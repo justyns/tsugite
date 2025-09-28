@@ -166,3 +166,4 @@ cython_debug/
 .env
 benchmark_results/
 test_output/
+.claude/settings.local.json
