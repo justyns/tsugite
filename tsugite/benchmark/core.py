@@ -13,7 +13,7 @@ import re
 
 from ..agent_runner import run_agent
 from .metrics import BenchmarkMetrics, TestResult, ModelPerformance
-from .evaluators import CorrectnessEvaluator, PerformanceEvaluator, QualityEvaluator
+from .evaluators import CorrectnessEvaluator, PerformanceEvaluator, QualityEvaluator, LLMEvaluator
 
 
 @dataclass
@@ -29,6 +29,7 @@ class BenchmarkConfig:
     output_dir: Path = field(default_factory=lambda: Path("benchmark_results"))
     include_cost_analysis: bool = True
     repeat_count: int = 1  # Number of times to run each test for averaging
+    llm_evaluator_model: str = "openai:gpt-4o-mini"  # Model to use for LLM evaluation
 
 
 @dataclass
@@ -44,6 +45,10 @@ class TestCase:
     requires_plan: bool = False
     expected_plan_elements: List[str] = field(default_factory=list)
     plan_evaluation: Dict[str, Any] = field(default_factory=dict)
+    # LLM evaluation fields
+    use_llm_evaluation: bool = False
+    llm_evaluation_criteria: str = ""
+    llm_evaluation_rubric: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -63,6 +68,10 @@ class BenchmarkTest:
     test_cases: List[TestCase] = field(default_factory=list)
     evaluation_criteria: Dict[str, Any] = field(default_factory=dict)
     test_path: Optional[Path] = None
+    # LLM evaluation fields
+    use_llm_evaluation: bool = False
+    llm_evaluation_criteria: str = ""
+    llm_evaluation_rubric: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -137,6 +146,7 @@ class BenchmarkRunner:
         self.correctness_evaluator = CorrectnessEvaluator()
         self.performance_evaluator = PerformanceEvaluator()
         self.quality_evaluator = QualityEvaluator()
+        self.llm_evaluator = LLMEvaluator(evaluator_model=config.llm_evaluator_model)
 
         # Create output directory
         self.config.output_dir.mkdir(parents=True, exist_ok=True)
@@ -236,6 +246,9 @@ class BenchmarkRunner:
                 test_cases=test_cases,
                 evaluation_criteria=common["evaluation_criteria"],
                 test_path=test_path,
+                use_llm_evaluation=test_metadata.get("use_llm_evaluation", False),
+                llm_evaluation_criteria=test_metadata.get("llm_evaluation_criteria", ""),
+                llm_evaluation_rubric=test_metadata.get("llm_evaluation_rubric", {}),
             )
         except Exception as e:
             raise ValueError(f"Failed to parse agent test pair {agent_path}/{test_path}: {e}")
@@ -264,6 +277,9 @@ class BenchmarkRunner:
                 requires_plan=metadata.get("requires_plan", False),
                 expected_plan_elements=metadata.get("expected_plan_elements", []),
                 plan_evaluation=metadata.get("plan_evaluation", {}),
+                use_llm_evaluation=metadata.get("use_llm_evaluation", False),
+                llm_evaluation_criteria=metadata.get("llm_evaluation_criteria", ""),
+                llm_evaluation_rubric=metadata.get("llm_evaluation_rubric", {}),
             )
 
             return BenchmarkTest(
@@ -280,6 +296,9 @@ class BenchmarkRunner:
                 test_cases=[test_case],
                 evaluation_criteria=common["evaluation_criteria"],
                 test_path=None,
+                use_llm_evaluation=metadata.get("use_llm_evaluation", False),
+                llm_evaluation_criteria=metadata.get("llm_evaluation_criteria", ""),
+                llm_evaluation_rubric=metadata.get("llm_evaluation_rubric", {}),
             )
         except Exception as e:
             raise ValueError(f"Failed to parse benchmark test {agent_path}: {e}")
@@ -425,6 +444,18 @@ class BenchmarkRunner:
             self._extract_block(content, "Plan Evaluation")
         )
 
+        # Parse LLM evaluation fields
+        use_llm_evaluation_text = self._extract_inline_field(content, "Use LLM Evaluation")
+        use_llm_evaluation = bool(
+            use_llm_evaluation_text
+            and use_llm_evaluation_text.strip().lower() in {"true", "yes", "1"}
+        )
+
+        llm_evaluation_criteria = self._extract_inline_field(content, "LLM Evaluation Criteria") or ""
+
+        llm_rubric_block = self._extract_block(content, "LLM Evaluation Rubric")
+        llm_evaluation_rubric = self._parse_key_value_block(llm_rubric_block)
+
         return TestCase(
             name=name,
             prompt=prompt,
@@ -435,6 +466,9 @@ class BenchmarkRunner:
             requires_plan=requires_plan,
             expected_plan_elements=expected_plan_elements,
             plan_evaluation=plan_evaluation,
+            use_llm_evaluation=use_llm_evaluation,
+            llm_evaluation_criteria=llm_evaluation_criteria,
+            llm_evaluation_rubric=llm_evaluation_rubric,
         )
 
     async def run_benchmark(
@@ -808,6 +842,25 @@ Make sure your plan includes the key steps and reasoning before you start execut
                     evaluation["score"] = custom_score
                     evaluation["passed"] = custom_score >= 0.7
 
+            # LLM evaluation for test case (if enabled)
+            if test_case.use_llm_evaluation and test_case.llm_evaluation_criteria:
+                llm_eval = await self.llm_evaluator.evaluate(
+                    output=result,
+                    task_description=test_case.prompt,
+                    evaluation_criteria=test_case.llm_evaluation_criteria,
+                    rubric=test_case.llm_evaluation_rubric if test_case.llm_evaluation_rubric else None
+                )
+                evaluation["metrics"]["llm_evaluation"] = llm_eval
+
+                # Use LLM evaluation if no other scoring method was successful
+                if evaluation["score"] == 0.0:
+                    evaluation["score"] = llm_eval["llm_score"]
+                    evaluation["passed"] = llm_eval["llm_score"] >= 0.7
+                else:
+                    # Blend LLM score with existing evaluation (LLM weighted at 40%)
+                    blended_score = (evaluation["score"] * 0.6) + (llm_eval["llm_score"] * 0.4)
+                    evaluation["score"] = blended_score
+
             # Plan evaluation (if planning was required)
             if test_case.requires_plan:
                 plan_score = 0.0
@@ -942,6 +995,25 @@ Make sure your plan includes the key steps and reasoning before you start execut
                 if not evaluation["passed"]:  # Use quality score if no correctness check
                     evaluation["passed"] = quality["score"] >= 0.7
                     evaluation["score"] = quality["score"]
+
+            # LLM evaluation (for complex tasks without predetermined outputs)
+            if test.use_llm_evaluation and test.llm_evaluation_criteria:
+                llm_eval = await self.llm_evaluator.evaluate(
+                    output=result,
+                    task_description=test.description,
+                    evaluation_criteria=test.llm_evaluation_criteria,
+                    expected_format=test.expected_type if test.expected_type != "string" else None,
+                    rubric=test.llm_evaluation_rubric if test.llm_evaluation_rubric else None
+                )
+                evaluation["metrics"]["llm_evaluation"] = llm_eval
+
+                # Use LLM evaluation as primary scoring if no expected output
+                if not test.expected_output:
+                    evaluation["passed"] = llm_eval["llm_score"] >= 0.7
+                    evaluation["score"] = llm_eval["llm_score"]
+                else:
+                    # Blend LLM score with correctness score if both available
+                    evaluation["score"] = (evaluation["score"] + llm_eval["llm_score"]) / 2
 
             # Estimate token usage and cost (simplified)
             evaluation["token_usage"] = {

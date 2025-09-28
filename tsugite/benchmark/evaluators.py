@@ -456,3 +456,287 @@ class CostEvaluator(BaseEvaluator):
             return "High"
         else:
             return "Very High"
+
+
+class LLMEvaluator(BaseEvaluator):
+    """Evaluates outputs using another LLM as a judge."""
+
+    def __init__(self, evaluator_model: str = "openai:gpt-4o-mini"):
+        """Initialize the LLM evaluator.
+
+        Args:
+            evaluator_model: Model to use for evaluation (format: provider:model_name)
+        """
+        self.evaluator_model = evaluator_model
+
+    async def evaluate(
+        self,
+        output: str,
+        task_description: str,
+        evaluation_criteria: str,
+        expected_format: str = None,
+        rubric: Dict[str, Any] = None
+    ) -> Dict[str, Any]:
+        """Evaluate output using an LLM judge.
+
+        Args:
+            output: The agent's output to evaluate
+            task_description: Description of what the agent was asked to do
+            evaluation_criteria: Criteria for evaluation (e.g., "accuracy, clarity, completeness")
+            expected_format: Expected format of the output (optional)
+            rubric: Detailed scoring rubric (optional)
+
+        Returns:
+            Dictionary with evaluation results
+        """
+        try:
+            from ..models import get_model
+            from pathlib import Path
+            import tempfile
+            import json
+
+            # Create evaluation prompt
+            evaluation_prompt = self._create_evaluation_prompt(
+                output, task_description, evaluation_criteria, expected_format, rubric
+            )
+
+            # Create a temporary evaluator agent
+            evaluator_agent_content = self._create_evaluator_agent(self.evaluator_model)
+
+            # Write to temporary file
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False) as f:
+                f.write(evaluator_agent_content)
+                temp_agent_path = f.name
+
+            try:
+                # Import here to avoid circular imports
+                from ..agent_runner import run_agent
+
+                # Run the evaluator agent
+                evaluation_result = run_agent(
+                    agent_path=Path(temp_agent_path),
+                    prompt=evaluation_prompt,
+                    context={},
+                    model_override=None,
+                    debug=False
+                )
+
+                # Parse the evaluation result
+                parsed_result = self._parse_evaluation_result(evaluation_result)
+
+                return {
+                    "llm_score": parsed_result.get("score", 0.0),
+                    "llm_feedback": parsed_result.get("feedback", ""),
+                    "llm_reasoning": parsed_result.get("reasoning", ""),
+                    "criteria_breakdown": parsed_result.get("criteria_breakdown", {}),
+                    "overall_assessment": parsed_result.get("assessment", ""),
+                    "evaluator_model": self.evaluator_model,
+                    "raw_evaluation": evaluation_result
+                }
+
+            finally:
+                # Clean up temporary file
+                import os
+                try:
+                    os.unlink(temp_agent_path)
+                except:
+                    pass
+
+        except Exception as e:
+            return {
+                "llm_score": 0.0,
+                "llm_feedback": f"Evaluation failed: {str(e)}",
+                "llm_reasoning": "",
+                "criteria_breakdown": {},
+                "overall_assessment": "Error",
+                "evaluator_model": self.evaluator_model,
+                "error": str(e)
+            }
+
+    def _create_evaluation_prompt(
+        self,
+        output: str,
+        task_description: str,
+        evaluation_criteria: str,
+        expected_format: str = None,
+        rubric: Dict[str, Any] = None
+    ) -> str:
+        """Create the evaluation prompt for the LLM judge."""
+
+        prompt = f"""You are an expert evaluator tasked with assessing an AI agent's performance.
+
+## Task Description
+The agent was asked to: {task_description}
+
+## Evaluation Criteria
+Evaluate the output based on: {evaluation_criteria}
+
+## Agent's Output
+{output}
+
+## Instructions
+1. Carefully analyze the agent's output against the task requirements
+2. Rate each criterion on a scale of 0-10 (0 = completely fails, 10 = exceeds expectations)
+3. Provide constructive feedback explaining your scoring
+4. Give an overall assessment and final score
+
+"""
+
+        if expected_format:
+            prompt += f"\n## Expected Format\nThe output should follow this format: {expected_format}\n"
+
+        if rubric:
+            prompt += f"\n## Detailed Rubric\n"
+            for criterion, details in rubric.items():
+                prompt += f"**{criterion}**: {details}\n"
+
+        prompt += """
+## Required Response Format
+Please respond with a JSON object containing:
+{
+  "score": <overall_score_0_to_10>,
+  "feedback": "<detailed_feedback>",
+  "reasoning": "<explanation_of_scoring>",
+  "criteria_breakdown": {
+    "<criterion1>": <score_0_to_10>,
+    "<criterion2>": <score_0_to_10>
+  },
+  "assessment": "<overall_quality_assessment>"
+}
+
+Provide thorough, constructive feedback that would help improve the agent's performance."""
+
+        return prompt
+
+    def _create_evaluator_agent(self, model: str) -> str:
+        """Create a temporary evaluator agent."""
+        return f"""---
+name: llm_evaluator
+model: {model}
+max_steps: 3
+tools: []
+---
+
+# LLM Evaluator Agent
+
+You are an expert AI evaluator with deep knowledge of AI systems, natural language processing, and task completion assessment.
+
+Your role is to provide fair, objective, and constructive evaluation of AI agent outputs.
+
+## Evaluation Principles
+- **Accuracy**: Does the output correctly address the task?
+- **Completeness**: Are all requirements fulfilled?
+- **Clarity**: Is the output clear and well-structured?
+- **Relevance**: Does the output stay on topic and address the request?
+- **Quality**: Is the output of high quality with attention to detail?
+
+## Task
+{{{{ user_prompt }}}}
+
+## Instructions
+Analyze the provided output carefully and return a properly formatted JSON response with scores and detailed feedback.
+"""
+
+    def _parse_evaluation_result(self, evaluation_result: str) -> Dict[str, Any]:
+        """Parse the LLM evaluation result."""
+        try:
+            # Try to extract JSON from the result
+            import re
+
+            # Look for JSON block in the response
+            json_match = re.search(r'```json\s*(\{.*?\})\s*```', evaluation_result, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(1)
+            else:
+                # Look for JSON object directly with proper handling of nested braces
+                json_match = re.search(r'\{(?:[^{}]|{[^}]*})*\}', evaluation_result, re.DOTALL)
+                if json_match and '"score"' in json_match.group(0):
+                    json_str = json_match.group(0)
+                else:
+                    # Try to find any JSON-like structure
+                    json_str = evaluation_result.strip()
+
+            # Parse the JSON
+            result = json.loads(json_str)
+
+            # Normalize score to 0-1 range if it's 0-10
+            score = result.get("score", 0)
+
+            # Convert to numeric if it's a string
+            if isinstance(score, str):
+                try:
+                    score = float(score)
+                except ValueError:
+                    score = 0.5  # Default to middle score for non-numeric
+
+            if isinstance(score, (int, float)) and score > 1:
+                score = score / 10.0
+
+            result["score"] = max(0.0, min(1.0, float(score)))
+
+            # Normalize criteria breakdown scores
+            if "criteria_breakdown" in result:
+                normalized_breakdown = {}
+                for criterion, score in result["criteria_breakdown"].items():
+                    # Convert to numeric if it's a string
+                    if isinstance(score, str):
+                        try:
+                            score = float(score)
+                        except ValueError:
+                            score = 0.5  # Default to middle score for non-numeric
+
+                    if isinstance(score, (int, float)) and score > 1:
+                        score = score / 10.0
+                    normalized_breakdown[criterion] = max(0.0, min(1.0, float(score)))
+                result["criteria_breakdown"] = normalized_breakdown
+
+            return result
+
+        except (json.JSONDecodeError, AttributeError) as e:
+            # Fallback parsing if JSON parsing fails
+            return self._fallback_parse(evaluation_result)
+
+    def _fallback_parse(self, evaluation_result: str) -> Dict[str, Any]:
+        """Fallback parsing when JSON extraction fails."""
+        import re
+
+        # Try to extract score using multiple patterns (check in order of specificity)
+        score = 0.5  # Default middle score
+
+        # Pattern 1: Percentage (75%, 85%) - check first since it's most specific
+        if re.search(r'(\d+(?:\.\d+)?)\s*%', evaluation_result):
+            pct_match = re.search(r'(\d+(?:\.\d+)?)\s*%', evaluation_result)
+            score = float(pct_match.group(1)) / 100.0
+
+        # Pattern 2: "score/rate X out of Y"
+        elif re.search(r'(?:score|rating|rate).*?(\d+(?:\.\d+)?)\s*out\s*of\s*(\d+)', evaluation_result, re.IGNORECASE):
+            score_match = re.search(r'(?:score|rating|rate).*?(\d+(?:\.\d+)?)\s*out\s*of\s*(\d+)', evaluation_result, re.IGNORECASE)
+            extracted_score = float(score_match.group(1))
+            max_score = float(score_match.group(2))
+            score = extracted_score / max_score
+
+        # Pattern 3: "score/rate X" without "out of"
+        elif re.search(r'(?:score|rating|rate).*?(\d+(?:\.\d+)?)', evaluation_result, re.IGNORECASE):
+            score_match = re.search(r'(?:score|rating|rate).*?(\d+(?:\.\d+)?)', evaluation_result, re.IGNORECASE)
+            extracted_score = float(score_match.group(1))
+            if extracted_score > 1:
+                score = extracted_score / 10.0
+            else:
+                score = extracted_score
+
+        # Pattern 4: Just a number followed by descriptive text
+        elif re.search(r'\b(\d+(?:\.\d+)?)\b', evaluation_result):
+            num_match = re.search(r'\b(\d+(?:\.\d+)?)\b', evaluation_result)
+            extracted_score = float(num_match.group(1))
+            if extracted_score > 1:
+                score = extracted_score / 10.0
+            else:
+                score = extracted_score
+
+        return {
+            "score": max(0.0, min(1.0, score)),
+            "feedback": evaluation_result[:500] + "..." if len(evaluation_result) > 500 else evaluation_result,
+            "reasoning": "Fallback parsing - JSON extraction failed",
+            "criteria_breakdown": {},
+            "assessment": "Evaluation completed with fallback parsing"
+        }

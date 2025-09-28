@@ -9,6 +9,7 @@ from tsugite.renderer import AgentRenderer
 from tsugite.tool_adapter import get_smolagents_tools
 from tsugite.models import get_model
 from tsugite.tools import call_tool
+from tsugite.tools.tasks import reset_task_manager, get_task_manager
 
 
 def execute_prefetch(prefetch_config: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -66,6 +67,10 @@ def run_agent(
     if context is None:
         context = {}
 
+    # Initialize task manager for this agent session
+    reset_task_manager()
+    task_manager = get_task_manager()
+
     # Parse agent configuration
     try:
         agent_text = agent_path.read_text()
@@ -82,11 +87,15 @@ def run_agent(
         except Exception as e:
             print(f"Warning: Prefetch execution failed: {e}")
 
+    # Add task context (will be updated as agent creates tasks)
+    task_context = task_manager.get_task_summary()
+
     # Prepare full context for template rendering
     full_context = {
         **context,
         **prefetch_context,
         "user_prompt": prompt,
+        "task_summary": task_context,
     }
 
     # Render agent template
@@ -104,9 +113,12 @@ def run_agent(
     except Exception as e:
         raise ValueError(f"Template rendering failed: {e}")
 
-    # Create smolagents tools
+    # Create smolagents tools (automatically include task tracking tools)
     try:
-        tools = get_smolagents_tools(agent_config.tools)
+        # Always include task tracking tools for agents
+        task_tools = ["task_add", "task_update", "task_complete", "task_list", "task_get"]
+        all_tools = list(agent_config.tools) + task_tools
+        tools = get_smolagents_tools(all_tools)
     except Exception as e:
         raise RuntimeError(f"Failed to create tools: {e}")
 
@@ -117,7 +129,7 @@ def run_agent(
     except Exception as e:
         raise RuntimeError(f"Failed to create model '{model_string}': {e}")
 
-    # Create and run smolagents agent
+    # Create and run smolagents agent with task tracking awareness
     try:
         agent = CodeAgent(
             tools=tools,
@@ -163,7 +175,10 @@ def validate_agent_execution(agent_path: Path) -> tuple[bool, str]:
         renderer = AgentRenderer()
         try:
             # Create mock context for prefetch variables
-            test_context = {"user_prompt": "test"}
+            test_context = {
+                "user_prompt": "test",
+                "task_summary": "## Current Tasks\nNo tasks yet."  # Mock task summary for validation
+            }
 
             # If agent has prefetch, create mock variables for validation
             if agent_config.prefetch:

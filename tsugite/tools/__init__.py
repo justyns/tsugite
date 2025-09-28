@@ -91,3 +91,5 @@ def describe_tool(name: str) -> str:
 from . import fs
 from . import shell
 from . import http
+from . import tasks
+from . import agents
