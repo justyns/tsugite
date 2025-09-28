@@ -1,0 +1,213 @@
+"""Agent execution engine using smolagents."""
+
+from pathlib import Path
+from typing import Dict, Any, Optional, List
+from smolagents import CodeAgent
+
+from tsugite.md_agents import parse_agent, AgentConfig
+from tsugite.renderer import AgentRenderer
+from tsugite.tool_adapter import get_smolagents_tools
+from tsugite.models import get_model
+from tsugite.tools import call_tool
+
+
+def execute_prefetch(prefetch_config: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Execute prefetch tools and return context.
+
+    Args:
+        prefetch_config: List of prefetch tool configurations
+
+    Returns:
+        Dictionary mapping assign names to tool results
+    """
+    context = {}
+
+    for config in prefetch_config:
+        tool_name = config.get("tool")
+        args = config.get("args", {})
+        assign_name = config.get("assign")
+
+        if not tool_name or not assign_name:
+            continue
+
+        try:
+            result = call_tool(tool_name, **args)
+            context[assign_name] = result
+        except Exception as e:
+            print(f"Warning: Prefetch tool '{tool_name}' failed: {e}")
+            context[assign_name] = None
+
+    return context
+
+
+def run_agent(
+    agent_path: Path,
+    prompt: str,
+    context: Optional[Dict[str, Any]] = None,
+    model_override: Optional[str] = None,
+    debug: bool = False,
+) -> str:
+    """Run a Tsugite agent using smolagents.
+
+    Args:
+        agent_path: Path to agent markdown file
+        prompt: User prompt/task for the agent
+        context: Additional context variables
+        model_override: Override agent's default model
+        debug: Enable debug output (rendered prompt)
+
+    Returns:
+        Agent execution result as string
+
+    Raises:
+        ValueError: If agent file is invalid
+        RuntimeError: If agent execution fails
+    """
+    if context is None:
+        context = {}
+
+    # Parse agent configuration
+    try:
+        agent_text = agent_path.read_text()
+        agent = parse_agent(agent_text, agent_path)
+        agent_config = agent.config
+    except Exception as e:
+        raise ValueError(f"Failed to parse agent file: {e}")
+
+    # Execute prefetch tools if any
+    prefetch_context = {}
+    if agent_config.prefetch:
+        try:
+            prefetch_context = execute_prefetch(agent_config.prefetch)
+        except Exception as e:
+            print(f"Warning: Prefetch execution failed: {e}")
+
+    # Prepare full context for template rendering
+    full_context = {
+        **context,
+        **prefetch_context,
+        "user_prompt": prompt,
+    }
+
+    # Render agent template
+    renderer = AgentRenderer()
+    try:
+        rendered_prompt = renderer.render(agent.content, full_context)
+
+        if debug:
+            print("\n" + "=" * 60)
+            print("DEBUG: Rendered Prompt")
+            print("=" * 60)
+            print(rendered_prompt)
+            print("=" * 60 + "\n")
+
+    except Exception as e:
+        raise ValueError(f"Template rendering failed: {e}")
+
+    # Create smolagents tools
+    try:
+        tools = get_smolagents_tools(agent_config.tools)
+    except Exception as e:
+        raise RuntimeError(f"Failed to create tools: {e}")
+
+    # Create model
+    model_string = model_override or agent_config.model
+    try:
+        model = get_model(model_string)
+    except Exception as e:
+        raise RuntimeError(f"Failed to create model '{model_string}': {e}")
+
+    # Create and run smolagents agent
+    try:
+        agent = CodeAgent(
+            tools=tools,
+            model=model,
+            max_steps=agent_config.max_steps,
+        )
+
+        result = agent.run(rendered_prompt)
+        return str(result)
+
+    except Exception as e:
+        raise RuntimeError(f"Agent execution failed: {e}")
+
+
+def validate_agent_execution(agent_path: Path) -> tuple[bool, str]:
+    """Validate that an agent can be executed.
+
+    Args:
+        agent_path: Path to agent markdown file
+
+    Returns:
+        Tuple of (is_valid, error_message)
+    """
+    try:
+        # Parse agent
+        agent_text = agent_path.read_text()
+        agent = parse_agent(agent_text, agent_path)
+        agent_config = agent.config
+
+        # Check if model is supported
+        try:
+            get_model(agent_config.model)
+        except Exception as e:
+            return False, f"Model validation failed: {e}"
+
+        # Check if tools exist
+        try:
+            get_smolagents_tools(agent_config.tools)
+        except Exception as e:
+            return False, f"Tool validation failed: {e}"
+
+        # Check template rendering with minimal context
+        renderer = AgentRenderer()
+        try:
+            # Create mock context for prefetch variables
+            test_context = {"user_prompt": "test"}
+
+            # If agent has prefetch, create mock variables for validation
+            if agent_config.prefetch:
+                for prefetch_item in agent_config.prefetch:
+                    assign_name = prefetch_item.get("assign")
+                    if assign_name:
+                        test_context[assign_name] = "mock_prefetch_data"
+
+            renderer.render(agent.content, test_context)
+        except Exception as e:
+            return False, f"Template validation failed: {e}"
+
+        return True, "Agent is valid"
+
+    except Exception as e:
+        return False, f"Agent validation failed: {e}"
+
+
+def get_agent_info(agent_path: Path) -> Dict[str, Any]:
+    """Get information about an agent without executing it.
+
+    Args:
+        agent_path: Path to agent markdown file
+
+    Returns:
+        Dictionary with agent information
+    """
+    try:
+        agent_text = agent_path.read_text()
+        agent = parse_agent(agent_text, agent_path)
+        agent_config = agent.config
+
+        return {
+            "name": agent_config.name,
+            "description": getattr(agent_config, "description", "No description"),
+            "model": agent_config.model,
+            "max_steps": agent_config.max_steps,
+            "tools": agent_config.tools,
+            "prefetch_count": (len(agent_config.prefetch) if agent_config.prefetch else 0),
+            "permissions_profile": getattr(agent_config, "permissions_profile", None),
+            "valid": validate_agent_execution(agent_path)[0],
+        }
+    except Exception as e:
+        return {
+            "error": str(e),
+            "valid": False,
+        }

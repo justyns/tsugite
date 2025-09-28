@@ -1,0 +1,45 @@
+[project]
+name = "tsugite"
+version = "0.1.0"
+description = "Micro-agent runner for task automation using markdown definitions"
+authors = [{name = "Justyn Shull"}]
+requires-python = ">=3.11"
+readme = "README.md"
+license = {file = "LICENSE"}
+keywords = ["agents", "automation", "smolagents", "cli", "jinja2"]
+dependencies = [
+    "typer>=0.12",
+    "jinja2>=3.1",
+    "pyyaml>=6.0",
+    "smolagents[openai,litellm]>=0.1",
+    "httpx>=0.25",
+    "rich>=13.0",
+]
+
+[project.scripts]
+tsugite = "tsugite.tsugite:app"
+tsu = "tsugite.tsugite:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W"]
+ignore = ["E501"]  # Line too long (handled by black)
+
+[tool.black]
+target-version = ["py311"]
+line-length = 120
+
+[dependency-groups]
+dev = [
+    "black>=25.9.0",
+    "pytest>=8.4.2",
+    "pytest-asyncio>=0.23.0",
+    "ruff>=0.1",
+]
