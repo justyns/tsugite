@@ -1,0 +1,68 @@
+categories:
+  basic:
+    weight: 1.0
+    timeout: 30
+    required: true
+    description: "Basic functionality tests"
+
+  tools:
+    weight: 2.0
+    timeout: 60
+    required: false
+    description: "Tool usage and orchestration tests"
+
+  scenarios:
+    weight: 3.0
+    timeout: 120
+    required: false
+    description: "Complex real-world scenarios"
+
+  performance:
+    weight: 1.5
+    timeout: 45
+    required: false
+    description: "Performance and efficiency tests"
+
+models:
+  defaults:
+    temperature: 0.1  # Low for reproducibility
+    max_tokens: 2000
+    timeout: 60
+
+  cost_estimates:
+    "gpt-4": 0.00003
+    "gpt-3.5-turbo": 0.000002
+    "claude-3": 0.000015
+    "ollama": 0.0
+
+scoring:
+  weights:
+    correctness: 0.4
+    performance: 0.2
+    efficiency: 0.2
+    quality: 0.2
+
+  quality_criteria:
+    default:
+      completeness:
+        type: "keyword"
+        keywords: ["complete", "done", "finished"]
+        weight: 0.3
+
+      clarity:
+        type: "length"
+        min_length: 10
+        max_length: 1000
+        weight: 0.3
+
+      format:
+        type: "format"
+        format: "text"
+        weight: 0.4
+
+benchmark:
+  parallel_execution: true
+  repeat_count: 1
+  timeout_buffer: 10  # Extra seconds beyond agent timeout
+  save_outputs: true
+  generate_reports: true

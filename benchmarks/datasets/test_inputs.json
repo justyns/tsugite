@@ -1,0 +1,43 @@
+{
+  "standard_prompts": {
+    "basic_001": "",
+    "basic_002": "",
+    "basic_003": "",
+    "basic_004": "",
+    "tools_001": "",
+    "tools_002": "",
+    "scenarios_001": "",
+    "scenarios_002": "",
+    "performance_001": "",
+    "performance_002": ""
+  },
+
+  "alternative_prompts": {
+    "math_variations": [
+      "Calculate (10 * 4) + 2",
+      "What is ten times four plus two?",
+      "Compute: 10*4+2"
+    ],
+
+    "string_variations": [
+      "Reverse 'HELLO WORLD'",
+      "Take 'HELLO WORLD' and reverse it",
+      "Flip the characters in 'HELLO WORLD'"
+    ]
+  },
+
+  "stress_tests": {
+    "long_calculation": "Calculate the result of: ((((10 * 4) + 2) * 3) - 5) / 7",
+    "complex_string": "Reverse this long string: 'The quick brown fox jumps over the lazy dog'",
+    "nested_conditions": "Evaluate: (10 > 5) AND (20 < 30) AND (15 == 15) OR (5 > 10)"
+  },
+
+  "edge_cases": {
+    "empty_string": "",
+    "single_char": "a",
+    "special_chars": "!@#$%^&*()",
+    "unicode": "Hello 🌍 World 🚀",
+    "large_number": "999999999999999999",
+    "zero": "0"
+  }
+}
