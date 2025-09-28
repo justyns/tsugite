@@ -3,7 +3,7 @@
 import yaml
 from pathlib import Path
 from typing import Dict, Any, Optional, List
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import re
 
 
@@ -15,17 +15,17 @@ class AgentConfig:
     description: str = ""
     model: str = "ollama:qwen2.5-coder:7b"
     max_steps: int = 5
-    tools: List[str] = []
-    prefetch: List[Dict[str, Any]] = []
+    tools: List[str] = field(default_factory=list)
+    prefetch: List[Dict[str, Any]] = field(default_factory=list)
     permissions_profile: str = "default"
-    context_budget: Dict[str, Any] = {}
+    context_budget: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
         if self.tools is None:
             self.tools = []
         if self.prefetch is None:
             self.prefetch = []
-        if self.context_budget is None:
+        if not self.context_budget:
             self.context_budget = {"tokens": 8000, "priority": ["system", "task"]}
 
 

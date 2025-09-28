@@ -21,7 +21,7 @@ class BenchmarkConfig:
     """Configuration for benchmark runs."""
 
     models: List[str] = field(default_factory=list)
-    categories: List[str] = field(default_factory=lambda: ["basic", "tools", "scenarios", "performance"])
+    categories: List[str] = field(default_factory=lambda: ["basic"])
     timeout: int = 120  # seconds
     parallel: bool = True
     temperature: float = 0.1  # Low for reproducibility

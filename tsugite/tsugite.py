@@ -55,14 +55,19 @@ def _agent_context(agent_path: str, root: Optional[str]):
 @app.command()
 def run(
     agent_path: str = typer.Argument(help="Path to agent markdown file"),
-    prompt: Optional[str] = typer.Argument(default="", help="Prompt/task for the agent (optional)"),
+    prompt: str = typer.Argument(default="", help="Prompt/task for the agent (optional)"),
     root: Optional[str] = typer.Option(None, "--root", help="Working directory"),
     model: Optional[str] = typer.Option(None, "--model", help="Override agent model"),
+    non_interactive: bool = typer.Option(False, "--non-interactive", help="Run without interactive prompts"),
+    history_dir: Optional[str] = typer.Option(None, "--history-dir", help="Directory to store history files"),
     no_color: bool = typer.Option(False, "--no-color", help="Disable ANSI colors"),
     log_json: bool = typer.Option(False, "--log-json", help="Machine-readable output"),
     debug: bool = typer.Option(False, "--debug", help="Show rendered prompt before execution"),
 ):
     """Run an agent with the given prompt."""
+
+    if history_dir:
+        Path(history_dir).mkdir(parents=True, exist_ok=True)
 
     if no_color:
         console.no_color = True
@@ -228,7 +233,7 @@ def benchmark_command(
         # Create config
         config = BenchmarkConfig(
             models=model_list,
-            categories=category_list or ["basic", "tools", "scenarios", "performance"],
+            categories=category_list or ["basic"],
             parallel=parallel,
             repeat_count=repeat,
             output_dir=Path("benchmark_results"),

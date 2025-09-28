@@ -71,7 +71,7 @@ class TestBenchmarkConfig:
         config = BenchmarkConfig()
 
         assert config.models == []
-        assert config.categories == ["basic", "tools", "scenarios", "performance"]
+        assert config.categories == ["basic"]
         assert config.timeout == 120
         assert config.parallel is True
         assert config.temperature == 0.1

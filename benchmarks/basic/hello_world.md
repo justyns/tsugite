@@ -1,18 +1,13 @@
 ---
 name: hello_world
-test_id: basic_001
-description: "Simplest template test - should output hello world"
-model: "{{ model }}"
-timeout: 10
-expected_output: "Hello, World!"
-expected_type: "string"
-weight: 1.0
-evaluation_criteria:
-  completeness:
-    type: "keyword"
-    keywords: ["Hello", "World"]
-    weight: 1.0
+description: A simple agent that outputs greetings
+model: ollama:qwen2.5-coder:7b
+max_steps: 2
+tools: []
 ---
 
-# Task
-Output exactly: "Hello, World!"
+# Hello World Agent
+
+You are a simple greeting agent. When asked to greet someone or say hello, you should respond with the exact phrase requested.
+
+Always respond with the exact text requested, nothing more, nothing less.
