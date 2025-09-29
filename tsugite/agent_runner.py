@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional, List
 from smolagents import CodeAgent
 
-from tsugite.md_agents import parse_agent, AgentConfig
+from tsugite.md_agents import parse_agent, AgentConfig, validate_agent_execution
 from tsugite.renderer import AgentRenderer
 from tsugite.tool_adapter import get_smolagents_tools
 from tsugite.models import get_model
@@ -144,8 +144,8 @@ def run_agent(
         raise RuntimeError(f"Agent execution failed: {e}")
 
 
-def validate_agent_execution(agent_path: Path) -> tuple[bool, str]:
-    """Validate that an agent can be executed.
+def validate_agent_file(agent_path: Path) -> tuple[bool, str]:
+    """Validate that an agent file can be executed.
 
     Args:
         agent_path: Path to agent markdown file
@@ -157,44 +157,12 @@ def validate_agent_execution(agent_path: Path) -> tuple[bool, str]:
         # Parse agent
         agent_text = agent_path.read_text()
         agent = parse_agent(agent_text, agent_path)
-        agent_config = agent.config
 
-        # Check if model is supported
-        try:
-            get_model(agent_config.model)
-        except Exception as e:
-            return False, f"Model validation failed: {e}"
-
-        # Check if tools exist
-        try:
-            get_smolagents_tools(agent_config.tools)
-        except Exception as e:
-            return False, f"Tool validation failed: {e}"
-
-        # Check template rendering with minimal context
-        renderer = AgentRenderer()
-        try:
-            # Create mock context for prefetch variables
-            test_context = {
-                "user_prompt": "test",
-                "task_summary": "## Current Tasks\nNo tasks yet."  # Mock task summary for validation
-            }
-
-            # If agent has prefetch, create mock variables for validation
-            if agent_config.prefetch:
-                for prefetch_item in agent_config.prefetch:
-                    assign_name = prefetch_item.get("assign")
-                    if assign_name:
-                        test_context[assign_name] = "mock_prefetch_data"
-
-            renderer.render(agent.content, test_context)
-        except Exception as e:
-            return False, f"Template validation failed: {e}"
-
-        return True, "Agent is valid"
+        # Use centralized validation
+        return validate_agent_execution(agent)
 
     except Exception as e:
-        return False, f"Agent validation failed: {e}"
+        return False, f"Agent file validation failed: {e}"
 
 
 def get_agent_info(agent_path: Path) -> Dict[str, Any]:
@@ -219,7 +187,7 @@ def get_agent_info(agent_path: Path) -> Dict[str, Any]:
             "tools": agent_config.tools,
             "prefetch_count": (len(agent_config.prefetch) if agent_config.prefetch else 0),
             "permissions_profile": getattr(agent_config, "permissions_profile", None),
-            "valid": validate_agent_execution(agent_path)[0],
+            "valid": validate_agent_file(agent_path)[0],
         }
     except Exception as e:
         return {

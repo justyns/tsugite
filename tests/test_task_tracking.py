@@ -3,9 +3,16 @@
 import pytest
 from datetime import datetime
 from tsugite.tools.tasks import (
-    TaskManager, TaskStatus, Task,
-    task_add, task_update, task_complete, task_list, task_get,
-    reset_task_manager, get_task_manager
+    TaskManager,
+    TaskStatus,
+    Task,
+    task_add,
+    task_update,
+    task_complete,
+    task_list,
+    task_get,
+    reset_task_manager,
+    get_task_manager,
 )
 
 

@@ -27,27 +27,15 @@ class TestLLMEvaluator:
 
     @pytest.mark.asyncio
     @patch("tsugite.agent_runner.run_agent")
-    async def test_llm_evaluation_success(self, mock_run_agent):
+    async def test_llm_evaluation_success(self, mock_run_agent, mock_llm_evaluation_response):
         """Test successful LLM evaluation."""
         # Mock the agent runner to return JSON evaluation
-        mock_run_agent.return_value = '''
-        {
-            "score": 8.5,
-            "feedback": "The output demonstrates good understanding of the task.",
-            "reasoning": "Clear structure, accurate content, and appropriate tone.",
-            "criteria_breakdown": {
-                "accuracy": 9,
-                "clarity": 8,
-                "completeness": 8
-            },
-            "assessment": "Good quality output"
-        }
-        '''
+        mock_run_agent.return_value = mock_llm_evaluation_response
 
         result = await self.evaluator.evaluate(
             output="This is a well-written response to the task.",
             task_description="Write a brief explanation",
-            evaluation_criteria="accuracy, clarity, completeness"
+            evaluation_criteria="accuracy, clarity, completeness",
         )
 
         assert result["llm_score"] == 0.85  # Normalized from 8.5/10
@@ -65,7 +53,7 @@ class TestLLMEvaluator:
     @patch("tsugite.agent_runner.run_agent")
     async def test_llm_evaluation_with_rubric(self, mock_run_agent):
         """Test LLM evaluation with detailed rubric."""
-        mock_run_agent.return_value = '''
+        mock_run_agent.return_value = """
         {
             "score": 7,
             "feedback": "Meets most requirements",
@@ -76,11 +64,11 @@ class TestLLMEvaluator:
             },
             "assessment": "Satisfactory"
         }
-        '''
+        """
 
         rubric = {
             "technical_accuracy": "Code should be syntactically correct and follow best practices",
-            "code_quality": "Code should be clean, readable, and well-commented"
+            "code_quality": "Code should be clean, readable, and well-commented",
         }
 
         result = await self.evaluator.evaluate(
@@ -88,7 +76,7 @@ class TestLLMEvaluator:
             task_description="Write a hello world function",
             evaluation_criteria="technical accuracy, code quality",
             expected_format="Python code",
-            rubric=rubric
+            rubric=rubric,
         )
 
         assert result["llm_score"] == 0.7
@@ -104,7 +92,7 @@ class TestLLMEvaluator:
     @patch("tsugite.agent_runner.run_agent")
     async def test_llm_evaluation_json_in_code_block(self, mock_run_agent):
         """Test parsing JSON wrapped in code blocks."""
-        mock_run_agent.return_value = '''
+        mock_run_agent.return_value = """
 Here's my evaluation:
 
 ```json
@@ -121,12 +109,10 @@ Here's my evaluation:
 ```
 
 Additional comments here...
-        '''
+        """
 
         result = await self.evaluator.evaluate(
-            output="Incomplete response",
-            task_description="Complete task",
-            evaluation_criteria="completeness, accuracy"
+            output="Incomplete response", task_description="Complete task", evaluation_criteria="completeness, accuracy"
         )
 
         assert result["llm_score"] == 0.6
@@ -137,15 +123,15 @@ Additional comments here...
     @patch("tsugite.agent_runner.run_agent")
     async def test_llm_evaluation_fallback_parsing(self, mock_run_agent):
         """Test fallback parsing when JSON extraction fails."""
-        mock_run_agent.return_value = '''
+        mock_run_agent.return_value = """
         I would rate this response a 7 out of 10. The answer shows understanding
         but lacks detail. Overall, it's a satisfactory response.
-        '''
+        """
 
         result = await self.evaluator.evaluate(
             output="Brief answer",
             task_description="Provide detailed explanation",
-            evaluation_criteria="detail, accuracy"
+            evaluation_criteria="detail, accuracy",
         )
 
         assert result["llm_score"] == 0.7  # Should extract "7" and normalize
@@ -159,9 +145,7 @@ Additional comments here...
         mock_run_agent.side_effect = Exception("Model unavailable")
 
         result = await self.evaluator.evaluate(
-            output="Test output",
-            task_description="Test task",
-            evaluation_criteria="quality"
+            output="Test output", task_description="Test task", evaluation_criteria="quality"
         )
 
         assert result["llm_score"] == 0.0
@@ -176,7 +160,7 @@ Additional comments here...
             task_description="Sample task",
             evaluation_criteria="accuracy, clarity",
             expected_format="markdown",
-            rubric={"accuracy": "Must be factually correct"}
+            rubric={"accuracy": "Must be factually correct"},
         )
 
         assert "Sample output" in prompt
@@ -199,7 +183,7 @@ Additional comments here...
 
     def test_parse_evaluation_result_valid_json(self):
         """Test parsing valid JSON evaluation result."""
-        json_result = '''
+        json_result = """
         {
             "score": 8,
             "feedback": "Good work",
@@ -207,7 +191,7 @@ Additional comments here...
             "criteria_breakdown": {"quality": 8},
             "assessment": "Good"
         }
-        '''
+        """
 
         result = self.evaluator._parse_evaluation_result(json_result)
 
@@ -265,9 +249,7 @@ class TestLLMEvaluatorPrompts:
     def test_basic_prompt_generation(self):
         """Test basic evaluation prompt generation."""
         prompt = self.evaluator._create_evaluation_prompt(
-            output="Hello world",
-            task_description="Write a greeting",
-            evaluation_criteria="friendliness, clarity"
+            output="Hello world", task_description="Write a greeting", evaluation_criteria="friendliness, clarity"
         )
 
         assert "Hello world" in prompt
@@ -278,17 +260,14 @@ class TestLLMEvaluatorPrompts:
 
     def test_prompt_with_all_options(self):
         """Test prompt generation with all optional parameters."""
-        rubric = {
-            "friendliness": "Should be warm and welcoming",
-            "clarity": "Should be easy to understand"
-        }
+        rubric = {"friendliness": "Should be warm and welcoming", "clarity": "Should be easy to understand"}
 
         prompt = self.evaluator._create_evaluation_prompt(
             output="Hello there, how are you?",
             task_description="Write a friendly greeting",
             evaluation_criteria="friendliness, clarity, length",
             expected_format="conversational text",
-            rubric=rubric
+            rubric=rubric,
         )
 
         assert "Hello there, how are you?" in prompt
@@ -303,9 +282,7 @@ class TestLLMEvaluatorPrompts:
     def test_prompt_structure(self):
         """Test that prompt has proper structure."""
         prompt = self.evaluator._create_evaluation_prompt(
-            output="Test",
-            task_description="Test task",
-            evaluation_criteria="quality"
+            output="Test", task_description="Test task", evaluation_criteria="quality"
         )
 
         # Check for required sections
@@ -330,9 +307,7 @@ class TestLLMEvaluatorEdgeCases:
         mock_run_agent.return_value = '{"score": 0, "feedback": "No output provided", "reasoning": "Empty response", "criteria_breakdown": {}, "assessment": "Failed"}'
 
         result = await self.evaluator.evaluate(
-            output="",
-            task_description="Provide an explanation",
-            evaluation_criteria="completeness"
+            output="", task_description="Provide an explanation", evaluation_criteria="completeness"
         )
 
         assert result["llm_score"] == 0.0
@@ -347,9 +322,7 @@ class TestLLMEvaluatorEdgeCases:
         mock_run_agent.return_value = '{"score": 5, "feedback": "Too verbose", "reasoning": "Excessive length", "criteria_breakdown": {"conciseness": 2}, "assessment": "Needs editing"}'
 
         result = await self.evaluator.evaluate(
-            output=long_output,
-            task_description="Provide a brief summary",
-            evaluation_criteria="conciseness, clarity"
+            output=long_output, task_description="Provide a brief summary", evaluation_criteria="conciseness, clarity"
         )
 
         assert result["llm_score"] == 0.5
@@ -361,7 +334,7 @@ class TestLLMEvaluatorEdgeCases:
             '{"score": 8, "feedback": "Good" incomplete',
             '{"score": 8.5 "feedback": "Missing comma"}',
             'score: 7.5, feedback: "Not JSON format"',
-            '{"score": "eight", "feedback": "Non-numeric score"}'
+            '{"score": "eight", "feedback": "Non-numeric score"}',
         ]
 
         for response in malformed_responses:

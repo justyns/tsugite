@@ -475,7 +475,7 @@ class LLMEvaluator(BaseEvaluator):
         task_description: str,
         evaluation_criteria: str,
         expected_format: str = None,
-        rubric: Dict[str, Any] = None
+        rubric: Dict[str, Any] = None,
     ) -> Dict[str, Any]:
         """Evaluate output using an LLM judge.
 
@@ -504,7 +504,7 @@ class LLMEvaluator(BaseEvaluator):
             evaluator_agent_content = self._create_evaluator_agent(self.evaluator_model)
 
             # Write to temporary file
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False) as f:
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
                 f.write(evaluator_agent_content)
                 temp_agent_path = f.name
 
@@ -518,7 +518,7 @@ class LLMEvaluator(BaseEvaluator):
                     prompt=evaluation_prompt,
                     context={},
                     model_override=None,
-                    debug=False
+                    debug=False,
                 )
 
                 # Parse the evaluation result
@@ -531,12 +531,13 @@ class LLMEvaluator(BaseEvaluator):
                     "criteria_breakdown": parsed_result.get("criteria_breakdown", {}),
                     "overall_assessment": parsed_result.get("assessment", ""),
                     "evaluator_model": self.evaluator_model,
-                    "raw_evaluation": evaluation_result
+                    "raw_evaluation": evaluation_result,
                 }
 
             finally:
                 # Clean up temporary file
                 import os
+
                 try:
                     os.unlink(temp_agent_path)
                 except:
@@ -550,7 +551,7 @@ class LLMEvaluator(BaseEvaluator):
                 "criteria_breakdown": {},
                 "overall_assessment": "Error",
                 "evaluator_model": self.evaluator_model,
-                "error": str(e)
+                "error": str(e),
             }
 
     def _create_evaluation_prompt(
@@ -559,7 +560,7 @@ class LLMEvaluator(BaseEvaluator):
         task_description: str,
         evaluation_criteria: str,
         expected_format: str = None,
-        rubric: Dict[str, Any] = None
+        rubric: Dict[str, Any] = None,
     ) -> str:
         """Create the evaluation prompt for the LLM judge."""
 
@@ -644,12 +645,12 @@ Analyze the provided output carefully and return a properly formatted JSON respo
             import re
 
             # Look for JSON block in the response
-            json_match = re.search(r'```json\s*(\{.*?\})\s*```', evaluation_result, re.DOTALL)
+            json_match = re.search(r"```json\s*(\{.*?\})\s*```", evaluation_result, re.DOTALL)
             if json_match:
                 json_str = json_match.group(1)
             else:
                 # Look for JSON object directly with proper handling of nested braces
-                json_match = re.search(r'\{(?:[^{}]|{[^}]*})*\}', evaluation_result, re.DOTALL)
+                json_match = re.search(r"\{(?:[^{}]|{[^}]*})*\}", evaluation_result, re.DOTALL)
                 if json_match and '"score"' in json_match.group(0):
                     json_str = json_match.group(0)
                 else:
@@ -704,20 +705,22 @@ Analyze the provided output carefully and return a properly formatted JSON respo
         score = 0.5  # Default middle score
 
         # Pattern 1: Percentage (75%, 85%) - check first since it's most specific
-        if re.search(r'(\d+(?:\.\d+)?)\s*%', evaluation_result):
-            pct_match = re.search(r'(\d+(?:\.\d+)?)\s*%', evaluation_result)
+        if re.search(r"(\d+(?:\.\d+)?)\s*%", evaluation_result):
+            pct_match = re.search(r"(\d+(?:\.\d+)?)\s*%", evaluation_result)
             score = float(pct_match.group(1)) / 100.0
 
         # Pattern 2: "score/rate X out of Y"
-        elif re.search(r'(?:score|rating|rate).*?(\d+(?:\.\d+)?)\s*out\s*of\s*(\d+)', evaluation_result, re.IGNORECASE):
-            score_match = re.search(r'(?:score|rating|rate).*?(\d+(?:\.\d+)?)\s*out\s*of\s*(\d+)', evaluation_result, re.IGNORECASE)
+        elif re.search(r"(?:score|rating|rate).*?(\d+(?:\.\d+)?)\s*out\s*of\s*(\d+)", evaluation_result, re.IGNORECASE):
+            score_match = re.search(
+                r"(?:score|rating|rate).*?(\d+(?:\.\d+)?)\s*out\s*of\s*(\d+)", evaluation_result, re.IGNORECASE
+            )
             extracted_score = float(score_match.group(1))
             max_score = float(score_match.group(2))
             score = extracted_score / max_score
 
         # Pattern 3: "score/rate X" without "out of"
-        elif re.search(r'(?:score|rating|rate).*?(\d+(?:\.\d+)?)', evaluation_result, re.IGNORECASE):
-            score_match = re.search(r'(?:score|rating|rate).*?(\d+(?:\.\d+)?)', evaluation_result, re.IGNORECASE)
+        elif re.search(r"(?:score|rating|rate).*?(\d+(?:\.\d+)?)", evaluation_result, re.IGNORECASE):
+            score_match = re.search(r"(?:score|rating|rate).*?(\d+(?:\.\d+)?)", evaluation_result, re.IGNORECASE)
             extracted_score = float(score_match.group(1))
             if extracted_score > 1:
                 score = extracted_score / 10.0
@@ -725,8 +728,8 @@ Analyze the provided output carefully and return a properly formatted JSON respo
                 score = extracted_score
 
         # Pattern 4: Just a number followed by descriptive text
-        elif re.search(r'\b(\d+(?:\.\d+)?)\b', evaluation_result):
-            num_match = re.search(r'\b(\d+(?:\.\d+)?)\b', evaluation_result)
+        elif re.search(r"\b(\d+(?:\.\d+)?)\b", evaluation_result):
+            num_match = re.search(r"\b(\d+(?:\.\d+)?)\b", evaluation_result)
             extracted_score = float(num_match.group(1))
             if extracted_score > 1:
                 score = extracted_score / 10.0
@@ -738,5 +741,5 @@ Analyze the provided output carefully and return a properly formatted JSON respo
             "feedback": evaluation_result[:500] + "..." if len(evaluation_result) > 500 else evaluation_result,
             "reasoning": "Fallback parsing - JSON extraction failed",
             "criteria_breakdown": {},
-            "assessment": "Evaluation completed with fallback parsing"
+            "assessment": "Evaluation completed with fallback parsing",
         }

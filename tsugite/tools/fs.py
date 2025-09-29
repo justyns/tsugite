@@ -3,6 +3,7 @@
 from pathlib import Path
 from typing import List
 from ..tools import tool
+from ..utils import standardize_error_message
 
 
 @tool
@@ -23,7 +24,7 @@ def read_file(path: str) -> str:
     try:
         return file_path.read_text(encoding="utf-8")
     except Exception as e:
-        raise RuntimeError(f"Failed to read file {path}: {e}")
+        raise RuntimeError(standardize_error_message("read", f"file {path}", e))
 
 
 @tool
@@ -41,7 +42,7 @@ def write_file(path: str, content: str) -> str:
         file_path.write_text(content, encoding="utf-8")
         return f"Successfully wrote {len(content)} characters to {path}"
     except Exception as e:
-        raise RuntimeError(f"Failed to write file {path}: {e}")
+        raise RuntimeError(standardize_error_message("write", f"file {path}", e))
 
 
 @tool
@@ -68,7 +69,7 @@ def list_files(path: str = ".", pattern: str = "*") -> List[str]:
 
         return sorted(files)
     except Exception as e:
-        raise RuntimeError(f"Failed to list files in {path}: {e}")
+        raise RuntimeError(standardize_error_message("list files in", f"directory {path}", e))
 
 
 @tool
@@ -94,4 +95,4 @@ def create_directory(path: str) -> str:
         dir_path.mkdir(parents=True, exist_ok=True)
         return f"Successfully created directory: {path}"
     except Exception as e:
-        raise RuntimeError(f"Failed to create directory {path}: {e}")
+        raise RuntimeError(standardize_error_message("create", f"directory {path}", e))

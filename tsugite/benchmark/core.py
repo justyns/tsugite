@@ -12,6 +12,7 @@ import json
 import re
 
 from ..agent_runner import run_agent
+from ..utils import parse_yaml_frontmatter
 from .metrics import BenchmarkMetrics, TestResult, ModelPerformance
 from .evaluators import CorrectnessEvaluator, PerformanceEvaluator, QualityEvaluator, LLMEvaluator
 
@@ -86,21 +87,6 @@ class BenchmarkResult:
     test_results: Dict[str, Dict[str, TestResult]]  # model -> test_id -> result
     summary: Dict[str, Any]
     errors: List[str] = field(default_factory=list)
-
-
-def _parse_frontmatter(content: str, label: str) -> tuple[Dict[str, Any], str]:
-    """Parse YAML frontmatter from markdown content."""
-
-    if not content.startswith("---"):
-        raise ValueError(f"{label} must start with YAML frontmatter")
-
-    parts = content.split("---", 2)
-    if len(parts) < 3:
-        raise ValueError(f"Invalid YAML frontmatter format in {label.lower()}")
-
-    metadata = yaml.safe_load(parts[1]) or {}
-    markdown_content = parts[2]
-    return metadata, markdown_content
 
 
 def _extract_common_test_fields(
@@ -213,7 +199,7 @@ class BenchmarkRunner:
     def _parse_agent_test_pair(self, agent_path: Path, test_path: Path, category: str) -> BenchmarkTest:
         """Parse an agent + test.md pair into a BenchmarkTest."""
         try:
-            test_metadata, markdown_content = _parse_frontmatter(test_path.read_text(), "Test file")
+            test_metadata, markdown_content = parse_yaml_frontmatter(test_path.read_text(), "Test file")
 
             common = _extract_common_test_fields(
                 test_metadata,
@@ -256,7 +242,7 @@ class BenchmarkRunner:
     def _parse_benchmark_test(self, agent_path: Path, category: str) -> BenchmarkTest:
         """Parse a single benchmark markdown file with embedded expectations."""
         try:
-            metadata, markdown_content = _parse_frontmatter(agent_path.read_text(), "Benchmark file")
+            metadata, markdown_content = parse_yaml_frontmatter(agent_path.read_text(), "Benchmark file")
 
             common = _extract_common_test_fields(
                 metadata,
@@ -432,23 +418,15 @@ class BenchmarkRunner:
         evaluation = self._parse_key_value_block(self._extract_block(content, "Evaluation"))
 
         requires_plan_text = self._extract_inline_field(content, "Requires Plan")
-        requires_plan = bool(
-            requires_plan_text
-            and requires_plan_text.strip().lower() in {"true", "yes", "1"}
-        )
+        requires_plan = bool(requires_plan_text and requires_plan_text.strip().lower() in {"true", "yes", "1"})
 
-        expected_plan_elements = self._parse_bullet_list(
-            self._extract_block(content, "Expected Plan Elements")
-        )
-        plan_evaluation = self._parse_key_value_block(
-            self._extract_block(content, "Plan Evaluation")
-        )
+        expected_plan_elements = self._parse_bullet_list(self._extract_block(content, "Expected Plan Elements"))
+        plan_evaluation = self._parse_key_value_block(self._extract_block(content, "Plan Evaluation"))
 
         # Parse LLM evaluation fields
         use_llm_evaluation_text = self._extract_inline_field(content, "Use LLM Evaluation")
         use_llm_evaluation = bool(
-            use_llm_evaluation_text
-            and use_llm_evaluation_text.strip().lower() in {"true", "yes", "1"}
+            use_llm_evaluation_text and use_llm_evaluation_text.strip().lower() in {"true", "yes", "1"}
         )
 
         llm_evaluation_criteria = self._extract_inline_field(content, "LLM Evaluation Criteria") or ""
@@ -848,7 +826,7 @@ Make sure your plan includes the key steps and reasoning before you start execut
                     output=result,
                     task_description=test_case.prompt,
                     evaluation_criteria=test_case.llm_evaluation_criteria,
-                    rubric=test_case.llm_evaluation_rubric if test_case.llm_evaluation_rubric else None
+                    rubric=test_case.llm_evaluation_rubric if test_case.llm_evaluation_rubric else None,
                 )
                 evaluation["metrics"]["llm_evaluation"] = llm_eval
 
@@ -1003,7 +981,7 @@ Make sure your plan includes the key steps and reasoning before you start execut
                     task_description=test.description,
                     evaluation_criteria=test.llm_evaluation_criteria,
                     expected_format=test.expected_type if test.expected_type != "string" else None,
-                    rubric=test.llm_evaluation_rubric if test.llm_evaluation_rubric else None
+                    rubric=test.llm_evaluation_rubric if test.llm_evaluation_rubric else None,
                 )
                 evaluation["metrics"]["llm_evaluation"] = llm_eval
 

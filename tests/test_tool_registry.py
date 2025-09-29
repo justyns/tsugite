@@ -55,7 +55,7 @@ def test_tool_registration_without_docstring(reset_tool_registry):
 
 def test_get_nonexistent_tool(reset_tool_registry):
     """Test getting a tool that doesn't exist."""
-    with pytest.raises(ValueError, match="Tool 'nonexistent' not found"):
+    with pytest.raises(ValueError, match="Invalid tool 'nonexistent': not found"):
         get_tool("nonexistent")
 
 
@@ -84,7 +84,7 @@ def test_call_tool_missing_required_param(reset_tool_registry):
         """Tool that requires a parameter."""
         return required_arg.upper()
 
-    with pytest.raises(ValueError, match="Missing required parameter 'required_arg'"):
+    with pytest.raises(ValueError, match="Invalid parameter 'required_arg': missing for tool 'requires_param'"):
         call_tool("requires_param")
 
 
@@ -96,7 +96,7 @@ def test_call_tool_runtime_error(reset_tool_registry):
         """A tool that always fails."""
         raise RuntimeError("Something went wrong")
 
-    with pytest.raises(RuntimeError, match="Tool 'failing_tool' failed: Something went wrong"):
+    with pytest.raises(RuntimeError, match="Tool 'failing_tool' failed to execute: Something went wrong"):
         call_tool("failing_tool")
 
 

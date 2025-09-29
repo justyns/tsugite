@@ -4,6 +4,7 @@ from typing import Dict, Callable, Any, List
 import functools
 import inspect
 from dataclasses import dataclass
+from ..utils import tool_error, validation_error
 
 
 @dataclass
@@ -49,7 +50,8 @@ def tool(func: Callable) -> Callable:
 def get_tool(name: str) -> ToolInfo:
     """Get a registered tool by name."""
     if name not in _tools:
-        raise ValueError(f"Tool '{name}' not found. Available: {list(_tools.keys())}")
+        available = ", ".join(list(_tools.keys())) if _tools else "none"
+        raise validation_error("tool", name, f"not found. Available: {available}")
     return _tools[name]
 
 
@@ -60,12 +62,12 @@ def call_tool(name: str, **kwargs) -> Any:
     # Validate required parameters
     for param_name, param_info in tool_info.parameters.items():
         if param_info["required"] and param_name not in kwargs:
-            raise ValueError(f"Missing required parameter '{param_name}' for tool '{name}'")
+            raise validation_error("parameter", param_name, f"missing for tool '{name}'")
 
     try:
         return tool_info.func(**kwargs)
     except Exception as e:
-        raise RuntimeError(f"Tool '{name}' failed: {e}")
+        raise tool_error(name, "execute", str(e))
 
 
 def list_tools() -> List[str]:

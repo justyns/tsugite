@@ -125,9 +125,7 @@ class BenchmarkMetrics:
             model_scores[result.model].append(result.score)
 
         # Calculate average scores per model
-        avg_model_scores = {
-            model: round(sum(scores) / len(scores), 4) for model, scores in model_scores.items()
-        }
+        avg_model_scores = {model: round(sum(scores) / len(scores), 4) for model, scores in model_scores.items()}
 
         # Find best and worst models
         if avg_model_scores:

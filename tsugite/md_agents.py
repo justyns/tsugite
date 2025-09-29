@@ -1,10 +1,10 @@
 """Agent markdown parser and template renderer."""
 
-import yaml
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass, field
 import re
+from .utils import parse_yaml_frontmatter
 
 
 @dataclass
@@ -44,27 +44,11 @@ class Agent:
 
 def parse_agent(text: str, file_path: Optional[Path] = None) -> Agent:
     """Parse agent markdown text with YAML frontmatter."""
-
-    # Check for YAML frontmatter
-    if not text.startswith("---"):
-        raise ValueError("Agent text must start with YAML frontmatter")
-
-    # Split frontmatter and content
-    parts = text.split("---", 2)
-    if len(parts) < 3:
-        raise ValueError("Invalid YAML frontmatter format")
-
     # Parse YAML frontmatter
-    try:
-        frontmatter = yaml.safe_load(parts[1])
-    except yaml.YAMLError as e:
-        raise ValueError(f"Invalid YAML frontmatter: {e}")
+    frontmatter, markdown_content = parse_yaml_frontmatter(text, "Agent text")
 
     # Create config
     config = AgentConfig(**frontmatter)
-
-    # Get markdown content (everything after second ---)
-    markdown_content = parts[2].strip()
 
     return Agent(config=config, content=markdown_content, file_path=file_path or Path(""))
 
@@ -125,10 +109,18 @@ def validate_agent(agent: Agent) -> List[str]:
     if not agent.config.model:
         errors.append("Agent model is required")
 
-    # Validate tools exist (TODO: check against registry)
+    # Validate model format
+    if not _is_valid_model_format(agent.config.model):
+        errors.append(f"Invalid model format: {agent.config.model}")
+
+    # Validate tools exist
     for tool in agent.config.tools:
         if not isinstance(tool, str):
             errors.append(f"Tool name must be string: {tool}")
+
+    # Validate max_steps is positive
+    if agent.config.max_steps <= 0:
+        errors.append("max_steps must be positive")
 
     # Validate directives in content
     directives = extract_directives(agent.content)
@@ -137,3 +129,71 @@ def validate_agent(agent: Agent) -> List[str]:
             errors.append(f"Tool directive missing name: {directive['raw_args']}")
 
     return errors
+
+
+def _is_valid_model_format(model: str) -> bool:
+    """Check if model string follows expected format."""
+    if ":" not in model:
+        return False
+
+    provider, model_name = model.split(":", 1)
+    return bool(provider.strip() and model_name.strip())
+
+
+def validate_agent_execution(agent: Agent | Path) -> tuple[bool, str]:
+    """Validate that an agent can be executed.
+
+    Args:
+        agent: Parsed agent or path to agent file
+
+    Returns:
+        Tuple of (is_valid, error_message)
+    """
+    # Handle both Path objects and Agent objects
+    if isinstance(agent, Path):
+        try:
+            agent_text = agent.read_text()
+            agent = parse_agent(agent_text, agent)
+        except Exception as e:
+            return False, f"Failed to parse agent file: {e}"
+
+    # First do basic validation
+    errors = validate_agent(agent)
+    if errors:
+        return False, "; ".join(errors)
+
+    try:
+        # Check if model is supported
+        from .models import get_model
+
+        get_model(agent.config.model)
+    except Exception as e:
+        return False, f"Model validation failed: {e}"
+
+    try:
+        # Check if tools exist
+        from .tool_adapter import get_smolagents_tools
+
+        get_smolagents_tools(agent.config.tools)
+    except Exception as e:
+        return False, f"Tool validation failed: {e}"
+
+    # Check template rendering with minimal context
+    from .renderer import AgentRenderer
+
+    renderer = AgentRenderer()
+    try:
+        test_context = {"user_prompt": "test", "task_summary": "## Current Tasks\nNo tasks yet."}
+
+        # If agent has prefetch, create mock variables
+        if agent.config.prefetch:
+            for prefetch_item in agent.config.prefetch:
+                assign_name = prefetch_item.get("assign")
+                if assign_name:
+                    test_context[assign_name] = "mock_prefetch_data"
+
+        renderer.render(agent.content, test_context)
+    except Exception as e:
+        return False, f"Template validation failed: {e}"
+
+    return True, "Agent is valid"

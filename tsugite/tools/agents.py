@@ -3,14 +3,12 @@
 from pathlib import Path
 from typing import Dict, Any, Optional
 from ..tools import tool
+from ..utils import validation_error
 
 
 @tool
 def spawn_agent(
-    agent_path: str,
-    prompt: str,
-    context: Optional[Dict[str, Any]] = None,
-    model_override: Optional[str] = None
+    agent_path: str, prompt: str, context: Optional[Dict[str, Any]] = None, model_override: Optional[str] = None
 ) -> str:
     """Spawn a sub-agent and return its result.
 
@@ -33,10 +31,10 @@ def spawn_agent(
         agent_file = Path.cwd() / agent_file
 
     if not agent_file.exists():
-        raise ValueError(f"Agent file not found: {agent_path}")
+        raise validation_error("agent file", str(agent_path), "not found")
 
-    if not agent_file.suffix == '.md':
-        raise ValueError(f"Agent file must be a .md file: {agent_path}")
+    if not agent_file.suffix == ".md":
+        raise validation_error("agent file", str(agent_path), "must be a .md file")
 
     # Prepare context for sub-agent
     sub_context = context or {}
@@ -47,11 +45,7 @@ def spawn_agent(
 
         # Run the sub-agent
         result = run_agent(
-            agent_path=agent_file,
-            prompt=prompt,
-            context=sub_context,
-            model_override=model_override,
-            debug=False
+            agent_path=agent_file, prompt=prompt, context=sub_context, model_override=model_override, debug=False
         )
         return result
     except Exception as e:

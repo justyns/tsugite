@@ -10,6 +10,7 @@ from . import tool
 
 class TaskStatus(Enum):
     """Valid status values for tasks."""
+
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
@@ -20,6 +21,7 @@ class TaskStatus(Enum):
 @dataclass
 class Task:
     """Individual task with metadata."""
+
     id: int
     title: str
     status: TaskStatus
@@ -44,12 +46,7 @@ class TaskManager:
         if parent_id is not None and parent_id not in self.tasks:
             raise ValueError(f"Parent task {parent_id} does not exist")
 
-        task = Task(
-            id=task_id,
-            title=title,
-            status=status,
-            parent_id=parent_id
-        )
+        task = Task(id=task_id, title=title, status=status, parent_id=parent_id)
 
         self.tasks[task_id] = task
         return task_id
@@ -100,7 +97,7 @@ class TaskManager:
             "Active Tasks": [TaskStatus.IN_PROGRESS, TaskStatus.PENDING],
             "Blocked Tasks": [TaskStatus.BLOCKED],
             "Completed Tasks": [TaskStatus.COMPLETED],
-            "Cancelled Tasks": [TaskStatus.CANCELLED]
+            "Cancelled Tasks": [TaskStatus.CANCELLED],
         }
 
         status_icons = {
@@ -108,7 +105,7 @@ class TaskManager:
             TaskStatus.IN_PROGRESS: "⏳",
             TaskStatus.COMPLETED: "✅",
             TaskStatus.BLOCKED: "🚫",
-            TaskStatus.CANCELLED: "❌"
+            TaskStatus.CANCELLED: "❌",
         }
 
         for group_name, statuses in status_groups.items():
@@ -134,7 +131,9 @@ class TaskManager:
                     summary.append(f"  └─ [{subtask.id}] {sub_icon} {subtask.title}")
 
             # Show orphaned subtasks (parent not in this group)
-            orphaned = [t for t in group_tasks if t.parent_id is not None and t.parent_id not in [p.id for p in parent_tasks]]
+            orphaned = [
+                t for t in group_tasks if t.parent_id is not None and t.parent_id not in [p.id for p in parent_tasks]
+            ]
             for orphan in orphaned:
                 icon = status_icons[orphan.status]
                 summary.append(f"[{orphan.id}] {icon} {orphan.title} (subtask of #{orphan.parent_id})")
@@ -244,7 +243,7 @@ def task_list(status: Optional[str] = None) -> List[Dict[str, Any]]:
             "parent_id": task.parent_id,
             "created_at": task.created_at.isoformat(),
             "updated_at": task.updated_at.isoformat(),
-            "completed_at": task.completed_at.isoformat() if task.completed_at else None
+            "completed_at": task.completed_at.isoformat() if task.completed_at else None,
         }
         for task in tasks
     ]
@@ -270,5 +269,5 @@ def task_get(task_id: int) -> Dict[str, Any]:
         "parent_id": task.parent_id,
         "created_at": task.created_at.isoformat(),
         "updated_at": task.updated_at.isoformat(),
-        "completed_at": task.completed_at.isoformat() if task.completed_at else None
+        "completed_at": task.completed_at.isoformat() if task.completed_at else None,
     }
