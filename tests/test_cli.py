@@ -286,3 +286,145 @@ tools: []
     agent_file.write_text(agent_content)
     result = cli_runner.invoke(app, ["run", str(agent_file), "test prompt"])
     assert result.exit_code == 0
+
+
+class TestAnimationCLIIntegration:
+    """Test animation integration with CLI commands."""
+
+    @patch("tsugite.tsugite.loading_animation")
+    def test_animation_enabled_in_interactive_color_mode(
+        self, mock_loading_animation, cli_runner, sample_agent_file, mock_agent_execution
+    ):
+        """Test that animation is enabled in default interactive color mode."""
+        mock_loading_animation.return_value.__enter__ = MagicMock()
+        mock_loading_animation.return_value.__exit__ = MagicMock(return_value=None)
+
+        result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt"])
+
+        assert result.exit_code == 0
+        # Animation should be called with enabled=True
+        mock_loading_animation.assert_called_once()
+        call_args = mock_loading_animation.call_args
+        assert call_args.kwargs["enabled"] is True
+        assert call_args.kwargs["message"] == "Waiting for LLM response"
+
+    @patch("tsugite.tsugite.loading_animation")
+    def test_animation_disabled_with_non_interactive_flag(
+        self, mock_loading_animation, cli_runner, sample_agent_file, mock_agent_execution
+    ):
+        """Test that animation is disabled with --non-interactive flag."""
+        mock_loading_animation.return_value.__enter__ = MagicMock()
+        mock_loading_animation.return_value.__exit__ = MagicMock(return_value=None)
+
+        result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--non-interactive"])
+
+        assert result.exit_code == 0
+        # Animation should be called with enabled=False
+        mock_loading_animation.assert_called_once()
+        call_args = mock_loading_animation.call_args
+        assert call_args.kwargs["enabled"] is False
+
+    @patch("tsugite.tsugite.loading_animation")
+    def test_animation_disabled_with_no_color_flag(
+        self, mock_loading_animation, cli_runner, sample_agent_file, mock_agent_execution
+    ):
+        """Test that animation is disabled with --no-color flag."""
+        mock_loading_animation.return_value.__enter__ = MagicMock()
+        mock_loading_animation.return_value.__exit__ = MagicMock(return_value=None)
+
+        result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--no-color"])
+
+        assert result.exit_code == 0
+        # Animation should be called with enabled=False
+        mock_loading_animation.assert_called_once()
+        call_args = mock_loading_animation.call_args
+        assert call_args.kwargs["enabled"] is False
+
+    @patch("tsugite.tsugite.loading_animation")
+    def test_animation_disabled_with_both_flags(
+        self, mock_loading_animation, cli_runner, sample_agent_file, mock_agent_execution
+    ):
+        """Test that animation is disabled with both --non-interactive and --no-color flags."""
+        mock_loading_animation.return_value.__enter__ = MagicMock()
+        mock_loading_animation.return_value.__exit__ = MagicMock(return_value=None)
+
+        result = cli_runner.invoke(
+            app,
+            ["run", str(sample_agent_file), "test prompt", "--non-interactive", "--no-color"]
+        )
+
+        assert result.exit_code == 0
+        # Animation should be called with enabled=False
+        mock_loading_animation.assert_called_once()
+        call_args = mock_loading_animation.call_args
+        assert call_args.kwargs["enabled"] is False
+
+    @patch("tsugite.tsugite.loading_animation")
+    @patch("tsugite.tsugite.run_agent")
+    def test_animation_context_manager_usage(
+        self, mock_run_agent, mock_loading_animation, cli_runner, sample_agent_file
+    ):
+        """Test that animation context manager is properly used around run_agent."""
+        mock_run_agent.return_value = "Test completion"
+        mock_context = MagicMock()
+        mock_loading_animation.return_value = mock_context
+
+        with patch("tsugite.tsugite.validate_agent_execution") as mock_validate:
+            mock_validate.return_value = (True, "Agent is valid")
+
+            result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt"])
+
+        assert result.exit_code == 0
+        # Verify context manager was used
+        mock_context.__enter__.assert_called_once()
+        mock_context.__exit__.assert_called_once()
+        # Verify run_agent was called
+        mock_run_agent.assert_called_once()
+
+    @patch("tsugite.tsugite.loading_animation")
+    def test_animation_with_agent_execution_error(
+        self, mock_loading_animation, cli_runner, sample_agent_file
+    ):
+        """Test animation cleanup when agent execution fails."""
+        mock_context = MagicMock()
+        mock_loading_animation.return_value = mock_context
+
+        with patch("tsugite.tsugite.run_agent") as mock_run_agent, \
+             patch("tsugite.tsugite.validate_agent_execution") as mock_validate:
+
+            mock_validate.return_value = (True, "Agent is valid")
+            mock_run_agent.side_effect = RuntimeError("Agent execution failed")
+
+            result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt"])
+
+        assert result.exit_code == 1
+        # Verify context manager was still properly used despite error
+        mock_context.__enter__.assert_called_once()
+        mock_context.__exit__.assert_called_once()
+
+    @patch("tsugite.tsugite.loading_animation")
+    def test_animation_console_parameter(
+        self, mock_loading_animation, cli_runner, sample_agent_file, mock_agent_execution
+    ):
+        """Test that correct console instance is passed to animation."""
+        mock_loading_animation.return_value.__enter__ = MagicMock()
+        mock_loading_animation.return_value.__exit__ = MagicMock(return_value=None)
+
+        result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt"])
+
+        assert result.exit_code == 0
+        # Verify console parameter was passed
+        mock_loading_animation.assert_called_once()
+        call_args = mock_loading_animation.call_args
+        # Console should be the first positional argument
+        if call_args.args:
+            console_arg = call_args.args[0]
+            assert console_arg is not None
+            # Check it's a Console-like object (has the methods we expect)
+            assert hasattr(console_arg, 'print')
+        else:
+            # Console might be passed as keyword argument
+            assert 'console' in call_args.kwargs
+            console_arg = call_args.kwargs['console']
+            assert console_arg is not None
+            assert hasattr(console_arg, 'print')

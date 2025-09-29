@@ -11,6 +11,7 @@ from rich.text import Text
 from typing import Optional
 
 from tsugite.agent_runner import run_agent, get_agent_info, validate_agent_execution
+from tsugite.animation import loading_animation
 
 app = typer.Typer(
     name="tsugite",
@@ -97,13 +98,18 @@ def run(
         console.print("[green]Starting agent execution...[/green]")
 
         try:
-            # Execute agent
-            result = run_agent(
-                agent_path=agent_file,
-                prompt=prompt,
-                model_override=model,
-                debug=debug,
-            )
+            # Execute agent with loading animation
+            with loading_animation(
+                console=console,
+                message="Waiting for LLM response",
+                enabled=not non_interactive and not no_color
+            ):
+                result = run_agent(
+                    agent_path=agent_file,
+                    prompt=prompt,
+                    model_override=model,
+                    debug=debug,
+                )
 
             # Display result
             console.print("\n" + "=" * 50)
