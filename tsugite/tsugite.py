@@ -76,6 +76,7 @@ def run(
     with _agent_context(agent_path, root) as agent_file:
         # Get agent info for display
         agent_info = get_agent_info(agent_file)
+        instruction_label = "runtime + agent" if agent_info.get("instructions") else "runtime default"
 
         console.print(
             Panel(
@@ -83,6 +84,7 @@ def run(
                 f"[cyan]Task:[/cyan] {prompt}\n"
                 f"[cyan]Directory:[/cyan] {Path.cwd()}\n"
                 f"[cyan]Model:[/cyan] {agent_info.get('model', 'unknown')}\n"
+                f"[cyan]Instructions:[/cyan] {instruction_label}\n"
                 f"[cyan]Tools:[/cyan] {', '.join(agent_info.get('tools', []))}",
                 title="Tsugite Agent Runner",
                 border_style="blue",
@@ -100,9 +102,7 @@ def run(
         try:
             # Execute agent with loading animation
             with loading_animation(
-                console=console,
-                message="Waiting for LLM response",
-                enabled=not non_interactive and not no_color
+                console=console, message="Waiting for LLM response", enabled=not non_interactive and not no_color
             ):
                 result = run_agent(
                     agent_path=agent_file,

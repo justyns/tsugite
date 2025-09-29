@@ -8,6 +8,8 @@ permissions_profile: web_read_only
 context_budget:
   tokens: 8000
   priority: [system, task]
+instructions: |
+  Deliver concise factual summaries with citations and flag low-reliability sources.
 ---
 
 # System

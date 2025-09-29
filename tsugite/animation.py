@@ -64,9 +64,7 @@ class LoadingAnimation:
 
 @contextmanager
 def loading_animation(
-    console: Console,
-    message: str = "Waiting for LLM response",
-    enabled: bool = True
+    console: Console, message: str = "Waiting for LLM response", enabled: bool = True
 ) -> Generator[None, None, None]:
     """Context manager for showing loading animation during LLM calls.
 

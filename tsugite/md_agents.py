@@ -19,6 +19,7 @@ class AgentConfig:
     prefetch: List[Dict[str, Any]] = field(default_factory=list)
     permissions_profile: str = "default"
     context_budget: Dict[str, Any] = field(default_factory=dict)
+    instructions: str = ""
 
     def __post_init__(self):
         if self.tools is None:
@@ -27,6 +28,8 @@ class AgentConfig:
             self.prefetch = []
         if not self.context_budget:
             self.context_budget = {"tokens": 8000, "priority": ["system", "task"]}
+        if self.instructions is None:
+            self.instructions = ""
 
 
 @dataclass

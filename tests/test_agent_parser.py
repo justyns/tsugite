@@ -22,6 +22,7 @@ def test_parse_valid_agent_file(sample_agent_file):
     assert "read_file" in agent.config.tools
     assert "write_file" in agent.config.tools
     assert agent.config.permissions_profile == "test_safe"
+    assert "Provide concise" in agent.config.instructions
 
     # Check prefetch configuration
     assert len(agent.config.prefetch) == 1
@@ -115,6 +116,7 @@ def test_agent_config_defaults():
     assert config.prefetch == []
     assert config.permissions_profile == "default"
     assert config.context_budget == {"tokens": 8000, "priority": ["system", "task"]}
+    assert config.instructions == ""
 
 
 def test_extract_directives_basic():

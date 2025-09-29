@@ -30,3 +30,13 @@
 - Tests: `tests/` with pytest fixtures
 - No comments unless they add meaningful context
 - Write new unit tests for all new features
+
+## Frontmatter Reference
+
+- `name` *(required)* – Agent identifier shown in CLI.
+- `model` *(optional)* – Defaults to `ollama:qwen2.5-coder:7b`.
+- `max_steps` *(optional)* – Defaults to `5`.
+- `tools` *(optional list)* – Tool names registered via `@tool`.
+- `prefetch` *(optional list)* – Tool calls to run before rendering.
+- `permissions_profile` *(optional)* – Placeholder for future permissions engine.
+- `instructions` *(optional string)* – Additional system guidance appended to Tsugite’s default runtime instructions before hitting the LLM.

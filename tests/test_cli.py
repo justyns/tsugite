@@ -349,8 +349,7 @@ class TestAnimationCLIIntegration:
         mock_loading_animation.return_value.__exit__ = MagicMock(return_value=None)
 
         result = cli_runner.invoke(
-            app,
-            ["run", str(sample_agent_file), "test prompt", "--non-interactive", "--no-color"]
+            app, ["run", str(sample_agent_file), "test prompt", "--non-interactive", "--no-color"]
         )
 
         assert result.exit_code == 0
@@ -382,15 +381,15 @@ class TestAnimationCLIIntegration:
         mock_run_agent.assert_called_once()
 
     @patch("tsugite.tsugite.loading_animation")
-    def test_animation_with_agent_execution_error(
-        self, mock_loading_animation, cli_runner, sample_agent_file
-    ):
+    def test_animation_with_agent_execution_error(self, mock_loading_animation, cli_runner, sample_agent_file):
         """Test animation cleanup when agent execution fails."""
         mock_context = MagicMock()
         mock_loading_animation.return_value = mock_context
 
-        with patch("tsugite.tsugite.run_agent") as mock_run_agent, \
-             patch("tsugite.tsugite.validate_agent_execution") as mock_validate:
+        with (
+            patch("tsugite.tsugite.run_agent") as mock_run_agent,
+            patch("tsugite.tsugite.validate_agent_execution") as mock_validate,
+        ):
 
             mock_validate.return_value = (True, "Agent is valid")
             mock_run_agent.side_effect = RuntimeError("Agent execution failed")
@@ -421,10 +420,10 @@ class TestAnimationCLIIntegration:
             console_arg = call_args.args[0]
             assert console_arg is not None
             # Check it's a Console-like object (has the methods we expect)
-            assert hasattr(console_arg, 'print')
+            assert hasattr(console_arg, "print")
         else:
             # Console might be passed as keyword argument
-            assert 'console' in call_args.kwargs
-            console_arg = call_args.kwargs['console']
+            assert "console" in call_args.kwargs
+            console_arg = call_args.kwargs["console"]
             assert console_arg is not None
-            assert hasattr(console_arg, 'print')
+            assert hasattr(console_arg, "print")

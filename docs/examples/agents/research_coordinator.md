@@ -12,6 +12,8 @@ permissions_profile: research_safe
 context_budget:
   tokens: 20000
   priority: [system, task, research_methods, sub_results]
+instructions: |
+  Produce structured research with source attributions and call out confidence or gaps in the evidence.
 ---
 
 # System

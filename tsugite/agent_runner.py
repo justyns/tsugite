@@ -12,6 +12,21 @@ from tsugite.tools import call_tool
 from tsugite.tools.tasks import reset_task_manager, get_task_manager
 
 
+TSUGITE_DEFAULT_INSTRUCTIONS = (
+    "You are operating inside the Tsugite micro-agent runtime. Follow the rendered task faithfully, use the available "
+    "tools when they meaningfully advance the work, and maintain a living plan via the task_* tools. Create or update "
+    "tasks whenever you define new sub-work, mark progress as you go, and rely on the task summary to decide the next "
+    "action. Provide a clear, actionable final response without unnecessary filler."
+)
+
+
+def _combine_instructions(*segments: str) -> str:
+    """Join instruction segments, skipping empties."""
+
+    parts = [segment.strip() for segment in segments if segment and segment.strip()]
+    return "\n\n".join(parts)
+
+
 def execute_prefetch(prefetch_config: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Execute prefetch tools and return context.
 
@@ -79,6 +94,11 @@ def run_agent(
     except Exception as e:
         raise ValueError(f"Failed to parse agent file: {e}")
 
+    combined_instructions = _combine_instructions(
+        TSUGITE_DEFAULT_INSTRUCTIONS,
+        getattr(agent_config, "instructions", ""),
+    )
+
     # Execute prefetch tools if any
     prefetch_context = {}
     if agent_config.prefetch:
@@ -135,6 +155,7 @@ def run_agent(
             tools=tools,
             model=model,
             max_steps=agent_config.max_steps,
+            instructions=combined_instructions or None,
         )
 
         result = agent.run(rendered_prompt)
@@ -188,6 +209,7 @@ def get_agent_info(agent_path: Path) -> Dict[str, Any]:
             "prefetch_count": (len(agent_config.prefetch) if agent_config.prefetch else 0),
             "permissions_profile": getattr(agent_config, "permissions_profile", None),
             "valid": validate_agent_file(agent_path)[0],
+            "instructions": getattr(agent_config, "instructions", ""),
         }
     except Exception as e:
         return {

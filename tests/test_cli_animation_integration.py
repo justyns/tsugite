@@ -51,8 +51,10 @@ class TestAnimationIntegrationScenarios:
 
     def test_end_to_end_animation_flow(self, cli_runner, sample_agent_file):
         """Test complete animation flow from CLI invocation to completion."""
-        with patch("tsugite.tsugite.run_agent") as mock_run_agent, \
-             patch("tsugite.tsugite.validate_agent_execution") as mock_validate:
+        with (
+            patch("tsugite.tsugite.run_agent") as mock_run_agent,
+            patch("tsugite.tsugite.validate_agent_execution") as mock_validate,
+        ):
 
             mock_validate.return_value = (True, "Agent is valid")
 
@@ -79,9 +81,11 @@ class TestAnimationIntegrationScenarios:
         color_console = Console(file=StringIO(), force_terminal=True, width=80)
         no_color_console = Console(file=StringIO(), no_color=True, width=80)
 
-        with patch("tsugite.tsugite.console", color_console), \
-             patch("tsugite.tsugite.run_agent") as mock_run_agent, \
-             patch("tsugite.tsugite.validate_agent_execution") as mock_validate:
+        with (
+            patch("tsugite.tsugite.console", color_console),
+            patch("tsugite.tsugite.run_agent") as mock_run_agent,
+            patch("tsugite.tsugite.validate_agent_execution") as mock_validate,
+        ):
 
             mock_validate.return_value = (True, "Agent is valid")
             mock_run_agent.return_value = "Test completion"
@@ -93,9 +97,11 @@ class TestAnimationIntegrationScenarios:
     def test_animation_interruption_handling(self, cli_runner, sample_agent_file):
         """Test animation behavior when agent execution is interrupted."""
 
-        with patch("tsugite.tsugite.run_agent") as mock_run_agent, \
-             patch("tsugite.tsugite.validate_agent_execution") as mock_validate, \
-             patch("tsugite.animation.LoadingAnimation.stop") as mock_stop:
+        with (
+            patch("tsugite.tsugite.run_agent") as mock_run_agent,
+            patch("tsugite.tsugite.validate_agent_execution") as mock_validate,
+            patch("tsugite.animation.LoadingAnimation.stop") as mock_stop,
+        ):
 
             mock_validate.return_value = (True, "Agent is valid")
             mock_run_agent.side_effect = KeyboardInterrupt("User interrupted")
@@ -112,8 +118,10 @@ class TestAnimationIntegrationScenarios:
         terminal_widths = [40, 80, 120, 200]
 
         for width in terminal_widths:
-            with patch("tsugite.tsugite.run_agent") as mock_run_agent, \
-                 patch("tsugite.tsugite.validate_agent_execution") as mock_validate:
+            with (
+                patch("tsugite.tsugite.run_agent") as mock_run_agent,
+                patch("tsugite.tsugite.validate_agent_execution") as mock_validate,
+            ):
 
                 mock_validate.return_value = (True, "Agent is valid")
                 mock_run_agent.return_value = "Test completion"
@@ -129,8 +137,10 @@ class TestAnimationIntegrationScenarios:
     def test_animation_with_long_running_agent(self, cli_runner, sample_agent_file):
         """Test animation during longer agent execution."""
 
-        with patch("tsugite.tsugite.run_agent") as mock_run_agent, \
-             patch("tsugite.tsugite.validate_agent_execution") as mock_validate:
+        with (
+            patch("tsugite.tsugite.run_agent") as mock_run_agent,
+            patch("tsugite.tsugite.validate_agent_execution") as mock_validate,
+        ):
 
             mock_validate.return_value = (True, "Agent is valid")
 
@@ -164,9 +174,11 @@ class TestAnimationModeDetection:
         ]
 
         for args, expected_enabled in test_cases:
-            with patch("tsugite.tsugite.loading_animation") as mock_animation, \
-                 patch("tsugite.tsugite.run_agent") as mock_run_agent, \
-                 patch("tsugite.tsugite.validate_agent_execution") as mock_validate:
+            with (
+                patch("tsugite.tsugite.loading_animation") as mock_animation,
+                patch("tsugite.tsugite.run_agent") as mock_run_agent,
+                patch("tsugite.tsugite.validate_agent_execution") as mock_validate,
+            ):
 
                 mock_validate.return_value = (True, "Agent is valid")
                 mock_run_agent.return_value = "Test completion"
@@ -184,8 +196,10 @@ class TestAnimationModeDetection:
     def test_color_detection_logic(self, cli_runner, sample_agent_file):
         """Test color detection affects animation mode."""
 
-        with patch("tsugite.tsugite.run_agent") as mock_run_agent, \
-             patch("tsugite.tsugite.validate_agent_execution") as mock_validate:
+        with (
+            patch("tsugite.tsugite.run_agent") as mock_run_agent,
+            patch("tsugite.tsugite.validate_agent_execution") as mock_validate,
+        ):
 
             mock_validate.return_value = (True, "Agent is valid")
             mock_run_agent.return_value = "Test completion"
@@ -195,10 +209,7 @@ class TestAnimationModeDetection:
                 mock_animation.return_value.__enter__ = MagicMock()
                 mock_animation.return_value.__exit__ = MagicMock(return_value=None)
 
-                result = cli_runner.invoke(
-                    app,
-                    ["run", str(sample_agent_file), "test prompt", "--no-color"]
-                )
+                result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--no-color"])
 
                 assert result.exit_code == 0
                 call_args = mock_animation.call_args
@@ -211,9 +222,11 @@ class TestAnimationErrorHandling:
     def test_animation_failure_doesnt_break_cli(self, cli_runner, sample_agent_file):
         """Test that animation failures don't break CLI functionality."""
 
-        with patch("tsugite.animation.LoadingAnimation.start") as mock_start, \
-             patch("tsugite.tsugite.run_agent") as mock_run_agent, \
-             patch("tsugite.tsugite.validate_agent_execution") as mock_validate:
+        with (
+            patch("tsugite.animation.LoadingAnimation.start") as mock_start,
+            patch("tsugite.tsugite.run_agent") as mock_run_agent,
+            patch("tsugite.tsugite.validate_agent_execution") as mock_validate,
+        ):
 
             mock_validate.return_value = (True, "Agent is valid")
             mock_run_agent.return_value = "Test completion"
@@ -228,9 +241,11 @@ class TestAnimationErrorHandling:
     def test_animation_stop_failure_handling(self, cli_runner, sample_agent_file):
         """Test handling of animation stop failures."""
 
-        with patch("tsugite.animation.LoadingAnimation.stop") as mock_stop, \
-             patch("tsugite.tsugite.run_agent") as mock_run_agent, \
-             patch("tsugite.tsugite.validate_agent_execution") as mock_validate:
+        with (
+            patch("tsugite.animation.LoadingAnimation.stop") as mock_stop,
+            patch("tsugite.tsugite.run_agent") as mock_run_agent,
+            patch("tsugite.tsugite.validate_agent_execution") as mock_validate,
+        ):
 
             mock_validate.return_value = (True, "Agent is valid")
             mock_run_agent.return_value = "Test completion"
@@ -249,8 +264,10 @@ class TestAnimationPerformance:
     def test_animation_startup_overhead(self, cli_runner, sample_agent_file):
         """Test that animation doesn't add significant startup overhead."""
 
-        with patch("tsugite.tsugite.run_agent") as mock_run_agent, \
-             patch("tsugite.tsugite.validate_agent_execution") as mock_validate:
+        with (
+            patch("tsugite.tsugite.run_agent") as mock_run_agent,
+            patch("tsugite.tsugite.validate_agent_execution") as mock_validate,
+        ):
 
             mock_validate.return_value = (True, "Agent is valid")
             mock_run_agent.return_value = "Quick completion"
@@ -262,10 +279,7 @@ class TestAnimationPerformance:
 
             # Measure time with animation disabled
             start_time = time.time()
-            result2 = cli_runner.invoke(
-                app,
-                ["run", str(sample_agent_file), "test prompt", "--non-interactive"]
-            )
+            result2 = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--non-interactive"])
             disabled_time = time.time() - start_time
 
             assert result1.exit_code == 0
@@ -280,8 +294,10 @@ class TestAnimationPerformance:
 
         initial_thread_count = threading.active_count()
 
-        with patch("tsugite.tsugite.run_agent") as mock_run_agent, \
-             patch("tsugite.tsugite.validate_agent_execution") as mock_validate:
+        with (
+            patch("tsugite.tsugite.run_agent") as mock_run_agent,
+            patch("tsugite.tsugite.validate_agent_execution") as mock_validate,
+        ):
 
             mock_validate.return_value = (True, "Agent is valid")
             mock_run_agent.return_value = "Test completion"
@@ -311,9 +327,11 @@ class TestAnimationAccessibility:
         ]
 
         for flags in accessibility_flags:
-            with patch("tsugite.tsugite.loading_animation") as mock_animation, \
-                 patch("tsugite.tsugite.run_agent") as mock_run_agent, \
-                 patch("tsugite.tsugite.validate_agent_execution") as mock_validate:
+            with (
+                patch("tsugite.tsugite.loading_animation") as mock_animation,
+                patch("tsugite.tsugite.run_agent") as mock_run_agent,
+                patch("tsugite.tsugite.validate_agent_execution") as mock_validate,
+            ):
 
                 mock_validate.return_value = (True, "Agent is valid")
                 mock_run_agent.return_value = "Test completion"
@@ -338,9 +356,11 @@ class TestAnimationAccessibility:
     def test_animation_message_accessibility(self, cli_runner, sample_agent_file):
         """Test that animation messages are accessible."""
 
-        with patch("tsugite.tsugite.loading_animation") as mock_animation, \
-             patch("tsugite.tsugite.run_agent") as mock_run_agent, \
-             patch("tsugite.tsugite.validate_agent_execution") as mock_validate:
+        with (
+            patch("tsugite.tsugite.loading_animation") as mock_animation,
+            patch("tsugite.tsugite.run_agent") as mock_run_agent,
+            patch("tsugite.tsugite.validate_agent_execution") as mock_validate,
+        ):
 
             mock_validate.return_value = (True, "Agent is valid")
             mock_run_agent.return_value = "Test completion"

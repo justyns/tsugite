@@ -193,8 +193,7 @@ class TestLoadingAnimationContextManager:
         """Test context manager when enabled."""
         console = Console(file=StringIO(), width=80, force_terminal=True)
 
-        with patch.object(LoadingAnimation, 'start') as mock_start, \
-             patch.object(LoadingAnimation, 'stop') as mock_stop:
+        with patch.object(LoadingAnimation, "start") as mock_start, patch.object(LoadingAnimation, "stop") as mock_stop:
 
             with loading_animation(console, "Test message", enabled=True):
                 pass
@@ -206,8 +205,7 @@ class TestLoadingAnimationContextManager:
         """Test context manager when disabled."""
         console = Console(file=StringIO(), width=80, force_terminal=True)
 
-        with patch.object(LoadingAnimation, 'start') as mock_start, \
-             patch.object(LoadingAnimation, 'stop') as mock_stop:
+        with patch.object(LoadingAnimation, "start") as mock_start, patch.object(LoadingAnimation, "stop") as mock_stop:
 
             with loading_animation(console, "Test message", enabled=False):
                 pass
@@ -219,8 +217,7 @@ class TestLoadingAnimationContextManager:
         """Test context manager properly stops animation on exception."""
         console = Console(file=StringIO(), width=80, force_terminal=True)
 
-        with patch.object(LoadingAnimation, 'start') as mock_start, \
-             patch.object(LoadingAnimation, 'stop') as mock_stop:
+        with patch.object(LoadingAnimation, "start") as mock_start, patch.object(LoadingAnimation, "stop") as mock_stop:
 
             with pytest.raises(ValueError):
                 with loading_animation(console, "Test message", enabled=True):
@@ -233,8 +230,7 @@ class TestLoadingAnimationContextManager:
         """Test context manager with default message."""
         console = Console(file=StringIO(), width=80, force_terminal=True)
 
-        with patch.object(LoadingAnimation, 'start') as mock_start, \
-             patch.object(LoadingAnimation, 'stop') as mock_stop:
+        with patch.object(LoadingAnimation, "start") as mock_start, patch.object(LoadingAnimation, "stop") as mock_stop:
 
             with loading_animation(console, enabled=True):
                 pass
@@ -246,8 +242,7 @@ class TestLoadingAnimationContextManager:
         """Test context manager handles KeyboardInterrupt properly."""
         console = Console(file=StringIO(), width=80, force_terminal=True)
 
-        with patch.object(LoadingAnimation, 'start') as mock_start, \
-             patch.object(LoadingAnimation, 'stop') as mock_stop:
+        with patch.object(LoadingAnimation, "start") as mock_start, patch.object(LoadingAnimation, "stop") as mock_stop:
 
             with pytest.raises(KeyboardInterrupt):
                 with loading_animation(console, "Test message", enabled=True):
@@ -260,8 +255,7 @@ class TestLoadingAnimationContextManager:
         """Test nested context manager usage."""
         console = Console(file=StringIO(), width=80, force_terminal=True)
 
-        with patch.object(LoadingAnimation, 'start') as mock_start, \
-             patch.object(LoadingAnimation, 'stop') as mock_stop:
+        with patch.object(LoadingAnimation, "start") as mock_start, patch.object(LoadingAnimation, "stop") as mock_stop:
 
             with loading_animation(console, "Outer", enabled=True):
                 # Inner context manager should also work

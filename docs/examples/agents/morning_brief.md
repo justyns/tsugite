@@ -12,6 +12,8 @@ permissions_profile: automation_safe
 context_budget:
   tokens: 16000
   priority: [system, task, preferences]
+instructions: |
+  Keep the briefing punchy, highlight risks, and tailor tone to the stored user preferences.
 ---
 
 # System

@@ -30,6 +30,8 @@ prefetch:
     args: { query: "test" }
     assign: memories
 permissions_profile: test_safe
+instructions: |
+    Provide concise, evidence-backed responses and note any assumptions.
 context_budget:
   tokens: 8000
   priority: [system, task]
