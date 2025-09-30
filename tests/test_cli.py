@@ -530,3 +530,55 @@ class TestHeadlessMode:
         # In headless mode, errors go to stderr but test output captures them differently
         # Just verify the exit code is correct
         assert result.exit_code == 1
+
+
+def test_logo_selection_narrow_terminal():
+    """Test that narrow logo is selected for terminals < 80 columns."""
+    from tsugite.tsugite import _get_logo, TSUGITE_LOGO_NARROW
+    from rich.console import Console
+
+    # Mock console with width < 80
+    mock_console = MagicMock(spec=Console)
+    mock_console.width = 79
+
+    result = _get_logo(mock_console)
+    assert result == TSUGITE_LOGO_NARROW
+
+
+def test_logo_selection_wide_terminal():
+    """Test that wide logo is selected for terminals >= 80 columns."""
+    from tsugite.tsugite import _get_logo, TSUGITE_LOGO_WIDE
+    from rich.console import Console
+
+    # Mock console with width >= 80
+    mock_console = MagicMock(spec=Console)
+    mock_console.width = 80
+
+    result = _get_logo(mock_console)
+    assert result == TSUGITE_LOGO_WIDE
+
+
+def test_logo_selection_very_wide_terminal():
+    """Test that wide logo is selected for very wide terminals."""
+    from tsugite.tsugite import _get_logo, TSUGITE_LOGO_WIDE
+    from rich.console import Console
+
+    # Mock console with width much larger than 80
+    mock_console = MagicMock(spec=Console)
+    mock_console.width = 200
+
+    result = _get_logo(mock_console)
+    assert result == TSUGITE_LOGO_WIDE
+
+
+def test_logo_selection_very_narrow_terminal():
+    """Test that narrow logo is selected for very narrow terminals."""
+    from tsugite.tsugite import _get_logo, TSUGITE_LOGO_NARROW
+    from rich.console import Console
+
+    # Mock console with width much smaller than 80
+    mock_console = MagicMock(spec=Console)
+    mock_console.width = 40
+
+    result = _get_logo(mock_console)
+    assert result == TSUGITE_LOGO_NARROW

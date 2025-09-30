@@ -23,6 +23,33 @@ app = typer.Typer(
 
 console = Console()
 
+# < 80 columns
+TSUGITE_LOGO_NARROW = """
+╔╦╗╔═╗╦ ╦╔═╗╦╔╦╗╔═╗
+ ║ ╚═╗║ ║║ ╦║ ║ ║╣
+ ╩ ╚═╝╚═╝╚═╝╩ ╩ ╚═╝
+"""
+
+# >= 80 columns
+TSUGITE_LOGO_WIDE = """
+ ███████████                              ███   █████
+░█░░░███░░░█                             ░░░   ░░███
+░   ░███  ░   █████  █████ ████  ███████ ████  ███████    ██████
+    ░███     ███░░  ░░███ ░███  ███░░███░░███ ░░░███░    ███░░███
+    ░███    ░░█████  ░███ ░███ ░███ ░███ ░███   ░███    ░███████
+    ░███     ░░░░███ ░███ ░███ ░███ ░███ ░███   ░███ ███░███░░░
+    █████    ██████  ░░████████░░███████ █████  ░░█████ ░░██████
+   ░░░░░    ░░░░░░    ░░░░░░░░  ░░░░░███░░░░░    ░░░░░   ░░░░░░
+                                ███ ░███
+                               ░░██████          Tsugite
+                                ░░░░░░
+"""
+
+
+def _get_logo(console: Console) -> str:
+    """Select appropriate logo based on terminal width."""
+    return TSUGITE_LOGO_NARROW if console.width < 80 else TSUGITE_LOGO_WIDE
+
 
 @contextmanager
 def _agent_context(agent_path: str, root: Optional[str]):
@@ -90,6 +117,10 @@ def run(
 
         # Skip initial panel in headless mode
         if not headless:
+            # Display ASCII logo (adaptive based on terminal width)
+            console.print(_get_logo(console), style="cyan")
+            console.print()  # blank line for spacing
+
             console.print(
                 Panel(
                     f"[cyan]Agent:[/cyan] {agent_file.name}\n"
