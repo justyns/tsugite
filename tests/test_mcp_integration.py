@@ -1,0 +1,507 @@
+"""Tests for MCP integration."""
+
+import json
+import tempfile
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from tsugite.mcp_config import MCPServerConfig, load_mcp_config
+from tsugite.mcp_integration import convert_to_server_params, load_all_mcp_tools, load_mcp_tools
+
+
+class TestMCPServerConfig:
+    """Tests for MCPServerConfig dataclass."""
+
+    def test_stdio_server_config(self):
+        """Test creating a stdio server configuration."""
+        config = MCPServerConfig(
+            name="test-server",
+            command="npx",
+            args=["-y", "test-mcp-server"],
+            env={"API_KEY": "test-key"},
+        )
+
+        assert config.name == "test-server"
+        assert config.command == "npx"
+        assert config.args == ["-y", "test-mcp-server"]
+        assert config.env == {"API_KEY": "test-key"}
+        assert config.type == "stdio"
+        assert config.is_stdio()
+        assert not config.is_http()
+
+    def test_http_server_config(self):
+        """Test creating an HTTP server configuration."""
+        config = MCPServerConfig(name="test-server", url="http://localhost:8000/mcp")
+
+        assert config.name == "test-server"
+        assert config.url == "http://localhost:8000/mcp"
+        assert config.type == "http"
+        assert config.is_http()
+        assert not config.is_stdio()
+
+    def test_server_config_with_explicit_type(self):
+        """Test creating a server with explicit type."""
+        config = MCPServerConfig(name="test-server", command="npx", args=["test"], type="stdio")
+
+        assert config.type == "stdio"
+
+    def test_invalid_server_config_no_command_or_url(self):
+        """Test that server config requires command or url."""
+        with pytest.raises(ValueError, match="must have either 'command' or 'url'"):
+            MCPServerConfig(name="test-server")
+
+    def test_invalid_stdio_server_without_command(self):
+        """Test that stdio server requires command."""
+        with pytest.raises(ValueError, match="Stdio server.*must have 'command'"):
+            MCPServerConfig(name="test-server", type="stdio", url="http://test.com")
+
+    def test_invalid_http_server_without_url(self):
+        """Test that HTTP server requires url."""
+        with pytest.raises(ValueError, match="HTTP server.*must have 'url'"):
+            MCPServerConfig(name="test-server", type="http", command="npx")
+
+
+class TestLoadMCPConfig:
+    """Tests for loading MCP configuration from file."""
+
+    def test_load_valid_config(self):
+        """Test loading a valid MCP configuration."""
+        config_data = {
+            "mcpServers": {
+                "test-stdio": {"command": "npx", "args": ["-y", "test-server"], "env": {"API_KEY": "test"}},
+                "test-http": {"url": "http://localhost:8000/mcp"},
+            }
+        }
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(config_data, f)
+            config_path = Path(f.name)
+
+        try:
+            servers = load_mcp_config(config_path)
+
+            assert len(servers) == 2
+            assert "test-stdio" in servers
+            assert "test-http" in servers
+
+            assert servers["test-stdio"].command == "npx"
+            assert servers["test-stdio"].is_stdio()
+
+            assert servers["test-http"].url == "http://localhost:8000/mcp"
+            assert servers["test-http"].is_http()
+        finally:
+            config_path.unlink()
+
+    def test_load_missing_config(self):
+        """Test loading config from non-existent file."""
+        servers = load_mcp_config(Path("/nonexistent/config.json"))
+        assert servers == {}
+
+    def test_load_invalid_json(self):
+        """Test loading invalid JSON file."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            f.write("{ invalid json")
+            config_path = Path(f.name)
+
+        try:
+            servers = load_mcp_config(config_path)
+            assert servers == {}
+        finally:
+            config_path.unlink()
+
+    def test_load_config_missing_mcpServers_key(self):
+        """Test loading config without mcpServers key."""
+        config_data = {"someOtherKey": {}}
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(config_data, f)
+            config_path = Path(f.name)
+
+        try:
+            servers = load_mcp_config(config_path)
+            assert servers == {}
+        finally:
+            config_path.unlink()
+
+    def test_load_config_with_invalid_server(self):
+        """Test loading config with one invalid server."""
+        config_data = {
+            "mcpServers": {
+                "valid-server": {"command": "npx", "args": ["test"]},
+                "invalid-server": {},  # Missing command/url
+            }
+        }
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(config_data, f)
+            config_path = Path(f.name)
+
+        try:
+            servers = load_mcp_config(config_path)
+            assert len(servers) == 1
+            assert "valid-server" in servers
+            assert "invalid-server" not in servers
+        finally:
+            config_path.unlink()
+
+
+class TestConvertToServerParams:
+    """Tests for converting MCPServerConfig to server parameters."""
+
+    def test_convert_stdio_server(self):
+        """Test converting stdio server config."""
+        config = MCPServerConfig(name="test", command="npx", args=["-y", "test"], env={"KEY": "value"})
+
+        params = convert_to_server_params(config)
+
+        assert hasattr(params, "command")
+        assert params.command == "npx"
+        assert params.args == ["-y", "test"]
+        assert "KEY" in params.env
+        assert params.env["KEY"] == "value"
+
+    def test_convert_http_server(self):
+        """Test converting HTTP server config."""
+        config = MCPServerConfig(name="test", url="http://localhost:8000/mcp")
+
+        params = convert_to_server_params(config)
+
+        assert isinstance(params, dict)
+        assert params["url"] == "http://localhost:8000/mcp"
+        assert params["transport"] == "streamable-http"
+
+    def test_convert_unknown_server_type(self):
+        """Test converting server with unknown type raises error."""
+        config = MCPServerConfig(name="test", command="npx")
+        config.type = "unknown"
+
+        with pytest.raises(ValueError, match="Unknown server type"):
+            convert_to_server_params(config)
+
+
+class TestLoadMCPTools:
+    """Tests for loading MCP tools from a server."""
+
+    @patch("tsugite.mcp_integration.ToolCollection")
+    def test_load_all_tools(self, mock_tool_collection):
+        """Test loading all tools from a server."""
+        # Setup mock tools
+        mock_tool1 = MagicMock()
+        mock_tool1.name = "tool1"
+        mock_tool2 = MagicMock()
+        mock_tool2.name = "tool2"
+
+        mock_context = MagicMock()
+        mock_context.__enter__ = MagicMock(return_value=MagicMock(tools=[mock_tool1, mock_tool2]))
+        mock_context.__exit__ = MagicMock(return_value=False)
+
+        mock_tool_collection.from_mcp = MagicMock(return_value=mock_context)
+
+        config = MCPServerConfig(name="test", command="npx", args=["test"])
+
+        tools = load_mcp_tools("test", config, allowed_tools=None, trust_remote_code=True)
+
+        assert len(tools) == 2
+        assert tools[0].name == "tool1"
+        assert tools[1].name == "tool2"
+
+    @patch("tsugite.mcp_integration.ToolCollection")
+    def test_load_filtered_tools(self, mock_tool_collection):
+        """Test loading specific tools from a server."""
+        mock_tool1 = MagicMock()
+        mock_tool1.name = "tool1"
+        mock_tool2 = MagicMock()
+        mock_tool2.name = "tool2"
+        mock_tool3 = MagicMock()
+        mock_tool3.name = "tool3"
+
+        mock_context = MagicMock()
+        mock_context.__enter__ = MagicMock(return_value=MagicMock(tools=[mock_tool1, mock_tool2, mock_tool3]))
+        mock_context.__exit__ = MagicMock(return_value=False)
+
+        mock_tool_collection.from_mcp = MagicMock(return_value=mock_context)
+
+        config = MCPServerConfig(name="test", command="npx", args=["test"])
+
+        tools = load_mcp_tools("test", config, allowed_tools=["tool1", "tool3"], trust_remote_code=True)
+
+        assert len(tools) == 2
+        assert tools[0].name == "tool1"
+        assert tools[1].name == "tool3"
+
+    @patch("tsugite.mcp_integration.ToolCollection")
+    def test_load_tools_with_unknown_tool_name(self, mock_tool_collection, capsys):
+        """Test loading tools with unknown tool name prints warning."""
+        mock_tool1 = MagicMock()
+        mock_tool1.name = "tool1"
+
+        mock_context = MagicMock()
+        mock_context.__enter__ = MagicMock(return_value=MagicMock(tools=[mock_tool1]))
+        mock_context.__exit__ = MagicMock(return_value=False)
+
+        mock_tool_collection.from_mcp = MagicMock(return_value=mock_context)
+
+        config = MCPServerConfig(name="test", command="npx", args=["test"])
+
+        tools = load_mcp_tools("test", config, allowed_tools=["tool1", "unknown_tool"], trust_remote_code=True)
+
+        assert len(tools) == 1
+        assert tools[0].name == "tool1"
+
+        captured = capsys.readouterr()
+        assert "unknown_tool" in captured.out
+        assert "not found" in captured.out
+
+    @patch("tsugite.mcp_integration.ToolCollection")
+    def test_load_tools_connection_failure(self, mock_tool_collection):
+        """Test that connection failures raise RuntimeError."""
+        mock_tool_collection.from_mcp = MagicMock(side_effect=Exception("Connection failed"))
+
+        config = MCPServerConfig(name="test", command="npx", args=["test"])
+
+        with pytest.raises(RuntimeError, match="Failed to load tools.*Connection failed"):
+            load_mcp_tools("test", config, allowed_tools=None, trust_remote_code=True)
+
+
+class TestLoadAllMCPTools:
+    """Tests for loading tools from multiple MCP servers."""
+
+    @patch("tsugite.mcp_integration.load_mcp_tools")
+    def test_load_from_multiple_servers(self, mock_load_mcp_tools):
+        """Test loading tools from multiple servers."""
+        mock_tool1 = MagicMock()
+        mock_tool1.name = "tool1"
+        mock_tool2 = MagicMock()
+        mock_tool2.name = "tool2"
+
+        mock_load_mcp_tools.side_effect = [[mock_tool1], [mock_tool2]]
+
+        mcp_servers_config = {"server1": None, "server2": ["tool2"]}
+
+        global_mcp_config = {
+            "server1": MCPServerConfig(name="server1", command="npx", args=["server1"]),
+            "server2": MCPServerConfig(name="server2", url="http://localhost:8000/mcp"),
+        }
+
+        tools = load_all_mcp_tools(mcp_servers_config, global_mcp_config, trust_remote_code=True)
+
+        assert len(tools) == 2
+        assert mock_load_mcp_tools.call_count == 2
+
+    @patch("tsugite.mcp_integration.load_mcp_tools")
+    def test_load_with_unknown_server(self, mock_load_mcp_tools, capsys):
+        """Test loading with unknown server prints warning."""
+        mcp_servers_config = {"unknown_server": None, "known_server": None}
+
+        mock_tool = MagicMock()
+        mock_tool.name = "tool1"
+        mock_load_mcp_tools.return_value = [mock_tool]
+
+        global_mcp_config = {"known_server": MCPServerConfig(name="known_server", command="npx", args=["test"])}
+
+        tools = load_all_mcp_tools(mcp_servers_config, global_mcp_config, trust_remote_code=True)
+
+        assert len(tools) == 1
+        captured = capsys.readouterr()
+        assert "unknown_server" in captured.out
+        assert "not found" in captured.out
+
+    @patch("tsugite.mcp_integration.load_mcp_tools")
+    def test_load_with_server_failure(self, mock_load_mcp_tools, capsys):
+        """Test that server failures are handled gracefully."""
+        mock_tool = MagicMock()
+        mock_tool.name = "tool1"
+
+        mock_load_mcp_tools.side_effect = [RuntimeError("Connection failed"), [mock_tool]]
+
+        mcp_servers_config = {"failing_server": None, "working_server": None}
+
+        global_mcp_config = {
+            "failing_server": MCPServerConfig(name="failing_server", command="npx", args=["fail"]),
+            "working_server": MCPServerConfig(name="working_server", command="npx", args=["work"]),
+        }
+
+        tools = load_all_mcp_tools(mcp_servers_config, global_mcp_config, trust_remote_code=True)
+
+        assert len(tools) == 1
+        captured = capsys.readouterr()
+        assert "Warning" in captured.out
+        assert "Connection failed" in captured.out
+
+
+class TestSaveMCPConfig:
+    """Tests for saving MCP configuration to file."""
+
+    def test_save_empty_config(self):
+        """Test saving empty MCP configuration."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            config_path = Path(f.name)
+
+        try:
+            from tsugite.mcp_config import save_mcp_config
+
+            save_mcp_config({}, config_path)
+
+            # Verify file was created
+            assert config_path.exists()
+
+            # Verify contents
+            with open(config_path) as f:
+                data = json.load(f)
+
+            assert "mcpServers" in data
+            assert data["mcpServers"] == {}
+        finally:
+            config_path.unlink()
+
+    def test_save_stdio_server(self):
+        """Test saving stdio server configuration."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "mcp.json"
+
+            from tsugite.mcp_config import save_mcp_config
+
+            servers = {
+                "test-server": MCPServerConfig(
+                    name="test-server", command="npx", args=["-y", "test"], env={"API_KEY": "test"}
+                )
+            }
+
+            save_mcp_config(servers, config_path)
+
+            # Verify file contents
+            with open(config_path) as f:
+                data = json.load(f)
+
+            assert "mcpServers" in data
+            assert "test-server" in data["mcpServers"]
+
+            server_data = data["mcpServers"]["test-server"]
+            assert server_data["command"] == "npx"
+            assert server_data["args"] == ["-y", "test"]
+            assert server_data["env"] == {"API_KEY": "test"}
+
+    def test_save_http_server(self):
+        """Test saving HTTP server configuration."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "mcp.json"
+
+            from tsugite.mcp_config import save_mcp_config
+
+            servers = {"test-server": MCPServerConfig(name="test-server", url="http://localhost:8000/mcp")}
+
+            save_mcp_config(servers, config_path)
+
+            # Verify file contents
+            with open(config_path) as f:
+                data = json.load(f)
+
+            assert "mcpServers" in data
+            assert "test-server" in data["mcpServers"]
+
+            server_data = data["mcpServers"]["test-server"]
+            assert server_data["type"] == "http"
+            assert server_data["url"] == "http://localhost:8000/mcp"
+
+    def test_save_creates_directory(self):
+        """Test that save_mcp_config creates parent directory if needed."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "subdir" / "mcp.json"
+
+            from tsugite.mcp_config import save_mcp_config
+
+            # Directory doesn't exist yet
+            assert not config_path.parent.exists()
+
+            save_mcp_config({}, config_path)
+
+            # Directory should be created
+            assert config_path.parent.exists()
+            assert config_path.exists()
+
+
+class TestAddServerToConfig:
+    """Tests for adding servers to configuration."""
+
+    def test_add_new_server(self):
+        """Test adding a new server to empty config."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "mcp.json"
+
+            from tsugite.mcp_config import add_server_to_config
+
+            server = MCPServerConfig(name="new-server", url="http://localhost:8000/mcp")
+
+            result = add_server_to_config(server, config_path)
+
+            assert result is True
+            assert config_path.exists()
+
+            # Verify server was added
+            with open(config_path) as f:
+                data = json.load(f)
+
+            assert "new-server" in data["mcpServers"]
+
+    def test_add_server_to_existing_config(self):
+        """Test adding a server to existing config."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "mcp.json"
+
+            from tsugite.mcp_config import add_server_to_config, save_mcp_config
+
+            # Create initial config
+            initial_servers = {"server1": MCPServerConfig(name="server1", url="http://localhost:8000/mcp")}
+            save_mcp_config(initial_servers, config_path)
+
+            # Add second server
+            server2 = MCPServerConfig(name="server2", command="npx", args=["test"])
+            add_server_to_config(server2, config_path)
+
+            # Verify both servers exist
+            with open(config_path) as f:
+                data = json.load(f)
+
+            assert len(data["mcpServers"]) == 2
+            assert "server1" in data["mcpServers"]
+            assert "server2" in data["mcpServers"]
+
+    def test_add_duplicate_server_without_force(self):
+        """Test adding duplicate server fails without force."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "mcp.json"
+
+            from tsugite.mcp_config import add_server_to_config
+
+            server1 = MCPServerConfig(name="test", url="http://localhost:8000/mcp")
+            add_server_to_config(server1, config_path)
+
+            # Try to add same server again
+            server2 = MCPServerConfig(name="test", url="http://localhost:9000/mcp")
+
+            with pytest.raises(ValueError, match="already exists"):
+                add_server_to_config(server2, config_path, overwrite=False)
+
+    def test_add_duplicate_server_with_force(self):
+        """Test adding duplicate server with force overwrites."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "mcp.json"
+
+            from tsugite.mcp_config import add_server_to_config
+
+            server1 = MCPServerConfig(name="test", url="http://localhost:8000/mcp")
+            add_server_to_config(server1, config_path)
+
+            # Overwrite with different config
+            server2 = MCPServerConfig(name="test", url="http://localhost:9000/mcp")
+            result = add_server_to_config(server2, config_path, overwrite=True)
+
+            assert result is True
+
+            # Verify server was updated
+            with open(config_path) as f:
+                data = json.load(f)
+
+            assert data["mcpServers"]["test"]["url"] == "http://localhost:9000/mcp"

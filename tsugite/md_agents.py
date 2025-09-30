@@ -20,6 +20,7 @@ class AgentConfig:
     permissions_profile: str = "default"
     context_budget: Dict[str, Any] = field(default_factory=dict)
     instructions: str = ""
+    mcp_servers: Optional[Dict[str, Optional[List[str]]]] = None
 
     def __post_init__(self):
         if self.tools is None:
@@ -30,6 +31,8 @@ class AgentConfig:
             self.context_budget = {"tokens": 8000, "priority": ["system", "task"]}
         if self.instructions is None:
             self.instructions = ""
+        if self.mcp_servers is None:
+            self.mcp_servers = {}
 
 
 @dataclass

@@ -11,9 +11,10 @@ dependencies = [
     "typer>=0.12",
     "jinja2>=3.1",
     "pyyaml>=6.0",
-    "smolagents[openai,litellm]>=0.1",
+    "smolagents[docker,litellm,mcp,openai,toolkit]>=0.1",
     "httpx>=0.25",
     "rich>=13.0",
+    "mcp>=1.0",
 ]
 
 [project.scripts]

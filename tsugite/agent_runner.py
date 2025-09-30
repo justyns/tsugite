@@ -63,6 +63,7 @@ def run_agent(
     model_override: Optional[str] = None,
     debug: bool = False,
     custom_logger: Optional[Any] = None,
+    trust_mcp_code: bool = False,
 ) -> str:
     """Run a Tsugite agent using smolagents.
 
@@ -72,6 +73,8 @@ def run_agent(
         context: Additional context variables
         model_override: Override agent's default model
         debug: Enable debug output (rendered prompt)
+        custom_logger: Custom logger for agent output
+        trust_mcp_code: Whether to trust remote code from MCP servers
 
     Returns:
         Agent execution result as string
@@ -142,6 +145,19 @@ def run_agent(
         tools = get_smolagents_tools(all_tools)
     except Exception as e:
         raise RuntimeError(f"Failed to create tools: {e}")
+
+    # Load MCP tools if configured
+    if agent_config.mcp_servers:
+        try:
+            from tsugite.mcp_config import load_mcp_config
+            from tsugite.mcp_integration import load_all_mcp_tools
+
+            global_mcp_config = load_mcp_config()
+            mcp_tools = load_all_mcp_tools(agent_config.mcp_servers, global_mcp_config, trust_mcp_code)
+            tools.extend(mcp_tools)
+        except Exception as e:
+            print(f"Warning: Failed to load MCP tools: {e}")
+            print("Continuing without MCP tools.")
 
     # Create model
     model_string = model_override or agent_config.model
