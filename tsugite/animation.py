@@ -22,9 +22,13 @@ class LoadingAnimation:
         """Run spinner animation in a separate thread."""
         spinner = Spinner("dots", text=message, style="cyan")
 
-        with Live(spinner, console=self.console, refresh_per_second=10):
+        with Live(spinner, console=self.console, refresh_per_second=10, transient=True):
             while not self.stop_event.is_set():
                 time.sleep(0.1)
+
+        # Force clear the spinner line after Live context exits
+        time.sleep(0.05)  # Small delay to ensure Live has fully cleaned up
+        self.console.print("\r" + " " * 80 + "\r", end="")
 
     def _animate_simple(self, message: str) -> None:
         """Simple text-based animation for non-color mode."""
@@ -57,9 +61,10 @@ class LoadingAnimation:
             self.stop_event.set()
             self.thread.join(timeout=1.0)
 
-            # Clear the animation line
-            if self.console.no_color:
-                self.console.print("\r" + " " * 50 + "\r", end="")
+            # Force clear the animation line for both modes
+            # Small delay to ensure thread cleanup is complete
+            time.sleep(0.05)
+            self.console.print("\r" + " " * 80 + "\r", end="")
 
 
 @contextmanager

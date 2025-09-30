@@ -295,11 +295,11 @@ class TestAnimationCLIIntegration:
     def test_animation_enabled_in_interactive_color_mode(
         self, mock_loading_animation, cli_runner, sample_agent_file, mock_agent_execution
     ):
-        """Test that animation is enabled in default interactive color mode."""
+        """Test that animation is enabled in native UI interactive color mode."""
         mock_loading_animation.return_value.__enter__ = MagicMock()
         mock_loading_animation.return_value.__exit__ = MagicMock(return_value=None)
 
-        result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt"])
+        result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--native-ui"])
 
         assert result.exit_code == 0
         # Animation should be called with enabled=True
@@ -312,11 +312,13 @@ class TestAnimationCLIIntegration:
     def test_animation_disabled_with_non_interactive_flag(
         self, mock_loading_animation, cli_runner, sample_agent_file, mock_agent_execution
     ):
-        """Test that animation is disabled with --non-interactive flag."""
+        """Test that animation is disabled with --non-interactive flag in native UI."""
         mock_loading_animation.return_value.__enter__ = MagicMock()
         mock_loading_animation.return_value.__exit__ = MagicMock(return_value=None)
 
-        result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--non-interactive"])
+        result = cli_runner.invoke(
+            app, ["run", str(sample_agent_file), "test prompt", "--native-ui", "--non-interactive"]
+        )
 
         assert result.exit_code == 0
         # Animation should be called with enabled=False
@@ -328,11 +330,11 @@ class TestAnimationCLIIntegration:
     def test_animation_disabled_with_no_color_flag(
         self, mock_loading_animation, cli_runner, sample_agent_file, mock_agent_execution
     ):
-        """Test that animation is disabled with --no-color flag."""
+        """Test that animation is disabled with --no-color flag in native UI."""
         mock_loading_animation.return_value.__enter__ = MagicMock()
         mock_loading_animation.return_value.__exit__ = MagicMock(return_value=None)
 
-        result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--no-color"])
+        result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--native-ui", "--no-color"])
 
         assert result.exit_code == 0
         # Animation should be called with enabled=False
@@ -344,12 +346,12 @@ class TestAnimationCLIIntegration:
     def test_animation_disabled_with_both_flags(
         self, mock_loading_animation, cli_runner, sample_agent_file, mock_agent_execution
     ):
-        """Test that animation is disabled with both --non-interactive and --no-color flags."""
+        """Test that animation is disabled with both --non-interactive and --no-color flags in native UI."""
         mock_loading_animation.return_value.__enter__ = MagicMock()
         mock_loading_animation.return_value.__exit__ = MagicMock(return_value=None)
 
         result = cli_runner.invoke(
-            app, ["run", str(sample_agent_file), "test prompt", "--non-interactive", "--no-color"]
+            app, ["run", str(sample_agent_file), "test prompt", "--native-ui", "--non-interactive", "--no-color"]
         )
 
         assert result.exit_code == 0
@@ -363,7 +365,7 @@ class TestAnimationCLIIntegration:
     def test_animation_context_manager_usage(
         self, mock_run_agent, mock_loading_animation, cli_runner, sample_agent_file
     ):
-        """Test that animation context manager is properly used around run_agent."""
+        """Test that animation context manager is properly used around run_agent in native UI."""
         mock_run_agent.return_value = "Test completion"
         mock_context = MagicMock()
         mock_loading_animation.return_value = mock_context
@@ -371,7 +373,7 @@ class TestAnimationCLIIntegration:
         with patch("tsugite.tsugite.validate_agent_execution") as mock_validate:
             mock_validate.return_value = (True, "Agent is valid")
 
-            result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt"])
+            result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--native-ui"])
 
         assert result.exit_code == 0
         # Verify context manager was used
@@ -382,7 +384,7 @@ class TestAnimationCLIIntegration:
 
     @patch("tsugite.tsugite.loading_animation")
     def test_animation_with_agent_execution_error(self, mock_loading_animation, cli_runner, sample_agent_file):
-        """Test animation cleanup when agent execution fails."""
+        """Test animation cleanup when agent execution fails in native UI."""
         mock_context = MagicMock()
         mock_loading_animation.return_value = mock_context
 
@@ -394,7 +396,7 @@ class TestAnimationCLIIntegration:
             mock_validate.return_value = (True, "Agent is valid")
             mock_run_agent.side_effect = RuntimeError("Agent execution failed")
 
-            result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt"])
+            result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--native-ui"])
 
         assert result.exit_code == 1
         # Verify context manager was still properly used despite error
@@ -405,11 +407,11 @@ class TestAnimationCLIIntegration:
     def test_animation_console_parameter(
         self, mock_loading_animation, cli_runner, sample_agent_file, mock_agent_execution
     ):
-        """Test that correct console instance is passed to animation."""
+        """Test that correct console instance is passed to animation in native UI."""
         mock_loading_animation.return_value.__enter__ = MagicMock()
         mock_loading_animation.return_value.__exit__ = MagicMock(return_value=None)
 
-        result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt"])
+        result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--native-ui"])
 
         assert result.exit_code == 0
         # Verify console parameter was passed
@@ -427,3 +429,104 @@ class TestAnimationCLIIntegration:
             console_arg = call_args.kwargs["console"]
             assert console_arg is not None
             assert hasattr(console_arg, "print")
+
+
+class TestHeadlessMode:
+    """Test headless mode for CI/scripts."""
+
+    def test_headless_mode_basic(self, cli_runner, sample_agent_file, mock_agent_execution):
+        """Test that headless mode produces clean output without UI decorations."""
+        result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--headless"])
+
+        assert result.exit_code == 0
+        # Should not contain Panel decorations
+        assert "Tsugite Agent Runner" not in result.stdout
+        assert "Agent:" not in result.stdout or "[cyan]Agent:[/cyan]" not in result.stdout
+        assert "Starting agent execution" not in result.stdout
+        # Should not contain "=" decorations
+        assert "=" * 50 not in result.stdout
+        assert "Agent Execution Complete" not in result.stdout
+        # Should have the final result
+        assert "Test agent execution completed" in result.stdout
+
+    def test_headless_mode_no_ansi(self, cli_runner, sample_agent_file, mock_agent_execution):
+        """Test that headless mode produces no ANSI color codes."""
+        result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--headless"])
+
+        assert result.exit_code == 0
+        # Check that ANSI escape codes are not present
+        assert "\033[" not in result.stdout
+
+    def test_headless_mode_no_panel_borders(self, cli_runner, sample_agent_file, mock_agent_execution):
+        """Test that headless mode produces no Rich panel box drawing characters."""
+        result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--headless"])
+
+        assert result.exit_code == 0
+        # Check for Rich panel box drawing characters (should not be present)
+        panel_chars = ["╭", "╮", "╰", "╯", "│", "─", "┌", "┐", "└", "┘", "├", "┤"]
+        for char in panel_chars:
+            assert char not in result.stdout, f"Found panel border character '{char}' in headless output"
+
+    def test_headless_mode_with_verbose(self, cli_runner, sample_agent_file, mock_agent_execution):
+        """Test that headless verbose mode still works."""
+        result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--headless", "--verbose"])
+
+        assert result.exit_code == 0
+        # Should still have clean output
+        assert "Test agent execution completed" in result.stdout
+
+    @patch("tsugite.tsugite.custom_agent_ui")
+    def test_headless_uses_custom_ui_with_correct_flags(
+        self, mock_custom_ui, cli_runner, sample_agent_file, mock_agent_execution
+    ):
+        """Test that headless mode uses custom_agent_ui with correct flags."""
+        mock_custom_ui.return_value.__enter__ = MagicMock(return_value=MagicMock())
+        mock_custom_ui.return_value.__exit__ = MagicMock(return_value=None)
+
+        result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--headless"])
+
+        assert result.exit_code == 0
+        # Verify custom_agent_ui was called with correct flags
+        mock_custom_ui.assert_called_once()
+        call_kwargs = mock_custom_ui.call_args.kwargs
+        assert call_kwargs["show_code"] is False
+        assert call_kwargs["show_observations"] is False
+        assert call_kwargs["show_progress"] is False
+        assert call_kwargs["show_llm_messages"] is False
+        assert call_kwargs["show_execution_results"] is False
+        assert call_kwargs["show_execution_logs"] is False
+        assert call_kwargs["show_panels"] is False
+
+    @patch("tsugite.tsugite.custom_agent_ui")
+    def test_headless_verbose_enables_output(self, mock_custom_ui, cli_runner, sample_agent_file, mock_agent_execution):
+        """Test that headless --verbose enables detailed output."""
+        mock_custom_ui.return_value.__enter__ = MagicMock(return_value=MagicMock())
+        mock_custom_ui.return_value.__exit__ = MagicMock(return_value=None)
+
+        result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--headless", "--verbose"])
+
+        assert result.exit_code == 0
+        # Verify custom_agent_ui was called with verbose flags
+        mock_custom_ui.assert_called_once()
+        call_kwargs = mock_custom_ui.call_args.kwargs
+        assert call_kwargs["show_code"] is True
+        assert call_kwargs["show_observations"] is True
+        assert call_kwargs["show_llm_messages"] is True
+        assert call_kwargs["show_execution_results"] is True
+        assert call_kwargs["show_execution_logs"] is True
+        # Progress and panels should still be disabled in headless
+        assert call_kwargs["show_progress"] is False
+        assert call_kwargs["show_panels"] is False
+
+    def test_headless_validation_error(self, cli_runner, temp_dir):
+        """Test that validation errors in headless mode are handled correctly."""
+        # Create invalid agent (missing required fields)
+        invalid_agent = temp_dir / "invalid.md"
+        invalid_agent.write_text("---\n---\nInvalid agent")
+
+        result = cli_runner.invoke(app, ["run", str(invalid_agent), "test prompt", "--headless"])
+
+        assert result.exit_code == 1
+        # In headless mode, errors go to stderr but test output captures them differently
+        # Just verify the exit code is correct
+        assert result.exit_code == 1

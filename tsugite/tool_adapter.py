@@ -19,7 +19,12 @@ def create_smolagents_tool_from_tsugite(tool_name: str):
     # Create wrapper function dynamically with proper signature
     def wrapper_func(*args, **kwargs):
         try:
-            return call_tool(tool_name, *args, **kwargs)
+            # Convert positional args to keyword args based on parameter names
+            param_names = list(sig.parameters.keys())
+            for i, arg in enumerate(args):
+                if i < len(param_names):
+                    kwargs[param_names[i]] = arg
+            return call_tool(tool_name, **kwargs)
         except Exception as e:
             return f"Tool '{tool_name}' failed: {e}"
 

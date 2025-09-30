@@ -62,6 +62,7 @@ def run_agent(
     context: Optional[Dict[str, Any]] = None,
     model_override: Optional[str] = None,
     debug: bool = False,
+    custom_logger: Optional[Any] = None,
 ) -> str:
     """Run a Tsugite agent using smolagents.
 
@@ -151,12 +152,20 @@ def run_agent(
 
     # Create and run smolagents agent with task tracking awareness
     try:
-        agent = CodeAgent(
-            tools=tools,
-            model=model,
-            max_steps=agent_config.max_steps,
-            instructions=combined_instructions or None,
-        )
+        # Build agent kwargs
+        agent_kwargs = {
+            "tools": tools,
+            "model": model,
+            "max_steps": agent_config.max_steps,
+            "instructions": combined_instructions or None,
+        }
+
+        # Add custom logger if provided
+        if custom_logger is not None:
+            agent_kwargs["logger"] = custom_logger
+            agent_kwargs["verbosity_level"] = -1  # Suppress default output
+
+        agent = CodeAgent(**agent_kwargs)
 
         result = agent.run(rendered_prompt)
         return str(result)

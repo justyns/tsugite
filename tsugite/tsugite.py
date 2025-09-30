@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 """Tsugite CLI application."""
 
-import typer
+import os
+import sys
 from contextlib import contextmanager
 from pathlib import Path
-import os
-from rich.console import Console
-from rich.panel import Panel
-from rich.text import Text
 from typing import Optional
 
-from tsugite.agent_runner import run_agent, get_agent_info, validate_agent_execution
+import typer
+from rich.console import Console
+from rich.panel import Panel
+
+from tsugite.agent_runner import get_agent_info, run_agent, validate_agent_execution
 from tsugite.animation import loading_animation
+from tsugite.custom_ui import create_silent_logger, custom_agent_ui
 
 app = typer.Typer(
     name="tsugite",
@@ -64,6 +66,13 @@ def run(
     no_color: bool = typer.Option(False, "--no-color", help="Disable ANSI colors"),
     log_json: bool = typer.Option(False, "--log-json", help="Machine-readable output"),
     debug: bool = typer.Option(False, "--debug", help="Show rendered prompt before execution"),
+    native_ui: bool = typer.Option(False, "--native-ui", help="Use native smolagents output instead of custom UI"),
+    silent: bool = typer.Option(False, "--silent", help="Suppress all agent output"),
+    show_reasoning: bool = typer.Option(False, "--show-reasoning", help="Show LLM reasoning messages"),
+    verbose: bool = typer.Option(False, "--verbose", help="Show all execution details"),
+    headless: bool = typer.Option(
+        False, "--headless", help="Headless mode for CI/scripts: result to stdout, optional progress to stderr"
+    ),
 ):
     """Run an agent with the given prompt."""
 
@@ -78,58 +87,123 @@ def run(
         agent_info = get_agent_info(agent_file)
         instruction_label = "runtime + agent" if agent_info.get("instructions") else "runtime default"
 
-        console.print(
-            Panel(
-                f"[cyan]Agent:[/cyan] {agent_file.name}\n"
-                f"[cyan]Task:[/cyan] {prompt}\n"
-                f"[cyan]Directory:[/cyan] {Path.cwd()}\n"
-                f"[cyan]Model:[/cyan] {agent_info.get('model', 'unknown')}\n"
-                f"[cyan]Instructions:[/cyan] {instruction_label}\n"
-                f"[cyan]Tools:[/cyan] {', '.join(agent_info.get('tools', []))}",
-                title="Tsugite Agent Runner",
-                border_style="blue",
+        # Skip initial panel in headless mode
+        if not headless:
+            console.print(
+                Panel(
+                    f"[cyan]Agent:[/cyan] {agent_file.name}\n"
+                    f"[cyan]Task:[/cyan] {prompt}\n"
+                    f"[cyan]Directory:[/cyan] {Path.cwd()}\n"
+                    f"[cyan]Model:[/cyan] {agent_info.get('model', 'unknown')}\n"
+                    f"[cyan]Instructions:[/cyan] {instruction_label}\n"
+                    f"[cyan]Tools:[/cyan] {', '.join(agent_info.get('tools', []))}",
+                    title="Tsugite Agent Runner",
+                    border_style="blue",
+                )
             )
-        )
 
         # Validate agent before execution
         is_valid, error_msg = validate_agent_execution(agent_file)
         if not is_valid:
-            console.print(f"[red]Agent validation failed: {error_msg}[/red]")
+            error_console = Console(file=sys.stderr, no_color=True) if headless else console
+            error_console.print(f"[red]Agent validation failed: {error_msg}[/red]")
             raise typer.Exit(1)
 
-        console.print("[green]Starting agent execution...[/green]")
+        # Skip "Starting agent execution" in headless mode
+        if not headless:
+            console.print("[green]Starting agent execution...[/green]")
 
         try:
-            # Execute agent with loading animation
-            with loading_animation(
-                console=console, message="Waiting for LLM response", enabled=not non_interactive and not no_color
-            ):
+            # Choose execution mode based on flags
+            if silent:
+                # Completely silent execution
                 result = run_agent(
                     agent_path=agent_file,
                     prompt=prompt,
                     model_override=model,
                     debug=debug,
+                    custom_logger=create_silent_logger(),
                 )
+            elif headless:
+                # Headless mode: stderr for progress (if verbose), stdout for result
+                stderr_console = Console(file=sys.stderr, no_color=True)
+                stdout_console = Console(file=sys.stdout, no_color=True)
+
+                with custom_agent_ui(
+                    console=stderr_console,
+                    show_code=verbose,
+                    show_observations=verbose,
+                    show_progress=False,  # No spinners in headless
+                    show_llm_messages=verbose,
+                    show_execution_results=verbose,
+                    show_execution_logs=verbose,
+                    show_panels=False,  # No panels in headless
+                ) as custom_logger:
+                    result = run_agent(
+                        agent_path=agent_file,
+                        prompt=prompt,
+                        model_override=model,
+                        debug=debug,
+                        custom_logger=custom_logger,
+                    )
+            elif native_ui:
+                # Use native smolagents output with loading animation
+                with loading_animation(
+                    console=console, message="Waiting for LLM response", enabled=not non_interactive and not no_color
+                ):
+                    result = run_agent(
+                        agent_path=agent_file,
+                        prompt=prompt,
+                        model_override=model,
+                        debug=debug,
+                    )
+            else:
+                # Default: Use custom UI
+                with custom_agent_ui(
+                    console=console,
+                    show_code=not non_interactive,
+                    show_observations=not non_interactive,
+                    show_progress=not no_color,
+                    show_llm_messages=show_reasoning,
+                    show_execution_results=True,
+                    show_execution_logs=verbose,
+                ) as custom_logger:
+                    result = run_agent(
+                        agent_path=agent_file,
+                        prompt=prompt,
+                        model_override=model,
+                        debug=debug,
+                        custom_logger=custom_logger,
+                    )
 
             # Display result
-            console.print("\n" + "=" * 50)
-            console.print("[bold green]Agent Execution Complete[/bold green]")
-            console.print("=" * 50)
-            console.print(result)
+            if headless:
+                # Headless: plain result to stdout
+                stdout_console = Console(file=sys.stdout, no_color=True)
+                stdout_console.print(result)
+            elif not silent:
+                console.print("\n" + "=" * 50)
+                console.print("[bold green]Agent Execution Complete[/bold green]")
+                console.print("=" * 50)
+                console.print(result)
 
         except ValueError as e:
-            console.print(f"[red]Configuration error: {e}[/red]")
+            error_console = Console(file=sys.stderr, no_color=True) if headless else console
+            error_console.print(f"[red]Configuration error: {e}[/red]")
             raise typer.Exit(1)
         except RuntimeError as e:
-            console.print(f"[red]Execution error: {e}[/red]")
+            error_console = Console(file=sys.stderr, no_color=True) if headless else console
+            error_console.print(f"[red]Execution error: {e}[/red]")
             raise typer.Exit(1)
         except KeyboardInterrupt:
-            console.print("\n[yellow]Agent execution interrupted by user[/yellow]")
+            error_console = Console(file=sys.stderr, no_color=True) if headless else console
+            error_console.print("\n[yellow]Agent execution interrupted by user[/yellow]")
             raise typer.Exit(130)
         except Exception as e:
-            console.print(f"[red]Unexpected error: {e}[/red]")
+            error_console = Console(file=sys.stderr, no_color=True) if headless else console
+            error_console.print(f"[red]Unexpected error: {e}[/red]")
             if not log_json:
-                console.print("\n[dim]Use --log-json for machine-readable output[/dim]")
+                error_console.print("\n[dim]Use --log-json for machine-readable output[/dim]")
             raise typer.Exit(1)
 
 
@@ -141,7 +215,6 @@ def render(
     no_color: bool = typer.Option(False, "--no-color", help="Disable ANSI colors"),
 ):
     """Render an agent template without executing it."""
-    from tsugite.agent_runner import get_agent_info
     from tsugite.md_agents import parse_agent
     from tsugite.renderer import AgentRenderer
 
@@ -219,7 +292,8 @@ def benchmark_command(
     """Run benchmarks and generate reports."""
     import asyncio
     from pathlib import Path
-    from .benchmark import BenchmarkRunner, BenchmarkConfig
+
+    from .benchmark import BenchmarkConfig, BenchmarkRunner
     from .benchmark.reports import ReportGenerator
 
     if action == "run":
@@ -245,7 +319,7 @@ def benchmark_command(
             output_dir=Path("benchmark_results"),
         )
 
-        console.print(f"[cyan]Running benchmarks...[/cyan]")
+        console.print("[cyan]Running benchmarks...[/cyan]")
         console.print(f"Models: {', '.join(model_list)}")
 
         if agent_path:

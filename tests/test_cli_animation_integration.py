@@ -106,7 +106,7 @@ class TestAnimationIntegrationScenarios:
             mock_validate.return_value = (True, "Agent is valid")
             mock_run_agent.side_effect = KeyboardInterrupt("User interrupted")
 
-            result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt"])
+            result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--native-ui"])
 
             assert result.exit_code == 130  # Standard exit code for KeyboardInterrupt
             # Animation stop should have been called during cleanup
@@ -163,14 +163,14 @@ class TestAnimationModeDetection:
     """Test animation mode detection logic."""
 
     def test_interactive_mode_detection(self, cli_runner, sample_agent_file):
-        """Test detection of interactive vs non-interactive mode."""
+        """Test detection of interactive vs non-interactive mode with native UI."""
 
         test_cases = [
             # (args, expected_enabled)
-            ([], True),  # Default interactive mode
-            (["--non-interactive"], False),  # Explicit non-interactive
-            (["--no-color"], False),  # No color mode
-            (["--non-interactive", "--no-color"], False),  # Both flags
+            (["--native-ui"], True),  # Native UI interactive mode
+            (["--native-ui", "--non-interactive"], False),  # Explicit non-interactive
+            (["--native-ui", "--no-color"], False),  # No color mode
+            (["--native-ui", "--non-interactive", "--no-color"], False),  # Both flags
         ]
 
         for args, expected_enabled in test_cases:
@@ -209,7 +209,9 @@ class TestAnimationModeDetection:
                 mock_animation.return_value.__enter__ = MagicMock()
                 mock_animation.return_value.__exit__ = MagicMock(return_value=None)
 
-                result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--no-color"])
+                result = cli_runner.invoke(
+                    app, ["run", str(sample_agent_file), "test prompt", "--native-ui", "--no-color"]
+                )
 
                 assert result.exit_code == 0
                 call_args = mock_animation.call_args
