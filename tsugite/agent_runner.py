@@ -159,8 +159,20 @@ def run_agent(
             print(f"Warning: Failed to load MCP tools: {e}")
             print("Continuing without MCP tools.")
 
-    # Create model
+    # Create model - use CLI override, then agent config, then global default
     model_string = model_override or agent_config.model
+    if not model_string:
+        from tsugite.config import load_config
+
+        config = load_config()
+        model_string = config.default_model
+
+    if not model_string:
+        raise RuntimeError(
+            "No model specified. Set a model in agent frontmatter, use --model flag, "
+            "or set a default with 'tsugite config set-default <model>'"
+        )
+
     try:
         model = get_model(model_string)
     except Exception as e:
@@ -225,10 +237,20 @@ def get_agent_info(agent_path: Path) -> Dict[str, Any]:
         agent = parse_agent(agent_text, agent_path)
         agent_config = agent.config
 
+        model_display = agent_config.model
+        if not model_display:
+            from tsugite.config import load_config
+
+            config = load_config()
+            if config.default_model:
+                model_display = f"{config.default_model} (default)"
+            else:
+                model_display = "not set"
+
         return {
             "name": agent_config.name,
             "description": getattr(agent_config, "description", "No description"),
-            "model": agent_config.model,
+            "model": model_display,
             "max_steps": agent_config.max_steps,
             "tools": agent_config.tools,
             "prefetch_count": (len(agent_config.prefetch) if agent_config.prefetch else 0),

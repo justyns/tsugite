@@ -13,7 +13,7 @@ class AgentConfig:
 
     name: str
     description: str = ""
-    model: str = "ollama:qwen2.5-coder:7b"
+    model: Optional[str] = None
     max_steps: int = 5
     tools: List[str] = field(default_factory=list)
     prefetch: List[Dict[str, Any]] = field(default_factory=list)
@@ -112,11 +112,10 @@ def validate_agent(agent: Agent) -> List[str]:
     if not agent.config.name:
         errors.append("Agent name is required")
 
-    if not agent.config.model:
-        errors.append("Agent model is required")
+    # Model is now optional - it will be loaded from config if not specified
 
-    # Validate model format
-    if not _is_valid_model_format(agent.config.model):
+    # Validate model format if specified
+    if agent.config.model and not _is_valid_model_format(agent.config.model):
         errors.append(f"Invalid model format: {agent.config.model}")
 
     # Validate tools exist
@@ -168,13 +167,14 @@ def validate_agent_execution(agent: Agent | Path) -> tuple[bool, str]:
     if errors:
         return False, "; ".join(errors)
 
-    try:
-        # Check if model is supported
-        from .models import get_model
+    # Only validate model if specified in agent config
+    if agent.config.model:
+        try:
+            from .models import get_model
 
-        get_model(agent.config.model)
-    except Exception as e:
-        return False, f"Model validation failed: {e}"
+            get_model(agent.config.model)
+        except Exception as e:
+            return False, f"Model validation failed: {e}"
 
     try:
         # Check if tools exist

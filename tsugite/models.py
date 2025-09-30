@@ -4,6 +4,33 @@ from typing import Optional
 from smolagents import LiteLLMModel, OpenAIServerModel
 
 
+def resolve_model_alias(model_string: str) -> str:
+    """Resolve a model alias to its full model string.
+
+    Args:
+        model_string: Either an alias name or full model string
+
+    Returns:
+        Full model string (resolved alias or original string)
+
+    Examples:
+        >>> resolve_model_alias("cheap")  # if alias exists
+        "openai:gpt-4o-mini"
+        >>> resolve_model_alias("ollama:qwen2.5-coder:7b")
+        "ollama:qwen2.5-coder:7b"
+    """
+    from tsugite.config import get_model_alias
+
+    if ":" in model_string:
+        return model_string
+
+    alias_value = get_model_alias(model_string)
+    if alias_value:
+        return alias_value
+
+    return model_string
+
+
 def parse_model_string(model_string: str) -> tuple[str, str, Optional[str]]:
     """Parse Tsugite model string format.
 
@@ -28,7 +55,7 @@ def get_model(model_string: str, **kwargs):
     """Create a smolagents model from Tsugite model string.
 
     Args:
-        model_string: Model specification like "ollama:qwen2.5-coder:14b"
+        model_string: Model specification like "ollama:qwen2.5-coder:14b" or an alias
         **kwargs: Additional model configuration options
 
     Returns:
@@ -37,9 +64,10 @@ def get_model(model_string: str, **kwargs):
     Examples:
         >>> model = get_model("ollama:qwen2.5-coder:14b")
         >>> model = get_model("openai:gpt-4", api_key="sk-...")
-        >>> model = get_model("anthropic:claude-3-sonnet", api_key="...")
+        >>> model = get_model("cheap")  # if alias exists
     """
-    provider, model_name, variant = parse_model_string(model_string)
+    resolved_model = resolve_model_alias(model_string)
+    provider, model_name, variant = parse_model_string(resolved_model)
 
     if provider == "ollama":
         # Ollama typically runs on localhost:11434 with OpenAI-compatible API

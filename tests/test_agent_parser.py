@@ -50,7 +50,7 @@ Just a basic agent.
     agent = parse_agent_file(agent_file)
 
     assert agent.name == "minimal_agent"
-    assert agent.config.model == "ollama:qwen2.5-coder:7b"  # Default
+    assert agent.config.model is None  # Model is optional, will use config default
     assert agent.config.max_steps == 5  # Default
     assert agent.config.tools == []  # Default
     assert agent.config.prefetch == []  # Default
@@ -110,7 +110,7 @@ def test_agent_config_defaults():
     config = AgentConfig(name="test")
 
     assert config.name == "test"
-    assert config.model == "ollama:qwen2.5-coder:7b"
+    assert config.model is None  # Model is optional, will use config default
     assert config.max_steps == 5
     assert config.tools == []
     assert config.prefetch == []
@@ -203,7 +203,7 @@ model: ollama:test
 
 
 def test_validate_agent_missing_model(temp_dir):
-    """Test validating an agent without a model (should use default)."""
+    """Test validating an agent without a model (should use config default)."""
     content = """---
 name: test_agent
 ---
@@ -216,9 +216,9 @@ name: test_agent
     agent = parse_agent_file(agent_file)
     errors = validate_agent(agent)
 
-    # Should be valid (uses default model)
+    # Should be valid (will use config default at runtime)
     assert len(errors) == 0
-    assert agent.config.model == "ollama:qwen2.5-coder:7b"
+    assert agent.config.model is None  # Model is optional
 
 
 def test_validate_agent_invalid_tools(temp_dir):
