@@ -40,7 +40,7 @@
 - `prefetch` *(optional list)* – Tool calls to run before rendering.
 - `permissions_profile` *(optional)* – Placeholder for future permissions engine.
 - `instructions` *(optional string)* – Additional system guidance appended to Tsugite's default runtime instructions before hitting the LLM.
-- `mcp_servers` *(optional dict)* – MCP servers to load tools from. Keys are server names from `~/.tsugite/mcp.json`, values are optional tool lists.
+- `mcp_servers` *(optional dict)* – MCP servers to load tools from. Keys are server names from MCP config file (see XDG paths below), values are optional tool lists.
 
 ## MCP Server Integration
 
@@ -48,7 +48,16 @@ Tsugite supports loading tools from [Model Context Protocol (MCP)](https://model
 
 ### Configuration File
 
-Create `~/.tsugite/mcp.json` with server definitions:
+Tsugite follows the [XDG Base Directory specification](https://wiki.archlinux.org/title/XDG_Base_Directory) for config file locations.
+
+**Config file locations (checked in order):**
+1. `~/.tsugite/mcp.json`
+2. `$XDG_CONFIG_HOME/tsugite/mcp.json` (if `XDG_CONFIG_HOME` is set)
+3. `~/.config/tsugite/mcp.json` (XDG default)
+
+If a config file already exists, Tsugite will continue using that location. New configs use the XDG location.
+
+**Example config file:**
 
 ```json
 {

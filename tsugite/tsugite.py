@@ -427,16 +427,17 @@ app.add_typer(mcp_app, name="mcp")
 @mcp_app.command("list")
 def mcp_list():
     """List all configured MCP servers."""
-    from tsugite.mcp_config import load_mcp_config
+    from tsugite.mcp_config import get_default_config_path, load_mcp_config
 
+    config_path = get_default_config_path()
     servers = load_mcp_config()
 
     if not servers:
         console.print("[yellow]No MCP servers configured[/yellow]")
-        console.print(f"Create a config file at: {Path.home() / '.tsugite' / 'mcp.json'}")
+        console.print(f"\nConfig file will be created at: {config_path}")
         return
 
-    console.print(f"[cyan]Found {len(servers)} MCP server(s):[/cyan]\n")
+    console.print(f"[cyan]Found {len(servers)} MCP server(s)[/cyan] in [dim]{config_path}[/dim]\n")
 
     for name, config in servers.items():
         server_type = "stdio" if config.is_stdio() else "HTTP"
@@ -572,6 +573,9 @@ def mcp_add(
 
     # Add to config
     try:
+        from tsugite.mcp_config import get_config_path_for_write
+
+        config_path = get_config_path_for_write()
         add_server_to_config(server, overwrite=force)
 
         action = "Updated" if force else "Added"
@@ -589,7 +593,7 @@ def mcp_add(
             if server.env:
                 console.print(f"  Env vars: {', '.join(server.env.keys())}")
 
-        console.print(f"\nServer added to: {Path.home() / '.tsugite' / 'mcp.json'}")
+        console.print(f"\nServer saved to: {config_path}")
 
     except ValueError as e:
         console.print(f"[red]Error: {e}[/red]")

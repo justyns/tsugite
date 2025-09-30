@@ -505,3 +505,136 @@ class TestAddServerToConfig:
                 data = json.load(f)
 
             assert data["mcpServers"]["test"]["url"] == "http://localhost:9000/mcp"
+
+
+class TestXDGConfigPaths:
+    """Tests for XDG Base Directory support."""
+
+    def test_home_tsugite_path_takes_precedence(self, monkeypatch):
+        """Test that ~/.tsugite/mcp.json takes precedence over XDG."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create both ~/.tsugite and XDG paths
+            home_tsugite_dir = Path(tmpdir) / ".tsugite"
+            home_tsugite_dir.mkdir()
+            home_tsugite_path = home_tsugite_dir / "mcp.json"
+
+            xdg_dir = Path(tmpdir) / ".config" / "tsugite"
+            xdg_dir.mkdir(parents=True)
+            xdg_path = xdg_dir / "mcp.json"
+
+            # Write different content to each
+            home_tsugite_path.write_text('{"mcpServers": {"home": {}}}')
+            xdg_path.write_text('{"mcpServers": {"xdg": {}}}')
+
+            # Mock home directory
+            monkeypatch.setattr(Path, "home", lambda: Path(tmpdir))
+
+            from tsugite.mcp_config import get_default_config_path
+
+            result_path = get_default_config_path()
+
+            # Should return ~/.tsugite path
+            assert result_path == home_tsugite_path
+
+    def test_xdg_config_home_used_when_set(self, monkeypatch):
+        """Test that XDG_CONFIG_HOME is used when environment variable is set."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            xdg_config = Path(tmpdir) / "custom_config"
+            xdg_config.mkdir()
+
+            xdg_path = xdg_config / "tsugite" / "mcp.json"
+            xdg_path.parent.mkdir()
+            xdg_path.write_text('{"mcpServers": {}}')
+
+            # Set XDG_CONFIG_HOME
+            monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_config))
+            monkeypatch.setattr(Path, "home", lambda: Path(tmpdir))
+
+            from tsugite.mcp_config import get_default_config_path
+
+            result_path = get_default_config_path()
+
+            # Should return XDG path
+            assert result_path == xdg_path
+
+    def test_default_xdg_path_when_no_env(self, monkeypatch):
+        """Test that ~/.config/tsugite/mcp.json is used as default."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            default_path = Path(tmpdir) / ".config" / "tsugite" / "mcp.json"
+            default_path.parent.mkdir(parents=True)
+            default_path.write_text('{"mcpServers": {}}')
+
+            # No XDG_CONFIG_HOME set
+            monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+            monkeypatch.setattr(Path, "home", lambda: Path(tmpdir))
+
+            from tsugite.mcp_config import get_default_config_path
+
+            result_path = get_default_config_path()
+
+            # Should return default XDG path
+            assert result_path == default_path
+
+    def test_new_install_uses_xdg(self, monkeypatch):
+        """Test that new installations use XDG location."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # No config files exist
+            monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+            monkeypatch.setattr(Path, "home", lambda: Path(tmpdir))
+
+            from tsugite.mcp_config import get_default_config_path
+
+            result_path = get_default_config_path()
+
+            # Should return default XDG path (even though file doesn't exist)
+            expected = Path(tmpdir) / ".config" / "tsugite" / "mcp.json"
+            assert result_path == expected
+
+    def test_write_path_respects_existing_home_tsugite(self, monkeypatch):
+        """Test that write operations respect existing ~/.tsugite config."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            home_tsugite_dir = Path(tmpdir) / ".tsugite"
+            home_tsugite_dir.mkdir()
+            home_tsugite_path = home_tsugite_dir / "mcp.json"
+            home_tsugite_path.write_text('{"mcpServers": {}}')
+
+            monkeypatch.setattr(Path, "home", lambda: Path(tmpdir))
+
+            from tsugite.mcp_config import get_config_path_for_write
+
+            result_path = get_config_path_for_write()
+
+            # Should return ~/.tsugite path since it exists
+            assert result_path == home_tsugite_path
+
+    def test_write_path_uses_xdg_for_new_config(self, monkeypatch):
+        """Test that new configs are written to XDG location."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # No existing config
+            xdg_config = Path(tmpdir) / "custom_xdg"
+
+            monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_config))
+            monkeypatch.setattr(Path, "home", lambda: Path(tmpdir))
+
+            from tsugite.mcp_config import get_config_path_for_write
+
+            result_path = get_config_path_for_write()
+
+            # Should return XDG path
+            expected = xdg_config / "tsugite" / "mcp.json"
+            assert result_path == expected
+
+    def test_write_path_uses_default_xdg_when_no_env(self, monkeypatch):
+        """Test that default XDG path is used for new configs when XDG_CONFIG_HOME not set."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # No existing config, no XDG_CONFIG_HOME
+            monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+            monkeypatch.setattr(Path, "home", lambda: Path(tmpdir))
+
+            from tsugite.mcp_config import get_config_path_for_write
+
+            result_path = get_config_path_for_write()
+
+            # Should return default XDG path
+            expected = Path(tmpdir) / ".config" / "tsugite" / "mcp.json"
+            assert result_path == expected
