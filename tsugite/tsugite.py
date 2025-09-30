@@ -126,7 +126,7 @@ def run(
                     f"[cyan]Agent:[/cyan] {agent_file.name}\n"
                     f"[cyan]Task:[/cyan] {prompt}\n"
                     f"[cyan]Directory:[/cyan] {Path.cwd()}\n"
-                    f"[cyan]Model:[/cyan] {agent_info.get('model', 'unknown')}\n"
+                    f"[cyan]Model:[/cyan] {model or agent_info.get('model', 'unknown')}\n"
                     f"[cyan]Instructions:[/cyan] {instruction_label}\n"
                     f"[cyan]Tools:[/cyan] {', '.join(agent_info.get('tools', []))}",
                     title="Tsugite Agent Runner",

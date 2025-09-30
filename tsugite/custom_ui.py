@@ -120,6 +120,12 @@ class CustomUILogger(AgentLogger):
         elif "Execution logs:" in content:
             # Handle execution logs
             self.ui_handler.handle_event(UIEvent.EXECUTION_LOGS, {"content": content, "level": level})
+        else:
+            # Check if this looks like an error message that doesn't fit expected patterns
+            content_lower = content.lower()
+            if any(keyword in content_lower for keyword in ["error", "failed", "exception", "traceback"]):
+                # This is an unhandled error - display it prominently
+                self.ui_handler.handle_event(UIEvent.ERROR, {"error": content, "error_type": "Unexpected Error"})
 
 
 class CustomUIHandler:
@@ -163,6 +169,8 @@ class CustomUIHandler:
                 self._handle_observation(data)
             elif event == UIEvent.FINAL_ANSWER:
                 self._handle_final_answer(data)
+            elif event == UIEvent.ERROR:
+                self._handle_error(data)
             elif event == UIEvent.LLM_MESSAGE:
                 self._handle_llm_message(data)
             elif event == UIEvent.EXECUTION_RESULT:
@@ -240,10 +248,30 @@ class CustomUIHandler:
         if self.show_observations and observation:
             # Clean up observation for display
             clean_obs = observation.replace("|", "[").strip()
-            if len(clean_obs) > 200:
-                clean_obs = clean_obs[:200] + "..."
 
-            self.console.print(f"[dim]💡 {clean_obs}[/dim]")
+            # Check if this looks like an error
+            is_error = any(
+                keyword in clean_obs.lower()
+                for keyword in ["error", "failed", "exception", "traceback", "not found", "invalid"]
+            )
+
+            if is_error:
+                # Display errors prominently in red without truncation
+                if self.show_panels:
+                    self.console.print(
+                        Panel(
+                            f"[red]{clean_obs}[/red]",
+                            title="[bold red]⚠️  Error[/bold red]",
+                            border_style="red",
+                        )
+                    )
+                else:
+                    self.console.print(f"[red]⚠️  {clean_obs}[/red]")
+            else:
+                # Normal observation - truncate if too long
+                if len(clean_obs) > 200:
+                    clean_obs = clean_obs[:200] + "..."
+                self.console.print(f"[dim]💡 {clean_obs}[/dim]")
 
         # Add to current step history
         if self.state.steps_history:
@@ -265,6 +293,31 @@ class CustomUIHandler:
                     border_style="green",
                 )
             )
+
+    def _handle_error(self, data: Dict[str, Any]) -> None:
+        """Handle error event."""
+        error = data.get("error", "")
+        error_type = data.get("error_type", "Error")
+
+        # Update progress
+        self.update_progress("❌ Error occurred...")
+
+        # Always show errors prominently
+        if self.show_panels:
+            self.console.print(
+                Panel(
+                    f"[bold red]{error}[/bold red]",
+                    title=f"[bold red]⚠️  {error_type}[/bold red]",
+                    border_style="red",
+                )
+            )
+        else:
+            self.console.print(f"[bold red]⚠️  {error_type}: {error}[/bold red]")
+
+        # Add to current step history
+        if self.state.steps_history:
+            self.state.steps_history[-1]["actions"].append({"type": "error", "content": error})
+            self.state.steps_history[-1]["status"] = "error"
 
     def _handle_llm_message(self, data: Dict[str, Any]) -> None:
         """Handle LLM reasoning message event."""
@@ -325,8 +378,27 @@ class CustomUIHandler:
             # Display output if present and meaningful
             if output_lines:
                 output_text = "\n".join(output_lines)
-                # Filter out non-meaningful outputs like "None", "null", empty strings
-                if output_text.strip() and output_text.strip().lower() not in ("none", "null", ""):
+                # Check if output contains error information
+                contains_error = any(
+                    keyword in output_text.lower()
+                    for keyword in ["error", "failed", "exception", "not found", "invalid", "traceback"]
+                )
+
+                # Always show errors, filter non-meaningful outputs otherwise
+                if contains_error:
+                    # Show errors prominently
+                    if self.show_panels:
+                        self.console.print(
+                            Panel(
+                                f"[red]{output_text}[/red]",
+                                title="[bold red]⚠️  Error in Output[/bold red]",
+                                border_style="red",
+                            )
+                        )
+                    else:
+                        self.console.print(f"[red]📤 Output (Error): {output_text}[/red]")
+                elif output_text.strip() and output_text.strip().lower() not in ("none", "null", ""):
+                    # Show normal meaningful output
                     self.console.print(f"[bold cyan]📤 Output:[/bold cyan] {output_text}")
 
     def _handle_execution_logs(self, data: Dict[str, Any]) -> None:

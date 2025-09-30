@@ -3,6 +3,7 @@
 import json
 from typing import Dict, Any, Optional, Union
 import httpx
+from ddgs import DDGS
 from tsugite.tools import tool
 
 
@@ -201,3 +202,36 @@ def check_url(url: str, timeout: int = 10) -> Dict[str, Any]:
             "accessible": False,
             "error": str(e),
         }
+
+
+@tool
+def web_search(query: str, max_results: int = 5) -> list[Dict[str, str]]:
+    """Search the web using DuckDuckGo and return results.
+
+    Args:
+        query: Search query string
+        max_results: Maximum number of results to return (default: 5)
+
+    Returns:
+        List of search result dictionaries with title, url, and snippet
+
+    Raises:
+        RuntimeError: If search fails
+    """
+    try:
+        results = []
+        with DDGS() as ddgs:
+            search_results = ddgs.text(query, max_results=max_results)
+            for result in search_results:
+                results.append(
+                    {
+                        "title": result.get("title", ""),
+                        "url": result.get("href", ""),
+                        "snippet": result.get("body", ""),
+                    }
+                )
+
+        return results
+
+    except Exception as e:
+        raise RuntimeError(f"Web search failed: {e}")
