@@ -170,3 +170,83 @@ def file_tools(reset_tool_registry):
     tool(list_files)
     tool(file_exists)
     tool(create_directory)
+
+
+@pytest.fixture
+def cli_runner():
+    """Create a CLI test runner."""
+    from typer.testing import CliRunner
+
+    return CliRunner()
+
+
+@pytest.fixture
+def mock_animation_context():
+    """Mock animation context manager for CLI tests."""
+    from unittest.mock import MagicMock
+
+    mock_context = MagicMock()
+    mock_context.__enter__ = MagicMock()
+    mock_context.__exit__ = MagicMock(return_value=None)
+    return mock_context
+
+
+@pytest.fixture
+def temp_config_file(temp_dir):
+    """Create a temporary config file path."""
+    return temp_dir / "config.json"
+
+
+@pytest.fixture
+def agent_content_factory():
+    """Factory for creating agent content with various configurations."""
+
+    def _create_agent(
+        name="test_agent",
+        model="openai:gpt-4o-mini",
+        tools=None,
+        prefetch=None,
+        instructions=None,
+        content="# Task\n{{ user_prompt }}",
+    ):
+        tools_str = str(tools) if tools is not None else "[]"
+        frontmatter = f"""---
+name: {name}
+model: {model}
+tools: {tools_str}"""
+
+        if prefetch:
+            frontmatter += f"\nprefetch: {prefetch}"
+        if instructions:
+            frontmatter += f"\ninstructions: {instructions}"
+
+        frontmatter += "\n---\n\n"
+        return frontmatter + content
+
+    return _create_agent
+
+
+@pytest.fixture
+def mcp_config_factory():
+    """Factory for creating MCP server configurations."""
+
+    def _create_config(server_type="stdio", name="test-server", **kwargs):
+        """Create an MCP server config dict.
+
+        Args:
+            server_type: "stdio" or "http"
+            name: Server name
+            **kwargs: Additional config fields (command, args, env, url, etc)
+        """
+        if server_type == "stdio":
+            return {
+                "command": kwargs.get("command", "npx"),
+                "args": kwargs.get("args", ["-y", "test-server"]),
+                "env": kwargs.get("env", {}),
+            }
+        elif server_type == "http":
+            return {"url": kwargs.get("url", "http://localhost:8000/mcp"), "type": "http"}
+        else:
+            raise ValueError(f"Unknown server type: {server_type}")
+
+    return _create_config

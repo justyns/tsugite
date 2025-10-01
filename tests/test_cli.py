@@ -8,12 +8,6 @@ from tsugite.tsugite import app
 
 
 @pytest.fixture
-def cli_runner():
-    """Create a CLI test runner."""
-    return CliRunner()
-
-
-@pytest.fixture
 def mock_agent_execution():
     """Mock both run_agent and validate_agent_execution for CLI tests."""
     with (
@@ -291,74 +285,32 @@ tools: []
 class TestAnimationCLIIntegration:
     """Test animation integration with CLI commands."""
 
+    @pytest.mark.parametrize(
+        "extra_flags,expected_enabled",
+        [
+            ([], True),  # No flags - animation enabled
+            (["--non-interactive"], False),  # Non-interactive disables animation
+            (["--no-color"], False),  # No color disables animation
+            (["--non-interactive", "--no-color"], False),  # Both flags disable animation
+        ],
+    )
     @patch("tsugite.tsugite.loading_animation")
-    def test_animation_enabled_in_interactive_color_mode(
-        self, mock_loading_animation, cli_runner, sample_agent_file, mock_agent_execution
+    def test_animation_flags(
+        self, mock_loading_animation, cli_runner, sample_agent_file, mock_agent_execution, extra_flags, expected_enabled
     ):
-        """Test that animation is enabled in native UI interactive color mode."""
+        """Test that animation is enabled/disabled based on CLI flags."""
         mock_loading_animation.return_value.__enter__ = MagicMock()
         mock_loading_animation.return_value.__exit__ = MagicMock(return_value=None)
 
-        result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--native-ui"])
+        cmd = ["run", str(sample_agent_file), "test prompt", "--native-ui"] + extra_flags
+        result = cli_runner.invoke(app, cmd)
 
         assert result.exit_code == 0
-        # Animation should be called with enabled=True
         mock_loading_animation.assert_called_once()
         call_args = mock_loading_animation.call_args
-        assert call_args.kwargs["enabled"] is True
-        assert call_args.kwargs["message"] == "Waiting for LLM response"
-
-    @patch("tsugite.tsugite.loading_animation")
-    def test_animation_disabled_with_non_interactive_flag(
-        self, mock_loading_animation, cli_runner, sample_agent_file, mock_agent_execution
-    ):
-        """Test that animation is disabled with --non-interactive flag in native UI."""
-        mock_loading_animation.return_value.__enter__ = MagicMock()
-        mock_loading_animation.return_value.__exit__ = MagicMock(return_value=None)
-
-        result = cli_runner.invoke(
-            app, ["run", str(sample_agent_file), "test prompt", "--native-ui", "--non-interactive"]
-        )
-
-        assert result.exit_code == 0
-        # Animation should be called with enabled=False
-        mock_loading_animation.assert_called_once()
-        call_args = mock_loading_animation.call_args
-        assert call_args.kwargs["enabled"] is False
-
-    @patch("tsugite.tsugite.loading_animation")
-    def test_animation_disabled_with_no_color_flag(
-        self, mock_loading_animation, cli_runner, sample_agent_file, mock_agent_execution
-    ):
-        """Test that animation is disabled with --no-color flag in native UI."""
-        mock_loading_animation.return_value.__enter__ = MagicMock()
-        mock_loading_animation.return_value.__exit__ = MagicMock(return_value=None)
-
-        result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--native-ui", "--no-color"])
-
-        assert result.exit_code == 0
-        # Animation should be called with enabled=False
-        mock_loading_animation.assert_called_once()
-        call_args = mock_loading_animation.call_args
-        assert call_args.kwargs["enabled"] is False
-
-    @patch("tsugite.tsugite.loading_animation")
-    def test_animation_disabled_with_both_flags(
-        self, mock_loading_animation, cli_runner, sample_agent_file, mock_agent_execution
-    ):
-        """Test that animation is disabled with both --non-interactive and --no-color flags in native UI."""
-        mock_loading_animation.return_value.__enter__ = MagicMock()
-        mock_loading_animation.return_value.__exit__ = MagicMock(return_value=None)
-
-        result = cli_runner.invoke(
-            app, ["run", str(sample_agent_file), "test prompt", "--native-ui", "--non-interactive", "--no-color"]
-        )
-
-        assert result.exit_code == 0
-        # Animation should be called with enabled=False
-        mock_loading_animation.assert_called_once()
-        call_args = mock_loading_animation.call_args
-        assert call_args.kwargs["enabled"] is False
+        assert call_args.kwargs["enabled"] is expected_enabled
+        if expected_enabled:
+            assert call_args.kwargs["message"] == "Waiting for LLM response"
 
     @patch("tsugite.tsugite.loading_animation")
     @patch("tsugite.tsugite.run_agent")
@@ -532,53 +484,23 @@ class TestHeadlessMode:
         assert result.exit_code == 1
 
 
-def test_logo_selection_narrow_terminal():
-    """Test that narrow logo is selected for terminals < 80 columns."""
-    from tsugite.tsugite import _get_logo, TSUGITE_LOGO_NARROW
+@pytest.mark.parametrize(
+    "terminal_width,expected_logo",
+    [
+        (40, "NARROW"),  # Very narrow terminal
+        (79, "NARROW"),  # Just below threshold
+        (80, "WIDE"),  # At threshold
+        (200, "WIDE"),  # Very wide terminal
+    ],
+)
+def test_logo_selection(terminal_width, expected_logo):
+    """Test that correct logo is selected based on terminal width."""
+    from tsugite.tsugite import _get_logo, TSUGITE_LOGO_NARROW, TSUGITE_LOGO_WIDE
     from rich.console import Console
 
-    # Mock console with width < 80
     mock_console = MagicMock(spec=Console)
-    mock_console.width = 79
+    mock_console.width = terminal_width
 
     result = _get_logo(mock_console)
-    assert result == TSUGITE_LOGO_NARROW
-
-
-def test_logo_selection_wide_terminal():
-    """Test that wide logo is selected for terminals >= 80 columns."""
-    from tsugite.tsugite import _get_logo, TSUGITE_LOGO_WIDE
-    from rich.console import Console
-
-    # Mock console with width >= 80
-    mock_console = MagicMock(spec=Console)
-    mock_console.width = 80
-
-    result = _get_logo(mock_console)
-    assert result == TSUGITE_LOGO_WIDE
-
-
-def test_logo_selection_very_wide_terminal():
-    """Test that wide logo is selected for very wide terminals."""
-    from tsugite.tsugite import _get_logo, TSUGITE_LOGO_WIDE
-    from rich.console import Console
-
-    # Mock console with width much larger than 80
-    mock_console = MagicMock(spec=Console)
-    mock_console.width = 200
-
-    result = _get_logo(mock_console)
-    assert result == TSUGITE_LOGO_WIDE
-
-
-def test_logo_selection_very_narrow_terminal():
-    """Test that narrow logo is selected for very narrow terminals."""
-    from tsugite.tsugite import _get_logo, TSUGITE_LOGO_NARROW
-    from rich.console import Console
-
-    # Mock console with width much smaller than 80
-    mock_console = MagicMock(spec=Console)
-    mock_console.width = 40
-
-    result = _get_logo(mock_console)
-    assert result == TSUGITE_LOGO_NARROW
+    expected = TSUGITE_LOGO_NARROW if expected_logo == "NARROW" else TSUGITE_LOGO_WIDE
+    assert result == expected

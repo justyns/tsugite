@@ -66,7 +66,7 @@ class TestMCPServerConfig:
 class TestLoadMCPConfig:
     """Tests for loading MCP configuration from file."""
 
-    def test_load_valid_config(self):
+    def test_load_valid_config(self, tmp_path):
         """Test loading a valid MCP configuration."""
         config_data = {
             "mcpServers": {
@@ -75,57 +75,44 @@ class TestLoadMCPConfig:
             }
         }
 
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-            json.dump(config_data, f)
-            config_path = Path(f.name)
+        config_path = tmp_path / "config.json"
+        config_path.write_text(json.dumps(config_data))
 
-        try:
-            servers = load_mcp_config(config_path)
+        servers = load_mcp_config(config_path)
 
-            assert len(servers) == 2
-            assert "test-stdio" in servers
-            assert "test-http" in servers
+        assert len(servers) == 2
+        assert "test-stdio" in servers
+        assert "test-http" in servers
 
-            assert servers["test-stdio"].command == "npx"
-            assert servers["test-stdio"].is_stdio()
+        assert servers["test-stdio"].command == "npx"
+        assert servers["test-stdio"].is_stdio()
 
-            assert servers["test-http"].url == "http://localhost:8000/mcp"
-            assert servers["test-http"].is_http()
-        finally:
-            config_path.unlink()
+        assert servers["test-http"].url == "http://localhost:8000/mcp"
+        assert servers["test-http"].is_http()
 
     def test_load_missing_config(self):
         """Test loading config from non-existent file."""
         servers = load_mcp_config(Path("/nonexistent/config.json"))
         assert servers == {}
 
-    def test_load_invalid_json(self):
+    def test_load_invalid_json(self, tmp_path):
         """Test loading invalid JSON file."""
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-            f.write("{ invalid json")
-            config_path = Path(f.name)
+        config_path = tmp_path / "invalid.json"
+        config_path.write_text("{ invalid json")
 
-        try:
-            servers = load_mcp_config(config_path)
-            assert servers == {}
-        finally:
-            config_path.unlink()
+        servers = load_mcp_config(config_path)
+        assert servers == {}
 
-    def test_load_config_missing_mcpServers_key(self):
+    def test_load_config_missing_mcpServers_key(self, tmp_path):
         """Test loading config without mcpServers key."""
         config_data = {"someOtherKey": {}}
+        config_path = tmp_path / "config.json"
+        config_path.write_text(json.dumps(config_data))
 
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-            json.dump(config_data, f)
-            config_path = Path(f.name)
+        servers = load_mcp_config(config_path)
+        assert servers == {}
 
-        try:
-            servers = load_mcp_config(config_path)
-            assert servers == {}
-        finally:
-            config_path.unlink()
-
-    def test_load_config_with_invalid_server(self):
+    def test_load_config_with_invalid_server(self, tmp_path):
         """Test loading config with one invalid server."""
         config_data = {
             "mcpServers": {
@@ -133,18 +120,13 @@ class TestLoadMCPConfig:
                 "invalid-server": {},  # Missing command/url
             }
         }
+        config_path = tmp_path / "config.json"
+        config_path.write_text(json.dumps(config_data))
 
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-            json.dump(config_data, f)
-            config_path = Path(f.name)
-
-        try:
-            servers = load_mcp_config(config_path)
-            assert len(servers) == 1
-            assert "valid-server" in servers
-            assert "invalid-server" not in servers
-        finally:
-            config_path.unlink()
+        servers = load_mcp_config(config_path)
+        assert len(servers) == 1
+        assert "valid-server" in servers
+        assert "invalid-server" not in servers
 
 
 class TestConvertToServerParams:
@@ -334,177 +316,136 @@ class TestLoadAllMCPTools:
 class TestSaveMCPConfig:
     """Tests for saving MCP configuration to file."""
 
-    def test_save_empty_config(self):
+    def test_save_empty_config(self, tmp_path):
         """Test saving empty MCP configuration."""
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-            config_path = Path(f.name)
+        from tsugite.mcp_config import save_mcp_config
 
-        try:
-            from tsugite.mcp_config import save_mcp_config
+        config_path = tmp_path / "config.json"
+        save_mcp_config({}, config_path)
 
-            save_mcp_config({}, config_path)
+        assert config_path.exists()
+        data = json.loads(config_path.read_text())
+        assert "mcpServers" in data
+        assert data["mcpServers"] == {}
 
-            # Verify file was created
-            assert config_path.exists()
-
-            # Verify contents
-            with open(config_path) as f:
-                data = json.load(f)
-
-            assert "mcpServers" in data
-            assert data["mcpServers"] == {}
-        finally:
-            config_path.unlink()
-
-    def test_save_stdio_server(self):
+    def test_save_stdio_server(self, tmp_path):
         """Test saving stdio server configuration."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            config_path = Path(tmpdir) / "mcp.json"
+        from tsugite.mcp_config import save_mcp_config
 
-            from tsugite.mcp_config import save_mcp_config
+        config_path = tmp_path / "mcp.json"
+        servers = {
+            "test-server": MCPServerConfig(
+                name="test-server", command="npx", args=["-y", "test"], env={"API_KEY": "test"}
+            )
+        }
 
-            servers = {
-                "test-server": MCPServerConfig(
-                    name="test-server", command="npx", args=["-y", "test"], env={"API_KEY": "test"}
-                )
-            }
+        save_mcp_config(servers, config_path)
 
-            save_mcp_config(servers, config_path)
+        data = json.loads(config_path.read_text())
+        assert "mcpServers" in data
+        assert "test-server" in data["mcpServers"]
 
-            # Verify file contents
-            with open(config_path) as f:
-                data = json.load(f)
+        server_data = data["mcpServers"]["test-server"]
+        assert server_data["command"] == "npx"
+        assert server_data["args"] == ["-y", "test"]
+        assert server_data["env"] == {"API_KEY": "test"}
 
-            assert "mcpServers" in data
-            assert "test-server" in data["mcpServers"]
-
-            server_data = data["mcpServers"]["test-server"]
-            assert server_data["command"] == "npx"
-            assert server_data["args"] == ["-y", "test"]
-            assert server_data["env"] == {"API_KEY": "test"}
-
-    def test_save_http_server(self):
+    def test_save_http_server(self, tmp_path):
         """Test saving HTTP server configuration."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            config_path = Path(tmpdir) / "mcp.json"
+        from tsugite.mcp_config import save_mcp_config
 
-            from tsugite.mcp_config import save_mcp_config
+        config_path = tmp_path / "mcp.json"
+        servers = {"test-server": MCPServerConfig(name="test-server", url="http://localhost:8000/mcp")}
 
-            servers = {"test-server": MCPServerConfig(name="test-server", url="http://localhost:8000/mcp")}
+        save_mcp_config(servers, config_path)
 
-            save_mcp_config(servers, config_path)
+        data = json.loads(config_path.read_text())
+        assert "mcpServers" in data
+        assert "test-server" in data["mcpServers"]
 
-            # Verify file contents
-            with open(config_path) as f:
-                data = json.load(f)
+        server_data = data["mcpServers"]["test-server"]
+        assert server_data["type"] == "http"
+        assert server_data["url"] == "http://localhost:8000/mcp"
 
-            assert "mcpServers" in data
-            assert "test-server" in data["mcpServers"]
-
-            server_data = data["mcpServers"]["test-server"]
-            assert server_data["type"] == "http"
-            assert server_data["url"] == "http://localhost:8000/mcp"
-
-    def test_save_creates_directory(self):
+    def test_save_creates_directory(self, tmp_path):
         """Test that save_mcp_config creates parent directory if needed."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            config_path = Path(tmpdir) / "subdir" / "mcp.json"
+        from tsugite.mcp_config import save_mcp_config
 
-            from tsugite.mcp_config import save_mcp_config
+        config_path = tmp_path / "subdir" / "mcp.json"
+        assert not config_path.parent.exists()
 
-            # Directory doesn't exist yet
-            assert not config_path.parent.exists()
+        save_mcp_config({}, config_path)
 
-            save_mcp_config({}, config_path)
-
-            # Directory should be created
-            assert config_path.parent.exists()
-            assert config_path.exists()
+        assert config_path.parent.exists()
+        assert config_path.exists()
 
 
 class TestAddServerToConfig:
     """Tests for adding servers to configuration."""
 
-    def test_add_new_server(self):
+    def test_add_new_server(self, tmp_path):
         """Test adding a new server to empty config."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            config_path = Path(tmpdir) / "mcp.json"
+        from tsugite.mcp_config import add_server_to_config
 
-            from tsugite.mcp_config import add_server_to_config
+        config_path = tmp_path / "mcp.json"
+        server = MCPServerConfig(name="new-server", url="http://localhost:8000/mcp")
 
-            server = MCPServerConfig(name="new-server", url="http://localhost:8000/mcp")
+        result = add_server_to_config(server, config_path)
 
-            result = add_server_to_config(server, config_path)
+        assert result is True
+        assert config_path.exists()
+        data = json.loads(config_path.read_text())
+        assert "new-server" in data["mcpServers"]
 
-            assert result is True
-            assert config_path.exists()
-
-            # Verify server was added
-            with open(config_path) as f:
-                data = json.load(f)
-
-            assert "new-server" in data["mcpServers"]
-
-    def test_add_server_to_existing_config(self):
+    def test_add_server_to_existing_config(self, tmp_path):
         """Test adding a server to existing config."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            config_path = Path(tmpdir) / "mcp.json"
+        from tsugite.mcp_config import add_server_to_config, save_mcp_config
 
-            from tsugite.mcp_config import add_server_to_config, save_mcp_config
+        config_path = tmp_path / "mcp.json"
 
-            # Create initial config
-            initial_servers = {"server1": MCPServerConfig(name="server1", url="http://localhost:8000/mcp")}
-            save_mcp_config(initial_servers, config_path)
+        # Create initial config
+        initial_servers = {"server1": MCPServerConfig(name="server1", url="http://localhost:8000/mcp")}
+        save_mcp_config(initial_servers, config_path)
 
-            # Add second server
-            server2 = MCPServerConfig(name="server2", command="npx", args=["test"])
-            add_server_to_config(server2, config_path)
+        # Add second server
+        server2 = MCPServerConfig(name="server2", command="npx", args=["test"])
+        add_server_to_config(server2, config_path)
 
-            # Verify both servers exist
-            with open(config_path) as f:
-                data = json.load(f)
+        # Verify both servers exist
+        data = json.loads(config_path.read_text())
+        assert len(data["mcpServers"]) == 2
+        assert "server1" in data["mcpServers"]
+        assert "server2" in data["mcpServers"]
 
-            assert len(data["mcpServers"]) == 2
-            assert "server1" in data["mcpServers"]
-            assert "server2" in data["mcpServers"]
-
-    def test_add_duplicate_server_without_force(self):
+    def test_add_duplicate_server_without_force(self, tmp_path):
         """Test adding duplicate server fails without force."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            config_path = Path(tmpdir) / "mcp.json"
+        from tsugite.mcp_config import add_server_to_config
 
-            from tsugite.mcp_config import add_server_to_config
+        config_path = tmp_path / "mcp.json"
+        server1 = MCPServerConfig(name="test", url="http://localhost:8000/mcp")
+        add_server_to_config(server1, config_path)
 
-            server1 = MCPServerConfig(name="test", url="http://localhost:8000/mcp")
-            add_server_to_config(server1, config_path)
+        # Try to add same server again
+        server2 = MCPServerConfig(name="test", url="http://localhost:9000/mcp")
 
-            # Try to add same server again
-            server2 = MCPServerConfig(name="test", url="http://localhost:9000/mcp")
+        with pytest.raises(ValueError, match="already exists"):
+            add_server_to_config(server2, config_path, overwrite=False)
 
-            with pytest.raises(ValueError, match="already exists"):
-                add_server_to_config(server2, config_path, overwrite=False)
-
-    def test_add_duplicate_server_with_force(self):
+    def test_add_duplicate_server_with_force(self, tmp_path):
         """Test adding duplicate server with force overwrites."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            config_path = Path(tmpdir) / "mcp.json"
+        from tsugite.mcp_config import add_server_to_config
 
-            from tsugite.mcp_config import add_server_to_config
+        config_path = tmp_path / "mcp.json"
+        server1 = MCPServerConfig(name="test", url="http://localhost:8000/mcp")
+        add_server_to_config(server1, config_path)
 
-            server1 = MCPServerConfig(name="test", url="http://localhost:8000/mcp")
-            add_server_to_config(server1, config_path)
+        # Overwrite with different config
+        server2 = MCPServerConfig(name="test", url="http://localhost:9000/mcp")
+        result = add_server_to_config(server2, config_path, overwrite=True)
 
-            # Overwrite with different config
-            server2 = MCPServerConfig(name="test", url="http://localhost:9000/mcp")
-            result = add_server_to_config(server2, config_path, overwrite=True)
-
-            assert result is True
-
-            # Verify server was updated
-            with open(config_path) as f:
-                data = json.load(f)
-
-            assert data["mcpServers"]["test"]["url"] == "http://localhost:9000/mcp"
+        assert result is True
+        data = json.loads(config_path.read_text())
+        assert data["mcpServers"]["test"]["url"] == "http://localhost:9000/mcp"
 
 
 class TestXDGConfigPaths:
