@@ -27,6 +27,39 @@ def slugify(text: str) -> str:
     return text.strip("-")
 
 
+def file_exists(path: str) -> bool:
+    """Check if a file or directory exists."""
+    from pathlib import Path
+
+    return Path(path).exists()
+
+
+def is_file(path: str) -> bool:
+    """Check if path exists and is a file."""
+    from pathlib import Path
+
+    p = Path(path)
+    return p.exists() and p.is_file()
+
+
+def is_dir(path: str) -> bool:
+    """Check if path exists and is a directory."""
+    from pathlib import Path
+
+    p = Path(path)
+    return p.exists() and p.is_dir()
+
+
+def read_text(path: str, default: str = "") -> str:
+    """Safely read file content, returning default on error."""
+    from pathlib import Path
+
+    try:
+        return Path(path).read_text(encoding="utf-8")
+    except Exception:
+        return default
+
+
 class AgentRenderer:
     """Jinja2 template renderer for agent content."""
 
@@ -44,6 +77,10 @@ class AgentRenderer:
                 "now": now,
                 "today": today,
                 "slugify": slugify,
+                "file_exists": file_exists,
+                "is_file": is_file,
+                "is_dir": is_dir,
+                "read_text": read_text,
                 "env": dict(os.environ),
             }
         )

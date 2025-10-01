@@ -42,6 +42,83 @@
 - `instructions` *(optional string)* – Additional system guidance appended to Tsugite's default runtime instructions before hitting the LLM.
 - `mcp_servers` *(optional dict)* – MCP servers to load tools from. Keys are server names from MCP config file (see XDG paths below), values are optional tool lists.
 
+## Template Helpers
+
+Agent templates use Jinja2 syntax and have access to built-in helper functions for common operations.
+
+### Available Helper Functions
+
+**Date/Time:**
+- `now()` - Current timestamp (ISO format)
+- `today()` - Today's date (YYYY-MM-DD)
+
+**Text Processing:**
+- `slugify(text)` - Convert text to slug format
+
+**Filesystem:**
+- `file_exists(path)` - Check if file or directory exists (returns bool)
+- `is_file(path)` - Check if path is a file (returns bool)
+- `is_dir(path)` - Check if path is a directory (returns bool)
+- `read_text(path, default="")` - Safely read file content, return default on error
+
+**Environment:**
+- `env` - Dictionary of environment variables (e.g., `env.HOME`)
+
+### Examples
+
+**Conditional based on file existence:**
+
+```yaml
+---
+name: config_checker
+model: ollama:qwen2.5-coder:7b
+tools: [read_file, write_file]
+---
+
+{% if file_exists("config.json") %}
+## Configuration Found
+Config exists at config.json
+Content preview: {{ read_text("config.json")[:100] }}
+{% else %}
+## No Configuration
+Please create a config.json file first.
+{% endif %}
+
+Task: {{ user_prompt }}
+```
+
+**Check multiple paths:**
+
+```jinja2
+{% if is_file("data.csv") and is_dir("output") %}
+Ready to process data.csv into output/
+{% elif not is_file("data.csv") %}
+Error: data.csv not found
+{% elif not is_dir("output") %}
+Error: output directory missing
+{% endif %}
+```
+
+**Using prefetch vs template helpers:**
+
+Template helpers are best for simple checks in conditionals. Use `prefetch` when you need to:
+- Pass results to tools as arguments
+- Reuse expensive operations multiple times
+- Run operations that modify state
+
+```yaml
+# Good: Simple existence check
+{% if file_exists("config.json") %}...{% endif %}
+
+# Better with prefetch: Complex operation used multiple times
+prefetch:
+  - name: read_file
+    args:
+      path: "config.json"
+    assign: config_content
+# Then use {{ config_content }} throughout template
+```
+
 ## Model Providers
 
 Tsugite supports multiple model providers through LiteLLM integration. Specify models using the format `provider:model-name`.

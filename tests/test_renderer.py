@@ -3,7 +3,8 @@
 import pytest
 from unittest.mock import patch
 from datetime import datetime
-from tsugite.renderer import AgentRenderer, now, today, slugify
+from pathlib import Path
+from tsugite.renderer import AgentRenderer, now, today, slugify, file_exists, is_file, is_dir, read_text
 
 
 def test_helper_functions():
@@ -326,3 +327,98 @@ User: {{ env.USER }}
     assert "Test task" in result
     assert "Weather: Sunny" in result
     assert "User: demo_user" in result
+
+
+def test_filesystem_helper_functions(tmp_path):
+    """Test filesystem helper functions."""
+    test_file = tmp_path / "test.txt"
+    test_file.write_text("test content")
+    test_dir = tmp_path / "test_dir"
+    test_dir.mkdir()
+
+    assert file_exists(str(test_file)) is True
+    assert file_exists(str(test_dir)) is True
+    assert file_exists(str(tmp_path / "nonexistent.txt")) is False
+
+    assert is_file(str(test_file)) is True
+    assert is_file(str(test_dir)) is False
+    assert is_file(str(tmp_path / "nonexistent.txt")) is False
+
+    assert is_dir(str(test_dir)) is True
+    assert is_dir(str(test_file)) is False
+    assert is_dir(str(tmp_path / "nonexistent_dir")) is False
+
+    assert read_text(str(test_file)) == "test content"
+    assert read_text(str(tmp_path / "nonexistent.txt")) == ""
+    assert read_text(str(tmp_path / "nonexistent.txt"), default="fallback") == "fallback"
+
+
+def test_renderer_with_filesystem_helpers(tmp_path):
+    """Test rendering templates with filesystem helper functions."""
+    config_file = tmp_path / "config.json"
+    config_file.write_text('{"setting": "value"}')
+
+    content = """
+{% if file_exists("config.json") %}
+Config file exists!
+Content: {{ read_text("config.json") }}
+{% else %}
+No config file found.
+{% endif %}
+""".strip()
+
+    renderer = AgentRenderer()
+    result = renderer.render(content, {"cwd": str(tmp_path)})
+
+    # Without changing working directory, file won't exist
+    assert "No config file found." in result
+
+
+def test_renderer_filesystem_conditionals(tmp_path):
+    """Test complex conditionals with filesystem helpers."""
+    (tmp_path / "data.txt").write_text("some data")
+    (tmp_path / "backups").mkdir()
+
+    content = """
+{% if is_file("data.txt") %}
+Data file: {{ read_text("data.txt") }}
+{% endif %}
+
+{% if is_dir("backups") %}
+Backups directory exists!
+{% endif %}
+
+{% if file_exists("missing.txt") %}
+Should not appear
+{% else %}
+File is missing as expected
+{% endif %}
+""".strip()
+
+    renderer = AgentRenderer()
+
+    import os
+
+    original_cwd = os.getcwd()
+    try:
+        os.chdir(tmp_path)
+        result = renderer.render(content)
+
+        assert "Data file: some data" in result
+        assert "Backups directory exists!" in result
+        assert "File is missing as expected" in result
+        assert "Should not appear" not in result
+    finally:
+        os.chdir(original_cwd)
+
+
+def test_read_text_with_default():
+    """Test read_text with custom default value."""
+    renderer = AgentRenderer()
+
+    content = """
+Content: {{ read_text("nonexistent.txt", default="<no file>") }}
+""".strip()
+
+    result = renderer.render(content)
+    assert "Content: <no file>" in result
