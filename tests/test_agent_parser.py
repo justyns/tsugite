@@ -39,6 +39,7 @@ def test_parse_minimal_agent_file(temp_dir):
     """Test parsing an agent file with minimal configuration."""
     content = """---
 name: minimal_agent
+extends: none
 ---
 
 # Simple Agent
@@ -206,6 +207,7 @@ def test_validate_agent_missing_model(temp_dir):
     """Test validating an agent without a model (should use config default)."""
     content = """---
 name: test_agent
+extends: none
 ---
 
 # Agent

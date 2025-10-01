@@ -13,6 +13,7 @@ class Config:
 
     default_model: Optional[str] = None
     model_aliases: Dict[str, str] = field(default_factory=dict)
+    default_base_agent: Optional[str] = None
 
     def __post_init__(self):
         if self.model_aliases is None:
@@ -70,6 +71,7 @@ def load_config(path: Optional[Path] = None) -> Config:
         return Config(
             default_model=data.get("default_model"),
             model_aliases=data.get("model_aliases", {}),
+            default_base_agent=data.get("default_base_agent"),
         )
 
     except json.JSONDecodeError as e:
@@ -102,6 +104,9 @@ def save_config(config: Config, path: Optional[Path] = None) -> None:
 
     if config.model_aliases:
         config_data["model_aliases"] = config.model_aliases
+
+    if config.default_base_agent is not None:
+        config_data["default_base_agent"] = config.default_base_agent
 
     with open(path, "w") as f:
         json.dump(config_data, f, indent=2)
@@ -162,3 +167,15 @@ def get_model_alias(alias: str, path: Optional[Path] = None) -> Optional[str]:
     """
     config = load_config(path)
     return config.model_aliases.get(alias)
+
+
+def set_default_base_agent(base_agent: Optional[str], path: Optional[Path] = None) -> None:
+    """Set the default base agent in configuration.
+
+    Args:
+        base_agent: Base agent name (e.g., "default") or None to disable
+        path: Path to config.json file. If None, uses default path
+    """
+    config = load_config(path)
+    config.default_base_agent = base_agent
+    save_config(config, path)

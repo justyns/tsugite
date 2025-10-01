@@ -21,6 +21,7 @@ class AgentConfig:
     context_budget: Dict[str, Any] = field(default_factory=dict)
     instructions: str = ""
     mcp_servers: Optional[Dict[str, Optional[List[str]]]] = None
+    extends: Optional[str] = None
 
     def __post_init__(self):
         if self.tools is None:
@@ -60,13 +61,33 @@ def parse_agent(text: str, file_path: Optional[Path] = None) -> Agent:
 
 
 def parse_agent_file(file_path: Path) -> Agent:
-    """Parse an agent markdown file with YAML frontmatter."""
+    """Parse an agent markdown file with YAML frontmatter.
 
+    This function also resolves agent inheritance if configured.
+
+    Args:
+        file_path: Path to agent markdown file
+
+    Returns:
+        Parsed Agent with resolved inheritance
+
+    Raises:
+        FileNotFoundError: If agent file doesn't exist
+        ValueError: If circular inheritance or missing parent agent
+    """
     if not file_path.exists():
         raise FileNotFoundError(f"Agent file not found: {file_path}")
 
     content = file_path.read_text(encoding="utf-8")
-    return parse_agent(content, file_path)
+    agent = parse_agent(content, file_path)
+
+    # Resolve inheritance if needed
+    if agent.config.extends or agent.config.extends != "none":
+        from .agent_inheritance import resolve_agent_inheritance
+
+        agent = resolve_agent_inheritance(agent, file_path)
+
+    return agent
 
 
 def extract_directives(content: str) -> List[Dict[str, Any]]:

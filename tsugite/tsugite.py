@@ -635,6 +635,147 @@ def mcp_add(
 
 
 # Config subcommands
+agents_app = typer.Typer(help="Manage agents and agent inheritance")
+app.add_typer(agents_app, name="agents")
+
+
+@agents_app.command("list")
+def agents_list(
+    global_only: bool = typer.Option(False, "--global", help="List only global agents"),
+    local_only: bool = typer.Option(False, "--local", help="List only local agents"),
+):
+    """List available agents."""
+    from tsugite.agent_inheritance import get_global_agents_paths
+    from tsugite.agent_utils import list_local_agents
+
+    # Show global agents
+    if global_only or not local_only:
+        console.print("[cyan]Global Agents:[/cyan]\n")
+
+        found_any = False
+        for global_path in get_global_agents_paths():
+            if not global_path.exists():
+                continue
+
+            agent_files = sorted(global_path.glob("*.md"))
+            if agent_files:
+                found_any = True
+                console.print(f"[dim]{global_path}[/dim]")
+                for agent_file in agent_files:
+                    console.print(f"  • {agent_file.stem}")
+                console.print()
+
+        if not found_any:
+            console.print("[yellow]No global agents found[/yellow]")
+            console.print("\nGlobal agent locations:")
+            for path in get_global_agents_paths():
+                console.print(f"  {path}")
+            console.print()
+
+    # Show local agents
+    if local_only or not global_only:
+        console.print("[cyan]Local Agents:[/cyan]\n")
+
+        local_agents = list_local_agents()
+
+        if not local_agents:
+            console.print("[yellow]No local agents found[/yellow]")
+            console.print("\nLocal agent locations:")
+            console.print("  • Current directory (*.md)")
+            console.print("  • .tsugite/")
+            console.print("  • ./agents/")
+        else:
+            for location, agent_files in local_agents.items():
+                console.print(f"[dim]{location}[/dim]")
+                for agent_file in agent_files:
+                    console.print(f"  • {agent_file.stem}")
+                console.print()
+
+
+@agents_app.command("show")
+def agents_show(
+    agent_path: str = typer.Argument(help="Agent name or path to agent file"),
+    show_inheritance: bool = typer.Option(False, "--inheritance", help="Show inheritance chain"),
+):
+    """Show agent information.
+
+    Can be either a file path (e.g., 'examples/my_agent.md') or
+    an agent name to search globally (e.g., 'default').
+    """
+    from tsugite.md_agents import parse_agent_file
+    from tsugite.agent_inheritance import find_agent_file
+
+    try:
+        agent_file = Path(agent_path)
+
+        # If path doesn't exist, try to find it as an agent name
+        if not agent_file.exists():
+            found_path = find_agent_file(agent_path, Path.cwd())
+            if found_path:
+                agent_file = found_path
+                console.print(f"[dim]Found: {agent_file}[/dim]\n")
+            else:
+                console.print(f"[red]Agent not found: {agent_path}[/red]")
+                console.print("\nSearched in:")
+                console.print("  • Current directory")
+                console.print("  • .tsugite/")
+                console.print("  • ./agents/")
+                console.print("  • Global locations (use 'agents list --global' to see)")
+                raise typer.Exit(1)
+
+        agent = parse_agent_file(agent_file)
+        config = agent.config
+
+        console.print(f"[cyan]Agent:[/cyan] [bold]{config.name}[/bold]\n")
+
+        if config.description:
+            console.print(f"[bold]Description:[/bold] {config.description}\n")
+
+        if config.model:
+            console.print(f"[bold]Model:[/bold] {config.model}")
+        else:
+            console.print("[bold]Model:[/bold] [dim](uses default)[/dim]")
+
+        console.print(f"[bold]Max Steps:[/bold] {config.max_steps}")
+
+        if config.tools:
+            console.print(f"\n[bold]Tools ({len(config.tools)}):[/bold]")
+            for tool in config.tools:
+                console.print(f"  • {tool}")
+
+        if config.extends:
+            console.print(f"\n[bold]Extends:[/bold] {config.extends}")
+
+        if show_inheritance:
+            from tsugite.agent_utils import build_inheritance_chain
+
+            try:
+                chain = build_inheritance_chain(agent_file)
+                console.print("\n[bold cyan]Inheritance Chain:[/bold cyan]")
+
+                if len(chain) == 1:
+                    console.print("  [dim](no inheritance)[/dim]")
+                else:
+                    for i, (agent_name, agent_path) in enumerate(chain):
+                        is_current = i == len(chain) - 1
+                        prefix = "  └─" if is_current else "  ├─"
+
+                        if is_current:
+                            console.print(f"{prefix} [bold]{agent_name}[/bold] [dim](current)[/dim]")
+                        else:
+                            console.print(f"{prefix} {agent_name} [dim]({agent_path.name})[/dim]")
+                            if i < len(chain) - 1:
+                                console.print("  │")
+            except Exception as e:
+                console.print(f"\n[yellow]Could not build inheritance chain: {e}[/yellow]")
+
+        console.print()
+
+    except Exception as e:
+        console.print(f"[red]Failed to load agent: {e}[/red]")
+        raise typer.Exit(1)
+
+
 config_app = typer.Typer(help="Manage Tsugite configuration")
 app.add_typer(config_app, name="config")
 
@@ -653,6 +794,11 @@ def config_show():
         console.print(f"[bold]Default Model:[/bold] {config.default_model}\n")
     else:
         console.print("[yellow]No default model set[/yellow]\n")
+
+    if config.default_base_agent is not None:
+        console.print(f"[bold]Default Base Agent:[/bold] {config.default_base_agent}\n")
+    else:
+        console.print("[bold]Default Base Agent:[/bold] default (fallback)\n")
 
     if config.model_aliases:
         console.print(f"[bold]Model Aliases ({len(config.model_aliases)}):[/bold]")
@@ -731,6 +877,31 @@ def config_list_aliases():
     console.print(f"[cyan]Model Aliases ({len(config.model_aliases)}):[/cyan]\n")
     for alias, model in config.model_aliases.items():
         console.print(f"  [bold]{alias}[/bold] → {model}")
+
+
+@config_app.command("set-default-base")
+def config_set_default_base(
+    base_agent: str = typer.Argument(help="Base agent name (e.g., 'default') or 'none' to disable"),
+):
+    """Set the default base agent for inheritance."""
+    from tsugite.config import get_config_path, set_default_base_agent
+
+    try:
+        # Handle "none" as None
+        agent_value = None if base_agent.lower() == "none" else base_agent
+
+        set_default_base_agent(agent_value)
+        config_path = get_config_path()
+
+        if agent_value is None:
+            console.print("[green]✓ Default base agent disabled[/green]")
+        else:
+            console.print(f"[green]✓ Default base agent set to:[/green] {base_agent}")
+
+        console.print(f"[dim]Saved to: {config_path}[/dim]")
+    except Exception as e:
+        console.print(f"[red]Failed to set default base agent: {e}[/red]")
+        raise typer.Exit(1)
 
 
 if __name__ == "__main__":
