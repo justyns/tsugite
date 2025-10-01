@@ -6,7 +6,7 @@ from datetime import datetime
 
 
 @dataclass
-class TestResult:
+class BenchmarkTestResult:
     """Result from running a single test."""
 
     test_id: str
@@ -87,7 +87,7 @@ class BenchmarkMetrics:
         return weighted_sum / total_weight
 
     @staticmethod
-    def calculate_reliability_score(test_results: List[TestResult]) -> float:
+    def calculate_reliability_score(test_results: List[BenchmarkTestResult]) -> float:
         """Calculate reliability score based on error patterns."""
         if not test_results:
             return 0.0
@@ -103,7 +103,7 @@ class BenchmarkMetrics:
         return reliability
 
     @staticmethod
-    def calculate_category_performance(test_results: Dict[str, TestResult], category: str) -> CategoryMetrics:
+    def calculate_category_performance(test_results: Dict[str, BenchmarkTestResult], category: str) -> CategoryMetrics:
         """Calculate performance metrics for a specific category."""
         category_results = [result for result in test_results.values() if result.test_id.startswith(category)]
 
@@ -169,7 +169,7 @@ class BenchmarkMetrics:
         return round(improvement, 4)
 
     @staticmethod
-    def aggregate_test_results(results: List[TestResult]) -> Dict[str, Any]:
+    def aggregate_test_results(results: List[BenchmarkTestResult]) -> Dict[str, Any]:
         """Aggregate multiple test results into summary statistics."""
         if not results:
             return {

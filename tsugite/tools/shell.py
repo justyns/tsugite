@@ -6,6 +6,43 @@ from typing import Optional
 from tsugite.tools import tool
 
 
+DANGEROUS_SHELL_SUBSTRINGS = (
+    "rm -rf /",
+    "sudo rm",
+    "dd if=",
+    "mkfs",
+    "format",
+    "> /dev/",
+)
+
+
+BLOCKED_SAFE_MODE_COMMANDS = {
+    "rm",
+    "rmdir",
+    "del",
+    "format",
+    "fdisk",
+    "mkfs",
+    "sudo",
+    "su",
+    "chmod",
+    "chown",
+    "passwd",
+    "wget",
+    "curl",
+    "nc",
+    "netcat",
+    "ssh",
+    "scp",
+    "python",
+    "perl",
+    "ruby",
+    "node",
+    "bash",
+    "sh",
+}
+
+
 @tool
 def run(command: str, timeout: int = 30, shell: bool = True) -> str:
     """Execute a shell command and return its output.
@@ -18,16 +55,7 @@ def run(command: str, timeout: int = 30, shell: bool = True) -> str:
     try:
         # Basic safety check, isn't very thorough
         # TODO: Replace this with something that parses the command to look for pipes/etc
-        dangerous_patterns = [
-            "rm -rf /",
-            "sudo rm",
-            "dd if=",
-            "mkfs",
-            "format",
-            "> /dev/",
-        ]
-
-        for pattern in dangerous_patterns:
+        for pattern in DANGEROUS_SHELL_SUBSTRINGS:
             if pattern in command.lower():
                 raise ValueError(f"Dangerous command pattern detected: {pattern}")
 
@@ -88,32 +116,6 @@ def run_safe(command: str, timeout: int = 30) -> str:
         RuntimeError: If command execution fails or is deemed unsafe
     """
     # TODO: maybe make a whitelist instead of blacklist?
-    dangerous_commands = [
-        "rm",
-        "rmdir",
-        "del",
-        "format",
-        "fdisk",
-        "mkfs",
-        "sudo",
-        "su",
-        "chmod",
-        "chown",
-        "passwd",
-        "wget",
-        "curl",
-        "nc",
-        "netcat",
-        "ssh",
-        "scp",
-        "python",
-        "perl",
-        "ruby",
-        "node",
-        "bash",
-        "sh",
-    ]
-
     try:
         cmd_parts = shlex.split(command)
         if not cmd_parts:
@@ -121,7 +123,7 @@ def run_safe(command: str, timeout: int = 30) -> str:
 
         command_name = cmd_parts[0].lower()
 
-        if command_name in dangerous_commands:
+        if command_name in BLOCKED_SAFE_MODE_COMMANDS:
             raise ValueError(f"Command '{command_name}' is not allowed in safe mode")
 
         return run(command, timeout=timeout, shell=False)

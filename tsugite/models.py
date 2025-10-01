@@ -108,6 +108,21 @@ def get_model(model_string: str, **kwargs):
             **{k: v for k, v in kwargs.items() if k != "api_key"},
         )
 
+    elif provider == "github_copilot":
+        # Use LiteLLM for GitHub Copilot (requires paid subscription)
+        # OAuth device flow handled automatically by LiteLLM on first use
+        litellm_model = f"github_copilot/{model_name}"
+
+        # GitHub Copilot requires specific headers
+        extra_headers = kwargs.get("extra_headers", {})
+        if "editor-version" not in extra_headers:
+            extra_headers["editor-version"] = "vscode/1.95.0"
+        if "Copilot-Integration-Id" not in extra_headers:
+            extra_headers["Copilot-Integration-Id"] = "vscode-chat"
+
+        kwargs_with_headers = {**kwargs, "extra_headers": extra_headers}
+        return LiteLLMModel(model_id=litellm_model, **kwargs_with_headers)
+
     else:
         # Fallback: try LiteLLM with the provider prefix
         # LiteLLM supports 100+ providers

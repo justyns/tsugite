@@ -13,7 +13,7 @@ import re
 
 from ..agent_runner import run_agent
 from ..utils import parse_yaml_frontmatter
-from .metrics import BenchmarkMetrics, TestResult, ModelPerformance
+from .metrics import BenchmarkMetrics, BenchmarkTestResult, ModelPerformance
 from .evaluators import CorrectnessEvaluator, PerformanceEvaluator, QualityEvaluator, LLMEvaluator
 
 
@@ -84,7 +84,7 @@ class BenchmarkResult:
     end_time: datetime
     total_duration: float
     model_performances: Dict[str, ModelPerformance]
-    test_results: Dict[str, Dict[str, TestResult]]  # model -> test_id -> result
+    test_results: Dict[str, Dict[str, BenchmarkTestResult]]  # model -> test_id -> result
     summary: Dict[str, Any]
     errors: List[str] = field(default_factory=list)
 
@@ -549,7 +549,7 @@ class BenchmarkRunner:
                 print(f"    Error: {model_errors[-1]}")
 
                 # Create failed test result
-                test_result = TestResult(
+                test_result = BenchmarkTestResult(
                     test_id=test.test_id,
                     model=model_name,
                     passed=False,
@@ -582,7 +582,7 @@ class BenchmarkRunner:
 
         return model_performance, model_test_results, model_errors
 
-    async def _run_single_test(self, model_name: str, test: BenchmarkTest) -> TestResult:
+    async def _run_single_test(self, model_name: str, test: BenchmarkTest) -> BenchmarkTestResult:
         """Run all test cases for a single agent against a model."""
         start_time = time.time()
 
@@ -706,7 +706,7 @@ Make sure your plan includes the key steps and reasoning before you start execut
                 if len(raw_outputs) == 1:
                     output_content = raw_outputs[0]
 
-                return TestResult(
+                return BenchmarkTestResult(
                     test_id=test.test_id,
                     model=model_name,
                     passed=overall_passed,
@@ -729,7 +729,7 @@ Make sure your plan includes the key steps and reasoning before you start execut
             end_time = time.time()
             duration = end_time - start_time
 
-            return TestResult(
+            return BenchmarkTestResult(
                 test_id=test.test_id,
                 model=model_name,
                 passed=False,
@@ -826,7 +826,7 @@ Make sure your plan includes the key steps and reasoning before you start execut
                     output=result,
                     task_description=test_case.prompt,
                     evaluation_criteria=test_case.llm_evaluation_criteria,
-                    rubric=test_case.llm_evaluation_rubric if test_case.llm_evaluation_rubric else None,
+                    rubric=test_case.llm_evaluation_rubric or {},
                 )
                 evaluation["metrics"]["llm_evaluation"] = llm_eval
 
@@ -976,12 +976,14 @@ Make sure your plan includes the key steps and reasoning before you start execut
 
             # LLM evaluation (for complex tasks without predetermined outputs)
             if test.use_llm_evaluation and test.llm_evaluation_criteria:
+                expected_format = "" if not test.expected_type or test.expected_type == "string" else test.expected_type
+
                 llm_eval = await self.llm_evaluator.evaluate(
                     output=result,
                     task_description=test.description,
                     evaluation_criteria=test.llm_evaluation_criteria,
-                    expected_format=test.expected_type if test.expected_type != "string" else None,
-                    rubric=test.llm_evaluation_rubric if test.llm_evaluation_rubric else None,
+                    expected_format=expected_format,
+                    rubric=test.llm_evaluation_rubric or {},
                 )
                 evaluation["metrics"]["llm_evaluation"] = llm_eval
 
@@ -1009,7 +1011,7 @@ Make sure your plan includes the key steps and reasoning before you start execut
     def _generate_summary(
         self,
         model_performances: Dict[str, ModelPerformance],
-        test_results: Dict[str, Dict[str, TestResult]],
+        test_results: Dict[str, Dict[str, BenchmarkTestResult]],
     ) -> Dict[str, Any]:
         """Generate summary statistics from benchmark results."""
         summary = {

@@ -3,19 +3,19 @@
 import pytest
 from datetime import datetime
 from tsugite.benchmark.metrics import (
-    TestResult,
+    BenchmarkTestResult,
     ModelPerformance,
     CategoryMetrics,
     BenchmarkMetrics,
 )
 
 
-class TestTestResult:
-    """Test TestResult data structure."""
+class TestBenchmarkTestResult:
+    """Test BenchmarkTestResult data structure."""
 
     def test_test_result_creation(self):
         """Test creating a test result."""
-        result = TestResult(
+        result = BenchmarkTestResult(
             test_id="test_001",
             model="test-model:v1",
             passed=True,
@@ -41,7 +41,7 @@ class TestTestResult:
 
     def test_test_result_with_error(self):
         """Test creating a test result with error."""
-        result = TestResult(
+        result = BenchmarkTestResult(
             test_id="test_002",
             model="test-model:v1",
             passed=False,
@@ -158,8 +158,8 @@ class TestBenchmarkMetrics:
         """Test reliability score calculation."""
         # All successful tests
         successful_results = [
-            TestResult("test1", "model", True, 1.0, 1.0, "output", "expected"),
-            TestResult("test2", "model", True, 1.0, 1.0, "output", "expected"),
+            BenchmarkTestResult("test1", "model", True, 1.0, 1.0, "output", "expected"),
+            BenchmarkTestResult("test2", "model", True, 1.0, 1.0, "output", "expected"),
         ]
 
         reliability = BenchmarkMetrics.calculate_reliability_score(successful_results)
@@ -167,8 +167,8 @@ class TestBenchmarkMetrics:
 
         # Some errors
         mixed_results = [
-            TestResult("test1", "model", True, 1.0, 1.0, "output", "expected"),
-            TestResult("test2", "model", False, 0.0, 0.0, "", "expected", error="Failed"),
+            BenchmarkTestResult("test1", "model", True, 1.0, 1.0, "output", "expected"),
+            BenchmarkTestResult("test2", "model", False, 0.0, 0.0, "", "expected", error="Failed"),
         ]
 
         reliability = BenchmarkMetrics.calculate_reliability_score(mixed_results)
@@ -176,8 +176,8 @@ class TestBenchmarkMetrics:
 
         # Timeout errors (more penalty)
         timeout_results = [
-            TestResult("test1", "model", True, 1.0, 1.0, "output", "expected"),
-            TestResult("test2", "model", False, 0.0, 0.0, "", "expected", error="timeout"),
+            BenchmarkTestResult("test1", "model", True, 1.0, 1.0, "output", "expected"),
+            BenchmarkTestResult("test2", "model", False, 0.0, 0.0, "", "expected", error="timeout"),
         ]
 
         timeout_reliability = BenchmarkMetrics.calculate_reliability_score(timeout_results)
@@ -190,11 +190,11 @@ class TestBenchmarkMetrics:
     def test_calculate_category_performance(self):
         """Test category performance calculation."""
         test_results = {
-            "basic_001": TestResult("basic_001", "model1", True, 0.9, 1.0, "out", "exp"),
-            "basic_002": TestResult("basic_002", "model1", True, 0.8, 1.0, "out", "exp"),
-            "basic_001_m2": TestResult("basic_001", "model2", True, 0.7, 1.0, "out", "exp"),
-            "basic_002_m2": TestResult("basic_002", "model2", True, 0.6, 1.0, "out", "exp"),
-            "tools_001": TestResult("tools_001", "model1", True, 0.95, 1.0, "out", "exp"),
+            "basic_001": BenchmarkTestResult("basic_001", "model1", True, 0.9, 1.0, "out", "exp"),
+            "basic_002": BenchmarkTestResult("basic_002", "model1", True, 0.8, 1.0, "out", "exp"),
+            "basic_001_m2": BenchmarkTestResult("basic_001", "model2", True, 0.7, 1.0, "out", "exp"),
+            "basic_002_m2": BenchmarkTestResult("basic_002", "model2", True, 0.6, 1.0, "out", "exp"),
+            "tools_001": BenchmarkTestResult("tools_001", "model1", True, 0.95, 1.0, "out", "exp"),
         }
 
         # Test basic category
@@ -233,9 +233,9 @@ class TestBenchmarkMetrics:
     def test_aggregate_test_results(self):
         """Test aggregating multiple test results."""
         results = [
-            TestResult("test1", "model", True, 0.9, 1.0, "out", "exp", cost=0.01),
-            TestResult("test2", "model", True, 0.8, 2.0, "out", "exp", cost=0.02),
-            TestResult(
+            BenchmarkTestResult("test1", "model", True, 0.9, 1.0, "out", "exp", cost=0.01),
+            BenchmarkTestResult("test2", "model", True, 0.8, 2.0, "out", "exp", cost=0.02),
+            BenchmarkTestResult(
                 "test3",
                 "model",
                 False,

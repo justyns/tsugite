@@ -12,7 +12,7 @@ from tsugite.benchmark.core import (
     BenchmarkTest,
     BenchmarkResult,
 )
-from tsugite.benchmark.metrics import TestResult, ModelPerformance
+from tsugite.benchmark.metrics import BenchmarkTestResult, ModelPerformance
 
 
 @pytest.fixture
@@ -167,7 +167,7 @@ class TestBenchmarkRunner:
 
         result = await runner._run_single_test("test-model:v1", test)
 
-        assert isinstance(result, TestResult)
+        assert isinstance(result, BenchmarkTestResult)
         assert result.test_id == "test_001"
         assert result.model == "test-model:v1"
         assert result.output == "42"

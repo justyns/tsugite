@@ -7,7 +7,7 @@ from typing import Dict, Any, List, Optional
 from dataclasses import asdict
 
 from .core import BenchmarkResult
-from .metrics import TestResult, ModelPerformance
+from .metrics import BenchmarkTestResult, ModelPerformance
 
 
 class ReportGenerator:

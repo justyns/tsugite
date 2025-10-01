@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from datetime import datetime
 from tsugite.benchmark.core import BenchmarkResult, BenchmarkConfig
-from tsugite.benchmark.metrics import TestResult, ModelPerformance
+from tsugite.benchmark.metrics import BenchmarkTestResult, ModelPerformance
 from tsugite.benchmark.reports import ReportGenerator
 
 
@@ -46,16 +46,16 @@ def sample_benchmark_result():
 
     test_results = {
         "model1": {
-            "basic_001": TestResult("basic_001", "model1", True, 0.9, 1.5, "42", "42"),
-            "basic_002": TestResult("basic_002", "model1", False, 0.3, 2.0, "24", "42"),
-            "tools_001": TestResult("tools_001", "model1", True, 0.8, 2.5, "success", "success"),
-            "tools_002": TestResult("tools_002", "model1", True, 0.7, 2.0, "done", "done"),
+            "basic_001": BenchmarkTestResult("basic_001", "model1", True, 0.9, 1.5, "42", "42"),
+            "basic_002": BenchmarkTestResult("basic_002", "model1", False, 0.3, 2.0, "24", "42"),
+            "tools_001": BenchmarkTestResult("tools_001", "model1", True, 0.8, 2.5, "success", "success"),
+            "tools_002": BenchmarkTestResult("tools_002", "model1", True, 0.7, 2.0, "done", "done"),
         },
         "model2": {
-            "basic_001": TestResult("basic_001", "model2", True, 1.0, 2.0, "42", "42"),
-            "basic_002": TestResult("basic_002", "model2", True, 0.9, 3.0, "42", "42"),
-            "tools_001": TestResult("tools_001", "model2", True, 1.0, 4.0, "success", "success"),
-            "tools_002": TestResult("tools_002", "model2", True, 0.8, 3.0, "done", "done"),
+            "basic_001": BenchmarkTestResult("basic_001", "model2", True, 1.0, 2.0, "42", "42"),
+            "basic_002": BenchmarkTestResult("basic_002", "model2", True, 0.9, 3.0, "42", "42"),
+            "tools_001": BenchmarkTestResult("tools_001", "model2", True, 1.0, 4.0, "success", "success"),
+            "tools_002": BenchmarkTestResult("tools_002", "model2", True, 0.8, 3.0, "done", "done"),
         },
     }
 

@@ -1,9 +1,10 @@
 """Bridge between Tsugite's tool registry and smolagents Tool class."""
 
 import inspect
-from typing import Dict, Any, List, Optional, Union
+from functools import wraps
+from typing import Iterable, List, Optional
 from smolagents import tool as smol_tool
-from tsugite.tools import get_tool, call_tool, list_tools, _tools
+from tsugite.tools import get_tool, call_tool, list_tools
 
 
 def create_smolagents_tool_from_tsugite(tool_name: str):
@@ -16,29 +17,21 @@ def create_smolagents_tool_from_tsugite(tool_name: str):
     # Create a wrapper function with the correct signature
     sig = inspect.signature(tool_info.func)
 
-    # Create wrapper function dynamically with proper signature
+    @wraps(tool_info.func)
     def wrapper_func(*args, **kwargs):
         try:
-            # Convert positional args to keyword args based on parameter names
-            param_names = list(sig.parameters.keys())
-            for i, arg in enumerate(args):
-                if i < len(param_names):
-                    kwargs[param_names[i]] = arg
-            return call_tool(tool_name, **kwargs)
+            bound_args = sig.bind_partial(*args, **kwargs)
+            return call_tool(tool_name, **bound_args.arguments)
         except Exception as e:
             return f"Tool '{tool_name}' failed: {e}"
 
-    # Copy function metadata
-    wrapper_func.__name__ = tool_name
-    wrapper_func.__doc__ = tool_info.func.__doc__  # Copy full docstring, not just description
-    wrapper_func.__annotations__ = tool_info.func.__annotations__
-    wrapper_func.__signature__ = sig
+    setattr(wrapper_func, "__signature__", sig)
 
     # Apply smolagents tool decorator
     return smol_tool(wrapper_func)
 
 
-def get_smolagents_tools(tool_names: List[str] = None) -> List:
+def get_smolagents_tools(tool_names: Optional[Iterable[str]] = None) -> List:
     """Convert Tsugite tools to smolagents tools.
 
     Args:

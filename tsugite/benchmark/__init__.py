@@ -9,7 +9,7 @@ from .evaluators import (
 )
 from .metrics import (
     BenchmarkMetrics,
-    TestResult,
+    BenchmarkTestResult,
     ModelPerformance,
 )
 from .reports import ReportGenerator
@@ -23,7 +23,7 @@ __all__ = [
     "QualityEvaluator",
     "CostEvaluator",
     "BenchmarkMetrics",
-    "TestResult",
+    "BenchmarkTestResult",
     "ModelPerformance",
     "ReportGenerator",
 ]

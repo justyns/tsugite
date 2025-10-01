@@ -42,6 +42,60 @@
 - `instructions` *(optional string)* – Additional system guidance appended to Tsugite's default runtime instructions before hitting the LLM.
 - `mcp_servers` *(optional dict)* – MCP servers to load tools from. Keys are server names from MCP config file (see XDG paths below), values are optional tool lists.
 
+## Model Providers
+
+Tsugite supports multiple model providers through LiteLLM integration. Specify models using the format `provider:model-name`.
+
+### Supported Providers
+
+**Ollama** (local models):
+```yaml
+model: ollama:qwen2.5-coder:7b
+model: ollama:llama3.2:latest
+```
+- Connects to local Ollama instance at `http://localhost:11434/v1`
+- No API key required
+
+**OpenAI**:
+```yaml
+model: openai:gpt-4
+model: openai:gpt-4o-mini
+```
+- Requires `OPENAI_API_KEY` environment variable
+- Billed per token via OpenAI API
+
+**Anthropic** (Claude):
+```yaml
+model: anthropic:claude-3-5-sonnet-20241022
+model: anthropic:claude-3-5-haiku-20241022
+```
+- Requires `ANTHROPIC_API_KEY` environment variable
+- Billed per token via Anthropic API
+
+**Google** (Gemini):
+```yaml
+model: google:gemini-1.5-pro
+model: google:gemini-2.0-flash-exp
+```
+- Requires Google API key
+- Billed per token via Google AI API
+
+**GitHub Copilot**:
+```yaml
+model: github_copilot:gpt-4
+```
+- Requires paid GitHub Copilot subscription
+- First run will prompt OAuth authentication via device flow
+- LiteLLM stores auth tokens automatically
+- **Billed via subscription, not per-token**
+
+Optional environment variables:
+- `GITHUB_COPILOT_TOKEN_DIR` - Custom token storage directory
+- `GITHUB_COPILOT_ACCESS_TOKEN_FILE` - Custom access token file path
+
+**Other Providers**:
+Tsugite supports 100+ providers through LiteLLM. Use format `provider:model-name` and it will attempt to connect via LiteLLM. See [LiteLLM providers](https://docs.litellm.ai/docs/providers) for full list.
+
 ## MCP Server Integration
 
 Tsugite supports loading tools from [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) servers, enabling access to external tools and data sources.

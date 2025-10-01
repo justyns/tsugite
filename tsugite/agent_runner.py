@@ -188,6 +188,10 @@ def run_agent(
             "instructions": combined_instructions or None,
         }
 
+        # Use markdown code blocks for GitHub Copilot (more familiar format)
+        # if model_string.startswith("github_copilot:"):
+        #     agent_kwargs["code_block_tags"] = "markdown"
+
         # Add custom logger if provided
         if custom_logger is not None:
             agent_kwargs["logger"] = custom_logger
