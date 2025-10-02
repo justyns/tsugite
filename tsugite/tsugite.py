@@ -512,6 +512,16 @@ def benchmark_command(
             if summary.get("best_model"):
                 console.print(f"Best Model: {summary['best_model']}")
 
+            # Print detailed per-model performance
+            if len(result.model_performances) > 0:
+                console.print("\n[bold]Model Performance:[/bold]")
+                for model_name, perf in result.model_performances.items():
+                    console.print(f"  [cyan]{model_name}[/cyan]:")
+                    console.print(f"    Accuracy: {perf.accuracy:.1%} ({perf.passed_tests}/{perf.total_tests} passed)")
+                    console.print(f"    Avg Duration: {perf.average_duration:.2f}s")
+                    if perf.total_cost > 0:
+                        console.print(f"    Total Cost: ${perf.total_cost:.4f}")
+
             if result.errors:
                 console.print(f"\n[yellow]Errors encountered: {len(result.errors)}[/yellow]")
 

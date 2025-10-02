@@ -795,10 +795,32 @@ Make sure your plan includes the key steps and reasoning before you start execut
                     if criterion == "exact_match":
                         custom_checks[criterion] = result.strip() == expected_value
                     elif criterion == "contains":
+                        # Case-insensitive contains check
+                        result_lower = result.lower()
                         if isinstance(expected_value, list):
-                            custom_checks[criterion] = all(item in result for item in expected_value)
+                            custom_checks[criterion] = all(str(item).lower() in result_lower for item in expected_value)
                         else:
-                            custom_checks[criterion] = expected_value in result
+                            custom_checks[criterion] = str(expected_value).lower() in result_lower
+                    elif criterion == "valid_json":
+                        # Actually parse and validate JSON
+                        try:
+                            json.loads(result.strip())
+                            custom_checks[criterion] = expected_value  # true means should be valid
+                        except (json.JSONDecodeError, ValueError):
+                            custom_checks[criterion] = not expected_value  # false if expecting invalid
+                    elif criterion == "contains_keys":
+                        # Check if parsed JSON contains required keys
+                        try:
+                            parsed = json.loads(result.strip())
+                            if isinstance(parsed, dict):
+                                if isinstance(expected_value, list):
+                                    custom_checks[criterion] = all(key in parsed for key in expected_value)
+                                else:
+                                    custom_checks[criterion] = expected_value in parsed
+                            else:
+                                custom_checks[criterion] = False
+                        except (json.JSONDecodeError, ValueError, TypeError):
+                            custom_checks[criterion] = False
                     elif criterion == "content_pattern":
                         import re
 
