@@ -8,17 +8,14 @@ from jinja2 import DictLoader, Environment, StrictUndefined
 
 
 def now() -> str:
-    """Return current timestamp."""
     return datetime.now().isoformat()
 
 
 def today() -> str:
-    """Return today's date."""
     return datetime.now().strftime("%Y-%m-%d")
 
 
 def slugify(text: str) -> str:
-    """Convert text to slug format."""
     import re
 
     text = text.lower()
@@ -29,14 +26,12 @@ def slugify(text: str) -> str:
 
 
 def file_exists(path: str) -> bool:
-    """Check if a file or directory exists."""
     from pathlib import Path
 
     return Path(path).exists()
 
 
 def is_file(path: str) -> bool:
-    """Check if path exists and is a file."""
     from pathlib import Path
 
     p = Path(path)
@@ -44,7 +39,6 @@ def is_file(path: str) -> bool:
 
 
 def is_dir(path: str) -> bool:
-    """Check if path exists and is a directory."""
     from pathlib import Path
 
     p = Path(path)
@@ -52,7 +46,6 @@ def is_dir(path: str) -> bool:
 
 
 def read_text(path: str, default: str = "") -> str:
-    """Safely read file content, returning default on error."""
     from pathlib import Path
 
     try:

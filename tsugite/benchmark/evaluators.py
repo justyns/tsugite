@@ -147,7 +147,7 @@ class CorrectnessEvaluator(BaseEvaluator):
 
     def _json_similarity(self, obj1: Any, obj2: Any) -> float:
         """Calculate similarity between JSON objects."""
-        if type(obj1) != type(obj2):
+        if type(obj1) is not type(obj2):
             return 0.0
 
         if isinstance(obj1, dict):
@@ -537,7 +537,7 @@ class LLMEvaluator(BaseEvaluator):
 
                 try:
                     os.unlink(temp_agent_path)
-                except:
+                except Exception:
                     pass
 
         except Exception as e:

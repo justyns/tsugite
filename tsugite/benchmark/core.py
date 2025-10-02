@@ -712,8 +712,8 @@ Make sure your plan includes the key steps and reasoning before you start execut
                     output=output_content,
                     expected_output=expected_output or "",
                     error=None,
-                    token_usage={},  # TODO: Aggregate from individual cases
-                    cost=0.0,  # TODO: Aggregate from individual cases
+                    token_usage={},
+                    cost=0.0,
                     metrics=aggregate_metrics,
                 )
 

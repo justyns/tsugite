@@ -1,10 +1,11 @@
 """Tsugite configuration management."""
 
 import json
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Optional
+
+from .xdg import get_xdg_config_path
 
 
 @dataclass
@@ -21,32 +22,7 @@ class Config:
 
 
 def get_config_path() -> Path:
-    """Get the configuration file path.
-
-    Checks locations in order of precedence:
-    1. ~/.tsugite/config.json
-    2. $XDG_CONFIG_HOME/tsugite/config.json (if XDG_CONFIG_HOME is set)
-    3. ~/.config/tsugite/config.json (XDG default)
-
-    Returns the first existing file, or the preferred location for new files.
-    """
-    home_tsugite_path = Path.home() / ".tsugite" / "config.json"
-    if home_tsugite_path.exists():
-        return home_tsugite_path
-
-    xdg_config = os.environ.get("XDG_CONFIG_HOME")
-    if xdg_config:
-        xdg_path = Path(xdg_config) / "tsugite" / "config.json"
-        if xdg_path.exists():
-            return xdg_path
-
-    default_path = Path.home() / ".config" / "tsugite" / "config.json"
-    if default_path.exists():
-        return default_path
-
-    if xdg_config:
-        return Path(xdg_config) / "tsugite" / "config.json"
-    return default_path
+    return get_xdg_config_path("config.json")
 
 
 def load_config(path: Optional[Path] = None) -> Config:

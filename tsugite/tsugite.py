@@ -13,6 +13,7 @@ from rich.panel import Panel
 
 from tsugite.agent_runner import get_agent_info, run_agent, validate_agent_execution
 from tsugite.animation import loading_animation
+from tsugite.constants import TSUGITE_LOGO_NARROW, TSUGITE_LOGO_WIDE
 from tsugite.custom_ui import create_silent_logger, custom_agent_ui
 
 app = typer.Typer(
@@ -23,32 +24,17 @@ app = typer.Typer(
 
 console = Console()
 
-# < 80 columns
-TSUGITE_LOGO_NARROW = """
-╔╦╗╔═╗╦ ╦╔═╗╦╔╦╗╔═╗
- ║ ╚═╗║ ║║ ╦║ ║ ║╣
- ╩ ╚═╝╚═╝╚═╝╩ ╩ ╚═╝
-"""
-
-# >= 80 columns
-TSUGITE_LOGO_WIDE = """
- ███████████                              ███   █████
-░█░░░███░░░█                             ░░░   ░░███
-░   ░███  ░   █████  █████ ████  ███████ ████  ███████    ██████
-    ░███     ███░░  ░░███ ░███  ███░░███░░███ ░░░███░    ███░░███
-    ░███    ░░█████  ░███ ░███ ░███ ░███ ░███   ░███    ░███████
-    ░███     ░░░░███ ░███ ░███ ░███ ░███ ░███   ░███ ███░███░░░
-    █████    ██████  ░░████████░░███████ █████  ░░█████ ░░██████
-   ░░░░░    ░░░░░░    ░░░░░░░░  ░░░░░███░░░░░    ░░░░░   ░░░░░░
-                                ███ ░███
-                               ░░██████          Tsugite
-                                ░░░░░░
-"""
-
 
 def _get_logo(console: Console) -> str:
-    """Select appropriate logo based on terminal width."""
     return TSUGITE_LOGO_NARROW if console.width < 80 else TSUGITE_LOGO_WIDE
+
+
+def _get_error_console(headless: bool, console: Console) -> Console:
+    return Console(file=sys.stderr, no_color=True) if headless else console
+
+
+def _get_output_console() -> Console:
+    return Console(file=sys.stdout, no_color=True)
 
 
 def parse_cli_arguments(args: List[str]) -> tuple[List[str], str]:
@@ -226,8 +212,7 @@ def run(
         # Validate agent before execution
         is_valid, error_msg = validate_agent_execution(agent_file)
         if not is_valid:
-            error_console = Console(file=sys.stderr, no_color=True) if headless else console
-            error_console.print(f"[red]Agent validation failed: {error_msg}[/red]")
+            _get_error_console(headless, console).print(f"[red]Agent validation failed: {error_msg}[/red]")
             raise typer.Exit(1)
 
         # Detect if this is a multi-step agent
@@ -260,8 +245,7 @@ def run(
                 )
             elif headless:
                 # Headless mode: stderr for progress (if verbose), stdout for result
-                stderr_console = Console(file=sys.stderr, no_color=True)
-                stdout_console = Console(file=sys.stdout, no_color=True)
+                stderr_console = _get_error_console(True, console)
 
                 with custom_agent_ui(
                     console=stderr_console,
@@ -319,8 +303,7 @@ def run(
             # Display result
             if headless:
                 # Headless: plain result to stdout
-                stdout_console = Console(file=sys.stdout, no_color=True)
-                stdout_console.print(result)
+                _get_output_console().print(result)
             elif not silent:
                 console.print("\n" + "=" * 50)
                 console.print("[bold green]Agent Execution Complete[/bold green]")
@@ -328,22 +311,19 @@ def run(
                 console.print(result)
 
         except ValueError as e:
-            error_console = Console(file=sys.stderr, no_color=True) if headless else console
-            error_console.print(f"[red]Configuration error: {e}[/red]")
+            _get_error_console(headless, console).print(f"[red]Configuration error: {e}[/red]")
             raise typer.Exit(1)
         except RuntimeError as e:
-            error_console = Console(file=sys.stderr, no_color=True) if headless else console
-            error_console.print(f"[red]Execution error: {e}[/red]")
+            _get_error_console(headless, console).print(f"[red]Execution error: {e}[/red]")
             raise typer.Exit(1)
         except KeyboardInterrupt:
-            error_console = Console(file=sys.stderr, no_color=True) if headless else console
-            error_console.print("\n[yellow]Agent execution interrupted by user[/yellow]")
+            _get_error_console(headless, console).print("\n[yellow]Agent execution interrupted by user[/yellow]")
             raise typer.Exit(130)
         except Exception as e:
-            error_console = Console(file=sys.stderr, no_color=True) if headless else console
-            error_console.print(f"[red]Unexpected error: {e}[/red]")
+            err_console = _get_error_console(headless, console)
+            err_console.print(f"[red]Unexpected error: {e}[/red]")
             if not log_json:
-                error_console.print("\n[dim]Use --log-json for machine-readable output[/dim]")
+                err_console.print("\n[dim]Use --log-json for machine-readable output[/dim]")
             raise typer.Exit(1)
 
     finally:

@@ -28,16 +28,7 @@ def _combine_instructions(*segments: str) -> str:
 
 
 def execute_prefetch(prefetch_config: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Execute prefetch tools and return context.
-
-    Args:
-        prefetch_config: List of prefetch tool configurations
-
-    Returns:
-        Dictionary mapping assign names to tool results
-    """
     context = {}
-
     for config in prefetch_config:
         tool_name = config.get("tool")
         args = config.get("args", {})
@@ -47,8 +38,7 @@ def execute_prefetch(prefetch_config: List[Dict[str, Any]]) -> Dict[str, Any]:
             continue
 
         try:
-            result = call_tool(tool_name, **args)
-            context[assign_name] = result
+            context[assign_name] = call_tool(tool_name, **args)
         except Exception as e:
             print(f"Warning: Prefetch tool '{tool_name}' failed: {e}")
             context[assign_name] = None
@@ -208,11 +198,6 @@ def run_agent(
         agent_config = agent.config
     except Exception as e:
         raise ValueError(f"Failed to parse agent file: {e}")
-
-    combined_instructions = _combine_instructions(
-        TSUGITE_DEFAULT_INSTRUCTIONS,
-        getattr(agent_config, "instructions", ""),
-    )
 
     # Execute prefetch tools if any
     prefetch_context = {}

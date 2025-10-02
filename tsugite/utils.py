@@ -65,42 +65,12 @@ def lazy_import(module_path: str, attr_name: str = None, level: int = 1) -> Call
 
 
 def standardize_error_message(operation: str, target: str, error: Exception) -> str:
-    """Create standardized error messages across tools.
-
-    Args:
-        operation: The operation being performed (e.g., "read", "write", "parse")
-        target: The target of the operation (e.g., file path, tool name)
-        error: The original exception
-
-    Returns:
-        Formatted error message
-    """
     return f"Failed to {operation} {target}: {error}"
 
 
 def tool_error(tool_name: str, operation: str, details: str) -> RuntimeError:
-    """Create standardized tool execution errors.
-
-    Args:
-        tool_name: Name of the tool
-        operation: What the tool was trying to do
-        details: Error details
-
-    Returns:
-        RuntimeError with standardized message
-    """
     return RuntimeError(f"Tool '{tool_name}' failed to {operation}: {details}")
 
 
 def validation_error(item_type: str, item_name: str, issue: str) -> ValueError:
-    """Create standardized validation errors.
-
-    Args:
-        item_type: Type of item being validated (e.g., "agent", "parameter")
-        item_name: Name/identifier of the item
-        issue: Description of the validation issue
-
-    Returns:
-        ValueError with standardized message
-    """
     return ValueError(f"Invalid {item_type} '{item_name}': {issue}")

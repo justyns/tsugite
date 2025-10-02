@@ -52,8 +52,7 @@ def run(command: str, timeout: int = 30, shell: bool = True) -> str:
         shell: Whether to use shell execution (default: True)
     """
     try:
-        # Basic safety check, isn't very thorough
-        # TODO: Replace this with something that parses the command to look for pipes/etc
+        # Basic safety check for dangerous patterns
         for pattern in DANGEROUS_SHELL_SUBSTRINGS:
             if pattern in command.lower():
                 raise ValueError(f"Dangerous command pattern detected: {pattern}")
@@ -114,7 +113,6 @@ def run_safe(command: str, timeout: int = 30) -> str:
     Raises:
         RuntimeError: If command execution fails or is deemed unsafe
     """
-    # TODO: maybe make a whitelist instead of blacklist?
     try:
         cmd_parts = shlex.split(command)
         if not cmd_parts:
