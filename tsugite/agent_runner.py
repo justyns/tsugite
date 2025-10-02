@@ -54,6 +54,8 @@ def _execute_agent_with_prompt(
     trust_mcp_code: bool = False,
     delegation_agents: Optional[List[tuple[str, Path]]] = None,
     skip_task_reset: bool = False,
+    model_kwargs: Optional[Dict[str, Any]] = None,
+    injectable_vars: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Execute agent with a pre-rendered prompt.
 
@@ -67,6 +69,8 @@ def _execute_agent_with_prompt(
         trust_mcp_code: Trust MCP server code
         delegation_agents: Delegation agents list
         skip_task_reset: Skip resetting task manager (for multi-step agents)
+        model_kwargs: Additional model parameters (response_format, temperature, etc.)
+        injectable_vars: Variables to inject into Python execution namespace
 
     Returns:
         Agent execution result
@@ -78,10 +82,23 @@ def _execute_agent_with_prompt(
     if not skip_task_reset:
         reset_task_manager()
 
-    combined_instructions = _combine_instructions(
+    # Build base instructions
+    base_instructions = _combine_instructions(
         TSUGITE_DEFAULT_INSTRUCTIONS,
         getattr(agent_config, "instructions", ""),
     )
+
+    # Add variable documentation if variables are available
+    if injectable_vars:
+        var_docs = "\n\nAVAILABLE PYTHON VARIABLES:\n"
+        for var_name, var_value in injectable_vars.items():
+            preview = str(var_value)[:100]
+            if len(str(var_value)) > 100:
+                preview += "..."
+            var_docs += f"- {var_name}: {preview}\n"
+        combined_instructions = base_instructions + var_docs
+    else:
+        combined_instructions = base_instructions
 
     # Create smolagents tools
     try:
@@ -130,7 +147,7 @@ def _execute_agent_with_prompt(
         )
 
     try:
-        model = get_model(model_string)
+        model = get_model(model_string, **(model_kwargs or {}))
     except Exception as e:
         raise RuntimeError(f"Failed to create model '{model_string}': {e}")
 
@@ -141,6 +158,7 @@ def _execute_agent_with_prompt(
             "model": model,
             "max_steps": agent_config.max_steps,
             "instructions": combined_instructions or None,
+            "additional_authorized_imports": ["json"],
         }
 
         if custom_logger is not None:
@@ -148,6 +166,11 @@ def _execute_agent_with_prompt(
             agent_kwargs["verbosity_level"] = -1
 
         agent = CodeAgent(**agent_kwargs)
+
+        # Inject variables into Python execution namespace (for multi-step agents)
+        if injectable_vars and hasattr(agent, "python_executor"):
+            agent.python_executor.send_variables(injectable_vars)
+
         result = agent.run(rendered_prompt)
         return str(result)
 
@@ -431,6 +454,11 @@ def run_multistep_agent(
         except Exception as e:
             raise RuntimeError(f"Step '{step.name}' template rendering failed: {e}")
 
+        # Prepare variables to inject into Python namespace
+        # Filter out metadata variables, only inject step results
+        metadata_vars = {"user_prompt", "task_summary", "step_number", "step_name", "total_steps"}
+        injectable_vars = {k: v for k, v in step_context.items() if k not in metadata_vars}
+
         # Execute this step as a full agent run
         try:
             step_result = _execute_agent_with_prompt(
@@ -441,6 +469,8 @@ def run_multistep_agent(
                 trust_mcp_code=trust_mcp_code,
                 delegation_agents=delegation_agents,
                 skip_task_reset=True,  # Don't reset tasks between steps
+                model_kwargs=step.model_kwargs,
+                injectable_vars=injectable_vars,
             )
 
             final_result = step_result

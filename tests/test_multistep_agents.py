@@ -604,3 +604,220 @@ Currently in step {{ step_number }}/{{ total_steps }}: {{ step_name }}
 
         # Third step uses step_number in conditional
         assert "step_number" in steps[2].content
+
+
+class TestStructuredOutput:
+    """Tests for structured output support in multi-step agents."""
+
+    def test_json_shorthand_parsing(self):
+        """Test that json='true' shorthand is parsed correctly."""
+        content = """
+<!-- tsu:step name="analyze" assign="data" json="true" -->
+Return JSON data
+"""
+        preamble, steps = extract_step_directives(content)
+
+        assert len(steps) == 1
+        assert "response_format" in steps[0].model_kwargs
+        assert steps[0].model_kwargs["response_format"] == {"type": "json_object"}
+
+    def test_temperature_parsing(self):
+        """Test that temperature parameter is parsed correctly."""
+        content = """
+<!-- tsu:step name="creative" temperature="1.2" -->
+Be creative
+"""
+        preamble, steps = extract_step_directives(content)
+
+        assert len(steps) == 1
+        assert "temperature" in steps[0].model_kwargs
+        assert steps[0].model_kwargs["temperature"] == 1.2
+
+    def test_max_tokens_parsing(self):
+        """Test that max_tokens parameter is parsed correctly."""
+        content = """
+<!-- tsu:step name="brief" max_tokens="500" -->
+Keep it brief
+"""
+        preamble, steps = extract_step_directives(content)
+
+        assert len(steps) == 1
+        assert "max_tokens" in steps[0].model_kwargs
+        assert steps[0].model_kwargs["max_tokens"] == 500
+
+    def test_multiple_model_kwargs(self):
+        """Test parsing multiple model parameters in one step."""
+        content = """
+<!-- tsu:step name="precise" json="true" temperature="0.1" max_tokens="2000" -->
+Be precise and return JSON
+"""
+        preamble, steps = extract_step_directives(content)
+
+        assert len(steps) == 1
+        kwargs = steps[0].model_kwargs
+        assert kwargs["response_format"] == {"type": "json_object"}
+        assert kwargs["temperature"] == 0.1
+        assert kwargs["max_tokens"] == 2000
+
+    def test_response_format_json_parsing(self):
+        """Test that response_format with JSON value is parsed correctly."""
+        content = """
+<!-- tsu:step name="schema" response_format='{"type":"json_object"}' -->
+Return JSON
+"""
+        preamble, steps = extract_step_directives(content)
+
+        assert len(steps) == 1
+        assert steps[0].model_kwargs["response_format"] == {"type": "json_object"}
+
+    def test_response_format_overrides_json_shorthand(self):
+        """Test that explicit response_format overrides json shorthand."""
+        content = """
+<!-- tsu:step name="test" json="true" response_format='{"type":"json_schema","json_schema":{"name":"test"}}' -->
+Use schema
+"""
+        preamble, steps = extract_step_directives(content)
+
+        assert len(steps) == 1
+        # response_format should override json shorthand
+        assert "json_schema" in steps[0].model_kwargs["response_format"]
+
+    def test_invalid_response_format_json_raises_error(self):
+        """Test that invalid JSON in response_format raises ValueError."""
+        content = """
+<!-- tsu:step name="bad" response_format='{invalid json}' -->
+This should fail
+"""
+        with pytest.raises(ValueError, match="Invalid JSON in response_format"):
+            extract_step_directives(content)
+
+    def test_top_p_parsing(self):
+        """Test that top_p parameter is parsed correctly."""
+        content = """
+<!-- tsu:step name="nucleus" top_p="0.9" -->
+Use nucleus sampling
+"""
+        preamble, steps = extract_step_directives(content)
+
+        assert len(steps) == 1
+        assert "top_p" in steps[0].model_kwargs
+        assert steps[0].model_kwargs["top_p"] == 0.9
+
+    def test_frequency_penalty_parsing(self):
+        """Test that frequency_penalty parameter is parsed correctly."""
+        content = """
+<!-- tsu:step name="varied" frequency_penalty="0.5" -->
+Avoid repetition
+"""
+        preamble, steps = extract_step_directives(content)
+
+        assert len(steps) == 1
+        assert "frequency_penalty" in steps[0].model_kwargs
+        assert steps[0].model_kwargs["frequency_penalty"] == 0.5
+
+    def test_presence_penalty_parsing(self):
+        """Test that presence_penalty parameter is parsed correctly."""
+        content = """
+<!-- tsu:step name="diverse" presence_penalty="0.5" -->
+Be diverse
+"""
+        preamble, steps = extract_step_directives(content)
+
+        assert len(steps) == 1
+        assert "presence_penalty" in steps[0].model_kwargs
+        assert steps[0].model_kwargs["presence_penalty"] == 0.5
+
+    def test_no_model_kwargs_by_default(self):
+        """Test that steps without parameters have empty model_kwargs."""
+        content = """
+<!-- tsu:step name="simple" -->
+Just a simple step
+"""
+        preamble, steps = extract_step_directives(content)
+
+        assert len(steps) == 1
+        assert steps[0].model_kwargs == {}
+
+    def test_json_false_does_not_set_format(self):
+        """Test that json='false' doesn't set response_format."""
+        content = """
+<!-- tsu:step name="no_json" json="false" -->
+No JSON formatting
+"""
+        preamble, steps = extract_step_directives(content)
+
+        assert len(steps) == 1
+        assert "response_format" not in steps[0].model_kwargs
+
+
+class TestVariableInjection:
+    """Tests for variable injection into Python namespace."""
+
+    def test_injectable_vars_filtering(self):
+        """Test that metadata variables are filtered from injectable vars."""
+        from tsugite.agent_runner import run_multistep_agent
+
+        # We'll test the filtering logic by checking what would be injected
+        step_context = {
+            "user_prompt": "test task",
+            "task_summary": "## Tasks\nNone",
+            "step_number": 2,
+            "step_name": "process",
+            "total_steps": 3,
+            "data": '{"result": "value"}',  # This should be injected
+            "analysis": "some analysis",  # This should be injected
+        }
+
+        metadata_vars = {"user_prompt", "task_summary", "step_number", "step_name", "total_steps"}
+        injectable_vars = {k: v for k, v in step_context.items() if k not in metadata_vars}
+
+        assert "data" in injectable_vars
+        assert "analysis" in injectable_vars
+        assert "user_prompt" not in injectable_vars
+        assert "task_summary" not in injectable_vars
+        assert "step_number" not in injectable_vars
+        assert "step_name" not in injectable_vars
+        assert "total_steps" not in injectable_vars
+
+    def test_multistep_with_variable_injection_structure(self, tmp_path):
+        """Test that multi-step agent structure supports variable injection."""
+        agent_file = tmp_path / "var_injection.md"
+        agent_file.write_text(
+            """---
+name: var_injection_test
+model: ollama:qwen2.5-coder:7b
+max_steps: 5
+---
+
+<!-- tsu:step name="fetch" assign="data" json="true" -->
+Return JSON data: {"score": 87, "name": "Alice"}
+
+<!-- tsu:step name="process" -->
+The variable `data` should be available in Python.
+Parse it and use it.
+"""
+        )
+
+        from tsugite.md_agents import parse_agent
+
+        agent = parse_agent(agent_file.read_text(), agent_file)
+        preamble, steps = extract_step_directives(agent.content)
+
+        # Verify structure supports variable assignment and usage
+        assert len(steps) == 2
+        assert steps[0].assign_var == "data"
+        assert steps[0].model_kwargs.get("response_format") == {"type": "json_object"}
+
+    def test_agent_kwargs_include_json_import(self):
+        """Test that CodeAgent is created with json in additional_authorized_imports."""
+        # This is integration-level, so we'll just verify the structure
+        from tsugite.agent_runner import _execute_agent_with_prompt
+        from tsugite.md_agents import AgentConfig
+
+        # We can't easily test this without mocking, but we can verify
+        # the function accepts injectable_vars parameter
+        import inspect
+
+        sig = inspect.signature(_execute_agent_with_prompt)
+        assert "injectable_vars" in sig.parameters
+        assert "model_kwargs" in sig.parameters

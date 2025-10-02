@@ -1,5 +1,6 @@
 """Agent markdown parser and template renderer."""
 
+import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -133,6 +134,7 @@ class StepDirective:
     name: str
     content: str
     assign_var: Optional[str] = None
+    model_kwargs: Dict[str, Any] = field(default_factory=dict)
     start_pos: int = 0
     end_pos: int = 0
 
@@ -208,9 +210,56 @@ def extract_step_directives(content: str, include_preamble: bool = True) -> tupl
         if assign_match:
             assign_var = assign_match.group(2)
 
+        # Parse model_kwargs from remaining attributes
+        model_kwargs = {}
+
+        # Check for json shorthand
+        json_match = re.search(r'json=(["\']?)(true|false)\1', args)
+        if json_match and json_match.group(2) == "true":
+            model_kwargs["response_format"] = {"type": "json_object"}
+
+        # Check for response_format (overrides json shorthand)
+        rf_match = re.search(r'response_format=(["\'])(.+?)\1', args)
+        if rf_match:
+            try:
+                rf_value = rf_match.group(2)
+                model_kwargs["response_format"] = json.loads(rf_value)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Invalid JSON in response_format for step '{step_name}': {e}")
+
+        # Parse temperature
+        temp_match = re.search(r'temperature=(["\']?)([0-9.]+)\1', args)
+        if temp_match:
+            model_kwargs["temperature"] = float(temp_match.group(2))
+
+        # Parse max_tokens
+        tokens_match = re.search(r'max_tokens=(["\']?)([0-9]+)\1', args)
+        if tokens_match:
+            model_kwargs["max_tokens"] = int(tokens_match.group(2))
+
+        # Parse top_p
+        top_p_match = re.search(r'top_p=(["\']?)([0-9.]+)\1', args)
+        if top_p_match:
+            model_kwargs["top_p"] = float(top_p_match.group(2))
+
+        # Parse frequency_penalty
+        freq_match = re.search(r'frequency_penalty=(["\']?)([0-9.]+)\1', args)
+        if freq_match:
+            model_kwargs["frequency_penalty"] = float(freq_match.group(2))
+
+        # Parse presence_penalty
+        pres_match = re.search(r'presence_penalty=(["\']?)([0-9.]+)\1', args)
+        if pres_match:
+            model_kwargs["presence_penalty"] = float(pres_match.group(2))
+
         steps.append(
             StepDirective(
-                name=step_name, content=step_content, assign_var=assign_var, start_pos=start_pos, end_pos=end_pos
+                name=step_name,
+                content=step_content,
+                assign_var=assign_var,
+                model_kwargs=model_kwargs,
+                start_pos=start_pos,
+                end_pos=end_pos,
             )
         )
 
