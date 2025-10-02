@@ -358,3 +358,72 @@ class TestSilentLogger:
         # Since it writes to /dev/null, we can't capture output
         # but we can verify it doesn't raise errors
         logger.log("Test message")  # Should not raise
+
+
+class TestMultiStepContext:
+    """Test multi-step context handling."""
+
+    def test_set_multistep_context(self):
+        """Test setting multi-step context."""
+        console = Console(file=StringIO())
+        handler = CustomUIHandler(console)
+
+        assert handler.state.multistep_context is None
+
+        handler.set_multistep_context(1, "research", 4)
+
+        assert handler.state.multistep_context is not None
+        assert handler.state.multistep_context["step_number"] == 1
+        assert handler.state.multistep_context["step_name"] == "research"
+        assert handler.state.multistep_context["total_steps"] == 4
+
+    def test_clear_multistep_context(self):
+        """Test clearing multi-step context."""
+        console = Console(file=StringIO())
+        handler = CustomUIHandler(console)
+
+        handler.set_multistep_context(1, "research", 4)
+        assert handler.state.multistep_context is not None
+
+        handler.clear_multistep_context()
+        assert handler.state.multistep_context is None
+
+    def test_display_prefix_with_multistep(self):
+        """Test that display prefix is added when in multi-step context."""
+        console = Console(file=StringIO())
+        handler = CustomUIHandler(console)
+
+        # No prefix without multi-step context
+        assert handler._get_display_prefix() == ""
+
+        # Prefix added with multi-step context
+        handler.set_multistep_context(1, "research", 4)
+        assert handler._get_display_prefix() == "  └─ "
+
+    def test_step_start_with_multistep_shows_round(self):
+        """Test that step start shows 'Round' when in multi-step context."""
+        console = Console(file=StringIO())
+        handler = CustomUIHandler(console)
+
+        # Set multi-step context
+        handler.set_multistep_context(1, "research", 4)
+
+        # Trigger step start
+        handler.handle_event(UIEvent.STEP_START, {"step": 1, "title": "Step 1"})
+
+        # Should show "Round" instead of "Step"
+        assert handler.state.current_step == 1
+
+    def test_step_start_without_multistep_shows_step(self):
+        """Test that step start shows 'Step' when not in multi-step context."""
+        console = Console(file=StringIO())
+        handler = CustomUIHandler(console)
+
+        # No multi-step context
+        assert handler.state.multistep_context is None
+
+        # Trigger step start
+        handler.handle_event(UIEvent.STEP_START, {"step": 1, "title": "Step 1"})
+
+        # Should show "Step"
+        assert handler.state.current_step == 1

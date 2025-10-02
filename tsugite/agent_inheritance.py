@@ -42,12 +42,19 @@ def find_agent_file(agent_ref: str, current_agent_dir: Path) -> Optional[Path]:
         Path to agent file if found, None otherwise
 
     Search order:
-    1. If path-like (contains / or .md), resolve relative to current agent
-    2. .tsugite/{name}.md (project-local shared)
-    3. ./agents/{name}.md (project convention)
-    4. ./{name}.md (current directory)
-    5. Global agent directories (XDG order)
+    1. Built-in agents (e.g., "builtin-default")
+    2. If path-like (contains / or .md), resolve relative to current agent
+    3. .tsugite/{name}.md (project-local shared)
+    4. ./agents/{name}.md (project convention)
+    5. ./{name}.md (current directory)
+    6. Global agent directories (XDG order)
     """
+    # Check if it's a built-in agent
+    from .builtin_agents import is_builtin_agent
+
+    if is_builtin_agent(agent_ref):
+        return Path(f"<{agent_ref}>")
+
     # If it looks like a path, resolve it relative to current agent
     if "/" in agent_ref or agent_ref.endswith(".md"):
         path = current_agent_dir / agent_ref
@@ -251,6 +258,15 @@ def resolve_agent_inheritance(agent, agent_path: Path, inheritance_chain: Option
                     configs_to_merge.append(default_agent.config)
                 except ValueError:
                     pass
+        elif default_base_name == "default" and default_path is None:
+            # No user default.md found, use built-in fallback
+            from .builtin_agents import get_builtin_default_agent
+
+            try:
+                builtin_agent = get_builtin_default_agent()
+                configs_to_merge.append(builtin_agent.config)
+            except Exception:
+                pass  # Silently fail if built-in can't be loaded
 
     # 2. Load explicitly extended agent
     if current_config.extends and current_config.extends != "none":

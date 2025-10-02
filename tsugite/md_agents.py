@@ -125,6 +125,110 @@ def extract_directives(content: str) -> List[Dict[str, Any]]:
     return directives
 
 
+@dataclass
+class StepDirective:
+    """Represents a step in multi-step agent execution."""
+
+    name: str
+    content: str
+    assign_var: Optional[str] = None
+    start_pos: int = 0
+    end_pos: int = 0
+
+
+def extract_step_directives(content: str, include_preamble: bool = True) -> tuple[str, List[StepDirective]]:
+    """Extract step directives and preamble from markdown content.
+
+    Steps are marked with <!-- tsu:step name="..." assign="..." --> comments.
+    Each step's content runs from the directive to the next step (or EOF).
+    Content before the first step is the preamble and can be prepended to all steps.
+
+    Args:
+        content: Raw markdown content
+        include_preamble: If True, prepend preamble to each step's content
+
+    Returns:
+        Tuple of (preamble, list of StepDirective objects with parsed attributes and content)
+
+    Example:
+        >>> content = '''
+        ... Header content
+        ... <!-- tsu:step name="research" assign="data" -->
+        ... Do research here
+        ... <!-- tsu:step name="write" -->
+        ... Write content
+        ... '''
+        >>> preamble, steps = extract_step_directives(content)
+        >>> len(steps)
+        2
+        >>> 'Header content' in preamble
+        True
+    """
+    steps = []
+
+    # Pattern to match <!-- tsu:step name="..." assign="..." -->
+    # Both name and assign can use single or double quotes, or no quotes
+    pattern = r"<!--\s*tsu:step\s+([^>]+?)\s*-->"
+
+    matches = list(re.finditer(pattern, content))
+
+    # Extract preamble (content before first step)
+    preamble = ""
+    if matches:
+        preamble = content[: matches[0].start()].strip()
+
+    for i, match in enumerate(matches):
+        args = match.group(1).strip()
+        start_pos = match.end()
+
+        # Determine end position (next step or EOF)
+        if i + 1 < len(matches):
+            end_pos = matches[i + 1].start()
+        else:
+            end_pos = len(content)
+
+        # Extract step content
+        step_content = content[start_pos:end_pos].strip()
+
+        # Prepend preamble to each step if requested and preamble exists
+        if include_preamble and preamble:
+            step_content = f"{preamble}\n\n{step_content}"
+
+        # Parse name attribute (required)
+        name_match = re.search(r'name=(["\']?)(\w+)\1', args)
+        if not name_match:
+            raise ValueError(f"Step directive missing required 'name' attribute: {args}")
+
+        step_name = name_match.group(2)
+
+        # Parse assign attribute (optional)
+        assign_var = None
+        assign_match = re.search(r'assign=(["\']?)(\w+)\1', args)
+        if assign_match:
+            assign_var = assign_match.group(2)
+
+        steps.append(
+            StepDirective(
+                name=step_name, content=step_content, assign_var=assign_var, start_pos=start_pos, end_pos=end_pos
+            )
+        )
+
+    return preamble, steps
+
+
+def has_step_directives(content: str) -> bool:
+    """Check if markdown content contains step directives.
+
+    Args:
+        content: Raw markdown content
+
+    Returns:
+        True if content has at least one step directive
+    """
+    pattern = r"<!--\s*tsu:step\s+"
+    return bool(re.search(pattern, content))
+
+
 def validate_agent(agent: Agent) -> List[str]:
     """Validate agent configuration and content."""
     errors = []
@@ -218,6 +322,20 @@ def validate_agent_execution(agent: Agent | Path) -> tuple[bool, str]:
                 assign_name = prefetch_item.get("assign")
                 if assign_name:
                     test_context[assign_name] = "mock_prefetch_data"
+
+        # If agent has steps, create mock variables for step assignments
+        # This allows validation to pass for multi-step agents where variables
+        # are created dynamically by earlier steps
+        if has_step_directives(agent.content):
+            try:
+                preamble, steps = extract_step_directives(agent.content)
+                for step in steps:
+                    if step.assign_var:
+                        test_context[step.assign_var] = "mock_step_result"
+            except Exception:
+                # If step parsing fails, that's a different validation error
+                # Let it be caught by the normal validation flow
+                pass
 
         renderer.render(agent.content, test_context)
     except Exception as e:

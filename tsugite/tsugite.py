@@ -5,7 +5,7 @@ import os
 import sys
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 import typer
 from rich.console import Console
@@ -51,6 +51,44 @@ def _get_logo(console: Console) -> str:
     return TSUGITE_LOGO_NARROW if console.width < 80 else TSUGITE_LOGO_WIDE
 
 
+def parse_cli_arguments(args: List[str]) -> tuple[List[str], str]:
+    """Parse CLI arguments into agent references and prompt.
+
+    Args:
+        args: List of positional arguments from CLI
+
+    Returns:
+        Tuple of (agent_refs, prompt)
+
+    Examples:
+        ["+a", "+b", "task"] -> (["+a", "+b"], "task")
+        ["+a", "create", "ticket"] -> (["+a"], "create ticket")
+        ["agent.md", "helper.md", "do", "work"] -> (["agent.md", "helper.md"], "do work")
+    """
+    if not args:
+        raise ValueError("No arguments provided")
+
+    agents = []
+    prompt_parts = []
+
+    for i, arg in enumerate(args):
+        # Check if this looks like an agent reference
+        is_agent = arg.startswith("+") or arg.endswith(".md") or "/" in arg
+
+        if is_agent and not prompt_parts:
+            # Still collecting agents
+            agents.append(arg)
+        else:
+            # First non-agent arg or after we started collecting prompt
+            prompt_parts.append(arg)
+
+    if not agents:
+        raise ValueError("No agent specified")
+
+    prompt = " ".join(prompt_parts)
+    return agents, prompt
+
+
 @contextmanager
 def _agent_context(agent_path: str, root: Optional[str]):
     """Validate agent path and optionally change working directory."""
@@ -84,9 +122,13 @@ def _agent_context(agent_path: str, root: Optional[str]):
 
 @app.command()
 def run(
-    agent_path: str = typer.Argument(help="Path to agent markdown file"),
-    prompt: str = typer.Argument(default="", help="Prompt/task for the agent (optional)"),
+    args: List[str] = typer.Argument(
+        ..., help="Agent(s) and optional prompt (e.g., +assistant 'task' or +a +b +c 'task' or +a create ticket)"
+    ),
     root: Optional[str] = typer.Option(None, "--root", help="Working directory"),
+    with_agents: Optional[str] = typer.Option(
+        None, "--with-agents", help="Additional agents (comma or space separated)"
+    ),
     model: Optional[str] = typer.Option(None, "--model", help="Override agent model"),
     non_interactive: bool = typer.Option(False, "--non-interactive", help="Run without interactive prompts"),
     history_dir: Optional[str] = typer.Option(None, "--history-dir", help="Directory to store history files"),
@@ -102,7 +144,15 @@ def run(
     ),
     trust_mcp_code: bool = typer.Option(False, "--trust-mcp-code", help="Trust remote code from MCP servers"),
 ):
-    """Run an agent with the given prompt."""
+    """Run an agent with the given prompt.
+
+    Examples:
+        tsu run agent.md "prompt"
+        tsu run +assistant "prompt"
+        tsu run +assistant +jira +coder "prompt"
+        tsu run +assistant create a ticket for bug 123
+        tsu run +assistant --with-agents "jira,coder" "prompt"
+    """
 
     if history_dir:
         Path(history_dir).mkdir(parents=True, exist_ok=True)
@@ -110,7 +160,46 @@ def run(
     if no_color:
         console.no_color = True
 
-    with _agent_context(agent_path, root) as agent_file:
+    # Parse CLI arguments into agents and prompt
+    try:
+        agent_refs, prompt = parse_cli_arguments(args)
+    except ValueError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+
+    # Parse agent references and resolve paths
+    from tsugite.agent_composition import parse_agent_references
+
+    try:
+        # Change to root directory first if specified
+        original_cwd = None
+        if root:
+            root_path = Path(root)
+            if not root_path.exists():
+                console.print(f"[red]Working directory not found: {root}[/red]")
+                raise typer.Exit(1)
+            original_cwd = os.getcwd()
+            os.chdir(str(root_path))
+
+        base_dir = Path.cwd()
+        primary_agent_path, delegation_agents = parse_agent_references(agent_refs, with_agents, base_dir)
+
+        # Validate primary agent
+        if not primary_agent_path.exists():
+            console.print(f"[red]Agent file not found: {primary_agent_path}[/red]")
+            raise typer.Exit(1)
+
+        if primary_agent_path.suffix != ".md":
+            console.print(f"[red]Agent file must be a .md file: {primary_agent_path}[/red]")
+            raise typer.Exit(1)
+
+        agent_file = primary_agent_path.resolve()
+
+    except ValueError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+
+    try:
         # Get agent info for display
         agent_info = get_agent_info(agent_file)
         instruction_label = "runtime + agent" if agent_info.get("instructions") else "runtime default"
@@ -141,21 +230,33 @@ def run(
             error_console.print(f"[red]Agent validation failed: {error_msg}[/red]")
             raise typer.Exit(1)
 
+        # Detect if this is a multi-step agent
+        from tsugite.md_agents import has_step_directives
+        from tsugite.agent_runner import run_multistep_agent
+
+        agent_text = agent_file.read_text()
+        is_multistep = has_step_directives(agent_text)
+
+        # Choose executor function
+        executor = run_multistep_agent if is_multistep else run_agent
+
         # Skip "Starting agent execution" in headless mode
         if not headless:
-            console.print("[green]Starting agent execution...[/green]")
+            execution_type = "multi-step agent" if is_multistep else "agent"
+            console.print(f"[green]Starting {execution_type} execution...[/green]")
 
         try:
             # Choose execution mode based on flags
             if silent:
                 # Completely silent execution
-                result = run_agent(
+                result = executor(
                     agent_path=agent_file,
                     prompt=prompt,
                     model_override=model,
                     debug=debug,
                     custom_logger=create_silent_logger(),
                     trust_mcp_code=trust_mcp_code,
+                    delegation_agents=delegation_agents,
                 )
             elif headless:
                 # Headless mode: stderr for progress (if verbose), stdout for result
@@ -172,25 +273,27 @@ def run(
                     show_execution_logs=verbose,
                     show_panels=False,  # No panels in headless
                 ) as custom_logger:
-                    result = run_agent(
+                    result = executor(
                         agent_path=agent_file,
                         prompt=prompt,
                         model_override=model,
                         debug=debug,
                         custom_logger=custom_logger,
                         trust_mcp_code=trust_mcp_code,
+                        delegation_agents=delegation_agents,
                     )
             elif native_ui:
                 # Use native smolagents output with loading animation
                 with loading_animation(
                     console=console, message="Waiting for LLM response", enabled=not non_interactive and not no_color
                 ):
-                    result = run_agent(
+                    result = executor(
                         agent_path=agent_file,
                         prompt=prompt,
                         model_override=model,
                         debug=debug,
                         trust_mcp_code=trust_mcp_code,
+                        delegation_agents=delegation_agents,
                     )
             else:
                 # Default: Use custom UI
@@ -203,13 +306,14 @@ def run(
                     show_execution_results=True,
                     show_execution_logs=verbose,
                 ) as custom_logger:
-                    result = run_agent(
+                    result = executor(
                         agent_path=agent_file,
                         prompt=prompt,
                         model_override=model,
                         debug=debug,
                         custom_logger=custom_logger,
                         trust_mcp_code=trust_mcp_code,
+                        delegation_agents=delegation_agents,
                     )
 
             # Display result
@@ -241,6 +345,11 @@ def run(
             if not log_json:
                 error_console.print("\n[dim]Use --log-json for machine-readable output[/dim]")
             raise typer.Exit(1)
+
+    finally:
+        # Restore original working directory
+        if original_cwd:
+            os.chdir(original_cwd)
 
 
 @app.command()
@@ -700,31 +809,39 @@ def agents_show(
     """Show agent information.
 
     Can be either a file path (e.g., 'examples/my_agent.md') or
-    an agent name to search globally (e.g., 'default').
+    an agent name to search globally (e.g., 'default', 'builtin-default').
     """
     from tsugite.md_agents import parse_agent_file
     from tsugite.agent_inheritance import find_agent_file
+    from tsugite.builtin_agents import is_builtin_agent, get_builtin_default_agent
 
     try:
-        agent_file = Path(agent_path)
+        # Check if it's a built-in agent
+        if is_builtin_agent(agent_path):
+            agent = get_builtin_default_agent()
+            config = agent.config
+            console.print(f"[dim]Built-in agent[/dim]\n")
+        else:
+            agent_file = Path(agent_path)
 
-        # If path doesn't exist, try to find it as an agent name
-        if not agent_file.exists():
-            found_path = find_agent_file(agent_path, Path.cwd())
-            if found_path:
-                agent_file = found_path
-                console.print(f"[dim]Found: {agent_file}[/dim]\n")
-            else:
-                console.print(f"[red]Agent not found: {agent_path}[/red]")
-                console.print("\nSearched in:")
-                console.print("  • Current directory")
-                console.print("  • .tsugite/")
-                console.print("  • ./agents/")
-                console.print("  • Global locations (use 'agents list --global' to see)")
-                raise typer.Exit(1)
+            # If path doesn't exist, try to find it as an agent name
+            if not agent_file.exists():
+                found_path = find_agent_file(agent_path, Path.cwd())
+                if found_path:
+                    agent_file = found_path
+                    console.print(f"[dim]Found: {agent_file}[/dim]\n")
+                else:
+                    console.print(f"[red]Agent not found: {agent_path}[/red]")
+                    console.print("\nSearched in:")
+                    console.print("  • Built-in agents")
+                    console.print("  • Current directory")
+                    console.print("  • .tsugite/")
+                    console.print("  • ./agents/")
+                    console.print("  • Global locations (use 'agents list --global' to see)")
+                    raise typer.Exit(1)
 
-        agent = parse_agent_file(agent_file)
-        config = agent.config
+            agent = parse_agent_file(agent_file)
+            config = agent.config
 
         console.print(f"[cyan]Agent:[/cyan] [bold]{config.name}[/bold]\n")
 

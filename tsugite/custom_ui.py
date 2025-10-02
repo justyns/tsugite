@@ -41,6 +41,7 @@ class UIState:
     code_being_executed: Optional[str] = None
     last_observation: Optional[str] = None
     steps_history: List[Dict[str, Any]] = None
+    multistep_context: Optional[Dict[str, Any]] = None
 
     def __post_init__(self):
         if self.steps_history is None:
@@ -180,6 +181,12 @@ class CustomUIHandler:
 
             self._update_display()
 
+    def _get_display_prefix(self) -> str:
+        """Get display prefix for nested multi-step context."""
+        if self.state.multistep_context:
+            return "  └─ "
+        return ""
+
     def _handle_task_start(self, data: Dict[str, Any]) -> None:
         """Handle task start event."""
         self.state.task = data.get("task")
@@ -202,8 +209,18 @@ class CustomUIHandler:
         self.state.current_step = data.get("step", self.state.current_step + 1)
         self.state.current_action = "Thinking..."
 
+        prefix = self._get_display_prefix()
+
+        # Check if we're in a multi-step execution context
+        if self.state.multistep_context:
+            # Show "Round" instead of "Step" when nested in multi-step
+            label = f"Round {self.state.current_step}"
+        else:
+            # Normal single-step agent
+            label = f"Step {self.state.current_step}"
+
         # Update progress
-        self.update_progress(f"🤔 Step {self.state.current_step}: Waiting for LLM response...")
+        self.update_progress(f"{prefix}🤔 {label}: Waiting for LLM response...")
 
         # Add step to history
         self.state.steps_history.append({"step": self.state.current_step, "status": "in_progress", "actions": []})
@@ -213,8 +230,9 @@ class CustomUIHandler:
         self.state.code_being_executed = data.get("code")
         self.state.current_action = "Executing code..."
 
+        prefix = self._get_display_prefix()
         # Update progress
-        self.update_progress("⚡ Executing code...")
+        self.update_progress(f"{prefix}⚡ Executing code...")
 
         if self.show_code and self.show_panels and self.state.code_being_executed:
             self.console.print(
@@ -230,8 +248,9 @@ class CustomUIHandler:
         content = data.get("content", "")
         self.state.current_action = "Calling tool..."
 
+        prefix = self._get_display_prefix()
         # Update progress
-        self.update_progress("🔧 Calling tool...")
+        self.update_progress(f"{prefix}🔧 Calling tool...")
 
         # Add to current step history
         if self.state.steps_history:
@@ -242,8 +261,9 @@ class CustomUIHandler:
         observation = data.get("observation", "")
         self.state.last_observation = observation
 
+        prefix = self._get_display_prefix()
         # Update progress
-        self.update_progress("💡 Processing results...")
+        self.update_progress(f"{prefix}💡 Processing results...")
 
         if self.show_observations and observation:
             # Clean up observation for display
@@ -282,8 +302,9 @@ class CustomUIHandler:
         """Handle final answer event."""
         answer = data.get("answer", "")
 
+        prefix = self._get_display_prefix()
         # Update progress
-        self.update_progress("✅ Finalizing answer...")
+        self.update_progress(f"{prefix}✅ Finalizing answer...")
 
         if self.show_panels:
             self.console.print(
@@ -299,8 +320,9 @@ class CustomUIHandler:
         error = data.get("error", "")
         error_type = data.get("error_type", "Error")
 
+        prefix = self._get_display_prefix()
         # Update progress
-        self.update_progress("❌ Error occurred...")
+        self.update_progress(f"{prefix}❌ Error occurred...")
 
         # Always show errors prominently
         if self.show_panels:
@@ -346,8 +368,9 @@ class CustomUIHandler:
         if not self.show_execution_results:
             return
 
+        prefix = self._get_display_prefix()
         # Update progress
-        self.update_progress("📊 Processing execution results...")
+        self.update_progress(f"{prefix}📊 Processing execution results...")
 
         content = data.get("content", "")
 
@@ -441,6 +464,24 @@ class CustomUIHandler:
         """Update progress description."""
         if self.progress and self.task_id is not None:
             self.progress.update(self.task_id, description=description)
+
+    def set_multistep_context(self, step_number: int, step_name: str, total_steps: int) -> None:
+        """Set multi-step execution context.
+
+        Args:
+            step_number: Current multi-step number (1-indexed)
+            step_name: Name of current multi-step
+            total_steps: Total number of multi-steps
+        """
+        self.state.multistep_context = {
+            "step_number": step_number,
+            "step_name": step_name,
+            "total_steps": total_steps,
+        }
+
+    def clear_multistep_context(self) -> None:
+        """Clear multi-step execution context."""
+        self.state.multistep_context = None
 
 
 @contextmanager

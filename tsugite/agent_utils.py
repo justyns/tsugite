@@ -126,6 +126,9 @@ def list_local_agents(base_path: Path = None) -> dict[str, List[Path]]:
 
     results = {}
 
+    # Add built-in agents first
+    results["Built-in"] = [Path("<builtin-default>")]
+
     locations = [
         ("Current directory", base_path),
         (".tsugite/", base_path / ".tsugite"),

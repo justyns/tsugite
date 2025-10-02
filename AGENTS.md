@@ -119,6 +119,178 @@ prefetch:
 # Then use {{ config_content }} throughout template
 ```
 
+## Multi-Step Agents
+
+Multi-step agents enable forced sequential execution where each step is a full agent run. Results from earlier steps can be assigned to variables and used in later steps.
+
+### Syntax
+
+Use HTML comment directives to mark steps:
+
+```markdown
+<!-- tsu:step name="step_name" assign="variable_name" -->
+```
+
+- `name` *(required)* - Unique identifier for the step
+- `assign` *(optional)* - Variable name to store this step's result
+
+### How It Works
+
+1. **Sequential Execution** - Each step runs as a complete agent session
+2. **Variable Assignment** - Step results are captured and made available to subsequent steps
+3. **Context Accumulation** - Each step has access to all previous results via Jinja2 variables
+4. **Abort on Failure** - If any step fails, execution stops immediately
+5. **Shared Preamble** - Content before the first step directive is prepended to all steps as shared context
+
+### Preamble (Shared Context)
+
+Content before the first `<!-- tsu:step -->` directive is automatically included in **every step** as shared context. This is useful for:
+
+- Headers and introductions that provide framing
+- Common task descriptions (e.g., `Task: {{ user_prompt }}`)
+- Shared instructions or constraints
+- Template variables that all steps should see
+
+**Example:**
+```markdown
+---
+name: analyzer
+---
+
+# Task Analysis Framework
+
+Task: {{ user_prompt }}
+
+Guidelines:
+- Be thorough and systematic
+- Consider edge cases
+- Provide clear reasoning
+
+<!-- tsu:step name="analyze" -->
+Analyze the task...
+
+<!-- tsu:step name="execute" -->
+Execute based on analysis...
+```
+
+In this example, the header, task description, and guidelines appear in both the "analyze" and "execute" steps.
+
+### Example
+
+```markdown
+---
+name: research_writer
+max_steps: 10
+tools: [write_file, web_search]
+---
+
+# Research & Write Pipeline
+
+Topic: {{ user_prompt }}
+
+<!-- tsu:step name="research" assign="findings" -->
+Research the topic using web_search. Gather 3-5 key insights.
+
+<!-- tsu:step name="outline" assign="structure" -->
+Create an outline for an article using these findings:
+
+{{ findings }}
+
+<!-- tsu:step name="write" assign="article" -->
+Write a full article following this structure:
+
+{{ structure }}
+
+Using these facts:
+{{ findings }}
+
+<!-- tsu:step name="save" -->
+Save the article to article.md:
+
+{{ article }}
+
+Confirm the file was created successfully.
+```
+
+### Usage
+
+```bash
+# Multi-step agents are detected automatically
+tsugite run research_writer.md "AI in healthcare"
+
+# Shows progress like:
+# [Step 1/4: research] Starting...
+# [Step 1/4: research] Complete
+# [Step 2/4: outline] Starting...
+# ...
+
+# Debug mode shows each step's rendered prompt
+tsugite run research_writer.md "AI in healthcare" --debug
+```
+
+### Best Practices
+
+**Step Design:**
+- Keep steps focused on a single responsibility
+- Use descriptive step names
+- Assign variables when results will be reused
+
+**Preamble Usage:**
+- Use preamble for shared context needed by all steps
+- Include task description and common instructions in preamble
+- Keep preamble concise - it's prepended to every step
+- Template variables in preamble are rendered for each step
+
+**Context Passing:**
+- Reference previous results using `{{ variable_name }}`
+- All standard template helpers work in steps
+- Each step sees `{{ user_prompt }}` and all previous assignments
+- Task list is shared across all steps (use `{{ task_summary }}` to see tasks)
+
+**Step Context Variables:**
+Multi-step execution provides automatic context variables:
+- `{{ step_number }}` - Current step number (1-indexed)
+- `{{ step_name }}` - Current step's name attribute
+- `{{ total_steps }}` - Total number of steps in the agent
+
+Example usage:
+```jinja2
+<!-- tsu:step name="analyze" -->
+## Step {{ step_number }} of {{ total_steps }}: {{ step_name }}
+Analyze the user's request...
+
+<!-- tsu:step name="execute" -->
+{% if step_number == total_steps %}
+This is the final step - provide the complete result.
+{% else %}
+Continue with step {{ step_number + 1 }}...
+{% endif %}
+```
+
+**Task Management:**
+- Tasks created in step 1 are visible in steps 2, 3, etc.
+- Use task tracking to coordinate work across steps
+- Task list persists throughout the entire multi-step execution
+- Reference `{{ task_summary }}` in templates to see current tasks
+
+**Error Handling:**
+- Steps fail fast - execution aborts on first error
+- Use clear step names for better error messages
+- Test steps individually during development
+
+**Performance:**
+- Each step is a full agent run with its own token usage
+- Consider combining simple operations into one step
+- Use `max_steps` to control reasoning iterations within each step
+
+### Limitations
+
+Current limitations (may be expanded in future):
+- No conditional steps (all steps always execute)
+- No parallel execution (strict sequential order)
+- No loops or DAG workflows
+- Step results are strings only
+
 ## Model Providers
 
 Tsugite supports multiple model providers through LiteLLM integration. Specify models using the format `provider:model-name`.
@@ -310,3 +482,156 @@ tsugite run agent.md "task" --trust-mcp-code
 - Use `--trust-mcp-code` flag to enable remote code execution
 - Sensitive environment variables (tokens, keys) are redacted in `mcp show` output
 - Connection failures are handled gracefully - agent continues with available tools
+
+## Multi-Agent Composition
+
+Tsugite supports running multiple agents together, where a primary agent can delegate work to other agents.
+
+### Agent Shorthand Syntax
+
+Use `+name` to reference agents by name instead of file path:
+
+```bash
+# Instead of:
+tsugite run agents/assistant.md "query"
+
+# Use shorthand:
+tsugite run +assistant "query"
+```
+
+**Agent search locations** (in order):
+1. `.tsugite/{name}.md` - Project-local shared agents
+2. `agents/{name}.md` - Project convention directory
+3. `./{name}.md` - Current directory
+4. `~/.tsugite/agents/{name}.md` - User global agents
+5. `~/.config/tsugite/agents/{name}.md` - XDG global agents
+
+### Delegating to Multiple Agents
+
+Tsugite supports two syntaxes for multi-agent delegation:
+
+**1. Positional syntax (simple and intuitive):**
+```bash
+# Multiple agents positionally
+tsugite run +assistant +jira +coder "create ticket and fix bug #123"
+
+# Unquoted multi-word prompts
+tsugite run +assistant +jira create a ticket for bug 123
+```
+
+**2. Using --with-agents option:**
+```bash
+tsugite run +assistant --with-agents "+jira +coder" "create ticket and fix bug #123"
+```
+
+Both syntaxes work identically. Use positional for quick commands, use `--with-agents` when you have complex prompts with special characters.
+
+**How it works:**
+1. The primary agent (first one: `+assistant`) receives the user prompt
+2. Additional agents (`jira`, `coder`) are made available via delegation tools
+3. The primary agent gets `spawn_jira(prompt)` and `spawn_coder(prompt)` tools
+4. The primary agent can delegate subtasks:
+   ```python
+   # In the agent's execution:
+   ticket_result = spawn_jira("Create ticket for bug #123")
+   fix_result = spawn_coder("Fix the authentication bug")
+   ```
+
+### Examples
+
+**Example 1: Coordinator with specialists (positional syntax)**
+
+```bash
+# Positional - clean and simple
+tsugite run +coordinator +researcher +writer +reviewer "Research AI trends and create a blog post"
+
+# Or with --with-agents
+tsugite run +coordinator --with-agents "researcher,writer,reviewer" \
+  "Research AI trends and create a blog post"
+```
+
+The coordinator agent can:
+- Use `spawn_researcher("Find latest AI trends")` to gather information
+- Use `spawn_writer("Write blog post about: {research}")` to create content
+- Use `spawn_reviewer("Review this blog post: {content}")` to get feedback
+
+**Example 2: Development workflow with unquoted prompts**
+
+```bash
+# Unquoted multi-word prompt
+tsugite run +project_manager +github +tester create feature branch implement login and run tests
+
+# Or quoted
+tsugite run +project_manager +github +tester "Create feature branch, implement login, and run tests"
+```
+
+The project manager can:
+- Use `spawn_github("Create feature branch for login")` to manage git
+- Implement the feature itself or delegate to another agent
+- Use `spawn_tester("Run unit tests for login module")` to verify
+
+**Example 3: All supported syntaxes**
+
+```bash
+# Positional agents
+tsugite run +assistant +jira +coder "fix bug #123"
+
+# Using --with-agents (space-separated)
+tsugite run +assistant --with-agents "jira coder" "fix bug #123"
+
+# Using --with-agents (comma-separated)
+tsugite run +assistant --with-agents jira,coder "fix bug #123"
+
+# Unquoted prompts (when no special characters)
+tsugite run +assistant +jira create a ticket for bug 123
+
+# Mix of paths and names
+tsugite run agents/custom.md +jira ./helpers/coder.md "task"
+```
+
+### Creating Delegation-Aware Agents
+
+Agents can use the `spawn_agent` tool directly or use auto-generated wrappers:
+
+**Using spawn_agent (always available):**
+```yaml
+---
+name: coordinator
+model: ollama:qwen2.5-coder:7b
+tools: [spawn_agent]
+---
+
+Task: {{ user_prompt }}
+
+Delegate subtasks using spawn_agent(agent_path, prompt):
+- spawn_agent("agents/researcher.md", "Find information about X")
+- spawn_agent("+writer", "Write content based on: ...")
+```
+
+**Using auto-generated delegation tools:**
+```bash
+# When you run (either syntax):
+tsugite run +coordinator +researcher +writer "task"
+# OR
+tsugite run +coordinator --with-agents "researcher writer" "task"
+
+# The coordinator automatically gets these tools:
+# - spawn_researcher(prompt)
+# - spawn_writer(prompt)
+# - spawn_agent(agent_path, prompt)  # Still available for ad-hoc delegation
+```
+
+The auto-generated tools are simpler to use since the agent path is pre-filled.
+
+**When to use each syntax:**
+- **Positional** (`+a +b +c "task"`): Quick commands, simple prompts, fewer agents
+- **--with-agents**: Complex prompts with quotes/special chars, many agents, scripting
+- **Unquoted prompts**: Very quick ad-hoc commands without special characters
+
+### Best Practices
+
+1. **Clear responsibilities**: Each agent should have a focused purpose
+2. **Descriptive names**: Use names that indicate the agent's role (`+github`, `+tester`)
+3. **Reusable agents**: Store commonly-used agents in `.tsugite/` or `~/.tsugite/agents/`
+4. **Document delegation**: Include delegation instructions in agent templates
+5. **Error handling**: Agents should handle delegation failures gracefully

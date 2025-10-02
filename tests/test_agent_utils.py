@@ -143,7 +143,10 @@ def test_list_local_agents_empty(tmp_path):
     """Test listing agents in empty directory."""
     result = list_local_agents(tmp_path)
 
-    assert len(result) == 0
+    # Should have built-in agent even in empty directory
+    assert len(result) == 1
+    assert "Built-in" in result
+    assert len(result["Built-in"]) == 1
 
 
 def test_list_local_agents_current_dir(tmp_path):
@@ -237,7 +240,9 @@ def test_list_local_agents_multiple_locations(tmp_path):
 
     result = list_local_agents(tmp_path)
 
-    assert len(result) == 3
+    # Should include built-in + 3 locations
+    assert len(result) == 4
+    assert "Built-in" in result
     assert "Current directory" in result
     assert ".tsugite/" in result
     assert "agents/" in result
