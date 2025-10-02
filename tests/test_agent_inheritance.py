@@ -1,15 +1,17 @@
 """Tests for agent inheritance system."""
 
-import pytest
 from pathlib import Path
-from tsugite.md_agents import AgentConfig, Agent, parse_agent
+
+import pytest
+
 from tsugite.agent_inheritance import (
-    get_global_agents_paths,
-    find_agent_file,
     detect_circular_inheritance,
+    find_agent_file,
+    get_global_agents_paths,
     merge_agent_configs,
     resolve_agent_inheritance,
 )
+from tsugite.md_agents import AgentConfig, parse_agent
 
 
 def test_get_global_agents_paths():

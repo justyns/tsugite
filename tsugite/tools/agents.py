@@ -1,7 +1,8 @@
 """Agent orchestration tools for spawning and managing sub-agents."""
 
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
+
 from ..tools import tool
 from ..utils import validation_error
 

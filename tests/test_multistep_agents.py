@@ -1,8 +1,8 @@
 """Tests for multi-step agent execution."""
 
 import pytest
-from pathlib import Path
-from tsugite.md_agents import extract_step_directives, has_step_directives, StepDirective
+
+from tsugite.md_agents import extract_step_directives, has_step_directives
 
 
 class TestStepDirectiveParsing:
@@ -498,9 +498,9 @@ Use {{ result1 }}
 class TestMultiStepTaskSharing:
     def test_tasks_persist_across_steps(self, tmp_path):
         """Test that task list is shared across steps, not reset."""
+        from unittest.mock import MagicMock, patch
+
         from tsugite.agent_runner import run_multistep_agent
-        from tsugite.tools.tasks import get_task_manager
-        from unittest.mock import patch, MagicMock
 
         agent_file = tmp_path / "task_sharing.md"
         agent_file.write_text(

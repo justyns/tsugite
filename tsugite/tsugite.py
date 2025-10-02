@@ -231,8 +231,8 @@ def run(
             raise typer.Exit(1)
 
         # Detect if this is a multi-step agent
-        from tsugite.md_agents import has_step_directives
         from tsugite.agent_runner import run_multistep_agent
+        from tsugite.md_agents import has_step_directives
 
         agent_text = agent_file.read_text()
         is_multistep = has_step_directives(agent_text)
@@ -616,11 +616,11 @@ def mcp_show(server_name: str = typer.Argument(help="Name of the MCP server to s
     if config.is_stdio():
         console.print(f"\n[bold]Command:[/bold] {config.command}")
         if config.args:
-            console.print(f"[bold]Arguments:[/bold]")
+            console.print("[bold]Arguments:[/bold]")
             for arg in config.args:
                 console.print(f"  - {arg}")
         if config.env:
-            console.print(f"\n[bold]Environment Variables:[/bold]")
+            console.print("\n[bold]Environment Variables:[/bold]")
             for key, value in config.env.items():
                 if "token" in key.lower() or "key" in key.lower() or "secret" in key.lower():
                     console.print(f"  {key}: [dim]<redacted>[/dim]")
@@ -811,16 +811,16 @@ def agents_show(
     Can be either a file path (e.g., 'examples/my_agent.md') or
     an agent name to search globally (e.g., 'default', 'builtin-default').
     """
-    from tsugite.md_agents import parse_agent_file
     from tsugite.agent_inheritance import find_agent_file
-    from tsugite.builtin_agents import is_builtin_agent, get_builtin_default_agent
+    from tsugite.builtin_agents import get_builtin_default_agent, is_builtin_agent
+    from tsugite.md_agents import parse_agent_file
 
     try:
         # Check if it's a built-in agent
         if is_builtin_agent(agent_path):
             agent = get_builtin_default_agent()
             config = agent.config
-            console.print(f"[dim]Built-in agent[/dim]\n")
+            console.print("[dim]Built-in agent[/dim]\n")
         else:
             agent_file = Path(agent_path)
 

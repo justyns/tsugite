@@ -1,7 +1,9 @@
 """Tests for HTTP tools."""
 
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
+
 from tsugite.tools.http import web_search
 
 

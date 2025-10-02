@@ -1,11 +1,10 @@
 """Evaluators for different aspects of benchmark test results."""
 
-import re
-import json
-import ast
 import difflib
-from typing import Dict, Any, Optional, List
+import json
+import re
 from abc import ABC, abstractmethod
+from typing import Any, Dict, Optional
 
 
 class BaseEvaluator(ABC):
@@ -490,10 +489,8 @@ class LLMEvaluator(BaseEvaluator):
             Dictionary with evaluation results
         """
         try:
-            from ..models import get_model
-            from pathlib import Path
             import tempfile
-            import json
+            from pathlib import Path
 
             # Create evaluation prompt
             evaluation_prompt = self._create_evaluation_prompt(
@@ -587,7 +584,7 @@ Evaluate the output based on: {evaluation_criteria}
             prompt += f"\n## Expected Format\nThe output should follow this format: {expected_format}\n"
 
         if rubric:
-            prompt += f"\n## Detailed Rubric\n"
+            prompt += "\n## Detailed Rubric\n"
             for criterion, details in rubric.items():
                 prompt += f"**{criterion}**: {details}\n"
 
@@ -693,7 +690,7 @@ Analyze the provided output carefully and return a properly formatted JSON respo
 
             return result
 
-        except (json.JSONDecodeError, AttributeError) as e:
+        except (json.JSONDecodeError, AttributeError):
             # Fallback parsing if JSON parsing fails
             return self._fallback_parse(evaluation_result)
 

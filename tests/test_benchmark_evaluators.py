@@ -1,12 +1,12 @@
 """Tests for benchmark evaluators."""
 
 import pytest
-import asyncio
+
 from tsugite.benchmark.evaluators import (
     CorrectnessEvaluator,
+    CostEvaluator,
     PerformanceEvaluator,
     QualityEvaluator,
-    CostEvaluator,
 )
 
 

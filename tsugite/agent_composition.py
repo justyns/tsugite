@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from typing import List, Tuple
+
 from smolagents import Tool
 
 

@@ -1,16 +1,16 @@
 """Agent execution engine using smolagents."""
 
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Any, Dict, List, Optional
+
 from smolagents import CodeAgent
 
-from tsugite.md_agents import parse_agent, AgentConfig, validate_agent_execution
+from tsugite.md_agents import AgentConfig, parse_agent, validate_agent_execution
+from tsugite.models import get_model
 from tsugite.renderer import AgentRenderer
 from tsugite.tool_adapter import get_smolagents_tools
-from tsugite.models import get_model
 from tsugite.tools import call_tool
-from tsugite.tools.tasks import reset_task_manager, get_task_manager
-
+from tsugite.tools.tasks import get_task_manager, reset_task_manager
 
 TSUGITE_DEFAULT_INSTRUCTIONS = (
     "You are operating inside the Tsugite micro-agent runtime. Follow the rendered task faithfully, use the available "
@@ -439,7 +439,7 @@ def run_multistep_agent(
             rendered_step_prompt = renderer.render(step.content, step_context)
 
             if debug:
-                print(f"\nRendered Prompt:")
+                print("\nRendered Prompt:")
                 print(rendered_step_prompt)
                 print(f"{'=' * 60}\n")
 

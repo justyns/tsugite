@@ -2,8 +2,10 @@
 
 import os
 from typing import List, Optional
-from smolagents import ToolCollection
+
 from mcp import StdioServerParameters
+from smolagents import ToolCollection
+
 from .mcp_config import MCPServerConfig
 
 

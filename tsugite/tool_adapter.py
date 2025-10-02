@@ -3,8 +3,10 @@
 import inspect
 from functools import wraps
 from typing import Iterable, List, Optional
+
 from smolagents import tool as smol_tool
-from tsugite.tools import get_tool, call_tool, list_tools
+
+from tsugite.tools import call_tool, get_tool, list_tools
 
 
 def create_smolagents_tool_from_tsugite(tool_name: str):

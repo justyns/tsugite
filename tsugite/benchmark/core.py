@@ -1,20 +1,17 @@
 """Core benchmark framework for evaluating Tsugite agents."""
 
-import time
-import asyncio
-import traceback
-from pathlib import Path
-from typing import Dict, List, Optional, Any
-from dataclasses import dataclass, field
-from datetime import datetime
-import yaml
 import json
 import re
+import time
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 from ..agent_runner import run_agent
 from ..utils import parse_yaml_frontmatter
-from .metrics import BenchmarkMetrics, BenchmarkTestResult, ModelPerformance
-from .evaluators import CorrectnessEvaluator, PerformanceEvaluator, QualityEvaluator, LLMEvaluator
+from .evaluators import CorrectnessEvaluator, LLMEvaluator, PerformanceEvaluator, QualityEvaluator
+from .metrics import BenchmarkTestResult, ModelPerformance
 
 
 @dataclass

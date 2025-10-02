@@ -1,7 +1,5 @@
 """Tests for agent utility functions."""
 
-import pytest
-from pathlib import Path
 from tsugite.agent_utils import build_inheritance_chain, list_local_agents
 
 

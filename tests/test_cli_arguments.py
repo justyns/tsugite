@@ -1,6 +1,7 @@
 """Tests for CLI argument parsing."""
 
 import pytest
+
 from tsugite.tsugite import parse_cli_arguments
 
 

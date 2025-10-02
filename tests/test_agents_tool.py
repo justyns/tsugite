@@ -1,12 +1,11 @@
 """Tests for agent orchestration tools."""
 
-import pytest
-import tempfile
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
+import pytest
+
+from tsugite.tools import call_tool, get_tool, tool
 from tsugite.tools.agents import spawn_agent
-from tsugite.tools import get_tool, call_tool, tool
 
 
 @pytest.fixture
@@ -157,8 +156,6 @@ class TestAgentOrchestrationIntegration:
         # Mock other dependencies
         mock_get_model.return_value = MagicMock()
         mock_get_tools.return_value = []
-
-        from tsugite.agent_runner import run_agent
 
         # This would be a real integration test if we had full mocking
         # For now, we verify the structure is in place

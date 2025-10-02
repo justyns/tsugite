@@ -1,7 +1,7 @@
 """Utility functions for agent management."""
 
 from pathlib import Path
-from typing import List, Tuple, Optional
+from typing import List, Tuple
 
 
 def _parse_agent_from_path(path: Path):
@@ -44,7 +44,7 @@ def build_inheritance_chain(agent_path: Path) -> List[Tuple[str, Path]]:
     Returns:
         List of (agent_name, agent_path) tuples in inheritance order (parent to child)
     """
-    from tsugite.agent_inheritance import find_agent_file, _get_default_base_agent_name
+    from tsugite.agent_inheritance import _get_default_base_agent_name, find_agent_file
 
     chain = []
     visited = set()

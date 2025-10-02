@@ -1,13 +1,12 @@
 """Report generation for benchmark results."""
 
 import json
-from pathlib import Path
-from datetime import datetime
-from typing import Dict, Any, List, Optional
 from dataclasses import asdict
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List
 
 from .core import BenchmarkResult
-from .metrics import BenchmarkTestResult, ModelPerformance
 
 
 class ReportGenerator:
@@ -325,7 +324,7 @@ class ReportGenerator:
 <body>
     <div class="container">
         <h1>🚀 Tsugite Benchmark Report</h1>
-        <p>Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+        <p>Generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</p>
 
         <div class="summary">
             <h2>📊 Summary</h2>
@@ -338,11 +337,11 @@ class ReportGenerator:
                 <div class="metric-label">Models Tested</div>
             </div>
             <div class="metric">
-                <div class="metric-value">{self.result.summary.get('total_tests', 0)}</div>
+                <div class="metric-value">{self.result.summary.get("total_tests", 0)}</div>
                 <div class="metric-label">Total Tests</div>
             </div>
             <div class="metric">
-                <div class="metric-value">{self.result.summary.get('average_accuracy', 0):.1%}</div>
+                <div class="metric-value">{self.result.summary.get("average_accuracy", 0):.1%}</div>
                 <div class="metric-label">Average Accuracy</div>
             </div>
         </div>
@@ -372,16 +371,16 @@ class ReportGenerator:
                 html += f"""
                 <tr>
                     <td>{i}</td>
-                    <td><strong>{ranking['model']}</strong></td>
+                    <td><strong>{ranking["model"]}</strong></td>
                     <td>
                         {accuracy:.1%}
                         <div class="progress-bar">
-                            <div class="progress-fill {progress_class}" style="width: {accuracy*100}%"></div>
+                            <div class="progress-fill {progress_class}" style="width: {accuracy * 100}%"></div>
                         </div>
                     </td>
                     <td><span class="{tier_class}">{self._get_performance_tier(accuracy)}</span></td>
-                    <td>{ranking['avg_duration']:.2f}s</td>
-                    <td>${ranking['total_cost']:.4f}</td>
+                    <td>{ranking["avg_duration"]:.2f}s</td>
+                    <td>${ranking["total_cost"]:.4f}</td>
                 </tr>
                 """
 

@@ -1,7 +1,6 @@
 """Built-in agent definitions."""
 
 from pathlib import Path
-from typing import Optional
 
 BUILTIN_DEFAULT_AGENT_CONTENT = """---
 name: builtin-default

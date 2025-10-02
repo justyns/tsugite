@@ -1,9 +1,9 @@
 """Tests for the CLI interface."""
 
+from unittest.mock import MagicMock, patch
+
 import pytest
-from typer.testing import CliRunner
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+
 from tsugite.tsugite import app
 
 
@@ -344,7 +344,6 @@ class TestAnimationCLIIntegration:
             patch("tsugite.tsugite.run_agent") as mock_run_agent,
             patch("tsugite.tsugite.validate_agent_execution") as mock_validate,
         ):
-
             mock_validate.return_value = (True, "Agent is valid")
             mock_run_agent.side_effect = RuntimeError("Agent execution failed")
 
@@ -495,8 +494,9 @@ class TestHeadlessMode:
 )
 def test_logo_selection(terminal_width, expected_logo):
     """Test that correct logo is selected based on terminal width."""
-    from tsugite.tsugite import _get_logo, TSUGITE_LOGO_NARROW, TSUGITE_LOGO_WIDE
     from rich.console import Console
+
+    from tsugite.tsugite import TSUGITE_LOGO_NARROW, TSUGITE_LOGO_WIDE, _get_logo
 
     mock_console = MagicMock(spec=Console)
     mock_console.width = terminal_width

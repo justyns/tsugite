@@ -1,6 +1,7 @@
 """Tests for the smolagents tool adapter."""
 
 import pytest
+
 from tsugite.tool_adapter import create_smolagents_tool_from_tsugite, get_smolagents_tools
 from tsugite.tools import tool
 

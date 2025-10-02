@@ -1,6 +1,7 @@
 """Model adapters for Tsugite agents using smolagents."""
 
 from typing import Optional
+
 from smolagents import LiteLLMModel, OpenAIServerModel
 
 

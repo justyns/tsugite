@@ -1,10 +1,8 @@
 """Tests for LLM evaluation functionality."""
 
+from unittest.mock import patch
+
 import pytest
-import tempfile
-import json
-from pathlib import Path
-from unittest.mock import patch, MagicMock, AsyncMock
 
 from tsugite.benchmark.evaluators import LLMEvaluator
 

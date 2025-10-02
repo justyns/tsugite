@@ -1,9 +1,11 @@
 """HTTP client tools for Tsugite agents."""
 
 import json
-from typing import Dict, Any, Optional, Union
+from typing import Any, Dict, Optional, Union
+
 import httpx
 from ddgs import DDGS
+
 from tsugite.tools import tool
 
 

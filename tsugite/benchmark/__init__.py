@@ -1,11 +1,11 @@
 """Tsugite benchmark framework for evaluating agent performance across different models."""
 
-from .core import BenchmarkRunner, BenchmarkResult, BenchmarkConfig
+from .core import BenchmarkConfig, BenchmarkResult, BenchmarkRunner
 from .evaluators import (
     CorrectnessEvaluator,
+    CostEvaluator,
     PerformanceEvaluator,
     QualityEvaluator,
-    CostEvaluator,
 )
 from .metrics import (
     BenchmarkMetrics,

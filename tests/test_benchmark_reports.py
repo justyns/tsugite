@@ -1,10 +1,11 @@
 """Tests for benchmark report generation."""
 
-import pytest
 import json
-from pathlib import Path
 from datetime import datetime
-from tsugite.benchmark.core import BenchmarkResult, BenchmarkConfig
+
+import pytest
+
+from tsugite.benchmark.core import BenchmarkConfig, BenchmarkResult
 from tsugite.benchmark.metrics import BenchmarkTestResult, ModelPerformance
 from tsugite.benchmark.reports import ReportGenerator
 

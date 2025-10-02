@@ -2102,6 +2102,7 @@ dependencies = [
     { name = "mcp" },
     { name = "pyyaml" },
     { name = "rich" },
+    { name = "ruff" },
     { name = "smolagents", extra = ["docker", "litellm", "mcp", "openai", "toolkit"] },
     { name = "typer" },
 ]
@@ -2122,6 +2123,7 @@ requires-dist = [
     { name = "mcp", specifier = ">=1.0" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "rich", specifier = ">=13.0" },
+    { name = "ruff", specifier = ">=0.13.2" },
     { name = "smolagents", extras = ["docker", "litellm", "mcp", "openai", "toolkit"], specifier = ">=0.1" },
     { name = "typer", specifier = ">=0.12" },
 ]

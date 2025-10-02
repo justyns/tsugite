@@ -1,12 +1,14 @@
 """Tests for the agent markdown parser."""
 
-import pytest
 from pathlib import Path
+
+import pytest
+
 from tsugite.md_agents import (
-    parse_agent_file,
-    AgentConfig,
     Agent,
+    AgentConfig,
     extract_directives,
+    parse_agent_file,
     validate_agent,
 )
 

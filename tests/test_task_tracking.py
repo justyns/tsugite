@@ -1,18 +1,19 @@
 """Tests for task tracking functionality."""
 
-import pytest
 from datetime import datetime
+
+import pytest
+
 from tsugite.tools.tasks import (
     TaskManager,
     TaskStatus,
-    Task,
-    task_add,
-    task_update,
-    task_complete,
-    task_list,
-    task_get,
-    reset_task_manager,
     get_task_manager,
+    reset_task_manager,
+    task_add,
+    task_complete,
+    task_get,
+    task_list,
+    task_update,
 )
 
 

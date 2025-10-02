@@ -1,10 +1,10 @@
 """Tests for built-in agents."""
 
-import pytest
 from pathlib import Path
-from tsugite.builtin_agents import get_builtin_default_agent, is_builtin_agent
+
 from tsugite.agent_inheritance import find_agent_file
 from tsugite.agent_utils import list_local_agents
+from tsugite.builtin_agents import get_builtin_default_agent, is_builtin_agent
 
 
 class TestBuiltinAgents:

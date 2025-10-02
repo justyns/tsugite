@@ -1,12 +1,12 @@
 """Tests for benchmark metrics functionality."""
 
-import pytest
 from datetime import datetime
+
 from tsugite.benchmark.metrics import (
-    BenchmarkTestResult,
-    ModelPerformance,
-    CategoryMetrics,
     BenchmarkMetrics,
+    BenchmarkTestResult,
+    CategoryMetrics,
+    ModelPerformance,
 )
 
 

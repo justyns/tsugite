@@ -1,9 +1,10 @@
 """Jinja2 template rendering for agent content."""
 
-from jinja2 import Environment, DictLoader, StrictUndefined
-from datetime import datetime
-from typing import Dict, Any
 import os
+from datetime import datetime
+from typing import Any, Dict
+
+from jinja2 import DictLoader, Environment, StrictUndefined
 
 
 def now() -> str:

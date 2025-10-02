@@ -1,14 +1,7 @@
 """Tests for file system tools."""
 
 import pytest
-from pathlib import Path
-from tsugite.tools.fs import (
-    read_file,
-    write_file,
-    list_files,
-    file_exists,
-    create_directory,
-)
+
 from tsugite.tools import call_tool
 
 

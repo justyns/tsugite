@@ -1,10 +1,8 @@
 """Tests for models module."""
 
-from pathlib import Path
-
 import pytest
 
-from tsugite.config import add_model_alias, save_config, Config
+from tsugite.config import Config, add_model_alias
 from tsugite.models import parse_model_string, resolve_model_alias
 
 

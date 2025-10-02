@@ -1,10 +1,11 @@
 """Tests for the Jinja2 template renderer."""
 
-import pytest
-from unittest.mock import patch
 from datetime import datetime
-from pathlib import Path
-from tsugite.renderer import AgentRenderer, now, today, slugify, file_exists, is_file, is_dir, read_text
+from unittest.mock import patch
+
+import pytest
+
+from tsugite.renderer import AgentRenderer, file_exists, is_dir, is_file, now, read_text, slugify, today
 
 
 def test_helper_functions():

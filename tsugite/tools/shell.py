@@ -1,10 +1,9 @@
 """Shell command execution tools for Tsugite agents."""
 
-import subprocess
 import shlex
-from typing import Optional
-from tsugite.tools import tool
+import subprocess
 
+from tsugite.tools import tool
 
 DANGEROUS_SHELL_SUBSTRINGS = (
     "rm -rf /",

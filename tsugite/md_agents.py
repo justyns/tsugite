@@ -1,9 +1,10 @@
 """Agent markdown parser and template renderer."""
 
-from pathlib import Path
-from typing import Dict, Any, Optional, List
-from dataclasses import dataclass, field
 import re
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
 from .utils import parse_yaml_frontmatter
 
 

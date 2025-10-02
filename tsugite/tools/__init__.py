@@ -1,9 +1,10 @@
 """Tool registry for Tsugite agents."""
 
-from typing import Dict, Callable, Any, List
 import functools
 import inspect
 from dataclasses import dataclass
+from typing import Any, Callable, Dict, List
+
 from ..utils import tool_error, validation_error
 
 
@@ -90,8 +91,4 @@ def describe_tool(name: str) -> str:
 
 
 # Import all tool modules to register them
-from . import fs
-from . import shell
-from . import http
-from . import tasks
-from . import agents
+from . import agents, fs, http, shell, tasks

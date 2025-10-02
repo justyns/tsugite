@@ -1,8 +1,9 @@
 """Tests for error display in custom UI."""
 
-import pytest
 from io import StringIO
+
 from rich.console import Console
+
 from tsugite.custom_ui import CustomUIHandler, UIEvent
 
 

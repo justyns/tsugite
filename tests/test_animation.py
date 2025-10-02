@@ -1,11 +1,11 @@
 """Tests for loading animation functionality."""
 
 import time
-import threading
-from unittest.mock import patch, MagicMock
+from io import StringIO
+from unittest.mock import patch
+
 import pytest
 from rich.console import Console
-from io import StringIO
 
 from tsugite.animation import LoadingAnimation, loading_animation
 
@@ -194,7 +194,6 @@ class TestLoadingAnimationContextManager:
         console = Console(file=StringIO(), width=80, force_terminal=True)
 
         with patch.object(LoadingAnimation, "start") as mock_start, patch.object(LoadingAnimation, "stop") as mock_stop:
-
             with loading_animation(console, "Test message", enabled=True):
                 pass
 
@@ -206,7 +205,6 @@ class TestLoadingAnimationContextManager:
         console = Console(file=StringIO(), width=80, force_terminal=True)
 
         with patch.object(LoadingAnimation, "start") as mock_start, patch.object(LoadingAnimation, "stop") as mock_stop:
-
             with loading_animation(console, "Test message", enabled=False):
                 pass
 
@@ -218,7 +216,6 @@ class TestLoadingAnimationContextManager:
         console = Console(file=StringIO(), width=80, force_terminal=True)
 
         with patch.object(LoadingAnimation, "start") as mock_start, patch.object(LoadingAnimation, "stop") as mock_stop:
-
             with pytest.raises(ValueError):
                 with loading_animation(console, "Test message", enabled=True):
                     raise ValueError("Test exception")
@@ -231,7 +228,6 @@ class TestLoadingAnimationContextManager:
         console = Console(file=StringIO(), width=80, force_terminal=True)
 
         with patch.object(LoadingAnimation, "start") as mock_start, patch.object(LoadingAnimation, "stop") as mock_stop:
-
             with loading_animation(console, enabled=True):
                 pass
 
@@ -243,7 +239,6 @@ class TestLoadingAnimationContextManager:
         console = Console(file=StringIO(), width=80, force_terminal=True)
 
         with patch.object(LoadingAnimation, "start") as mock_start, patch.object(LoadingAnimation, "stop") as mock_stop:
-
             with pytest.raises(KeyboardInterrupt):
                 with loading_animation(console, "Test message", enabled=True):
                     raise KeyboardInterrupt("User interrupted")
@@ -256,7 +251,6 @@ class TestLoadingAnimationContextManager:
         console = Console(file=StringIO(), width=80, force_terminal=True)
 
         with patch.object(LoadingAnimation, "start") as mock_start, patch.object(LoadingAnimation, "stop") as mock_stop:
-
             with loading_animation(console, "Outer", enabled=True):
                 # Inner context manager should also work
                 with loading_animation(console, "Inner", enabled=True):

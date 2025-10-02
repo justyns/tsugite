@@ -1,12 +1,12 @@
 """Tests for agent composition utilities."""
 
 import pytest
-from pathlib import Path
+
 from tsugite.agent_composition import (
-    resolve_agent_reference,
     create_delegation_tool,
     create_delegation_tools,
     parse_agent_references,
+    resolve_agent_reference,
 )
 
 

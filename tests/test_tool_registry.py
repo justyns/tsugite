@@ -1,7 +1,8 @@
 """Tests for the tool registry system."""
 
 import pytest
-from tsugite.tools import tool, get_tool, call_tool, list_tools, describe_tool, ToolInfo
+
+from tsugite.tools import ToolInfo, call_tool, describe_tool, get_tool, list_tools, tool
 
 
 def test_tool_decorator(reset_tool_registry):

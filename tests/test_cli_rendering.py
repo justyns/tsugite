@@ -1,9 +1,11 @@
 """Test CLI rendering commands and features."""
 
-import pytest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
+import pytest
 from typer.testing import CliRunner
+
 from tsugite.tsugite import app
 
 
@@ -229,8 +231,9 @@ class TestDebugOutput:
 
     def test_debug_output_in_agent_runner(self, capsys):
         """Test debug output shows rendered prompt."""
-        from tsugite.agent_runner import run_agent
         from unittest.mock import patch
+
+        from tsugite.agent_runner import run_agent
 
         # Create a minimal agent content
         agent_content = """---

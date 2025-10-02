@@ -1,20 +1,18 @@
 """Tests for custom UI system."""
 
-import pytest
-from unittest.mock import MagicMock, patch
 from io import StringIO
-from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 from rich.console import Console
 from smolagents.monitoring import LogLevel
 
 from tsugite.custom_ui import (
+    CustomUIHandler,
+    CustomUILogger,
     UIEvent,
     UIState,
-    CustomUILogger,
-    CustomUIHandler,
-    custom_agent_ui,
     create_silent_logger,
+    custom_agent_ui,
 )
 
 

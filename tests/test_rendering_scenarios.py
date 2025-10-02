@@ -1,11 +1,11 @@
 """Test rendering scenarios for Tsugite agents."""
 
+from unittest.mock import patch
+
 import pytest
-from pathlib import Path
-from unittest.mock import patch, mock_open
-from tsugite.renderer import AgentRenderer
-from tsugite.md_agents import parse_agent
+
 from tsugite.agent_runner import execute_prefetch, validate_agent_execution
+from tsugite.renderer import AgentRenderer
 
 
 class TestBasicRendering:

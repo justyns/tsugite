@@ -1,8 +1,8 @@
 """Common utilities for Tsugite."""
 
+from typing import Any, Callable, Dict, Tuple
+
 import yaml
-from typing import Dict, Any, Tuple, Callable
-from pathlib import Path
 
 
 def parse_yaml_frontmatter(content: str, label: str = "content") -> Tuple[Dict[str, Any], str]:

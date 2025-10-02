@@ -1,10 +1,11 @@
 """Test configuration and fixtures."""
 
-import pytest
-import tempfile
 import shutil
+import tempfile
 from pathlib import Path
 from typing import Generator
+
+import pytest
 
 
 @pytest.fixture
@@ -155,14 +156,14 @@ def reset_tool_registry():
 @pytest.fixture
 def file_tools(reset_tool_registry):
     """Register file system tools for testing."""
-    from tsugite.tools.fs import (
-        write_file,
-        read_file,
-        list_files,
-        file_exists,
-        create_directory,
-    )
     from tsugite.tools import tool
+    from tsugite.tools.fs import (
+        create_directory,
+        file_exists,
+        list_files,
+        read_file,
+        write_file,
+    )
 
     # Re-register the tools after registry reset
     tool(write_file)
