@@ -298,7 +298,6 @@ class TestAnimationOutputVerification:
         animation.stop()
 
         # Check that Live was used (implicitly through no direct text output)
-        output_content = output.getvalue()
         # Spinner uses Live which doesn't write to the StringIO directly
         # This test verifies the spinner path is taken
         assert True  # Test passes if no exception is raised

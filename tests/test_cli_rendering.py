@@ -256,7 +256,7 @@ Debug test: {{ user_prompt }}"""
 
                     with patch("tsugite.agent_runner.TSUGITE_DEFAULT_INSTRUCTIONS", "BASE INSTRUCTIONS"):
                         with patch("tsugite.agent_runner.CodeAgent", return_value=mock_agent) as mock_code_agent:
-                            result = run_agent(agent_path=Path("test.md"), prompt="test input", debug=True)
+                            run_agent(agent_path=Path("test.md"), prompt="test input", debug=True)
 
                             # Capture the debug output
                             captured = capsys.readouterr()

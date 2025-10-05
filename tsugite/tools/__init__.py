@@ -94,5 +94,6 @@ def describe_tool(name: str) -> str:
 from . import agents as agents  # noqa: E402
 from . import fs as fs  # noqa: E402
 from . import http as http  # noqa: E402
+from . import interactive as interactive  # noqa: E402
 from . import shell as shell  # noqa: E402
 from . import tasks as tasks  # noqa: E402

@@ -12,6 +12,8 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.syntax import Syntax
 from smolagents.monitoring import AgentLogger, LogLevel
 
+from tsugite.ui_context import clear_ui_context, set_ui_context
+
 
 class UIEvent(IntEnum):
     """Events that the UI can handle."""
@@ -453,12 +455,16 @@ class CustomUIHandler:
             console=self.console,
         )
 
+        # Store console and progress in thread-local for tool access
+        set_ui_context(console=self.console, progress=self.progress)
+
         with self.progress:
             self.task_id = self.progress.add_task("Starting agent...", total=None)
             try:
                 yield
             finally:
                 self.progress.stop()
+                clear_ui_context()
 
     def update_progress(self, description: str) -> None:
         """Update progress description."""
@@ -521,11 +527,17 @@ def custom_agent_ui(
     )
     logger = CustomUILogger(ui_handler)
 
-    if show_progress:
-        with ui_handler.progress_context():
+    # Store console in thread-local even without progress
+    set_ui_context(console=console, progress=None)
+
+    try:
+        if show_progress:
+            with ui_handler.progress_context():
+                yield logger
+        else:
             yield logger
-    else:
-        yield logger
+    finally:
+        clear_ui_context()
 
 
 # Convenience function for completely silent execution

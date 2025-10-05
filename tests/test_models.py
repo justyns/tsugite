@@ -48,7 +48,6 @@ def test_resolve_model_alias_with_alias(tmp_path, monkeypatch):
 
 def test_resolve_model_alias_nonexistent(tmp_path, monkeypatch):
     """Test resolving nonexistent alias returns original string."""
-    config_path = tmp_path / "config.json"
     Config().save_config = lambda path: None
 
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))

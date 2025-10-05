@@ -103,7 +103,7 @@ class TestLoadMCPConfig:
         servers = load_mcp_config(config_path)
         assert servers == {}
 
-    def test_load_config_missing_mcpServers_key(self, tmp_path):
+    def test_load_config_missing_mcp_servers_key(self, tmp_path):
         """Test loading config without mcpServers key."""
         config_data = {"someOtherKey": {}}
         config_path = tmp_path / "config.json"

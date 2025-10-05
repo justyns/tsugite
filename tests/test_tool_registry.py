@@ -40,7 +40,7 @@ def test_tool_registration_without_annotations(reset_tool_registry):
         return f"Hello {name}"
 
     tool_info = get_tool("simple_tool")
-    assert tool_info.parameters["name"]["type"] == str  # Default type
+    assert tool_info.parameters["name"]["type"] is str  # Default type
 
 
 def test_tool_registration_without_docstring(reset_tool_registry):
@@ -149,8 +149,8 @@ def test_tool_with_complex_types(reset_tool_registry):
         return {"items": len(items), "metadata": metadata}
 
     tool_info = get_tool("complex_tool")
-    assert tool_info.parameters["items"]["type"] == list
-    assert tool_info.parameters["metadata"]["type"] == dict
+    assert tool_info.parameters["items"]["type"] is list
+    assert tool_info.parameters["metadata"]["type"] is dict
     assert tool_info.parameters["metadata"]["default"] is None
 
 

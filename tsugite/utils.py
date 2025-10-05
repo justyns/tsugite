@@ -1,5 +1,6 @@
 """Common utilities for Tsugite."""
 
+import sys
 from typing import Any, Callable, Dict, Tuple
 
 import yaml
@@ -74,3 +75,12 @@ def tool_error(tool_name: str, operation: str, details: str) -> RuntimeError:
 
 def validation_error(item_type: str, item_name: str, issue: str) -> ValueError:
     return ValueError(f"Invalid {item_type} '{item_name}': {issue}")
+
+
+def is_interactive() -> bool:
+    """Check if running in an interactive terminal (TTY).
+
+    Returns:
+        True if running in an interactive terminal, False otherwise
+    """
+    return sys.stdin.isatty()

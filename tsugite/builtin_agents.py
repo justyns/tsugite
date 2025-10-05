@@ -18,6 +18,8 @@ instructions: |
 ---
 # Context
 
+**Interactive Mode**: {{ is_interactive }}
+
 {% if step_number is defined %}
 ## Multi-Step Execution
 You are in step {{ step_number }} of {{ total_steps }} ({{ step_name }}).

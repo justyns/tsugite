@@ -77,7 +77,6 @@ class TestAnimationIntegrationScenarios:
 
         # Create test console instances
         color_console = Console(file=StringIO(), force_terminal=True, width=80)
-        no_color_console = Console(file=StringIO(), no_color=True, width=80)
 
         with (
             patch("tsugite.tsugite.console", color_console),

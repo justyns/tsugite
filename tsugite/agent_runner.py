@@ -11,12 +11,15 @@ from tsugite.renderer import AgentRenderer
 from tsugite.tool_adapter import get_smolagents_tools
 from tsugite.tools import call_tool
 from tsugite.tools.tasks import get_task_manager, reset_task_manager
+from tsugite.utils import is_interactive
 
 TSUGITE_DEFAULT_INSTRUCTIONS = (
     "You are operating inside the Tsugite micro-agent runtime. Follow the rendered task faithfully, use the available "
     "tools when they meaningfully advance the work, and maintain a living plan via the task_* tools. Create or update "
     "tasks whenever you define new sub-work, mark progress as you go, and rely on the task summary to decide the next "
-    "action. Provide a clear, actionable final response without unnecessary filler."
+    "action. Provide a clear, actionable final response without unnecessary filler.\n\n"
+    "Interactive Mode: The `is_interactive` variable indicates whether you're running in an interactive terminal. "
+    "Interactive-only tools (like ask_user) are automatically available only when is_interactive is True."
 )
 
 
@@ -107,6 +110,10 @@ def _execute_agent_with_prompt(
 
         if delegation_agents:
             all_tools.append("spawn_agent")
+
+        # Filter out ask_user tool in non-interactive mode
+        if not is_interactive() and "ask_user" in all_tools:
+            all_tools.remove("ask_user")
 
         tools = get_smolagents_tools(all_tools)
     except Exception as e:
@@ -233,12 +240,16 @@ def run_agent(
     # Add task context (will be updated as agent creates tasks)
     task_context = task_manager.get_task_summary()
 
+    # Check if running in interactive mode
+    interactive_mode = is_interactive()
+
     # Prepare full context for template rendering
     full_context = {
         **context,
         **prefetch_context,
         "user_prompt": prompt,
         "task_summary": task_context,
+        "is_interactive": interactive_mode,
     }
 
     # Render agent template
@@ -398,11 +409,15 @@ def run_multistep_agent(
     reset_task_manager()
     task_manager = get_task_manager()
 
+    # Check if running in interactive mode
+    interactive_mode = is_interactive()
+
     # Initialize context with user prompt
     step_context = {
         **context,
         "user_prompt": prompt,
         "task_summary": task_manager.get_task_summary(),
+        "is_interactive": interactive_mode,
     }
 
     # Execute prefetch once (before any steps)

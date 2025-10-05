@@ -755,7 +755,6 @@ class TestVariableInjection:
 
     def test_injectable_vars_filtering(self):
         """Test that metadata variables are filtered from injectable vars."""
-        from tsugite.agent_runner import run_multistep_agent
 
         # We'll test the filtering logic by checking what would be injected
         step_context = {
@@ -811,12 +810,11 @@ Parse it and use it.
     def test_agent_kwargs_include_json_import(self):
         """Test that CodeAgent is created with json in additional_authorized_imports."""
         # This is integration-level, so we'll just verify the structure
-        from tsugite.agent_runner import _execute_agent_with_prompt
-        from tsugite.md_agents import AgentConfig
-
         # We can't easily test this without mocking, but we can verify
         # the function accepts injectable_vars parameter
         import inspect
+
+        from tsugite.agent_runner import _execute_agent_with_prompt
 
         sig = inspect.signature(_execute_agent_with_prompt)
         assert "injectable_vars" in sig.parameters
