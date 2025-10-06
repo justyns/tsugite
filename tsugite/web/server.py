@@ -9,7 +9,6 @@ from typing import Dict, Optional
 from fastapi import FastAPI, Form, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-
 from smolagents.monitoring import LogLevel
 
 from tsugite.agent_runner import run_agent
@@ -146,6 +145,7 @@ async def _run_in_executor(execution_id: str, func, *args, error_type: str = "Ex
     except Exception as e:
         print(f"[WEB] Error in execution {execution_id}: {e}")
         import traceback
+
         traceback.print_exc()
         handler = executions.get(execution_id)
         if handler:
