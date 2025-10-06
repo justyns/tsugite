@@ -170,7 +170,7 @@ def task_add(title: str, status: str = "pending", parent_id: Optional[int] = Non
     Args:
         title: Description of the task
         status: Task status (pending/in_progress/completed/blocked/cancelled)
-        parent_id: ID of parent task if this is a subtask
+        parent_id: ID of parent task if this is a subtask (omit or use None for root tasks)
 
     Returns:
         ID of the created task
@@ -180,6 +180,10 @@ def task_add(title: str, status: str = "pending", parent_id: Optional[int] = Non
     except ValueError:
         valid_statuses = [s.value for s in TaskStatus]
         raise ValueError(f"Invalid status '{status}'. Valid options: {valid_statuses}")
+
+    # Treat 0 as None (root task) for convenience
+    if parent_id == 0:
+        parent_id = None
 
     manager = get_task_manager()
     return manager.add_task(title, task_status, parent_id)

@@ -1011,5 +1011,95 @@ def config_set_default_base(
         raise typer.Exit(1)
 
 
+@app.command()
+def chat(
+    agent: Optional[str] = typer.Argument(None, help="Agent name or path (optional, uses default if not provided)"),
+    model: Optional[str] = typer.Option(None, "--model", help="Override agent model"),
+    max_history: int = typer.Option(50, "--max-history", help="Maximum turns to keep in context"),
+    root: Optional[str] = typer.Option(None, "--root", help="Working directory"),
+):
+    """Start an interactive chat session with an agent."""
+    from tsugite.agent_composition import parse_agent_references
+    from tsugite.chat_ui import run_chat_cli
+
+    # Change to root directory if specified
+    original_cwd = None
+    if root:
+        root_path = Path(root)
+        if not root_path.exists():
+            console.print(f"[red]Working directory not found: {root}[/red]")
+            raise typer.Exit(1)
+        original_cwd = os.getcwd()
+        os.chdir(str(root_path))
+
+    try:
+        # Resolve agent path
+        if agent:
+            # Parse agent reference
+            base_dir = Path.cwd()
+            agent_refs = [agent]
+            primary_agent_path, _ = parse_agent_references(agent_refs, None, base_dir)
+        else:
+            # Use default agent
+            default_agent = Path.cwd() / ".tsugite" / "default.md"
+            if not default_agent.exists():
+                # Fallback to assistant
+                default_agent = Path.cwd() / "agents" / "assistant.md"
+                if not default_agent.exists():
+                    console.print("[red]No default agent found[/red]")
+                    console.print("Specify an agent: [cyan]tsugite chat +assistant[/cyan]")
+                    raise typer.Exit(1)
+            primary_agent_path = default_agent
+
+        if not primary_agent_path.exists():
+            console.print(f"[red]Agent file not found: {primary_agent_path}[/red]")
+            raise typer.Exit(1)
+
+        # Run chat
+        run_chat_cli(
+            agent_path=primary_agent_path,
+            model_override=model,
+            max_history=max_history,
+        )
+
+    finally:
+        # Restore original directory
+        if original_cwd:
+            os.chdir(original_cwd)
+
+
+@app.command()
+def web(
+    host: str = typer.Option("127.0.0.1", "--host", help="Host to bind to"),
+    port: int = typer.Option(8080, "--port", help="Port to bind to"),
+    reload: bool = typer.Option(False, "--reload", help="Enable auto-reload on code changes"),
+):
+    """Start the web UI server."""
+    try:
+        import uvicorn
+    except ImportError:
+        console.print("[red]Web UI dependencies not installed![/red]")
+        console.print("\nInstall with: [cyan]uv add fastapi uvicorn python-multipart[/cyan]")
+        raise typer.Exit(1)
+
+    console.print("[cyan]Starting Tsugite Web UI...[/cyan]")
+    console.print(f"[dim]Server: http://{host}:{port}[/dim]")
+    console.print(f"[dim]Chat UI: http://{host}:{port}/chat[/dim]\n")
+
+    try:
+        uvicorn.run(
+            "tsugite.web.server:app",
+            host=host,
+            port=port,
+            reload=reload,
+            log_level="info",
+        )
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Server stopped by user[/yellow]")
+    except Exception as e:
+        console.print(f"[red]Server error: {e}[/red]")
+        raise typer.Exit(1)
+
+
 if __name__ == "__main__":
     app()

@@ -135,6 +135,8 @@ class StepDirective:
     content: str
     assign_var: Optional[str] = None
     model_kwargs: Dict[str, Any] = field(default_factory=dict)
+    max_retries: int = 0
+    retry_delay: float = 0.0
     start_pos: int = 0
     end_pos: int = 0
 
@@ -252,12 +254,26 @@ def extract_step_directives(content: str, include_preamble: bool = True) -> tupl
         if pres_match:
             model_kwargs["presence_penalty"] = float(pres_match.group(2))
 
+        # Parse max_retries
+        max_retries = 0
+        retries_match = re.search(r'max_retries=(["\']?)([0-9]+)\1', args)
+        if retries_match:
+            max_retries = int(retries_match.group(2))
+
+        # Parse retry_delay
+        retry_delay = 0.0
+        delay_match = re.search(r'retry_delay=(["\']?)([0-9.]+)\1', args)
+        if delay_match:
+            retry_delay = float(delay_match.group(2))
+
         steps.append(
             StepDirective(
                 name=step_name,
                 content=step_content,
                 assign_var=assign_var,
                 model_kwargs=model_kwargs,
+                max_retries=max_retries,
+                retry_delay=retry_delay,
                 start_pos=start_pos,
                 end_pos=end_pos,
             )

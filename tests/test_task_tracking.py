@@ -125,6 +125,17 @@ class TestTaskTools:
         task = manager.get_task(task_id)
         assert task.title == "Test task"
 
+    def test_task_add_with_parent_id_zero(self):
+        """Test that parent_id=0 is treated as None (root task)."""
+        task_id = task_add("Root task", parent_id=0)
+        assert task_id == 1
+
+        # Verify the task was created as a root task (parent_id=None)
+        manager = get_task_manager()
+        task = manager.get_task(task_id)
+        assert task.title == "Root task"
+        assert task.parent_id is None
+
     def test_task_add_with_invalid_status(self):
         """Test task_add with invalid status."""
         with pytest.raises(ValueError, match="Invalid status 'invalid'"):

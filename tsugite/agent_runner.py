@@ -1,5 +1,6 @@
 """Agent execution engine using smolagents."""
 
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -59,7 +60,8 @@ def _execute_agent_with_prompt(
     skip_task_reset: bool = False,
     model_kwargs: Optional[Dict[str, Any]] = None,
     injectable_vars: Optional[Dict[str, Any]] = None,
-) -> str:
+    return_token_usage: bool = False,
+) -> str | tuple[str, Optional[int]]:
     """Execute agent with a pre-rendered prompt.
 
     Low-level execution function used by both run_agent and run_multistep_agent.
@@ -74,9 +76,10 @@ def _execute_agent_with_prompt(
         skip_task_reset: Skip resetting task manager (for multi-step agents)
         model_kwargs: Additional model parameters (response_format, temperature, etc.)
         injectable_vars: Variables to inject into Python execution namespace
+        return_token_usage: Whether to return token usage from LiteLLM
 
     Returns:
-        Agent execution result
+        Agent execution result as string, or tuple of (result, token_count) if return_token_usage=True
 
     Raises:
         RuntimeError: If execution fails
@@ -170,7 +173,7 @@ def _execute_agent_with_prompt(
 
         if custom_logger is not None:
             agent_kwargs["logger"] = custom_logger
-            agent_kwargs["verbosity_level"] = -1
+            agent_kwargs["verbosity_level"] = 1  # 1 = show tool calls and results
 
         agent = CodeAgent(**agent_kwargs)
 
@@ -178,8 +181,16 @@ def _execute_agent_with_prompt(
         if injectable_vars and hasattr(agent, "python_executor"):
             agent.python_executor.send_variables(injectable_vars)
 
-        result = agent.run(rendered_prompt)
-        return str(result)
+        # Get full result with token usage if requested
+        if return_token_usage:
+            full_result = agent.run(rendered_prompt, return_full_result=True)
+            token_count = None
+            if hasattr(full_result, "token_usage") and full_result.token_usage:
+                token_count = full_result.token_usage.total_tokens
+            return str(full_result.output), token_count
+        else:
+            result = agent.run(rendered_prompt)
+            return str(result)
 
     except Exception as e:
         raise RuntimeError(f"Agent execution failed: {e}")
@@ -194,7 +205,8 @@ def run_agent(
     custom_logger: Optional[Any] = None,
     trust_mcp_code: bool = False,
     delegation_agents: Optional[List[tuple[str, Path]]] = None,
-) -> str:
+    return_token_usage: bool = False,
+) -> str | tuple[str, Optional[int]]:
     """Run a Tsugite agent using smolagents.
 
     Args:
@@ -206,9 +218,10 @@ def run_agent(
         custom_logger: Custom logger for agent output
         trust_mcp_code: Whether to trust remote code from MCP servers
         delegation_agents: List of (name, path) tuples for agents to make available for delegation
+        return_token_usage: Whether to return token usage from LiteLLM
 
     Returns:
-        Agent execution result as string
+        Agent execution result as string, or tuple of (result, token_count) if return_token_usage=True
 
     Raises:
         ValueError: If agent file is invalid
@@ -275,6 +288,7 @@ def run_agent(
         custom_logger=custom_logger,
         trust_mcp_code=trust_mcp_code,
         delegation_agents=delegation_agents,
+        return_token_usage=return_token_usage,
     )
 
 
@@ -440,80 +454,139 @@ def run_multistep_agent(
         # Show step progress (unless in debug mode which has its own output)
         step_header = f"[Step {i}/{len(steps)}: {step.name}]"
 
-        if custom_logger and not debug:
-            # Set multi-step context for nested progress display
-            if hasattr(custom_logger, "ui_handler"):
-                custom_logger.ui_handler.set_multistep_context(i, step.name, len(steps))
+        # Retry loop
+        max_attempts = step.max_retries + 1
+        errors = []
 
-            # Use custom logger's console with color
-            custom_logger.console.print(f"[cyan]{step_header} Starting...[/cyan]")
-        elif not debug:
-            # Direct output for native-ui/silent modes
-            print(f"{step_header} Starting...")
+        for attempt in range(max_attempts):
+            # Add retry context variables
+            step_context["is_retry"] = attempt > 0
+            step_context["retry_count"] = attempt
+            step_context["max_retries"] = step.max_retries
+            step_context["last_error"] = errors[-1] if errors else ""
+            step_context["all_errors"] = errors
 
-        if debug:
-            print(f"\n{'=' * 60}")
-            print(f"DEBUG: Executing Step {i}/{len(steps)}: {step.name}")
-            print(f"{'=' * 60}")
+            if custom_logger and not debug:
+                # Set multi-step context for nested progress display
+                if hasattr(custom_logger, "ui_handler"):
+                    custom_logger.ui_handler.set_multistep_context(i, step.name, len(steps))
 
-        # Render this step's content with current context
-        renderer = AgentRenderer()
-        try:
-            rendered_step_prompt = renderer.render(step.content, step_context)
+                # Show retry attempt if applicable
+                if attempt > 0:
+                    custom_logger.console.print(f"[yellow]{step_header} Retry {attempt}/{step.max_retries}...[/yellow]")
+                else:
+                    custom_logger.console.print(f"[cyan]{step_header} Starting...[/cyan]")
+            elif not debug:
+                # Direct output for native-ui/silent modes
+                if attempt > 0:
+                    print(f"{step_header} Retry {attempt}/{step.max_retries}...")
+                else:
+                    print(f"{step_header} Starting...")
 
             if debug:
-                print("\nRendered Prompt:")
-                print(rendered_step_prompt)
-                print(f"{'=' * 60}\n")
+                print(f"\n{'=' * 60}")
+                if attempt > 0:
+                    print(f"DEBUG: Retrying Step {i}/{len(steps)}: {step.name} (Attempt {attempt + 1}/{max_attempts})")
+                else:
+                    print(f"DEBUG: Executing Step {i}/{len(steps)}: {step.name}")
+                print(f"{'=' * 60}")
 
-        except Exception as e:
-            raise RuntimeError(f"Step '{step.name}' template rendering failed: {e}")
+            # Render this step's content with current context
+            renderer = AgentRenderer()
+            try:
+                rendered_step_prompt = renderer.render(step.content, step_context)
 
-        # Prepare variables to inject into Python namespace
-        # Filter out metadata variables, only inject step results
-        metadata_vars = {"user_prompt", "task_summary", "step_number", "step_name", "total_steps"}
-        injectable_vars = {k: v for k, v in step_context.items() if k not in metadata_vars}
-
-        # Execute this step as a full agent run
-        try:
-            step_result = _execute_agent_with_prompt(
-                rendered_prompt=rendered_step_prompt,
-                agent_config=agent.config,
-                model_override=model_override,
-                custom_logger=custom_logger,
-                trust_mcp_code=trust_mcp_code,
-                delegation_agents=delegation_agents,
-                skip_task_reset=True,  # Don't reset tasks between steps
-                model_kwargs=step.model_kwargs,
-                injectable_vars=injectable_vars,
-            )
-
-            final_result = step_result
-
-            # Store result in context if assign variable specified
-            if step.assign_var:
-                step_context[step.assign_var] = step_result
                 if debug:
-                    print(f"Assigned result to variable: {step.assign_var}")
+                    print("\nRendered Prompt:")
+                    print(rendered_step_prompt)
+                    print(f"{'=' * 60}\n")
 
-            # Update task summary for next step
-            step_context["task_summary"] = task_manager.get_task_summary()
+            except Exception as e:
+                error_msg = f"Template rendering failed: {e}"
+                errors.append(error_msg)
 
-            # Show step completion
-            if custom_logger and not debug:
-                # Clear multi-step context after step completes
-                if hasattr(custom_logger, "ui_handler"):
-                    custom_logger.ui_handler.clear_multistep_context()
+                if attempt == max_attempts - 1:
+                    if custom_logger and hasattr(custom_logger, "ui_handler"):
+                        custom_logger.ui_handler.clear_multistep_context()
+                    raise RuntimeError(
+                        f"Step '{step.name}' failed after {max_attempts} attempts. Errors: {'; '.join(errors)}"
+                    )
 
-                custom_logger.console.print(f"[green]{step_header} Complete[/green]")
-            elif not debug:
-                print(f"{step_header} Complete")
+                if step.retry_delay > 0:
+                    time.sleep(step.retry_delay)
+                continue
 
-        except Exception as e:
-            # Clear multi-step context on error too
-            if custom_logger and hasattr(custom_logger, "ui_handler"):
-                custom_logger.ui_handler.clear_multistep_context()
+            # Prepare variables to inject into Python namespace
+            # Filter out metadata variables, only inject step results
+            metadata_vars = {
+                "user_prompt",
+                "task_summary",
+                "step_number",
+                "step_name",
+                "total_steps",
+                "is_retry",
+                "retry_count",
+                "max_retries",
+                "last_error",
+                "all_errors",
+            }
+            injectable_vars = {k: v for k, v in step_context.items() if k not in metadata_vars}
 
-            raise RuntimeError(f"Step '{step.name}' execution failed: {e}")
+            # Execute this step as a full agent run
+            try:
+                step_result = _execute_agent_with_prompt(
+                    rendered_prompt=rendered_step_prompt,
+                    agent_config=agent.config,
+                    model_override=model_override,
+                    custom_logger=custom_logger,
+                    trust_mcp_code=trust_mcp_code,
+                    delegation_agents=delegation_agents,
+                    skip_task_reset=True,  # Don't reset tasks between steps
+                    model_kwargs=step.model_kwargs,
+                    injectable_vars=injectable_vars,
+                )
+
+                final_result = step_result
+
+                # Store result in context if assign variable specified
+                if step.assign_var:
+                    step_context[step.assign_var] = step_result
+                    if debug:
+                        print(f"Assigned result to variable: {step.assign_var}")
+
+                # Update task summary for next step
+                step_context["task_summary"] = task_manager.get_task_summary()
+
+                # Show step completion
+                if custom_logger and not debug:
+                    # Clear multi-step context after step completes
+                    if hasattr(custom_logger, "ui_handler"):
+                        custom_logger.ui_handler.clear_multistep_context()
+
+                    custom_logger.console.print(f"[green]{step_header} Complete[/green]")
+                elif not debug:
+                    print(f"{step_header} Complete")
+
+                # Success - break retry loop
+                break
+
+            except Exception as e:
+                error_msg = str(e)
+                errors.append(error_msg)
+
+                if attempt == max_attempts - 1:
+                    if custom_logger and hasattr(custom_logger, "ui_handler"):
+                        custom_logger.ui_handler.clear_multistep_context()
+                    raise RuntimeError(
+                        f"Step '{step.name}' failed after {max_attempts} attempts. Errors: {'; '.join(errors)}"
+                    )
+
+                if step.retry_delay > 0:
+                    time.sleep(step.retry_delay)
+
+                if custom_logger and not debug:
+                    custom_logger.console.print(f"[yellow]Step '{step.name}' failed: {error_msg}[/yellow]")
+                elif not debug:
+                    print(f"Step '{step.name}' failed: {error_msg}")
 
     return final_result or ""
