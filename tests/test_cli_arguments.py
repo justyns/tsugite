@@ -95,3 +95,33 @@ class TestParseCliArguments:
         agents, prompt = parse_cli_arguments(["+assistant", "create", "+urgent", "ticket"])
         assert agents == ["+assistant"]
         assert prompt == "create +urgent ticket"
+
+    def test_file_reference_not_treated_as_agent(self):
+        """Test that @filename.md is treated as prompt, not agent."""
+        agents, prompt = parse_cli_arguments(["+assistant", "Summarize", "@README.md"])
+        assert agents == ["+assistant"]
+        assert prompt == "Summarize @README.md"
+
+    def test_file_reference_with_path_not_treated_as_agent(self):
+        """Test that @path/file.md is treated as prompt, not agent."""
+        agents, prompt = parse_cli_arguments(["+assistant", "Review", "@src/main.py"])
+        assert agents == ["+assistant"]
+        assert prompt == "Review @src/main.py"
+
+    def test_quoted_file_reference_not_treated_as_agent(self):
+        """Test that quoted @filename is treated as prompt."""
+        agents, prompt = parse_cli_arguments(["+assistant", 'Check @"my file.md"'])
+        assert agents == ["+assistant"]
+        assert prompt == 'Check @"my file.md"'
+
+    def test_prompt_ending_with_md_not_treated_as_agent(self):
+        """Test that prompts ending with .md are not treated as agent files."""
+        agents, prompt = parse_cli_arguments(["+assistant", "Summarize @README.md"])
+        assert agents == ["+assistant"]
+        assert prompt == "Summarize @README.md"
+
+    def test_prompt_with_spaces_not_treated_as_agent(self):
+        """Test that arguments with spaces are treated as prompts."""
+        agents, prompt = parse_cli_arguments(["+assistant", "Review the code in agent.md"])
+        assert agents == ["+assistant"]
+        assert prompt == "Review the code in agent.md"

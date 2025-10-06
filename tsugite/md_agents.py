@@ -380,7 +380,11 @@ def validate_agent_execution(agent: Agent | Path) -> tuple[bool, str]:
 
     renderer = AgentRenderer()
     try:
-        test_context = {"user_prompt": "test", "task_summary": "## Current Tasks\nNo tasks yet."}
+        test_context = {
+            "user_prompt": "test",
+            "task_summary": "## Current Tasks\nNo tasks yet.",
+            "is_interactive": False,
+        }
 
         # If agent has prefetch, create mock variables
         if agent.config.prefetch:

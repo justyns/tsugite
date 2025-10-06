@@ -15,6 +15,7 @@ from tsugite.agent_runner import get_agent_info, run_agent, validate_agent_execu
 from tsugite.animation import loading_animation
 from tsugite.constants import TSUGITE_LOGO_NARROW, TSUGITE_LOGO_WIDE
 from tsugite.custom_ui import create_silent_logger, custom_agent_ui
+from tsugite.utils import expand_file_references
 
 app = typer.Typer(
     name="tsugite",
@@ -59,7 +60,16 @@ def parse_cli_arguments(args: List[str]) -> tuple[List[str], str]:
 
     for i, arg in enumerate(args):
         # Check if this looks like an agent reference
-        is_agent = arg.startswith("+") or arg.endswith(".md") or "/" in arg
+        # Exclude arguments containing @ (file references) from being treated as agents
+        # Also exclude arguments with spaces unless they're file paths (contain /)
+        has_file_reference = "@" in arg
+        has_path_separator = "/" in arg
+        has_spaces = " " in arg
+        is_agent = (
+            (arg.startswith("+") or arg.endswith(".md") or has_path_separator)
+            and not has_file_reference
+            and not (has_spaces and not has_path_separator)
+        )
 
         if is_agent and not prompt_parts:
             # Still collecting agents
@@ -168,6 +178,15 @@ def run(
             os.chdir(str(root_path))
 
         base_dir = Path.cwd()
+
+        # Expand @filename references in prompt
+        expanded_files = []
+        try:
+            prompt, expanded_files = expand_file_references(prompt, base_dir)
+        except ValueError as e:
+            console.print(f"[red]File reference error: {e}[/red]")
+            raise typer.Exit(1)
+
         primary_agent_path, delegation_agents = parse_agent_references(agent_refs, with_agents, base_dir)
 
         # Validate primary agent
@@ -196,14 +215,23 @@ def run(
             console.print(_get_logo(console), style="cyan")
             console.print()  # blank line for spacing
 
+            # Build panel content
+            panel_content = (
+                f"[cyan]Agent:[/cyan] {agent_file.name}\n"
+                f"[cyan]Task:[/cyan] {prompt}\n"
+                f"[cyan]Directory:[/cyan] {Path.cwd()}\n"
+                f"[cyan]Model:[/cyan] {model or agent_info.get('model', 'unknown')}\n"
+                f"[cyan]Instructions:[/cyan] {instruction_label}\n"
+                f"[cyan]Tools:[/cyan] {', '.join(agent_info.get('tools', []))}"
+            )
+
+            # Add expanded files if any
+            if expanded_files:
+                panel_content += f"\n[cyan]Expanded Files:[/cyan] {', '.join(expanded_files)}"
+
             console.print(
                 Panel(
-                    f"[cyan]Agent:[/cyan] {agent_file.name}\n"
-                    f"[cyan]Task:[/cyan] {prompt}\n"
-                    f"[cyan]Directory:[/cyan] {Path.cwd()}\n"
-                    f"[cyan]Model:[/cyan] {model or agent_info.get('model', 'unknown')}\n"
-                    f"[cyan]Instructions:[/cyan] {instruction_label}\n"
-                    f"[cyan]Tools:[/cyan] {', '.join(agent_info.get('tools', []))}",
+                    panel_content,
                     title="Tsugite Agent Runner",
                     border_style="blue",
                 )
@@ -342,12 +370,21 @@ def render(
     """Render an agent template without executing it."""
     from tsugite.md_agents import parse_agent
     from tsugite.renderer import AgentRenderer
+    from tsugite.utils import is_interactive
 
     if no_color:
         console.no_color = True
 
     with _agent_context(agent_path, root) as agent_file:
         try:
+            # Expand file references in prompt
+            base_dir = Path.cwd()
+            try:
+                prompt_expanded, _ = expand_file_references(prompt, base_dir)
+            except ValueError as e:
+                console.print(f"[red]File reference error: {e}[/red]")
+                raise typer.Exit(1)
+
             # Parse agent
             agent_text = agent_file.read_text()
             agent = parse_agent(agent_text, agent_file)
@@ -365,7 +402,9 @@ def render(
             # Prepare context
             context = {
                 **prefetch_context,
-                "user_prompt": prompt,
+                "user_prompt": prompt_expanded,
+                "is_interactive": is_interactive(),
+                "task_summary": "## Current Tasks\nNo tasks yet.",
             }
 
             # Render template

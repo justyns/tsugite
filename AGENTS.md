@@ -31,6 +31,20 @@ tsugite run agents/custom.md +jira ./helpers/coder.md "task"
 tsugite run +coordinator +researcher +writer "task"
 tsugite run +coordinator --with-agents "researcher writer" "task"
 
+### File References
+
+Use `@filename` syntax to automatically inject file contents into prompts:
+
+tsugite run +assistant "Review @src/main.py and suggest improvements"
+tsugite run +coder "Fix bugs in @app.py based on @tests/test_app.py"
+tsugite run +assistant @README.md  # Single file as entire context
+tsugite run +writer "Summarize @"docs/user guide.md""  # Quoted paths for spaces
+tsugite run +assistant "Compare @file1.py and @file2.py"  # Multiple files
+
+The files are automatically read and injected as formatted context. The CLI will show which files were expanded in the info panel.
+
+**Note**: `@word` patterns that start with alphanumeric characters will be treated as file references. Use `@"path"` for explicit file references or avoid `@` prefix for non-file content (e.g., write "email user123" instead of "@user123").
+
 ## Quickstart Checklist
 
 - Install dev dependencies with `uv sync --dev`; use `uv add` for new packages.
