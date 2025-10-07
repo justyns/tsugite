@@ -88,6 +88,93 @@ def is_interactive() -> bool:
     return sys.stdin.isatty()
 
 
+def fetch_url_content(url: str) -> str:
+    """Fetch text content from a URL.
+
+    Args:
+        url: URL to fetch
+
+    Returns:
+        Text content from the URL
+
+    Raises:
+        ValueError: If URL cannot be fetched or is not text
+    """
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(url, timeout=30) as response:
+            # Check content type
+            content_type = response.headers.get("Content-Type", "")
+            if not any(t in content_type.lower() for t in ["text", "json", "xml", "markdown"]):
+                raise ValueError(f"URL does not appear to be text content: {content_type}")
+
+            content = response.read().decode("utf-8")
+            return content
+    except urllib.error.URLError as e:
+        raise ValueError(f"Failed to fetch URL: {e}")
+    except UnicodeDecodeError:
+        raise ValueError("URL content is not valid UTF-8 text")
+    except Exception as e:
+        raise ValueError(f"Error fetching URL: {e}")
+
+
+def resolve_attachments(
+    attachment_refs: List[str], base_dir: Path, refresh_cache: bool = False
+) -> List[Tuple[str, str]]:
+    """Resolve attachment references to their content using handler system.
+
+    Args:
+        attachment_refs: List of attachment aliases
+        base_dir: Base directory for resolving relative file paths (unused but kept for API compatibility)
+        refresh_cache: If True, bypass cache and re-fetch content
+
+    Returns:
+        List of (alias, content) tuples
+
+    Raises:
+        ValueError: If an attachment cannot be resolved
+    """
+    from tsugite.attachments import get_attachment, get_handler
+    from tsugite.cache import get_cached_content, save_to_cache
+
+    resolved = []
+
+    for ref in attachment_refs:
+        # Get attachment from registry
+        result = get_attachment(ref)
+        if result is None:
+            raise ValueError(f"Attachment not found: '{ref}'")
+
+        source, content = result
+
+        # If inline content, use it directly
+        if content is not None:
+            resolved.append((ref, content))
+            continue
+
+        # For file/URL references, check cache first
+        if not refresh_cache:
+            cached = get_cached_content(source)
+            if cached:
+                resolved.append((ref, cached))
+                continue
+
+        # Fetch content via handler
+        try:
+            handler = get_handler(source)
+            fetched_content = handler.fetch(source)
+
+            # Save to cache
+            save_to_cache(source, fetched_content)
+
+            resolved.append((ref, fetched_content))
+        except Exception as e:
+            raise ValueError(f"Failed to fetch attachment '{ref}' from {source}: {e}")
+
+    return resolved
+
+
 def expand_file_references(prompt: str, base_dir: Path) -> Tuple[str, List[str]]:
     """Expand @filename references in prompt by reading and injecting file contents.
 

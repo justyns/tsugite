@@ -45,6 +45,129 @@ The files are automatically read and injected as formatted context. The CLI will
 
 **Note**: `@word` patterns that start with alphanumeric characters will be treated as file references. Use `@"path"` for explicit file references or avoid `@` prefix for non-file content (e.g., write "email user123" instead of "@user123").
 
+### Attachments (Reusable Context)
+
+Attachments are reusable content references that can point to files, URLs, YouTube videos, or inline text. They're stored as lightweight references with automatic caching, similar to `llm`'s attachments but with enhanced handler support.
+
+**Managing Attachments:**
+
+# Add attachments from files, URLs, or stdin
+tsugite attachments add coding-standards docs/style-guide.md  # File reference
+tsugite attachments add api-docs https://api.example.com/reference  # URL reference
+tsugite attachments add tutorial https://youtube.com/watch?v=abc123  # YouTube transcript
+cat context.txt | tsugite attachments add mycontext -  # Inline text (stdin)
+
+# List all attachments
+tsugite attachments list
+
+# Show attachment details (displays type, cache status)
+tsugite attachments show coding-standards
+tsugite attachments show coding-standards --content  # Fetch and show full content
+
+# Search attachments
+tsugite attachments search "api"
+
+# Remove attachments
+tsugite attachments remove old-docs
+
+# Cache management
+tsugite cache list  # Show all cached attachments
+tsugite cache info coding-standards  # Show cache details for specific attachment
+tsugite cache clear  # Clear entire cache
+tsugite cache clear coding-standards  # Clear cache for specific attachment
+
+**Using Attachments in Prompts:**
+
+# Use saved attachments with -f flag
+tsugite run +assistant "implement login" -f coding-standards -f api-docs
+
+# Mix attachments with file references
+tsugite run +coder "review @app.py" -f coding-standards
+
+# Use direct files/URLs without saving (one-time use)
+tsugite run +assistant "check" -f ./config.json
+tsugite run +assistant "summarize" -f https://example.com/doc.md
+
+# Multiple attachments
+tsugite run +reviewer "check PR" -f style -f security-guide -f api-docs
+
+# Force refresh cached content
+tsugite run +assistant "update" -f api-docs --refresh-cache
+
+**How It Works:**
+
+- **Storage**: Attachments registry stored in `~/.tsugite/attachments.json` (or `$XDG_CONFIG_HOME/tsugite/attachments.json`)
+- **Caching**: Downloaded content cached in `~/.cache/tsugite/attachments/` (or `$XDG_CACHE_HOME/tsugite/attachments/`)
+- **Handler System**: Auto-detects content type from source:
+  - **Inline**: stdin text stored directly
+  - **File**: local file paths (absolute or relative)
+  - **YouTube**: `youtube.com` or `youtu.be` URLs → transcript with timestamps
+  - **URL**: HTTP(S) URLs (HTML auto-converted to markdown)
+- **Cache behavior**: Permanent cache with manual refresh via `--refresh-cache` flag
+- **Sync**: Sync `~/.tsugite/` (registry only) with Nextcloud/Dropbox for cross-machine access
+
+**Output Format:**
+
+<Attachment: coding-standards>
+[style guide content]
+</Attachment: coding-standards>
+
+<Attachment: api-docs>
+[api documentation]
+</Attachment: api-docs>
+
+<File: app.py>
+[file content from @app.py]
+</File: app.py>
+
+Task: review app.py following coding-standards and api-docs
+
+**Agent-Defined Attachments:**
+
+Agents can specify attachments in their frontmatter, so they always load required context automatically:
+
+---
+name: code_reviewer
+model: openai:gpt-4o-mini
+tools: [read_file, write_file]
+attachments:
+  - coding-standards
+  - security-checklist
+---
+
+You are a code reviewer. Follow our standards when reviewing code.
+
+Task: {{ user_prompt }}
+
+**Attachment Resolution Order:**
+
+1. **Agent attachments** (from agent definition) - prepended first
+2. **CLI attachments** (from `-f` flag) - prepended after agent attachments
+3. **File references** (from `@filename`) - prepended after attachments
+4. **User prompt** - comes last
+
+Example:
+tsugite run code_reviewer.md "review @app.py" -f extra-context
+
+Results in:
+<Attachment: coding-standards>      # From agent definition
+...
+</Attachment: coding-standards>
+
+<Attachment: security-checklist>     # From agent definition
+...
+</Attachment: security-checklist>
+
+<Attachment: extra-context>          # From CLI -f flag
+...
+</Attachment: extra-context>
+
+<File: app.py>                     # From @filename
+...
+</File: app.py>
+
+Task: review app.py               # User prompt
+
 ## Quickstart Checklist
 
 - Install dev dependencies with `uv sync --dev`; use `uv add` for new packages.
@@ -91,6 +214,7 @@ The files are automatically read and injected as formatted context. The CLI will
 | `max_steps` | ❌ | `5` | Reasoning iterations per run. |
 | `tools` | ❌ | `[]` | Registered tool names; ensure module import registers them. |
 | `prefetch` | ❌ | `[]` | Tool calls executed before rendering; assign results for template reuse. |
+| `attachments` | ❌ | `[]` | Attachment aliases to auto-load as context (prepended to all prompts). |
 | `context_budget` | ❌ | Unlimited | Hard cap for rendered prompt length. |
 | `permissions_profile` | ❌ | — | Placeholder until the permissions engine ships. |
 | `instructions` | ❌ | — | Extra system guidance appended at runtime. |

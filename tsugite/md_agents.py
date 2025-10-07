@@ -19,6 +19,7 @@ class AgentConfig:
     max_steps: int = 5
     tools: List[str] = field(default_factory=list)
     prefetch: List[Dict[str, Any]] = field(default_factory=list)
+    attachments: List[str] = field(default_factory=list)
     permissions_profile: str = "default"
     context_budget: Dict[str, Any] = field(default_factory=dict)
     instructions: str = ""
@@ -30,6 +31,8 @@ class AgentConfig:
             self.tools = []
         if self.prefetch is None:
             self.prefetch = []
+        if self.attachments is None:
+            self.attachments = []
         if not self.context_budget:
             self.context_budget = {"tokens": 8000, "priority": ["system", "task"]}
         if self.instructions is None:

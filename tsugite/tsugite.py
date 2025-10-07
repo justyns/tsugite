@@ -139,6 +139,10 @@ def run(
         False, "--headless", help="Headless mode for CI/scripts: result to stdout, optional progress to stderr"
     ),
     trust_mcp_code: bool = typer.Option(False, "--trust-mcp-code", help="Trust remote code from MCP servers"),
+    attachment: Optional[List[str]] = typer.Option(
+        None, "-f", "--attachment", help="Attachment(s) to include (repeatable)"
+    ),
+    refresh_cache: bool = typer.Option(False, "--refresh-cache", help="Force refresh cached attachment content"),
 ):
     """Run an agent with the given prompt.
 
@@ -179,14 +183,6 @@ def run(
 
         base_dir = Path.cwd()
 
-        # Expand @filename references in prompt
-        expanded_files = []
-        try:
-            prompt, expanded_files = expand_file_references(prompt, base_dir)
-        except ValueError as e:
-            console.print(f"[red]File reference error: {e}[/red]")
-            raise typer.Exit(1)
-
         primary_agent_path, delegation_agents = parse_agent_references(agent_refs, with_agents, base_dir)
 
         # Validate primary agent
@@ -209,6 +205,50 @@ def run(
         agent_info = get_agent_info(agent_file)
         instruction_label = "runtime + agent" if agent_info.get("instructions") else "runtime default"
 
+        # Resolve agent attachments (from agent definition)
+        agent_attachment_contents = []
+        agent_attachments = agent_info.get("attachments", [])
+        if agent_attachments:
+            from tsugite.utils import resolve_attachments
+
+            try:
+                agent_attachment_contents = resolve_attachments(agent_attachments, base_dir, refresh_cache)
+            except ValueError as e:
+                console.print(f"[red]Agent attachment error: {e}[/red]")
+                raise typer.Exit(1)
+
+        # Resolve CLI attachments (-f flag)
+        cli_attachment_contents = []
+        if attachment:
+            from tsugite.utils import resolve_attachments
+
+            try:
+                cli_attachment_contents = resolve_attachments(attachment, base_dir, refresh_cache)
+            except ValueError as e:
+                console.print(f"[red]Attachment error: {e}[/red]")
+                raise typer.Exit(1)
+
+        # Expand @filename references in prompt
+        expanded_files = []
+        try:
+            prompt, expanded_files = expand_file_references(prompt, base_dir)
+        except ValueError as e:
+            console.print(f"[red]File reference error: {e}[/red]")
+            raise typer.Exit(1)
+
+        # Assemble prompt with proper order: agent attachments -> CLI attachments -> file refs -> prompt
+        all_attachments = []
+        if agent_attachment_contents:
+            all_attachments.extend(agent_attachment_contents)
+        if cli_attachment_contents:
+            all_attachments.extend(cli_attachment_contents)
+
+        if all_attachments:
+            attachment_sections = [
+                f"<Attachment: {name}>\n{content}\n</Attachment: {name}>" for name, content in all_attachments
+            ]
+            prompt = "\n\n".join(attachment_sections) + "\n\n" + prompt
+
         # Skip initial panel in headless mode
         if not headless:
             # Display ASCII logo (adaptive based on terminal width)
@@ -224,6 +264,16 @@ def run(
                 f"[cyan]Instructions:[/cyan] {instruction_label}\n"
                 f"[cyan]Tools:[/cyan] {', '.join(agent_info.get('tools', []))}"
             )
+
+            # Add agent attachments if any
+            if agent_attachment_contents:
+                agent_attachment_names = [name for name, _ in agent_attachment_contents]
+                panel_content += f"\n[cyan]Agent Attachments:[/cyan] {', '.join(agent_attachment_names)}"
+
+            # Add CLI attachments if any
+            if cli_attachment_contents:
+                cli_attachment_names = [name for name, _ in cli_attachment_contents]
+                panel_content += f"\n[cyan]CLI Attachments:[/cyan] {', '.join(cli_attachment_names)}"
 
             # Add expanded files if any
             if expanded_files:
@@ -366,6 +416,10 @@ def render(
     prompt: Optional[str] = typer.Argument(default="", help="Prompt/task for the agent (optional)"),
     root: Optional[str] = typer.Option(None, "--root", help="Working directory"),
     no_color: bool = typer.Option(False, "--no-color", help="Disable ANSI colors"),
+    attachment: Optional[List[str]] = typer.Option(
+        None, "-f", "--attachment", help="Attachment(s) to include (repeatable)"
+    ),
+    refresh_cache: bool = typer.Option(False, "--refresh-cache", help="Force refresh cached attachment content"),
 ):
     """Render an agent template without executing it."""
     from tsugite.md_agents import parse_agent
@@ -377,17 +431,53 @@ def render(
 
     with _agent_context(agent_path, root) as agent_file:
         try:
-            # Expand file references in prompt
             base_dir = Path.cwd()
+
+            # Parse agent first to get its configuration
+            agent_text = agent_file.read_text()
+            agent = parse_agent(agent_text, agent_file)
+
+            # Resolve agent attachments (from agent definition)
+            agent_attachment_contents = []
+            if agent.config.attachments:
+                from tsugite.utils import resolve_attachments
+
+                try:
+                    agent_attachment_contents = resolve_attachments(agent.config.attachments, base_dir, refresh_cache)
+                except ValueError as e:
+                    console.print(f"[red]Agent attachment error: {e}[/red]")
+                    raise typer.Exit(1)
+
+            # Resolve CLI attachments (-f flag)
+            cli_attachment_contents = []
+            if attachment:
+                from tsugite.utils import resolve_attachments
+
+                try:
+                    cli_attachment_contents = resolve_attachments(attachment, base_dir, refresh_cache)
+                except ValueError as e:
+                    console.print(f"[red]Attachment error: {e}[/red]")
+                    raise typer.Exit(1)
+
+            # Expand file references in prompt
             try:
                 prompt_expanded, _ = expand_file_references(prompt, base_dir)
             except ValueError as e:
                 console.print(f"[red]File reference error: {e}[/red]")
                 raise typer.Exit(1)
 
-            # Parse agent
-            agent_text = agent_file.read_text()
-            agent = parse_agent(agent_text, agent_file)
+            # Assemble prompt with proper order: agent attachments -> CLI attachments -> file refs -> prompt
+            all_attachments = []
+            if agent_attachment_contents:
+                all_attachments.extend(agent_attachment_contents)
+            if cli_attachment_contents:
+                all_attachments.extend(cli_attachment_contents)
+
+            if all_attachments:
+                attachment_sections = [
+                    f"<Attachment: {name}>\n{content}\n</Attachment: {name}>" for name, content in all_attachments
+                ]
+                prompt_expanded = "\n\n".join(attachment_sections) + "\n\n" + prompt_expanded
 
             # Execute prefetch tools if any
             from tsugite.agent_runner import execute_prefetch
@@ -1138,6 +1228,302 @@ def web(
     except Exception as e:
         console.print(f"[red]Server error: {e}[/red]")
         raise typer.Exit(1)
+
+
+# Attachments subcommands
+attachments_app = typer.Typer(help="Manage reusable text attachments")
+app.add_typer(attachments_app, name="attachments")
+
+
+@attachments_app.command("add")
+def attachments_add(
+    alias: str = typer.Argument(help="Unique name for the attachment"),
+    source: str = typer.Argument(help="File path, URL, or '-' for stdin"),
+):
+    """Add or update an attachment.
+
+    For stdin input ('-'), content is stored inline in attachments.json.
+    For files and URLs, only the reference is stored (content fetched on demand).
+    """
+    from tsugite.attachments import add_attachment
+
+    try:
+        if source == "-":
+            # Read from stdin - store inline
+            import sys
+
+            content = sys.stdin.read()
+            add_attachment(alias, source="inline", content=content)
+
+            console.print(f"[green]✓ Inline attachment '{alias}' saved[/green]")
+            console.print("  Type: Inline text")
+            console.print(f"  Size: {len(content)} characters")
+        else:
+            # File or URL reference - validate but don't fetch
+            if source.startswith("http://") or source.startswith("https://"):
+                # URL reference
+                add_attachment(alias, source=source)
+                console.print(f"[green]✓ URL attachment '{alias}' saved[/green]")
+                console.print(f"  Source: {source}")
+                console.print("  Type: URL (fetched on demand)")
+            else:
+                # File reference - validate it exists
+                file_path = Path(source).expanduser()
+                if not file_path.exists():
+                    console.print(f"[red]File not found: {source}[/red]")
+                    raise typer.Exit(1)
+
+                # Store absolute path for reliability
+                absolute_path = str(file_path.resolve())
+                add_attachment(alias, source=absolute_path)
+
+                console.print(f"[green]✓ File attachment '{alias}' saved[/green]")
+                console.print(f"  Source: {absolute_path}")
+                console.print("  Type: File (read on demand)")
+
+    except Exception as e:
+        console.print(f"[red]Failed to add attachment: {e}[/red]")
+        raise typer.Exit(1)
+
+
+@attachments_app.command("list")
+def attachments_list():
+    """List all attachments."""
+    from rich.table import Table
+
+    from tsugite.attachments import list_attachments
+
+    attachments = list_attachments()
+
+    if not attachments:
+        console.print("[yellow]No attachments found[/yellow]")
+        console.print("\nAdd an attachment with: [cyan]tsugite attachments add NAME SOURCE[/cyan]")
+        return
+
+    table = Table(title=f"Attachments ({len(attachments)} total)")
+    table.add_column("Alias", style="cyan")
+    table.add_column("Source", style="dim")
+    table.add_column("Size", justify="right")
+    table.add_column("Updated", style="dim")
+
+    for alias, data in sorted(attachments.items()):
+        size = len(data.get("content", ""))
+        updated = data.get("updated", "unknown")[:10]  # Just date part
+        table.add_row(alias, data.get("source", "unknown"), f"{size:,}", updated)
+
+    console.print(table)
+
+
+@attachments_app.command("show")
+def attachments_show(
+    alias: str = typer.Argument(help="Attachment alias to show"),
+    content: bool = typer.Option(False, "--content", help="Show full content"),
+):
+    """Show details of an attachment."""
+    from rich.panel import Panel
+
+    from tsugite.attachments import get_attachment
+    from tsugite.cache import get_cache_key, list_cache
+
+    result = get_attachment(alias)
+
+    if result is None:
+        console.print(f"[red]Attachment '{alias}' not found[/red]")
+        raise typer.Exit(1)
+
+    source, stored_content = result
+
+    # Determine attachment type
+    is_inline = source.lower() in ("inline", "text")
+
+    # Build panel content
+    panel_content = f"[cyan]Alias:[/cyan] {alias}\n"
+    panel_content += f"[cyan]Type:[/cyan] {'Inline' if is_inline else 'Reference'}\n"
+    panel_content += f"[cyan]Source:[/cyan] {source}\n"
+
+    # Check cache status for references
+    if not is_inline:
+        cache_entries = list_cache()
+        cache_key = get_cache_key(source)
+        if cache_key in cache_entries:
+            cache_info = cache_entries[cache_key]
+            panel_content += f"[cyan]Cached:[/cyan] Yes (size: {cache_info['size']:,} bytes)\n"
+            panel_content += f"[cyan]Cached at:[/cyan] {cache_info['cached_at']}\n"
+        else:
+            panel_content += "[cyan]Cached:[/cyan] No\n"
+
+    # Show content or preview
+    if is_inline and stored_content:
+        panel_content += f"[cyan]Size:[/cyan] {len(stored_content):,} characters\n"
+        if content:
+            panel_content += f"\n[cyan]Content:[/cyan]\n{stored_content}"
+        else:
+            preview = stored_content[:200]
+            if len(stored_content) > 200:
+                preview += "..."
+            panel_content += f"\n[cyan]Preview:[/cyan]\n{preview}"
+            panel_content += "\n\n[dim]Use --content to show full content[/dim]"
+    elif not is_inline and content:
+        # For references, fetch and show content if requested
+        from tsugite.utils import resolve_attachments
+
+        resolved = resolve_attachments([alias], Path.cwd())
+        if resolved:
+            _, resolved_content = resolved[0]
+            panel_content += f"[cyan]Size:[/cyan] {len(resolved_content):,} characters\n"
+            panel_content += f"\n[cyan]Content:[/cyan]\n{resolved_content}"
+    elif not is_inline:
+        panel_content += "\n[dim]Use --content to fetch and show full content[/dim]"
+
+    console.print(Panel(panel_content, title=f"Attachment: {alias}", border_style="blue"))
+
+
+@attachments_app.command("remove")
+def attachments_remove(
+    alias: str = typer.Argument(help="Attachment alias to remove"),
+):
+    """Remove an attachment."""
+    from tsugite.attachments import remove_attachment
+
+    if remove_attachment(alias):
+        console.print(f"[green]✓ Attachment '{alias}' removed[/green]")
+    else:
+        console.print(f"[yellow]Attachment '{alias}' not found[/yellow]")
+
+
+@attachments_app.command("search")
+def attachments_search(
+    query: str = typer.Argument(help="Search term"),
+):
+    """Search attachments by alias or source."""
+    from rich.table import Table
+
+    from tsugite.attachments import search_attachments
+
+    results = search_attachments(query)
+
+    if not results:
+        console.print(f"[yellow]No attachments found matching '{query}'[/yellow]")
+        return
+
+    table = Table(title=f"Search Results for '{query}' ({len(results)} found)")
+    table.add_column("Alias", style="cyan")
+    table.add_column("Source", style="dim")
+    table.add_column("Size", justify="right")
+
+    for alias, data in sorted(results.items()):
+        size = len(data.get("content", ""))
+        table.add_row(alias, data.get("source", "unknown"), f"{size:,}")
+
+    console.print(table)
+
+
+# Cache subcommands
+cache_app = typer.Typer(help="Manage attachment cache")
+app.add_typer(cache_app, name="cache")
+
+
+@cache_app.command("clear")
+def cache_clear(
+    alias: Optional[str] = typer.Argument(None, help="Attachment alias to clear cache for (or all if omitted)"),
+):
+    """Clear cache for an attachment or entire cache."""
+    from tsugite.attachments import get_attachment
+    from tsugite.cache import clear_cache
+
+    try:
+        if alias:
+            # Get attachment source
+            result = get_attachment(alias)
+            if result is None:
+                console.print(f"[red]Attachment '{alias}' not found[/red]")
+                raise typer.Exit(1)
+
+            source, content = result
+            if content is not None:
+                console.print(f"[yellow]Attachment '{alias}' is inline (no cache)[/yellow]")
+                return
+
+            # Clear cache for this source
+            count = clear_cache(source)
+            if count > 0:
+                console.print(f"[green]✓ Cache cleared for '{alias}'[/green]")
+            else:
+                console.print(f"[yellow]No cache found for '{alias}'[/yellow]")
+        else:
+            # Clear all cache
+            count = clear_cache()
+            console.print(f"[green]✓ Cleared {count} cache entries[/green]")
+
+    except Exception as e:
+        console.print(f"[red]Failed to clear cache: {e}[/red]")
+        raise typer.Exit(1)
+
+
+@cache_app.command("list")
+def cache_list():
+    """List all cached attachments."""
+    from rich.table import Table
+
+    from tsugite.cache import list_cache
+
+    cache_entries = list_cache()
+
+    if not cache_entries:
+        console.print("[yellow]No cached entries found[/yellow]")
+        return
+
+    table = Table(title=f"Cached Attachments ({len(cache_entries)} total)")
+    table.add_column("Source", style="cyan")
+    table.add_column("Cached At", style="dim")
+    table.add_column("Size", justify="right")
+
+    for key, metadata in sorted(cache_entries.items(), key=lambda x: x[1].get("cached_at", "")):
+        source = metadata.get("source", "unknown")
+        cached_at = metadata.get("cached_at", "unknown")[:19]  # Just date + time
+        size = metadata.get("size", 0)
+        table.add_row(source, cached_at, f"{size:,} bytes")
+
+    console.print(table)
+
+
+@cache_app.command("info")
+def cache_info(
+    alias: str = typer.Argument(help="Attachment alias"),
+):
+    """Show cache info for an attachment."""
+    from rich.panel import Panel
+
+    from tsugite.attachments import get_attachment
+    from tsugite.cache import get_cache_info
+
+    result = get_attachment(alias)
+    if result is None:
+        console.print(f"[red]Attachment '{alias}' not found[/red]")
+        raise typer.Exit(1)
+
+    source, content = result
+
+    if content is not None:
+        console.print(f"[yellow]Attachment '{alias}' is inline (no cache)[/yellow]")
+        return
+
+    cache_metadata = get_cache_info(source)
+
+    if cache_metadata:
+        cached_at = cache_metadata.get("cached_at", "unknown")
+        size = cache_metadata.get("size", 0)
+
+        panel_content = (
+            f"[cyan]Source:[/cyan] {source}\n"
+            f"[cyan]Cached:[/cyan] Yes\n"
+            f"[cyan]Cached At:[/cyan] {cached_at}\n"
+            f"[cyan]Size:[/cyan] {size:,} bytes"
+        )
+        console.print(Panel(panel_content, title=f"Cache Info: {alias}", border_style="green"))
+    else:
+        panel_content = f"[cyan]Source:[/cyan] {source}\n[yellow]Cached:[/yellow] No (will be fetched on first use)"
+        console.print(Panel(panel_content, title=f"Cache Info: {alias}", border_style="yellow"))
 
 
 if __name__ == "__main__":

@@ -62,3 +62,23 @@ def get_xdg_write_path(filename: str, legacy_dir: bool = True) -> Path:
 
     xdg_config = os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))
     return Path(xdg_config) / "tsugite" / filename
+
+
+def get_xdg_cache_path(subdir: str = "") -> Path:
+    """Get XDG-compliant cache directory path.
+
+    Uses XDG Base Directory specification for cache:
+    - $XDG_CACHE_HOME/tsugite/{subdir} (if XDG_CACHE_HOME is set)
+    - ~/.cache/tsugite/{subdir} (XDG default)
+
+    Args:
+        subdir: Optional subdirectory within tsugite cache (e.g., "attachments")
+
+    Returns:
+        Path to cache directory
+    """
+    xdg_cache = os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache"))
+    cache_path = Path(xdg_cache) / "tsugite"
+    if subdir:
+        cache_path = cache_path / subdir
+    return cache_path

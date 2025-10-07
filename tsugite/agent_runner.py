@@ -344,6 +344,7 @@ def get_agent_info(agent_path: Path) -> Dict[str, Any]:
             "max_steps": agent_config.max_steps,
             "tools": agent_config.tools,
             "prefetch_count": (len(agent_config.prefetch) if agent_config.prefetch else 0),
+            "attachments": agent_config.attachments,
             "permissions_profile": getattr(agent_config, "permissions_profile", None),
             "valid": validate_agent_file(agent_path)[0],
             "instructions": getattr(agent_config, "instructions", ""),
