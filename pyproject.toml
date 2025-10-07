@@ -28,6 +28,8 @@ dependencies = [
 [project.scripts]
 tsugite = "tsugite.tsugite:app"
 tsu = "tsugite.tsugite:app"
+tsugite-docker = "tsugite.docker_cli:docker_main"
+tsugite-docker-session = "tsugite.docker_cli:session_main"
 
 [build-system]
 requires = ["hatchling"]

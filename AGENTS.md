@@ -168,6 +168,97 @@ Results in:
 
 Task: review app.py               # User prompt
 
+### Docker Container Execution (Optional)
+
+Run agents in isolated Docker containers for safety and reproducibility using **optional wrapper scripts**.
+
+These scripts are **completely separate** from tsugite core—no Docker dependencies in the main codebase. The wrapper scripts (`tsugite-docker` and `tsugite-docker-session`) are automatically installed as console scripts when you install tsugite.
+
+**Setup:**
+
+# Build runtime image (one-time setup)
+docker build -f Dockerfile.runtime -t tsugite/runtime .
+
+# Wrapper scripts are automatically available after installation:
+# - tsugite-docker
+# - tsugite-docker-session
+
+**Two Usage Patterns:**
+
+You can use either the integrated `--docker` flag or call the wrapper directly:
+
+# Pattern 1: Integrated flag (convenient)
+tsugite run --docker agent.md "task"
+tsugite run --docker --network none agent.md "task"
+tsugite run --docker --keep agent.md "task"
+tsugite run --container my-session agent.md "task"
+
+# Pattern 2: Direct wrapper call (explicit)
+tsugite-docker run agent.md "task"
+tsugite-docker --network none run agent.md "task"
+tsugite-docker --keep run agent.md "task"
+tsugite-docker --container my-session run agent.md "task"
+
+Both patterns work identically—the first delegates to the second. Use whichever feels more natural.
+
+**All tsugite flags work transparently:**
+
+tsugite run --docker agent.md "task" --debug --verbose
+tsugite-docker run +assistant "query" -f context.md
+tsugite run --docker agent.md "task" --headless
+
+**Session Management:**
+
+# Start persistent session
+tsugite-docker-session start my-work
+
+# Run multiple agents in same session
+tsugite-docker --container my-work run agent.md "task 1"
+tsugite-docker --container my-work run agent.md "task 2"
+
+# List all sessions
+tsugite-docker-session list
+
+# Execute arbitrary commands in session
+tsugite-docker-session exec my-work bash
+tsugite-docker-session exec my-work python script.py
+
+# Stop session (keeps container)
+tsugite-docker-session stop my-work
+
+# Stop and remove session
+tsugite-docker-session stop my-work --remove
+
+**How It Works:**
+
+- Wrapper scripts parse Docker flags and build `docker run` commands
+- All other arguments forwarded to tsugite unchanged
+- Agents run in `tsugite/runtime` Docker image (Python 3.12)
+- Default network mode: `host` (works with Podman)
+- Alternative modes: `bridge`, `none`, or custom
+
+**Volume Mounts:**
+
+Automatically mounted for full functionality:
+- `/workspace` - Current directory (read-only for security)
+- `~/.config/tsugite` - Config and MCP server settings (read-only)
+- `~/.cache/tsugite` - Attachment cache (read-write)
+- Environment variables - API keys (OPENAI_API_KEY, ANTHROPIC_API_KEY, etc.)
+
+**Use Cases:**
+
+- **Untrusted agents** - Run agents from the internet safely
+- **Reproducible environments** - Consistent execution across machines
+- **Multi-agent workflows** - Multiple agents sharing container state
+- **Debugging** - Keep container alive to inspect state after errors
+- **Development** - Fast iteration with persistent containers
+
+**Design Philosophy:**
+
+Instead of integrating Docker into tsugite core, we provide simple wrapper scripts (~100 lines total) that follow the Unix philosophy: do one thing well and work with other tools. This approach eliminates 550+ lines of integrated code while providing the same functionality.
+
+See `bin/README.md` for complete documentation and examples.
+
 ## Quickstart Checklist
 
 - Install dev dependencies with `uv sync --dev`; use `uv add` for new packages.

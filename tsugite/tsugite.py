@@ -143,6 +143,10 @@ def run(
         None, "-f", "--attachment", help="Attachment(s) to include (repeatable)"
     ),
     refresh_cache: bool = typer.Option(False, "--refresh-cache", help="Force refresh cached attachment content"),
+    docker: bool = typer.Option(False, "--docker", help="Run in Docker container (delegates to tsugite-docker)"),
+    keep: bool = typer.Option(False, "--keep", help="Keep Docker container running (use with --docker)"),
+    container: Optional[str] = typer.Option(None, "--container", help="Use existing Docker container"),
+    network: str = typer.Option("host", "--network", help="Docker network mode (use with --docker)"),
 ):
     """Run an agent with the given prompt.
 
@@ -159,6 +163,75 @@ def run(
 
     if no_color:
         console.no_color = True
+
+    # Delegate to tsugite-docker wrapper if Docker flags are present
+    if docker or container:
+        import shutil
+        import subprocess
+
+        # Check if tsugite-docker is available
+        wrapper_path = shutil.which("tsugite-docker")
+        if not wrapper_path:
+            console.print("[red]Error: tsugite-docker wrapper not found in PATH[/red]")
+            console.print("[yellow]Install it by adding tsugite/bin/ to your PATH[/yellow]")
+            console.print("[dim]See bin/README.md for installation instructions[/dim]")
+            raise typer.Exit(1)
+
+        # Build command for wrapper
+        cmd = ["tsugite-docker"]
+
+        # Add wrapper-specific flags
+        if network != "host":
+            cmd.extend(["--network", network])
+        if keep:
+            cmd.append("--keep")
+        if container:
+            cmd.extend(["--container", container])
+
+        # Add 'run' subcommand
+        cmd.append("run")
+
+        # Add all the original args (agent refs and prompt words)
+        cmd.extend(args)
+
+        # Add tsugite flags (not wrapper flags)
+        if model:
+            cmd.extend(["--model", model])
+        if with_agents:
+            cmd.extend(["--with-agents", with_agents])
+        if root:
+            cmd.extend(["--root", str(root)])
+        if history_dir:
+            cmd.extend(["--history-dir", str(history_dir)])
+        if debug:
+            cmd.append("--debug")
+        if verbose:
+            cmd.append("--verbose")
+        if headless:
+            cmd.append("--headless")
+        if show_reasoning:
+            cmd.append("--show-reasoning")
+        if no_color:
+            cmd.append("--no-color")
+        if silent:
+            cmd.append("--silent")
+        if log_json:
+            cmd.append("--log-json")
+        if non_interactive:
+            cmd.append("--non-interactive")
+        if native_ui:
+            cmd.append("--native-ui")
+        if trust_mcp_code:
+            cmd.append("--trust-mcp-code")
+        if attachment:
+            for att in attachment:
+                cmd.extend(["--attachment", att])
+        if refresh_cache:
+            cmd.append("--refresh-cache")
+
+        # Execute wrapper
+        result = subprocess.run(cmd)
+        raise typer.Exit(result.returncode)
 
     # Parse CLI arguments into agents and prompt
     try:
