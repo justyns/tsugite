@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 from typer.testing import CliRunner
 
-from tsugite.tsugite import app
+from tsugite.cli import app
 
 runner = CliRunner()
 

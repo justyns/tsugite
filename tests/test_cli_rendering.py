@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from typer.testing import CliRunner
 
-from tsugite.tsugite import app
+from tsugite.cli import app
 
 
 class TestCliRenderCommand:
@@ -163,7 +163,7 @@ Static content without user prompt.
         agent_file.write_text(agent_content)
 
         # Mock the agent execution to avoid model calls
-        with patch("tsugite.tsugite.run_agent") as mock_run:
+        with patch("tsugite.cli.run_agent") as mock_run:
             mock_run.return_value = "Agent completed successfully"
 
             result = self.runner.invoke(app, ["run", str(agent_file)])
@@ -187,7 +187,7 @@ Debug test: {{ user_prompt }}
         agent_file = temp_dir / "debug.md"
         agent_file.write_text(agent_content)
 
-        with patch("tsugite.tsugite.run_agent") as mock_run:
+        with patch("tsugite.cli.run_agent") as mock_run:
             mock_run.return_value = "Debug test completed"
 
             result = self.runner.invoke(app, ["run", str(agent_file), "test task", "--debug"])
@@ -216,7 +216,7 @@ Task: {{ user_prompt }}
         agent_file = temp_dir / "validation.md"
         agent_file.write_text(agent_content)
 
-        with patch("tsugite.tsugite.run_agent") as mock_run:
+        with patch("tsugite.cli.run_agent") as mock_run:
             mock_run.side_effect = Exception("Model execution failed")
 
             result = self.runner.invoke(app, ["run", str(agent_file), "test task"])

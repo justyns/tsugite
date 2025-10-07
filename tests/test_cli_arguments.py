@@ -2,7 +2,7 @@
 
 import pytest
 
-from tsugite.tsugite import parse_cli_arguments
+from tsugite.cli.helpers import parse_cli_arguments
 
 
 class TestParseCliArguments:

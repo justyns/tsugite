@@ -4,15 +4,15 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from tsugite.tsugite import app
+from tsugite.cli import app
 
 
 @pytest.fixture
 def mock_agent_execution():
     """Mock both run_agent and validate_agent_execution for CLI tests."""
     with (
-        patch("tsugite.tsugite.run_agent") as mock_run_agent,
-        patch("tsugite.tsugite.validate_agent_execution") as mock_validate,
+        patch("tsugite.cli.run_agent") as mock_run_agent,
+        patch("tsugite.cli.validate_agent_execution") as mock_validate,
     ):
         mock_run_agent.return_value = "Test agent execution completed"
         mock_validate.return_value = (True, "Agent is valid")
@@ -294,7 +294,7 @@ class TestAnimationCLIIntegration:
             (["--non-interactive", "--no-color"], False),  # Both flags disable animation
         ],
     )
-    @patch("tsugite.tsugite.loading_animation")
+    @patch("tsugite.cli.loading_animation")
     def test_animation_flags(
         self, mock_loading_animation, cli_runner, sample_agent_file, mock_agent_execution, extra_flags, expected_enabled
     ):
@@ -312,8 +312,8 @@ class TestAnimationCLIIntegration:
         if expected_enabled:
             assert call_args.kwargs["message"] == "Waiting for LLM response"
 
-    @patch("tsugite.tsugite.loading_animation")
-    @patch("tsugite.tsugite.run_agent")
+    @patch("tsugite.cli.loading_animation")
+    @patch("tsugite.cli.run_agent")
     def test_animation_context_manager_usage(
         self, mock_run_agent, mock_loading_animation, cli_runner, sample_agent_file
     ):
@@ -322,7 +322,7 @@ class TestAnimationCLIIntegration:
         mock_context = MagicMock()
         mock_loading_animation.return_value = mock_context
 
-        with patch("tsugite.tsugite.validate_agent_execution") as mock_validate:
+        with patch("tsugite.cli.validate_agent_execution") as mock_validate:
             mock_validate.return_value = (True, "Agent is valid")
 
             result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--native-ui"])
@@ -334,15 +334,15 @@ class TestAnimationCLIIntegration:
         # Verify run_agent was called
         mock_run_agent.assert_called_once()
 
-    @patch("tsugite.tsugite.loading_animation")
+    @patch("tsugite.cli.loading_animation")
     def test_animation_with_agent_execution_error(self, mock_loading_animation, cli_runner, sample_agent_file):
         """Test animation cleanup when agent execution fails in native UI."""
         mock_context = MagicMock()
         mock_loading_animation.return_value = mock_context
 
         with (
-            patch("tsugite.tsugite.run_agent") as mock_run_agent,
-            patch("tsugite.tsugite.validate_agent_execution") as mock_validate,
+            patch("tsugite.cli.run_agent") as mock_run_agent,
+            patch("tsugite.cli.validate_agent_execution") as mock_validate,
         ):
             mock_validate.return_value = (True, "Agent is valid")
             mock_run_agent.side_effect = RuntimeError("Agent execution failed")
@@ -354,7 +354,7 @@ class TestAnimationCLIIntegration:
         mock_context.__enter__.assert_called_once()
         mock_context.__exit__.assert_called_once()
 
-    @patch("tsugite.tsugite.loading_animation")
+    @patch("tsugite.cli.loading_animation")
     def test_animation_console_parameter(
         self, mock_loading_animation, cli_runner, sample_agent_file, mock_agent_execution
     ):
@@ -426,7 +426,7 @@ class TestHeadlessMode:
         # Should still have clean output
         assert "Test agent execution completed" in result.stdout
 
-    @patch("tsugite.tsugite.custom_agent_ui")
+    @patch("tsugite.cli.custom_agent_ui")
     def test_headless_uses_custom_ui_with_correct_flags(
         self, mock_custom_ui, cli_runner, sample_agent_file, mock_agent_execution
     ):
@@ -448,7 +448,7 @@ class TestHeadlessMode:
         assert call_kwargs["show_execution_logs"] is False
         assert call_kwargs["show_panels"] is False
 
-    @patch("tsugite.tsugite.custom_agent_ui")
+    @patch("tsugite.cli.custom_agent_ui")
     def test_headless_verbose_enables_output(self, mock_custom_ui, cli_runner, sample_agent_file, mock_agent_execution):
         """Test that headless --verbose enables detailed output."""
         mock_custom_ui.return_value.__enter__ = MagicMock(return_value=MagicMock())
@@ -496,11 +496,12 @@ def test_logo_selection(terminal_width, expected_logo):
     """Test that correct logo is selected based on terminal width."""
     from rich.console import Console
 
-    from tsugite.tsugite import TSUGITE_LOGO_NARROW, TSUGITE_LOGO_WIDE, _get_logo
+    from tsugite.cli.helpers import get_logo
+    from tsugite.constants import TSUGITE_LOGO_NARROW, TSUGITE_LOGO_WIDE
 
     mock_console = MagicMock(spec=Console)
     mock_console.width = terminal_width
 
-    result = _get_logo(mock_console)
+    result = get_logo(mock_console)
     expected = TSUGITE_LOGO_NARROW if expected_logo == "NARROW" else TSUGITE_LOGO_WIDE
     assert result == expected
