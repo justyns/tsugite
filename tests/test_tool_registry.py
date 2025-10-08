@@ -2,7 +2,16 @@
 
 import pytest
 
-from tsugite.tools import ToolInfo, call_tool, describe_tool, get_tool, list_tools, tool
+from tsugite.tools import (
+    ToolInfo,
+    call_tool,
+    describe_tool,
+    expand_tool_specs,
+    get_tool,
+    get_tools_by_category,
+    list_tools,
+    tool,
+)
 
 
 def test_tool_decorator(reset_tool_registry):
@@ -182,3 +191,138 @@ def test_multiple_tool_registrations(reset_tool_registry):
     tools = list_tools()
     assert len(tools) == 3
     assert all(name in tools for name in ["math_add", "string_upper", "bool_toggle"])
+
+
+def test_get_tools_by_category(file_tools):
+    """Test getting tools by category."""
+    # Get fs category tools
+    fs_tools = get_tools_by_category("fs")
+    assert "read_file" in fs_tools
+    assert "write_file" in fs_tools
+    assert "list_files" in fs_tools
+    assert "file_exists" in fs_tools
+    assert "create_directory" in fs_tools
+
+    # Tools should be sorted
+    assert fs_tools == sorted(fs_tools)
+
+    # Non-existent category returns empty list
+    empty = get_tools_by_category("nonexistent")
+    assert empty == []
+
+
+def test_expand_tool_specs_regular_names(file_tools):
+    """Test expanding regular tool names."""
+    specs = ["read_file", "write_file"]
+    expanded = expand_tool_specs(specs)
+    assert expanded == ["read_file", "write_file"]
+
+
+def test_expand_tool_specs_category(file_tools):
+    """Test expanding category references."""
+    specs = ["@fs"]
+    expanded = expand_tool_specs(specs)
+
+    # Should contain all fs tools
+    assert "read_file" in expanded
+    assert "write_file" in expanded
+    assert "list_files" in expanded
+    assert "file_exists" in expanded
+    assert "create_directory" in expanded
+
+    # Should not contain non-fs tools
+    assert "run" not in expanded
+    assert "web_search" not in expanded
+
+
+def test_expand_tool_specs_glob_pattern(file_tools):
+    """Test expanding glob patterns."""
+    # Pattern matching *_file
+    specs = ["*_file"]
+    expanded = expand_tool_specs(specs)
+    assert "read_file" in expanded
+    assert "write_file" in expanded
+
+    # Pattern matching list_*
+    specs = ["list_*"]
+    expanded = expand_tool_specs(specs)
+    assert "list_files" in expanded
+
+
+def test_expand_tool_specs_mixed(file_tools):
+    """Test expanding mixed specifications."""
+    specs = ["@fs", "file_exists", "*_directory"]
+    expanded = expand_tool_specs(specs)
+
+    # Should have all fs tools from category
+    assert "read_file" in expanded
+    assert "write_file" in expanded
+    assert "list_files" in expanded
+
+    # Should have explicit tool
+    assert "file_exists" in expanded
+
+    # Should have *_directory matches
+    assert "create_directory" in expanded
+
+
+def test_expand_tool_specs_duplicates(file_tools):
+    """Test that duplicates are removed."""
+    specs = ["read_file", "@fs", "*_file", "read_file"]
+    expanded = expand_tool_specs(specs)
+
+    # read_file should only appear once
+    assert expanded.count("read_file") == 1
+
+    # Order should be preserved (first occurrence)
+    assert expanded[0] == "read_file"
+
+
+def test_expand_tool_specs_invalid_tool(file_tools):
+    """Test error on invalid tool name."""
+    specs = ["nonexistent_tool"]
+
+    with pytest.raises(ValueError, match="Invalid tool 'nonexistent_tool': not found"):
+        expand_tool_specs(specs)
+
+
+def test_expand_tool_specs_invalid_category(file_tools):
+    """Test error on invalid category."""
+    specs = ["@nonexistent"]
+
+    with pytest.raises(ValueError, match="Invalid tool category 'nonexistent': not found or empty"):
+        expand_tool_specs(specs)
+
+
+def test_expand_tool_specs_no_glob_matches(file_tools):
+    """Test error when glob pattern matches nothing."""
+    specs = ["xyz_*_abc"]
+
+    with pytest.raises(ValueError, match="Invalid tool pattern 'xyz_\\*_abc': matched no tools"):
+        expand_tool_specs(specs)
+
+
+def test_expand_tool_specs_empty_list(file_tools):
+    """Test expanding empty list."""
+    specs = []
+    expanded = expand_tool_specs(specs)
+    assert expanded == []
+
+
+def test_expand_tool_specs_preserves_order(file_tools):
+    """Test that expansion preserves order of specifications."""
+    specs = ["file_exists", "@fs", "list_files"]
+    expanded = expand_tool_specs(specs)
+
+    # file_exists should come first (explicit, before category expansion)
+    assert expanded[0] == "file_exists"
+
+    # fs tools should come in the middle (from @fs category)
+    # Note: file_exists appears first due to spec order, then @fs adds the rest
+    read_index = expanded.index("read_file")
+    write_index = expanded.index("write_file")
+    assert read_index < len(expanded)
+    assert write_index < len(expanded)
+
+    # list_files appears twice but only counted once due to dedup
+    assert expanded.count("list_files") == 1

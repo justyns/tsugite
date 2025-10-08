@@ -373,8 +373,11 @@ def validate_agent_execution(agent: Agent | Path) -> tuple[bool, str]:
     try:
         # Check if tools exist
         from .tool_adapter import get_smolagents_tools
+        from .tools import expand_tool_specs
 
-        get_smolagents_tools(agent.config.tools)
+        # Expand tool specifications before validation
+        expanded_tools = expand_tool_specs(agent.config.tools) if agent.config.tools else []
+        get_smolagents_tools(expanded_tools)
     except Exception as e:
         return False, f"Tool validation failed: {e}"
 

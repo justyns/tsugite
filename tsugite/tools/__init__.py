@@ -89,6 +89,83 @@ def describe_tool(name: str) -> str:
     return desc
 
 
+def get_tools_by_category(category: str) -> List[str]:
+    """Get all tool names in a specific category.
+
+    Args:
+        category: Category name (e.g., 'fs', 'http', 'shell')
+
+    Returns:
+        List of tool names in the category
+    """
+    category_tools = []
+    for tool_name, tool_info in _tools.items():
+        module = tool_info.func.__module__.split(".")[-1]
+        if module == category:
+            category_tools.append(tool_name)
+
+    return sorted(category_tools)
+
+
+def expand_tool_specs(tool_specs: List[str]) -> List[str]:
+    """Expand tool specifications to actual tool names.
+
+    Supports:
+    - Regular tool names: 'read_file' -> ['read_file']
+    - Category references: '@fs' -> all tools in fs category
+    - Glob patterns: '*_file' -> all tools matching pattern
+
+    Args:
+        tool_specs: List of tool specifications (names, @category, or globs)
+
+    Returns:
+        Expanded list of unique tool names
+
+    Examples:
+        >>> expand_tool_specs(['read_file', 'write_file'])
+        ['read_file', 'write_file']
+        >>> expand_tool_specs(['@fs'])
+        ['create_directory', 'file_exists', 'list_files', 'read_file', 'write_file']
+        >>> expand_tool_specs(['*_file'])
+        ['read_file', 'write_file']
+    """
+    import fnmatch
+
+    expanded = []
+
+    for spec in tool_specs:
+        if spec.startswith("@"):
+            # Category reference: @fs, @http, etc.
+            category = spec[1:]
+            category_tools = get_tools_by_category(category)
+            if not category_tools:
+                raise validation_error("tool category", category, "not found or empty")
+            expanded.extend(category_tools)
+        elif "*" in spec or "?" in spec or "[" in spec:
+            # Glob pattern
+            all_tool_names = list_tools()
+            matches = fnmatch.filter(all_tool_names, spec)
+            if not matches:
+                raise validation_error("tool pattern", spec, "matched no tools")
+            expanded.extend(matches)
+        else:
+            # Regular tool name
+            if spec not in _tools:
+                available = ", ".join(list(_tools.keys())) if _tools else "none"
+                raise validation_error("tool", spec, f"not found. Available: {available}")
+            expanded.append(spec)
+
+    # Return unique tools while preserving order
+    seen = set()
+    result = []
+    for tool in expanded:
+        if tool not in seen:
+            seen.add(tool)
+            result.append(tool)
+
+    return result
+
+
 # Import tool modules at the end to avoid circular imports
 # (they need to import 'tool' decorator from this module)
 from . import agents as agents  # noqa: E402

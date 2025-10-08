@@ -108,8 +108,14 @@ def _execute_agent_with_prompt(
 
     # Create smolagents tools
     try:
+        from tsugite.tools import expand_tool_specs
+
+        # Expand tool specifications (categories, globs, regular names)
+        expanded_tools = expand_tool_specs(agent_config.tools) if agent_config.tools else []
+
+        # Add task management tools
         task_tools = ["task_add", "task_update", "task_complete", "task_list", "task_get"]
-        all_tools = list(agent_config.tools) + task_tools
+        all_tools = expanded_tools + task_tools
 
         if delegation_agents:
             all_tools.append("spawn_agent")
