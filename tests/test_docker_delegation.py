@@ -219,7 +219,7 @@ Test agent. Use final_answer() to complete.
 
             with patch("subprocess.run") as mock_run:
                 # This should NOT be called for Docker delegation
-                result = runner.invoke(
+                runner.invoke(
                     app,
                     ["run", str(agent_file), "test prompt"],
                     catch_exceptions=False,

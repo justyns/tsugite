@@ -1,7 +1,6 @@
 """Tsugite CLI application - main entry point."""
 
 import os
-import sys
 from pathlib import Path
 from typing import List, Optional
 
@@ -14,7 +13,14 @@ from tsugite.animation import loading_animation
 from tsugite.custom_ui import create_silent_logger, custom_agent_ui
 from tsugite.utils import expand_file_references
 
+from .agents import agents_app
+from .attachments import attachments_app
+from .benchmark import benchmark_command
+from .cache import cache_app
+from .config import config_app
 from .helpers import agent_context, get_error_console, get_logo, get_output_console, parse_cli_arguments
+from .mcp import mcp_app
+from .tools import tools_app
 
 app = typer.Typer(
     name="tsugite",
@@ -611,16 +617,10 @@ def web(
 
 
 # Register subcommands from separate modules
-from .agents import agents_app
-from .attachments import attachments_app
-from .benchmark import benchmark_command
-from .cache import cache_app
-from .config import config_app
-from .mcp import mcp_app
-
 app.add_typer(mcp_app, name="mcp")
 app.add_typer(agents_app, name="agents")
 app.add_typer(config_app, name="config")
 app.add_typer(attachments_app, name="attachments")
 app.add_typer(cache_app, name="cache")
+app.add_typer(tools_app, name="tools")
 app.command("benchmark")(benchmark_command)
