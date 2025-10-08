@@ -107,6 +107,42 @@ def get_tools_by_category(category: str) -> List[str]:
     return sorted(category_tools)
 
 
+def _expand_single_spec(spec: str, strict: bool = True) -> List[str]:
+    """Expand a single tool specification to tool names.
+
+    Args:
+        spec: Tool specification (name, @category, or glob pattern)
+        strict: If True, raise error when spec matches nothing. If False, return empty list.
+
+    Returns:
+        List of matching tool names
+    """
+    import fnmatch
+
+    if spec.startswith("@"):
+        # Category reference: @fs, @http, etc.
+        category = spec[1:]
+        category_tools = get_tools_by_category(category)
+        if not category_tools and strict:
+            raise validation_error("tool category", category, "not found or empty")
+        return category_tools
+    elif "*" in spec or "?" in spec or "[" in spec:
+        # Glob pattern
+        all_tool_names = list_tools()
+        matches = fnmatch.filter(all_tool_names, spec)
+        if not matches and strict:
+            raise validation_error("tool pattern", spec, "matched no tools")
+        return matches
+    else:
+        # Regular tool name
+        if spec not in _tools:
+            if strict:
+                available = ", ".join(list(_tools.keys())) if _tools else "none"
+                raise validation_error("tool", spec, f"not found. Available: {available}")
+            return []
+        return [spec]
+
+
 def expand_tool_specs(tool_specs: List[str]) -> List[str]:
     """Expand tool specifications to actual tool names.
 
@@ -114,9 +150,10 @@ def expand_tool_specs(tool_specs: List[str]) -> List[str]:
     - Regular tool names: 'read_file' -> ['read_file']
     - Category references: '@fs' -> all tools in fs category
     - Glob patterns: '*_file' -> all tools matching pattern
+    - Exclusions: '-tool_name', '-@category', '-pattern*' -> remove matching tools
 
     Args:
-        tool_specs: List of tool specifications (names, @category, or globs)
+        tool_specs: List of tool specifications (names, @category, globs, or exclusions with -)
 
     Returns:
         Expanded list of unique tool names
@@ -128,37 +165,38 @@ def expand_tool_specs(tool_specs: List[str]) -> List[str]:
         ['create_directory', 'file_exists', 'list_files', 'read_file', 'write_file']
         >>> expand_tool_specs(['*_file'])
         ['read_file', 'write_file']
+        >>> expand_tool_specs(['@fs', '-*_directory'])
+        ['file_exists', 'list_files', 'read_file', 'write_file']
+        >>> expand_tool_specs(['@http', '-web_search'])
+        ['check_url', 'download_file', 'fetch_json', 'fetch_text', 'post_json']
     """
-    import fnmatch
-
-    expanded = []
+    # Separate inclusions and exclusions
+    inclusions = []
+    exclusions = []
 
     for spec in tool_specs:
-        if spec.startswith("@"):
-            # Category reference: @fs, @http, etc.
-            category = spec[1:]
-            category_tools = get_tools_by_category(category)
-            if not category_tools:
-                raise validation_error("tool category", category, "not found or empty")
-            expanded.extend(category_tools)
-        elif "*" in spec or "?" in spec or "[" in spec:
-            # Glob pattern
-            all_tool_names = list_tools()
-            matches = fnmatch.filter(all_tool_names, spec)
-            if not matches:
-                raise validation_error("tool pattern", spec, "matched no tools")
-            expanded.extend(matches)
+        if spec.startswith("-"):
+            exclusions.append(spec[1:])  # Strip the - prefix
         else:
-            # Regular tool name
-            if spec not in _tools:
-                available = ", ".join(list(_tools.keys())) if _tools else "none"
-                raise validation_error("tool", spec, f"not found. Available: {available}")
-            expanded.append(spec)
+            inclusions.append(spec)
+
+    # Expand inclusions (strict - must match something)
+    expanded = []
+    for spec in inclusions:
+        expanded.extend(_expand_single_spec(spec, strict=True))
+
+    # Expand exclusions (non-strict - silently ignore if nothing matches)
+    excluded_tools = set()
+    for spec in exclusions:
+        excluded_tools.update(_expand_single_spec(spec, strict=False))
+
+    # Apply exclusions
+    result_with_exclusions = [tool for tool in expanded if tool not in excluded_tools]
 
     # Return unique tools while preserving order
     seen = set()
     result = []
-    for tool in expanded:
+    for tool in result_with_exclusions:
         if tool not in seen:
             seen.add(tool)
             result.append(tool)

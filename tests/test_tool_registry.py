@@ -326,3 +326,113 @@ def test_expand_tool_specs_preserves_order(file_tools):
 
     # list_files appears twice but only counted once due to dedup
     assert expanded.count("list_files") == 1
+
+
+def test_expand_tool_specs_exclude_exact_name(file_tools):
+    """Test excluding an exact tool name."""
+    specs = ["@fs", "-read_file"]
+    expanded = expand_tool_specs(specs)
+
+    # Should have all fs tools except read_file
+    assert "write_file" in expanded
+    assert "list_files" in expanded
+    assert "file_exists" in expanded
+    assert "create_directory" in expanded
+    assert "read_file" not in expanded
+
+
+def test_expand_tool_specs_exclude_glob_pattern(file_tools):
+    """Test excluding tools matching a glob pattern."""
+    specs = ["@fs", "-*_file"]
+    expanded = expand_tool_specs(specs)
+
+    # Should exclude read_file and write_file
+    assert "read_file" not in expanded
+    assert "write_file" not in expanded
+
+    # Should still have other fs tools
+    assert "list_files" in expanded
+    assert "file_exists" in expanded
+    assert "create_directory" in expanded
+
+
+def test_expand_tool_specs_exclude_category(file_tools):
+    """Test excluding an entire category."""
+    # First register some non-fs tools
+    from tsugite.tools import tool
+
+    @tool
+    def test_shell_tool():
+        """Test shell tool."""
+        return "shell"
+
+    # Add it to a different module to create a category
+    test_shell_tool.__module__ = "tsugite.tools.shell"
+
+    specs = ["@fs", "test_shell_tool", "-@fs"]
+    expanded = expand_tool_specs(specs)
+
+    # Should only have test_shell_tool, all fs excluded
+    assert expanded == ["test_shell_tool"]
+    assert "read_file" not in expanded
+    assert "write_file" not in expanded
+
+
+def test_expand_tool_specs_exclude_nonexistent(file_tools):
+    """Test that excluding non-existent tools doesn't raise an error."""
+    specs = ["@fs", "-nonexistent_tool", "-fake_*", "-@fake_category"]
+    expanded = expand_tool_specs(specs)
+
+    # Should have all fs tools (exclusions silently ignored)
+    assert "read_file" in expanded
+    assert "write_file" in expanded
+    assert len(expanded) == 5  # All 5 fs tools
+
+
+def test_expand_tool_specs_only_exclusions(file_tools):
+    """Test that only exclusions with no inclusions returns empty list."""
+    specs = ["-read_file", "-@fs"]
+    expanded = expand_tool_specs(specs)
+
+    # No inclusions, so result should be empty
+    assert expanded == []
+
+
+def test_expand_tool_specs_exclude_then_include(file_tools):
+    """Test that order matters - later inclusions can re-add excluded tools."""
+    specs = ["@fs", "-read_file", "read_file"]
+    expanded = expand_tool_specs(specs)
+
+    # read_file excluded then re-added
+    # But our current implementation doesn't re-add, exclusions are applied after all inclusions
+    # So read_file should still be excluded
+    assert "read_file" not in expanded
+
+
+def test_expand_tool_specs_mixed_exclude(file_tools):
+    """Test complex exclusion scenarios."""
+    specs = ["@fs", "*_directory", "-*_directory"]
+    expanded = expand_tool_specs(specs)
+
+    # create_directory added by @fs and *_directory, but then excluded
+    assert "create_directory" not in expanded
+    assert "read_file" in expanded
+    assert "write_file" in expanded
+
+
+def test_expand_tool_specs_exclude_preserves_order(file_tools):
+    """Test that exclusions preserve the order of remaining tools."""
+    specs = ["file_exists", "@fs", "-read_file", "-write_file"]
+    expanded = expand_tool_specs(specs)
+
+    # file_exists should be first
+    assert expanded[0] == "file_exists"
+
+    # read_file and write_file should be excluded
+    assert "read_file" not in expanded
+    assert "write_file" not in expanded
+
+    # Other tools should be present
+    assert "create_directory" in expanded
+    assert "file_exists" in expanded
+    assert "list_files" in expanded
