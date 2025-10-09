@@ -4,7 +4,6 @@ This module provides a flexible UI system with multiple handlers:
 - CustomUIHandler: Rich UI with panels, colors, and emojis (default)
 - PlainUIHandler: Plain text output for copy-paste workflows
 - ChatUIHandler: Interactive chat UI with live updates
-- SSEUIHandler: Server-sent events for web interface
 
 Use the helper functions to create loggers:
 - custom_agent_ui(): Context manager for rich UI
@@ -16,7 +15,6 @@ from tsugite.ui.base import CustomUIHandler, CustomUILogger, UIEvent, UIState
 from tsugite.ui.chat import ChatUIHandler
 from tsugite.ui.helpers import create_plain_logger, create_silent_logger, custom_agent_ui
 from tsugite.ui.plain import PlainUIHandler
-from tsugite.ui.sse import SSEUIHandler
 
 __all__ = [
     # Core classes
@@ -27,7 +25,6 @@ __all__ = [
     "CustomUIHandler",
     "PlainUIHandler",
     "ChatUIHandler",
-    "SSEUIHandler",
     # Helper functions
     "custom_agent_ui",
     "create_silent_logger",

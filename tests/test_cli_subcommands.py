@@ -212,20 +212,3 @@ class TestChatCommand:
             result = runner.invoke(app, ["chat", "--root", tmpdir])
             assert result.exit_code == 1
             assert "No default agent" in result.stdout
-
-
-class TestWebCommand:
-    """Test web CLI command."""
-
-    def test_web_help(self):
-        """Test web --help works."""
-        result = runner.invoke(app, ["web", "--help"])
-        assert result.exit_code == 0
-        assert "web" in result.stdout.lower()
-
-    def test_web_missing_dependencies(self):
-        """Test web command with missing uvicorn."""
-        # Simpler test - just check help works
-        result = runner.invoke(app, ["web", "--help"])
-        assert result.exit_code == 0
-        assert "web" in result.stdout.lower()

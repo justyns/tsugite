@@ -664,39 +664,6 @@ def chat(
             os.chdir(original_cwd)
 
 
-@app.command()
-def web(
-    host: str = typer.Option("127.0.0.1", "--host", help="Host to bind to"),
-    port: int = typer.Option(8080, "--port", help="Port to bind to"),
-    reload: bool = typer.Option(False, "--reload", help="Enable auto-reload on code changes"),
-):
-    """Start the web UI server."""
-    try:
-        import uvicorn
-    except ImportError:
-        console.print("[red]Web UI dependencies not installed![/red]")
-        console.print("\nInstall with: [cyan]uv add fastapi uvicorn python-multipart[/cyan]")
-        raise typer.Exit(1)
-
-    console.print("[cyan]Starting Tsugite Web UI...[/cyan]")
-    console.print(f"[dim]Server: http://{host}:{port}[/dim]")
-    console.print(f"[dim]Chat UI: http://{host}:{port}/chat[/dim]\n")
-
-    try:
-        uvicorn.run(
-            "tsugite.web.server:app",
-            host=host,
-            port=port,
-            reload=reload,
-            log_level="info",
-        )
-    except KeyboardInterrupt:
-        console.print("\n[yellow]Server stopped by user[/yellow]")
-    except Exception as e:
-        console.print(f"[red]Server error: {e}[/red]")
-        raise typer.Exit(1)
-
-
 # Register subcommands from separate modules
 app.add_typer(mcp_app, name="mcp")
 app.add_typer(agents_app, name="agents")
