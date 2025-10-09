@@ -1,5 +1,6 @@
 """Common utilities for Tsugite."""
 
+import os
 import re
 import sys
 from pathlib import Path
@@ -56,6 +57,27 @@ def is_interactive() -> bool:
         True if running in an interactive terminal, False otherwise
     """
     return sys.stdin.isatty()
+
+
+def should_use_plain_output() -> bool:
+    """Detect if plain output mode should be used (no panels/boxes).
+
+    Plain output is used when:
+    - NO_COLOR environment variable is set
+    - stdout is not a TTY (output is piped/redirected)
+
+    Returns:
+        True if plain output should be used, False otherwise
+    """
+    # Check NO_COLOR standard
+    if os.environ.get("NO_COLOR"):
+        return True
+
+    # Check if output is being piped/redirected
+    if not sys.stdout.isatty():
+        return True
+
+    return False
 
 
 def resolve_attachments(

@@ -10,15 +10,23 @@ from rich.panel import Panel
 
 from tsugite.agent_runner import get_agent_info, run_agent, validate_agent_execution
 from tsugite.animation import loading_animation
-from tsugite.custom_ui import create_silent_logger, custom_agent_ui
-from tsugite.utils import expand_file_references
+from tsugite.ui import create_plain_logger, create_silent_logger, custom_agent_ui
+from tsugite.utils import expand_file_references, should_use_plain_output
 
 from .agents import agents_app
 from .attachments import attachments_app
 from .benchmark import benchmark_command
 from .cache import cache_app
 from .config import config_app
-from .helpers import agent_context, get_error_console, get_logo, get_output_console, parse_cli_arguments
+from .helpers import (
+    agent_context,
+    get_error_console,
+    get_logo,
+    get_output_console,
+    parse_cli_arguments,
+    print_plain_info,
+    print_plain_section,
+)
 from .mcp import mcp_app
 from .tools import tools_app
 
@@ -41,6 +49,7 @@ def run(
         None, "--with-agents", help="Additional agents (comma or space separated)"
     ),
     model: Optional[str] = typer.Option(None, "--model", help="Override agent model"),
+    ui: Optional[str] = typer.Option(None, "--ui", help="UI mode: rich (default), plain, minimal, headless, or silent"),
     non_interactive: bool = typer.Option(False, "--non-interactive", help="Run without interactive prompts"),
     history_dir: Optional[str] = typer.Option(None, "--history-dir", help="Directory to store history files"),
     no_color: bool = typer.Option(False, "--no-color", help="Disable ANSI colors"),
@@ -55,6 +64,7 @@ def run(
     headless: bool = typer.Option(
         False, "--headless", help="Headless mode for CI/scripts: result to stdout, optional progress to stderr"
     ),
+    plain: bool = typer.Option(False, "--plain", help="Plain output without panels/boxes (copy-paste friendly)"),
     trust_mcp_code: bool = typer.Option(False, "--trust-mcp-code", help="Trust remote code from MCP servers"),
     attachment: Optional[List[str]] = typer.Option(
         None, "-f", "--attachment", help="Attachment(s) to include (repeatable)"
@@ -80,6 +90,31 @@ def run(
 
     if no_color:
         console.no_color = True
+
+    # Handle --ui flag (maps to existing UI flags for convenience)
+    if ui:
+        ui_lower = ui.lower()
+        # Check for conflicts
+        if any([plain, headless, silent, native_ui]):
+            console.print("[red]Error: --ui cannot be used with --plain, --headless, --silent, or --native-ui[/red]")
+            raise typer.Exit(1)
+
+        # Map UI mode to appropriate flags
+        if ui_lower == "rich":
+            pass  # Default - no changes needed
+        elif ui_lower == "plain":
+            plain = True
+        elif ui_lower == "minimal":
+            native_ui = True
+        elif ui_lower == "headless":
+            headless = True
+        elif ui_lower == "silent":
+            silent = True
+        else:
+            console.print(
+                f"[red]Error: Invalid UI mode '{ui}'. Choose from: rich, plain, minimal, headless, silent[/red]"
+            )
+            raise typer.Exit(1)
 
     # Delegate to tsugite-docker wrapper if Docker flags are present
     if docker or container:
@@ -120,12 +155,16 @@ def run(
             cmd.extend(["--root", str(root)])
         if history_dir:
             cmd.extend(["--history-dir", str(history_dir)])
+        if ui:
+            cmd.extend(["--ui", ui])
         if debug:
             cmd.append("--debug")
         if verbose:
             cmd.append("--verbose")
         if headless:
             cmd.append("--headless")
+        if plain:
+            cmd.append("--plain")
         if show_reasoning:
             cmd.append("--show-reasoning")
         if no_color:
@@ -191,6 +230,14 @@ def run(
         raise typer.Exit(1)
 
     try:
+        # Determine if we should use plain output (no panels/boxes)
+        # Plain mode is enabled if:
+        # 1. User explicitly sets --plain flag, OR
+        # 2. User explicitly sets --ui minimal (native_ui), OR
+        # 3. Output is being piped/redirected (auto-detection), OR
+        # 4. NO_COLOR environment variable is set (auto-detection)
+        use_plain_output = plain or native_ui or should_use_plain_output()
+
         # Get agent info for display
         agent_info = get_agent_info(agent_file)
         instruction_label = "runtime + agent" if agent_info.get("instructions") else "runtime default"
@@ -241,41 +288,48 @@ def run(
 
         # Skip initial panel in headless mode
         if not headless:
-            # Display ASCII logo (adaptive based on terminal width)
-            console.print(get_logo(console), style="cyan")
-            console.print()  # blank line for spacing
+            # Display ASCII logo (adaptive based on terminal width) - skip in plain mode
+            if not use_plain_output:
+                console.print(get_logo(console), style="cyan")
+                console.print()  # blank line for spacing
 
-            # Build panel content
-            panel_content = (
-                f"[cyan]Agent:[/cyan] {agent_file.name}\n"
-                f"[cyan]Task:[/cyan] {prompt}\n"
-                f"[cyan]Directory:[/cyan] {Path.cwd()}\n"
-                f"[cyan]Model:[/cyan] {model or agent_info.get('model', 'unknown')}\n"
-                f"[cyan]Instructions:[/cyan] {instruction_label}\n"
-                f"[cyan]Tools:[/cyan] {', '.join(agent_info.get('tools', []))}"
-            )
+            # Prepare info items
+            info_items = {
+                "Agent": agent_file.name,
+                "Task": prompt,
+                "Directory": str(Path.cwd()),
+                "Model": model or agent_info.get("model", "unknown"),
+                "Instructions": instruction_label,
+                "Tools": ", ".join(agent_info.get("tools", [])),
+            }
 
             # Add agent attachments if any
             if agent_attachment_contents:
                 agent_attachment_names = [name for name, _ in agent_attachment_contents]
-                panel_content += f"\n[cyan]Agent Attachments:[/cyan] {', '.join(agent_attachment_names)}"
+                info_items["Agent Attachments"] = ", ".join(agent_attachment_names)
 
             # Add CLI attachments if any
             if cli_attachment_contents:
                 cli_attachment_names = [name for name, _ in cli_attachment_contents]
-                panel_content += f"\n[cyan]CLI Attachments:[/cyan] {', '.join(cli_attachment_names)}"
+                info_items["CLI Attachments"] = ", ".join(cli_attachment_names)
 
             # Add expanded files if any
             if expanded_files:
-                panel_content += f"\n[cyan]Expanded Files:[/cyan] {', '.join(expanded_files)}"
+                info_items["Expanded Files"] = ", ".join(expanded_files)
 
-            console.print(
-                Panel(
-                    panel_content,
-                    title="Tsugite Agent Runner",
-                    border_style="blue",
+            # Display as panel or plain text based on mode
+            if use_plain_output:
+                print_plain_info(console, "Tsugite Agent Runner", info_items, style="cyan")
+            else:
+                # Build panel content
+                panel_content = "\n".join([f"[cyan]{label}:[/cyan] {value}" for label, value in info_items.items()])
+                console.print(
+                    Panel(
+                        panel_content,
+                        title="Tsugite Agent Runner",
+                        border_style="blue",
+                    )
                 )
-            )
 
         # Validate agent before execution
         is_valid, error_msg = validate_agent_execution(agent_file)
@@ -335,20 +389,7 @@ def run(
                         delegation_agents=delegation_agents,
                     )
             elif native_ui:
-                # Use minimal output with loading animation
-                with loading_animation(
-                    console=console, message="Waiting for LLM response", enabled=not non_interactive and not no_color
-                ):
-                    result = executor(
-                        agent_path=agent_file,
-                        prompt=prompt,
-                        model_override=model,
-                        debug=debug,
-                        trust_mcp_code=trust_mcp_code,
-                        delegation_agents=delegation_agents,
-                    )
-            else:
-                # Default: Use custom UI
+                # Minimal: colors and animations, but no panel boxes
                 with custom_agent_ui(
                     console=console,
                     show_code=not non_interactive,
@@ -357,6 +398,7 @@ def run(
                     show_llm_messages=show_reasoning,
                     show_execution_results=True,
                     show_execution_logs=verbose,
+                    show_panels=False,  # No panel boxes - just colors and animations
                 ) as custom_logger:
                     result = executor(
                         agent_path=agent_file,
@@ -367,11 +409,49 @@ def run(
                         trust_mcp_code=trust_mcp_code,
                         delegation_agents=delegation_agents,
                     )
+            else:
+                # Choose UI handler based on plain mode
+                if use_plain_output:
+                    # Use PlainUIHandler for copy-paste friendly output
+                    custom_logger = create_plain_logger()
+                    result = executor(
+                        agent_path=agent_file,
+                        prompt=prompt,
+                        model_override=model,
+                        debug=debug,
+                        custom_logger=custom_logger,
+                        trust_mcp_code=trust_mcp_code,
+                        delegation_agents=delegation_agents,
+                    )
+                else:
+                    # Use custom UI with panels and formatting
+                    with custom_agent_ui(
+                        console=console,
+                        show_code=not non_interactive,
+                        show_observations=not non_interactive,
+                        show_progress=not no_color,
+                        show_llm_messages=show_reasoning,
+                        show_execution_results=True,
+                        show_execution_logs=verbose,
+                        show_panels=True,
+                    ) as custom_logger:
+                        result = executor(
+                            agent_path=agent_file,
+                            prompt=prompt,
+                            model_override=model,
+                            debug=debug,
+                            custom_logger=custom_logger,
+                            trust_mcp_code=trust_mcp_code,
+                            delegation_agents=delegation_agents,
+                        )
 
             # Display result
             if headless:
                 # Headless: plain result to stdout
                 get_output_console().print(result)
+            elif native_ui:
+                # Minimal: just the result, no banner
+                console.print(result)
             elif not silent:
                 console.print("\n" + "=" * 50)
                 console.print("[bold green]Agent Execution Complete[/bold green]")

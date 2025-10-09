@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from tsugite.core.agent import TsugiteAgent
-from tsugite.custom_ui import UIEvent
+from tsugite.ui import UIEvent
 
 
 @pytest.fixture

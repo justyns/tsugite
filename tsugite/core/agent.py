@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 
 import litellm
 
-from tsugite.custom_ui import UIEvent
+from tsugite.ui import UIEvent
 
 from .executor import CodeExecutor, LocalExecutor
 from .memory import AgentMemory, StepResult

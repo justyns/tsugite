@@ -67,7 +67,7 @@ def _extract_reasoning_content(agent: TsugiteAgent, custom_logger: Optional[Any]
         if reasoning_content and custom_logger:
             # Check if custom_logger has ui_handler (custom UI mode)
             if hasattr(custom_logger, "ui_handler"):
-                from tsugite.custom_ui import UIEvent
+                from tsugite.ui import UIEvent
 
                 custom_logger.ui_handler.handle_event(
                     UIEvent.REASONING_CONTENT, {"content": reasoning_content, "step": None}

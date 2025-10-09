@@ -5,7 +5,7 @@ import queue
 
 import pytest
 
-from tsugite.custom_ui import UIEvent
+from tsugite.ui import UIEvent
 from tsugite.web.ui_handler import SSEUIHandler
 
 

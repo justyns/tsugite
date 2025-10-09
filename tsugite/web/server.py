@@ -13,7 +13,7 @@ from rich.console import Console
 
 from tsugite.agent_runner import run_agent
 from tsugite.chat import ChatManager
-from tsugite.custom_ui import CustomUILogger, UIEvent
+from tsugite.ui import CustomUILogger, UIEvent
 from tsugite.web.ui_handler import SSEUIHandler
 
 app = FastAPI(title="Tsugite Web UI")

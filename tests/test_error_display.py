@@ -4,7 +4,7 @@ from io import StringIO
 
 from rich.console import Console
 
-from tsugite.custom_ui import CustomUIHandler, UIEvent
+from tsugite.ui import CustomUIHandler, UIEvent
 
 
 def test_observation_with_error_highlighted():

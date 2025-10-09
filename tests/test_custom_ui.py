@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 from rich.console import Console
 
-from tsugite.custom_ui import (
+from tsugite.ui import (
     CustomUIHandler,
     CustomUILogger,
     UIEvent,

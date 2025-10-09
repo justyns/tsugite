@@ -1,37 +1,64 @@
 # Agent Development Guide
 
-## Quick cheat sheet of example commands
+Use this guide as a grab-and-go reference for building, composing, and running Tsugite agents.
 
-_Quick CLI cheat sheet for common `tsugite` workflows:_
+## Quick command crib sheet
 
-tsugite run research_writer.md "AI in healthcare"
-tsugite run research_writer.md "AI in healthcare" --debug
-tsugite mcp add basic-memory --url http://localhost:3000/mcp
-tsugite mcp add pubmed --command uvx --args "--quiet" --args "pubmedmcp@0.1.3" --env "UV_PYTHON=3.12"
-tsugite mcp add ai-tools \
-tsugite mcp add basic-memory --url http://new-url.com/mcp --force
-tsugite mcp list
-tsugite mcp show basic-memory
-tsugite mcp test basic-memory --trust-code
-tsugite run agent.md "task" --trust-mcp-code
-tsugite run agents/assistant.md "query"
-tsugite run +assistant "query"
-tsugite run +assistant +jira +coder "create ticket and fix bug #123"
-tsugite run +assistant +jira create a ticket for bug 123
-tsugite run +assistant --with-agents "+jira +coder" "create ticket and fix bug #123"
-tsugite run +coordinator +researcher +writer +reviewer "Research AI trends and create a blog post"
-tsugite run +coordinator --with-agents "researcher,writer,reviewer" \
-tsugite run +project_manager +github +tester create feature branch implement login and run tests
-tsugite run +project_manager +github +tester "Create feature branch, implement login, and run tests"
-tsugite run +assistant +jira +coder "fix bug #123"
-tsugite run +assistant --with-agents "jira coder" "fix bug #123"
-tsugite run +assistant --with-agents jira,coder "fix bug #123"
-tsugite run +assistant +jira create a ticket for bug 123
-tsugite run agents/custom.md +jira ./helpers/coder.md "task"
-tsugite run +coordinator +researcher +writer "task"
-tsugite run +coordinator --with-agents "researcher writer" "task"
+| Task | Example |
+| --- | --- |
+| Run an agent | `tsugite run research_writer.md "AI in healthcare"`
+| Inspect rendered prompt | `tsugite run research_writer.md "AI in healthcare" --debug`
+| Plain output (copy-paste friendly) | `tsugite run +assistant "task" --plain`
+| Piped output (auto-plain) | `tsugite run +assistant "task" \| grep result`
+| Combine inline agents | `tsugite run +assistant +jira +coder "fix bug #123"`
+| Provide helper agents explicitly | `tsugite run +assistant --with-agents "jira coder" "fix bug #123"`
+| Trust MCP tool code | `tsugite run agent.md "task" --trust-mcp-code`
+| Compose from files | `tsugite run agents/custom.md +jira ./helpers/coder.md "task"`
 
-### File References
+### MCP server management
+
+| Action | Example |
+| --- | --- |
+| Register HTTP server | `tsugite mcp add basic-memory --url http://localhost:3000/mcp`
+| Register stdio server | `tsugite mcp add pubmed --command uvx --args "--quiet" --args "pubmedmcp@0.1.3" --env "UV_PYTHON=3.12"`
+| Force update existing entry | `tsugite mcp add basic-memory --url http://new-url.com/mcp --force`
+| List / show servers | `tsugite mcp list`, `tsugite mcp show basic-memory`
+| Smoke-test tools | `tsugite mcp test basic-memory --trust-code`
+
+### Multi-agent shortcuts
+
+* Coordinator with inline roster: `tsugite run +coordinator +researcher +writer +reviewer "Research AI trends and create a blog post"`
+* Coordinator plus explicit roster flag: `tsugite run +coordinator --with-agents "researcher writer" "task"`
+* Project manager pipeline: `tsugite run +project_manager +github +tester "Create feature branch, implement login, and run tests"`
+
+### Output Modes
+
+Tsugite supports different output modes for various use cases:
+
+**Plain Mode (`--plain`):** Copy-paste friendly output without box-drawing characters
+
+```bash
+tsugite run +assistant "task" --plain
+```
+
+**Auto-Detection:** Plain mode automatically activates when:
+- Output is piped or redirected (`tsugite run +assistant "task" | grep result`)
+- `NO_COLOR` environment variable is set
+- stdout is not a TTY
+
+**Headless Mode (`--headless`):** For CI/scripts, result to stdout, progress to stderr
+
+```bash
+tsugite run +assistant "task" --headless
+```
+
+**Benefits:**
+- **Plain mode**: Easy to copy/paste terminal output without box characters
+- **Auto-detection**: Zero configuration for scripts and pipelines
+- **Standards compliance**: Respects `NO_COLOR` environment variable
+- **Flexibility**: Explicit `--plain` flag when auto-detection isn't desired
+
+### File references
 
 Use `@filename` syntax to automatically inject file contents into prompts:
 
@@ -45,7 +72,7 @@ The files are automatically read and injected as formatted context. The CLI will
 
 **Note**: `@word` patterns that start with alphanumeric characters will be treated as file references. Use `@"path"` for explicit file references or avoid `@` prefix for non-file content (e.g., write "email user123" instead of "@user123").
 
-### Attachments (Reusable Context)
+### Attachments (reusable context)
 
 Attachments are reusable content references that can point to files, URLs, YouTube videos, or inline text. They're stored as lightweight references with automatic caching, similar to `llm`'s attachments but with enhanced handler support.
 
@@ -76,7 +103,7 @@ tsugite cache info coding-standards  # Show cache details for specific attachmen
 tsugite cache clear  # Clear entire cache
 tsugite cache clear coding-standards  # Clear cache for specific attachment
 
-**Using Attachments in Prompts:**
+**Using attachments in prompts**
 
 # Use saved attachments with -f flag
 tsugite run +assistant "implement login" -f coding-standards -f api-docs
@@ -94,7 +121,7 @@ tsugite run +reviewer "check PR" -f style -f security-guide -f api-docs
 # Force refresh cached content
 tsugite run +assistant "update" -f api-docs --refresh-cache
 
-**How It Works:**
+**How it works**
 
 - **Storage**: Attachments registry stored in `~/.tsugite/attachments.json` (or `$XDG_CONFIG_HOME/tsugite/attachments.json`)
 - **Caching**: Downloaded content cached in `~/.cache/tsugite/attachments/` (or `$XDG_CACHE_HOME/tsugite/attachments/`)
@@ -245,7 +272,7 @@ Automatically mounted for full functionality:
 - `~/.cache/tsugite` - Attachment cache (read-write)
 - Environment variables - API keys (OPENAI_API_KEY, ANTHROPIC_API_KEY, etc.)
 
-**Use Cases:**
+**Use cases**
 
 - **Untrusted agents** - Run agents from the internet safely
 - **Reproducible environments** - Consistent execution across machines
@@ -262,7 +289,7 @@ See `bin/README.md` for complete documentation and examples.
 ## Quickstart Checklist
 
 - Install dev dependencies with `uv sync --dev`; use `uv add` for new packages.
-- Run the focused pytest target you touched, then `uv run pytest` before merging.
+- Prefer TDD: add or update tests first, run the focused pytest target you touched, then `uv run pytest` before merging.
 - Keep formatting and linting clean: `uv run black .` and `uv run ruff check .`.
 - Prefer type hints on public functions and raise precise errors (`ValueError` vs `RuntimeError`).
 - Skim existing agents in `agents/` and `.tsugite/` to reuse proven patterns.

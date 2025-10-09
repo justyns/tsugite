@@ -115,8 +115,9 @@ def test_run_command_json_logging(cli_runner, sample_agent_file, mock_agent_exec
     assert result.exit_code == 0
 
 
+@patch("tsugite.cli.should_use_plain_output", return_value=False)
 @patch("tsugite.cli.custom_agent_ui")
-def test_show_reasoning_flag(mock_custom_ui, cli_runner, sample_agent_file, mock_agent_execution):
+def test_show_reasoning_flag(mock_custom_ui, mock_plain_output, cli_runner, sample_agent_file, mock_agent_execution):
     """Test --show-reasoning and --no-show-reasoning flags."""
     mock_custom_ui.return_value.__enter__ = MagicMock(return_value=MagicMock())
     mock_custom_ui.return_value.__exit__ = MagicMock(return_value=None)

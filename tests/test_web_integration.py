@@ -43,7 +43,7 @@ class TestWebIntegration:
         monkeypatch.chdir(test_agent.parent)
 
         # Create events directly in handler
-        from tsugite.custom_ui import UIEvent
+        from tsugite.ui import UIEvent
         from tsugite.web.ui_handler import SSEUIHandler
 
         # Create execution with pre-queued events
@@ -126,7 +126,7 @@ class TestWebIntegration:
 
     def test_error_handling_in_stream(self, client):
         """Test error event streaming."""
-        from tsugite.custom_ui import UIEvent
+        from tsugite.ui import UIEvent
         from tsugite.web.ui_handler import SSEUIHandler
 
         # Create execution with error
@@ -183,7 +183,7 @@ class TestWebIntegration:
 
     def test_stream_keepalive(self, client):
         """Test SSE keepalive messages."""
-        from tsugite.custom_ui import UIEvent
+        from tsugite.ui import UIEvent
         from tsugite.web.ui_handler import SSEUIHandler
 
         handler = SSEUIHandler()
@@ -226,7 +226,7 @@ class TestWebUILogger:
 
         from rich.console import Console
 
-        from tsugite.custom_ui import CustomUILogger, UIEvent
+        from tsugite.ui import CustomUILogger, UIEvent
         from tsugite.web.ui_handler import SSEUIHandler
 
         handler = SSEUIHandler()

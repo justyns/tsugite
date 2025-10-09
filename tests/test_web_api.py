@@ -146,7 +146,7 @@ class TestWebAPI:
         executions[execution_id] = handler
 
         # Queue some events
-        from tsugite.custom_ui import UIEvent
+        from tsugite.ui import UIEvent
 
         handler.handle_event(UIEvent.TASK_START, {"task": "Test task", "model": "test-model"})
         handler.handle_event(UIEvent.STEP_START, {"step": 1})

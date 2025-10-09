@@ -7,8 +7,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from tsugite.agent_runner import run_agent
-from tsugite.custom_ui import CustomUILogger
 from tsugite.md_agents import parse_agent_file
+from tsugite.ui import CustomUILogger
 
 
 @dataclass

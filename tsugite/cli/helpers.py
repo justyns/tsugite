@@ -27,6 +27,50 @@ def get_output_console() -> Console:
     return Console(file=sys.stdout, no_color=True)
 
 
+def print_plain_section(console: Console, title: str, content: str, style: str = "") -> None:
+    """Print a plain text section with simple separators.
+
+    Args:
+        console: Rich console instance
+        title: Section title
+        content: Section content
+        style: Optional Rich style for content (e.g., "cyan", "green")
+    """
+    sep = "=" * 50
+    console.print(f"\n{sep}")
+    if style:
+        console.print(f"[{style}]{title}[/{style}]")
+    else:
+        console.print(title)
+    console.print(sep)
+    if style:
+        console.print(f"[{style}]{content}[/{style}]")
+    else:
+        console.print(content)
+    console.print()
+
+
+def print_plain_info(console: Console, title: str, items: dict, style: str = "cyan") -> None:
+    """Print plain text information list.
+
+    Args:
+        console: Rich console instance
+        title: Section title
+        items: Dict of label: value pairs
+        style: Optional Rich style for labels
+    """
+    sep = "=" * 50
+    console.print(f"\n{sep}")
+    console.print(f"[bold]{title}[/bold]")
+    console.print(sep)
+    for label, value in items.items():
+        if style:
+            console.print(f"[{style}]{label}:[/{style}] {value}")
+        else:
+            console.print(f"{label}: {value}")
+    console.print()
+
+
 def parse_cli_arguments(args: List[str]) -> tuple[List[str], str]:
     """Parse CLI arguments into agent references and prompt.
 
