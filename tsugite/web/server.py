@@ -9,7 +9,7 @@ from typing import Dict, Optional
 from fastapi import FastAPI, Form, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from smolagents.monitoring import LogLevel
+from rich.console import Console
 
 from tsugite.agent_runner import run_agent
 from tsugite.chat import ChatManager
@@ -108,7 +108,8 @@ async def run_agent_endpoint(
 
     # Create SSE handler
     sse_handler = SSEUIHandler()
-    logger = CustomUILogger(sse_handler, level=LogLevel.INFO)
+    console = Console()  # Create console for logger
+    logger = CustomUILogger(sse_handler, console)
 
     # Store execution
     executions[execution_id] = sse_handler
@@ -240,7 +241,8 @@ async def send_chat_message(
     manager = _get_session_or_404(session_id)
 
     sse_handler = SSEUIHandler()
-    logger = CustomUILogger(sse_handler, level=LogLevel.INFO)
+    console = Console()  # Create console for logger
+    logger = CustomUILogger(sse_handler, console)
 
     execution_id = str(uuid.uuid4())
     executions[execution_id] = sse_handler

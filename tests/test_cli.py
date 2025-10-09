@@ -115,6 +115,40 @@ def test_run_command_json_logging(cli_runner, sample_agent_file, mock_agent_exec
     assert result.exit_code == 0
 
 
+@patch("tsugite.cli.custom_agent_ui")
+def test_show_reasoning_flag(mock_custom_ui, cli_runner, sample_agent_file, mock_agent_execution):
+    """Test --show-reasoning and --no-show-reasoning flags."""
+    mock_custom_ui.return_value.__enter__ = MagicMock(return_value=MagicMock())
+    mock_custom_ui.return_value.__exit__ = MagicMock(return_value=None)
+
+    # Test default (should enable show_llm_messages)
+    result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt"])
+    assert result.exit_code == 0
+    mock_custom_ui.assert_called()
+    call_kwargs = mock_custom_ui.call_args.kwargs
+    assert call_kwargs["show_llm_messages"] is True
+
+    # Reset mock
+    mock_custom_ui.reset_mock()
+
+    # Test --show-reasoning (explicit enable)
+    result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--show-reasoning"])
+    assert result.exit_code == 0
+    mock_custom_ui.assert_called()
+    call_kwargs = mock_custom_ui.call_args.kwargs
+    assert call_kwargs["show_llm_messages"] is True
+
+    # Reset mock
+    mock_custom_ui.reset_mock()
+
+    # Test --no-show-reasoning (disable)
+    result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--no-show-reasoning"])
+    assert result.exit_code == 0
+    mock_custom_ui.assert_called()
+    call_kwargs = mock_custom_ui.call_args.kwargs
+    assert call_kwargs["show_llm_messages"] is False
+
+
 def test_run_command_custom_history_dir(cli_runner, sample_agent_file, temp_dir, mock_agent_execution):
     """Test run command with custom history directory."""
     history_dir = temp_dir / "custom_history"
@@ -157,14 +191,6 @@ def test_run_command_all_options(cli_runner, sample_agent_file, temp_dir, mock_a
 def test_history_command_show(cli_runner):
     """Test history show command."""
     result = cli_runner.invoke(app, ["history", "show"])
-
-    assert result.exit_code == 0
-    assert "History show not yet implemented" in result.stdout
-
-
-def test_history_command_show_with_since(cli_runner):
-    """Test history show command with --since option."""
-    result = cli_runner.invoke(app, ["history", "show", "--since", "2023-12-01"])
 
     assert result.exit_code == 0
     assert "History show not yet implemented" in result.stdout

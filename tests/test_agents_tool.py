@@ -1,6 +1,6 @@
 """Tests for agent orchestration tools."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -136,29 +136,9 @@ class TestAgentOrchestrationIntegration:
         self.parent_file = create_agent_file(temp_dir, spawn_agent_content, "parent_agent.md")
         self.child_file = create_agent_file(temp_dir, simple_agent_content, "child_agent.md")
 
-    @patch("tsugite.agent_runner.CodeAgent")
-    @patch("tsugite.agent_runner.get_model")
-    @patch("tsugite.agent_runner.get_smolagents_tools")
-    def test_nested_agent_execution(self, mock_get_tools, mock_get_model, mock_code_agent):
+    def test_nested_agent_execution(self):
         """Test that agents can spawn other agents."""
-        # Mock the CodeAgent to simulate tool calls
-        mock_agent_instance = MagicMock()
-        mock_code_agent.return_value = mock_agent_instance
-
-        # Mock the child agent execution
-        def mock_run_side_effect(*args, **kwargs):
-            if "child_agent" in str(kwargs.get("agent_path", "")):
-                return "Child agent completed task"
-            return "Parent agent coordinated successfully"
-
-        mock_agent_instance.run.side_effect = mock_run_side_effect
-
-        # Mock other dependencies
-        mock_get_model.return_value = MagicMock()
-        mock_get_tools.return_value = []
-
-        # This would be a real integration test if we had full mocking
-        # For now, we verify the structure is in place
+        # Verify the structure is in place
         assert self.parent_file.exists()
         assert self.child_file.exists()
 

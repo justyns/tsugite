@@ -518,8 +518,8 @@ Step 2: Should see tasks from step 1
 """
         )
 
-        # Mock the CodeAgent to simulate task creation
-        with patch("tsugite.agent_runner.CodeAgent") as mock_agent_class:
+        # Mock the TsugiteAgent to simulate task creation
+        with patch("tsugite.core.agent.TsugiteAgent") as mock_agent_class:
             mock_agent = MagicMock()
             mock_agent_class.return_value = mock_agent
 

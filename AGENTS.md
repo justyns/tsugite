@@ -369,6 +369,78 @@ Write `article.md`, confirm it exists, and surface the final text.
 - Ensure requisite API keys (e.g., `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) are present before running agents.
 - Ollama requires the local server; override base URL via environment variables when needed.
 
+## Reasoning Models (o1, o3, Claude Extended Thinking)
+
+Tsugite supports reasoning models, with varying levels of reasoning visibility:
+
+### Models and Reasoning Visibility
+
+**Full Reasoning Content (Exposed):**
+- **Anthropic Claude** (`claude-3-7-sonnet`) - Extended thinking shown in full
+- **Deepseek** - Reasoning content exposed via API
+- Displayed in magenta panels with full step-by-step thinking
+
+**Reasoning Token Counts Only (Hidden Content):**
+- **OpenAI o1 series** (`o1`, `o1-mini`, `o1-preview`) - Content hidden by OpenAI
+- **OpenAI o3 series** (`o3`, `o3-mini`) - Content hidden by OpenAI
+- Shows "🧠 Used N reasoning tokens" instead of actual reasoning
+- Reasoning happens internally but isn't exposed via Chat Completions API
+
+### Why O1/O3 Don't Show Reasoning Content
+
+OpenAI's o1/o3 models use reasoning tokens to think through problems, but **the actual reasoning content is not exposed** via the standard Chat Completions API. You only see:
+- The final answer
+- A count of how many reasoning tokens were used
+- Total tokens consumed (including hidden reasoning)
+
+This is an intentional design decision by OpenAI. To get reasoning summaries from o1/o3, you would need OpenAI's newer Responses API (not yet supported by tsugite).
+
+### Controlling Reasoning Effort
+
+**Supported Models:** `o1`, `o1-preview`, `o3`, `o3-mini` (NOT `o1-mini`)
+
+```markdown
+---
+name: deep_thinker
+model: openai:o1  # or o1-preview, o3, o3-mini
+reasoning_effort: high  # Options: low, medium, high
+---
+Task: {{ user_prompt }}
+```
+
+**Important:** `o1-mini` does NOT support the `reasoning_effort` parameter.
+
+### Per-Step Reasoning Control
+
+```markdown
+<!-- tsu:step name="analyze" reasoning_effort="low" -->
+Quick analysis (fewer reasoning tokens)
+
+<!-- tsu:step name="deep_think" reasoning_effort="high" -->
+Thorough reasoning (more reasoning tokens)
+```
+
+### Example Usage
+
+```bash
+# O1-mini - shows reasoning token count
+tsugite run agents/examples/reasoning_model_test.md "Explain quantum computing"
+# Output: "🧠 Used 128 reasoning tokens"
+
+# Claude - shows full reasoning content
+tsugite run --model anthropic:claude-3-7-sonnet agents/examples/reasoning_model_test.md "Explain quantum computing"
+# Output: "[Panel with full thinking process]"
+```
+
+### Parameter Limitations
+
+OpenAI o1/o3 models have a more restricted parameter set than GPT-4:
+- **Not supported:** `temperature`, `top_p`, `stop`, `presence_penalty`, `frequency_penalty`
+- **o1-mini only:** Also doesn't support `reasoning_effort`
+- **Supported:** `max_completion_tokens`, `messages`, `stream`
+
+Tsugite automatically filters out unsupported parameters to prevent API errors.
+
 ## MCP Server Integration
 
 1. Add servers with `tsugite mcp add …`. Config lives under XDG paths (`~/.tsugite/mcp.json`, `$XDG_CONFIG_HOME/tsugite/mcp.json`, or `~/.config/tsugite/mcp.json`).

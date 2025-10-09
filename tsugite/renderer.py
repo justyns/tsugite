@@ -92,12 +92,3 @@ class AgentRenderer:
             return template.render(**context)
         except Exception as e:
             raise ValueError(f"Template rendering failed: {e}")
-
-    def render_with_variables(self, content: str, user_prompt: str = "", variables: Dict[str, Any] = None) -> str:
-        """Render content with standard agent variables."""
-        if variables is None:
-            variables = {}
-
-        context = {"user_prompt": user_prompt, **variables}
-
-        return self.render(content, context)

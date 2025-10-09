@@ -81,11 +81,12 @@ def mcp_show(server_name: str = typer.Argument(help="Name of the MCP server to s
 @mcp_app.command("test")
 def mcp_test(
     server_name: str = typer.Argument(help="Name of the MCP server to test"),
-    trust_code: bool = typer.Option(False, "--trust-code", help="Trust remote code from this server"),
 ):
     """Test connection to an MCP server and list available tools."""
+    import asyncio
+
+    from tsugite.mcp_client import load_mcp_tools
     from tsugite.mcp_config import load_mcp_config
-    from tsugite.mcp_integration import load_mcp_tools
 
     servers = load_mcp_config()
 
@@ -99,15 +100,16 @@ def mcp_test(
     console.print(f"[cyan]Testing connection to '{server_name}'...[/cyan]")
 
     try:
-        tools = load_mcp_tools(server_name, config, allowed_tools=None, trust_remote_code=trust_code)
+        # Use new async mcp_client implementation
+        tools = asyncio.run(load_mcp_tools(config, allowed_tools=None))
 
         console.print(f"[green]✓ Successfully connected to '{server_name}'[/green]")
         console.print(f"\n[bold]Available tools ({len(tools)}):[/bold]")
 
         for tool in tools:
-            console.print(f"  - {tool.name}: {tool.description if hasattr(tool, 'description') else 'No description'}")
+            console.print(f"  - {tool.name}: {tool.description}")
 
-    except RuntimeError as e:
+    except Exception as e:
         console.print(f"[red]✗ Connection failed: {e}[/red]")
         raise typer.Exit(1)
 

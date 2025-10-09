@@ -75,20 +75,6 @@ def list_tools() -> List[str]:
     return list(_tools.keys())
 
 
-def describe_tool(name: str) -> str:
-    """Get description and parameters for a tool."""
-    tool_info = get_tool(name)
-
-    desc = f"{tool_info.name}: {tool_info.description}\n"
-    desc += "Parameters:\n"
-
-    for param_name, param_info in tool_info.parameters.items():
-        required = " (required)" if param_info["required"] else f" (default: {param_info['default']})"
-        desc += f"  - {param_name}: {param_info['type'].__name__}{required}\n"
-
-    return desc
-
-
 def get_tools_by_category(category: str) -> List[str]:
     """Get all tool names in a specific category.
 

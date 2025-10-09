@@ -5,7 +5,6 @@ import pytest
 from tsugite.tools import (
     ToolInfo,
     call_tool,
-    describe_tool,
     expand_tool_specs,
     get_tool,
     get_tools_by_category,
@@ -130,23 +129,6 @@ def test_list_tools_multiple(reset_tool_registry):
     assert "tool_a" in tools
     assert "tool_b" in tools
     assert len(tools) == 2
-
-
-def test_describe_tool(reset_tool_registry):
-    """Test tool description generation."""
-
-    @tool
-    def example_tool(name: str, count: int = 5, active: bool = True) -> str:
-        """An example tool for testing."""
-        return f"Processed {name} {count} times, active={active}"
-
-    description = describe_tool("example_tool")
-
-    assert "example_tool: An example tool for testing." in description
-    assert "Parameters:" in description
-    assert "name: str (required)" in description
-    assert "count: int (default: 5)" in description
-    assert "active: bool (default: True)" in description
 
 
 def test_tool_with_complex_types(reset_tool_registry):

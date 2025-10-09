@@ -13,7 +13,6 @@ def benchmark_command(
     models: Optional[str] = typer.Option(None, "--models", help="Comma-separated list of models to test"),
     categories: Optional[str] = typer.Option(None, "--categories", help="Comma-separated list of categories to test"),
     agent_path: Optional[str] = typer.Option(None, "--agent", help="Path to specific agent file to test"),
-    baseline: Optional[str] = typer.Option(None, "--baseline", help="Baseline model for comparison"),
     output: Optional[str] = typer.Option(None, "--output", help="Output file for report"),
     format: Optional[str] = typer.Option("markdown", "--format", help="Report format: json, markdown, html, csv"),
     test_filter: Optional[str] = typer.Option(None, "--filter", help="Filter tests by name/ID"),

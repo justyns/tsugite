@@ -75,8 +75,6 @@ class TestBenchmarkConfig:
         assert config.categories == ["basic"]
         assert config.timeout == 120
         assert config.parallel is True
-        assert config.temperature == 0.1
-        assert config.max_tokens == 2000
 
     def test_custom_config(self):
         """Test custom configuration."""
@@ -173,30 +171,6 @@ class TestBenchmarkRunner:
         assert result.model == "test-model:v1"
         assert result.output == "42"
         assert result.duration > 0
-
-    @pytest.mark.asyncio
-    async def test_evaluate_test_result(self, benchmark_config):
-        """Test result evaluation."""
-        runner = BenchmarkRunner(benchmark_config)
-
-        test = BenchmarkTest(
-            name="test_math",
-            agent_path=Path("test.md"),
-            test_id="test_001",
-            category="basic",
-            expected_output="42",
-            expected_type="number",
-        )
-
-        # Test correct output
-        evaluation = await runner._evaluate_test_result(test, "42", 1.0)
-        assert evaluation["passed"] is True
-        assert evaluation["score"] == 1.0
-
-        # Test incorrect output
-        evaluation = await runner._evaluate_test_result(test, "24", 1.0)
-        assert evaluation["passed"] is False
-        assert evaluation["score"] < 1.0
 
     @pytest.mark.asyncio
     async def test_run_benchmark_integration(self, benchmark_config, temp_benchmark_dir, mock_agent_run, monkeypatch):

@@ -22,10 +22,7 @@ class BenchmarkConfig:
     categories: List[str] = field(default_factory=lambda: ["basic"])
     timeout: int = 120  # seconds
     parallel: bool = True
-    temperature: float = 0.1  # Low for reproducibility
-    max_tokens: int = 2000
     output_dir: Path = field(default_factory=lambda: Path("benchmark_results"))
-    include_cost_analysis: bool = True
     repeat_count: int = 1  # Number of times to run each test for averaging
     llm_evaluator_model: str = "openai:gpt-4o-mini"  # Model to use for LLM evaluation
 
@@ -182,16 +179,6 @@ class BenchmarkRunner:
             tests.extend(category_tests)
 
         return tests
-
-    def _discover_single_agent_test(self, agent_path: Path) -> BenchmarkTest:
-        """Discover test for a single agent file."""
-        agent_path = Path(agent_path)
-        test_path = agent_path.with_suffix(".test.md")
-
-        if not test_path.exists():
-            return self._parse_benchmark_test(agent_path, "custom")
-
-        return self._parse_agent_test_pair(agent_path, test_path, "custom")
 
     def _parse_agent_test_pair(self, agent_path: Path, test_path: Path, category: str) -> BenchmarkTest:
         """Parse an agent + test.md pair into a BenchmarkTest."""
@@ -947,80 +934,6 @@ Make sure your plan includes the key steps and reasoning before you start execut
                     evaluation["passed"] = (
                         evaluation["passed"] and plan_score >= 0.4
                     )  # Plan must meet minimum threshold
-
-        except Exception as e:
-            evaluation["error"] = str(e)
-
-        return evaluation
-
-    async def _evaluate_test_result(self, test: BenchmarkTest, result: str, duration: float) -> Dict[str, Any]:
-        """Evaluate test result using configured evaluators."""
-        evaluation = {
-            "passed": False,
-            "score": 0.0,
-            "metrics": {},
-            "token_usage": {},
-            "cost": 0.0,
-        }
-
-        try:
-            # Correctness evaluation
-            if test.expected_output:
-                correctness = self.correctness_evaluator.evaluate(
-                    output=result,
-                    expected=test.expected_output,
-                    output_type=test.expected_type,
-                )
-                evaluation["passed"] = correctness["passed"]
-                evaluation["score"] = correctness["score"]
-                evaluation["metrics"]["correctness"] = correctness
-
-            # Performance evaluation
-            performance = self.performance_evaluator.evaluate(
-                duration=duration,
-                timeout=test.timeout,
-            )
-            evaluation["metrics"]["performance"] = performance
-
-            # Quality evaluation (if no expected output for exact matching)
-            if not test.expected_output and test.evaluation_criteria:
-                quality = await self.quality_evaluator.evaluate(
-                    output=result,
-                    criteria=test.evaluation_criteria,
-                )
-                evaluation["metrics"]["quality"] = quality
-                if not evaluation["passed"]:  # Use quality score if no correctness check
-                    evaluation["passed"] = quality["score"] >= 0.7
-                    evaluation["score"] = quality["score"]
-
-            # LLM evaluation (for complex tasks without predetermined outputs)
-            if test.use_llm_evaluation and test.llm_evaluation_criteria:
-                expected_format = "" if not test.expected_type or test.expected_type == "string" else test.expected_type
-
-                llm_eval = await self.llm_evaluator.evaluate(
-                    output=result,
-                    task_description=test.description,
-                    evaluation_criteria=test.llm_evaluation_criteria,
-                    expected_format=expected_format,
-                    rubric=test.llm_evaluation_rubric or {},
-                )
-                evaluation["metrics"]["llm_evaluation"] = llm_eval
-
-                # Use LLM evaluation as primary scoring if no expected output
-                if not test.expected_output:
-                    evaluation["passed"] = llm_eval["llm_score"] >= 0.7
-                    evaluation["score"] = llm_eval["llm_score"]
-                else:
-                    # Blend LLM score with correctness score if both available
-                    evaluation["score"] = (evaluation["score"] + llm_eval["llm_score"]) / 2
-
-            # Estimate token usage and cost (simplified)
-            evaluation["token_usage"] = {
-                "input": len(result.split()) * 1.3,  # Rough estimate
-                "output": len(result.split()),
-                "total": len(result.split()) * 2.3,
-            }
-            evaluation["cost"] = evaluation["token_usage"]["total"] * 0.00001  # Rough estimate
 
         except Exception as e:
             evaluation["error"] = str(e)

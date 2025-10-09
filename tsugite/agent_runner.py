@@ -1,15 +1,15 @@
-"""Agent execution engine using smolagents."""
+"""Agent execution engine using TsugiteAgent."""
 
+import asyncio
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from smolagents import CodeAgent
-
+from tsugite.core.agent import TsugiteAgent
+from tsugite.core.executor import LocalExecutor
+from tsugite.core.tools import create_tool_from_tsugite
 from tsugite.md_agents import AgentConfig, parse_agent, validate_agent_execution
-from tsugite.models import get_model
 from tsugite.renderer import AgentRenderer
-from tsugite.tool_adapter import get_smolagents_tools
 from tsugite.tools import call_tool
 from tsugite.tools.tasks import get_task_manager, reset_task_manager
 from tsugite.utils import is_interactive
@@ -50,7 +50,42 @@ def execute_prefetch(prefetch_config: List[Dict[str, Any]]) -> Dict[str, Any]:
     return context
 
 
-def _execute_agent_with_prompt(
+def _extract_reasoning_content(agent: TsugiteAgent, custom_logger: Optional[Any] = None) -> None:
+    """Extract and display reasoning content from TsugiteAgent memory.
+
+    For models like Claude/Deepseek that expose reasoning_content, displays the actual reasoning.
+
+    Args:
+        agent: The TsugiteAgent instance that just completed execution
+        custom_logger: Custom logger to display reasoning content
+    """
+    if not hasattr(agent, "memory") or not agent.memory.reasoning_history:
+        return
+
+    # Display each reasoning entry
+    for reasoning_content in agent.memory.reasoning_history:
+        if reasoning_content and custom_logger:
+            # Check if custom_logger has ui_handler (custom UI mode)
+            if hasattr(custom_logger, "ui_handler"):
+                from tsugite.custom_ui import UIEvent
+
+                custom_logger.ui_handler.handle_event(
+                    UIEvent.REASONING_CONTENT, {"content": reasoning_content, "step": None}
+                )
+            # Otherwise try to log directly (fallback)
+            elif hasattr(custom_logger, "console"):
+                from rich.panel import Panel
+
+                custom_logger.console.print(
+                    Panel(
+                        reasoning_content,
+                        title="[bold magenta]🧠 Reasoning[/bold magenta]",
+                        border_style="magenta",
+                    )
+                )
+
+
+async def _execute_agent_with_prompt(
     rendered_prompt: str,
     agent_config: AgentConfig,
     model_override: Optional[str] = None,
@@ -106,7 +141,7 @@ def _execute_agent_with_prompt(
     else:
         combined_instructions = base_instructions
 
-    # Create smolagents tools
+    # Create Tool objects from tsugite tools
     try:
         from tsugite.tools import expand_tool_specs
 
@@ -115,16 +150,17 @@ def _execute_agent_with_prompt(
 
         # Add task management tools
         task_tools = ["task_add", "task_update", "task_complete", "task_list", "task_get"]
-        all_tools = expanded_tools + task_tools
+        all_tool_names = expanded_tools + task_tools
 
         if delegation_agents:
-            all_tools.append("spawn_agent")
+            all_tool_names.append("spawn_agent")
 
         # Filter out ask_user tool in non-interactive mode
-        if not is_interactive() and "ask_user" in all_tools:
-            all_tools.remove("ask_user")
+        if not is_interactive() and "ask_user" in all_tool_names:
+            all_tool_names.remove("ask_user")
 
-        tools = get_smolagents_tools(all_tools)
+        # Convert to Tool objects
+        tools = [create_tool_from_tsugite(name) for name in all_tool_names]
     except Exception as e:
         raise RuntimeError(f"Failed to create tools: {e}")
 
@@ -136,19 +172,33 @@ def _execute_agent_with_prompt(
         tools.extend(delegation_tools)
 
     # Load MCP tools if configured
+    mcp_clients = []  # Track clients for cleanup
     if agent_config.mcp_servers:
         try:
+            from tsugite.mcp_client import load_mcp_tools
             from tsugite.mcp_config import load_mcp_config
-            from tsugite.mcp_integration import load_all_mcp_tools
 
             global_mcp_config = load_mcp_config()
-            mcp_tools = load_all_mcp_tools(agent_config.mcp_servers, global_mcp_config, trust_mcp_code)
-            tools.extend(mcp_tools)
+
+            # Load tools from each configured MCP server
+            for server_name, allowed_tools in agent_config.mcp_servers.items():
+                if server_name not in global_mcp_config:
+                    print(f"Warning: MCP server '{server_name}' not found in config. Skipping.")
+                    continue
+
+                server_config = global_mcp_config[server_name]
+                try:
+                    mcp_client, mcp_tools = await load_mcp_tools(server_config, allowed_tools)
+                    mcp_clients.append(mcp_client)  # Keep client alive for tools to work
+                    tools.extend(mcp_tools)
+                    print(f"Loaded {len(mcp_tools)} tools from MCP server '{server_name}'")
+                except Exception as e:
+                    print(f"Warning: Failed to load MCP tools from '{server_name}': {e}")
         except Exception as e:
             print(f"Warning: Failed to load MCP tools: {e}")
             print("Continuing without MCP tools.")
 
-    # Create model
+    # Get model string
     model_string = model_override or agent_config.model
     if not model_string:
         from tsugite.config import load_config
@@ -162,44 +212,69 @@ def _execute_agent_with_prompt(
             "or set a default with 'tsugite config set-default <model>'"
         )
 
-    try:
-        model = get_model(model_string, **(model_kwargs or {}))
-    except Exception as e:
-        raise RuntimeError(f"Failed to create model '{model_string}': {e}")
+    # Merge reasoning_effort from agent config into model_kwargs
+    final_model_kwargs = dict(model_kwargs or {})
+    if hasattr(agent_config, "reasoning_effort") and agent_config.reasoning_effort:
+        # Only add if not already specified in model_kwargs
+        if "reasoning_effort" not in final_model_kwargs:
+            final_model_kwargs["reasoning_effort"] = agent_config.reasoning_effort
+
+    # Create executor
+    executor = LocalExecutor()
+
+    # Inject variables into executor (for multi-step agents)
+    if injectable_vars:
+        await executor.send_variables(injectable_vars)
 
     # Create and run agent
     try:
-        agent_kwargs = {
-            "tools": tools,
-            "model": model,
-            "max_steps": agent_config.max_steps,
-            "instructions": combined_instructions or None,
-            "additional_authorized_imports": ["json"],
-        }
+        # Extract ui_handler from custom_logger if available
+        ui_handler = None
+        if custom_logger and hasattr(custom_logger, "ui_handler"):
+            ui_handler = custom_logger.ui_handler
 
-        if custom_logger is not None:
-            agent_kwargs["logger"] = custom_logger
-            agent_kwargs["verbosity_level"] = 1  # 1 = show tool calls and results
+        agent = TsugiteAgent(
+            model_string=model_string,
+            tools=tools,
+            instructions=combined_instructions or "",
+            max_steps=agent_config.max_steps,
+            executor=executor,
+            model_kwargs=final_model_kwargs,
+            ui_handler=ui_handler,
+            model_name=model_string,
+        )
 
-        agent = CodeAgent(**agent_kwargs)
+        # Run agent
+        result = await agent.run(rendered_prompt, return_full_result=return_token_usage)
 
-        # Inject variables into Python execution namespace (for multi-step agents)
-        if injectable_vars and hasattr(agent, "python_executor"):
-            agent.python_executor.send_variables(injectable_vars)
+        # Extract and display reasoning content if present
+        _extract_reasoning_content(agent, custom_logger)
 
-        # Get full result with token usage if requested
+        # Return appropriate format
         if return_token_usage:
-            full_result = agent.run(rendered_prompt, return_full_result=True)
-            token_count = None
-            if hasattr(full_result, "token_usage") and full_result.token_usage:
-                token_count = full_result.token_usage.total_tokens
-            return str(full_result.output), token_count
+            from tsugite.core.agent import AgentResult
+
+            if isinstance(result, AgentResult):
+                return str(result.output), result.token_usage
+            else:
+                return str(result), None
         else:
-            result = agent.run(rendered_prompt)
-            return str(result)
+            from tsugite.core.agent import AgentResult
+
+            if isinstance(result, AgentResult):
+                return str(result.output)
+            else:
+                return str(result)
 
     except Exception as e:
         raise RuntimeError(f"Agent execution failed: {e}")
+    finally:
+        # Clean up MCP client connections
+        for client in mcp_clients:
+            try:
+                await client.disconnect()
+            except Exception:
+                pass  # Best effort cleanup
 
 
 def run_agent(
@@ -213,7 +288,7 @@ def run_agent(
     delegation_agents: Optional[List[tuple[str, Path]]] = None,
     return_token_usage: bool = False,
 ) -> str | tuple[str, Optional[int]]:
-    """Run a Tsugite agent using smolagents.
+    """Run a Tsugite agent.
 
     Args:
         agent_path: Path to agent markdown file
@@ -286,15 +361,17 @@ def run_agent(
     except Exception as e:
         raise ValueError(f"Template rendering failed: {e}")
 
-    # Execute with the low-level helper
-    return _execute_agent_with_prompt(
-        rendered_prompt=rendered_prompt,
-        agent_config=agent_config,
-        model_override=model_override,
-        custom_logger=custom_logger,
-        trust_mcp_code=trust_mcp_code,
-        delegation_agents=delegation_agents,
-        return_token_usage=return_token_usage,
+    # Execute with the low-level helper (wrapping async call)
+    return asyncio.run(
+        _execute_agent_with_prompt(
+            rendered_prompt=rendered_prompt,
+            agent_config=agent_config,
+            model_override=model_override,
+            custom_logger=custom_logger,
+            trust_mcp_code=trust_mcp_code,
+            delegation_agents=delegation_agents,
+            return_token_usage=return_token_usage,
+        )
     )
 
 
@@ -539,18 +616,20 @@ def run_multistep_agent(
             }
             injectable_vars = {k: v for k, v in step_context.items() if k not in metadata_vars}
 
-            # Execute this step as a full agent run
+            # Execute this step as a full agent run (wrapping async call)
             try:
-                step_result = _execute_agent_with_prompt(
-                    rendered_prompt=rendered_step_prompt,
-                    agent_config=agent.config,
-                    model_override=model_override,
-                    custom_logger=custom_logger,
-                    trust_mcp_code=trust_mcp_code,
-                    delegation_agents=delegation_agents,
-                    skip_task_reset=True,  # Don't reset tasks between steps
-                    model_kwargs=step.model_kwargs,
-                    injectable_vars=injectable_vars,
+                step_result = asyncio.run(
+                    _execute_agent_with_prompt(
+                        rendered_prompt=rendered_step_prompt,
+                        agent_config=agent.config,
+                        model_override=model_override,
+                        custom_logger=custom_logger,
+                        trust_mcp_code=trust_mcp_code,
+                        delegation_agents=delegation_agents,
+                        skip_task_reset=True,  # Don't reset tasks between steps
+                        model_kwargs=step.model_kwargs,
+                        injectable_vars=injectable_vars,
+                    )
                 )
 
                 final_result = step_result

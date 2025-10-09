@@ -10,7 +10,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.syntax import Syntax
-from smolagents.monitoring import AgentLogger, LogLevel
+from rich.text import Text
 
 from tsugite.ui_context import clear_ui_context, set_ui_context
 
@@ -23,13 +23,13 @@ class UIEvent(IntEnum):
     CODE_EXECUTION = 3
     TOOL_CALL = 4
     OBSERVATION = 5
-    STEP_END = 6
-    TASK_END = 7
     ERROR = 8
     FINAL_ANSWER = 9
     LLM_MESSAGE = 10
     EXECUTION_RESULT = 11
     EXECUTION_LOGS = 12
+    REASONING_CONTENT = 13
+    REASONING_TOKENS = 14
 
 
 @dataclass
@@ -39,9 +39,7 @@ class UIState:
     task: Optional[str] = None
     current_step: int = 0
     total_steps: Optional[int] = None
-    current_action: Optional[str] = None
     code_being_executed: Optional[str] = None
-    last_observation: Optional[str] = None
     steps_history: List[Dict[str, Any]] = None
     multistep_context: Optional[Dict[str, Any]] = None
 
@@ -50,85 +48,23 @@ class UIState:
             self.steps_history = []
 
 
-class CustomUILogger(AgentLogger):
-    """Custom logger that captures events and forwards them to our UI system."""
+class CustomUILogger:
+    """Simple logger wrapper for TsugiteAgent.
 
-    def __init__(self, ui_handler: "CustomUIHandler", level: LogLevel = LogLevel.OFF):
-        # Initialize with OFF to suppress all output by default
-        super().__init__(level=level, console=Console(file=open("/dev/null", "w")))
+    Provides console and ui_handler access for displaying reasoning content
+    and multi-step progress. This is a minimal wrapper providing access to
+    the UI handler and console for rendering.
+    """
+
+    def __init__(self, ui_handler: "CustomUIHandler", console: Console):
+        """Initialize logger.
+
+        Args:
+            ui_handler: Handler for UI events
+            console: Rich console for output
+        """
         self.ui_handler = ui_handler
-
-    def log_task(self, content: str, subtitle: str, title: str | None = None, level: LogLevel = LogLevel.INFO) -> None:
-        """Capture task start event."""
-        self.ui_handler.handle_event(UIEvent.TASK_START, {"task": content.strip(), "model": subtitle, "title": title})
-
-    def log_rule(self, title: str, level: int = LogLevel.INFO) -> None:
-        """Capture step start event."""
-        if "Step" in title:
-            step_num = int(title.split()[1]) if len(title.split()) > 1 else 0
-            self.ui_handler.handle_event(UIEvent.STEP_START, {"step": step_num, "title": title})
-
-    def log_code(self, title: str, content: str, level: int = LogLevel.INFO) -> None:
-        """Capture code execution event."""
-        self.ui_handler.handle_event(UIEvent.CODE_EXECUTION, {"title": title, "code": content})
-
-    def log_markdown(self, content: str, title: str | None = None, level=LogLevel.INFO, style=None) -> None:
-        """Capture LLM markdown output."""
-        if title and "Output message of the LLM" in title:
-            self.ui_handler.handle_event(UIEvent.LLM_MESSAGE, {"content": content, "title": title, "level": level})
-
-    def log(self, *args, level: int | str | LogLevel = LogLevel.INFO, **kwargs) -> None:
-        """Capture general log events."""
-        from rich.text import Text
-
-        # Handle Rich Group objects (execution results)
-        if len(args) == 1 and hasattr(args[0], "renderables"):
-            group = args[0]
-            texts = []
-            for renderable in group.renderables:
-                if hasattr(renderable, "plain"):
-                    texts.append(renderable.plain)
-                elif hasattr(renderable, "__str__"):
-                    texts.append(str(renderable))
-
-            combined_text = "\n".join(texts)
-
-            # Check if this is execution output
-            if "Execution logs:" in combined_text or "Out:" in combined_text:
-                self.ui_handler.handle_event(UIEvent.EXECUTION_RESULT, {"content": combined_text, "level": level})
-                return
-
-        # Handle individual Text objects
-        if len(args) == 1 and isinstance(args[0], Text):
-            text_content = args[0].plain
-            if text_content.startswith("[Step ") and "Duration" in text_content:
-                # This is step timing info, skip or handle differently
-                return
-
-        # Convert all args to string for pattern matching
-        content = " ".join(str(arg) for arg in args)
-
-        # Detect different types of events based on content
-        if "Calling tool:" in content:
-            # Extract tool name and arguments
-            self.ui_handler.handle_event(UIEvent.TOOL_CALL, {"content": content})
-        elif "Observations:" in content:
-            # Extract observation
-            observation = content.replace("Observations:", "").strip()
-            self.ui_handler.handle_event(UIEvent.OBSERVATION, {"observation": observation})
-        elif "Final answer:" in content:
-            # Extract final answer
-            answer = content.replace("Final answer:", "").strip()
-            self.ui_handler.handle_event(UIEvent.FINAL_ANSWER, {"answer": answer})
-        elif "Execution logs:" in content:
-            # Handle execution logs
-            self.ui_handler.handle_event(UIEvent.EXECUTION_LOGS, {"content": content, "level": level})
-        else:
-            # Check if this looks like an error message that doesn't fit expected patterns
-            content_lower = content.lower()
-            if any(keyword in content_lower for keyword in ["error", "failed", "exception", "traceback"]):
-                # This is an unhandled error - display it prominently
-                self.ui_handler.handle_event(UIEvent.ERROR, {"error": content, "error_type": "Unexpected Error"})
+        self.console = console
 
 
 class CustomUIHandler:
@@ -154,7 +90,6 @@ class CustomUIHandler:
         self.show_panels = show_panels
         self.progress = None
         self.task_id = None
-        self.live = None
         self._lock = threading.Lock()
 
     def handle_event(self, event: UIEvent, data: Dict[str, Any]) -> None:
@@ -180,6 +115,10 @@ class CustomUIHandler:
                 self._handle_execution_result(data)
             elif event == UIEvent.EXECUTION_LOGS:
                 self._handle_execution_logs(data)
+            elif event == UIEvent.REASONING_CONTENT:
+                self._handle_reasoning_content(data)
+            elif event == UIEvent.REASONING_TOKENS:
+                self._handle_reasoning_tokens(data)
 
             self._update_display()
 
@@ -209,7 +148,6 @@ class CustomUIHandler:
     def _handle_step_start(self, data: Dict[str, Any]) -> None:
         """Handle step start event."""
         self.state.current_step = data.get("step", self.state.current_step + 1)
-        self.state.current_action = "Thinking..."
 
         prefix = self._get_display_prefix()
 
@@ -230,7 +168,6 @@ class CustomUIHandler:
     def _handle_code_execution(self, data: Dict[str, Any]) -> None:
         """Handle code execution event."""
         self.state.code_being_executed = data.get("code")
-        self.state.current_action = "Executing code..."
 
         prefix = self._get_display_prefix()
         # Update progress
@@ -248,7 +185,6 @@ class CustomUIHandler:
     def _handle_tool_call(self, data: Dict[str, Any]) -> None:
         """Handle tool call event."""
         content = data.get("content", "")
-        self.state.current_action = "Calling tool..."
 
         prefix = self._get_display_prefix()
         # Update progress
@@ -261,7 +197,6 @@ class CustomUIHandler:
     def _handle_observation(self, data: Dict[str, Any]) -> None:
         """Handle observation event."""
         observation = data.get("observation", "")
-        self.state.last_observation = observation
 
         prefix = self._get_display_prefix()
         # Update progress
@@ -349,6 +284,7 @@ class CustomUIHandler:
             return
 
         content = data.get("content", "")
+        title = data.get("title", "Agent Reasoning")
 
         if content.strip():
             # Clean up the content and show as reasoning
@@ -356,7 +292,7 @@ class CustomUIHandler:
                 self.console.print(
                     Panel(
                         content.strip(),
-                        title="[bold blue]🤔 Agent Reasoning[/bold blue]",
+                        title=f"[bold blue]🤔 {title}[/bold blue]",
                         border_style="blue",
                         padding=(0, 1),
                     )
@@ -364,6 +300,61 @@ class CustomUIHandler:
             else:
                 # In headless/no-panel mode, just print the content
                 self.console.print(content.strip())
+
+    def _handle_reasoning_content(self, data: Dict[str, Any]) -> None:
+        """Handle reasoning content from reasoning models (Claude, Deepseek with exposed reasoning)."""
+        content = data.get("content", "")
+        step = data.get("step")
+
+        if content and content.strip():
+            prefix = self._get_display_prefix()
+
+            # Build title with step number if available
+            title_parts = ["[bold magenta]🧠 Model Reasoning"]
+            if step is not None:
+                title_parts.append(f" (Step {step})")
+            title_parts.append("[/bold magenta]")
+            title = "".join(title_parts)
+
+            # Update progress
+            self.update_progress(f"{prefix}🧠 Processing reasoning content...")
+
+            if self.show_panels:
+                # Truncate very long reasoning content for display
+                max_length = 2000
+                display_content = content.strip()
+                if len(display_content) > max_length:
+                    display_content = display_content[:max_length] + "\n\n[dim]... (truncated)[/dim]"
+
+                self.console.print(
+                    Panel(
+                        display_content,
+                        title=title,
+                        border_style="magenta",
+                        padding=(0, 1),
+                    )
+                )
+            else:
+                # In headless/no-panel mode, print with prefix
+                self.console.print(f"[magenta]🧠 Reasoning: {content.strip()}[/magenta]")
+
+    def _handle_reasoning_tokens(self, data: Dict[str, Any]) -> None:
+        """Handle reasoning token counts from models like o1/o3 that don't expose reasoning content."""
+        tokens = data.get("tokens", 0)
+        step = data.get("step")
+
+        if tokens:
+            # Build message with step number if available
+            if step is not None:
+                message = f"🧠 Step {step}: Used {tokens} reasoning tokens"
+            else:
+                message = f"🧠 Used {tokens} reasoning tokens"
+
+            if self.show_panels:
+                self.console.print(Text(message, style="dim magenta"))
+            else:
+                # In headless mode, still show it but more concisely
+                self.console.print(f"[dim magenta]{message}[/dim magenta]")
 
     def _handle_execution_result(self, data: Dict[str, Any]) -> None:
         """Handle code execution result event."""
@@ -514,7 +505,7 @@ def custom_agent_ui(
         show_panels: Whether to show Rich panels (borders and decorations)
 
     Yields:
-        CustomUILogger: Logger instance to pass to the agent
+        CustomUILogger: Logger instance with ui_handler and console
     """
     ui_handler = CustomUIHandler(
         console,
@@ -525,7 +516,7 @@ def custom_agent_ui(
         show_execution_logs=show_execution_logs,
         show_panels=show_panels,
     )
-    logger = CustomUILogger(ui_handler)
+    logger = CustomUILogger(ui_handler, console)
 
     # Store console in thread-local even without progress
     set_ui_context(console=console, progress=None)
@@ -540,7 +531,20 @@ def custom_agent_ui(
         clear_ui_context()
 
 
-# Convenience function for completely silent execution
-def create_silent_logger() -> AgentLogger:
-    """Create a completely silent logger that suppresses all output."""
-    return AgentLogger(level=LogLevel.OFF, console=Console(file=open("/dev/null", "w")))
+# Convenience function for silent execution
+def create_silent_logger() -> CustomUILogger:
+    """Create a minimal logger for silent execution.
+
+    Returns a logger with a console writing to /dev/null, so it produces no output.
+    """
+    silent_console = Console(file=open("/dev/null", "w"))
+    silent_handler = CustomUIHandler(
+        silent_console,
+        show_code=False,
+        show_observations=False,
+        show_llm_messages=False,
+        show_execution_results=False,
+        show_execution_logs=False,
+        show_panels=False,
+    )
+    return CustomUILogger(silent_handler, silent_console)

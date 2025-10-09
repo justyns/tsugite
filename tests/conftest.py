@@ -174,6 +174,36 @@ def file_tools(reset_tool_registry):
 
 
 @pytest.fixture
+def task_tools(reset_tool_registry):
+    """Register task management tools for testing."""
+    from tsugite.tools import tool
+    from tsugite.tools.tasks import (
+        task_add,
+        task_complete,
+        task_get,
+        task_list,
+        task_update,
+    )
+
+    # Re-register the tools after registry reset
+    tool(task_add)
+    tool(task_update)
+    tool(task_complete)
+    tool(task_list)
+    tool(task_get)
+
+
+@pytest.fixture
+def interactive_tools(reset_tool_registry):
+    """Register interactive tools for testing."""
+    from tsugite.tools import tool
+    from tsugite.tools.interactive import ask_user
+
+    # Re-register the tools after registry reset
+    tool(ask_user)
+
+
+@pytest.fixture
 def cli_runner():
     """Create a CLI test runner."""
     from typer.testing import CliRunner

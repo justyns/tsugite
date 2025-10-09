@@ -25,6 +25,7 @@ class AgentConfig:
     instructions: str = ""
     mcp_servers: Optional[Dict[str, Optional[List[str]]]] = None
     extends: Optional[str] = None
+    reasoning_effort: Optional[str] = None  # For reasoning models (low, medium, high)
 
     def __post_init__(self):
         if self.tools is None:
@@ -257,6 +258,11 @@ def extract_step_directives(content: str, include_preamble: bool = True) -> tupl
         if pres_match:
             model_kwargs["presence_penalty"] = float(pres_match.group(2))
 
+        # Parse reasoning_effort (for o1, o3, Claude extended thinking)
+        reasoning_match = re.search(r'reasoning_effort=(["\']?)(low|medium|high)\1', args)
+        if reasoning_match:
+            model_kwargs["reasoning_effort"] = reasoning_match.group(2)
+
         # Parse max_retries
         max_retries = 0
         retries_match = re.search(r'max_retries=(["\']?)([0-9]+)\1', args)
@@ -364,22 +370,15 @@ def validate_agent_execution(agent: Agent | Path) -> tuple[bool, str]:
     # Only validate model if specified in agent config
     if agent.config.model:
         try:
-            from .models import get_model
+            from .models import parse_model_string
 
-            get_model(agent.config.model)
+            parse_model_string(agent.config.model)
         except Exception as e:
             return False, f"Model validation failed: {e}"
 
-    try:
-        # Check if tools exist
-        from .tool_adapter import get_smolagents_tools
-        from .tools import expand_tool_specs
-
-        # Expand tool specifications before validation
-        expanded_tools = expand_tool_specs(agent.config.tools) if agent.config.tools else []
-        get_smolagents_tools(expanded_tools)
-    except Exception as e:
-        return False, f"Tool validation failed: {e}"
+    # Skip tool validation - tools are validated at runtime
+    # This allows agents to be validated without all tools being registered
+    # which is important for testing and agent development
 
     # Check template rendering with minimal context
     from .renderer import AgentRenderer

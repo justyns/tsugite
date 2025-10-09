@@ -67,26 +67,6 @@ User: {{ env.USER }}
     assert lines[3] == "User: testuser"
 
 
-def test_renderer_with_variables():
-    """Test render_with_variables method."""
-    renderer = AgentRenderer()
-
-    content = """
-# Task
-{{ user_prompt }}
-
-# Context
-Weather: {{ weather }}
-Temperature: {{ temperature|default("Unknown") }}
-""".strip()
-
-    result = renderer.render_with_variables(content, user_prompt="Test the system", variables={"weather": "Sunny"})
-
-    assert "Test the system" in result
-    assert "Weather: Sunny" in result
-    assert "Temperature: Unknown" in result
-
-
 def test_renderer_jinja_features():
     """Test advanced Jinja2 features work correctly."""
     renderer = AgentRenderer()
@@ -253,21 +233,6 @@ Custom: {{ env.get('CUSTOM_VAR', 'not_set') }}
     assert "Custom: not_set" in result
 
 
-def test_render_with_variables_defaults():
-    """Test render_with_variables with default parameters."""
-    renderer = AgentRenderer()
-
-    content = "Prompt: {{ user_prompt|default('No prompt') }}"
-
-    # Test with empty prompt
-    result = renderer.render_with_variables(content)
-    assert "Prompt:" in result  # Empty string, not default
-
-    # Test with None variables
-    result = renderer.render_with_variables(content, variables=None)
-    assert "Prompt:" in result
-
-
 def test_slugify_edge_cases():
     """Test slugify function with edge cases."""
     assert slugify("UPPERCASE") == "uppercase"
@@ -292,42 +257,6 @@ def test_renderer_error_handling():
     content = "{{ 'test' | nonexistent_filter }}"
     with pytest.raises(ValueError, match="Template rendering failed"):
         renderer.render(content)
-
-
-def test_render_with_variables_demo_style(monkeypatch):
-    """Ensure the developer demo scenario renders as expected."""
-    monkeypatch.setenv("USER", "demo_user")
-
-    content = """
-# System
-Current time: {{ now() }}
-Today: {{ today() }}
-
-# Task
-{{ user_prompt }}
-
-# Test Variables
-Weather: {{ weather|default("Unknown") }}
-User: {{ env.USER }}
-""".strip()
-
-    renderer = AgentRenderer()
-
-    with patch("tsugite.renderer.datetime") as mock_dt:
-        mock_dt.now.return_value = datetime(2024, 1, 1, 12, 0, 0)
-        result = renderer.render_with_variables(
-            content,
-            user_prompt="Test task",
-            variables={"weather": "Sunny"},
-        )
-
-    assert "# System" in result
-    assert "Current time: 2024-01-01T12:00:00" in result
-    assert "Today: 2024-01-01" in result
-    assert "# Task" in result
-    assert "Test task" in result
-    assert "Weather: Sunny" in result
-    assert "User: demo_user" in result
 
 
 def test_filesystem_helper_functions(tmp_path):

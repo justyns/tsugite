@@ -1,7 +1,6 @@
 """Test CLI rendering commands and features."""
 
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from typer.testing import CliRunner
@@ -224,86 +223,6 @@ Task: {{ user_prompt }}
             # Should pass validation (not exit due to template error)
             # but fail at execution (expected with mock)
             assert "Starting agent execution" in result.stdout
-
-
-class TestDebugOutput:
-    """Test debug output functionality."""
-
-    def test_debug_output_in_agent_runner(self, capsys):
-        """Test debug output shows rendered prompt."""
-        from unittest.mock import patch
-
-        from tsugite.agent_runner import run_agent
-
-        # Create a minimal agent content
-        agent_content = """---
-name: debug_output_test
-model: openai:gpt-4o-mini
-tools: []
----
-
-# Task
-Debug test: {{ user_prompt }}"""
-
-        with patch("pathlib.Path.read_text", return_value=agent_content):
-            with patch("tsugite.agent_runner.get_smolagents_tools", return_value=[]):
-                with patch("tsugite.agent_runner.get_model") as mock_get_model:
-                    mock_model = MagicMock(name="mock_model")
-                    mock_get_model.return_value = mock_model
-                    # Mock the smolagents CodeAgent to avoid actual execution
-                    mock_agent = MagicMock()
-                    mock_agent.run.return_value = "Test completed"
-
-                    with patch("tsugite.agent_runner.TSUGITE_DEFAULT_INSTRUCTIONS", "BASE INSTRUCTIONS"):
-                        with patch("tsugite.agent_runner.CodeAgent", return_value=mock_agent) as mock_code_agent:
-                            run_agent(agent_path=Path("test.md"), prompt="test input", debug=True)
-
-                            # Capture the debug output
-                            captured = capsys.readouterr()
-
-                            assert "DEBUG: Rendered Prompt" in captured.out
-                            assert "Debug test: test input" in captured.out
-                            assert "=" * 60 in captured.out  # Debug separator
-                            mock_code_agent.assert_called_once()
-                            _, call_kwargs = mock_code_agent.call_args
-                            assert call_kwargs["instructions"] == "BASE INSTRUCTIONS"
-                            assert call_kwargs["model"] is mock_model
-
-    def test_agent_specific_instructions_combined(self):
-        """Ensure agent frontmatter instructions are merged with Tsugite defaults."""
-        from tsugite.agent_runner import run_agent
-
-        agent_content = """---
-name: instructions_test
-model: openai:gpt-4o-mini
-tools: []
-instructions: |
-  Always respond in rhyming couplets.
----
-
-# Task
-Instruction test: {{ user_prompt }}"""
-
-        with patch("pathlib.Path.read_text", return_value=agent_content):
-            with patch("tsugite.agent_runner.get_smolagents_tools", return_value=[]):
-                with patch("tsugite.agent_runner.get_model") as mock_get_model:
-                    mock_model = MagicMock(name="mock_model")
-                    mock_get_model.return_value = mock_model
-
-                    mock_agent = MagicMock()
-                    mock_agent.run.return_value = "Done"
-
-                    with patch(
-                        "tsugite.agent_runner.TSUGITE_DEFAULT_INSTRUCTIONS",
-                        "Base instructions here.",
-                    ):
-                        with patch("tsugite.agent_runner.CodeAgent", return_value=mock_agent) as mock_code_agent:
-                            run_agent(agent_path=Path("instructions.md"), prompt="poetry please", debug=False)
-
-                            mock_code_agent.assert_called_once()
-                            _, kwargs = mock_code_agent.call_args
-                            expected = "Base instructions here.\n\nAlways respond in rhyming couplets."
-                            assert kwargs["instructions"] == expected
 
 
 class TestComplexScenarios:

@@ -3,7 +3,7 @@
 import re
 import sys
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 import yaml
 
@@ -37,36 +37,6 @@ def parse_yaml_frontmatter(content: str, label: str = "content") -> Tuple[Dict[s
     return metadata, markdown_content
 
 
-def lazy_import(module_path: str, attr_name: str = None, level: int = 1) -> Callable:
-    """Create a lazy import function to avoid circular dependencies.
-
-    Args:
-        module_path: Python module path (e.g., "..agent_runner")
-        attr_name: Specific attribute to import (if None, imports module)
-        level: Import level for relative imports
-
-    Returns:
-        Function that performs the import when called
-    """
-
-    def _import():
-        if attr_name:
-            if module_path.startswith("."):
-                # Relative import
-                module = __import__(module_path, fromlist=[attr_name], level=level)
-            else:
-                # Absolute import
-                module = __import__(module_path, fromlist=[attr_name])
-            return getattr(module, attr_name)
-        else:
-            if module_path.startswith("."):
-                return __import__(module_path, level=level)
-            else:
-                return __import__(module_path)
-
-    return _import
-
-
 def standardize_error_message(operation: str, target: str, error: Exception) -> str:
     return f"Failed to {operation} {target}: {error}"
 
@@ -86,37 +56,6 @@ def is_interactive() -> bool:
         True if running in an interactive terminal, False otherwise
     """
     return sys.stdin.isatty()
-
-
-def fetch_url_content(url: str) -> str:
-    """Fetch text content from a URL.
-
-    Args:
-        url: URL to fetch
-
-    Returns:
-        Text content from the URL
-
-    Raises:
-        ValueError: If URL cannot be fetched or is not text
-    """
-    import urllib.request
-
-    try:
-        with urllib.request.urlopen(url, timeout=30) as response:
-            # Check content type
-            content_type = response.headers.get("Content-Type", "")
-            if not any(t in content_type.lower() for t in ["text", "json", "xml", "markdown"]):
-                raise ValueError(f"URL does not appear to be text content: {content_type}")
-
-            content = response.read().decode("utf-8")
-            return content
-    except urllib.error.URLError as e:
-        raise ValueError(f"Failed to fetch URL: {e}")
-    except UnicodeDecodeError:
-        raise ValueError("URL content is not valid UTF-8 text")
-    except Exception as e:
-        raise ValueError(f"Error fetching URL: {e}")
 
 
 def resolve_attachments(

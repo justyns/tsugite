@@ -5,17 +5,19 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+# Import task tools to ensure they're registered
+import tsugite.tools.tasks  # noqa: F401
 from tsugite.agent_runner import _execute_agent_with_prompt, run_agent
 from tsugite.md_agents import AgentConfig
 
 
 @pytest.fixture
 def mock_agent_runner():
-    """Create a mock CodeAgent that captures the rendered prompt."""
+    """Create a mock TsugiteAgent that captures the rendered prompt."""
     captured_prompts = []
 
     def create_mock(return_value="Test complete"):
-        def mock_run(prompt):
+        async def mock_run(prompt, return_full_result=False):
             captured_prompts.append(prompt)
             return return_value
 
@@ -26,7 +28,7 @@ def mock_agent_runner():
     return create_mock
 
 
-def test_is_interactive_flag_true_in_tty(temp_dir, monkeypatch, mock_agent_runner):
+def test_is_interactive_flag_true_in_tty(temp_dir, monkeypatch, mock_agent_runner, task_tools):
     """Test that is_interactive flag is True when running in a TTY."""
     # Mock TTY check to return True
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
@@ -52,7 +54,7 @@ Task: {{ user_prompt }}
     # Use fixture to create mock
     mock_instance, captured_prompts = mock_agent_runner()
 
-    with patch("tsugite.agent_runner.CodeAgent", return_value=mock_instance):
+    with patch("tsugite.agent_runner.TsugiteAgent", return_value=mock_instance):
         run_agent(agent_file, "test prompt")
 
     # Verify is_interactive was True in the rendered prompt
@@ -60,7 +62,7 @@ Task: {{ user_prompt }}
     assert "Interactive mode: True" in captured_prompts[0]
 
 
-def test_is_interactive_flag_false_in_non_tty(temp_dir, monkeypatch, mock_agent_runner):
+def test_is_interactive_flag_false_in_non_tty(temp_dir, monkeypatch, mock_agent_runner, task_tools):
     """Test that is_interactive flag is False when not running in a TTY."""
     # Mock TTY check to return False
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
@@ -86,7 +88,7 @@ Task: {{ user_prompt }}
     # Use fixture to create mock
     mock_instance, captured_prompts = mock_agent_runner()
 
-    with patch("tsugite.agent_runner.CodeAgent", return_value=mock_instance):
+    with patch("tsugite.agent_runner.TsugiteAgent", return_value=mock_instance):
         run_agent(agent_file, "test prompt")
 
     # Verify is_interactive was False in the rendered prompt
@@ -94,7 +96,7 @@ Task: {{ user_prompt }}
     assert "Interactive mode: False" in captured_prompts[0]
 
 
-def test_multistep_agent_receives_interactive_flag(temp_dir, monkeypatch, mock_agent_runner):
+def test_multistep_agent_receives_interactive_flag(temp_dir, monkeypatch, mock_agent_runner, task_tools):
     """Test that multi-step agents receive the is_interactive flag."""
     from tsugite.agent_runner import run_multistep_agent
 
@@ -126,7 +128,7 @@ Task: {{ user_prompt }}
     # Use fixture to create mock
     mock_instance, captured_prompts = mock_agent_runner("Step complete")
 
-    with patch("tsugite.agent_runner.CodeAgent", return_value=mock_instance):
+    with patch("tsugite.agent_runner.TsugiteAgent", return_value=mock_instance):
         run_multistep_agent(agent_file, "test prompt")
 
     # Verify at least one prompt was captured
@@ -136,7 +138,7 @@ Task: {{ user_prompt }}
     assert any("Check interactive mode: True" in p for p in captured_prompts)
 
 
-def test_interactive_flag_available_in_templates(temp_dir, monkeypatch, mock_agent_runner):
+def test_interactive_flag_available_in_templates(temp_dir, monkeypatch, mock_agent_runner, task_tools):
     """Test that is_interactive can be used in template conditionals."""
     # Mock TTY check
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
@@ -166,7 +168,7 @@ Task: {{ user_prompt }}
     # Use fixture to create mock
     mock_instance, captured_prompts = mock_agent_runner()
 
-    with patch("tsugite.agent_runner.CodeAgent", return_value=mock_instance):
+    with patch("tsugite.agent_runner.TsugiteAgent", return_value=mock_instance):
         run_agent(agent_file, "test prompt")
 
     # Verify the conditional worked
@@ -175,7 +177,7 @@ Task: {{ user_prompt }}
     assert "Running in headless mode" not in captured_prompts[0]
 
 
-def test_ask_user_tool_not_available_in_headless(monkeypatch):
+def test_ask_user_tool_not_available_in_headless(monkeypatch, task_tools, file_tools, interactive_tools):
     """Test that ask_user tool is filtered out in non-interactive mode."""
     # Mock TTY check to return False (headless)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
@@ -198,25 +200,37 @@ def test_ask_user_tool_not_available_in_headless(monkeypatch):
     # Capture the tools list
     captured_tools = None
 
-    def mock_get_smolagents_tools(tool_names):
+    def mock_create_tool(tool_name):
         nonlocal captured_tools
-        captured_tools = tool_names
-        return []  # Return empty list for testing
+        if captured_tools is None:
+            captured_tools = []
+        captured_tools.append(tool_name)
+        from tsugite.core.tools import Tool
 
-    with patch("tsugite.agent_runner.get_smolagents_tools", side_effect=mock_get_smolagents_tools):
-        with patch("tsugite.agent_runner.CodeAgent") as mock_agent_class:
+        return Tool(name=tool_name, description=f"Mock {tool_name}", function=lambda: None, parameters={})
+
+    with patch("tsugite.agent_runner.create_tool_from_tsugite", side_effect=mock_create_tool):
+        with patch("tsugite.agent_runner.TsugiteAgent") as mock_agent_class:
             mock_instance = MagicMock()
-            mock_instance.run = MagicMock(return_value="Test complete")
+
+            async def mock_run(prompt, return_full_result=False):
+                return "Test complete"
+
+            mock_instance.run = MagicMock(side_effect=mock_run)
             mock_agent_class.return_value = mock_instance
 
             try:
-                _execute_agent_with_prompt(
-                    rendered_prompt="Test prompt",
-                    agent_config=agent_config,
-                    model_override=None,
-                    custom_logger=None,
-                    trust_mcp_code=False,
-                    delegation_agents=None,
+                import asyncio
+
+                asyncio.run(
+                    _execute_agent_with_prompt(
+                        rendered_prompt="Test prompt",
+                        agent_config=agent_config,
+                        model_override=None,
+                        custom_logger=None,
+                        trust_mcp_code=False,
+                        delegation_agents=None,
+                    )
                 )
             except Exception:
                 # We expect this to potentially fail due to mocking, but we just want to check the tools
@@ -228,7 +242,7 @@ def test_ask_user_tool_not_available_in_headless(monkeypatch):
     assert "write_file" in captured_tools  # Other tools should still be there
 
 
-def test_ask_user_tool_available_in_interactive(monkeypatch):
+def test_ask_user_tool_available_in_interactive(monkeypatch, task_tools, file_tools, interactive_tools):
     """Test that ask_user tool is available in interactive mode."""
     # Mock TTY check to return True (interactive)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
@@ -251,25 +265,37 @@ def test_ask_user_tool_available_in_interactive(monkeypatch):
     # Capture the tools list
     captured_tools = None
 
-    def mock_get_smolagents_tools(tool_names):
+    def mock_create_tool(tool_name):
         nonlocal captured_tools
-        captured_tools = tool_names
-        return []  # Return empty list for testing
+        if captured_tools is None:
+            captured_tools = []
+        captured_tools.append(tool_name)
+        from tsugite.core.tools import Tool
 
-    with patch("tsugite.agent_runner.get_smolagents_tools", side_effect=mock_get_smolagents_tools):
-        with patch("tsugite.agent_runner.CodeAgent") as mock_agent_class:
+        return Tool(name=tool_name, description=f"Mock {tool_name}", function=lambda: None, parameters={})
+
+    with patch("tsugite.agent_runner.create_tool_from_tsugite", side_effect=mock_create_tool):
+        with patch("tsugite.agent_runner.TsugiteAgent") as mock_agent_class:
             mock_instance = MagicMock()
-            mock_instance.run = MagicMock(return_value="Test complete")
+
+            async def mock_run(prompt, return_full_result=False):
+                return "Test complete"
+
+            mock_instance.run = MagicMock(side_effect=mock_run)
             mock_agent_class.return_value = mock_instance
 
             try:
-                _execute_agent_with_prompt(
-                    rendered_prompt="Test prompt",
-                    agent_config=agent_config,
-                    model_override=None,
-                    custom_logger=None,
-                    trust_mcp_code=False,
-                    delegation_agents=None,
+                import asyncio
+
+                asyncio.run(
+                    _execute_agent_with_prompt(
+                        rendered_prompt="Test prompt",
+                        agent_config=agent_config,
+                        model_override=None,
+                        custom_logger=None,
+                        trust_mcp_code=False,
+                        delegation_agents=None,
+                    )
                 )
             except Exception:
                 # We expect this to potentially fail due to mocking, but we just want to check the tools

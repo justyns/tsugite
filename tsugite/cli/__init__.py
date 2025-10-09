@@ -46,9 +46,11 @@ def run(
     no_color: bool = typer.Option(False, "--no-color", help="Disable ANSI colors"),
     log_json: bool = typer.Option(False, "--log-json", help="Machine-readable output"),
     debug: bool = typer.Option(False, "--debug", help="Show rendered prompt before execution"),
-    native_ui: bool = typer.Option(False, "--native-ui", help="Use native smolagents output instead of custom UI"),
+    native_ui: bool = typer.Option(False, "--native-ui", help="Use minimal output without custom UI panels"),
     silent: bool = typer.Option(False, "--silent", help="Suppress all agent output"),
-    show_reasoning: bool = typer.Option(False, "--show-reasoning", help="Show LLM reasoning messages"),
+    show_reasoning: bool = typer.Option(
+        True, "--show-reasoning/--no-show-reasoning", help="Show LLM reasoning messages (default: enabled)"
+    ),
     verbose: bool = typer.Option(False, "--verbose", help="Show all execution details"),
     headless: bool = typer.Option(
         False, "--headless", help="Headless mode for CI/scripts: result to stdout, optional progress to stderr"
@@ -333,7 +335,7 @@ def run(
                         delegation_agents=delegation_agents,
                     )
             elif native_ui:
-                # Use native smolagents output with loading animation
+                # Use minimal output with loading animation
                 with loading_animation(
                     console=console, message="Waiting for LLM response", enabled=not non_interactive and not no_color
                 ):
@@ -512,7 +514,6 @@ def render(
 @app.command()
 def history(
     action: str = typer.Argument(help="Action: show, clear"),
-    since: Optional[str] = typer.Option(None, "--since", help="Show history since date/time"),
 ):
     """View or manage execution history."""
     console.print(f"[yellow]History {action} not yet implemented[/yellow]")

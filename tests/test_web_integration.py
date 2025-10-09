@@ -222,16 +222,21 @@ class TestWebUILogger:
 
     def test_logger_with_sse_handler(self):
         """Test that CustomUILogger works with SSEUIHandler."""
-        from tsugite.custom_ui import CustomUILogger
+        from io import StringIO
+
+        from rich.console import Console
+
+        from tsugite.custom_ui import CustomUILogger, UIEvent
         from tsugite.web.ui_handler import SSEUIHandler
 
         handler = SSEUIHandler()
-        logger = CustomUILogger(handler)
+        console = Console(file=StringIO())
+        CustomUILogger(handler, console)
 
-        # Trigger various log methods
-        logger.log_task("Test task", "test-model")
-        logger.log_rule("Step 1")
-        logger.log_code("Code block", "print('test')")
+        # Trigger various events directly through handler
+        handler.handle_event(UIEvent.TASK_START, {"task": "Test task", "model": "test-model"})
+        handler.handle_event(UIEvent.STEP_START, {"step": 1})
+        handler.handle_event(UIEvent.CODE_EXECUTION, {"code": "print('test')"})
 
         # Verify events were queued
         assert handler.event_queue.qsize() == 3

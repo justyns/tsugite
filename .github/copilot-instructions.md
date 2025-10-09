@@ -1,9 +1,9 @@
 ## Tsugite: AI Contributor Guide (Concise)
 
-Purpose: Micro‑agent CLI. Agents = Markdown + YAML frontmatter rendered via Jinja2, executed via smolagents with a lightweight tool registry.
+Purpose: Micro‑agent CLI. Agents = Markdown + YAML frontmatter rendered via Jinja2, executed via TsugiteAgent with a lightweight tool registry.
 
 ### Core Implemented Modules
-`tsugite/tsugite.py` (CLI) • `md_agents.py` (frontmatter parsing + `AgentConfig`) • `renderer.py` (Jinja2 + filters: `now()`, `today()`, `slugify()`, `env`) • `agent_runner.py` (prefetch + execution) • `tool_adapter.py` (wrap tools for smolagents) • `models.py` (model string parsing + provider dispatch) • `tools/` (fs / shell / http) • `benchmarks/` (model + template evaluation).
+`tsugite/tsugite.py` (CLI) • `md_agents.py` (frontmatter parsing + `AgentConfig`) • `renderer.py` (Jinja2 + filters: `now()`, `today()`, `slugify()`, `env`) • `agent_runner.py` (prefetch + execution) • `core/agent.py` (TsugiteAgent with LiteLLM) • `models.py` (model string parsing + provider dispatch) • `tools/` (fs / shell / http) • `benchmarks/` (model + template evaluation).
 
 ### Design vs Current State
 Design docs mention permissions, history/audit JSONL, orchestration directives (`tsu:spawn`, `tsu:foreach`, `tsu:cond`), memory/git/network tools. These are NOT fully present—do not fabricate calls. Add future systems as isolated modules with tests before integration.
