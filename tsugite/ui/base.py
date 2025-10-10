@@ -30,6 +30,7 @@ class UIEvent(IntEnum):
     EXECUTION_LOGS = 12
     REASONING_CONTENT = 13
     REASONING_TOKENS = 14
+    COST_SUMMARY = 15
 
 
 @dataclass
@@ -119,6 +120,8 @@ class CustomUIHandler:
                 self._handle_reasoning_content(data)
             elif event == UIEvent.REASONING_TOKENS:
                 self._handle_reasoning_tokens(data)
+            elif event == UIEvent.COST_SUMMARY:
+                self._handle_cost_summary(data)
 
             self._update_display()
 
@@ -355,6 +358,36 @@ class CustomUIHandler:
             else:
                 # In headless mode, still show it but more concisely
                 self.console.print(f"[dim magenta]{message}[/dim magenta]")
+
+    def _handle_cost_summary(self, data: Dict[str, Any]) -> None:
+        """Handle cost summary display after final answer."""
+        cost = data.get("cost")
+        total_tokens = data.get("total_tokens")
+        reasoning_tokens = data.get("reasoning_tokens")
+
+        if cost is None and total_tokens is None:
+            return
+
+        # Build summary parts
+        parts = []
+        if cost is not None and cost > 0:
+            parts.append(f"💰 Cost: ${cost:.6f}")
+
+        if total_tokens is not None:
+            if reasoning_tokens is not None and reasoning_tokens > 0:
+                parts.append(f"📊 Tokens: {total_tokens:,} total ({reasoning_tokens:,} reasoning)")
+            else:
+                parts.append(f"📊 Tokens: {total_tokens:,}")
+
+        if not parts:
+            return
+
+        summary_text = " | ".join(parts)
+
+        if self.show_panels:
+            self.console.print(Text(summary_text, style="dim cyan"))
+        else:
+            self.console.print(f"[dim cyan]{summary_text}[/dim cyan]")
 
     def _handle_execution_result(self, data: Dict[str, Any]) -> None:
         """Handle code execution result event."""

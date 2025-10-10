@@ -653,11 +653,15 @@ def test_tool_execution_no_task_warnings():
 
     # Filter out unrelated warnings (like litellm cleanup)
     filtered_stderr = "\n".join(
-        line for line in stderr_output.split("\n") if "async_search" in line or "Task pending" in line or "never retrieved" in line
+        line
+        for line in stderr_output.split("\n")
+        if "async_search" in line or "Task pending" in line or "never retrieved" in line
     )
 
     assert "Task pending" not in filtered_stderr, f"Unexpected Task pending warning:\n{stderr_output}"
-    assert "Task exception was never retrieved" not in filtered_stderr, f"Unexpected Task exception warning:\n{stderr_output}"
+    assert "Task exception was never retrieved" not in filtered_stderr, (
+        f"Unexpected Task exception warning:\n{stderr_output}"
+    )
 
 
 def test_tool_exception_propagation_from_async():
@@ -719,4 +723,6 @@ def test_tool_exception_propagation_from_async():
         line for line in stderr_output.split("\n") if "failing_tool" in line or "never retrieved" in line
     )
 
-    assert "exception was never retrieved" not in filtered_stderr.lower(), f"Exception handling broken:\n{stderr_output}"
+    assert "exception was never retrieved" not in filtered_stderr.lower(), (
+        f"Exception handling broken:\n{stderr_output}"
+    )

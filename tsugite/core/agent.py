@@ -22,6 +22,7 @@ class AgentResult:
 
     output: Any
     token_usage: Optional[int] = None
+    cost: Optional[float] = None
     steps: Optional[List[StepResult]] = None
 
 
@@ -81,6 +82,9 @@ class TsugiteAgent:
         self.memory = AgentMemory()
         self.ui_handler = ui_handler
         self.model_name = model_name or model_string
+
+        # Track cumulative cost across all steps
+        self.total_cost = 0.0
 
         # Build tool map for quick lookup
         self.tool_map = {tool.name: tool for tool in tools}
@@ -204,6 +208,12 @@ class TsugiteAgent:
             # Parameters are filtered for reasoning models (o1/o3/Claude)
             response = await litellm.acompletion(messages=messages, **self.litellm_params)
 
+            # Track cost from this response
+            step_cost = 0.0
+            if hasattr(response, "_hidden_params") and "response_cost" in response._hidden_params:
+                step_cost = response._hidden_params["response_cost"]
+                self.total_cost += step_cost
+
             # Extract reasoning content if present (for o1/o3/Claude thinking)
             reasoning_content = self._extract_reasoning_content(response)
             if reasoning_content:
@@ -284,10 +294,28 @@ class TsugiteAgent:
                 if self.ui_handler:
                     self.ui_handler.handle_event(UIEvent.FINAL_ANSWER, {"answer": str(exec_result.final_answer)})
 
+                    # Trigger cost summary event
+                    total_tokens = response.usage.total_tokens if response.usage else None
+                    reasoning_tokens = None
+                    if response.usage and hasattr(response.usage, "completion_tokens_details"):
+                        details = response.usage.completion_tokens_details
+                        if hasattr(details, "reasoning_tokens"):
+                            reasoning_tokens = details.reasoning_tokens
+
+                    self.ui_handler.handle_event(
+                        UIEvent.COST_SUMMARY,
+                        {
+                            "cost": self.total_cost if self.total_cost > 0 else None,
+                            "total_tokens": total_tokens,
+                            "reasoning_tokens": reasoning_tokens,
+                        },
+                    )
+
                 if return_full_result:
                     return AgentResult(
                         output=exec_result.final_answer,
                         token_usage=response.usage.total_tokens if response.usage else None,
+                        cost=self.total_cost if self.total_cost > 0 else None,
                         steps=self.memory.steps,
                     )
                 return exec_result.final_answer

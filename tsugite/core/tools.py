@@ -123,7 +123,9 @@ class Tool:
 
             example_args.append(f"{param_name}={example_value}")
 
-        usage_example = f"result = {self.name}({', '.join(example_args)})" if example_args else f"result = {self.name}()"
+        usage_example = (
+            f"result = {self.name}({', '.join(example_args)})" if example_args else f"result = {self.name}()"
+        )
 
         # Build full function definition
         return f'''def {self.name}({param_str}) -> Any:

@@ -305,5 +305,3 @@ class TestAnimationPerformance:
         # Thread count should return to initial level
         final_thread_count = threading.active_count()
         assert final_thread_count <= initial_thread_count
-
-

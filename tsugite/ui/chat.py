@@ -77,6 +77,10 @@ class ChatUIHandler(CustomUIHandler):
             self._stop_spinner()
             self.is_thinking = False
 
+        elif event == UIEvent.COST_SUMMARY:
+            # Use parent's implementation for cost summary
+            self._handle_cost_summary(data)
+
     def _show_spinner(self, message: str):
         """Show a spinner with message."""
         if self.live_display is None:
