@@ -289,3 +289,84 @@ def test_create_tool_from_function_unmapped_types():
     assert "task_name" in tool.parameters["required"]
     assert "when" in tool.parameters["required"]
     assert "priority" not in tool.parameters["required"]  # Has default
+
+
+def test_tool_signature_keyword_only_parameters():
+    """Test that tool signatures use keyword-only parameters.
+
+    This ensures LLMs see the correct calling convention (keyword arguments only).
+    """
+
+    def search_files(pattern: str, path: str = ".") -> str:
+        """Search for pattern in files"""
+        return "results"
+
+    tool = Tool(
+        name="search_files",
+        description="Search for pattern in files",
+        parameters={
+            "type": "object",
+            "properties": {
+                "pattern": {"type": "string", "description": "Search pattern"},
+                "path": {"type": "string", "description": "Directory to search"},
+            },
+            "required": ["pattern"],
+        },
+        function=search_files,
+    )
+
+    prompt = tool.to_code_prompt()
+
+    # Verify signature uses keyword-only parameters (has * marker)
+    assert "def search_files(*, " in prompt, "Signature should include * for keyword-only params"
+
+    # Verify parameters are after the *
+    assert "*, pattern: str, path: str)" in prompt
+
+    # Verify it's valid Python
+    compile(prompt, "<string>", "exec")
+
+
+def test_tool_usage_examples_in_docstring():
+    """Test that tool docstrings include usage examples with keyword arguments.
+
+    This helps LLMs learn the correct calling convention by example.
+    """
+
+    def calculate(x: int, y: int, operation: str = "add") -> int:
+        """Perform calculation"""
+        return 0
+
+    tool = Tool(
+        name="calculate",
+        description="Perform calculation on two numbers",
+        parameters={
+            "type": "object",
+            "properties": {
+                "x": {"type": "integer", "description": "First number"},
+                "y": {"type": "integer", "description": "Second number"},
+                "operation": {"type": "string", "description": "Operation to perform"},
+            },
+            "required": ["x", "y"],
+        },
+        function=calculate,
+    )
+
+    prompt = tool.to_code_prompt()
+
+    # Verify usage example section exists
+    assert "Usage:" in prompt, "Docstring should include Usage section"
+
+    # Verify example shows keyword argument syntax
+    assert "calculate(" in prompt
+    assert "x=" in prompt, "Example should use keyword argument syntax (x=...)"
+    assert "y=" in prompt, "Example should use keyword argument syntax (y=...)"
+    assert "operation=" in prompt, "Example should use keyword argument syntax (operation=...)"
+
+    # Verify example is in the docstring (between triple quotes)
+    docstring_start = prompt.find('"""')
+    docstring_end = prompt.rfind('"""')
+    docstring = prompt[docstring_start:docstring_end]
+
+    assert "Usage:" in docstring, "Usage should be inside the docstring"
+    assert "result = calculate(" in docstring, "Example should show result assignment"

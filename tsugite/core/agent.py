@@ -127,8 +127,20 @@ class TsugiteAgent:
                     try:
                         loop = asyncio.get_event_loop()
                         if loop.is_running():
-                            # Already in async context - create a task
-                            return asyncio.create_task(tool_obj.execute(**kwargs))
+                            # Already in async context - use thread to block on async result
+                            import concurrent.futures
+
+                            with concurrent.futures.ThreadPoolExecutor() as executor:
+
+                                def run_async():
+                                    new_loop = asyncio.new_event_loop()
+                                    asyncio.set_event_loop(new_loop)
+                                    try:
+                                        return new_loop.run_until_complete(tool_obj.execute(**kwargs))
+                                    finally:
+                                        new_loop.close()
+
+                                return executor.submit(run_async).result()
                         else:
                             # Not in async context - run synchronously
                             return loop.run_until_complete(tool_obj.execute(**kwargs))
@@ -362,7 +374,7 @@ You repeat this Thought → Code → Observation cycle until you have the final 
 
 1. Always provide Thought before code
 2. Only use variables you've defined
-{"3. Call tools directly: result = tool_name(arg1, arg2)" if self.tools else "3. Use standard Python to solve the task"}
+{"3. Call tools with keyword arguments: result = tool_name(arg1=value1, arg2=value2)" if self.tools else "3. Use standard Python to solve the task"}
 4. Call final_answer() when you have the answer
 5. If you get an error, try a different approach
 6. State persists - variables remain available across code blocks

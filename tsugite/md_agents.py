@@ -483,40 +483,20 @@ def validate_agent_execution(agent: Agent | Path) -> tuple[bool, str]:
         except Exception as e:
             return False, f"Model validation failed: {e}"
 
-    # Validate that tools exist (with helpful error messages)
-    missing_tools = []
+    # Validate tool syntax (don't check existence - that happens at runtime)
+    # Just validate that tool specs can be parsed
     if agent.config.tools:
-        from .tools import _tools as registered_tools
-
-        # Expand tool specs to get actual tool names
         try:
-            from .tools import expand_tool_specs
+            # Make sure we can import expand_tool_specs
+            from .tools import expand_tool_specs  # noqa: F401
 
-            expanded_tools = expand_tool_specs(agent.config.tools)
-
-            # Check each tool
-            for tool_name in expanded_tools:
-                if tool_name not in registered_tools:
-                    missing_tools.append(tool_name)
+            # Don't actually expand here - just check syntax is valid
+            # Tool existence will be checked at execution time when modules are loaded
+            for tool_spec in agent.config.tools:
+                if not isinstance(tool_spec, str):
+                    return False, f"Tool specification must be string: {tool_spec}"
         except Exception as e:
-            # If expansion fails, that's a validation error
-            return False, f"Tool specification error: {e}"
-
-    if missing_tools:
-        from .shell_tool_config import get_custom_tools_config_path
-
-        error_msg = f"Tool(s) not found: {', '.join(missing_tools)}. "
-
-        # Check if custom tools config exists
-        config_path = get_custom_tools_config_path()
-        if config_path.exists():
-            error_msg += f"Check {config_path} for custom tool definitions. "
-        else:
-            error_msg += f"Create {config_path} to define custom tools. "
-
-        error_msg += "Run 'tsugite tools list' to see available tools."
-
-        return False, error_msg
+            return False, f"Tool import error: {e}"
 
     # Check template rendering with minimal context
     from .renderer import AgentRenderer

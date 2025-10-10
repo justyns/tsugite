@@ -89,7 +89,8 @@ class Tool:
             # Add to params list
             params.append(f"{param_name}: {python_type}")
 
-        param_str = ", ".join(params)
+        # Add * to indicate keyword-only parameters
+        param_str = f"*, {', '.join(params)}" if params else ""
 
         # Build docstring with parameter descriptions
         param_docs = []
@@ -100,12 +101,39 @@ class Tool:
 
         param_doc_str = "\n".join(param_docs) if param_docs else "        No parameters"
 
+        # Build usage example with keyword arguments
+        example_args = []
+        for param_name, param_info in props.items():
+            # Create example values based on type
+            param_type = param_info.get("type", "string")
+            if param_type == "string":
+                example_value = f'"{param_name}_value"'
+            elif param_type == "integer":
+                example_value = "42"
+            elif param_type == "number":
+                example_value = "3.14"
+            elif param_type == "boolean":
+                example_value = "True"
+            elif param_type == "array":
+                example_value = '["item1", "item2"]'
+            elif param_type == "object":
+                example_value = '{"key": "value"}'
+            else:
+                example_value = "value"
+
+            example_args.append(f"{param_name}={example_value}")
+
+        usage_example = f"result = {self.name}({', '.join(example_args)})" if example_args else f"result = {self.name}()"
+
         # Build full function definition
         return f'''def {self.name}({param_str}) -> Any:
     """{self.description}
 
     Args:
 {param_doc_str}
+
+    Usage:
+        {usage_example}
     """
     pass
 '''

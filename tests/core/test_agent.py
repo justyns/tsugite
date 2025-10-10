@@ -591,3 +591,132 @@ final_answer(42)
         # Should use custom executor
         mock_executor.execute.assert_called_once()
         assert result == 42
+
+
+def test_tool_execution_no_task_warnings():
+    """Test that calling async tools from sync context doesn't produce Task warnings.
+
+    This tests the fix for the issue where tool execution would create asyncio
+    Tasks that were never awaited, producing warning messages like:
+    - '💡 <Task pending name='Task-7' coro=<Tool.execute()>>'
+    - 'Task exception was never retrieved'
+    """
+    import asyncio
+    import sys
+    from io import StringIO
+
+    from tsugite.core.tools import Tool
+
+    # Create async tool (like real tools)
+    async def async_search(query: str) -> str:
+        """Search for information"""
+        await asyncio.sleep(0.001)  # Simulate async work
+        return f"Results for: {query}"
+
+    tool = Tool(
+        name="async_search",
+        description="Search for information",
+        parameters={
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+        },
+        function=async_search,
+    )
+
+    # Create agent and inject tool
+    agent = TsugiteAgent(
+        model_string="openai:gpt-4o-mini",
+        tools=[tool],
+        instructions="",
+        max_steps=5,
+    )
+
+    # Capture stderr to check for Task warnings
+    old_stderr = sys.stderr
+    stderr_capture = StringIO()
+    sys.stderr = stderr_capture
+
+    try:
+        # Call the tool from sync context (simulating what exec() does)
+        # This should NOT produce Task warnings
+        result = agent.executor.namespace["async_search"](query="test")
+
+        # Verify result is correct
+        assert result == "Results for: test"
+
+    finally:
+        sys.stderr = old_stderr
+
+    # Check that no Task warnings were produced
+    stderr_output = stderr_capture.getvalue()
+
+    # Filter out unrelated warnings (like litellm cleanup)
+    filtered_stderr = "\n".join(
+        line for line in stderr_output.split("\n") if "async_search" in line or "Task pending" in line or "never retrieved" in line
+    )
+
+    assert "Task pending" not in filtered_stderr, f"Unexpected Task pending warning:\n{stderr_output}"
+    assert "Task exception was never retrieved" not in filtered_stderr, f"Unexpected Task exception warning:\n{stderr_output}"
+
+
+def test_tool_exception_propagation_from_async():
+    """Test that exceptions from async tools are properly propagated.
+
+    This ensures that when an async tool raises an exception, it's properly
+    raised in the sync context rather than being lost or creating warnings.
+    """
+    import asyncio
+    import sys
+    from io import StringIO
+
+    from tsugite.core.tools import Tool
+
+    # Create async tool that raises exception
+    async def failing_tool(value: str) -> str:
+        """Tool that fails on purpose"""
+        await asyncio.sleep(0.001)
+        raise RuntimeError(f"Tool failed with value: {value}")
+
+    tool = Tool(
+        name="failing_tool",
+        description="Tool that fails",
+        parameters={
+            "type": "object",
+            "properties": {"value": {"type": "string"}},
+            "required": ["value"],
+        },
+        function=failing_tool,
+    )
+
+    # Create agent and inject tool
+    agent = TsugiteAgent(
+        model_string="openai:gpt-4o-mini",
+        tools=[tool],
+        instructions="",
+        max_steps=5,
+    )
+
+    # Capture stderr
+    old_stderr = sys.stderr
+    stderr_capture = StringIO()
+    sys.stderr = stderr_capture
+
+    try:
+        # Call the tool and expect exception
+        with pytest.raises(RuntimeError) as exc_info:
+            agent.executor.namespace["failing_tool"](value="test")
+
+        # Verify exception message
+        assert "Tool failed with value: test" in str(exc_info.value)
+
+    finally:
+        sys.stderr = old_stderr
+
+    # Check that no "exception was never retrieved" warnings appeared
+    stderr_output = stderr_capture.getvalue()
+    filtered_stderr = "\n".join(
+        line for line in stderr_output.split("\n") if "failing_tool" in line or "never retrieved" in line
+    )
+
+    assert "exception was never retrieved" not in filtered_stderr.lower(), f"Exception handling broken:\n{stderr_output}"
