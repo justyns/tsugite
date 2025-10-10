@@ -1,6 +1,6 @@
 # tsugite
 
-Tsugite (Japanese: 継手, meaning "joint" in woodworking) is a developer-facing agentic CLI inspired by Claude Code.
+Tsugite (Japanese: 継ぎ手, meaning "joint" in woodworking) is a developer-facing agentic CLI.
 
 Define AI agents as markdown files with YAML frontmatter. Chain multiple steps together, pass data between them, and use any LLM (OpenAI, Anthropic, Ollama, etc).
 

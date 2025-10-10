@@ -9,7 +9,6 @@ from rich.console import Console
 from rich.panel import Panel
 
 from tsugite.agent_runner import get_agent_info, run_agent, validate_agent_execution
-from tsugite.animation import loading_animation
 from tsugite.ui import create_plain_logger, create_silent_logger, custom_agent_ui
 from tsugite.utils import expand_file_references, should_use_plain_output
 
@@ -25,7 +24,6 @@ from .helpers import (
     get_output_console,
     parse_cli_arguments,
     print_plain_info,
-    print_plain_section,
 )
 from .mcp import mcp_app
 from .tools import tools_app

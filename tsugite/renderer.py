@@ -1,6 +1,7 @@
 """Jinja2 template rendering for agent content."""
 
 import os
+import re
 from datetime import datetime
 from typing import Any, Dict
 
@@ -54,6 +55,43 @@ def read_text(path: str, default: str = "") -> str:
         return default
 
 
+def strip_ignored_sections(content: str) -> str:
+    """Remove <!-- tsu:ignore --> blocks from content.
+
+    Supports both block and inline forms:
+    - Block: <!-- tsu:ignore -->\\ncontent\\n<!-- /tsu:ignore -->
+    - Inline: <!-- tsu:ignore -->content<!-- /tsu:ignore -->
+
+    Args:
+        content: Raw markdown content
+
+    Returns:
+        Content with ignored sections removed
+
+    Example:
+        >>> content = '''
+        ... Normal content
+        ... <!-- tsu:ignore -->
+        ... This is ignored
+        ... <!-- /tsu:ignore -->
+        ... More content
+        ... '''
+        >>> result = strip_ignored_sections(content)
+        >>> 'This is ignored' not in result
+        True
+    """
+    # Pattern matches opening tag, content (non-greedy), closing tag
+    # Handles both <!-- tsu:ignore --> and <!--tsu:ignore--> (with/without spaces)
+    # Uses non-greedy match (.*?) to handle multiple blocks correctly
+    # DOTALL flag allows matching across newlines
+    pattern = r"<!--\s*tsu:ignore\s*-->.*?<!--\s*/tsu:ignore\s*-->"
+
+    # Remove all ignore blocks
+    result = re.sub(pattern, "", content, flags=re.DOTALL)
+
+    return result
+
+
 class AgentRenderer:
     """Jinja2 template renderer for agent content."""
 
@@ -83,12 +121,31 @@ class AgentRenderer:
         self.env.filters["slugify"] = slugify
 
     def render(self, content: str, context: Dict[str, Any] = None) -> str:
-        """Render agent content with Jinja2."""
+        """Render agent content with Jinja2.
+
+        Preprocessing steps:
+        1. Strip <!-- tsu:ignore --> blocks
+        2. Render Jinja2 template with context
+
+        Args:
+            content: Raw markdown content
+            context: Template variables
+
+        Returns:
+            Rendered content
+
+        Raises:
+            ValueError: If template rendering fails
+        """
         if context is None:
             context = {}
 
         try:
-            template = self.env.from_string(content)
+            # Step 1: Strip ignored sections BEFORE rendering
+            preprocessed = strip_ignored_sections(content)
+
+            # Step 2: Render Jinja2 template
+            template = self.env.from_string(preprocessed)
             return template.render(**context)
         except Exception as e:
             raise ValueError(f"Template rendering failed: {e}")

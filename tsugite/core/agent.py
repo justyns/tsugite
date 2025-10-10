@@ -85,9 +85,78 @@ class TsugiteAgent:
         # Build tool map for quick lookup
         self.tool_map = {tool.name: tool for tool in tools}
 
+        # Inject tools into executor namespace so they can be called from code
+        self._inject_tools_into_executor()
+
         # Pre-compute LiteLLM params (filters unsupported params for reasoning models)
         # This is more efficient and correct - we filter once, not on every loop iteration
         self.litellm_params = get_model_params(model_string, **(model_kwargs or {}))
+
+    def _inject_tools_into_executor(self):
+        """Inject tools into executor namespace so they can be called from Python code.
+
+        Creates wrapper functions for each tool that call the tool's execute() method.
+        The LLM sees tools as Python functions and calls them directly in generated code.
+        """
+        import asyncio
+
+        tool_functions = {}
+
+        for tool in self.tools:
+            # Create a wrapper function that calls the tool's execute method
+            def make_tool_wrapper(tool_obj):
+                """Create a wrapper for this specific tool."""
+
+                def tool_wrapper(*args, **kwargs):
+                    """Synchronous wrapper that calls async tool.execute().
+
+                    Accepts both positional and keyword arguments for flexibility,
+                    but tool.execute() expects keyword arguments only.
+                    """
+                    # Convert positional args to keyword args if needed
+                    if args:
+                        # Tools should be called with keyword args, but if positional
+                        # args are provided, this is likely an error
+                        raise TypeError(
+                            f"Tool '{tool_obj.name}' must be called with keyword arguments, "
+                            f"not positional arguments. "
+                            f"Example: {tool_obj.name}(param1=value1, param2=value2)"
+                        )
+
+                    # Get the running event loop, or create one if needed
+                    try:
+                        loop = asyncio.get_event_loop()
+                        if loop.is_running():
+                            # Already in async context - create a task
+                            return asyncio.create_task(tool_obj.execute(**kwargs))
+                        else:
+                            # Not in async context - run synchronously
+                            return loop.run_until_complete(tool_obj.execute(**kwargs))
+                    except RuntimeError:
+                        # No event loop - create one
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        try:
+                            return loop.run_until_complete(tool_obj.execute(**kwargs))
+                        finally:
+                            loop.close()
+
+                # Copy the tool's function signature and metadata to the wrapper
+                # This ensures the wrapper appears identical to the original function
+                tool_wrapper.__name__ = tool_obj.name
+                tool_wrapper.__doc__ = tool_obj.description
+                if hasattr(tool_obj.function, "__signature__"):
+                    tool_wrapper.__signature__ = tool_obj.function.__signature__
+                if hasattr(tool_obj.function, "__annotations__"):
+                    tool_wrapper.__annotations__ = tool_obj.function.__annotations__
+
+                return tool_wrapper
+
+            tool_functions[tool.name] = make_tool_wrapper(tool)
+
+        # Inject all tool functions into executor namespace
+        if hasattr(self.executor, "namespace"):
+            self.executor.namespace.update(tool_functions)
 
     async def run(self, task: str, return_full_result: bool = False):
         """Run the agent on a task.

@@ -26,6 +26,7 @@ class AgentConfig:
     mcp_servers: Optional[Dict[str, Optional[List[str]]]] = None
     extends: Optional[str] = None
     reasoning_effort: Optional[str] = None  # For reasoning models (low, medium, high)
+    custom_tools: List[Dict[str, Any]] = field(default_factory=list)  # Per-agent shell tools
 
     def __post_init__(self):
         if self.tools is None:
@@ -40,6 +41,8 @@ class AgentConfig:
             self.instructions = ""
         if self.mcp_servers is None:
             self.mcp_servers = {}
+        if self.custom_tools is None:
+            self.custom_tools = []
 
 
 @dataclass
@@ -127,6 +130,110 @@ def extract_directives(content: str) -> List[Dict[str, Any]]:
                 directive["assign"] = assign_match.group(2)
 
         directives.append(directive)
+
+    return directives
+
+
+@dataclass
+class ToolDirective:
+    """Represents a tool directive in agent content."""
+
+    name: str
+    args: Dict[str, Any]
+    assign_var: str
+    start_pos: int
+    end_pos: int
+    raw_match: str
+
+
+def extract_tool_directives(content: str) -> List[ToolDirective]:
+    """Extract <!-- tsu:tool --> directives from content.
+
+    Args:
+        content: Raw markdown content
+
+    Returns:
+        List of ToolDirective objects with parsed name, args, and assignment
+
+    Example:
+        >>> content = '''
+        ... <!-- tsu:tool name="fetch_json" args={"url": "http://example.com"} assign="data" -->
+        ... '''
+        >>> directives = extract_tool_directives(content)
+        >>> directives[0].name
+        'fetch_json'
+        >>> directives[0].args
+        {'url': 'http://example.com'}
+    """
+    directives = []
+
+    # Pattern to match <!-- tsu:tool name="..." args={...} assign="..." -->
+    # Uses non-greedy match to handle multiple directives
+    pattern = r"<!--\s*tsu:tool\s+([^>]+?)\s*-->"
+
+    for match in re.finditer(pattern, content):
+        raw_args = match.group(1).strip()
+        start_pos = match.start()
+        end_pos = match.end()
+        raw_match = match.group(0)
+
+        # Extract name (required)
+        name_match = re.search(r'name=(["\']?)(\w+)\1', raw_args)
+        if not name_match:
+            raise ValueError(f"Tool directive missing required 'name' attribute: {raw_args}")
+
+        tool_name = name_match.group(2)
+
+        # Extract args (required, should be JSON)
+        # Find args= and extract the JSON object that follows
+        args_start = raw_args.find("args=")
+        if args_start == -1:
+            raise ValueError(f"Tool directive missing required 'args' attribute: {raw_args}")
+
+        # Find the opening brace after args=
+        json_start = raw_args.find("{", args_start)
+        if json_start == -1:
+            raise ValueError(f"Tool directive args must be a JSON object: {raw_args}")
+
+        # Find the matching closing brace (handle nested braces)
+        brace_count = 0
+        json_end = json_start
+        for i in range(json_start, len(raw_args)):
+            if raw_args[i] == "{":
+                brace_count += 1
+            elif raw_args[i] == "}":
+                brace_count -= 1
+                if brace_count == 0:
+                    json_end = i + 1
+                    break
+
+        if brace_count != 0:
+            raise ValueError(f"Unmatched braces in tool directive args: {raw_args}")
+
+        # Parse JSON args
+        try:
+            args_json_str = raw_args[json_start:json_end]
+            args_dict = json.loads(args_json_str)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON in tool directive args for '{tool_name}': {e}")
+
+        # Extract assign (required)
+        assign_match = re.search(r'assign=(["\']?)(\w+)\1', raw_args)
+        if not assign_match:
+            raise ValueError(f"Tool directive missing required 'assign' attribute: {raw_args}")
+
+        assign_var = assign_match.group(2)
+
+        directives.append(
+            ToolDirective(
+                name=tool_name,
+                args=args_dict,
+                assign_var=assign_var,
+                start_pos=start_pos,
+                end_pos=end_pos,
+                raw_match=raw_match,
+            )
+        )
 
     return directives
 
@@ -376,9 +483,40 @@ def validate_agent_execution(agent: Agent | Path) -> tuple[bool, str]:
         except Exception as e:
             return False, f"Model validation failed: {e}"
 
-    # Skip tool validation - tools are validated at runtime
-    # This allows agents to be validated without all tools being registered
-    # which is important for testing and agent development
+    # Validate that tools exist (with helpful error messages)
+    missing_tools = []
+    if agent.config.tools:
+        from .tools import _tools as registered_tools
+
+        # Expand tool specs to get actual tool names
+        try:
+            from .tools import expand_tool_specs
+
+            expanded_tools = expand_tool_specs(agent.config.tools)
+
+            # Check each tool
+            for tool_name in expanded_tools:
+                if tool_name not in registered_tools:
+                    missing_tools.append(tool_name)
+        except Exception as e:
+            # If expansion fails, that's a validation error
+            return False, f"Tool specification error: {e}"
+
+    if missing_tools:
+        from .shell_tool_config import get_custom_tools_config_path
+
+        error_msg = f"Tool(s) not found: {', '.join(missing_tools)}. "
+
+        # Check if custom tools config exists
+        config_path = get_custom_tools_config_path()
+        if config_path.exists():
+            error_msg += f"Check {config_path} for custom tool definitions. "
+        else:
+            error_msg += f"Create {config_path} to define custom tools. "
+
+        error_msg += "Run 'tsugite tools list' to see available tools."
+
+        return False, error_msg
 
     # Check template rendering with minimal context
     from .renderer import AgentRenderer

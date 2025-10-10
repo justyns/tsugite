@@ -50,6 +50,71 @@ def execute_prefetch(prefetch_config: List[Dict[str, Any]]) -> Dict[str, Any]:
     return context
 
 
+def execute_tool_directives(
+    content: str, existing_context: Optional[Dict[str, Any]] = None
+) -> tuple[str, Dict[str, Any]]:
+    """Execute tool directives in content and return updated context.
+
+    Tool directives are inline <!-- tsu:tool --> comments that execute tools
+    during the rendering phase, similar to prefetch but embedded in content.
+
+    Args:
+        content: Markdown content with tool directives
+        existing_context: Current template context (for error messages, not used for execution)
+
+    Returns:
+        Tuple of (modified_content, updated_context)
+        - modified_content: Directives replaced with execution notes
+        - updated_context: Original context + tool results
+
+    Example:
+        >>> content = '<!-- tsu:tool name="read_file" args={"path": "test.txt"} assign="data" -->'
+        >>> modified, context = execute_tool_directives(content)
+        >>> 'data' in context
+        True
+    """
+    from tsugite.md_agents import extract_tool_directives
+
+    if existing_context is None:
+        existing_context = {}
+
+    # Extract tool directives
+    try:
+        directives = extract_tool_directives(content)
+    except ValueError as e:
+        # If parsing fails, return content unchanged with empty context
+        print(f"Warning: Failed to parse tool directives: {e}")
+        return content, {}
+
+    if not directives:
+        # No directives to execute
+        return content, {}
+
+    # Execute directives in order
+    new_context = {}
+    modified_content = content
+
+    for directive in directives:
+        try:
+            # Execute the tool
+            result = call_tool(directive.name, **directive.args)
+            new_context[directive.assign_var] = result
+
+            # Replace directive with execution note
+            replacement = f"<!-- Tool '{directive.name}' executed, result in {directive.assign_var} -->"
+            modified_content = modified_content.replace(directive.raw_match, replacement)
+
+        except Exception as e:
+            print(f"Warning: Tool directive '{directive.name}' failed: {e}")
+            new_context[directive.assign_var] = None
+
+            # Replace with failure note
+            replacement = f"<!-- Tool '{directive.name}' failed: {e} -->"
+            modified_content = modified_content.replace(directive.raw_match, replacement)
+
+    return modified_content, new_context
+
+
 def _extract_reasoning_content(agent: TsugiteAgent, custom_logger: Optional[Any] = None) -> None:
     """Extract and display reasoning content from TsugiteAgent memory.
 
@@ -158,6 +223,23 @@ async def _execute_agent_with_prompt(
         # Filter out ask_user tool in non-interactive mode
         if not is_interactive() and "ask_user" in all_tool_names:
             all_tool_names.remove("ask_user")
+
+        # Register per-agent custom shell tools (if any)
+        if agent_config.custom_tools:
+            from tsugite.shell_tool_config import parse_tool_definition_from_dict
+            from tsugite.tools.shell_tools import register_shell_tools
+
+            try:
+                custom_tool_definitions = [
+                    parse_tool_definition_from_dict(tool_dict) for tool_dict in agent_config.custom_tools
+                ]
+                register_shell_tools(custom_tool_definitions)
+
+                # Add custom tool names to the tool list
+                for tool_def in custom_tool_definitions:
+                    all_tool_names.append(tool_def.name)
+            except Exception as e:
+                print(f"Warning: Failed to register custom tools: {e}")
 
         # Convert to Tool objects
         tools = [create_tool_from_tsugite(name) for name in all_tool_names]
@@ -331,6 +413,9 @@ def run_agent(
         except Exception as e:
             print(f"Warning: Prefetch execution failed: {e}")
 
+    # Execute tool directives in content
+    modified_content, tool_context = execute_tool_directives(agent.content, prefetch_context)
+
     # Add task context (will be updated as agent creates tasks)
     task_context = task_manager.get_task_summary()
 
@@ -341,15 +426,16 @@ def run_agent(
     full_context = {
         **context,
         **prefetch_context,
+        **tool_context,  # Add tool directive results
         "user_prompt": prompt,
         "task_summary": task_context,
         "is_interactive": interactive_mode,
     }
 
-    # Render agent template
+    # Render agent template (use modified content with directives replaced)
     renderer = AgentRenderer()
     try:
-        rendered_prompt = renderer.render(agent.content, full_context)
+        rendered_prompt = renderer.render(modified_content, full_context)
 
         if debug:
             print("\n" + "=" * 60)
@@ -575,10 +661,16 @@ def run_multistep_agent(
                     print(f"DEBUG: Executing Step {i}/{len(steps)}: {step.name}")
                 print(f"{'=' * 60}")
 
+            # Execute tool directives in this step's content
+            step_modified_content, step_tool_context = execute_tool_directives(step.content, step_context)
+
+            # Update step context with tool results
+            step_context.update(step_tool_context)
+
             # Render this step's content with current context
             renderer = AgentRenderer()
             try:
-                rendered_step_prompt = renderer.render(step.content, step_context)
+                rendered_step_prompt = renderer.render(step_modified_content, step_context)
 
                 if debug:
                     print("\nRendered Prompt:")

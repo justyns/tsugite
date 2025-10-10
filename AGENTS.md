@@ -389,6 +389,190 @@ Draft the article following {{ structure }}.
 Write `article.md`, confirm it exists, and surface the final text.
 ````
 
+## Directive Syntax
+
+Tsugite supports two types of HTML comment directives for controlling content flow and execution.
+
+### Documentation Blocks: `<!-- tsu:ignore -->`
+
+Strip sections of content before rendering, allowing you to include documentation that won't be sent to the LLM.
+
+**Syntax:**
+```markdown
+<!-- tsu:ignore -->
+This entire section is removed before rendering.
+Can contain notes, examples, template patterns, or developer documentation.
+<!-- /tsu:ignore -->
+```
+
+**Use Cases:**
+- Document what the agent does without sending to LLM
+- Explain template variables and their sources
+- Include usage examples and test cases
+- Show Jinja2 patterns without triggering rendering errors
+- Add developer notes and implementation details
+
+**Example:**
+```markdown
+---
+name: data_processor
+model: openai:gpt-4o-mini
+tools: [read_file, write_file]
+---
+
+<!-- tsu:ignore -->
+## Documentation
+
+This agent processes CSV files and generates reports.
+
+**Required Files:**
+- `data.csv` - Input data
+
+**Variables:**
+- `user_prompt`: Task from CLI
+- `raw_data`: Loaded CSV (from tool directive)
+
+**Example Usage:**
+```bash
+tsugite run data_processor.md "Analyze sales"
+```
+
+You can document Jinja2 patterns here:
+{{ undeclared_variable }}  # Won't cause errors!
+<!-- /tsu:ignore -->
+
+# Data Processing Agent
+
+Task: {{ user_prompt }}
+
+Process the data and create a report.
+```
+
+**Features:**
+- Supports both inline and block forms
+- Multiple ignore blocks in one agent
+- Can contain any content including Jinja2 syntax
+- Stripped before template rendering (won't cause undefined variable errors)
+- Regular HTML comments are preserved
+
+### Tool Directives: `<!-- tsu:tool -->`
+
+Execute tools inline during rendering, before the LLM sees the prompt. Similar to `prefetch` but embedded directly in content.
+
+**Syntax:**
+```markdown
+<!-- tsu:tool name="tool_name" args={"key": "value"} assign="variable_name" -->
+```
+
+**Parameters:**
+- `name`: Tool name (required) - any registered tool
+- `args`: JSON object of tool arguments (required)
+- `assign`: Variable name for result (required)
+
+**Execution Flow:**
+1. Parse agent frontmatter and content
+2. Execute `prefetch` tools (YAML-defined)
+3. **Execute tool directives** (inline in content)
+4. Strip ignore blocks
+5. Render Jinja2 templates
+6. Execute agent
+
+**Example:**
+```markdown
+---
+name: config_analyzer
+model: openai:gpt-4o-mini
+tools: [write_file]
+---
+
+# Configuration Analyzer
+
+<!-- tsu:tool name="read_file" args={"path": "config.json"} assign="config" -->
+<!-- tsu:tool name="read_file" args={"path": "schema.json"} assign="schema" -->
+
+Current configuration:
+```json
+{{ config }}
+```
+
+Schema:
+```json
+{{ schema }}
+```
+
+Task: {{ user_prompt }}
+
+Analyze the configuration against the schema and write a report.
+```
+
+**With Nested JSON:**
+```markdown
+<!-- tsu:tool name="fetch_json" args={"url": "https://api.example.com", "headers": {"auth": "token"}} assign="api_data" -->
+```
+
+**Error Handling:**
+- Failed tools assign `None` to the variable
+- Logs warning but continues execution
+- Check results with `{% if variable %}` in templates
+
+**Multi-Step Agents:**
+
+Tool directives work in both preamble and step content:
+
+```markdown
+---
+name: research_pipeline
+tools: [write_file]
+max_steps: 5
+---
+
+<!-- tsu:tool name="read_file" args={"path": "sources.txt"} assign="sources" -->
+
+Available sources: {{ sources }}
+
+<!-- tsu:step name="research" assign="findings" -->
+
+<!-- tsu:tool name="read_file" args={"path": "context.txt"} assign="context" -->
+
+Research the topic using context: {{ context }}
+And sources: {{ sources }}
+
+<!-- tsu:step name="write_report" -->
+
+Write a report combining:
+- Context: {{ context }}
+- Sources: {{ sources }}
+- Findings: {{ findings }}
+```
+
+**Scope:**
+- **Preamble directives**: Execute once, available to all steps
+- **Step directives**: Execute per step, scoped to that step
+- Variables from previous steps always available
+
+**vs. Prefetch:**
+
+| Feature | Prefetch (YAML) | Tool Directives (Inline) |
+|---------|-----------------|--------------------------|
+| Location | YAML frontmatter | Markdown content |
+| Visibility | All template content | Context-specific placement |
+| Multi-step | Once before all steps | Can execute per-step |
+| Documentation | Separate from content | Inline with usage |
+
+**Best Practices:**
+- Use prefetch for global data needed everywhere
+- Use tool directives for context-specific data
+- Place directives close to where variables are used
+- Document with ignore blocks when needed
+- Check for `None` when tools might fail
+
+**Examples:**
+
+See working examples in `examples/`:
+- `tool_directives_demo.md` - Basic directive usage
+- `multistep_with_directives.md` - Multi-step integration
+- `documentation_example.md` - Combined ignore + tool directives
+
 ## Model Providers
 
 - Model strings follow `provider:model[:variant]`; parsed by `tsugite.models.parse_model_string`.

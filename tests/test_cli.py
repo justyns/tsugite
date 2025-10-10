@@ -310,44 +310,42 @@ tools: []
 
 
 class TestAnimationCLIIntegration:
-    """Test animation integration with CLI commands."""
+    """Test animation integration with CLI commands via custom_agent_ui."""
 
     @pytest.mark.parametrize(
-        "extra_flags,expected_enabled",
+        "extra_flags,expected_progress",
         [
-            ([], True),  # No flags - animation enabled
-            (["--non-interactive"], False),  # Non-interactive disables animation
-            (["--no-color"], False),  # No color disables animation
-            (["--non-interactive", "--no-color"], False),  # Both flags disable animation
+            ([], True),  # No flags - progress enabled
+            (["--non-interactive"], True),  # Non-interactive doesn't affect progress
+            (["--no-color"], False),  # No color disables progress
+            (["--non-interactive", "--no-color"], False),  # Both flags - no-color disables progress
         ],
     )
-    @patch("tsugite.cli.loading_animation")
+    @patch("tsugite.cli.custom_agent_ui")
     def test_animation_flags(
-        self, mock_loading_animation, cli_runner, sample_agent_file, mock_agent_execution, extra_flags, expected_enabled
+        self, mock_custom_ui, cli_runner, sample_agent_file, mock_agent_execution, extra_flags, expected_progress
     ):
-        """Test that animation is enabled/disabled based on CLI flags."""
-        mock_loading_animation.return_value.__enter__ = MagicMock()
-        mock_loading_animation.return_value.__exit__ = MagicMock(return_value=None)
+        """Test that animation is enabled/disabled via show_progress based on CLI flags."""
+        mock_custom_ui.return_value.__enter__ = MagicMock(return_value=MagicMock())
+        mock_custom_ui.return_value.__exit__ = MagicMock(return_value=None)
 
         cmd = ["run", str(sample_agent_file), "test prompt", "--native-ui"] + extra_flags
         result = cli_runner.invoke(app, cmd)
 
         assert result.exit_code == 0
-        mock_loading_animation.assert_called_once()
-        call_args = mock_loading_animation.call_args
-        assert call_args.kwargs["enabled"] is expected_enabled
-        if expected_enabled:
-            assert call_args.kwargs["message"] == "Waiting for LLM response"
+        mock_custom_ui.assert_called_once()
+        call_args = mock_custom_ui.call_args
+        assert call_args.kwargs["show_progress"] is expected_progress
+        # Verify other native_ui flags are properly set
+        assert call_args.kwargs["show_panels"] is False
 
-    @patch("tsugite.cli.loading_animation")
+    @patch("tsugite.cli.custom_agent_ui")
     @patch("tsugite.cli.run_agent")
-    def test_animation_context_manager_usage(
-        self, mock_run_agent, mock_loading_animation, cli_runner, sample_agent_file
-    ):
-        """Test that animation context manager is properly used around run_agent in native UI."""
+    def test_animation_context_manager_usage(self, mock_run_agent, mock_custom_ui, cli_runner, sample_agent_file):
+        """Test that custom_agent_ui context manager is properly used around run_agent in native UI."""
         mock_run_agent.return_value = "Test completion"
         mock_context = MagicMock()
-        mock_loading_animation.return_value = mock_context
+        mock_custom_ui.return_value = mock_context
 
         with patch("tsugite.cli.validate_agent_execution") as mock_validate:
             mock_validate.return_value = (True, "Agent is valid")
@@ -361,11 +359,11 @@ class TestAnimationCLIIntegration:
         # Verify run_agent was called
         mock_run_agent.assert_called_once()
 
-    @patch("tsugite.cli.loading_animation")
-    def test_animation_with_agent_execution_error(self, mock_loading_animation, cli_runner, sample_agent_file):
+    @patch("tsugite.cli.custom_agent_ui")
+    def test_animation_with_agent_execution_error(self, mock_custom_ui, cli_runner, sample_agent_file):
         """Test animation cleanup when agent execution fails in native UI."""
         mock_context = MagicMock()
-        mock_loading_animation.return_value = mock_context
+        mock_custom_ui.return_value = mock_context
 
         with (
             patch("tsugite.cli.run_agent") as mock_run_agent,
@@ -381,32 +379,23 @@ class TestAnimationCLIIntegration:
         mock_context.__enter__.assert_called_once()
         mock_context.__exit__.assert_called_once()
 
-    @patch("tsugite.cli.loading_animation")
-    def test_animation_console_parameter(
-        self, mock_loading_animation, cli_runner, sample_agent_file, mock_agent_execution
-    ):
-        """Test that correct console instance is passed to animation in native UI."""
-        mock_loading_animation.return_value.__enter__ = MagicMock()
-        mock_loading_animation.return_value.__exit__ = MagicMock(return_value=None)
+    @patch("tsugite.cli.custom_agent_ui")
+    def test_animation_console_parameter(self, mock_custom_ui, cli_runner, sample_agent_file, mock_agent_execution):
+        """Test that correct console instance is passed to custom_agent_ui in native UI."""
+        mock_custom_ui.return_value.__enter__ = MagicMock(return_value=MagicMock())
+        mock_custom_ui.return_value.__exit__ = MagicMock(return_value=None)
 
         result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--native-ui"])
 
         assert result.exit_code == 0
         # Verify console parameter was passed
-        mock_loading_animation.assert_called_once()
-        call_args = mock_loading_animation.call_args
-        # Console should be the first positional argument
-        if call_args.args:
-            console_arg = call_args.args[0]
-            assert console_arg is not None
-            # Check it's a Console-like object (has the methods we expect)
-            assert hasattr(console_arg, "print")
-        else:
-            # Console might be passed as keyword argument
-            assert "console" in call_args.kwargs
-            console_arg = call_args.kwargs["console"]
-            assert console_arg is not None
-            assert hasattr(console_arg, "print")
+        mock_custom_ui.assert_called_once()
+        call_args = mock_custom_ui.call_args
+        # Console should be passed as keyword argument
+        assert "console" in call_args.kwargs
+        console_arg = call_args.kwargs["console"]
+        assert console_arg is not None
+        assert hasattr(console_arg, "print")
 
 
 class TestHeadlessMode:

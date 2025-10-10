@@ -50,8 +50,27 @@ def tool(func: Callable) -> Callable:
 def get_tool(name: str) -> ToolInfo:
     """Get a registered tool by name."""
     if name not in _tools:
-        available = ", ".join(list(_tools.keys())) if _tools else "none"
-        raise validation_error("tool", name, f"not found. Available: {available}")
+        # Provide helpful error message
+        from ..shell_tool_config import get_custom_tools_config_path
+
+        error_parts = ["not found"]
+
+        # Check if it might be a custom tool
+        config_path = get_custom_tools_config_path()
+        if config_path.exists():
+            error_parts.append(f"Check if '{name}' is defined in {config_path}")
+        else:
+            error_parts.append(f"Custom tools config not found at {config_path}")
+
+        # Suggest similar tool names
+        all_tools = list(_tools.keys())
+        similar = [t for t in all_tools if name.lower() in t.lower() or t.lower() in name.lower()]
+        if similar:
+            error_parts.append(f"Did you mean: {', '.join(similar[:3])}?")
+
+        error_parts.append("Run 'tsugite tools list' to see all available tools")
+
+        raise validation_error("tool", name, ". ".join(error_parts))
     return _tools[name]
 
 
@@ -190,6 +209,49 @@ def expand_tool_specs(tool_specs: List[str]) -> List[str]:
     return result
 
 
+def load_custom_shell_tools() -> None:
+    """Load custom shell tools from config file.
+
+    This is called automatically at module import time to register
+    user-defined shell tools from custom_tools.yaml.
+    """
+    import os
+    import sys
+
+    try:
+        from ..shell_tool_config import get_custom_tools_config_path, load_custom_tools_config
+        from .shell_tools import register_shell_tools
+
+        config_path = get_custom_tools_config_path()
+
+        # Only try to load if config file exists
+        if not config_path.exists():
+            # Silently skip if no custom tools configured
+            return
+
+        definitions = load_custom_tools_config()
+        if definitions:
+            register_shell_tools(definitions)
+
+            # Show helpful message if verbose mode enabled
+            if os.environ.get("TSUGITE_VERBOSE") or os.environ.get("TSUGITE_DEBUG"):
+                tool_names = [d.name for d in definitions]
+                print(
+                    f"✓ Loaded {len(definitions)} custom tool(s): {', '.join(tool_names)}",
+                    file=sys.stderr,
+                )
+        else:
+            # Config exists but no tools defined
+            if os.environ.get("TSUGITE_VERBOSE") or os.environ.get("TSUGITE_DEBUG"):
+                print(f"⚠ Custom tools config exists but no tools defined: {config_path}", file=sys.stderr)
+
+    except Exception as e:
+        # Don't fail startup if custom tools can't be loaded, but show clear error
+        print(f"⚠ Failed to load custom tools: {e}", file=sys.stderr)
+        print(f"  Config file: {get_custom_tools_config_path()}", file=sys.stderr)
+        print("  Use 'tsugite tools validate' to check your config", file=sys.stderr)
+
+
 # Import tool modules at the end to avoid circular imports
 # (they need to import 'tool' decorator from this module)
 from . import agents as agents  # noqa: E402
@@ -198,3 +260,6 @@ from . import http as http  # noqa: E402
 from . import interactive as interactive  # noqa: E402
 from . import shell as shell  # noqa: E402
 from . import tasks as tasks  # noqa: E402
+
+# Load custom shell tools after built-in tools
+load_custom_shell_tools()
