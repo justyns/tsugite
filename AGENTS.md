@@ -1,372 +1,243 @@
 # Agent Development Guide
 
-Use this guide as a grab-and-go reference for building, composing, and running Tsugite agents.
+Quick reference for building, composing, and running Tsugite agents.
 
-## Quick command crib sheet
+## Table of Contents
+
+- [Quick Commands](#quick-commands)
+- [Context Injection](#context-injection) - File references, attachments, custom tools
+- [Agent Configuration](#agent-configuration) - Frontmatter, tools, models
+- [Multi-Step Agents](#multi-step-agents) - Step directives, variables
+- [Directives](#directives) - Ignore blocks, tool directives
+- [Development](#development) - Testing, linting, project structure
+- [Advanced Features](#advanced-features) - MCP, Docker, reasoning models
+
+## Quick Commands
+
+### Basic Usage
 
 | Task | Example |
 | --- | --- |
-| Run an agent | `tsugite run research_writer.md "AI in healthcare"`
-| Inspect rendered prompt | `tsugite run research_writer.md "AI in healthcare" --debug`
-| Plain output (copy-paste friendly) | `tsugite run +assistant "task" --plain`
-| Piped output (auto-plain) | `tsugite run +assistant "task" \| grep result`
-| Combine inline agents | `tsugite run +assistant +jira +coder "fix bug #123"`
-| Provide helper agents explicitly | `tsugite run +assistant --with-agents "jira coder" "fix bug #123"`
-| Trust MCP tool code | `tsugite run agent.md "task" --trust-mcp-code`
-| Compose from files | `tsugite run agents/custom.md +jira ./helpers/coder.md "task"`
+| Run agent | `tsugite run agent.md "task"` or `tsugite run +assistant "task"` |
+| Debug prompt | `tsugite run agent.md "task" --debug` |
+| Plain output | `tsugite run +assistant "task" --plain` (or pipe: `\| grep result`) |
+| Headless (CI) | `tsugite run +assistant "task" --headless` |
 
-### MCP server management
-
-| Action | Example |
-| --- | --- |
-| Register HTTP server | `tsugite mcp add basic-memory --url http://localhost:3000/mcp`
-| Register stdio server | `tsugite mcp add pubmed --command uvx --args "--quiet" --args "pubmedmcp@0.1.3" --env "UV_PYTHON=3.12"`
-| Force update existing entry | `tsugite mcp add basic-memory --url http://new-url.com/mcp --force`
-| List / show servers | `tsugite mcp list`, `tsugite mcp show basic-memory`
-| Smoke-test tools | `tsugite mcp test basic-memory --trust-code`
-
-### Multi-agent shortcuts
-
-* Coordinator with inline roster: `tsugite run +coordinator +researcher +writer +reviewer "Research AI trends and create a blog post"`
-* Coordinator plus explicit roster flag: `tsugite run +coordinator --with-agents "researcher writer" "task"`
-* Project manager pipeline: `tsugite run +project_manager +github +tester "Create feature branch, implement login, and run tests"`
-
-### Output Modes
-
-Tsugite supports different output modes for various use cases:
-
-**Plain Mode (`--plain`):** Copy-paste friendly output without box-drawing characters
+### Multi-Agent Composition
 
 ```bash
-tsugite run +assistant "task" --plain
+# Inline agents
+tsugite run +assistant +jira +coder "fix bug #123"
+
+# Explicit helpers
+tsugite run +assistant --with-agents "jira coder" "task"
+
+# Mixed (files + shortcuts)
+tsugite run agents/custom.md +jira ./helpers/coder.md "task"
 ```
 
-**Auto-Detection:** Plain mode automatically activates when:
-- Output is piped or redirected (`tsugite run +assistant "task" | grep result`)
-- `NO_COLOR` environment variable is set
-- stdout is not a TTY
-
-**Headless Mode (`--headless`):** For CI/scripts, result to stdout, progress to stderr
+### MCP Servers
 
 ```bash
-tsugite run +assistant "task" --headless
+# Register servers
+tsugite mcp add basic-memory --url http://localhost:3000/mcp
+tsugite mcp add pubmed --command uvx --args "pubmedmcp@0.1.3"
+
+# Manage
+tsugite mcp list
+tsugite mcp show basic-memory
+tsugite mcp test basic-memory --trust-code
 ```
 
-**Benefits:**
-- **Plain mode**: Easy to copy/paste terminal output without box characters
-- **Auto-detection**: Zero configuration for scripts and pipelines
-- **Standards compliance**: Respects `NO_COLOR` environment variable
-- **Flexibility**: Explicit `--plain` flag when auto-detection isn't desired
+### Custom Tools
 
-### File references
+```bash
+# Add shell command wrapper
+tsugite tools add file_search \
+  -c "rg {pattern} {path}" \
+  -d "Search files" \
+  -p pattern:required \
+  -p path:.
 
-Use `@filename` syntax to automatically inject file contents into prompts:
+# Manage
+tsugite tools list
+tsugite tools validate
+tsugite tools check agent.md
+```
 
-tsugite run +assistant "Review @src/main.py and suggest improvements"
-tsugite run +coder "Fix bugs in @app.py based on @tests/test_app.py"
-tsugite run +assistant @README.md  # Single file as entire context
-tsugite run +writer "Summarize @"docs/user guide.md""  # Quoted paths for spaces
-tsugite run +assistant "Compare @file1.py and @file2.py"  # Multiple files
+See `CUSTOM_TOOLS.md` for full guide on creating shell tool wrappers.
 
-The files are automatically read and injected as formatted context. The CLI will show which files were expanded in the info panel.
+## Context Injection
 
-**Note**: `@word` patterns that start with alphanumeric characters will be treated as file references. Use `@"path"` for explicit file references or avoid `@` prefix for non-file content (e.g., write "email user123" instead of "@user123").
+### File References (`@filename`)
 
-### Attachments (reusable context)
+Inject file contents directly into prompts:
 
-Attachments are reusable content references that can point to files, URLs, YouTube videos, or inline text. They're stored as lightweight references with automatic caching, similar to `llm`'s attachments but with enhanced handler support.
+```bash
+tsugite run +assistant "Review @src/main.py"
+tsugite run +coder "Fix @app.py based on @tests/test_app.py"
+tsugite run +writer "Summarize @'docs/user guide.md'"  # Quote paths with spaces
+```
 
-**Managing Attachments:**
+Files are read and formatted automatically. **Note**: `@word` patterns trigger file lookup.
 
-# Add attachments from files, URLs, or stdin
-tsugite attachments add coding-standards docs/style-guide.md  # File reference
-tsugite attachments add api-docs https://api.example.com/reference  # URL reference
-tsugite attachments add tutorial https://youtube.com/watch?v=abc123  # YouTube transcript
-cat context.txt | tsugite attachments add mycontext -  # Inline text (stdin)
+### Attachments (Reusable Context)
 
-# List all attachments
-tsugite attachments list
+Store and reuse context from files, URLs, or YouTube:
 
-# Show attachment details (displays type, cache status)
-tsugite attachments show coding-standards
-tsugite attachments show coding-standards --content  # Fetch and show full content
+```bash
+# Create attachments
+tsugite attachments add coding-standards docs/style-guide.md
+tsugite attachments add api-docs https://api.example.com/docs
+tsugite attachments add tutorial https://youtube.com/watch?v=abc123
+cat notes.txt | tsugite attachments add notes -
 
-# Search attachments
-tsugite attachments search "api"
-
-# Remove attachments
-tsugite attachments remove old-docs
-
-# Cache management
-tsugite cache list  # Show all cached attachments
-tsugite cache info coding-standards  # Show cache details for specific attachment
-tsugite cache clear  # Clear entire cache
-tsugite cache clear coding-standards  # Clear cache for specific attachment
-
-**Using attachments in prompts**
-
-# Use saved attachments with -f flag
-tsugite run +assistant "implement login" -f coding-standards -f api-docs
-
-# Mix attachments with file references
+# Use in prompts
+tsugite run +assistant "task" -f coding-standards -f api-docs
 tsugite run +coder "review @app.py" -f coding-standards
 
-# Use direct files/URLs without saving (one-time use)
-tsugite run +assistant "check" -f ./config.json
-tsugite run +assistant "summarize" -f https://example.com/doc.md
+# One-time use (without saving)
+tsugite run +assistant "task" -f ./config.json -f https://example.com/doc.md
 
-# Multiple attachments
-tsugite run +reviewer "check PR" -f style -f security-guide -f api-docs
+# Manage
+tsugite attachments list
+tsugite cache clear
+```
 
-# Force refresh cached content
-tsugite run +assistant "update" -f api-docs --refresh-cache
+**Agent-defined attachments:**
 
-**How it works**
-
-- **Storage**: Attachments registry stored in `~/.tsugite/attachments.json` (or `$XDG_CONFIG_HOME/tsugite/attachments.json`)
-- **Caching**: Downloaded content cached in `~/.cache/tsugite/attachments/` (or `$XDG_CACHE_HOME/tsugite/attachments/`)
-- **Handler System**: Auto-detects content type from source:
-  - **Inline**: stdin text stored directly
-  - **File**: local file paths (absolute or relative)
-  - **YouTube**: `youtube.com` or `youtu.be` URLs → transcript with timestamps
-  - **URL**: HTTP(S) URLs (HTML auto-converted to markdown)
-- **Cache behavior**: Permanent cache with manual refresh via `--refresh-cache` flag
-- **Sync**: Sync `~/.tsugite/` (registry only) with Nextcloud/Dropbox for cross-machine access
-
-**Output Format:**
-
-<Attachment: coding-standards>
-[style guide content]
-</Attachment: coding-standards>
-
-<Attachment: api-docs>
-[api documentation]
-</Attachment: api-docs>
-
-<File: app.py>
-[file content from @app.py]
-</File: app.py>
-
-Task: review app.py following coding-standards and api-docs
-
-**Agent-Defined Attachments:**
-
-Agents can specify attachments in their frontmatter, so they always load required context automatically:
-
+```markdown
 ---
 name: code_reviewer
-model: openai:gpt-4o-mini
 tools: [read_file, write_file]
 attachments:
   - coding-standards
   - security-checklist
 ---
 
-You are a code reviewer. Follow our standards when reviewing code.
-
 Task: {{ user_prompt }}
+```
 
-**Attachment Resolution Order:**
+**Resolution order:** Agent attachments → CLI attachments (`-f`) → File refs (`@`) → Prompt
 
-1. **Agent attachments** (from agent definition) - prepended first
-2. **CLI attachments** (from `-f` flag) - prepended after agent attachments
-3. **File references** (from `@filename`) - prepended after attachments
-4. **User prompt** - comes last
+See [Attachment Resolution](#attachment-resolution-order) for details.
 
-Example:
-tsugite run code_reviewer.md "review @app.py" -f extra-context
+### Custom Tools
 
-Results in:
-<Attachment: coding-standards>      # From agent definition
-...
-</Attachment: coding-standards>
+Define shell command wrappers without writing Python:
 
-<Attachment: security-checklist>     # From agent definition
-...
-</Attachment: security-checklist>
+**Global** (`~/.config/tsugite/custom_tools.yaml`):
 
-<Attachment: extra-context>          # From CLI -f flag
-...
-</Attachment: extra-context>
+```yaml
+tools:
+  - name: file_search
+    description: Search files with ripgrep
+    command: "rg {pattern} {path}"
+    parameters:
+      pattern: {required: true}  # Type inferred as str
+      path: "."                   # Type inferred from default
 
-<File: app.py>                     # From @filename
-...
-</File: app.py>
+  - name: count_lines
+    command: "wc -l {file}"
+    parameters:
+      file: {required: true}
+```
 
-Task: review app.py               # User prompt
+**Per-agent** (frontmatter):
 
-### Docker Container Execution (Optional)
+```markdown
+---
+name: researcher
+tools: [file_search]
+custom_tools:
+  - name: local_grep
+    command: "grep -r {pattern} ."
+    parameters:
+      pattern: {required: true}
+---
+```
 
-Run agents in isolated Docker containers for safety and reproducibility using **optional wrapper scripts**.
+**CLI**:
 
-These scripts are **completely separate** from tsugite core—no Docker dependencies in the main codebase. The wrapper scripts (`tsugite-docker` and `tsugite-docker-session`) are automatically installed as console scripts when you install tsugite.
+```bash
+tsugite tools add find_files \
+  -c "find {path} -name {pattern}" \
+  -p pattern:required \
+  -p path:.
+```
 
-**Setup:**
+See `CUSTOM_TOOLS.md` for parameter types, validation, troubleshooting.
 
-# Build runtime image (one-time setup)
-docker build -f Dockerfile.runtime -t tsugite/runtime .
+## Agent Configuration
 
-# Wrapper scripts are automatically available after installation:
-# - tsugite-docker
-# - tsugite-docker-session
-
-**Two Usage Patterns:**
-
-You can use either the integrated `--docker` flag or call the wrapper directly:
-
-# Pattern 1: Integrated flag (convenient)
-tsugite run --docker agent.md "task"
-tsugite run --docker --network none agent.md "task"
-tsugite run --docker --keep agent.md "task"
-tsugite run --container my-session agent.md "task"
-
-# Pattern 2: Direct wrapper call (explicit)
-tsugite-docker run agent.md "task"
-tsugite-docker --network none run agent.md "task"
-tsugite-docker --keep run agent.md "task"
-tsugite-docker --container my-session run agent.md "task"
-
-Both patterns work identically—the first delegates to the second. Use whichever feels more natural.
-
-**All tsugite flags work transparently:**
-
-tsugite run --docker agent.md "task" --debug --verbose
-tsugite-docker run +assistant "query" -f context.md
-tsugite run --docker agent.md "task" --headless
-
-**Session Management:**
-
-# Start persistent session
-tsugite-docker-session start my-work
-
-# Run multiple agents in same session
-tsugite-docker --container my-work run agent.md "task 1"
-tsugite-docker --container my-work run agent.md "task 2"
-
-# List all sessions
-tsugite-docker-session list
-
-# Execute arbitrary commands in session
-tsugite-docker-session exec my-work bash
-tsugite-docker-session exec my-work python script.py
-
-# Stop session (keeps container)
-tsugite-docker-session stop my-work
-
-# Stop and remove session
-tsugite-docker-session stop my-work --remove
-
-**How It Works:**
-
-- Wrapper scripts parse Docker flags and build `docker run` commands
-- All other arguments forwarded to tsugite unchanged
-- Agents run in `tsugite/runtime` Docker image (Python 3.12)
-- Default network mode: `host` (works with Podman)
-- Alternative modes: `bridge`, `none`, or custom
-
-**Volume Mounts:**
-
-Automatically mounted for full functionality:
-- `/workspace` - Current directory (read-only for security)
-- `~/.config/tsugite` - Config and MCP server settings (read-only)
-- `~/.cache/tsugite` - Attachment cache (read-write)
-- Environment variables - API keys (OPENAI_API_KEY, ANTHROPIC_API_KEY, etc.)
-
-**Use cases**
-
-- **Untrusted agents** - Run agents from the internet safely
-- **Reproducible environments** - Consistent execution across machines
-- **Multi-agent workflows** - Multiple agents sharing container state
-- **Debugging** - Keep container alive to inspect state after errors
-- **Development** - Fast iteration with persistent containers
-
-**Design Philosophy:**
-
-Instead of integrating Docker into tsugite core, we provide simple wrapper scripts (~100 lines total) that follow the Unix philosophy: do one thing well and work with other tools. This approach eliminates 550+ lines of integrated code while providing the same functionality.
-
-See `bin/README.md` for complete documentation and examples.
-
-## Quickstart Checklist
-
-- Install dev dependencies with `uv sync --dev`; use `uv add` for new packages.
-- Prefer TDD: add or update tests first, run the focused pytest target you touched, then `uv run pytest` before merging.
-- Keep formatting and linting clean: `uv run black .` and `uv run ruff check .`.
-- Prefer type hints on public functions and raise precise errors (`ValueError` vs `RuntimeError`).
-- Skim existing agents in `agents/` and `.tsugite/` to reuse proven patterns.
-
-## Project Map
-
-- CLI entrypoint: `tsugite/tsugite.py`.
-- Agent config + frontmatter parsing: `tsugite/md_agents.py`.
-- Template rendering helpers (Jinja2 + filters): `tsugite/renderer.py`.
-- Runtime execution + prefetch handling: `tsugite/agent_runner.py`.
-- Tool registration + adapters: `tsugite/tools/` (ensure side-effect imports when adding tools).
-- Benchmarks + regression specs: `benchmarks/` (see `benchmarks/README.md`).
-
-## Build & Test Commands
-
-| Task | Command | Notes |
-| --- | --- | --- |
-| Install dev deps | `uv sync --dev` | Idempotent; required before tests. |
-| Run all tests | `uv run pytest` | Narrow scope with `tests/test_file.py::test_name` while iterating. |
-| Lint | `uv run ruff check .` | Prefer fixing warnings over ignoring. |
-| Format | `uv run black .` | Black's 88-character width is enforced. |
-| Benchmark smoke | `uv run pytest tests/test_benchmark_core.py` | Run when touching benchmark logic. |
-
-## Style Guidelines
-
-- Target Python 3.12+; avoid legacy compatibility shims.
-- Imports: stdlib, third-party, then local—each group separated by a blank line.
-- Line length: 88 characters (Black default).
-- Provide type hints on public APIs and reusable helpers.
-- Docstrings: concise triple-quoted summaries with `Args` / `Returns` for public functions or classes.
-- Raise `ValueError` for invalid inputs and `RuntimeError` for execution failures; name the failing component/tool/path.
-- Favor f-strings for interpolation and keep comments only when clarifying intent.
-
-## Agent Frontmatter Cheatsheet
+### Frontmatter Reference
 
 | Key | Required | Default | Description |
 | --- | --- | --- | --- |
-| `name` | ✅ | — | Identifier surfaced in CLI output. |
-| `model` | ❌ | `ollama:qwen2.5-coder:7b` | `provider:model[:variant]`; parsed by `parse_model_string`. |
-| `max_steps` | ❌ | `5` | Reasoning iterations per run. |
-| `tools` | ❌ | `[]` | Registered tool names; ensure module import registers them. |
-| `prefetch` | ❌ | `[]` | Tool calls executed before rendering; assign results for template reuse. |
-| `attachments` | ❌ | `[]` | Attachment aliases to auto-load as context (prepended to all prompts). |
-| `context_budget` | ❌ | Unlimited | Hard cap for rendered prompt length. |
-| `permissions_profile` | ❌ | — | Placeholder until the permissions engine ships. |
-| `instructions` | ❌ | — | Extra system guidance appended at runtime. |
-| `mcp_servers` | ❌ | — | MCP servers and optional tool safelists. |
+| `name` | ✅ | — | Agent identifier |
+| `model` | ❌ | `ollama:qwen2.5-coder:7b` | `provider:model[:variant]` |
+| `max_steps` | ❌ | `5` | Reasoning iterations |
+| `tools` | ❌ | `[]` | Tool names (supports `@category`, globs, `-exclusions`) |
+| `custom_tools` | ❌ | `[]` | Per-agent shell tool definitions |
+| `prefetch` | ❌ | `[]` | Tools to run before rendering |
+| `attachments` | ❌ | `[]` | Context to auto-load |
+| `instructions` | ❌ | — | Extra system guidance |
+| `mcp_servers` | ❌ | — | MCP servers + tool safelists |
+| `context_budget` | ❌ | Unlimited | Prompt length cap |
 
-### Prefetch Tips
+### Tool Selection
 
-- Use prefetch for expensive operations or structured data reused in multiple template locations.
-- Prefetch failures resolve to `None`; guard with `{% if variable %}` before use.
-- Prefer template helpers (below) for simple existence checks.
+```markdown
+---
+tools:
+  - read_file              # Exact name
+  - write_file
+  - @fs                    # All filesystem tools
+  - "*_search"             # Glob pattern
+  - -delete_file           # Exclude specific tool
+  - -@dangerous            # Exclude category
+---
+```
 
-## Template Helper Reference
+### Template Helpers
 
 | Helper | Purpose |
 | --- | --- |
-| `now()` | Current timestamp in ISO 8601 format. |
-| `today()` | Current date as `YYYY-MM-DD`. |
-| `slugify(text)` | Converts text into a filesystem-friendly slug. |
-| `file_exists(path)` | Returns `True` if a path exists. |
-| `is_file(path)` / `is_dir(path)` | Distinguish file vs directory. |
-| `read_text(path, default="")` | Safe file read with fallback value. |
-| `env` | Mapping of environment variables (e.g., `env.HOME`). |
+| `{{ user_prompt }}` | CLI prompt argument |
+| `{{ now() }}` | ISO 8601 timestamp |
+| `{{ today() }}` | `YYYY-MM-DD` date |
+| `{{ slugify(text) }}` | Filesystem-safe slug |
+| `{{ file_exists(path) }}` | Path existence check |
+| `{{ is_file(path) }}` / `{{ is_dir(path) }}` | Type checks |
+| `{{ read_text(path, default="") }}` | Safe file read |
+| `{{ env.HOME }}` | Environment variables |
+
+### Prefetch
+
+Execute tools before rendering; results available in templates:
+
+```markdown
+---
+prefetch:
+  - tool: read_file
+    args: {path: "config.json"}
+    assign: config
+  - tool: list_files
+    args: {directory: "src"}
+    assign: source_files
+---
+
+Config: {{ config }}
+Files: {{ source_files }}
+```
+
+Failures assign `None`—guard with `{% if variable %}`. For complex workflows, prefer [tool directives](#tool-directives-tsu tool).
 
 ## Multi-Step Agents
 
-- Mark steps with `<!-- tsu:step name="step_id" assign="variable" -->`.
-- Content before the first directive becomes a shared preamble for every step.
-- Execution halts on the first failure; give steps descriptive names to aid debugging.
-- Per-step context variables: `{{ step_number }}`, `{{ total_steps }}`, `{{ step_name }}`, plus any previously assigned variables.
-- Keep steps focused (analyze → plan → execute) to control token usage and simplify reasoning.
+Chain steps with variable passing:
 
-### Example
-
-````markdown
+```markdown
 ---
 name: research_writer
 max_steps: 10
@@ -376,121 +247,70 @@ tools: [write_file, web_search]
 Topic: {{ user_prompt }}
 
 <!-- tsu:step name="research" assign="findings" -->
-Research the topic with `web_search` and capture 3–5 insights.
+Research {{ user_prompt }} and capture 3-5 key insights.
 
 <!-- tsu:step name="outline" assign="structure" -->
-Outline the article using:
+Create article outline from:
 {{ findings }}
 
 <!-- tsu:step name="write" assign="article" -->
-Draft the article following {{ structure }}.
+Draft article following {{ structure }}.
 
 <!-- tsu:step name="save" -->
-Write `article.md`, confirm it exists, and surface the final text.
-````
+Write article to `output.md` and confirm success.
+```
 
-## Directive Syntax
+**Key points:**
+- Content before first directive = preamble (shared across steps)
+- Step context: `{{ step_number }}`, `{{ total_steps }}`, `{{ step_name }}`
+- Variables persist: `findings` and `structure` available in later steps
+- Execution stops on first failure
 
-Tsugite supports two types of HTML comment directives for controlling content flow and execution.
+## Directives
 
 ### Documentation Blocks: `<!-- tsu:ignore -->`
 
-Strip sections of content before rendering, allowing you to include documentation that won't be sent to the LLM.
+Strip content before sending to LLM (for developer notes):
 
-**Syntax:**
-```markdown
-<!-- tsu:ignore -->
-This entire section is removed before rendering.
-Can contain notes, examples, template patterns, or developer documentation.
-<!-- /tsu:ignore -->
-```
-
-**Use Cases:**
-- Document what the agent does without sending to LLM
-- Explain template variables and their sources
-- Include usage examples and test cases
-- Show Jinja2 patterns without triggering rendering errors
-- Add developer notes and implementation details
-
-**Example:**
 ```markdown
 ---
 name: data_processor
-model: openai:gpt-4o-mini
 tools: [read_file, write_file]
 ---
 
 <!-- tsu:ignore -->
 ## Documentation
 
-This agent processes CSV files and generates reports.
+Processes CSV files and generates reports.
 
-**Required Files:**
-- `data.csv` - Input data
+**Usage:** `tsugite run data_processor.md "Analyze sales"`
 
 **Variables:**
-- `user_prompt`: Task from CLI
-- `raw_data`: Loaded CSV (from tool directive)
+- `user_prompt`: Task description
+- `data`: CSV content (from tool directive)
 
-**Example Usage:**
-```bash
-tsugite run data_processor.md "Analyze sales"
-```
-
-You can document Jinja2 patterns here:
-{{ undeclared_variable }}  # Won't cause errors!
+Template patterns: {{ undeclared_var }}  # Won't cause errors!
 <!-- /tsu:ignore -->
 
 # Data Processing Agent
 
 Task: {{ user_prompt }}
-
-Process the data and create a report.
 ```
 
 **Features:**
-- Supports both inline and block forms
-- Multiple ignore blocks in one agent
-- Can contain any content including Jinja2 syntax
-- Stripped before template rendering (won't cause undefined variable errors)
-- Regular HTML comments are preserved
+- Multiple blocks supported
+- Can contain Jinja2 syntax without errors
+- Stripped before rendering
 
 ### Tool Directives: `<!-- tsu:tool -->`
 
-Execute tools inline during rendering, before the LLM sees the prompt. Similar to `prefetch` but embedded directly in content.
+Execute tools during rendering (before LLM sees prompt):
 
-**Syntax:**
 ```markdown
-<!-- tsu:tool name="tool_name" args={"key": "value"} assign="variable_name" -->
-```
-
-**Parameters:**
-- `name`: Tool name (required) - any registered tool
-- `args`: JSON object of tool arguments (required)
-- `assign`: Variable name for result (required)
-
-**Execution Flow:**
-1. Parse agent frontmatter and content
-2. Execute `prefetch` tools (YAML-defined)
-3. **Execute tool directives** (inline in content)
-4. Strip ignore blocks
-5. Render Jinja2 templates
-6. Execute agent
-
-**Example:**
-```markdown
----
-name: config_analyzer
-model: openai:gpt-4o-mini
-tools: [write_file]
----
-
-# Configuration Analyzer
-
 <!-- tsu:tool name="read_file" args={"path": "config.json"} assign="config" -->
 <!-- tsu:tool name="read_file" args={"path": "schema.json"} assign="schema" -->
 
-Current configuration:
+Current config:
 ```json
 {{ config }}
 ```
@@ -499,33 +319,11 @@ Schema:
 ```json
 {{ schema }}
 ```
-
-Task: {{ user_prompt }}
-
-Analyze the configuration against the schema and write a report.
 ```
 
-**With Nested JSON:**
-```markdown
-<!-- tsu:tool name="fetch_json" args={"url": "https://api.example.com", "headers": {"auth": "token"}} assign="api_data" -->
-```
-
-**Error Handling:**
-- Failed tools assign `None` to the variable
-- Logs warning but continues execution
-- Check results with `{% if variable %}` in templates
-
-**Multi-Step Agents:**
-
-Tool directives work in both preamble and step content:
+**Multi-step support:**
 
 ```markdown
----
-name: research_pipeline
-tools: [write_file]
-max_steps: 5
----
-
 <!-- tsu:tool name="read_file" args={"path": "sources.txt"} assign="sources" -->
 
 Available sources: {{ sources }}
@@ -534,141 +332,159 @@ Available sources: {{ sources }}
 
 <!-- tsu:tool name="read_file" args={"path": "context.txt"} assign="context" -->
 
-Research the topic using context: {{ context }}
+Research using context: {{ context }}
 And sources: {{ sources }}
-
-<!-- tsu:step name="write_report" -->
-
-Write a report combining:
-- Context: {{ context }}
-- Sources: {{ sources }}
-- Findings: {{ findings }}
 ```
 
-**Scope:**
-- **Preamble directives**: Execute once, available to all steps
-- **Step directives**: Execute per step, scoped to that step
+**Scoping:**
+- Preamble directives: Execute once, available to all steps
+- Step directives: Execute per step, scoped to that step
 - Variables from previous steps always available
 
 **vs. Prefetch:**
 
-| Feature | Prefetch (YAML) | Tool Directives (Inline) |
-|---------|-----------------|--------------------------|
-| Location | YAML frontmatter | Markdown content |
-| Visibility | All template content | Context-specific placement |
-| Multi-step | Once before all steps | Can execute per-step |
-| Documentation | Separate from content | Inline with usage |
+| Feature | Prefetch (YAML) | Tool Directives |
+|---------|-----------------|-----------------|
+| Location | Frontmatter | Inline content |
+| Visibility | Global | Context-specific |
+| Multi-step | Once | Per-step capable |
 
-**Best Practices:**
-- Use prefetch for global data needed everywhere
-- Use tool directives for context-specific data
-- Place directives close to where variables are used
-- Document with ignore blocks when needed
-- Check for `None` when tools might fail
+**Error handling:** Failed tools assign `None`. Check with `{% if variable %}`.
 
-**Examples:**
+Examples: `examples/tool_directives_demo.md`, `examples/multistep_with_directives.md`
 
-See working examples in `examples/`:
-- `tool_directives_demo.md` - Basic directive usage
-- `multistep_with_directives.md` - Multi-step integration
-- `documentation_example.md` - Combined ignore + tool directives
+## Development
 
-## Model Providers
-
-- Model strings follow `provider:model[:variant]`; parsed by `tsugite.models.parse_model_string`.
-- Built-in providers via LiteLLM: `ollama` (local, default URL `http://localhost:11434/v1`), `openai`, `anthropic`, `google`, `github_copilot`, plus any other LiteLLM-supported providers.
-- Ensure requisite API keys (e.g., `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) are present before running agents.
-- Ollama requires the local server; override base URL via environment variables when needed.
-
-## Reasoning Models (o1, o3, Claude Extended Thinking)
-
-Tsugite supports reasoning models, with varying levels of reasoning visibility:
-
-### Models and Reasoning Visibility
-
-**Full Reasoning Content (Exposed):**
-- **Anthropic Claude** (`claude-3-7-sonnet`) - Extended thinking shown in full
-- **Deepseek** - Reasoning content exposed via API
-- Displayed in magenta panels with full step-by-step thinking
-
-**Reasoning Token Counts Only (Hidden Content):**
-- **OpenAI o1 series** (`o1`, `o1-mini`, `o1-preview`) - Content hidden by OpenAI
-- **OpenAI o3 series** (`o3`, `o3-mini`) - Content hidden by OpenAI
-- Shows "🧠 Used N reasoning tokens" instead of actual reasoning
-- Reasoning happens internally but isn't exposed via Chat Completions API
-
-### Why O1/O3 Don't Show Reasoning Content
-
-OpenAI's o1/o3 models use reasoning tokens to think through problems, but **the actual reasoning content is not exposed** via the standard Chat Completions API. You only see:
-- The final answer
-- A count of how many reasoning tokens were used
-- Total tokens consumed (including hidden reasoning)
-
-This is an intentional design decision by OpenAI. To get reasoning summaries from o1/o3, you would need OpenAI's newer Responses API (not yet supported by tsugite).
-
-### Controlling Reasoning Effort
-
-**Supported Models:** `o1`, `o1-preview`, `o3`, `o3-mini` (NOT `o1-mini`)
-
-```markdown
----
-name: deep_thinker
-model: openai:o1  # or o1-preview, o3, o3-mini
-reasoning_effort: high  # Options: low, medium, high
----
-Task: {{ user_prompt }}
-```
-
-**Important:** `o1-mini` does NOT support the `reasoning_effort` parameter.
-
-### Per-Step Reasoning Control
-
-```markdown
-<!-- tsu:step name="analyze" reasoning_effort="low" -->
-Quick analysis (fewer reasoning tokens)
-
-<!-- tsu:step name="deep_think" reasoning_effort="high" -->
-Thorough reasoning (more reasoning tokens)
-```
-
-### Example Usage
+### Setup & Testing
 
 ```bash
-# O1-mini - shows reasoning token count
-tsugite run agents/examples/reasoning_model_test.md "Explain quantum computing"
-# Output: "🧠 Used 128 reasoning tokens"
+# Install dependencies
+uv sync --dev
 
-# Claude - shows full reasoning content
-tsugite run --model anthropic:claude-3-7-sonnet agents/examples/reasoning_model_test.md "Explain quantum computing"
-# Output: "[Panel with full thinking process]"
+# Run tests
+uv run pytest                              # All tests
+uv run pytest tests/test_file.py::test_x  # Specific test
+
+# Lint & format
+uv run ruff check .
+uv run black .
 ```
 
-### Parameter Limitations
+### Project Structure
 
-OpenAI o1/o3 models have a more restricted parameter set than GPT-4:
-- **Not supported:** `temperature`, `top_p`, `stop`, `presence_penalty`, `frequency_penalty`
-- **o1-mini only:** Also doesn't support `reasoning_effort`
-- **Supported:** `max_completion_tokens`, `messages`, `stream`
+- CLI entrypoint: `tsugite/tsugite.py`
+- Agent parsing: `tsugite/md_agents.py`
+- Template rendering: `tsugite/renderer.py`
+- Execution: `tsugite/agent_runner.py`
+- Tools: `tsugite/tools/` (ensure side-effect imports)
+- Custom tools: `tsugite/tools/shell_tools.py`, `tsugite/shell_tool_config.py`
 
-Tsugite automatically filters out unsupported parameters to prevent API errors.
+### Style Guidelines
 
-## MCP Server Integration
+- Python 3.12+; type hints on public APIs
+- Imports: stdlib → third-party → local (blank line between groups)
+- Line length: 88 characters (Black)
+- Errors: `ValueError` for invalid input, `RuntimeError` for execution failures
+- Docstrings: concise with `Args` / `Returns` for public functions
 
-1. Add servers with `tsugite mcp add …`. Config lives under XDG paths (`~/.tsugite/mcp.json`, `$XDG_CONFIG_HOME/tsugite/mcp.json`, or `~/.config/tsugite/mcp.json`).
-2. `--url` registers HTTP servers; `--command` + `--args` launches stdio servers (e.g., `npx`, `uvx`).
-3. Reference servers in frontmatter using `mcp_servers`. Provide a list of tool names to safelist or set the value to `null`/omit to expose all tools.
-4. Run agents with MCP tools using `--trust-mcp-code` when remote execution is acceptable.
-5. Inspect or validate servers with `tsugite mcp list`, `tsugite mcp show`, and `tsugite mcp test`.
+## Advanced Features
 
-## Multi-Agent Composition
+### Model Providers
 
-- Invoke multiple agents positionally: `tsugite run +assistant +coder "task"`; or supply extra agents via `--with-agents "coder reviewer"`.
-- The first agent acts as coordinator and receives helper tools named `spawn_{agent}` plus `spawn_agent(path, prompt)`.
-- Delegate specialized work (research → write → review, manager → coder → tester) and merge results deterministically.
-- Agent resolution order for `+name`: `.tsugite/{name}.md`, `agents/{name}.md`, `./{name}.md`, `~/.tsugite/agents/{name}.md`, `~/.config/tsugite/agents/{name}.md`.
-- Keep delegated agents idempotent and explicit about outputs so orchestration stays predictable.
+```markdown
+---
+model: provider:model[:variant]
+---
+```
+
+**Supported providers** (via LiteLLM): `ollama`, `openai`, `anthropic`, `google`, `github_copilot`, etc.
+
+**API keys required:** `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, etc.
+
+### Reasoning Models (o1, o3, Claude)
+
+**Full reasoning visible:**
+- Claude (`claude-3-7-sonnet`): Extended thinking shown
+- Deepseek: Reasoning exposed
+
+**Token counts only:**
+- OpenAI o1/o3: Content hidden, shows "🧠 Used N reasoning tokens"
+
+**Control reasoning effort** (o1, o1-preview, o3, o3-mini only; NOT o1-mini):
+
+```markdown
+---
+model: openai:o1
+reasoning_effort: high  # Options: low, medium, high
+---
+```
+
+**Per-step control:**
+
+```markdown
+<!-- tsu:step name="quick_analysis" reasoning_effort="low" -->
+<!-- tsu:step name="deep_think" reasoning_effort="high" -->
+```
+
+**Parameter limitations (o1/o3):**
+- Not supported: `temperature`, `top_p`, `stop`, `presence_penalty`, `frequency_penalty`
+- Supported: `max_completion_tokens`, `messages`, `stream`
+
+Tsugite auto-filters unsupported parameters.
+
+### MCP Integration
+
+```markdown
+---
+mcp_servers:
+  basic-memory: null              # All tools
+  pubmed: [search, fetch_article] # Specific tools only
+---
+```
+
+Run with `--trust-mcp-code` to execute remote code.
+
+See [MCP Commands](#mcp-servers) for registration.
+
+### Docker Execution (Optional)
+
+Run agents in isolated containers. **Completely optional**—no Docker dependencies in core.
+
+```bash
+# Build runtime (one-time)
+docker build -f Dockerfile.runtime -t tsugite/runtime .
+
+# Run in container
+tsugite run --docker agent.md "task"
+tsugite run --docker --network none agent.md "task"
+
+# Or use wrapper directly
+tsugite-docker run agent.md "task"
+
+# Persistent sessions
+tsugite-docker-session start my-work
+tsugite-docker --container my-work run agent.md "task 1"
+tsugite-docker --container my-work run agent.md "task 2"
+tsugite-docker-session stop my-work
+```
+
+**Use cases:** Untrusted agents, reproducible environments, debugging
+
+See `bin/README.md` for complete Docker documentation.
+
+### Multi-Agent Composition
+
+```bash
+tsugite run +assistant +coder "task"
+```
+
+- First agent = coordinator
+- Receives `spawn_{agent}()` tools for each helper
+- Agent resolution: `.tsugite/{name}.md` → `agents/{name}.md` → `./{name}.md` → `~/.config/tsugite/agents/{name}.md`
 
 ## Additional Resources
 
-- Explore `agents/examples/` and `docs/test_agents/` for ready-to-run patterns.
-- Design docs in `docs/` (permissions, history, task tracking, structured output) outline in-progress systems—keep new features modular to integrate cleanly later.
+- Examples: `agents/examples/`, `docs/test_agents/`
+- Custom tools: `CUSTOM_TOOLS.md`
+- Docker: `bin/README.md`
+- Design docs: `docs/` (permissions, history, task tracking)
