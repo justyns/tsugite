@@ -3,7 +3,7 @@
 import threading
 from typing import Any, Callable, Dict, Optional
 
-from tsugite.ui.base import CustomUIHandler, UIEvent, UIState
+from tsugite.ui.base import CustomUIHandler, UIEvent
 
 
 class TextualUIHandler(CustomUIHandler):
@@ -16,6 +16,7 @@ class TextualUIHandler(CustomUIHandler):
         on_stream_chunk: Optional[Callable[[str], None]] = None,
         on_stream_complete: Optional[Callable[[], None]] = None,
         on_intermediate_message: Optional[Callable[[str], None]] = None,
+        on_execution_event: Optional[Callable[[str, str], None]] = None,
     ):
         """Initialize Textual UI handler.
 
@@ -27,8 +28,9 @@ class TextualUIHandler(CustomUIHandler):
             on_intermediate_message: Callback for intermediate agent messages
         """
         # Initialize with a no-op console (we won't use it)
-        from rich.console import Console
         from io import StringIO
+
+        from rich.console import Console
 
         # Use a StringIO console to capture any output we don't want
         super().__init__(
@@ -41,6 +43,7 @@ class TextualUIHandler(CustomUIHandler):
         self.on_stream_chunk = on_stream_chunk
         self.on_stream_complete = on_stream_complete
         self.on_intermediate_message = on_intermediate_message
+        self.on_execution_event = on_execution_event
 
         # Track tools used in current turn
         self.current_tools = []
@@ -73,6 +76,8 @@ class TextualUIHandler(CustomUIHandler):
                 self._handle_stream_chunk(data)
             elif event == UIEvent.STREAM_COMPLETE:
                 self._handle_stream_complete(data)
+            elif event == UIEvent.EXECUTION_RESULT:
+                self._handle_execution_result(data)
 
     def _update_status(self, new_status: str) -> None:
         """Update status with thread safety.
@@ -105,6 +110,14 @@ class TextualUIHandler(CustomUIHandler):
             preview += "..."
         self._update_status(f"Executing: {preview}")
 
+        # Add execution details to message history
+        if self.on_execution_event:
+            # Show a brief summary in chat
+            code_summary = code[:100] if code else "code execution"
+            if len(code) > 100:
+                code_summary += "..."
+            self.on_execution_event("code_execution", code_summary)
+
     def _handle_tool_call(self, data: Dict[str, Any]) -> None:
         """Handle tool call."""
         content = data.get("content", "")
@@ -116,9 +129,22 @@ class TextualUIHandler(CustomUIHandler):
         if self.on_tool_call:
             self.on_tool_call(tool_name)
 
+        # Add tool call to message history
+        if self.on_execution_event:
+            self.on_execution_event("tool_call", tool_name)
+
     def _handle_observation(self, data: Dict[str, Any]) -> None:
         """Handle observation."""
+        observation = data.get("observation", "")
         self._update_status("Processing results...")
+
+        # Add observation to message history if meaningful
+        if self.on_execution_event and observation.strip():
+            # Clean up observation and truncate if too long
+            clean_obs = observation.replace("|", "[").strip()
+            if len(clean_obs) > 150:
+                clean_obs = clean_obs[:150] + "..."
+            self.on_execution_event("observation", clean_obs)
 
     def _handle_final_answer(self, data: Dict[str, Any]) -> None:
         """Handle final answer."""
@@ -161,3 +187,26 @@ class TextualUIHandler(CustomUIHandler):
     def clear_tools(self):
         """Clear tools list for new turn."""
         self.current_tools = []
+
+    def _handle_execution_result(self, data: Dict[str, Any]) -> None:
+        """Handle execution result."""
+        content = data.get("content", "")
+
+        if self.on_execution_event and content.strip():
+            # Parse execution result content
+            lines = content.split("\n")
+            output_lines = []
+
+            # Extract meaningful output
+            for line in lines:
+                if line.startswith("Out:"):
+                    output_lines.append(line[4:].strip())
+                elif not line.startswith("Execution logs:") and line.strip():
+                    output_lines.append(line.strip())
+
+            if output_lines:
+                result_text = "\n".join(output_lines)
+                # Truncate if too long
+                if len(result_text) > 200:
+                    result_text = result_text[:200] + "..."
+                self.on_execution_event("execution_result", result_text)

@@ -29,7 +29,7 @@ class Message(Static):
         """Render the message with styling."""
         text = Text()
         text.append(f"{self.sender}: ", style=self.sender_style)
-        text.append(self.content, style=self.content_style)
+        text.append(str(self.content), style=self.content_style)
         return text
 
 
@@ -50,6 +50,14 @@ class MessageList(VerticalScroll):
                 yield Message("You", msg["content"], sender_style="bold green", content_style="green")
             elif msg["type"] == "agent":
                 yield Message("Agent", msg["content"], sender_style="bold blue", content_style="blue")
+            elif msg["type"] == "tool_call":
+                yield Message("🔧 Tool", msg["content"], sender_style="yellow", content_style="dim yellow")
+            elif msg["type"] == "code_execution":
+                yield Message("⚡ Code", msg["content"], sender_style="magenta", content_style="dim")
+            elif msg["type"] == "execution_result":
+                yield Message("📤 Result", msg["content"], sender_style="cyan", content_style="dim cyan")
+            elif msg["type"] == "observation":
+                yield Message("💡 Info", msg["content"], sender_style="blue", content_style="dim blue")
             elif msg["type"] == "separator":
                 yield Static("─" * 40, classes="separator")
             elif msg["type"] == "status":

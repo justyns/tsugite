@@ -33,6 +33,7 @@ class ChatApp(App):
         model_override: Optional[str] = None,
         max_history: int = 50,
         stream: bool = False,
+        show_execution_details: bool = True,
     ):
         """Initialize chat app.
 
@@ -41,12 +42,14 @@ class ChatApp(App):
             model_override: Optional model override
             max_history: Maximum conversation history turns
             stream: Whether to stream responses
+            show_execution_details: Whether to show tool calls and code execution
         """
         super().__init__()
         self.agent_path = agent_path
         self.model_override = model_override
         self.max_history = max_history
         self.stream_enabled = stream
+        self.show_execution_details = show_execution_details
 
         # Parse agent info
         agent = parse_agent_file(agent_path)
@@ -84,6 +87,7 @@ class ChatApp(App):
             on_stream_chunk=self._handle_stream_chunk,
             on_stream_complete=self._handle_stream_complete,
             on_intermediate_message=self._handle_intermediate_message,
+            on_execution_event=self._handle_execution_event,
         )
 
         # Create custom logger for agent
@@ -103,14 +107,12 @@ class ChatApp(App):
             agent_content = self.agent_path.read_text()
             # Replace max_steps in frontmatter
             import re
+
             agent_content = re.sub(
-                r'^max_steps:\s*\d+',
-                f'max_steps: {adjusted_max_steps}',
-                agent_content,
-                flags=re.MULTILINE
+                r"^max_steps:\s*\d+", f"max_steps: {adjusted_max_steps}", agent_content, flags=re.MULTILINE
             )
             # Write to temp file
-            temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False)
+            temp_file = tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False)
             temp_file.write(agent_content)
             temp_file.close()
             agent_path_to_use = Path(temp_file.name)
@@ -136,7 +138,7 @@ class ChatApp(App):
         if adjusted_max_steps:
             message_list.add_message(
                 "status",
-                f"ℹ️  Note: Agent max_steps increased from {original_max_steps} to {adjusted_max_steps} for chat mode"
+                f"ℹ️  Note: Agent max_steps increased from {original_max_steps} to {adjusted_max_steps} for chat mode",
             )
 
         message_list.add_separator()
@@ -216,6 +218,26 @@ class ChatApp(App):
         # Show as agent message but slightly different styling could be added
         message_list.add_message("agent", f"[Step] {content}")
 
+    def _handle_execution_event(self, event_type: str, content: str) -> None:
+        """Handle execution event from UI handler.
+
+        Args:
+            event_type: Type of execution event (tool_call, code_execution, etc.)
+            content: Event content
+        """
+        self.call_from_thread(self._add_execution_event, event_type, content)
+
+    def _add_execution_event(self, event_type: str, content: str) -> None:
+        """Add execution event on main thread.
+
+        Args:
+            event_type: Type of execution event
+            content: Event content
+        """
+        if self.show_execution_details:
+            message_list = self.query_one(MessageList)
+            message_list.add_message(event_type, content)
+
     async def on_input_submitted(self, event: Input.Submitted) -> None:
         """Handle user message submission.
 
@@ -258,7 +280,7 @@ class ChatApp(App):
         self.run_worker(
             lambda: self._run_agent_turn(message),
             name=f"agent_turn_{self.turn_count}",
-            thread=True  # Run in thread since _run_agent_turn is synchronous
+            thread=True,  # Run in thread since _run_agent_turn is synchronous
         )
 
     def _run_agent_turn(self, message: str) -> str:
@@ -270,10 +292,12 @@ class ChatApp(App):
         Returns:
             Agent response
         """
+        if not self.manager:
+            raise RuntimeError("Chat manager not initialized")
         try:
             response = self.manager.run_turn(message)
             return response
-        except Exception as e:
+        except Exception:
             raise
 
     def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
@@ -288,7 +312,10 @@ class ChatApp(App):
 
             # Add agent response
             message_list = self.query_one(MessageList)
-            message_list.add_message("agent", response)
+            if response is not None:
+                message_list.add_message("agent", str(response))
+            else:
+                message_list.add_message("agent", "No response received")
             message_list.add_separator()
 
             # Update status
@@ -328,7 +355,8 @@ class ChatApp(App):
 
         elif cmd == "clear":
             # Clear history
-            self.manager.clear_history()
+            if self.manager:
+                self.manager.clear_history()
             message_list.messages = []
             self.turn_count = 0
             message_list.add_message("status", "✓ History cleared")
@@ -338,33 +366,43 @@ class ChatApp(App):
             message_list.add_message("status", "  /help - Show this help")
             message_list.add_message("status", "  /clear - Clear conversation history")
             message_list.add_message("status", "  /stats - Show session statistics")
+            message_list.add_message("status", "  /toggle - Toggle execution details visibility")
             message_list.add_message("status", "  /exit, /quit - Exit chat")
             message_list.add_message("status", "  Esc or Ctrl+C - Exit chat")
 
         elif cmd == "stats":
-            stats = self.manager.get_stats()
-            message_list.add_message("status", "Session Statistics:")
-            message_list.add_message("status", f"  Total Turns: {stats['total_turns']}")
-            tokens = stats.get("total_tokens")
-            if tokens:
-                message_list.add_message("status", f"  Total Tokens: {tokens:,}")
-            cost = stats.get("total_cost")
-            if cost and cost > 0:
-                message_list.add_message("status", f"  Total Cost: ${cost:.4f}")
-            duration = stats["session_duration"]
-            if duration >= 60:
-                mins = int(duration // 60)
-                secs = int(duration % 60)
-                duration_str = f"{mins}m {secs}s"
+            if self.manager:
+                stats = self.manager.get_stats()
+                message_list.add_message("status", "Session Statistics:")
+                message_list.add_message("status", f"  Total Turns: {stats['total_turns']}")
+                tokens = stats.get("total_tokens")
+                if tokens:
+                    message_list.add_message("status", f"  Total Tokens: {tokens:,}")
+                cost = stats.get("total_cost")
+                if cost and cost > 0:
+                    message_list.add_message("status", f"  Total Cost: ${cost:.4f}")
+                duration = stats["session_duration"]
+                if duration >= 60:
+                    mins = int(duration // 60)
+                    secs = int(duration % 60)
+                    duration_str = f"{mins}m {secs}s"
+                else:
+                    duration_str = f"{duration:.0f}s"
+                message_list.add_message("status", f"  Duration: {duration_str}")
             else:
-                duration_str = f"{duration:.0f}s"
-            message_list.add_message("status", f"  Duration: {duration_str}")
+                message_list.add_message("status", "❌ Chat manager not available")
+
+        elif cmd == "toggle":
+            # Toggle execution details visibility
+            self.show_execution_details = not self.show_execution_details
+            status = "enabled" if self.show_execution_details else "disabled"
+            message_list.add_message("status", f"✓ Execution details {status}")
 
         else:
             message_list.add_message("status", f"❌ Unknown command: /{cmd}")
             message_list.add_message("status", "Type /help for available commands")
 
-    def action_quit(self) -> None:
+    async def action_quit(self) -> None:
         """Quit the application."""
         self.exit()
 
@@ -374,6 +412,7 @@ def run_textual_chat(
     model_override: Optional[str] = None,
     max_history: int = 50,
     stream: bool = False,
+    show_execution_details: bool = True,
 ) -> None:
     """Run the Textual chat interface.
 
@@ -382,11 +421,13 @@ def run_textual_chat(
         model_override: Optional model override
         max_history: Maximum conversation history turns
         stream: Whether to stream responses
+        show_execution_details: Whether to show tool calls and code execution
     """
     app = ChatApp(
         agent_path=agent_path,
         model_override=model_override,
         max_history=max_history,
         stream=stream,
+        show_execution_details=show_execution_details,
     )
     app.run()
