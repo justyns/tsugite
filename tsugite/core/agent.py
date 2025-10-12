@@ -174,12 +174,13 @@ class TsugiteAgent:
         if hasattr(self.executor, "namespace"):
             self.executor.namespace.update(tool_functions)
 
-    async def run(self, task: str, return_full_result: bool = False):
+    async def run(self, task: str, return_full_result: bool = False, stream: bool = False):
         """Run the agent on a task.
 
         Args:
             task: The task to solve
             return_full_result: If True, return AgentResult with metadata
+            stream: If True, stream the response chunks in real-time
 
         Returns:
             str: The final answer from the agent
@@ -206,13 +207,54 @@ class TsugiteAgent:
 
             # Call LiteLLM directly with pre-computed params
             # Parameters are filtered for reasoning models (o1/o3/Claude)
-            response = await litellm.acompletion(messages=messages, **self.litellm_params)
+            if stream:
+                # Streaming mode: accumulate chunks and emit events
+                accumulated_content = ""
+                response = None
+
+                # Add stream parameter to litellm params
+                stream_params = {**self.litellm_params, "stream": True}
+
+                # Get the streaming response generator
+                stream_response = await litellm.acompletion(messages=messages, **stream_params)
+
+                async for chunk in stream_response:
+                    # Extract content from chunk
+                    if hasattr(chunk, "choices") and len(chunk.choices) > 0:
+                        delta = chunk.choices[0].delta
+                        if hasattr(delta, "content") and delta.content:
+                            chunk_text = delta.content
+                            accumulated_content += chunk_text
+
+                            # Emit stream chunk event
+                            if self.ui_handler:
+                                self.ui_handler.handle_event(
+                                    UIEvent.STREAM_CHUNK, {"chunk": chunk_text, "step": step_num + 1}
+                                )
+
+                    # Save the last chunk as response for usage/cost tracking
+                    response = chunk
+
+                # Emit stream complete event
+                if self.ui_handler:
+                    self.ui_handler.handle_event(UIEvent.STREAM_COMPLETE, {"step": step_num + 1})
+
+                # Parse accumulated content
+                thought, code, _ = self._parse_response_from_text(accumulated_content)
+            else:
+                # Non-streaming mode: get complete response
+                response = await litellm.acompletion(messages=messages, **self.litellm_params)
+
+                # Parse LLM response
+                # Response should contain: Thought + Code OR final_answer()
+                thought, code, _ = self._parse_response(response)
 
             # Track cost from this response
             step_cost = 0.0
             if hasattr(response, "_hidden_params") and "response_cost" in response._hidden_params:
                 step_cost = response._hidden_params["response_cost"]
-                self.total_cost += step_cost
+                if step_cost is not None:
+                    self.total_cost += step_cost
 
             # Extract reasoning content if present (for o1/o3/Claude thinking)
             reasoning_content = self._extract_reasoning_content(response)
@@ -233,12 +275,9 @@ class TsugiteAgent:
                             UIEvent.REASONING_TOKENS, {"tokens": details.reasoning_tokens, "step": step_num + 1}
                         )
 
-            # Parse LLM response
-            # Response should contain: Thought + Code OR final_answer()
-            thought, code, _ = self._parse_response(response)
-
             # Show LLM's thought/reasoning (always show what the LLM is saying)
-            if self.ui_handler:
+            # Skip this if streaming (already shown via STREAM_CHUNK events)
+            if self.ui_handler and not stream:
                 # If we parsed a thought, show it. Otherwise show the raw response
                 # (this helps debug when LLM doesn't follow the expected format)
                 display_content = thought if thought else response.choices[0].message.content
@@ -420,6 +459,17 @@ Now begin!"""
             (thought, code, final_answer)
         """
         content = response.choices[0].message.content
+        return self._parse_response_from_text(content)
+
+    def _parse_response_from_text(self, content: str) -> tuple[str, str, Optional[str]]:
+        """Parse text content into thought, code, and final_answer.
+
+        Args:
+            content: The text content to parse
+
+        Returns:
+            (thought, code, final_answer)
+        """
         thought = ""
         code = ""
 

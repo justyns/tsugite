@@ -199,17 +199,22 @@ No directives here
         assert modified_content == content
         assert context == {}
 
-    def test_malformed_directive_logs_warning(self, capsys):
+    def test_malformed_directive_logs_warning(self):
         """Test that malformed directives log warnings."""
+        from unittest.mock import patch
+
         content = """
 <!-- tsu:tool name="test" args={malformed} assign="data" -->
 """
-        modified_content, context = execute_tool_directives(content)
+        # Mock the stderr console to capture the warning
+        with patch("tsugite.agent_runner._stderr_console") as mock_console:
+            modified_content, context = execute_tool_directives(content)
 
-        # Should log warning
-        captured = capsys.readouterr()
-        assert "Warning" in captured.out
-        assert "Failed to parse" in captured.out
+            # Verify warning was printed
+            mock_console.print.assert_called_once()
+            warning_msg = str(mock_console.print.call_args[0][0])
+            assert "Warning" in warning_msg
+            assert "Failed to parse" in warning_msg
 
         # Should return content unchanged with empty context
         assert context == {}

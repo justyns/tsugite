@@ -20,6 +20,7 @@ class ChatTurn:
     agent_response: str
     tool_calls: List[str] = field(default_factory=list)
     token_count: Optional[int] = None
+    cost: Optional[float] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""
@@ -29,6 +30,7 @@ class ChatTurn:
             "agent_response": self.agent_response,
             "tool_calls": self.tool_calls,
             "token_count": self.token_count,
+            "cost": self.cost,
         }
 
     @classmethod
@@ -40,6 +42,7 @@ class ChatTurn:
             agent_response=data["agent_response"],
             tool_calls=data.get("tool_calls", []),
             token_count=data.get("token_count"),
+            cost=data.get("cost"),
         )
 
 
@@ -52,6 +55,7 @@ class ChatManager:
         model_override: Optional[str] = None,
         max_history: int = 50,
         custom_logger: Optional[CustomUILogger] = None,
+        stream: bool = False,
     ):
         """Initialize chat manager.
 
@@ -60,16 +64,23 @@ class ChatManager:
             model_override: Override agent's default model
             max_history: Maximum turns to keep in context
             custom_logger: Optional custom logger for UI
+            stream: Whether to stream responses in real-time
         """
         self.agent_path = agent_path
         self.model_override = model_override
         self.max_history = max_history
         self.custom_logger = custom_logger
+        self.stream = stream
         self.conversation_history: List[ChatTurn] = []
         self.session_start = datetime.now()
 
     def add_turn(
-        self, user_message: str, agent_response: str, tool_calls: List[str] = None, token_count: Optional[int] = None
+        self,
+        user_message: str,
+        agent_response: str,
+        tool_calls: List[str] = None,
+        token_count: Optional[int] = None,
+        cost: Optional[float] = None,
     ) -> None:
         """Add a turn to conversation history."""
         turn = ChatTurn(
@@ -78,6 +89,7 @@ class ChatManager:
             agent_response=agent_response,
             tool_calls=tool_calls or [],
             token_count=token_count,
+            cost=cost,
         )
         self.conversation_history.append(turn)
 
@@ -102,16 +114,25 @@ class ChatManager:
                 custom_logger=self.custom_logger,
                 context={"chat_history": self.conversation_history},
                 return_token_usage=True,
+                stream=self.stream,
             )
 
-            # Handle tuple return (response, token_count) or string return
+            # Handle tuple return (response, token_count, cost) or (response, token_count) or string return
+            response = None
+            token_count = None
+            cost = None
+
             if isinstance(result, tuple):
-                response, token_count = result
+                if len(result) == 3:
+                    response, token_count, cost = result
+                elif len(result) == 2:
+                    response, token_count = result
+                else:
+                    response = result[0]
             else:
                 response = result
-                token_count = None
 
-            self.add_turn(user_input, response, token_count=token_count)
+            self.add_turn(user_input, response, token_count=token_count, cost=cost)
             return response
 
         except Exception as e:
@@ -156,10 +177,12 @@ class ChatManager:
     def get_stats(self) -> Dict[str, Any]:
         """Get session statistics."""
         total_tokens = sum(turn.token_count for turn in self.conversation_history if turn.token_count)
+        total_cost = sum(turn.cost for turn in self.conversation_history if turn.cost)
 
         return {
             "total_turns": len(self.conversation_history),
             "total_tokens": total_tokens if total_tokens > 0 else None,
+            "total_cost": total_cost if total_cost > 0 else None,
             "session_duration": (datetime.now() - self.session_start).total_seconds(),
             "agent": str(self.agent_path),
             "model": self.model_override or "default",

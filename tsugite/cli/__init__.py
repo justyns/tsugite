@@ -49,7 +49,9 @@ def run(
         None, "--with-agents", help="Additional agents (comma or space separated)"
     ),
     model: Optional[str] = typer.Option(None, "--model", help="Override agent model"),
-    ui: Optional[str] = typer.Option(None, "--ui", help="UI mode: rich (default), plain, minimal, headless, or silent"),
+    ui: Optional[str] = typer.Option(
+        None, "--ui", help="UI mode: rich (default), plain, minimal, headless, silent, or live"
+    ),
     non_interactive: bool = typer.Option(False, "--non-interactive", help="Run without interactive prompts"),
     history_dir: Optional[str] = typer.Option(None, "--history-dir", help="Directory to store history files"),
     no_color: bool = typer.Option(False, "--no-color", help="Disable ANSI colors"),
@@ -65,6 +67,7 @@ def run(
         False, "--headless", help="Headless mode for CI/scripts: result to stdout, optional progress to stderr"
     ),
     plain: bool = typer.Option(False, "--plain", help="Plain output without panels/boxes (copy-paste friendly)"),
+    stream: bool = typer.Option(False, "--stream", help="Stream LLM responses in real-time"),
     trust_mcp_code: bool = typer.Option(False, "--trust-mcp-code", help="Trust remote code from MCP servers"),
     attachment: Optional[List[str]] = typer.Option(
         None, "-f", "--attachment", help="Attachment(s) to include (repeatable)"
@@ -86,7 +89,7 @@ def run(
     """
     # Lazy imports - only load heavy dependencies when actually running agents
     from tsugite.agent_runner import get_agent_info, run_agent, validate_agent_execution
-    from tsugite.ui import create_plain_logger, create_silent_logger, custom_agent_ui
+    from tsugite.ui import create_live_template_logger, create_plain_logger, create_silent_logger, custom_agent_ui
     from tsugite.utils import expand_file_references, should_use_plain_output
 
     if history_dir:
@@ -96,6 +99,7 @@ def run(
         console.no_color = True
 
     # Handle --ui flag (maps to existing UI flags for convenience)
+    live_ui = False  # Initialize live_ui flag
     if ui:
         ui_lower = ui.lower()
         # Check for conflicts
@@ -114,9 +118,11 @@ def run(
             headless = True
         elif ui_lower == "silent":
             silent = True
+        elif ui_lower == "live":
+            live_ui = True
         else:
             console.print(
-                f"[red]Error: Invalid UI mode '{ui}'. Choose from: rich, plain, minimal, headless, silent[/red]"
+                f"[red]Error: Invalid UI mode '{ui}'. Choose from: rich, plain, minimal, headless, silent, live[/red]"
             )
             raise typer.Exit(1)
 
@@ -368,6 +374,7 @@ def run(
                     custom_logger=create_silent_logger(),
                     trust_mcp_code=trust_mcp_code,
                     delegation_agents=delegation_agents,
+                    stream=stream,
                 )
             elif headless:
                 # Headless mode: stderr for progress (if verbose), stdout for result
@@ -391,6 +398,7 @@ def run(
                         custom_logger=custom_logger,
                         trust_mcp_code=trust_mcp_code,
                         delegation_agents=delegation_agents,
+                        stream=stream,
                     )
             elif native_ui:
                 # Minimal: colors and animations, but no panel boxes
@@ -412,6 +420,21 @@ def run(
                         custom_logger=custom_logger,
                         trust_mcp_code=trust_mcp_code,
                         delegation_agents=delegation_agents,
+                        stream=stream,
+                    )
+            elif live_ui:
+                # Live UI: Rich Live Display with Tree visualization and interactive prompts
+                custom_logger = create_live_template_logger(interactive=not non_interactive)
+                with custom_logger.ui_handler.progress_context():
+                    result = executor(
+                        agent_path=agent_file,
+                        prompt=prompt,
+                        model_override=model,
+                        debug=debug,
+                        custom_logger=custom_logger,
+                        trust_mcp_code=trust_mcp_code,
+                        delegation_agents=delegation_agents,
+                        stream=stream,
                     )
             else:
                 # Choose UI handler based on plain mode
@@ -426,6 +449,7 @@ def run(
                         custom_logger=custom_logger,
                         trust_mcp_code=trust_mcp_code,
                         delegation_agents=delegation_agents,
+                        stream=stream,
                     )
                 else:
                     # Use custom UI with panels and formatting
@@ -447,6 +471,7 @@ def run(
                             custom_logger=custom_logger,
                             trust_mcp_code=trust_mcp_code,
                             delegation_agents=delegation_agents,
+                            stream=stream,
                         )
 
             # Display result
@@ -617,11 +642,12 @@ def chat(
     agent: Optional[str] = typer.Argument(None, help="Agent name or path (optional, uses default if not provided)"),
     model: Optional[str] = typer.Option(None, "--model", help="Override agent model"),
     max_history: int = typer.Option(50, "--max-history", help="Maximum turns to keep in context"),
+    stream: bool = typer.Option(False, "--stream", help="Stream LLM responses in real-time"),
     root: Optional[str] = typer.Option(None, "--root", help="Working directory"),
 ):
     """Start an interactive chat session with an agent."""
     from tsugite.agent_composition import parse_agent_references
-    from tsugite.chat_ui import run_chat_cli
+    from tsugite.ui.textual_chat import run_textual_chat
 
     # Change to root directory if specified
     original_cwd = None
@@ -656,11 +682,12 @@ def chat(
             console.print(f"[red]Agent file not found: {primary_agent_path}[/red]")
             raise typer.Exit(1)
 
-        # Run chat
-        run_chat_cli(
+        # Run chat with Textual UI
+        run_textual_chat(
             agent_path=primary_agent_path,
             model_override=model,
             max_history=max_history,
+            stream=stream,
         )
 
     finally:

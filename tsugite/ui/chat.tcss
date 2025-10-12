@@ -1,0 +1,56 @@
+/* Textual CSS for Chat UI */
+
+Screen {
+    background: $background;
+}
+
+Header {
+    dock: top;
+    height: 3;
+    background: $primary-background;
+}
+
+StatusBar {
+    height: 8;
+    border: solid cyan;
+    padding: 1;
+    background: $surface;
+}
+
+MessageList {
+    height: 1fr;
+    border: solid blue;
+    padding: 1;
+    background: $surface;
+}
+
+Message {
+    width: 100%;
+    height: auto;
+    margin-bottom: 1;
+}
+
+.separator {
+    color: $text-muted;
+    height: 1;
+    margin: 1 0;
+}
+
+.status {
+    color: $warning;
+    height: auto;
+    margin: 1 0;
+}
+
+Input {
+    border: solid green;
+    background: $surface;
+    height: 3;
+}
+
+Footer {
+    dock: bottom;
+    height: 1;
+    background: $primary-background;
+    color: $text-muted;
+}

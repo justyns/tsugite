@@ -8,7 +8,6 @@ Deprecated: Use 'from tsugite.ui import ...' instead.
 
 # Re-export everything from tsugite.ui
 from tsugite.ui import (  # noqa: F401
-    ChatUIHandler,
     CustomUIHandler,
     CustomUILogger,
     PlainUIHandler,
@@ -25,7 +24,6 @@ __all__ = [
     "CustomUILogger",
     "CustomUIHandler",
     "PlainUIHandler",
-    "ChatUIHandler",
     "custom_agent_ui",
     "create_silent_logger",
     "create_plain_logger",

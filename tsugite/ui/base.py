@@ -31,6 +31,8 @@ class UIEvent(IntEnum):
     REASONING_CONTENT = 13
     REASONING_TOKENS = 14
     COST_SUMMARY = 15
+    STREAM_CHUNK = 16  # For streaming LLM responses
+    STREAM_COMPLETE = 17  # When streaming finishes
 
 
 @dataclass
@@ -93,6 +95,10 @@ class CustomUIHandler:
         self.task_id = None
         self._lock = threading.Lock()
 
+        # Streaming state
+        self.streaming_content = ""
+        self.is_streaming = False
+
     def handle_event(self, event: UIEvent, data: Dict[str, Any]) -> None:
         """Handle a UI event and update the display."""
         with self._lock:
@@ -122,6 +128,10 @@ class CustomUIHandler:
                 self._handle_reasoning_tokens(data)
             elif event == UIEvent.COST_SUMMARY:
                 self._handle_cost_summary(data)
+            elif event == UIEvent.STREAM_CHUNK:
+                self._handle_stream_chunk(data)
+            elif event == UIEvent.STREAM_COMPLETE:
+                self._handle_stream_complete(data)
 
             self._update_display()
 
@@ -462,6 +472,33 @@ class CustomUIHandler:
             logs = content.replace("Execution logs:", "").strip()
             if logs:
                 self.console.print(f"[dim]📝 {logs}[/dim]")
+
+    def _handle_stream_chunk(self, data: Dict[str, Any]) -> None:
+        """Handle streaming chunk event."""
+        chunk = data.get("chunk", "")
+        self.streaming_content += chunk
+        self.is_streaming = True
+
+        prefix = self._get_display_prefix()
+        # Update progress to show streaming
+        self.update_progress(f"{prefix}💬 Streaming response...")
+
+        # Print the chunk directly for real-time feedback
+        self.console.print(chunk, end="", highlight=False)
+
+    def _handle_stream_complete(self, data: Dict[str, Any]) -> None:
+        """Handle streaming complete event."""
+        self.is_streaming = False
+
+        # Print newline after streaming completes
+        self.console.print()
+
+        prefix = self._get_display_prefix()
+        # Update progress
+        self.update_progress(f"{prefix}✅ Streaming complete")
+
+        # Clear streaming content for next step
+        self.streaming_content = ""
 
     def _update_display(self) -> None:
         """Update the live display with current state."""

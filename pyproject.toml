@@ -20,6 +20,7 @@ dependencies = [
   "youtube-transcript-api>=0.6.0",
   "html2text>=2020.1.16",
   "litellm>=1.77.7",
+  "textual>=6.2.1",
 ]
 
 [project.scripts]

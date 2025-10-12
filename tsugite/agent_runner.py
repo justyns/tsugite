@@ -167,7 +167,8 @@ async def _execute_agent_with_prompt(
     model_kwargs: Optional[Dict[str, Any]] = None,
     injectable_vars: Optional[Dict[str, Any]] = None,
     return_token_usage: bool = False,
-) -> str | tuple[str, Optional[int]]:
+    stream: bool = False,
+) -> str | tuple[str, Optional[int], Optional[float]]:
     """Execute agent with a pre-rendered prompt.
 
     Low-level execution function used by both run_agent and run_multistep_agent.
@@ -182,10 +183,11 @@ async def _execute_agent_with_prompt(
         skip_task_reset: Skip resetting task manager (for multi-step agents)
         model_kwargs: Additional model parameters (response_format, temperature, etc.)
         injectable_vars: Variables to inject into Python execution namespace
-        return_token_usage: Whether to return token usage from LiteLLM
+        return_token_usage: Whether to return token usage and cost from LiteLLM
+        stream: Whether to stream responses in real-time
 
     Returns:
-        Agent execution result as string, or tuple of (result, token_count) if return_token_usage=True
+        Agent execution result as string, or tuple of (result, token_count, cost) if return_token_usage=True
 
     Raises:
         RuntimeError: If execution fails
@@ -339,7 +341,7 @@ async def _execute_agent_with_prompt(
         )
 
         # Run agent
-        result = await agent.run(rendered_prompt, return_full_result=return_token_usage)
+        result = await agent.run(rendered_prompt, return_full_result=return_token_usage, stream=stream)
 
         # Extract and display reasoning content if present
         _extract_reasoning_content(agent, custom_logger)
@@ -349,9 +351,9 @@ async def _execute_agent_with_prompt(
             from tsugite.core.agent import AgentResult
 
             if isinstance(result, AgentResult):
-                return str(result.output), result.token_usage
+                return str(result.output), result.token_usage, result.cost
             else:
-                return str(result), None
+                return str(result), None, None
         else:
             from tsugite.core.agent import AgentResult
 
@@ -381,7 +383,8 @@ def run_agent(
     trust_mcp_code: bool = False,
     delegation_agents: Optional[List[tuple[str, Path]]] = None,
     return_token_usage: bool = False,
-) -> str | tuple[str, Optional[int]]:
+    stream: bool = False,
+) -> str | tuple[str, Optional[int], Optional[float]]:
     """Run a Tsugite agent.
 
     Args:
@@ -393,10 +396,11 @@ def run_agent(
         custom_logger: Custom logger for agent output
         trust_mcp_code: Whether to trust remote code from MCP servers
         delegation_agents: List of (name, path) tuples for agents to make available for delegation
-        return_token_usage: Whether to return token usage from LiteLLM
+        return_token_usage: Whether to return token usage and cost from LiteLLM
+        stream: Whether to stream responses in real-time
 
     Returns:
-        Agent execution result as string, or tuple of (result, token_count) if return_token_usage=True
+        Agent execution result as string, or tuple of (result, token_count, cost) if return_token_usage=True
 
     Raises:
         ValueError: If agent file is invalid
@@ -467,6 +471,7 @@ def run_agent(
             trust_mcp_code=trust_mcp_code,
             delegation_agents=delegation_agents,
             return_token_usage=return_token_usage,
+            stream=stream,
         )
     )
 

@@ -17,7 +17,7 @@ def mock_agent_runner():
     captured_prompts = []
 
     def create_mock(return_value="Test complete"):
-        async def mock_run(prompt, return_full_result=False):
+        async def mock_run(prompt, return_full_result=False, stream=False):
             captured_prompts.append(prompt)
             return return_value
 
@@ -213,7 +213,7 @@ def test_ask_user_tool_not_available_in_headless(monkeypatch, task_tools, file_t
         with patch("tsugite.agent_runner.TsugiteAgent") as mock_agent_class:
             mock_instance = MagicMock()
 
-            async def mock_run(prompt, return_full_result=False):
+            async def mock_run(prompt, return_full_result=False, stream=False):
                 return "Test complete"
 
             mock_instance.run = MagicMock(side_effect=mock_run)
@@ -278,7 +278,7 @@ def test_ask_user_tool_available_in_interactive(monkeypatch, task_tools, file_to
         with patch("tsugite.agent_runner.TsugiteAgent") as mock_agent_class:
             mock_instance = MagicMock()
 
-            async def mock_run(prompt, return_full_result=False):
+            async def mock_run(prompt, return_full_result=False, stream=False):
                 return "Test complete"
 
             mock_instance.run = MagicMock(side_effect=mock_run)
