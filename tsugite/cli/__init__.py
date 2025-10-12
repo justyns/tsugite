@@ -7,6 +7,10 @@ from typing import List, Optional
 import typer
 from rich.console import Console
 from rich.panel import Panel
+from rich.traceback import install
+
+# Install rich traceback handler for better error messages
+install(show_locals=False, width=None, word_wrap=True)
 
 from .agents import agents_app
 from .attachments import attachments_app

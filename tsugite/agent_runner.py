@@ -1,9 +1,12 @@
 """Agent execution engine using TsugiteAgent."""
 
 import asyncio
+import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from rich.console import Console
 
 from tsugite.core.agent import TsugiteAgent
 from tsugite.core.executor import LocalExecutor
@@ -13,6 +16,9 @@ from tsugite.renderer import AgentRenderer
 from tsugite.tools import call_tool
 from tsugite.tools.tasks import get_task_manager, reset_task_manager
 from tsugite.utils import is_interactive
+
+# Console for warnings and debug output (stderr)
+_stderr_console = Console(file=sys.stderr, no_color=False)
 
 TSUGITE_DEFAULT_INSTRUCTIONS = (
     "You are operating inside the Tsugite micro-agent runtime. Follow the rendered task faithfully, use the available "
@@ -44,7 +50,7 @@ def execute_prefetch(prefetch_config: List[Dict[str, Any]]) -> Dict[str, Any]:
         try:
             context[assign_name] = call_tool(tool_name, **args)
         except Exception as e:
-            print(f"Warning: Prefetch tool '{tool_name}' failed: {e}")
+            _stderr_console.print(f"[yellow]Warning: Prefetch tool '{tool_name}' failed: {e}[/yellow]")
             context[assign_name] = None
 
     return context
@@ -83,7 +89,7 @@ def execute_tool_directives(
         directives = extract_tool_directives(content)
     except ValueError as e:
         # If parsing fails, return content unchanged with empty context
-        print(f"Warning: Failed to parse tool directives: {e}")
+        _stderr_console.print(f"[yellow]Warning: Failed to parse tool directives: {e}[/yellow]")
         return content, {}
 
     if not directives:
@@ -105,7 +111,7 @@ def execute_tool_directives(
             modified_content = modified_content.replace(directive.raw_match, replacement)
 
         except Exception as e:
-            print(f"Warning: Tool directive '{directive.name}' failed: {e}")
+            _stderr_console.print(f"[yellow]Warning: Tool directive '{directive.name}' failed: {e}[/yellow]")
             new_context[directive.assign_var] = None
 
             # Replace with failure note
@@ -239,7 +245,7 @@ async def _execute_agent_with_prompt(
                 for tool_def in custom_tool_definitions:
                     all_tool_names.append(tool_def.name)
             except Exception as e:
-                print(f"Warning: Failed to register custom tools: {e}")
+                _stderr_console.print(f"[yellow]Warning: Failed to register custom tools: {e}[/yellow]")
 
         # Convert to Tool objects
         tools = [create_tool_from_tsugite(name) for name in all_tool_names]
@@ -265,7 +271,7 @@ async def _execute_agent_with_prompt(
             # Load tools from each configured MCP server
             for server_name, allowed_tools in agent_config.mcp_servers.items():
                 if server_name not in global_mcp_config:
-                    print(f"Warning: MCP server '{server_name}' not found in config. Skipping.")
+                    _stderr_console.print(f"[yellow]Warning: MCP server '{server_name}' not found in config. Skipping.[/yellow]")
                     continue
 
                 server_config = global_mcp_config[server_name]
@@ -273,12 +279,12 @@ async def _execute_agent_with_prompt(
                     mcp_client, mcp_tools = await load_mcp_tools(server_config, allowed_tools)
                     mcp_clients.append(mcp_client)  # Keep client alive for tools to work
                     tools.extend(mcp_tools)
-                    print(f"Loaded {len(mcp_tools)} tools from MCP server '{server_name}'")
+                    _stderr_console.print(f"[green]Loaded {len(mcp_tools)} tools from MCP server '{server_name}'[/green]")
                 except Exception as e:
-                    print(f"Warning: Failed to load MCP tools from '{server_name}': {e}")
+                    _stderr_console.print(f"[yellow]Warning: Failed to load MCP tools from '{server_name}': {e}[/yellow]")
         except Exception as e:
-            print(f"Warning: Failed to load MCP tools: {e}")
-            print("Continuing without MCP tools.")
+            _stderr_console.print(f"[yellow]Warning: Failed to load MCP tools: {e}[/yellow]")
+            _stderr_console.print("[yellow]Continuing without MCP tools.[/yellow]")
 
     # Get model string
     model_string = model_override or agent_config.model
@@ -411,7 +417,7 @@ def run_agent(
         try:
             prefetch_context = execute_prefetch(agent_config.prefetch)
         except Exception as e:
-            print(f"Warning: Prefetch execution failed: {e}")
+            _stderr_console.print(f"[yellow]Warning: Prefetch execution failed: {e}[/yellow]")
 
     # Execute tool directives in content
     modified_content, tool_context = execute_tool_directives(agent.content, prefetch_context)
@@ -438,11 +444,9 @@ def run_agent(
         rendered_prompt = renderer.render(modified_content, full_context)
 
         if debug:
-            print("\n" + "=" * 60)
-            print("DEBUG: Rendered Prompt")
-            print("=" * 60)
-            print(rendered_prompt)
-            print("=" * 60 + "\n")
+            _stderr_console.rule("[bold cyan]DEBUG: Rendered Prompt[/bold cyan]")
+            _stderr_console.print(rendered_prompt)
+            _stderr_console.rule("[bold cyan]End Rendered Prompt[/bold cyan]")
 
     except Exception as e:
         raise ValueError(f"Template rendering failed: {e}")
@@ -610,7 +614,7 @@ def run_multistep_agent(
             prefetch_context = execute_prefetch(agent.config.prefetch)
             step_context.update(prefetch_context)
         except Exception as e:
-            print(f"Warning: Prefetch execution failed: {e}")
+            _stderr_console.print(f"[yellow]Warning: Prefetch execution failed: {e}[/yellow]")
 
     # Execute each step sequentially
     final_result = None
@@ -649,17 +653,15 @@ def run_multistep_agent(
             elif not debug:
                 # Direct output for native-ui/silent modes
                 if attempt > 0:
-                    print(f"{step_header} Retry {attempt}/{step.max_retries}...")
+                    _stderr_console.print(f"{step_header} Retry {attempt}/{step.max_retries}...")
                 else:
-                    print(f"{step_header} Starting...")
+                    _stderr_console.print(f"{step_header} Starting...")
 
             if debug:
-                print(f"\n{'=' * 60}")
                 if attempt > 0:
-                    print(f"DEBUG: Retrying Step {i}/{len(steps)}: {step.name} (Attempt {attempt + 1}/{max_attempts})")
+                    _stderr_console.rule(f"[bold cyan]DEBUG: Retrying Step {i}/{len(steps)}: {step.name} (Attempt {attempt + 1}/{max_attempts})[/bold cyan]")
                 else:
-                    print(f"DEBUG: Executing Step {i}/{len(steps)}: {step.name}")
-                print(f"{'=' * 60}")
+                    _stderr_console.rule(f"[bold cyan]DEBUG: Executing Step {i}/{len(steps)}: {step.name}[/bold cyan]")
 
             # Execute tool directives in this step's content
             step_modified_content, step_tool_context = execute_tool_directives(step.content, step_context)
@@ -673,9 +675,9 @@ def run_multistep_agent(
                 rendered_step_prompt = renderer.render(step_modified_content, step_context)
 
                 if debug:
-                    print("\nRendered Prompt:")
-                    print(rendered_step_prompt)
-                    print(f"{'=' * 60}\n")
+                    _stderr_console.print("\n[bold]Rendered Prompt:[/bold]")
+                    _stderr_console.print(rendered_step_prompt)
+                    _stderr_console.rule()
 
             except Exception as e:
                 error_msg = f"Template rendering failed: {e}"
@@ -730,7 +732,7 @@ def run_multistep_agent(
                 if step.assign_var:
                     step_context[step.assign_var] = step_result
                     if debug:
-                        print(f"Assigned result to variable: {step.assign_var}")
+                        _stderr_console.print(f"[dim]Assigned result to variable: {step.assign_var}[/dim]")
 
                 # Update task summary for next step
                 step_context["task_summary"] = task_manager.get_task_summary()
@@ -743,7 +745,7 @@ def run_multistep_agent(
 
                     custom_logger.console.print(f"[green]{step_header} Complete[/green]")
                 elif not debug:
-                    print(f"{step_header} Complete")
+                    _stderr_console.print(f"[green]{step_header} Complete[/green]")
 
                 # Success - break retry loop
                 break
@@ -765,6 +767,6 @@ def run_multistep_agent(
                 if custom_logger and not debug:
                     custom_logger.console.print(f"[yellow]Step '{step.name}' failed: {error_msg}[/yellow]")
                 elif not debug:
-                    print(f"Step '{step.name}' failed: {error_msg}")
+                    _stderr_console.print(f"[yellow]Step '{step.name}' failed: {error_msg}[/yellow]")
 
     return final_result or ""

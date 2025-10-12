@@ -8,6 +8,7 @@ from typing import List, Optional
 
 import typer
 from rich.console import Console
+from rich.rule import Rule
 
 from tsugite.constants import TSUGITE_LOGO_NARROW, TSUGITE_LOGO_WIDE
 
@@ -36,13 +37,8 @@ def print_plain_section(console: Console, title: str, content: str, style: str =
         content: Section content
         style: Optional Rich style for content (e.g., "cyan", "green")
     """
-    sep = "=" * 50
-    console.print(f"\n{sep}")
-    if style:
-        console.print(f"[{style}]{title}[/{style}]")
-    else:
-        console.print(title)
-    console.print(sep)
+    console.print()
+    console.rule(title if not style else f"[{style}]{title}[/{style}]", style="dim")
     if style:
         console.print(f"[{style}]{content}[/{style}]")
     else:
@@ -59,10 +55,8 @@ def print_plain_info(console: Console, title: str, items: dict, style: str = "cy
         items: Dict of label: value pairs
         style: Optional Rich style for labels
     """
-    sep = "=" * 50
-    console.print(f"\n{sep}")
-    console.print(f"[bold]{title}[/bold]")
-    console.print(sep)
+    console.print()
+    console.rule(f"[bold]{title}[/bold]", style="dim")
     for label, value in items.items():
         if style:
             console.print(f"[{style}]{label}:[/{style}] {value}")

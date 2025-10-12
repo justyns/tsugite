@@ -82,15 +82,13 @@ class PlainUIHandler(CustomUIHandler):
         self.state.steps_history = []
 
         # Show plain text header
-        sep = "=" * 60
-        self.console.print(f"\n{sep}")
-        self.console.print("Starting Agent Execution")
-        self.console.print(sep)
+        self.console.print()
+        self.console.rule("Starting Agent Execution")
         self.console.print(f"Task: {self.state.task}")
         model = data.get("model", "")
         if model:
             self.console.print(f"Model: {model}")
-        self.console.print(sep)
+        self.console.rule()
         self.console.print()
 
     def _handle_step_start(self, data: Dict[str, Any]) -> None:
@@ -115,12 +113,10 @@ class PlainUIHandler(CustomUIHandler):
         self.console.print("Executing code...")
 
         if self.show_code and self.state.code_being_executed:
-            sep = "-" * 60
-            self.console.print(f"\n{sep}")
-            self.console.print("Executing Code")
-            self.console.print(sep)
+            self.console.print()
+            self.console.rule("Executing Code", style="dim")
             self.console.print(self.state.code_being_executed)
-            self.console.print(sep)
+            self.console.rule(style="dim")
             self.console.print()
 
     def _handle_tool_call(self, data: Dict[str, Any]) -> None:
@@ -151,12 +147,10 @@ class PlainUIHandler(CustomUIHandler):
 
             if is_error:
                 # Display errors prominently
-                sep = "-" * 60
-                self.console.print(f"\n{sep}")
-                self.console.print("ERROR")
-                self.console.print(sep)
+                self.console.print()
+                self.console.rule("ERROR", style="dim")
                 self.console.print(clean_obs)
-                self.console.print(sep)
+                self.console.rule(style="dim")
                 self.console.print()
             else:
                 # Normal observation - truncate if too long
@@ -175,12 +169,10 @@ class PlainUIHandler(CustomUIHandler):
 
         self.console.print("Finalizing answer...")
 
-        sep = "=" * 60
-        self.console.print(f"\n{sep}")
-        self.console.print("FINAL ANSWER")
-        self.console.print(sep)
+        self.console.print()
+        self.console.rule("FINAL ANSWER")
         self.console.print(answer)
-        self.console.print(sep)
+        self.console.rule()
         self.console.print()
 
     def _handle_error(self, data: Dict[str, Any]) -> None:
@@ -191,12 +183,10 @@ class PlainUIHandler(CustomUIHandler):
         self.console.print("Error occurred...")
 
         # Always show errors prominently
-        sep = "=" * 60
-        self.console.print(f"\n{sep}")
-        self.console.print(f"{error_type}")
-        self.console.print(sep)
+        self.console.print()
+        self.console.rule(f"{error_type}")
         self.console.print(error)
-        self.console.print(sep)
+        self.console.rule()
         self.console.print()
 
         # Add to current step history
@@ -213,12 +203,10 @@ class PlainUIHandler(CustomUIHandler):
         title = data.get("title", "Agent Reasoning")
 
         if content.strip():
-            sep = "-" * 60
-            self.console.print(f"\n{sep}")
-            self.console.print(title)
-            self.console.print(sep)
+            self.console.print()
+            self.console.rule(title, style="dim")
             self.console.print(content.strip())
-            self.console.print(sep)
+            self.console.rule(style="dim")
             self.console.print()
 
     def _handle_reasoning_content(self, data: Dict[str, Any]) -> None:
@@ -241,12 +229,10 @@ class PlainUIHandler(CustomUIHandler):
             if len(display_content) > max_length:
                 display_content = display_content[:max_length] + "\n\n... (truncated)"
 
-            sep = "-" * 60
-            self.console.print(f"\n{sep}")
-            self.console.print(title)
-            self.console.print(sep)
+            self.console.print()
+            self.console.rule(title, style="dim")
             self.console.print(display_content)
-            self.console.print(sep)
+            self.console.rule(style="dim")
             self.console.print()
 
     def _handle_reasoning_tokens(self, data: Dict[str, Any]) -> None:
@@ -333,12 +319,10 @@ class PlainUIHandler(CustomUIHandler):
 
                 # Always show errors, filter non-meaningful outputs otherwise
                 if contains_error:
-                    sep = "-" * 60
-                    self.console.print(f"\n{sep}")
-                    self.console.print("ERROR IN OUTPUT")
-                    self.console.print(sep)
+                    self.console.print()
+                    self.console.rule("ERROR IN OUTPUT", style="dim")
                     self.console.print(output_text)
-                    self.console.print(sep)
+                    self.console.rule(style="dim")
                     self.console.print()
                 elif output_text.strip() and output_text.strip().lower() not in ("none", "null", ""):
                     self.console.print(f"Output: {output_text}")
