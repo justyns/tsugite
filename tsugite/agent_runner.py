@@ -271,7 +271,9 @@ async def _execute_agent_with_prompt(
             # Load tools from each configured MCP server
             for server_name, allowed_tools in agent_config.mcp_servers.items():
                 if server_name not in global_mcp_config:
-                    _stderr_console.print(f"[yellow]Warning: MCP server '{server_name}' not found in config. Skipping.[/yellow]")
+                    _stderr_console.print(
+                        f"[yellow]Warning: MCP server '{server_name}' not found in config. Skipping.[/yellow]"
+                    )
                     continue
 
                 server_config = global_mcp_config[server_name]
@@ -279,9 +281,13 @@ async def _execute_agent_with_prompt(
                     mcp_client, mcp_tools = await load_mcp_tools(server_config, allowed_tools)
                     mcp_clients.append(mcp_client)  # Keep client alive for tools to work
                     tools.extend(mcp_tools)
-                    _stderr_console.print(f"[green]Loaded {len(mcp_tools)} tools from MCP server '{server_name}'[/green]")
+                    _stderr_console.print(
+                        f"[green]Loaded {len(mcp_tools)} tools from MCP server '{server_name}'[/green]"
+                    )
                 except Exception as e:
-                    _stderr_console.print(f"[yellow]Warning: Failed to load MCP tools from '{server_name}': {e}[/yellow]")
+                    _stderr_console.print(
+                        f"[yellow]Warning: Failed to load MCP tools from '{server_name}': {e}[/yellow]"
+                    )
         except Exception as e:
             _stderr_console.print(f"[yellow]Warning: Failed to load MCP tools: {e}[/yellow]")
             _stderr_console.print("[yellow]Continuing without MCP tools.[/yellow]")
@@ -659,7 +665,9 @@ def run_multistep_agent(
 
             if debug:
                 if attempt > 0:
-                    _stderr_console.rule(f"[bold cyan]DEBUG: Retrying Step {i}/{len(steps)}: {step.name} (Attempt {attempt + 1}/{max_attempts})[/bold cyan]")
+                    _stderr_console.rule(
+                        f"[bold cyan]DEBUG: Retrying Step {i}/{len(steps)}: {step.name} (Attempt {attempt + 1}/{max_attempts})[/bold cyan]"
+                    )
                 else:
                     _stderr_console.rule(f"[bold cyan]DEBUG: Executing Step {i}/{len(steps)}: {step.name}[/bold cyan]")
 

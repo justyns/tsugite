@@ -8,7 +8,6 @@ from typing import List, Optional
 
 import typer
 from rich.console import Console
-from rich.rule import Rule
 
 from tsugite.constants import TSUGITE_LOGO_NARROW, TSUGITE_LOGO_WIDE
 

@@ -9,9 +9,6 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.traceback import install
 
-# Install rich traceback handler for better error messages
-install(show_locals=False, width=None, word_wrap=True)
-
 from .agents import agents_app
 from .attachments import attachments_app
 from .benchmark import benchmark_command
@@ -28,6 +25,10 @@ from .helpers import (
 from .init import init
 from .mcp import mcp_app
 from .tools import tools_app
+
+# Install rich traceback handler for better error messages
+# This is after imports to satisfy linting, but still early enough to catch runtime errors
+install(show_locals=False, width=None, word_wrap=True)
 
 app = typer.Typer(
     name="tsugite",
