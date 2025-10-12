@@ -25,6 +25,7 @@ from .helpers import (
     parse_cli_arguments,
     print_plain_info,
 )
+from .init import init
 from .mcp import mcp_app
 from .tools import tools_app
 
@@ -670,3 +671,4 @@ app.add_typer(attachments_app, name="attachments")
 app.add_typer(cache_app, name="cache")
 app.add_typer(tools_app, name="tools")
 app.command("benchmark")(benchmark_command)
+app.command("init")(init)

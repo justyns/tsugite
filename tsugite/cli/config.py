@@ -1,5 +1,7 @@
 """Configuration management CLI commands."""
 
+from typing import Optional
+
 import typer
 from rich.console import Console
 
@@ -38,15 +40,37 @@ def config_show():
 
 @config_app.command("set-default")
 def config_set_default(
-    model: str = typer.Argument(help="Model string (e.g., 'ollama:qwen2.5-coder:7b')"),
+    model: Optional[str] = typer.Argument(None, help="Model string (optional, interactive if omitted)"),
 ):
-    """Set the default model."""
+    """Set the default model (interactive or direct).
+
+    Examples:
+        # Interactive mode with provider and model selection
+        tsugite config set-default
+
+        # Direct mode with model string
+        tsugite config set-default "ollama:qwen2.5-coder:7b"
+    """
     from tsugite.config import get_config_path, set_default_model
+
+    # If no model provided, launch interactive selector
+    if not model:
+        from tsugite.cli.init import detect_available_providers, prompt_for_model
+
+        console.print("\n[bold cyan]Select Default Model[/bold cyan]")
+        console.print("[dim]Detecting available providers...[/dim]\n")
+
+        providers = detect_available_providers()
+        model = prompt_for_model(providers)
+
+        if not model:
+            console.print("[yellow]No model selected[/yellow]")
+            raise typer.Exit(1)
 
     try:
         set_default_model(model)
         config_path = get_config_path()
-        console.print(f"[green]✓ Default model set to:[/green] {model}")
+        console.print(f"\n[green]✓ Default model set to:[/green] {model}")
         console.print(f"[dim]Saved to: {config_path}[/dim]")
     except Exception as e:
         console.print(f"[red]Failed to set default model: {e}[/red]")
