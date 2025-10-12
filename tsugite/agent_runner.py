@@ -338,6 +338,7 @@ async def _execute_agent_with_prompt(
             model_kwargs=final_model_kwargs,
             ui_handler=ui_handler,
             model_name=model_string,
+            text_mode=agent_config.text_mode,
         )
 
         # Run agent
@@ -384,6 +385,7 @@ def run_agent(
     delegation_agents: Optional[List[tuple[str, Path]]] = None,
     return_token_usage: bool = False,
     stream: bool = False,
+    force_text_mode: bool = False,
 ) -> str | tuple[str, Optional[int], Optional[float]]:
     """Run a Tsugite agent.
 
@@ -398,6 +400,7 @@ def run_agent(
         delegation_agents: List of (name, path) tuples for agents to make available for delegation
         return_token_usage: Whether to return token usage and cost from LiteLLM
         stream: Whether to stream responses in real-time
+        force_text_mode: Force text_mode=True regardless of agent config (useful for chat UI)
 
     Returns:
         Agent execution result as string, or tuple of (result, token_count, cost) if return_token_usage=True
@@ -420,6 +423,10 @@ def run_agent(
         agent_config = agent.config
     except Exception as e:
         raise ValueError(f"Failed to parse agent file: {e}")
+
+    # Override text_mode if force_text_mode is True (for chat UI)
+    if force_text_mode:
+        agent_config.text_mode = True
 
     # Execute prefetch tools if any
     prefetch_context = {}

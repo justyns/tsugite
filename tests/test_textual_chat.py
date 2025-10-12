@@ -1,11 +1,11 @@
 """Tests for Textual chat UI functionality."""
 
-import pytest
-from pathlib import Path
 from unittest.mock import Mock, patch
 
-from tsugite.ui.textual_handler import TextualUIHandler
+import pytest
+
 from tsugite.ui.base import UIEvent
+from tsugite.ui.textual_handler import TextualUIHandler
 from tsugite.ui.widgets import MessageList, StatusBar
 
 
@@ -431,7 +431,7 @@ Test agent for runner.
         from tsugite.ui.textual_chat import ChatApp
 
         # We can't actually run the app (it would block), but we can create it
-        with patch.object(ChatApp, 'run') as mock_run:
+        with patch.object(ChatApp, "run") as mock_run:
             from tsugite.ui.textual_chat import run_textual_chat
 
             run_textual_chat(

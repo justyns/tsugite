@@ -27,6 +27,7 @@ class AgentConfig:
     extends: Optional[str] = None
     reasoning_effort: Optional[str] = None  # For reasoning models (low, medium, high)
     custom_tools: List[Dict[str, Any]] = field(default_factory=list)  # Per-agent shell tools
+    text_mode: bool = False  # Allow text-only responses (code blocks optional)
 
     def __post_init__(self):
         if self.tools is None:

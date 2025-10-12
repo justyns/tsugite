@@ -115,6 +115,7 @@ class ChatManager:
                 context={"chat_history": self.conversation_history},
                 return_token_usage=True,
                 stream=self.stream,
+                force_text_mode=True,  # Enable text mode for chat UI
             )
 
             # Handle tuple return (response, token_count, cost) or (response, token_count) or string return

@@ -59,6 +59,7 @@ class TsugiteAgent:
         model_kwargs: dict = None,
         ui_handler: Any = None,
         model_name: str = None,
+        text_mode: bool = False,
     ):
         """Initialize the agent.
 
@@ -71,6 +72,7 @@ class TsugiteAgent:
             model_kwargs: Extra parameters for LiteLLM (reasoning_effort, response_format, etc.)
             ui_handler: Optional UI handler for displaying progress
             model_name: Optional display name for the model (for UI)
+            text_mode: Allow text-only responses (code blocks optional)
         """
         from tsugite.models import get_model_params
 
@@ -82,6 +84,7 @@ class TsugiteAgent:
         self.memory = AgentMemory()
         self.ui_handler = ui_handler
         self.model_name = model_name or model_string
+        self.text_mode = text_mode
 
         # Track cumulative cost across all steps
         self.total_cost = 0.0
@@ -311,15 +314,33 @@ class TsugiteAgent:
 
                 exec_result = ExecutionResult(output="", error=None, stdout="", stderr="")
 
-                # Show a warning that the LLM didn't generate code
-                if self.ui_handler:
-                    self.ui_handler.handle_event(
-                        UIEvent.ERROR,
-                        {
-                            "error": "LLM did not generate code. Expected format:\n\nThought: <explanation>\n```python\n<code>\n```",
-                            "error_type": "Format Error",
-                        },
-                    )
+                if self.text_mode:
+                    # In text mode, code blocks are optional
+                    # If there's a thought but no code, treat the thought as the final answer
+                    if thought and thought.strip():
+                        exec_result.final_answer = thought
+                        # Don't show error - this is expected behavior in text mode
+                    else:
+                        # No thought and no code - this is an error even in text mode
+                        if self.ui_handler:
+                            self.ui_handler.handle_event(
+                                UIEvent.ERROR,
+                                {
+                                    "error": "No response generated. Expected at least a Thought.",
+                                    "error_type": "Format Error",
+                                },
+                            )
+                else:
+                    # Standard mode: code is required
+                    # Show a warning that the LLM didn't generate code
+                    if self.ui_handler:
+                        self.ui_handler.handle_event(
+                            UIEvent.ERROR,
+                            {
+                                "error": "LLM did not generate code. Expected format:\n\nThought: <explanation>\n```python\n<code>\n```",
+                                "error_type": "Format Error",
+                            },
+                        )
 
             # Add this step to memory (always, even if final_answer was called)
             self.memory.add_step(thought=thought, code=code, output=exec_result.output, error=exec_result.error)
@@ -419,7 +440,41 @@ You have access to these Python functions:
 ```
 """
 
-        prompt = f"""You are an expert assistant who solves tasks using Python code.
+        if self.text_mode:
+            # Text mode: code blocks are optional
+            prompt = f"""You are an expert assistant who helps with tasks.
+
+You can respond in two ways:
+
+**For conversational questions or simple responses:**
+Just provide your Thought with the answer directly:
+
+Thought: [Your response here]
+
+**When you need to use tools or perform actions:**
+Provide a Thought and write Python code:
+
+Thought: [What you'll do and why]
+```python
+# Your code here
+final_answer(result)
+```
+{tools_section}
+## Rules:
+
+1. Start with "Thought:" to explain your reasoning
+2. Code blocks are OPTIONAL - only use them when you need tools or complex logic
+3. For direct answers, just provide the Thought without code
+{"4. When using code, call tools with keyword arguments: result = tool_name(arg1=value1, arg2=value2)" if self.tools else "4. Use Python when you need to perform actions"}
+5. When using code blocks, call final_answer() with the result
+6. Variables persist across code blocks
+
+{self.instructions}
+
+Now begin!"""
+        else:
+            # Standard mode: code blocks required
+            prompt = f"""You are an expert assistant who solves tasks using Python code.
 
 To solve a task, you proceed in steps using this pattern:
 
