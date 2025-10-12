@@ -8,10 +8,6 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 
-from tsugite.agent_runner import get_agent_info, run_agent, validate_agent_execution
-from tsugite.ui import create_plain_logger, create_silent_logger, custom_agent_ui
-from tsugite.utils import expand_file_references, should_use_plain_output
-
 from .agents import agents_app
 from .attachments import attachments_app
 from .benchmark import benchmark_command
@@ -83,6 +79,10 @@ def run(
         tsu run +assistant create a ticket for bug 123
         tsu run +assistant --with-agents "jira,coder" "prompt"
     """
+    # Lazy imports - only load heavy dependencies when actually running agents
+    from tsugite.agent_runner import get_agent_info, run_agent, validate_agent_execution
+    from tsugite.ui import create_plain_logger, create_silent_logger, custom_agent_ui
+    from tsugite.utils import expand_file_references, should_use_plain_output
 
     if history_dir:
         Path(history_dir).mkdir(parents=True, exist_ok=True)
@@ -491,9 +491,10 @@ def render(
     refresh_cache: bool = typer.Option(False, "--refresh-cache", help="Force refresh cached attachment content"),
 ):
     """Render an agent template without executing it."""
+    # Lazy imports - only load dependencies when rendering
     from tsugite.md_agents import parse_agent
     from tsugite.renderer import AgentRenderer
-    from tsugite.utils import is_interactive
+    from tsugite.utils import expand_file_references, is_interactive
 
     if no_color:
         console.no_color = True
