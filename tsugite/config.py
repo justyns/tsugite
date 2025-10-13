@@ -15,6 +15,7 @@ class Config:
     default_model: Optional[str] = None
     model_aliases: Dict[str, str] = field(default_factory=dict)
     default_base_agent: Optional[str] = None
+    chat_theme: str = "gruvbox"
 
     def __post_init__(self):
         if self.model_aliases is None:
@@ -48,6 +49,7 @@ def load_config(path: Optional[Path] = None) -> Config:
             default_model=data.get("default_model"),
             model_aliases=data.get("model_aliases", {}),
             default_base_agent=data.get("default_base_agent"),
+            chat_theme=data.get("chat_theme", "gruvbox"),
         )
 
     except json.JSONDecodeError as e:
@@ -83,6 +85,9 @@ def save_config(config: Config, path: Optional[Path] = None) -> None:
 
     if config.default_base_agent is not None:
         config_data["default_base_agent"] = config.default_base_agent
+
+    if config.chat_theme:
+        config_data["chat_theme"] = config.chat_theme
 
     with open(path, "w") as f:
         json.dump(config_data, f, indent=2)
@@ -155,3 +160,28 @@ def set_default_base_agent(base_agent: Optional[str], path: Optional[Path] = Non
     config = load_config(path)
     config.default_base_agent = base_agent
     save_config(config, path)
+
+
+def set_chat_theme(theme: str, path: Optional[Path] = None) -> None:
+    """Set the chat UI theme in configuration.
+
+    Args:
+        theme: Theme name (e.g., "gruvbox", "nord", "tokyo-night")
+        path: Path to config.json file. If None, uses default path
+    """
+    config = load_config(path)
+    config.chat_theme = theme
+    save_config(config, path)
+
+
+def get_chat_theme(path: Optional[Path] = None) -> str:
+    """Get the chat UI theme from configuration.
+
+    Args:
+        path: Path to config.json file. If None, uses default path
+
+    Returns:
+        Theme name (defaults to "gruvbox")
+    """
+    config = load_config(path)
+    return config.chat_theme

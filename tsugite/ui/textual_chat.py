@@ -7,36 +7,16 @@ import litellm
 from rich.console import Console
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.theme import Theme
 from textual.widgets import Footer, Header, Input
 from textual.worker import Worker, WorkerState
 from textual_autocomplete import AutoComplete, DropdownItem, TargetState
 
 from tsugite.chat import ChatManager
+from tsugite.config import get_chat_theme
 from tsugite.md_agents import parse_agent_file
 from tsugite.ui import CustomUILogger
 from tsugite.ui.textual_handler import TextualUIHandler
 from tsugite.ui.widgets import MessageList, ThoughtLog
-
-# Gruvbox theme colors
-GRUVBOX_THEME = Theme(
-    name="gruvbox",
-    primary="#83a598",  # blue
-    secondary="#d3869b",  # purple
-    warning="#fabd2f",  # yellow
-    error="#fb4934",  # red
-    success="#b8bb26",  # green
-    accent="#fe8019",  # orange
-    foreground="#ebdbb2",  # fg
-    background="#282828",  # bg
-    surface="#3c3836",  # bg1
-    panel="#504945",  # bg2
-    dark=True,
-    variables={
-        "border": "#504945",
-        "border-blurred": "#3c3836",
-    },
-)
 
 # Slash commands for autocomplete
 SLASH_COMMANDS = [
@@ -91,6 +71,9 @@ class ChatApp(App):
         agent = parse_agent_file(agent_path)
         self.agent_name = agent.config.name or agent_path.stem
         self.model = model_override or agent.config.model or "default"
+
+        # Load theme from config
+        self.chat_theme = get_chat_theme()
 
         # Chat manager will be initialized in on_mount
         self.manager: Optional[ChatManager] = None
@@ -201,9 +184,8 @@ class ChatApp(App):
 
     def on_mount(self) -> None:
         """Called when app is mounted."""
-        # Register and apply gruvbox theme
-        self.register_theme(GRUVBOX_THEME)
-        self.theme = "gruvbox"
+        # Apply theme from config (built-in themes are already registered)
+        self.theme = self.chat_theme
 
         # Create UI handler with callbacks to update Textual widgets
         self.ui_handler = TextualUIHandler(
