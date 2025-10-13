@@ -1,6 +1,5 @@
 """Textual UI handler for chat interface."""
 
-import threading
 from typing import Any, Callable, Dict, Optional
 
 from tsugite.ui.base import CustomUIHandler, UIEvent
@@ -17,6 +16,7 @@ class TextualUIHandler(CustomUIHandler):
         on_stream_complete: Optional[Callable[[], None]] = None,
         on_intermediate_message: Optional[Callable[[str], None]] = None,
         on_execution_event: Optional[Callable[[str, str], None]] = None,
+        on_thought_log: Optional[Callable[[str, str], None]] = None,
     ):
         """Initialize Textual UI handler.
 
@@ -26,6 +26,8 @@ class TextualUIHandler(CustomUIHandler):
             on_stream_chunk: Callback for streaming chunks
             on_stream_complete: Callback when streaming completes
             on_intermediate_message: Callback for intermediate agent messages
+            on_execution_event: Callback for execution events (deprecated, use on_thought_log)
+            on_thought_log: Callback for thought log entries (type, content)
         """
         # Initialize with a no-op console (we won't use it)
         from io import StringIO
@@ -44,40 +46,32 @@ class TextualUIHandler(CustomUIHandler):
         self.on_stream_complete = on_stream_complete
         self.on_intermediate_message = on_intermediate_message
         self.on_execution_event = on_execution_event
+        self.on_thought_log = on_thought_log
 
         # Track tools used in current turn
         self.current_tools = []
-
-        # Lock for status updates to prevent corruption
-        self._status_lock = threading.Lock()
         self._last_status = ""
 
     def handle_event(self, event: UIEvent, data: Dict[str, Any]) -> None:
         """Handle UI event by calling appropriate callbacks."""
-        # Update internal state
+        handlers = {
+            UIEvent.TASK_START: self._handle_task_start,
+            UIEvent.STEP_START: self._handle_step_start,
+            UIEvent.CODE_EXECUTION: self._handle_code_execution,
+            UIEvent.TOOL_CALL: self._handle_tool_call,
+            UIEvent.OBSERVATION: self._handle_observation,
+            UIEvent.FINAL_ANSWER: self._handle_final_answer,
+            UIEvent.ERROR: self._handle_error,
+            UIEvent.LLM_MESSAGE: self._handle_llm_message,
+            UIEvent.STREAM_CHUNK: self._handle_stream_chunk,
+            UIEvent.STREAM_COMPLETE: self._handle_stream_complete,
+            UIEvent.EXECUTION_RESULT: self._handle_execution_result,
+        }
+
         with self._lock:
-            if event == UIEvent.TASK_START:
-                self._handle_task_start(data)
-            elif event == UIEvent.STEP_START:
-                self._handle_step_start(data)
-            elif event == UIEvent.CODE_EXECUTION:
-                self._handle_code_execution(data)
-            elif event == UIEvent.TOOL_CALL:
-                self._handle_tool_call(data)
-            elif event == UIEvent.OBSERVATION:
-                self._handle_observation(data)
-            elif event == UIEvent.FINAL_ANSWER:
-                self._handle_final_answer(data)
-            elif event == UIEvent.ERROR:
-                self._handle_error(data)
-            elif event == UIEvent.LLM_MESSAGE:
-                self._handle_llm_message(data)
-            elif event == UIEvent.STREAM_CHUNK:
-                self._handle_stream_chunk(data)
-            elif event == UIEvent.STREAM_COMPLETE:
-                self._handle_stream_complete(data)
-            elif event == UIEvent.EXECUTION_RESULT:
-                self._handle_execution_result(data)
+            handler = handlers.get(event)
+            if handler:
+                handler(data)
 
     def _update_status(self, new_status: str) -> None:
         """Update status with thread safety.
@@ -85,11 +79,10 @@ class TextualUIHandler(CustomUIHandler):
         Args:
             new_status: New status message
         """
-        with self._status_lock:
-            if new_status != self._last_status:
-                self._last_status = new_status
-                if self.on_status_change:
-                    self.on_status_change(new_status)
+        if new_status != self._last_status:
+            self._last_status = new_status
+            if self.on_status_change:
+                self.on_status_change(new_status)
 
     def _handle_task_start(self, data: Dict[str, Any]) -> None:
         """Handle task start - reset tools list."""
@@ -99,7 +92,12 @@ class TextualUIHandler(CustomUIHandler):
     def _handle_step_start(self, data: Dict[str, Any]) -> None:
         """Handle step start."""
         step = data.get("step", 1)
-        self._update_status(f"Step {step}: Waiting for LLM response...")
+        status_msg = f"Step {step}: Waiting for LLM response..."
+        self._update_status(status_msg)
+
+        # Log to thought log
+        if self.on_thought_log:
+            self.on_thought_log("step", f"Step {step}")
 
     def _handle_code_execution(self, data: Dict[str, Any]) -> None:
         """Handle code execution."""
@@ -110,13 +108,9 @@ class TextualUIHandler(CustomUIHandler):
             preview += "..."
         self._update_status(f"Executing: {preview}")
 
-        # Add execution details to message history
-        if self.on_execution_event:
-            # Show a brief summary in chat
-            code_summary = code[:100] if code else "code execution"
-            if len(code) > 100:
-                code_summary += "..."
-            self.on_execution_event("code_execution", code_summary)
+        # Log to thought log instead of chat
+        if self.on_thought_log:
+            self.on_thought_log("code_execution", code)
 
     def _handle_tool_call(self, data: Dict[str, Any]) -> None:
         """Handle tool call."""
@@ -129,22 +123,22 @@ class TextualUIHandler(CustomUIHandler):
         if self.on_tool_call:
             self.on_tool_call(tool_name)
 
-        # Add tool call to message history
-        if self.on_execution_event:
-            self.on_execution_event("tool_call", tool_name)
+        # Log to thought log instead of chat
+        if self.on_thought_log:
+            self.on_thought_log("tool_call", tool_name)
 
     def _handle_observation(self, data: Dict[str, Any]) -> None:
         """Handle observation."""
         observation = data.get("observation", "")
         self._update_status("Processing results...")
 
-        # Add observation to message history if meaningful
-        if self.on_execution_event and observation.strip():
+        # Log to thought log if meaningful
+        if self.on_thought_log and observation.strip():
             # Clean up observation and truncate if too long
             clean_obs = observation.replace("|", "[").strip()
             if len(clean_obs) > 150:
                 clean_obs = clean_obs[:150] + "..."
-            self.on_execution_event("observation", clean_obs)
+            self.on_thought_log("observation", clean_obs)
 
     def _handle_final_answer(self, data: Dict[str, Any]) -> None:
         """Handle final answer."""
@@ -156,10 +150,15 @@ class TextualUIHandler(CustomUIHandler):
         self._update_status(f"Error: {error}")
 
     def _handle_llm_message(self, data: Dict[str, Any]) -> None:
-        """Handle intermediate LLM message."""
+        """Handle intermediate LLM message (thoughts from agent)."""
         content = data.get("content", "")
-        if content and self.on_intermediate_message:
-            self.on_intermediate_message(content)
+        if content:
+            # Route thoughts to thought log instead of chat
+            if self.on_thought_log:
+                # Clean up the content - remove any leading/trailing whitespace
+                clean_content = content.strip()
+                if clean_content:
+                    self.on_thought_log("step", f"💭 {clean_content}")
 
     def _handle_stream_chunk(self, data: Dict[str, Any]) -> None:
         """Handle streaming chunk."""
@@ -192,7 +191,7 @@ class TextualUIHandler(CustomUIHandler):
         """Handle execution result."""
         content = data.get("content", "")
 
-        if self.on_execution_event and content.strip():
+        if self.on_thought_log and content.strip():
             # Parse execution result content
             lines = content.split("\n")
             output_lines = []
@@ -209,4 +208,4 @@ class TextualUIHandler(CustomUIHandler):
                 # Truncate if too long
                 if len(result_text) > 200:
                     result_text = result_text[:200] + "..."
-                self.on_execution_event("execution_result", result_text)
+                self.on_thought_log("execution_result", result_text)

@@ -1,19 +1,53 @@
 """Textual-based chat UI for interactive conversations."""
 
-import tempfile
 from pathlib import Path
 from typing import Optional
 
+import litellm
 from rich.console import Console
 from textual.app import App, ComposeResult
+from textual.binding import Binding
+from textual.theme import Theme
 from textual.widgets import Footer, Header, Input
 from textual.worker import Worker, WorkerState
+from textual_autocomplete import AutoComplete, DropdownItem, TargetState
 
 from tsugite.chat import ChatManager
 from tsugite.md_agents import parse_agent_file
 from tsugite.ui import CustomUILogger
 from tsugite.ui.textual_handler import TextualUIHandler
-from tsugite.ui.widgets import MessageList, StatusBar
+from tsugite.ui.widgets import MessageList, ThoughtLog
+
+# Gruvbox theme colors
+GRUVBOX_THEME = Theme(
+    name="gruvbox",
+    primary="#83a598",  # blue
+    secondary="#d3869b",  # purple
+    warning="#fabd2f",  # yellow
+    error="#fb4934",  # red
+    success="#b8bb26",  # green
+    accent="#fe8019",  # orange
+    foreground="#ebdbb2",  # fg
+    background="#282828",  # bg
+    surface="#3c3836",  # bg1
+    panel="#504945",  # bg2
+    dark=True,
+    variables={
+        "border": "#504945",
+        "border-blurred": "#3c3836",
+    },
+)
+
+# Slash commands for autocomplete
+SLASH_COMMANDS = [
+    "/help",
+    "/clear",
+    "/stats",
+    "/toggle",
+    "/markdown",
+    "/exit",
+    "/quit",
+]
 
 
 class ChatApp(App):
@@ -22,9 +56,11 @@ class ChatApp(App):
     CSS_PATH = "chat.tcss"
     TITLE = "Tsugite Chat"
     BINDINGS = [
-        ("ctrl+c", "quit", "Quit"),
-        ("ctrl+d", "quit", "Quit"),
-        ("escape", "quit", "Quit"),
+        Binding("ctrl+c", "quit", "Quit", show=False, priority=True),
+        Binding("ctrl+d", "quit", "Quit", show=False, priority=True),
+        Binding("escape", "quit", "Quit", show=True, priority=True),
+        Binding("ctrl+n", "focus_next", "Next Pane", show=True, priority=True),
+        Binding("ctrl+k", "toggle_markdown", "Markdown", show=True, priority=True),
     ]
 
     def __init__(
@@ -67,19 +103,108 @@ class ChatApp(App):
         self.current_user_message = ""
         self.streaming_message = ""
 
+        # Token and cost tracking
+        self.total_tokens = 0
+        self.total_cost = 0.0
+
     def compose(self) -> ComposeResult:
         """Compose the UI."""
-        # Update title with agent name
-        self.sub_title = f"{self.agent_name} | {self.model}"
+        # Initial subtitle with agent name
+        self._update_subtitle()
 
         yield Header(show_clock=True)
-        yield StatusBar()
+        yield ThoughtLog()
         yield MessageList()
-        yield Input(placeholder="Type your message... (Esc to quit)")
+
+        # Create input widget
+        input_widget = Input(placeholder="Type your message... (Esc to quit)")
+        yield input_widget
+
+        # Add autocomplete for slash commands only
+        yield AutoComplete(input_widget, candidates=self._get_autocomplete_candidates)
+
         yield Footer()
+
+    def _get_autocomplete_candidates(self, state: TargetState) -> list[DropdownItem]:
+        """Get autocomplete candidates - only show for slash commands.
+
+        Args:
+            state: Current target state containing input text
+
+        Returns:
+            List of dropdown items for slash commands
+        """
+        # Get current input text
+        value = state.text
+
+        # Only show suggestions if input starts with "/"
+        if not value.startswith("/"):
+            return []
+
+        # Get matching slash commands
+        matches = [cmd for cmd in SLASH_COMMANDS if cmd.startswith(value.lower())]
+        return [DropdownItem(cmd) for cmd in matches]
+
+    def _get_model_context_limit(self) -> Optional[int]:
+        """Get context limit for the current model from LiteLLM's database.
+
+        Returns:
+            Context limit in tokens, or None if unknown
+        """
+        model_name = self.model.split(":")[-1] if ":" in self.model else self.model
+
+        # Try exact match in LiteLLM's model database
+        model_info = litellm.model_cost.get(model_name)
+        if model_info and "max_input_tokens" in model_info:
+            return model_info["max_input_tokens"]
+
+        # Try fuzzy match in LiteLLM (e.g., "claude-3-5-sonnet" matches "claude-3-5-sonnet-20241022")
+        model_lower = model_name.lower()
+        for litellm_model, info in litellm.model_cost.items():
+            if model_lower in litellm_model.lower() and "max_input_tokens" in info:
+                # Skip image generation models
+                if not litellm_model.startswith(("1024", "256", "512")):
+                    return info["max_input_tokens"]
+
+        return None
+
+    def _update_subtitle(self) -> None:
+        """Update header subtitle with token/cost info."""
+        parts = [f"{self.agent_name} | {self.model}"]
+
+        if self.total_tokens > 0:
+            # Get context limit if available
+            context_limit = self._get_model_context_limit()
+
+            if context_limit:
+                # Calculate percentage used
+                usage_pct = (self.total_tokens / context_limit) * 100
+
+                # Format with warning if getting close to limit
+                if usage_pct >= 90:
+                    token_str = f"🔢 {self.total_tokens:,}/{context_limit:,} (⚠️ {usage_pct:.0f}%)"
+                elif usage_pct >= 75:
+                    token_str = f"🔢 {self.total_tokens:,}/{context_limit:,} ({usage_pct:.0f}%)"
+                else:
+                    token_str = f"🔢 {self.total_tokens:,}/{context_limit:,}"
+            else:
+                # No limit known, just show total
+                token_str = f"🔢 {self.total_tokens:,} tokens"
+
+            parts.append(token_str)
+
+        if self.total_cost > 0:
+            # Show cost with 4 decimal places
+            parts.append(f"💰 ${self.total_cost:.4f}")
+
+        self.sub_title = " | ".join(parts)
 
     def on_mount(self) -> None:
         """Called when app is mounted."""
+        # Register and apply gruvbox theme
+        self.register_theme(GRUVBOX_THEME)
+        self.theme = "gruvbox"
+
         # Create UI handler with callbacks to update Textual widgets
         self.ui_handler = TextualUIHandler(
             on_status_change=self._update_status,
@@ -88,38 +213,16 @@ class ChatApp(App):
             on_stream_complete=self._handle_stream_complete,
             on_intermediate_message=self._handle_intermediate_message,
             on_execution_event=self._handle_execution_event,
+            on_thought_log=self._handle_thought_log,
         )
 
         # Create custom logger for agent
         console = Console()
         custom_logger = CustomUILogger(ui_handler=self.ui_handler, console=console)
 
-        # Check agent config and override max_steps if too low for chat
-        agent = parse_agent_file(self.agent_path)
-        original_max_steps = agent.config.max_steps or 5
-        min_chat_steps = 10
-        adjusted_max_steps = None
-        agent_path_to_use = self.agent_path
-
-        if original_max_steps < min_chat_steps:
-            adjusted_max_steps = 30  # Increased to 30 for better chat handling
-            # Create a temporary agent file with increased max_steps
-            agent_content = self.agent_path.read_text()
-            # Replace max_steps in frontmatter
-            import re
-
-            agent_content = re.sub(
-                r"^max_steps:\s*\d+", f"max_steps: {adjusted_max_steps}", agent_content, flags=re.MULTILINE
-            )
-            # Write to temp file
-            temp_file = tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False)
-            temp_file.write(agent_content)
-            temp_file.close()
-            agent_path_to_use = Path(temp_file.name)
-
         # Initialize chat manager with custom logger
         self.manager = ChatManager(
-            agent_path=agent_path_to_use,
+            agent_path=self.agent_path,
             model_override=self.model_override,
             max_history=self.max_history,
             custom_logger=custom_logger,
@@ -133,52 +236,48 @@ class ChatApp(App):
         message_list = self.query_one(MessageList)
         message_list.add_message("status", f"💬 Chat with {self.agent_name} ({self.model})")
         message_list.add_message("status", "Type your message and press Enter to send")
-
-        # Show max_steps adjustment notice if applicable
-        if adjusted_max_steps:
-            message_list.add_message(
-                "status",
-                f"ℹ️  Note: Agent max_steps increased from {original_max_steps} to {adjusted_max_steps} for chat mode",
-            )
-
+        message_list.add_message(
+            "status", "💡 Tip: Type / to see command dropdown (↑↓ to navigate, Tab/Enter to select)"
+        )
+        message_list.add_message("status", "Type /help for all commands")
         message_list.add_separator()
 
     def _update_status(self, status: str) -> None:
-        """Update status bar (called from UI handler).
+        """Update status (called from UI handler).
 
         Args:
             status: Status message
         """
-        # Call from main thread to update reactive variable
-        self.call_from_thread(self._set_status, status)
-
-    def _set_status(self, status: str) -> None:
-        """Set status on main thread.
-
-        Args:
-            status: Status message
-        """
-        status_bar = self.query_one(StatusBar)
-        status_bar.status = status
+        # Log status to thought log instead of status bar
+        self.call_from_thread(self._add_thought_entry, "status", status)
 
     def _add_tool(self, tool_name: str) -> None:
-        """Add tool to list (called from UI handler).
+        """Add tool to thought log (called from UI handler).
 
         Args:
             tool_name: Name of tool being used
         """
-        self.call_from_thread(self._append_tool, tool_name)
+        # This is handled by thought log callback now
+        pass
 
-    def _append_tool(self, tool_name: str) -> None:
-        """Append tool on main thread.
+    def _handle_thought_log(self, entry_type: str, content: str) -> None:
+        """Handle thought log entry from UI handler.
 
         Args:
-            tool_name: Name of tool
+            entry_type: Type of thought entry (step, tool_call, code_execution, etc.)
+            content: Entry content
         """
-        status_bar = self.query_one(StatusBar)
-        tools = list(status_bar.tools_used)
-        tools.append(tool_name)
-        status_bar.tools_used = tools
+        self.call_from_thread(self._add_thought_entry, entry_type, content)
+
+    def _add_thought_entry(self, entry_type: str, content: str) -> None:
+        """Add entry to thought log on main thread.
+
+        Args:
+            entry_type: Type of entry
+            content: Entry content
+        """
+        thought_log = self.query_one(ThoughtLog)
+        thought_log.add_entry(entry_type, content)
 
     def _handle_stream_chunk(self, chunk: str) -> None:
         """Handle streaming chunk.
@@ -219,24 +318,14 @@ class ChatApp(App):
         message_list.add_message("agent", f"[Step] {content}")
 
     def _handle_execution_event(self, event_type: str, content: str) -> None:
-        """Handle execution event from UI handler.
+        """Handle execution event from UI handler - now deprecated.
 
         Args:
             event_type: Type of execution event (tool_call, code_execution, etc.)
             content: Event content
         """
-        self.call_from_thread(self._add_execution_event, event_type, content)
-
-    def _add_execution_event(self, event_type: str, content: str) -> None:
-        """Add execution event on main thread.
-
-        Args:
-            event_type: Type of execution event
-            content: Event content
-        """
-        if self.show_execution_details:
-            message_list = self.query_one(MessageList)
-            message_list.add_message(event_type, content)
+        # Execution events now go only to thought log, not to chat
+        pass
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
         """Handle user message submission.
@@ -261,12 +350,12 @@ class ChatApp(App):
         message_list = self.query_one(MessageList)
         message_list.add_message("user", message)
 
-        # Update turn counter and reset tools
+        # Update turn counter
         self.turn_count += 1
-        status_bar = self.query_one(StatusBar)
-        # Don't set status here - let UI handler set it to avoid race condition
-        # where "Turn X: Processing..." gets partially overwritten by "Step X: ..."
-        status_bar.tools_used = []
+
+        # Add separator in thought log for new turn
+        thought_log = self.query_one(ThoughtLog)
+        thought_log.add_entry("status", f"─── Turn {self.turn_count} ───")
 
         # Clear UI handler tools for new turn
         if self.ui_handler:
@@ -310,17 +399,45 @@ class ChatApp(App):
             # Get response from worker
             response = event.worker.result
 
-            # Add agent response
+            # Add agent response (clean it first - remove Thought: lines)
             message_list = self.query_one(MessageList)
             if response is not None:
-                message_list.add_message("agent", str(response))
+                clean_response = self._clean_response(str(response))
+                if clean_response:
+                    message_list.add_message("agent", clean_response)
+                else:
+                    message_list.add_message("agent", "No response received")
             else:
                 message_list.add_message("agent", "No response received")
             message_list.add_separator()
 
-            # Update status
-            status_bar = self.query_one(StatusBar)
-            status_bar.status = "Ready"
+            # Update token and cost tracking from manager
+            if self.manager:
+                stats = self.manager.get_stats()
+                self.total_tokens = stats.get("total_tokens") or 0
+                self.total_cost = stats.get("total_cost") or 0.0
+                self._update_subtitle()
+
+                # Check for context limit warnings
+                context_limit = self._get_model_context_limit()
+                if context_limit and self.total_tokens > 0:
+                    usage_pct = (self.total_tokens / context_limit) * 100
+                    if usage_pct >= 90:
+                        thought_log = self.query_one(ThoughtLog)
+                        thought_log.add_entry(
+                            "error",
+                            f"⚠️ Context usage at {usage_pct:.0f}%! Consider using /clear to reset history.",
+                        )
+                    elif usage_pct >= 75:
+                        thought_log = self.query_one(ThoughtLog)
+                        thought_log.add_entry(
+                            "status",
+                            f"Context usage at {usage_pct:.0f}% ({self.total_tokens:,}/{context_limit:,} tokens)",
+                        )
+
+            # Update thought log
+            thought_log = self.query_one(ThoughtLog)
+            thought_log.add_entry("status", "✓ Turn complete")
 
             # Focus input again
             self.query_one(Input).focus()
@@ -332,12 +449,109 @@ class ChatApp(App):
             message_list.add_message("status", f"❌ Error: {error_msg}")
             message_list.add_separator()
 
-            # Update status
-            status_bar = self.query_one(StatusBar)
-            status_bar.status = "Ready"
+            # Update thought log
+            thought_log = self.query_one(ThoughtLog)
+            thought_log.add_entry("error", f"Error: {error_msg}")
 
             # Focus input again
             self.query_one(Input).focus()
+
+    def _clean_response(self, response: str) -> str:
+        """Remove Thought: lines from response - those go to thought log only.
+
+        Args:
+            response: Raw agent response
+
+        Returns:
+            Cleaned response without Thought: lines
+        """
+        cleaned_lines = (line for line in response.split("\n") if not line.strip().lower().startswith("thought:"))
+        return "\n".join(cleaned_lines).strip()
+
+    async def _cmd_exit(self, message_list: MessageList) -> None:
+        """Exit the application."""
+        self.exit()
+
+    async def _cmd_clear(self, message_list: MessageList) -> None:
+        """Clear conversation history."""
+        if self.manager:
+            self.manager.clear_history()
+        message_list.messages = []
+        thought_log = self.query_one(ThoughtLog)
+        thought_log.clear_log()
+        self.turn_count = 0
+        self.total_tokens = 0
+        self.total_cost = 0.0
+        self._update_subtitle()
+        message_list.add_message("status", "✓ History cleared")
+
+    async def _cmd_help(self, message_list: MessageList) -> None:
+        """Show help message."""
+        message_list.add_message("status", "Available commands:")
+        message_list.add_message("status", "  /help - Show this help")
+        message_list.add_message("status", "  /clear - Clear conversation history")
+        message_list.add_message("status", "  /stats - Show session statistics")
+        message_list.add_message("status", "  /toggle - Toggle thought log visibility")
+        message_list.add_message("status", "  /markdown - Toggle markdown rendering for agent responses")
+        message_list.add_message("status", "  /exit, /quit - Exit chat")
+        message_list.add_message("status", "")
+        message_list.add_message("status", "Navigation:")
+        message_list.add_message("status", "  When dropdown visible: ↑↓ navigate, Tab/Enter select, Esc dismiss")
+        message_list.add_message("status", "  Ctrl+N - Cycle through panes (Thought Log → Messages → Input)")
+        message_list.add_message("status", "  Ctrl+P - Command palette")
+        message_list.add_message("status", "  ↑↓ - Scroll focused pane (when not in input)")
+        message_list.add_message("status", "  Esc - Exit chat (or dismiss dropdown if open)")
+
+    async def _cmd_stats(self, message_list: MessageList) -> None:
+        """Show session statistics."""
+        if not self.manager:
+            message_list.add_message("status", "❌ Chat manager not available")
+            return
+
+        stats = self.manager.get_stats()
+        message_list.add_message("status", "Session Statistics:")
+        message_list.add_message("status", f"  Total Turns: {stats['total_turns']}")
+
+        tokens = stats.get("total_tokens")
+        if tokens:
+            context_limit = self._get_model_context_limit()
+            if context_limit:
+                usage_pct = (tokens / context_limit) * 100
+                message_list.add_message("status", f"  Total Tokens: {tokens:,} / {context_limit:,} ({usage_pct:.1f}%)")
+            else:
+                message_list.add_message("status", f"  Total Tokens: {tokens:,}")
+
+        cost = stats.get("total_cost")
+        if cost and cost > 0:
+            message_list.add_message("status", f"  Total Cost: ${cost:.4f}")
+
+        duration = stats["session_duration"]
+        if duration >= 60:
+            mins = int(duration // 60)
+            secs = int(duration % 60)
+            duration_str = f"{mins}m {secs}s"
+        else:
+            duration_str = f"{duration:.0f}s"
+        message_list.add_message("status", f"  Duration: {duration_str}")
+
+    async def _cmd_toggle(self, message_list: MessageList) -> None:
+        """Toggle thought log visibility."""
+        thought_log = self.query_one(ThoughtLog)
+        current_display = thought_log.styles.display
+        if current_display == "none":
+            thought_log.styles.display = "block"
+            message_list.add_message("status", "✓ Thought log enabled")
+        else:
+            thought_log.styles.display = "none"
+            message_list.add_message("status", "✓ Thought log disabled")
+
+    async def _cmd_markdown(self, message_list: MessageList) -> None:
+        """Toggle markdown rendering."""
+        new_state = message_list.toggle_markdown()
+        if new_state:
+            message_list.add_message("status", "✓ Markdown rendering enabled")
+        else:
+            message_list.add_message("status", "✓ Markdown rendering disabled (raw view)")
 
     async def handle_command(self, command: str) -> None:
         """Handle slash commands.
@@ -346,58 +560,23 @@ class ChatApp(App):
             command: Command string starting with "/"
         """
         message_list = self.query_one(MessageList)
-
         parts = command[1:].lower().split()
         cmd = parts[0] if parts else ""
 
-        if cmd in ("exit", "quit", "q"):
-            self.exit()
+        command_handlers = {
+            "exit": self._cmd_exit,
+            "quit": self._cmd_exit,
+            "q": self._cmd_exit,
+            "clear": self._cmd_clear,
+            "help": self._cmd_help,
+            "stats": self._cmd_stats,
+            "toggle": self._cmd_toggle,
+            "markdown": self._cmd_markdown,
+        }
 
-        elif cmd == "clear":
-            # Clear history
-            if self.manager:
-                self.manager.clear_history()
-            message_list.messages = []
-            self.turn_count = 0
-            message_list.add_message("status", "✓ History cleared")
-
-        elif cmd == "help":
-            message_list.add_message("status", "Available commands:")
-            message_list.add_message("status", "  /help - Show this help")
-            message_list.add_message("status", "  /clear - Clear conversation history")
-            message_list.add_message("status", "  /stats - Show session statistics")
-            message_list.add_message("status", "  /toggle - Toggle execution details visibility")
-            message_list.add_message("status", "  /exit, /quit - Exit chat")
-            message_list.add_message("status", "  Esc or Ctrl+C - Exit chat")
-
-        elif cmd == "stats":
-            if self.manager:
-                stats = self.manager.get_stats()
-                message_list.add_message("status", "Session Statistics:")
-                message_list.add_message("status", f"  Total Turns: {stats['total_turns']}")
-                tokens = stats.get("total_tokens")
-                if tokens:
-                    message_list.add_message("status", f"  Total Tokens: {tokens:,}")
-                cost = stats.get("total_cost")
-                if cost and cost > 0:
-                    message_list.add_message("status", f"  Total Cost: ${cost:.4f}")
-                duration = stats["session_duration"]
-                if duration >= 60:
-                    mins = int(duration // 60)
-                    secs = int(duration % 60)
-                    duration_str = f"{mins}m {secs}s"
-                else:
-                    duration_str = f"{duration:.0f}s"
-                message_list.add_message("status", f"  Duration: {duration_str}")
-            else:
-                message_list.add_message("status", "❌ Chat manager not available")
-
-        elif cmd == "toggle":
-            # Toggle execution details visibility
-            self.show_execution_details = not self.show_execution_details
-            status = "enabled" if self.show_execution_details else "disabled"
-            message_list.add_message("status", f"✓ Execution details {status}")
-
+        handler = command_handlers.get(cmd)
+        if handler:
+            await handler(message_list)
         else:
             message_list.add_message("status", f"❌ Unknown command: /{cmd}")
             message_list.add_message("status", "Type /help for available commands")
@@ -405,6 +584,17 @@ class ChatApp(App):
     async def action_quit(self) -> None:
         """Quit the application."""
         self.exit()
+
+    async def action_toggle_markdown(self) -> None:
+        """Toggle markdown rendering mode."""
+        message_list = self.query_one(MessageList)
+        new_state = message_list.toggle_markdown()
+
+        # Show status message
+        if new_state:
+            message_list.add_message("status", "✓ Markdown rendering enabled")
+        else:
+            message_list.add_message("status", "✓ Markdown rendering disabled (raw view)")
 
 
 def run_textual_chat(

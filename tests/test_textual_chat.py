@@ -6,7 +6,7 @@ import pytest
 
 from tsugite.ui.base import UIEvent
 from tsugite.ui.textual_handler import TextualUIHandler
-from tsugite.ui.widgets import MessageList, StatusBar
+from tsugite.ui.widgets import MessageList
 
 
 class TestTextualUIHandler:
@@ -119,7 +119,7 @@ class TestMessageListWidget:
         widget = MessageList()
 
         assert widget.messages == []
-        assert widget.can_focus is False
+        assert widget.can_focus is True  # Changed to True to allow keyboard scrolling
 
     def test_add_user_message(self):
         """Test adding a user message."""
@@ -185,53 +185,6 @@ class TestMessageListWidget:
         widget.messages = []
 
         assert len(widget.messages) == 0
-
-
-class TestStatusBarWidget:
-    """Test StatusBar widget."""
-
-    def test_initialization(self):
-        """Test widget initializes with defaults."""
-        widget = StatusBar()
-
-        assert widget.status == "Ready"
-        assert widget.tools_used == []
-        assert widget.is_streaming is False
-        assert widget.code_executing is None
-        assert widget.can_focus is False
-
-    def test_status_change(self):
-        """Test changing status."""
-        widget = StatusBar()
-
-        widget.status = "Processing..."
-
-        assert widget.status == "Processing..."
-
-    def test_tools_used_tracking(self):
-        """Test tracking tools used."""
-        widget = StatusBar()
-
-        widget.tools_used = ["read_file", "write_file"]
-
-        assert len(widget.tools_used) == 2
-        assert "read_file" in widget.tools_used
-
-    def test_streaming_state(self):
-        """Test streaming state."""
-        widget = StatusBar()
-
-        widget.is_streaming = True
-
-        assert widget.is_streaming is True
-
-    def test_code_execution_state(self):
-        """Test code execution state."""
-        widget = StatusBar()
-
-        widget.code_executing = "print('hello')"
-
-        assert widget.code_executing == "print('hello')"
 
 
 class TestChatAppIntegration:

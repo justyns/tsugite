@@ -1,16 +1,26 @@
 """Scrollable message history widget for chat UI."""
 
+from rich.console import Group, RenderableType
+from rich.markdown import Markdown
 from rich.text import Text
 from textual.app import ComposeResult
-from textual.containers import VerticalScroll
 from textual.reactive import reactive
 from textual.widgets import Static
+
+from .base_scroll_log import BaseScrollLog
 
 
 class Message(Static):
     """Individual message display widget."""
 
-    def __init__(self, sender: str, content: str, sender_style: str = "bold", content_style: str = ""):
+    def __init__(
+        self,
+        sender: str,
+        content: str,
+        sender_style: str = "bold",
+        content_style: str = "",
+        render_markdown: bool = False,
+    ):
         """Initialize message widget.
 
         Args:
@@ -18,46 +28,65 @@ class Message(Static):
             content: Message content
             sender_style: Rich style for sender label
             content_style: Rich style for content
+            render_markdown: Whether to render content as markdown
         """
         super().__init__()
         self.sender = sender
         self.content = content
         self.sender_style = sender_style
         self.content_style = content_style
+        self.render_markdown = render_markdown
 
-    def render(self) -> Text:
+    def render(self) -> RenderableType:
         """Render the message with styling."""
-        text = Text()
-        text.append(f"{self.sender}: ", style=self.sender_style)
-        text.append(str(self.content), style=self.content_style)
-        return text
+        # Create sender label
+        sender_text = Text()
+        sender_text.append(f"{self.sender}: ", style=self.sender_style)
+
+        # Render content based on mode
+        if self.render_markdown:
+            # Use markdown rendering
+            content_rendered = Markdown(str(self.content), code_theme="monokai", inline_code_theme="monokai")
+            # Group sender and markdown content together
+            return Group(sender_text, content_rendered)
+        else:
+            # Use plain text rendering
+            sender_text.append(str(self.content), style=self.content_style)
+            return sender_text
 
 
-class MessageList(VerticalScroll):
+class MessageList(BaseScrollLog):
     """Scrollable container for chat messages."""
 
     messages = reactive([], recompose=True)
+    markdown_mode = reactive(True, recompose=True)
 
     def __init__(self):
         """Initialize message list."""
         super().__init__()
-        self.can_focus = False  # Don't steal focus from input
 
     def compose(self) -> ComposeResult:
         """Compose the message list from reactive messages."""
         for msg in self.messages:
             if msg["type"] == "user":
-                yield Message("You", msg["content"], sender_style="bold green", content_style="green")
+                yield Message("You", msg["content"], sender_style="bold #b8bb26", content_style="#b8bb26")
             elif msg["type"] == "agent":
-                yield Message("Agent", msg["content"], sender_style="bold blue", content_style="blue")
+                # Render agent messages with markdown if enabled
+                yield Message(
+                    "Agent",
+                    msg["content"],
+                    sender_style="bold #83a598",
+                    content_style="#83a598",
+                    render_markdown=self.markdown_mode,
+                )
             elif msg["type"] == "tool_call":
-                yield Message("🔧 Tool", msg["content"], sender_style="yellow", content_style="dim yellow")
+                yield Message("🔧 Tool", msg["content"], sender_style="#fabd2f", content_style="dim #fabd2f")
             elif msg["type"] == "code_execution":
-                yield Message("⚡ Code", msg["content"], sender_style="magenta", content_style="dim")
+                yield Message("⚡ Code", msg["content"], sender_style="#d3869b", content_style="dim")
             elif msg["type"] == "execution_result":
-                yield Message("📤 Result", msg["content"], sender_style="cyan", content_style="dim cyan")
+                yield Message("📤 Result", msg["content"], sender_style="#8ec07c", content_style="dim #8ec07c")
             elif msg["type"] == "observation":
-                yield Message("💡 Info", msg["content"], sender_style="blue", content_style="dim blue")
+                yield Message("💡 Info", msg["content"], sender_style="#83a598", content_style="dim #83a598")
             elif msg["type"] == "separator":
                 yield Static("─" * 40, classes="separator")
             elif msg["type"] == "status":
@@ -78,11 +107,15 @@ class MessageList(VerticalScroll):
         """Add a visual separator between exchanges."""
         self.add_message("separator", "")
 
+    def toggle_markdown(self) -> bool:
+        """Toggle markdown rendering mode.
+
+        Returns:
+            New markdown mode state
+        """
+        self.markdown_mode = not self.markdown_mode
+        return self.markdown_mode
+
     def watch_messages(self):
         """Called when messages change - auto-scroll to bottom."""
-        # Schedule scroll to happen after recompose
         self.call_after_refresh(self.scroll_end)
-
-    def on_mount(self):
-        """Called when widget is mounted - initial scroll."""
-        self.scroll_end(animate=False)

@@ -10,18 +10,50 @@ Header {
     background: $primary-background;
 }
 
-StatusBar {
-    height: 8;
-    border: solid cyan;
+/* Top pane: Thought log showing execution summaries */
+ThoughtLog {
+    height: 35%;
+    border: solid $accent;
     padding: 1;
     background: $surface;
 }
 
+ThoughtLog:focus {
+    border: double $accent;
+}
+
+ThoughtLog > .scrollbar {
+    width: 1;
+}
+
+ThoughtLog > .scrollbar:focus {
+    width: 1;
+}
+
+ThoughtEntry {
+    width: 100%;
+    height: auto;
+    margin-bottom: 0;
+}
+
+/* Bottom pane: Clean chat conversation */
 MessageList {
     height: 1fr;
-    border: solid blue;
+    border: solid $primary;
     padding: 1;
     background: $surface;
+}
+
+MessageList:focus {
+    border: double $primary;
+}
+
+MessageList > .scrollbar {
+    width: 1;
+}
+
+MessageList > .scrollbar:focus {
+    width: 1;
 }
 
 Message {
@@ -43,9 +75,13 @@ Message {
 }
 
 Input {
-    border: solid green;
+    border: solid $success;
     background: $surface;
     height: 3;
+}
+
+Input:focus {
+    border: double $success;
 }
 
 Footer {
