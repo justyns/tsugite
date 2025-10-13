@@ -667,18 +667,15 @@ def chat(
             agent_refs = [agent]
             primary_agent_path, _ = parse_agent_references(agent_refs, None, base_dir)
         else:
-            # Use default agent
-            default_agent = Path.cwd() / ".tsugite" / "default.md"
-            if not default_agent.exists():
-                # Fallback to assistant
-                default_agent = Path.cwd() / "agents" / "assistant.md"
-                if not default_agent.exists():
-                    console.print("[red]No default agent found[/red]")
-                    console.print("Specify an agent: [cyan]tsugite chat +assistant[/cyan]")
-                    raise typer.Exit(1)
-            primary_agent_path = default_agent
+            # Use built-in chat assistant by default
+            # Users can override by creating .tsugite/chat_assistant.md or agents/chat_assistant.md
+            base_dir = Path.cwd()
+            agent_refs = ["builtin-chat-assistant"]
+            primary_agent_path, _ = parse_agent_references(agent_refs, None, base_dir)
 
-        if not primary_agent_path.exists():
+        # Built-in agents have special paths starting with "<builtin-"
+        # These don't need to exist on disk, so only check exists() for real files
+        if not str(primary_agent_path).startswith("<builtin-") and not primary_agent_path.exists():
             console.print(f"[red]Agent file not found: {primary_agent_path}[/red]")
             raise typer.Exit(1)
 

@@ -131,6 +131,18 @@ def load_extended_agent(extends_ref: str, current_agent_path: Path, inheritance_
 
     # Load the parent agent WITHOUT resolving its inheritance yet
     # (we'll do that recursively in resolve_agent_inheritance)
+
+    # Handle built-in agents
+    if str(agent_path).startswith("<builtin-"):
+        from .builtin_agents import get_builtin_chat_assistant, get_builtin_default_agent
+
+        if "builtin-default" in str(agent_path):
+            return get_builtin_default_agent()
+        elif "builtin-chat-assistant" in str(agent_path):
+            return get_builtin_chat_assistant()
+        else:
+            raise ValueError(f"Unknown built-in agent: {agent_path}")
+
     if not agent_path.exists():
         raise ValueError(f"Agent file not found: {agent_path}")
 

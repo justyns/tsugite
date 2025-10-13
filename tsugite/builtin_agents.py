@@ -46,6 +46,77 @@ def get_builtin_default_agent():
     return parse_agent(BUILTIN_DEFAULT_AGENT_CONTENT, Path("<builtin-default>"))
 
 
+BUILTIN_CHAT_ASSISTANT_CONTENT = """---
+name: chat_assistant
+description: A conversational assistant that can respond naturally or use tools when needed
+model: openai:gpt-4o
+text_mode: true
+max_steps: 10
+tools:
+  - read_file
+  - write_file
+  - list_files
+  - web_search
+  - run
+---
+
+You are a helpful conversational assistant with access to tools.
+
+## How to respond:
+
+**For simple conversational questions:** Respond directly with just your Thought:
+```
+Thought: Your answer here
+```
+
+**When you need to use tools or get information:** Write a code block:
+```
+Thought: I'll use [tool] to [action]
+```python
+result = list_files(path=".")
+final_answer(result)
+```
+```
+
+## Available tools you can use:
+
+- `list_files(path=".", pattern="*")` - List files in a directory
+- `read_file(path="file.txt")` - Read file contents
+- `write_file(path="file.txt", content="...")` - Write to a file
+- `web_search(query="...")` - Search the web
+- `run(command="...")` - Run shell commands
+
+**Important:** When the user asks about files, directories, or anything requiring system information, ALWAYS use the appropriate tool with a code block!
+
+{% if chat_history %}
+## Previous Conversation
+
+{% for turn in chat_history %}
+**User:** {{ turn.user_message }}
+
+**Assistant:** {{ turn.agent_response }}
+
+{% endfor %}
+{% endif %}
+
+## Current Request
+
+{{ user_prompt }}
+"""
+
+
+def get_builtin_chat_assistant():
+    """Get the built-in chat assistant agent.
+
+    Returns:
+        Agent object with built-in chat assistant configuration
+    """
+    from .md_agents import parse_agent
+
+    # Use special path to indicate it's built-in
+    return parse_agent(BUILTIN_CHAT_ASSISTANT_CONTENT, Path("<builtin-chat-assistant>"))
+
+
 def is_builtin_agent(name: str) -> bool:
     """Check if an agent name refers to a built-in agent.
 
@@ -55,4 +126,4 @@ def is_builtin_agent(name: str) -> bool:
     Returns:
         True if the name refers to a built-in agent
     """
-    return name == "builtin-default"
+    return name in ("builtin-default", "builtin-chat-assistant")

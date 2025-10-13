@@ -76,7 +76,7 @@ def parse_agent_file(file_path: Path) -> Agent:
     This function also resolves agent inheritance if configured.
 
     Args:
-        file_path: Path to agent markdown file
+        file_path: Path to agent markdown file (can be a built-in agent with path like <builtin-name>)
 
     Returns:
         Parsed Agent with resolved inheritance
@@ -85,6 +85,17 @@ def parse_agent_file(file_path: Path) -> Agent:
         FileNotFoundError: If agent file doesn't exist
         ValueError: If circular inheritance or missing parent agent
     """
+    # Handle built-in agents (special paths like "<builtin-default>")
+    if str(file_path).startswith("<builtin-"):
+        from .builtin_agents import get_builtin_chat_assistant, get_builtin_default_agent
+
+        if "builtin-default" in str(file_path):
+            return get_builtin_default_agent()
+        elif "builtin-chat-assistant" in str(file_path):
+            return get_builtin_chat_assistant()
+        else:
+            raise ValueError(f"Unknown built-in agent: {file_path}")
+
     if not file_path.exists():
         raise FileNotFoundError(f"Agent file not found: {file_path}")
 
