@@ -6,7 +6,9 @@ WARNING: Not secure! Only use for development.
 Maintains state (variables persist between runs).
 """
 
+import ast
 import io
+import pprint
 import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -84,8 +86,66 @@ class LocalExecutor(CodeExecutor):
 
         self.namespace["final_answer"] = final_answer
 
+    def _split_code_for_last_expr(self, code: str) -> tuple[str, Optional[str]]:
+        """Split code into setup and last expression if applicable.
+
+        If the last statement is an expression, return (setup, last_expr).
+        Otherwise, return (code, None).
+
+        Args:
+            code: Python code to analyze
+
+        Returns:
+            Tuple of (setup_code, last_expression_or_none)
+        """
+        try:
+            tree = ast.parse(code)
+            if not tree.body:
+                return (code, None)
+
+            # Check if last statement is an expression
+            last_node = tree.body[-1]
+            if not isinstance(last_node, ast.Expr):
+                return (code, None)
+
+            # Split: everything except last statement vs last statement
+            if len(tree.body) == 1:
+                # Only one statement and it's an expression
+                setup_code = ""
+                last_expr = ast.unparse(last_node.value)  # Unparse the expression itself
+            else:
+                # Multiple statements - use ast.unparse to reconstruct
+                setup_tree = ast.Module(body=tree.body[:-1], type_ignores=[])
+                setup_code = ast.unparse(setup_tree)
+                last_expr = ast.unparse(last_node.value)
+
+            return (setup_code, last_expr)
+
+        except SyntaxError:
+            # Code has syntax errors, let exec handle it normally
+            return (code, None)
+
+    def _format_value(self, value: Any) -> str:
+        """Format a value for display.
+
+        Uses pprint for complex objects, repr for simple ones.
+
+        Args:
+            value: Value to format
+
+        Returns:
+            Formatted string representation
+        """
+        # For dicts and lists, use pprint for nice formatting
+        if isinstance(value, (dict, list, tuple, set)):
+            return pprint.pformat(value, width=100, compact=False)
+        else:
+            return repr(value)
+
     async def execute(self, code: str) -> ExecutionResult:
         """Execute code using exec().
+
+        Automatically displays the value of the last expression (REPL-like behavior).
 
         Args:
             code: Python code to execute
@@ -108,8 +168,24 @@ class LocalExecutor(CodeExecutor):
             sys.stdout = stdout_capture
             sys.stderr = stderr_capture
 
-            # Execute code in shared namespace
-            exec(code, self.namespace)
+            # Check if we should handle the last expression specially
+            setup_code, last_expr = self._split_code_for_last_expr(code)
+
+            if last_expr:
+                # Execute setup code first (if any)
+                if setup_code.strip():
+                    exec(setup_code, self.namespace)
+
+                # Evaluate the last expression and capture its value
+                result = eval(last_expr, self.namespace)
+
+                # Display the result if it's not None
+                if result is not None:
+                    formatted = self._format_value(result)
+                    print(formatted)
+            else:
+                # No special handling needed, execute normally
+                exec(code, self.namespace)
 
             # Get output
             output = stdout_capture.getvalue()

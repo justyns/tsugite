@@ -68,6 +68,7 @@ def run(
     ),
     plain: bool = typer.Option(False, "--plain", help="Plain output without panels/boxes (copy-paste friendly)"),
     stream: bool = typer.Option(False, "--stream", help="Stream LLM responses in real-time"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show execution plan without running agent"),
     trust_mcp_code: bool = typer.Option(False, "--trust-mcp-code", help="Trust remote code from MCP servers"),
     attachment: Optional[List[str]] = typer.Option(
         None, "-f", "--attachment", help="Attachment(s) to include (repeatable)"
@@ -348,11 +349,24 @@ def run(
             raise typer.Exit(1)
 
         # Detect if this is a multi-step agent
-        from tsugite.agent_runner import run_multistep_agent
+        from tsugite.agent_runner import preview_multistep_agent, run_multistep_agent
         from tsugite.md_agents import has_step_directives
 
         agent_text = agent_file.read_text()
         is_multistep = has_step_directives(agent_text)
+
+        # Handle dry-run mode
+        if dry_run:
+            if is_multistep:
+                preview_multistep_agent(
+                    agent_path=agent_file,
+                    prompt=prompt,
+                    console=console,
+                )
+            else:
+                console.print("[yellow]Dry-run mode is for multi-step agents only.[/yellow]")
+                console.print("[dim]This is a single-step agent. Use --debug to see the rendered prompt.[/dim]")
+            return
 
         # Choose executor function
         executor = run_multistep_agent if is_multistep else run_agent

@@ -3,6 +3,7 @@
 import asyncio
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -19,6 +20,20 @@ from tsugite.utils import is_interactive
 
 # Console for warnings and debug output (stderr)
 _stderr_console = Console(file=sys.stderr, no_color=False)
+
+
+@dataclass
+class StepMetrics:
+    """Metrics for a single step execution."""
+
+    step_name: str
+    step_number: int
+    duration: float  # seconds
+    tokens_used: Optional[int] = None
+    cost: Optional[float] = None
+    status: str = "success"  # success, failed, skipped
+    error: Optional[str] = None
+
 
 TSUGITE_DEFAULT_INSTRUCTIONS = (
     "You are operating inside the Tsugite micro-agent runtime. Follow the rendered task faithfully, use the available "
@@ -638,6 +653,7 @@ def run_multistep_agent(
 
     # Execute each step sequentially
     final_result = None
+    step_metrics: List[StepMetrics] = []
 
     for i, step in enumerate(steps, 1):
         # Add step information to context for this step
@@ -651,6 +667,7 @@ def run_multistep_agent(
         # Retry loop
         max_attempts = step.max_retries + 1
         errors = []
+        step_start_time = time.time()
 
         for attempt in range(max_attempts):
             # Add retry context variables
@@ -708,9 +725,40 @@ def run_multistep_agent(
                 if attempt == max_attempts - 1:
                     if custom_logger and hasattr(custom_logger, "ui_handler"):
                         custom_logger.ui_handler.clear_multistep_context()
-                    raise RuntimeError(
-                        f"Step '{step.name}' failed after {max_attempts} attempts. Errors: {'; '.join(errors)}"
+
+                    # Build detailed error message for rendering failure
+                    available_vars = list(step_context.keys())
+                    previous_step = steps[i - 2].name if i > 1 else "None"
+
+                    error_lines = [
+                        "",
+                        "Step Template Rendering Failed",
+                        "━" * 60,
+                        f"Step: {step.name} ({i}/{len(steps)})",
+                        f"Previous Step: {previous_step}",
+                        f"Attempts: {max_attempts}",
+                        "",
+                        f"Context Variables: {', '.join(available_vars)}",
+                        "",
+                        "Errors:",
+                    ]
+
+                    for idx, err in enumerate(errors, 1):
+                        error_lines.append(f"  Attempt {idx}: {err}")
+
+                    error_lines.extend(
+                        [
+                            "━" * 60,
+                            "",
+                            "To debug:",
+                            "  1. Check for undefined variables in step template",
+                            "  2. Verify previous steps assigned expected variables",
+                            "  3. Run with --debug to see full context",
+                            "",
+                        ]
                     )
+
+                    raise RuntimeError("\n".join(error_lines))
 
                 if step.retry_delay > 0:
                     time.sleep(step.retry_delay)
@@ -734,8 +782,9 @@ def run_multistep_agent(
 
             # Execute this step as a full agent run (wrapping async call)
             try:
-                step_result = asyncio.run(
-                    _execute_agent_with_prompt(
+                # Wrap execution with timeout if specified
+                async def execute_step():
+                    coro = _execute_agent_with_prompt(
                         rendered_prompt=rendered_step_prompt,
                         agent_config=agent.config,
                         model_override=model_override,
@@ -747,7 +796,13 @@ def run_multistep_agent(
                         injectable_vars=injectable_vars,
                         stream=stream,
                     )
-                )
+
+                    if step.timeout:
+                        return await asyncio.wait_for(coro, timeout=step.timeout)
+                    else:
+                        return await coro
+
+                step_result = asyncio.run(execute_step())
 
                 final_result = step_result
 
@@ -770,19 +825,100 @@ def run_multistep_agent(
                 elif not debug:
                     _stderr_console.print(f"[green]{step_header} Complete[/green]")
 
+                # Record metrics for successful step
+                step_duration = time.time() - step_start_time
+                step_metrics.append(
+                    StepMetrics(
+                        step_name=step.name,
+                        step_number=i,
+                        duration=step_duration,
+                        status="success",
+                    )
+                )
+
                 # Success - break retry loop
                 break
+
+            except asyncio.TimeoutError:
+                error_msg = f"Step timed out after {step.timeout} seconds"
+                errors.append(error_msg)
 
             except Exception as e:
                 error_msg = str(e)
                 errors.append(error_msg)
 
+                # Check if we should continue despite the error
+                if step.continue_on_error:
+                    # Log warning but continue execution
+                    if custom_logger and hasattr(custom_logger, "ui_handler"):
+                        custom_logger.ui_handler.clear_multistep_context()
+
+                    warning_msg = f"⚠ Step '{step.name}' failed but continuing (continue_on_error=true)"
+                    if custom_logger:
+                        custom_logger.console.print(f"[yellow]{warning_msg}[/yellow]")
+                        custom_logger.console.print(f"[dim]Error: {error_msg}[/dim]")
+                    else:
+                        _stderr_console.print(f"[yellow]{warning_msg}[/yellow]")
+                        _stderr_console.print(f"[dim]Error: {error_msg}[/dim]")
+
+                    # Assign None to the variable if specified
+                    if step.assign_var:
+                        step_context[step.assign_var] = None
+                        if debug:
+                            _stderr_console.print(f"[dim]Assigned None to variable: {step.assign_var}[/dim]")
+
+                    # Record metrics for skipped step
+                    step_duration = time.time() - step_start_time
+                    step_metrics.append(
+                        StepMetrics(
+                            step_name=step.name,
+                            step_number=i,
+                            duration=step_duration,
+                            status="skipped",
+                            error=error_msg,
+                        )
+                    )
+
+                    # Break retry loop and move to next step
+                    break
+
                 if attempt == max_attempts - 1:
                     if custom_logger and hasattr(custom_logger, "ui_handler"):
                         custom_logger.ui_handler.clear_multistep_context()
-                    raise RuntimeError(
-                        f"Step '{step.name}' failed after {max_attempts} attempts. Errors: {'; '.join(errors)}"
+
+                    # Build detailed error message with context
+                    available_vars = list(injectable_vars.keys())
+                    previous_step = steps[i - 2].name if i > 1 else "None"
+
+                    error_lines = [
+                        "",
+                        "Step Execution Failed",
+                        "━" * 60,
+                        f"Step: {step.name} ({i}/{len(steps)})",
+                        f"Previous Step: {previous_step}",
+                        f"Attempts: {max_attempts}",
+                        "",
+                        f"Available Variables: {', '.join(available_vars) if available_vars else 'None'}",
+                        "",
+                        "Errors:",
+                    ]
+
+                    for idx, err in enumerate(errors, 1):
+                        error_lines.append(f"  Attempt {idx}: {err}")
+
+                    error_lines.extend(
+                        [
+                            "━" * 60,
+                            "",
+                            "To debug:",
+                            "  1. Run with --debug to see rendered prompts",
+                            "  2. Check variable values in previous steps",
+                            "  3. Verify step dependencies are correct",
+                            "",
+                        ]
                     )
+
+                    raise RuntimeError("\n".join(error_lines))
 
                 if step.retry_delay > 0:
                     time.sleep(step.retry_delay)
@@ -792,4 +928,195 @@ def run_multistep_agent(
                 elif not debug:
                     _stderr_console.print(f"[yellow]Step '{step.name}' failed: {error_msg}[/yellow]")
 
+    # Display metrics summary
+    if step_metrics:
+        _display_step_metrics(step_metrics, custom_logger if custom_logger else None)
+
     return final_result or ""
+
+
+def _display_step_metrics(metrics: List[StepMetrics], custom_logger: Optional[Any] = None):
+    """Display step execution metrics in a table."""
+    from rich.table import Table
+
+    console = custom_logger.console if custom_logger and hasattr(custom_logger, "console") else _stderr_console
+
+    table = Table(title="Multi-Step Execution Metrics", show_header=True)
+    table.add_column("Step", style="cyan")
+    table.add_column("Duration", justify="right", style="yellow")
+    table.add_column("Status", justify="center")
+
+    total_duration = 0
+    successful = 0
+    failed = 0
+    skipped = 0
+
+    for m in metrics:
+        status_color = {
+            "success": "green",
+            "failed": "red",
+            "skipped": "yellow",
+        }.get(m.status, "white")
+
+        status_symbol = {
+            "success": "✓",
+            "failed": "✗",
+            "skipped": "⚠",
+        }.get(m.status, "?")
+
+        table.add_row(
+            f"{m.step_number}. {m.step_name}",
+            f"{m.duration:.1f}s",
+            f"[{status_color}]{status_symbol} {m.status}[/{status_color}]",
+        )
+
+        total_duration += m.duration
+        if m.status == "success":
+            successful += 1
+        elif m.status == "failed":
+            failed += 1
+        elif m.status == "skipped":
+            skipped += 1
+
+    console.print()
+    console.print(table)
+
+    # Summary line
+    summary_parts = []
+    summary_parts.append(f"Total: {total_duration:.1f}s")
+    if successful > 0:
+        summary_parts.append(f"[green]Success: {successful}[/green]")
+    if skipped > 0:
+        summary_parts.append(f"[yellow]Skipped: {skipped}[/yellow]")
+    if failed > 0:
+        summary_parts.append(f"[red]Failed: {failed}[/red]")
+
+    console.print(" | ".join(summary_parts))
+    console.print()
+
+
+def preview_multistep_agent(
+    agent_path: Path,
+    prompt: str,
+    context: Optional[Dict[str, Any]] = None,
+    console: Optional[Any] = None,
+):
+    """Preview multi-step agent execution without running it.
+
+    Shows the execution plan including steps, dependencies, attributes,
+    and estimated resource usage.
+
+    Args:
+        agent_path: Path to agent markdown file
+        prompt: User prompt/task for the agent
+        context: Additional context variables
+        console: Rich Console instance (defaults to stderr console)
+    """
+    import re
+
+    from rich.table import Table
+
+    # Use provided console or default to stderr
+    if console is None:
+        console = _stderr_console
+
+    # Parse agent
+    try:
+        agent_text = agent_path.read_text()
+        agent = parse_agent(agent_text, agent_path)
+    except Exception as e:
+        console.print(f"[red]Error parsing agent: {e}[/red]")
+        return
+
+    # Extract steps
+    from tsugite.md_agents import extract_step_directives, has_step_directives
+
+    if not has_step_directives(agent.content):
+        console.print("[yellow]This is a single-step agent (no step directives).[/yellow]")
+        console.print("[dim]Dry-run preview is for multi-step agents only.[/dim]")
+        return
+
+    try:
+        preamble, steps = extract_step_directives(agent.content)
+    except Exception as e:
+        console.print(f"[red]Error extracting steps: {e}[/red]")
+        return
+
+    # Display header
+    console.print()
+    console.print("[bold]Dry-Run Preview: Multi-Step Agent[/bold]")
+    console.print("═" * 60)
+    console.print(f"Agent: {agent.config.name}")
+    console.print(f"File: {agent_path.name}")
+    console.print(f"Prompt: {prompt}")
+    console.print(f"Steps: {len(steps)}")
+    console.print(f"Model: {agent.config.model or 'default'}")
+    console.print(f"Tools: {', '.join(agent.config.tools) if agent.config.tools else 'None'}")
+    console.print()
+
+    # Show steps in table format
+    table = Table(title="Execution Plan", show_header=True)
+    table.add_column("#", style="cyan", width=3)
+    table.add_column("Step Name", style="green")
+    table.add_column("Attributes", style="yellow")
+    table.add_column("Dependencies", style="dim")
+
+    for i, step in enumerate(steps, 1):
+        # Collect attributes
+        attrs = []
+        if step.assign_var:
+            attrs.append(f"→ {step.assign_var}")
+        if step.max_retries > 0:
+            attrs.append(f"retries:{step.max_retries}")
+        if step.timeout:
+            attrs.append(f"timeout:{step.timeout}s")
+        if step.continue_on_error:
+            attrs.append("continue_on_error")
+        if step.retry_delay > 0:
+            attrs.append(f"delay:{step.retry_delay}s")
+
+        attr_str = ", ".join(attrs) if attrs else "—"
+
+        # Find dependencies (variables referenced in step content)
+        variables_used = set(re.findall(r"\{\{\s*(\w+)", step.content))
+        # Filter out template helpers and metadata
+        metadata_vars = {
+            "user_prompt",
+            "task_summary",
+            "step_number",
+            "step_name",
+            "total_steps",
+            "now",
+            "today",
+            "is_interactive",
+            "is_retry",
+            "retry_count",
+        }
+        real_deps = variables_used - metadata_vars
+
+        deps_str = ", ".join(sorted(real_deps)) if real_deps else "—"
+
+        table.add_row(str(i), step.name, attr_str, deps_str)
+
+    console.print(table)
+    console.print()
+
+    # Warnings
+    warnings = []
+    for step in steps:
+        if step.timeout and step.timeout < 30:
+            warnings.append(f"⚠ Step '{step.name}' has short timeout ({step.timeout}s)")
+        if step.continue_on_error and not step.assign_var:
+            warnings.append(f"⚠ Step '{step.name}' has continue_on_error but no assign variable")
+
+    if warnings:
+        console.print("[bold]Warnings:[/bold]")
+        console.print("─" * 60)
+        for warning in warnings:
+            console.print(f"  [yellow]{warning}[/yellow]")
+        console.print()
+
+    console.print("━" * 60)
+    console.print("[dim]Note: This is a preview only. No tools will be executed.[/dim]")
+    console.print("[dim]Remove --dry-run to execute the agent.[/dim]")
+    console.print()

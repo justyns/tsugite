@@ -260,6 +260,8 @@ class StepDirective:
     model_kwargs: Dict[str, Any] = field(default_factory=dict)
     max_retries: int = 0
     retry_delay: float = 0.0
+    continue_on_error: bool = False
+    timeout: Optional[int] = None  # Timeout in seconds, None = no timeout
     start_pos: int = 0
     end_pos: int = 0
 
@@ -394,6 +396,18 @@ def extract_step_directives(content: str, include_preamble: bool = True) -> tupl
         if delay_match:
             retry_delay = float(delay_match.group(2))
 
+        # Parse continue_on_error
+        continue_on_error = False
+        continue_match = re.search(r'continue_on_error=(["\']?)(true|false)\1', args, re.IGNORECASE)
+        if continue_match:
+            continue_on_error = continue_match.group(2).lower() == "true"
+
+        # Parse timeout
+        timeout = None
+        timeout_match = re.search(r'timeout=(["\']?)([0-9]+)\1', args)
+        if timeout_match:
+            timeout = int(timeout_match.group(2))
+
         steps.append(
             StepDirective(
                 name=step_name,
@@ -402,6 +416,8 @@ def extract_step_directives(content: str, include_preamble: bool = True) -> tupl
                 model_kwargs=model_kwargs,
                 max_retries=max_retries,
                 retry_delay=retry_delay,
+                continue_on_error=continue_on_error,
+                timeout=timeout,
                 start_pos=start_pos,
                 end_pos=end_pos,
             )

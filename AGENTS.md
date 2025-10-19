@@ -308,8 +308,171 @@ Write {{ summary }} to file.
 **Step parameters:**
 
 ```markdown
-<!-- tsu:step name="..." assign="..." temperature="0.7" reasoning_effort="high" -->
+<!-- tsu:step name="..." assign="..." temperature="0.7" reasoning_effort="high" continue_on_error="true" timeout="30" -->
 ```
+
+### Multi-Step Agent Reliability Features
+
+Phase 1 improvements for robust long-running agents:
+
+#### Better Error Messages
+
+When a step fails, errors now include:
+- Step number and name
+- Previous step context
+- Available variables
+- All retry attempts
+- Debugging suggestions
+
+Example error:
+```
+Step Execution Failed
+────────────────────────────────────────────────────────────
+Step: fetch_data (2/5)
+Previous Step: initialize
+Attempts: 3
+
+Available Variables: config, user_id
+
+Errors:
+  Attempt 1: Connection timeout after 30s
+  Attempt 2: Rate limit exceeded
+  Attempt 3: Network unreachable
+
+💡 Tips:
+  - Check if required variables are set
+  - Verify previous step completed successfully
+  - Review step dependencies
+```
+
+#### Continue on Error
+
+Allow steps to fail gracefully without aborting the entire agent. Failed step assigns `None` to its variable.
+
+```markdown
+<!-- tsu:step name="optional_fetch" assign="extra_data" continue_on_error="true" -->
+Fetch supplementary data that's nice to have but not critical.
+
+<!-- tsu:step name="process" -->
+Process results. Extra data: {{ extra_data or "Not available" }}
+```
+
+**Use cases:**
+- Optional data enrichment
+- Non-critical API calls
+- Best-effort operations
+- Partial results acceptable
+
+**Behavior:**
+- Step executes normally
+- On failure, assigns `None` to variable
+- Logs warning with error details
+- Continues to next step
+
+#### Per-Step Timeouts
+
+Prevent individual steps from hanging indefinitely. Timeout in seconds.
+
+```markdown
+<!-- tsu:step name="quick_check" timeout="10" -->
+Fast operation that should complete quickly.
+
+<!-- tsu:step name="web_scrape" timeout="60" -->
+Fetch data from potentially slow endpoints.
+
+<!-- tsu:step name="analysis" timeout="300" -->
+Deep analysis that needs more time.
+```
+
+**Behavior:**
+- Step canceled after timeout
+- Raises `asyncio.TimeoutError`
+- Respects `continue_on_error` if set
+- No timeout = unlimited (default)
+
+**Combine features:**
+```markdown
+<!-- tsu:step name="external_api" assign="api_data" timeout="30" continue_on_error="true" -->
+Fetch from external API with 30s timeout. Continue if it fails.
+```
+
+#### Dry-Run Mode
+
+Preview agent execution without running. Shows execution plan, dependencies, and cost estimates.
+
+```bash
+tsugite run +my_agent "task" --dry-run
+```
+
+**Output:**
+```
+Agent: my_agent
+Model: anthropic:claude-3-5-sonnet
+Total Steps: 5
+
+Step Execution Plan:
+──────────────────────────────────────────────────────────────
+Step 1: initialize
+  Variables: config
+  Dependencies: None
+  Timeout: None
+  Continue on error: No
+
+Step 2: fetch_data
+  Variables: raw_data
+  Dependencies: config
+  Timeout: 60s
+  Continue on error: No
+
+Step 3: process
+  Variables: processed
+  Dependencies: raw_data
+  Timeout: None
+  Continue on error: No
+
+[...]
+
+Estimated Cost: ~$0.15 (based on ~60K tokens @ $3/MTok)
+Estimated Duration: ~3-5 minutes
+```
+
+**Use for:**
+- Validating step dependencies
+- Estimating costs before long runs
+- Debugging agent structure
+- Planning resource allocation
+
+#### Step Metrics
+
+Automatic performance tracking displayed after execution:
+
+```
+Step Execution Metrics
+──────────────────────────────────────────────────────────────
+Step              Duration    Status    Error
+──────────────────────────────────────────────────────────────
+initialize           2.3s   success
+fetch_data          45.1s   success
+optional_api         0.0s   skipped   Connection refused
+process             12.8s   success
+generate_report     34.2s   success
+──────────────────────────────────────────────────────────────
+Total              94.4s
+──────────────────────────────────────────────────────────────
+```
+
+**Metrics tracked:**
+- Step name and number
+- Duration in seconds
+- Status (success, failed, skipped)
+- Error message if failed/skipped
+- Total execution time
+
+**Use for:**
+- Identifying bottlenecks
+- Optimizing slow steps
+- Tracking agent performance
+- Debugging execution flow
 
 ## Directives
 

@@ -204,3 +204,110 @@ async def test_local_executor_complex_data_types():
 
     assert result.error is None
     assert "15" in result.output
+
+
+@pytest.mark.asyncio
+async def test_local_executor_last_expression_simple_value():
+    """Test that last expression value is automatically displayed (REPL-like)."""
+    executor = LocalExecutor()
+
+    # Code ending with a simple expression
+    result = await executor.execute("x = 42\nx")
+
+    assert result.error is None
+    assert "42" in result.output
+
+
+@pytest.mark.asyncio
+async def test_local_executor_last_expression_dict():
+    """Test that last expression dict is pretty-printed."""
+    executor = LocalExecutor()
+
+    # Code ending with a dict expression
+    result = await executor.execute("data = {'name': 'test', 'value': 123}\ndata")
+
+    assert result.error is None
+    assert "'name': 'test'" in result.output
+    assert "'value': 123" in result.output
+
+
+@pytest.mark.asyncio
+async def test_local_executor_last_expression_list():
+    """Test that last expression list is pretty-printed."""
+    executor = LocalExecutor()
+
+    # Code ending with a list expression
+    result = await executor.execute("items = [1, 2, 3, 4, 5]\nitems")
+
+    assert result.error is None
+    assert "[1, 2, 3, 4, 5]" in result.output
+
+
+@pytest.mark.asyncio
+async def test_local_executor_last_expression_none_not_displayed():
+    """Test that None values are not displayed."""
+    executor = LocalExecutor()
+
+    # Code ending with None expression
+    result = await executor.execute("x = None\nx")
+
+    assert result.error is None
+    # Should be empty - None should not be displayed
+    assert result.output == ""
+
+
+@pytest.mark.asyncio
+async def test_local_executor_no_last_expression():
+    """Test that code ending with statement (not expression) works normally."""
+    executor = LocalExecutor()
+
+    # Code ending with a statement (assignment), not expression
+    result = await executor.execute("x = 5\ny = 10")
+
+    assert result.error is None
+    # Should be empty - no expression to display
+    assert result.output == ""
+
+
+@pytest.mark.asyncio
+async def test_local_executor_last_expression_with_print():
+    """Test that both print and last expression work together."""
+    executor = LocalExecutor()
+
+    # Code with print statement and ending with expression
+    result = await executor.execute("print('Debug: calculating')\nx = 5 + 3\nx")
+
+    assert result.error is None
+    assert "Debug: calculating" in result.output
+    assert "8" in result.output
+
+
+@pytest.mark.asyncio
+async def test_local_executor_last_expression_function_call():
+    """Test that function call as last expression displays result."""
+    executor = LocalExecutor()
+
+    # Define a function and call it as last expression
+    code = """
+def get_data():
+    return {'status': 'success', 'value': 42}
+
+get_data()
+"""
+    result = await executor.execute(code)
+
+    assert result.error is None
+    assert "'status': 'success'" in result.output
+    assert "'value': 42" in result.output
+
+
+@pytest.mark.asyncio
+async def test_local_executor_single_expression():
+    """Test that a single expression is displayed."""
+    executor = LocalExecutor()
+
+    # Just a single expression, no setup
+    result = await executor.execute("2 + 2")
+
+    assert result.error is None
+    assert "4" in result.output
