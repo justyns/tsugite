@@ -557,8 +557,9 @@ async def test_agent_custom_executor():
     """Test agent can use custom executor."""
 
     # Create mock executor
-    mock_executor = AsyncMock()
+    mock_executor = MagicMock()
     mock_executor.execute = AsyncMock(return_value=MagicMock(output="custom output", error=None, final_answer=42))
+    mock_executor.namespace = {}
 
     with patch("tsugite.core.agent.litellm") as mock_litellm:
         mock_litellm.acompletion = AsyncMock(

@@ -47,14 +47,14 @@ def custom_agent_ui(
     )
     logger = CustomUILogger(ui_handler, console)
 
-    # Store console and ui_handler in thread-local for ask_user integration
-    set_ui_context(console=console, progress=None, ui_handler=ui_handler)
-
     try:
         if show_progress:
+            # progress_context() will call set_ui_context() with the progress instance
             with ui_handler.progress_context():
                 yield logger
         else:
+            # No progress, so set ui_context here without progress
+            set_ui_context(console=console, progress=None, ui_handler=ui_handler)
             yield logger
     finally:
         clear_ui_context()

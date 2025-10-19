@@ -201,6 +201,83 @@ Config: {{ config }}
 
 Failures assign `None`. Guard with `{% if config %}`.
 
+## Interactive User Input
+
+Tsugite provides two tools for collecting user input during agent execution, available only in interactive mode:
+
+### ask_user - Single Question
+
+Ask one question at a time:
+
+```python
+# Text input
+name = ask_user(question="What is your name?", question_type="text")
+
+# Yes/No question
+save = ask_user(question="Save to file?", question_type="yes_no")
+# Returns: "yes" or "no"
+
+# Multiple choice (arrow key navigation)
+format = ask_user(
+    question="Choose format:",
+    question_type="choice",
+    options=["json", "txt", "md"]
+)
+```
+
+**Question types:**
+- `text`: Freeform text input
+- `yes_no`: Binary yes/no question
+- `choice`: Multiple choice with arrow key navigation (requires `options` list)
+
+### ask_user_batch - Multiple Questions
+
+For better UX when collecting multiple related inputs, use `ask_user_batch` to ask all questions at once:
+
+```python
+responses = ask_user_batch(questions=[
+    {"id": "name", "question": "What is your name?", "type": "text"},
+    {"id": "email", "question": "Email address?", "type": "text"},
+    {"id": "save", "question": "Save to file?", "type": "yes_no"},
+    {
+        "id": "format",
+        "question": "Choose format:",
+        "type": "choice",
+        "options": ["json", "txt", "md"]
+    }
+])
+
+# Access responses by ID
+user_name = responses["name"]
+user_email = responses["email"]
+should_save = responses["save"]  # "yes" or "no"
+file_format = responses["format"]
+```
+
+**Question structure:**
+- `id` (required): Unique identifier used as key in response dict
+- `question` (required): The question text
+- `type` (required): Question type - "text", "yes_no", or "choice"
+- `options` (optional): List of options for "choice" type (minimum 2)
+
+**Features:**
+- Arrow key navigation (↑/↓) or vim-style (j/k) for choice questions
+- Colored interface with highlighting
+- Protection against accidental double-Enter
+- Returns dict mapping question IDs to responses
+- Validates question structure and enforces unique IDs
+
+**Agent configuration:**
+
+```yaml
+---
+name: user_registration
+tools: [ask_user_batch, write_file]
+---
+```
+
+Interactive tools are automatically filtered out in non-interactive mode (e.g., CI/headless). Check `{{ is_interactive }}` variable in templates.
+
 ## Multi-Step Agents
 
 ```markdown

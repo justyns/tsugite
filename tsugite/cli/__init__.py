@@ -441,16 +441,18 @@ def run(
                 if use_plain_output:
                     # Use PlainUIHandler for copy-paste friendly output
                     custom_logger = create_plain_logger()
-                    result = executor(
-                        agent_path=agent_file,
-                        prompt=prompt,
-                        model_override=model,
-                        debug=debug,
-                        custom_logger=custom_logger,
-                        trust_mcp_code=trust_mcp_code,
-                        delegation_agents=delegation_agents,
-                        stream=stream,
-                    )
+                    # Wrap in progress_context to register UI handler for interactive tools
+                    with custom_logger.ui_handler.progress_context():
+                        result = executor(
+                            agent_path=agent_file,
+                            prompt=prompt,
+                            model_override=model,
+                            debug=debug,
+                            custom_logger=custom_logger,
+                            trust_mcp_code=trust_mcp_code,
+                            delegation_agents=delegation_agents,
+                            stream=stream,
+                        )
                 else:
                     # Use custom UI with panels and formatting
                     with custom_agent_ui(

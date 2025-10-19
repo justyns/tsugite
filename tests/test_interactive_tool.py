@@ -10,11 +10,12 @@ from tsugite.tools import call_tool
 
 @pytest.fixture
 def interactive_tool(reset_tool_registry):
-    """Register interactive tool for testing."""
+    """Register interactive tools for testing."""
     from tsugite.tools import tool
-    from tsugite.tools.interactive import ask_user
+    from tsugite.tools.interactive import ask_user, ask_user_batch
 
     tool(ask_user)
+    tool(ask_user_batch)
 
 
 def test_ask_user_text_interactive(interactive_tool, monkeypatch):
@@ -189,3 +190,207 @@ def test_ask_user_choice_with_many_options(interactive_tool, monkeypatch):
         )
 
     assert result == "Option 7"
+
+
+# Tests for ask_user_batch
+
+
+def test_ask_user_batch_mixed_types(interactive_tool, monkeypatch):
+    """Test batch questions with mixed types (text, yes_no, choice)."""
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
+    questions = [
+        {"id": "name", "question": "What is your name?", "type": "text"},
+        {"id": "save", "question": "Save to file?", "type": "yes_no"},
+        {"id": "format", "question": "Choose format:", "type": "choice", "options": ["json", "txt", "md"]},
+    ]
+
+    # Mock each interaction type
+    with (
+        patch("tsugite.tools.interactive.Prompt.ask", return_value="Alice"),
+        patch("tsugite.tools.interactive.Confirm.ask", return_value=True),
+        patch("tsugite.tools.interactive.questionary.select") as mock_select,
+    ):
+        mock_select.return_value.ask.return_value = "json"
+        result = call_tool("ask_user_batch", questions=questions)
+
+    assert result == {"name": "Alice", "save": "yes", "format": "json"}
+    assert len(result) == 3
+
+
+def test_ask_user_batch_all_text(interactive_tool, monkeypatch):
+    """Test batch with all text questions."""
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
+    questions = [
+        {"id": "first_name", "question": "First name?", "type": "text"},
+        {"id": "last_name", "question": "Last name?", "type": "text"},
+        {"id": "email", "question": "Email?", "type": "text"},
+    ]
+
+    # Mock Prompt.ask to return different values for each call
+    responses = ["John", "Doe", "john@example.com"]
+    with patch("tsugite.tools.interactive.Prompt.ask", side_effect=responses):
+        result = call_tool("ask_user_batch", questions=questions)
+
+    assert result == {
+        "first_name": "John",
+        "last_name": "Doe",
+        "email": "john@example.com",
+    }
+
+
+def test_ask_user_batch_all_yes_no(interactive_tool, monkeypatch):
+    """Test batch with all yes/no questions."""
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
+    questions = [
+        {"id": "agree_terms", "question": "Agree to terms?", "type": "yes_no"},
+        {"id": "subscribe", "question": "Subscribe to newsletter?", "type": "yes_no"},
+        {"id": "public", "question": "Make profile public?", "type": "yes_no"},
+    ]
+
+    # Mock Confirm.ask to return different values
+    with patch("tsugite.tools.interactive.Confirm.ask", side_effect=[True, False, True]):
+        result = call_tool("ask_user_batch", questions=questions)
+
+    assert result == {
+        "agree_terms": "yes",
+        "subscribe": "no",
+        "public": "yes",
+    }
+
+
+def test_ask_user_batch_all_choice(interactive_tool, monkeypatch):
+    """Test batch with all choice questions."""
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
+    questions = [
+        {"id": "color", "question": "Favorite color?", "type": "choice", "options": ["red", "blue", "green"]},
+        {"id": "size", "question": "Choose size:", "type": "choice", "options": ["small", "medium", "large"]},
+    ]
+
+    # Mock questionary.select to return different values
+    mock_question = patch("tsugite.tools.interactive.questionary.select")
+    with mock_question as mock_select:
+        mock_select.return_value.ask.side_effect = ["blue", "large"]
+        result = call_tool("ask_user_batch", questions=questions)
+
+    assert result == {"color": "blue", "size": "large"}
+
+
+def test_ask_user_batch_non_interactive(interactive_tool, monkeypatch):
+    """Test that batch tool fails in non-interactive mode."""
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+
+    questions = [{"id": "name", "question": "Name?", "type": "text"}]
+
+    with pytest.raises(RuntimeError, match="Cannot use ask_user_batch tool in non-interactive mode"):
+        call_tool("ask_user_batch", questions=questions)
+
+
+def test_ask_user_batch_empty_list(interactive_tool, monkeypatch):
+    """Test validation of empty questions list."""
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
+    with pytest.raises(RuntimeError, match="Tool 'ask_user_batch' failed"):
+        call_tool("ask_user_batch", questions=[])
+
+
+def test_ask_user_batch_missing_id(interactive_tool, monkeypatch):
+    """Test validation when question is missing 'id' field."""
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
+    questions = [{"question": "What is your name?", "type": "text"}]  # Missing 'id'
+
+    with pytest.raises(RuntimeError, match="Tool 'ask_user_batch' failed"):
+        call_tool("ask_user_batch", questions=questions)
+
+
+def test_ask_user_batch_missing_question(interactive_tool, monkeypatch):
+    """Test validation when question is missing 'question' field."""
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
+    questions = [{"id": "name", "type": "text"}]  # Missing 'question'
+
+    with pytest.raises(RuntimeError, match="Tool 'ask_user_batch' failed"):
+        call_tool("ask_user_batch", questions=questions)
+
+
+def test_ask_user_batch_missing_type(interactive_tool, monkeypatch):
+    """Test validation when question is missing 'type' field."""
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
+    questions = [{"id": "name", "question": "What is your name?"}]  # Missing 'type'
+
+    with pytest.raises(RuntimeError, match="Tool 'ask_user_batch' failed"):
+        call_tool("ask_user_batch", questions=questions)
+
+
+def test_ask_user_batch_invalid_type(interactive_tool, monkeypatch):
+    """Test validation of invalid question type."""
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
+    questions = [{"id": "name", "question": "Name?", "type": "invalid_type"}]
+
+    with pytest.raises(RuntimeError, match="Tool 'ask_user_batch' failed"):
+        call_tool("ask_user_batch", questions=questions)
+
+
+def test_ask_user_batch_duplicate_ids(interactive_tool, monkeypatch):
+    """Test validation when questions have duplicate IDs."""
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
+    questions = [
+        {"id": "name", "question": "First name?", "type": "text"},
+        {"id": "name", "question": "Last name?", "type": "text"},  # Duplicate ID
+    ]
+
+    with pytest.raises(RuntimeError, match="Tool 'ask_user_batch' failed"):
+        call_tool("ask_user_batch", questions=questions)
+
+
+def test_ask_user_batch_choice_missing_options(interactive_tool, monkeypatch):
+    """Test that choice questions require options."""
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
+    questions = [{"id": "color", "question": "Favorite color?", "type": "choice"}]  # Missing options
+
+    with pytest.raises(RuntimeError, match="Tool 'ask_user_batch' failed"):
+        call_tool("ask_user_batch", questions=questions)
+
+
+def test_ask_user_batch_choice_too_few_options(interactive_tool, monkeypatch):
+    """Test that choice questions need at least 2 options."""
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
+    questions = [
+        {"id": "color", "question": "Favorite color?", "type": "choice", "options": ["red"]}  # Only 1 option
+    ]
+
+    with pytest.raises(RuntimeError, match="Tool 'ask_user_batch' failed"):
+        call_tool("ask_user_batch", questions=questions)
+
+
+def test_ask_user_batch_keyboard_interrupt(interactive_tool, monkeypatch):
+    """Test handling of keyboard interrupt during batch input."""
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
+    questions = [{"id": "name", "question": "Name?", "type": "text"}]
+
+    with patch("tsugite.tools.interactive.Prompt.ask", side_effect=KeyboardInterrupt()):
+        with pytest.raises(RuntimeError, match="User input interrupted"):
+            call_tool("ask_user_batch", questions=questions)
+
+
+def test_ask_user_batch_single_question(interactive_tool, monkeypatch):
+    """Test batch with just one question works correctly."""
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
+    questions = [{"id": "name", "question": "What is your name?", "type": "text"}]
+
+    with patch("tsugite.tools.interactive.Prompt.ask", return_value="Alice"):
+        result = call_tool("ask_user_batch", questions=questions)
+
+    assert result == {"name": "Alice"}
+    assert len(result) == 1

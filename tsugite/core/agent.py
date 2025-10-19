@@ -132,27 +132,23 @@ class TsugiteAgent:
 
                     # Get the running event loop, or create one if needed
                     try:
-                        loop = asyncio.get_event_loop()
-                        if loop.is_running():
-                            # Already in async context - use thread to block on async result
-                            import concurrent.futures
+                        loop = asyncio.get_running_loop()
+                        # Already in async context - use thread to block on async result
+                        import concurrent.futures
 
-                            with concurrent.futures.ThreadPoolExecutor() as executor:
+                        with concurrent.futures.ThreadPoolExecutor() as executor:
 
-                                def run_async():
-                                    new_loop = asyncio.new_event_loop()
-                                    asyncio.set_event_loop(new_loop)
-                                    try:
-                                        return new_loop.run_until_complete(tool_obj.execute(**kwargs))
-                                    finally:
-                                        new_loop.close()
+                            def run_async():
+                                new_loop = asyncio.new_event_loop()
+                                asyncio.set_event_loop(new_loop)
+                                try:
+                                    return new_loop.run_until_complete(tool_obj.execute(**kwargs))
+                                finally:
+                                    new_loop.close()
 
-                                return executor.submit(run_async).result()
-                        else:
-                            # Not in async context - run synchronously
-                            return loop.run_until_complete(tool_obj.execute(**kwargs))
+                            return executor.submit(run_async).result()
                     except RuntimeError:
-                        # No event loop - create one
+                        # No running event loop - create one and run synchronously
                         loop = asyncio.new_event_loop()
                         asyncio.set_event_loop(loop)
                         try:

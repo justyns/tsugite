@@ -1,11 +1,22 @@
 """Test configuration and fixtures."""
 
 import shutil
+import sys
 import tempfile
+import warnings
 from pathlib import Path
 from typing import Generator
 
 import pytest
+
+# Suppress RuntimeWarnings from litellm's async cleanup
+# These warnings occur during test teardown and are not actionable in our tests
+warnings.filterwarnings("ignore", category=RuntimeWarning, module="litellm")
+warnings.filterwarnings("ignore", message="coroutine.*was never awaited")
+
+# Configure Python warnings module to suppress uncaught RuntimeWarnings at module level
+if not sys.warnoptions:
+    warnings.simplefilter("ignore", RuntimeWarning)
 
 
 @pytest.fixture

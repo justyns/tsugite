@@ -516,8 +516,8 @@ class CustomUIHandler:
             console=self.console,
         )
 
-        # Store console and progress in thread-local for tool access
-        set_ui_context(console=self.console, progress=self.progress)
+        # Store console, progress, and ui_handler in thread-local for tool access
+        set_ui_context(console=self.console, progress=self.progress, ui_handler=self)
 
         with self.progress:
             self.task_id = self.progress.add_task("Starting agent...", total=None)
@@ -531,6 +531,22 @@ class CustomUIHandler:
         """Update progress description."""
         if self.progress and self.task_id is not None:
             self.progress.update(self.task_id, description=description)
+
+    @contextmanager
+    def pause_for_input(self) -> Generator[None, None, None]:
+        """Pause the progress display for user input.
+
+        Stops the progress, shows the prompt, then restarts it.
+        The transient=True flag ensures clean redraw when restarted.
+        """
+        if self.progress is not None:
+            self.progress.stop()
+
+        try:
+            yield
+        finally:
+            if self.progress is not None:
+                self.progress.start()
 
     def set_multistep_context(self, step_number: int, step_name: str, total_steps: int) -> None:
         """Set multi-step execution context.

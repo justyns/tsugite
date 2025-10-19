@@ -80,6 +80,8 @@ class LiveTemplateHandler(CustomUIHandler):
 
         This replaces the default progress spinner with a full Live Display.
         """
+        from tsugite.ui_context import clear_ui_context, set_ui_context
+
         # Create the layout
         layout = self._create_layout()
 
@@ -91,11 +93,30 @@ class LiveTemplateHandler(CustomUIHandler):
             screen=False,  # Set to True for full-screen mode
         )
 
+        # Store console and ui_handler in thread-local for tool access
+        set_ui_context(console=self.console, progress=None, ui_handler=self)
+
         with self.live_display:
             try:
                 yield
             finally:
                 self.live_display = None
+                clear_ui_context()
+
+    @contextmanager
+    def pause_for_input(self) -> Generator[None, None, None]:
+        """Pause the Live Display for user input.
+
+        Stops the live display, shows the prompt, then restarts it.
+        """
+        if self.live_display is not None:
+            self.live_display.stop()
+
+        try:
+            yield
+        finally:
+            if self.live_display is not None:
+                self.live_display.start()
 
     def _create_layout(self) -> Layout:
         """Create the layout structure for Live Display.

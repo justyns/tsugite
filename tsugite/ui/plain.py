@@ -346,8 +346,8 @@ class PlainUIHandler(CustomUIHandler):
 
         Plain UI handler uses no-op progress (no spinner, no animations).
         """
-        # Store console in thread-local for tool access
-        set_ui_context(console=self.console, progress=None)
+        # Store console and ui_handler in thread-local for tool access
+        set_ui_context(console=self.console, progress=None, ui_handler=self)
 
         try:
             yield

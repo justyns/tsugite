@@ -209,6 +209,9 @@ class TestChatCommand:
     def test_chat_no_default_agent(self):
         """Test chat without default agent."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            result = runner.invoke(app, ["chat", "--root", tmpdir])
-            assert result.exit_code == 1
-            assert "No default agent" in result.stdout
+            with patch("tsugite.ui.textual_chat.run_textual_chat") as mock_run:
+                result = runner.invoke(app, ["chat", "--root", tmpdir])
+                # The chat command should succeed but run_textual_chat should be called
+                # Built-in chat assistant exists by default
+                assert result.exit_code == 0
+                mock_run.assert_called_once()
