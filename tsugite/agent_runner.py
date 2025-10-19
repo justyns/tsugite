@@ -556,6 +556,7 @@ def run_multistep_agent(
     custom_logger: Optional[Any] = None,
     trust_mcp_code: bool = False,
     delegation_agents: Optional[List[tuple[str, Path]]] = None,
+    stream: bool = False,
 ) -> str:
     """Run a multi-step Tsugite agent.
 
@@ -572,6 +573,7 @@ def run_multistep_agent(
         custom_logger: Custom logger for agent output
         trust_mcp_code: Whether to trust remote code from MCP servers
         delegation_agents: List of (name, path) tuples for agents to make available
+        stream: Whether to stream responses in real-time (currently unused for multi-step agents)
 
     Returns:
         Result from the final step
@@ -743,6 +745,7 @@ def run_multistep_agent(
                         skip_task_reset=True,  # Don't reset tasks between steps
                         model_kwargs=step.model_kwargs,
                         injectable_vars=injectable_vars,
+                        stream=stream,
                     )
                 )
 
