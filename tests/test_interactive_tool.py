@@ -297,14 +297,18 @@ def test_ask_user_batch_empty_list(interactive_tool, monkeypatch):
         call_tool("ask_user_batch", questions=[])
 
 
-def test_ask_user_batch_missing_id(interactive_tool, monkeypatch):
-    """Test validation when question is missing 'id' field."""
+def test_ask_user_batch_auto_generate_id(interactive_tool, monkeypatch):
+    """Test that ID is auto-generated from question text when not provided."""
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
-    questions = [{"question": "What is your name?", "type": "text"}]  # Missing 'id'
+    questions = [{"question": "What is your name?", "type": "text"}]  # No 'id' provided
 
-    with pytest.raises(RuntimeError, match="Tool 'ask_user_batch' failed"):
-        call_tool("ask_user_batch", questions=questions)
+    with patch("tsugite.tools.interactive.Prompt.ask", return_value="Alice"):
+        result = call_tool("ask_user_batch", questions=questions)
+
+    # ID should be auto-generated from question
+    assert "what_is_your_name" in result
+    assert result["what_is_your_name"] == "Alice"
 
 
 def test_ask_user_batch_missing_question(interactive_tool, monkeypatch):
@@ -394,3 +398,88 @@ def test_ask_user_batch_single_question(interactive_tool, monkeypatch):
 
     assert result == {"name": "Alice"}
     assert len(result) == 1
+
+
+def test_ask_user_batch_auto_id_multiple_questions(interactive_tool, monkeypatch):
+    """Test auto-generated IDs for multiple questions."""
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
+    questions = [
+        {"question": "What is your email?", "type": "text"},
+        {"question": "Save to file?", "type": "yes_no"},
+        {"question": "Choose format:", "type": "choice", "options": ["json", "txt"]},
+    ]
+
+    with (
+        patch("tsugite.tools.interactive.Prompt.ask", return_value="test@example.com"),
+        patch("tsugite.tools.interactive.Confirm.ask", return_value=True),
+        patch("tsugite.tools.interactive.questionary.select") as mock_select,
+    ):
+        mock_select.return_value.ask.return_value = "json"
+        result = call_tool("ask_user_batch", questions=questions)
+
+    # Check auto-generated IDs
+    assert "what_is_your_email" in result
+    assert "save_to_file" in result
+    assert "choose_format" in result
+    assert result["what_is_your_email"] == "test@example.com"
+    assert result["save_to_file"] == "yes"
+    assert result["choose_format"] == "json"
+
+
+def test_ask_user_batch_auto_id_duplicate_handling(interactive_tool, monkeypatch):
+    """Test handling of duplicate auto-generated IDs."""
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
+    questions = [
+        {"question": "Name?", "type": "text"},
+        {"question": "Name?", "type": "text"},  # Same question text
+        {"question": "Name?", "type": "text"},  # Same question text again
+    ]
+
+    with patch("tsugite.tools.interactive.Prompt.ask", side_effect=["Alice", "Bob", "Charlie"]):
+        result = call_tool("ask_user_batch", questions=questions)
+
+    # Should have unique IDs with numeric suffixes
+    assert "name" in result
+    assert "name_1" in result
+    assert "name_2" in result
+    assert result["name"] == "Alice"
+    assert result["name_1"] == "Bob"
+    assert result["name_2"] == "Charlie"
+
+
+def test_ask_user_batch_question_type_field(interactive_tool, monkeypatch):
+    """Test accepting 'question_type' field (compatibility with ask_user)."""
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
+    questions = [
+        {"id": "name", "question": "What is your name?", "question_type": "text"},  # Using 'question_type'
+        {"id": "save", "question": "Save?", "type": "yes_no"},  # Using 'type'
+    ]
+
+    with (
+        patch("tsugite.tools.interactive.Prompt.ask", return_value="Alice"),
+        patch("tsugite.tools.interactive.Confirm.ask", return_value=True),
+    ):
+        result = call_tool("ask_user_batch", questions=questions)
+
+    assert result == {"name": "Alice", "save": "yes"}
+
+
+def test_ask_user_batch_mixed_explicit_and_auto_ids(interactive_tool, monkeypatch):
+    """Test mixing explicit IDs with auto-generated IDs."""
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
+    questions = [
+        {"id": "user_name", "question": "What is your name?", "type": "text"},  # Explicit ID
+        {"question": "What is your email?", "type": "text"},  # Auto-generated ID
+    ]
+
+    with patch("tsugite.tools.interactive.Prompt.ask", side_effect=["Alice", "alice@example.com"]):
+        result = call_tool("ask_user_batch", questions=questions)
+
+    assert "user_name" in result
+    assert "what_is_your_email" in result
+    assert result["user_name"] == "Alice"
+    assert result["what_is_your_email"] == "alice@example.com"
