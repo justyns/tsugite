@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
 
+from .config import get_performance_tier
 from .core import BenchmarkResult
 
 
@@ -78,8 +79,9 @@ class ReportGenerator:
                 f"- **Accuracy**: {performance.accuracy:.1%} ({performance.passed_tests}/{performance.total_tests})"
             )
             report.append(f"- **Average Duration**: {performance.average_duration:.2f}s")
+            report.append(f"- **Average Steps**: {performance.average_steps:.1f}")
             report.append(f"- **Total Cost**: ${performance.total_cost:.4f}")
-            report.append(f"- **Performance Tier**: {self._get_performance_tier(performance.accuracy)}")
+            report.append(f"- **Performance Tier**: {get_performance_tier(performance.accuracy)}")
             report.append("")
 
         # Category Breakdown
@@ -96,16 +98,18 @@ class ReportGenerator:
         report.append("## Test Results Details")
         for model in self.result.model_performances.keys():
             report.append(f"### {model}")
-            report.append("| Test ID | Category | Result | Score | Duration |")
-            report.append("|---------|----------|--------|-------|----------|")
+            report.append("| Test ID | Category | Result | Score | Duration | Steps | Cost |")
+            report.append("|---------|----------|--------|-------|----------|-------|------|")
 
             model_tests = self.result.test_results.get(model, {})
             for test_id, test_result in model_tests.items():
-                category = self._get_test_category(test_id)
+                category = test_result.category
                 result_status = "✅ PASS" if test_result.passed else "❌ FAIL"
                 score = f"{test_result.score:.2f}"
                 duration = f"{test_result.duration:.2f}s"
-                report.append(f"| {test_id} | {category} | {result_status} | {score} | {duration} |")
+                steps = str(test_result.steps_taken)
+                cost = f"${test_result.cost:.4f}" if test_result.cost > 0 else "$0.00"
+                report.append(f"| {test_id} | {category} | {result_status} | {score} | {duration} | {steps} | {cost} |")
             report.append("")
 
         # Errors
@@ -142,6 +146,7 @@ class ReportGenerator:
                     "Passed",
                     "Score",
                     "Duration",
+                    "Steps",
                     "Token_Usage",
                     "Cost",
                     "Error",
@@ -151,7 +156,7 @@ class ReportGenerator:
             # Data rows
             for model, tests in self.result.test_results.items():
                 for test_id, test_result in tests.items():
-                    category = self._get_test_category(test_id)
+                    category = test_result.category
                     token_usage = test_result.token_usage.get("total", 0)
 
                     writer.writerow(
@@ -162,6 +167,7 @@ class ReportGenerator:
                             test_result.passed,
                             test_result.score,
                             test_result.duration,
+                            test_result.steps_taken,
                             token_usage,
                             test_result.cost,
                             test_result.error or "",
@@ -175,39 +181,13 @@ class ReportGenerator:
             all_test_ids.update(tests.keys())
         return list(all_test_ids)
 
-    def _get_test_category(self, test_id: str) -> str:
-        """Extract category from test ID."""
-        if test_id.startswith("basic_"):
-            return "basic"
-        elif test_id.startswith("tools_"):
-            return "tools"
-        elif test_id.startswith("scenarios_"):
-            return "scenarios"
-        elif test_id.startswith("performance_"):
-            return "performance"
-        else:
-            return "unknown"
-
-    def _get_performance_tier(self, accuracy: float) -> str:
-        """Get performance tier description."""
-        if accuracy >= 0.9:
-            return "Excellent"
-        elif accuracy >= 0.75:
-            return "Good"
-        elif accuracy >= 0.6:
-            return "Fair"
-        elif accuracy >= 0.4:
-            return "Poor"
-        else:
-            return "Very Poor"
-
     def _calculate_category_breakdown(self) -> Dict[str, Any]:
         """Calculate performance breakdown by category."""
         categories = {}
 
         for model, tests in self.result.test_results.items():
             for test_id, test_result in tests.items():
-                category = self._get_test_category(test_id)
+                category = test_result.category
 
                 if category not in categories:
                     categories[category] = {}
@@ -378,7 +358,7 @@ class ReportGenerator:
                             <div class="progress-fill {progress_class}" style="width: {accuracy * 100}%"></div>
                         </div>
                     </td>
-                    <td><span class="{tier_class}">{self._get_performance_tier(accuracy)}</span></td>
+                    <td><span class="{tier_class}">{get_performance_tier(accuracy)}</span></td>
                     <td>{ranking["avg_duration"]:.2f}s</td>
                     <td>${ranking["total_cost"]:.4f}</td>
                 </tr>
@@ -398,7 +378,7 @@ class ReportGenerator:
             <h3>{model}</h3>
             <p>
                 <span class="{tier_class}">
-                    {self._get_performance_tier(performance.accuracy)}
+                    {get_performance_tier(performance.accuracy)}
                 </span>
                 - {performance.accuracy:.1%} accuracy
                 ({performance.passed_tests}/{performance.total_tests} tests passed)

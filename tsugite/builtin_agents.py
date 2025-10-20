@@ -15,6 +15,13 @@ instructions: |
   - Use task tracking tools (task_add, task_update, task_complete) to organize your work
   - Break down complex tasks into clear steps
   - Ask clarifying questions when the task is ambiguous
+  {% if text_mode %}
+  - For simple responses: use "Thought: [answer]" format
+  - When using tools: write Python code blocks and call final_answer(result)
+  {% else %}
+  - Write Python code to accomplish tasks
+  - Call final_answer(result) when you've completed the task
+  {% endif %}
 ---
 # Context
 

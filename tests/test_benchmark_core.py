@@ -11,8 +11,8 @@ from tsugite.benchmark.core import (
     BenchmarkConfig,
     BenchmarkResult,
     BenchmarkRunner,
-    BenchmarkTest,
 )
+from tsugite.benchmark.discovery import BenchmarkTest
 from tsugite.benchmark.metrics import BenchmarkTestResult, ModelPerformance
 
 
@@ -59,8 +59,8 @@ def benchmark_config():
 @pytest.fixture
 def mock_agent_run():
     """Mock the agent runner."""
-    with patch("tsugite.benchmark.core.run_agent") as mock:
-        mock.return_value = "42"
+    with patch("tsugite.benchmark.execution.run_agent") as mock:
+        mock.return_value = ("42", 0, 0.0, 0)
         yield mock
 
 
@@ -123,7 +123,7 @@ class TestBenchmarkRunner:
 
         assert runner.config == benchmark_config
         assert runner.benchmark_dir == Path("benchmarks")
-        assert runner.test_cache == {}
+        assert runner.discovery.test_cache == {}
 
     def test_discover_tests(self, benchmark_config, temp_benchmark_dir, monkeypatch):
         """Test test discovery functionality."""
@@ -146,7 +146,7 @@ class TestBenchmarkRunner:
         runner = BenchmarkRunner(benchmark_config)
         agent_path = temp_benchmark_dir / "basic" / "test_simple.md"
 
-        test = runner._parse_benchmark_test(agent_path, "basic")
+        test = runner.discovery._parse_benchmark_test(agent_path, "basic")
 
         assert test.name == "test_simple"
         assert test.test_id == "test_001"
@@ -162,9 +162,9 @@ class TestBenchmarkRunner:
 
         runner = BenchmarkRunner(benchmark_config)
         agent_path = temp_benchmark_dir / "basic" / "test_simple.md"
-        test = runner._parse_benchmark_test(agent_path, "basic")
+        test = runner.discovery._parse_benchmark_test(agent_path, "basic")
 
-        result = await runner._run_single_test("test-model:v1", test)
+        result = await runner.executor.run_test("test-model:v1", test)
 
         assert isinstance(result, BenchmarkTestResult)
         assert result.test_id == "test_001"
@@ -265,7 +265,7 @@ async def test_benchmark_error_handling(benchmark_config, temp_benchmark_dir, mo
     monkeypatch.setattr("tsugite.benchmark.core.BenchmarkRunner.benchmark_dir", temp_benchmark_dir)
 
     # Mock run_agent to raise an exception
-    with patch("tsugite.benchmark.core.run_agent") as mock_run:
+    with patch("tsugite.benchmark.execution.run_agent") as mock_run:
         mock_run.side_effect = Exception("Test error")
 
         runner = BenchmarkRunner(benchmark_config)

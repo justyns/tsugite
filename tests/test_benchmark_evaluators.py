@@ -323,9 +323,11 @@ class TestCostEvaluator:
 
     def test_cost_tiers(self):
         """Test cost tier classification."""
-        assert self.evaluator._get_cost_tier(0.0) == "Free"
-        assert self.evaluator._get_cost_tier(0.0001) == "Very Low"
-        assert self.evaluator._get_cost_tier(0.005) == "Low"
-        assert self.evaluator._get_cost_tier(0.05) == "Medium"
-        assert self.evaluator._get_cost_tier(0.5) == "High"
-        assert self.evaluator._get_cost_tier(5.0) == "Very High"
+        from tsugite.benchmark.config import get_cost_tier
+
+        assert get_cost_tier(0.0) == "Free"
+        assert get_cost_tier(0.0001) == "Very Low"
+        assert get_cost_tier(0.005) == "Low"
+        assert get_cost_tier(0.05) == "Medium"
+        assert get_cost_tier(0.5) == "High"
+        assert get_cost_tier(5.0) == "Very High"

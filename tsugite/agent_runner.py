@@ -35,14 +35,39 @@ class StepMetrics:
     error: Optional[str] = None
 
 
-TSUGITE_DEFAULT_INSTRUCTIONS = (
-    "You are operating inside the Tsugite micro-agent runtime. Follow the rendered task faithfully, use the available "
-    "tools when they meaningfully advance the work, and maintain a living plan via the task_* tools. Create or update "
-    "tasks whenever you define new sub-work, mark progress as you go, and rely on the task summary to decide the next "
-    "action. Provide a clear, actionable final response without unnecessary filler.\n\n"
-    "Interactive Mode: The `is_interactive` variable indicates whether you're running in an interactive terminal. "
-    "Interactive-only tools (like ask_user) are automatically available only when is_interactive is True."
-)
+def get_default_instructions(text_mode: bool = False) -> str:
+    """Get default instructions based on agent mode.
+
+    Args:
+        text_mode: Whether agent is in text mode
+
+    Returns:
+        Mode-appropriate default instructions
+    """
+    base = (
+        "You are operating inside the Tsugite micro-agent runtime. Follow the rendered task faithfully, use the available "
+        "tools when they meaningfully advance the work, and maintain a living plan via the task_* tools. Create or update "
+        "tasks whenever you define new sub-work, mark progress as you go, and rely on the task summary to decide the next "
+        "action. Provide a clear, actionable final response without unnecessary filler.\n\n"
+    )
+
+    if text_mode:
+        completion = (
+            "Task Completion: For conversational responses, use the format 'Thought: [your response]'. "
+            "When using tools or code, write Python code blocks and call final_answer(result) when complete.\n\n"
+        )
+    else:
+        completion = (
+            "Task Completion: Write Python code to accomplish your task. "
+            "When you have completed your task, call final_answer(result) to signal completion and return the result.\n\n"
+        )
+
+    interactive = (
+        "Interactive Mode: The `is_interactive` variable indicates whether you're running in an interactive terminal. "
+        "Interactive-only tools (like ask_user) are automatically available only when is_interactive is True."
+    )
+
+    return base + completion + interactive
 
 
 def _combine_instructions(*segments: str) -> str:
@@ -183,7 +208,7 @@ async def _execute_agent_with_prompt(
     injectable_vars: Optional[Dict[str, Any]] = None,
     return_token_usage: bool = False,
     stream: bool = False,
-) -> str | tuple[str, Optional[int], Optional[float]]:
+) -> str | tuple[str, Optional[int], Optional[float], int]:
     """Execute agent with a pre-rendered prompt.
 
     Low-level execution function used by both run_agent and run_multistep_agent.
@@ -202,7 +227,7 @@ async def _execute_agent_with_prompt(
         stream: Whether to stream responses in real-time
 
     Returns:
-        Agent execution result as string, or tuple of (result, token_count, cost) if return_token_usage=True
+        Agent execution result as string, or tuple of (result, token_count, cost, steps) if return_token_usage=True
 
     Raises:
         RuntimeError: If execution fails
@@ -213,7 +238,7 @@ async def _execute_agent_with_prompt(
 
     # Build base instructions
     base_instructions = _combine_instructions(
-        TSUGITE_DEFAULT_INSTRUCTIONS,
+        get_default_instructions(text_mode=agent_config.text_mode),
         getattr(agent_config, "instructions", ""),
     )
 
@@ -367,9 +392,10 @@ async def _execute_agent_with_prompt(
             from tsugite.core.agent import AgentResult
 
             if isinstance(result, AgentResult):
-                return str(result.output), result.token_usage, result.cost
+                step_count = len(result.steps) if result.steps else 0
+                return str(result.output), result.token_usage, result.cost, step_count
             else:
-                return str(result), None, None
+                return str(result), None, None, 0
         else:
             from tsugite.core.agent import AgentResult
 
@@ -401,7 +427,7 @@ def run_agent(
     return_token_usage: bool = False,
     stream: bool = False,
     force_text_mode: bool = False,
-) -> str | tuple[str, Optional[int], Optional[float]]:
+) -> str | tuple[str, Optional[int], Optional[float], int]:
     """Run a Tsugite agent.
 
     Args:
@@ -418,7 +444,7 @@ def run_agent(
         force_text_mode: Force text_mode=True regardless of agent config (useful for chat UI)
 
     Returns:
-        Agent execution result as string, or tuple of (result, token_count, cost) if return_token_usage=True
+        Agent execution result as string, or tuple of (result, token_count, cost, steps) if return_token_usage=True
 
     Raises:
         ValueError: If agent file is invalid
@@ -468,6 +494,7 @@ def run_agent(
         "user_prompt": prompt,
         "task_summary": task_context,
         "is_interactive": interactive_mode,
+        "text_mode": agent_config.text_mode,
     }
 
     # Render agent template (use modified content with directives replaced)
@@ -641,6 +668,7 @@ def run_multistep_agent(
         "user_prompt": prompt,
         "task_summary": task_manager.get_task_summary(),
         "is_interactive": interactive_mode,
+        "text_mode": agent.config.text_mode,
     }
 
     # Execute prefetch once (before any steps)
