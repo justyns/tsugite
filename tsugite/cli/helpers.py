@@ -105,9 +105,13 @@ def parse_cli_arguments(args: List[str]) -> tuple[List[str], str]:
             prompt_parts.append(arg)
 
     if not agents:
-        raise ValueError("No agent specified")
+        # Default to builtin-default for auto-discovery
+        agents = ["+builtin-default"]
+        # All args become the prompt
+        prompt = " ".join(args)
+    else:
+        prompt = " ".join(prompt_parts)
 
-    prompt = " ".join(prompt_parts)
     return agents, prompt
 
 

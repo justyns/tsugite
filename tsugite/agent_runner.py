@@ -12,7 +12,7 @@ from rich.console import Console
 from tsugite.core.agent import TsugiteAgent
 from tsugite.core.executor import LocalExecutor
 from tsugite.core.tools import create_tool_from_tsugite
-from tsugite.md_agents import AgentConfig, parse_agent, validate_agent_execution
+from tsugite.md_agents import AgentConfig, parse_agent, parse_agent_file, validate_agent_execution
 from tsugite.renderer import AgentRenderer
 from tsugite.tools import call_tool
 from tsugite.tools.tasks import get_task_manager, reset_task_manager
@@ -483,8 +483,12 @@ def run_agent(
 
     # Parse agent configuration
     try:
-        agent_text = agent_path.read_text()
-        agent = parse_agent(agent_text, agent_path)
+        # Handle builtin agents
+        if str(agent_path).startswith("<builtin-"):
+            agent = parse_agent_file(agent_path)
+        else:
+            agent_text = agent_path.read_text()
+            agent = parse_agent(agent_text, agent_path)
         agent_config = agent.config
     except Exception as e:
         raise ValueError(f"Failed to parse agent file: {e}")
@@ -553,15 +557,21 @@ def validate_agent_file(agent_path: Path) -> tuple[bool, str]:
     """Validate that an agent file can be executed.
 
     Args:
-        agent_path: Path to agent markdown file
+        agent_path: Path to agent markdown file (or builtin agent path like <builtin-default>)
 
     Returns:
         Tuple of (is_valid, error_message)
     """
     try:
-        # Parse agent
-        agent_text = agent_path.read_text()
-        agent = parse_agent(agent_text, agent_path)
+        # Handle builtin agents
+        if str(agent_path).startswith("<builtin-"):
+            from .md_agents import parse_agent_file
+
+            agent = parse_agent_file(agent_path)
+        else:
+            # Parse agent
+            agent_text = agent_path.read_text()
+            agent = parse_agent(agent_text, agent_path)
 
         # Use centralized validation
         return validate_agent_execution(agent)
@@ -574,14 +584,20 @@ def get_agent_info(agent_path: Path) -> Dict[str, Any]:
     """Get information about an agent without executing it.
 
     Args:
-        agent_path: Path to agent markdown file
+        agent_path: Path to agent markdown file (or builtin agent path like <builtin-default>)
 
     Returns:
         Dictionary with agent information
     """
     try:
-        agent_text = agent_path.read_text()
-        agent = parse_agent(agent_text, agent_path)
+        # Handle builtin agents
+        if str(agent_path).startswith("<builtin-"):
+            from .md_agents import parse_agent_file
+
+            agent = parse_agent_file(agent_path)
+        else:
+            agent_text = agent_path.read_text()
+            agent = parse_agent(agent_text, agent_path)
         agent_config = agent.config
 
         model_display = agent_config.model
@@ -655,8 +671,12 @@ def run_multistep_agent(
 
     # Read and parse agent
     try:
-        agent_text = agent_path.read_text()
-        agent = parse_agent(agent_text, agent_path)
+        # Handle builtin agents
+        if str(agent_path).startswith("<builtin-"):
+            agent = parse_agent_file(agent_path)
+        else:
+            agent_text = agent_path.read_text()
+            agent = parse_agent(agent_text, agent_path)
     except Exception as e:
         raise ValueError(f"Failed to parse agent file: {e}")
 

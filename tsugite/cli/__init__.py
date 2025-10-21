@@ -226,15 +226,21 @@ def run(
         primary_agent_path, delegation_agents = parse_agent_references(agent_refs, with_agents, base_dir)
 
         # Validate primary agent
-        if not primary_agent_path.exists():
+        # Built-in agents have special paths starting with "<builtin-"
+        # These don't need to exist on disk, so only check exists() for real files
+        if not str(primary_agent_path).startswith("<builtin-") and not primary_agent_path.exists():
             console.print(f"[red]Agent file not found: {primary_agent_path}[/red]")
             raise typer.Exit(1)
 
-        if primary_agent_path.suffix != ".md":
+        if not str(primary_agent_path).startswith("<builtin-") and primary_agent_path.suffix != ".md":
             console.print(f"[red]Agent file must be a .md file: {primary_agent_path}[/red]")
             raise typer.Exit(1)
 
-        agent_file = primary_agent_path.resolve()
+        # Don't resolve builtin agent paths
+        if str(primary_agent_path).startswith("<builtin-"):
+            agent_file = primary_agent_path
+        else:
+            agent_file = primary_agent_path.resolve()
 
     except ValueError as e:
         console.print(f"[red]Error: {e}[/red]")
@@ -352,7 +358,14 @@ def run(
         from tsugite.agent_runner import preview_multistep_agent, run_multistep_agent
         from tsugite.md_agents import has_step_directives
 
-        agent_text = agent_file.read_text()
+        # Handle builtin agents for step directive checking
+        if str(agent_file).startswith("<builtin-"):
+            from tsugite.md_agents import parse_agent_file
+
+            agent_obj = parse_agent_file(agent_file)
+            agent_text = agent_obj.content
+        else:
+            agent_text = agent_file.read_text()
         is_multistep = has_step_directives(agent_text)
 
         # Handle dry-run mode

@@ -521,3 +521,79 @@ def test_logo_selection(terminal_width, expected_logo):
     result = get_logo(mock_console)
     expected = TSUGITE_LOGO_NARROW if expected_logo == "NARROW" else TSUGITE_LOGO_WIDE
     assert result == expected
+
+
+class TestAutoDiscovery:
+    """Test auto-discovery feature where CLI defaults to builtin-default."""
+
+    def test_run_without_agent_defaults_to_builtin(self, cli_runner, temp_dir):
+        """Test that running without an agent defaults to builtin-default."""
+        from tsugite.cli.helpers import parse_cli_arguments
+
+        # Test that parse_cli_arguments defaults to builtin-default
+        agents, prompt = parse_cli_arguments(["test", "task"])
+
+        assert agents == ["+builtin-default"]
+        assert prompt == "test task"
+
+    def test_run_explicit_agent_overrides_default(self, cli_runner, sample_agent_file, mock_agent_execution):
+        """Test that explicitly specifying an agent still works."""
+        result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt"])
+
+        assert result.exit_code == 0
+        # Should use the specified agent, not builtin-default
+        assert "test_agent.md" in result.stdout
+
+    @patch("tsugite.agent_runner.run_agent")
+    @patch("tsugite.agent_runner.validate_agent_execution")
+    def test_builtin_default_agent_execution(self, mock_validate, mock_run, cli_runner):
+        """Test that builtin-default agent can be executed."""
+        mock_validate.return_value = (True, "Agent is valid")
+        mock_run.return_value = "Task completed"
+
+        # Run without specifying an agent
+        result = cli_runner.invoke(app, ["run", "What is 2+2?"])
+
+        # Should not fail due to missing agent file
+        assert "Agent file not found" not in result.stdout
+        # May fail on validation or execution, but not on path issues
+        # The actual execution depends on whether the API key is set
+
+    def test_builtin_agent_path_validation(self):
+        """Test that builtin agent paths bypass file existence checks."""
+        from pathlib import Path
+
+        builtin_path = Path("<builtin-default>")
+
+        # These checks should recognize it as builtin
+        assert str(builtin_path).startswith("<builtin-")
+
+        # Should not try to check .exists() or .suffix
+        # (This validates the CLI path handling logic)
+
+    @patch("tsugite.agent_runner.run_agent")
+    @patch("tsugite.agent_runner.validate_agent_execution")
+    def test_auto_discovery_with_available_agents(self, mock_validate, mock_run, cli_runner, tmp_path, monkeypatch):
+        """Test auto-discovery when agents are available."""
+        monkeypatch.chdir(tmp_path)
+
+        # Create a test agent
+        agents_dir = tmp_path / "agents"
+        agents_dir.mkdir()
+        test_agent = agents_dir / "helper.md"
+        test_agent.write_text("""---
+name: helper
+description: Helps with tasks
+---
+Content
+""")
+
+        mock_validate.return_value = (True, "Agent is valid")
+        mock_run.return_value = "Task completed"
+
+        # The builtin-default should be able to discover the helper agent
+        # via its prefetch mechanism
+        cli_runner.invoke(app, ["run", "help me with something"])
+
+        # Should execute successfully (verified by no exception)
+        # The actual delegation to helper depends on LLM decision

@@ -484,7 +484,7 @@ def validate_agent_execution(agent: Agent | Path) -> tuple[bool, str]:
     """Validate that an agent can be executed.
 
     Args:
-        agent: Parsed agent or path to agent file
+        agent: Parsed agent or path to agent file (including builtin paths like <builtin-default>)
 
     Returns:
         Tuple of (is_valid, error_message)
@@ -492,8 +492,12 @@ def validate_agent_execution(agent: Agent | Path) -> tuple[bool, str]:
     # Handle both Path objects and Agent objects
     if isinstance(agent, Path):
         try:
-            agent_text = agent.read_text()
-            agent = parse_agent(agent_text, agent)
+            # Handle builtin agents
+            if str(agent).startswith("<builtin-"):
+                agent = parse_agent_file(agent)
+            else:
+                agent_text = agent.read_text()
+                agent = parse_agent(agent_text, agent)
         except Exception as e:
             return False, f"Failed to parse agent file: {e}"
 

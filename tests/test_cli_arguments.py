@@ -59,10 +59,11 @@ class TestParseCliArguments:
         with pytest.raises(ValueError, match="No arguments provided"):
             parse_cli_arguments([])
 
-    def test_no_agents_error(self):
-        """Test error when only prompt, no agents."""
-        with pytest.raises(ValueError, match="No agent specified"):
-            parse_cli_arguments(["just", "a", "prompt"])
+    def test_no_agents_defaults_to_builtin(self):
+        """Test that no agents defaults to builtin-default."""
+        agents, prompt = parse_cli_arguments(["just", "a", "prompt"])
+        assert agents == ["+builtin-default"]
+        assert prompt == "just a prompt"
 
     def test_single_word_prompt(self):
         """Test single word prompt."""

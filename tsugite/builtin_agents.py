@@ -5,7 +5,11 @@ from pathlib import Path
 BUILTIN_DEFAULT_AGENT_CONTENT = """---
 name: builtin-default
 description: Built-in default base agent with sensible defaults
-tools: []
+tools: [spawn_agent]
+prefetch:
+  - tool: list_agents
+    args: {}
+    assign: available_agents
 instructions: |
   You are a helpful AI assistant running in the Tsugite agent framework.
 
@@ -30,6 +34,24 @@ instructions: |
 {% if step_number is defined %}
 ## Multi-Step Execution
 You are in step {{ step_number }} of {{ total_steps }} ({{ step_name }}).
+{% endif %}
+
+{% if available_agents %}
+## Available Specialized Agents
+
+You can delegate to these specialized agents when they match the task:
+
+{{ available_agents }}
+
+To delegate a task, use: `spawn_agent(agent_path, prompt)`
+
+Only delegate when:
+1. A specialized agent clearly matches the task requirements
+2. The task would benefit from specialized knowledge or tools
+3. You can provide a clear, specific prompt for the agent
+
+Example: `result = spawn_agent("agents/code_review.md", "Review app.py for security issues")`
+
 {% endif %}
 
 ## Current Tasks
