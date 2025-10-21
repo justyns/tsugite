@@ -26,11 +26,11 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
-      - name: Run ruff
-        run: uv run ruff check .
+      - name: Run ruff check
+        run: uv run ruff check --show-fixes .
 
-      - name: Run black
-        run: uv run black . --check
+      - name: Run ruff format
+        run: uv run ruff format --check
 
   test:
     name: Test (Python ${{ matrix.python-version }})
