@@ -34,6 +34,7 @@ def sample_agent_content() -> str:
     """Sample agent markdown content for testing."""
     return """---
 name: test_agent
+extends: none
 model: openai:gpt-4o-mini
 max_steps: 5
 tools: [read_file, write_file]

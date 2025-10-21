@@ -254,9 +254,10 @@ def resolve_agent_inheritance(agent, agent_path: Path, inheritance_chain: Option
     # Build inheritance chain
     configs_to_merge = []
 
-    # 1. Load default base agent (if not the current agent and not opted out)
+    # 1. Load default base agent (only if no explicit extends field is provided)
     default_base_name = _get_default_base_agent_name()
-    if default_base_name and current_config.extends != "none":
+    # Only use default base if agent doesn't explicitly extend something else
+    if default_base_name and current_config.extends is None:
         # Don't load default if current agent IS the default
         default_path = find_agent_file(default_base_name, agent_path.parent)
         if default_path and default_path.resolve() != resolved_path:
