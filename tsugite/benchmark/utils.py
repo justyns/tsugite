@@ -107,6 +107,12 @@ def coerce_value(value: str) -> Any:
 def parse_key_value_block(block: Optional[str]) -> Dict[str, Any]:
     """Parse a key-value block from markdown.
 
+    Supports both simple key-value pairs and nested YAML structures:
+    - simple_key: value
+    - nested_key:
+        sub_key: value
+        another: value
+
     Args:
         block: Block containing key-value pairs (bullet list format)
 
@@ -117,14 +123,68 @@ def parse_key_value_block(block: Optional[str]) -> Dict[str, Any]:
         return {}
 
     result: Dict[str, Any] = {}
-    for line in block.splitlines():
-        line = line.strip()
-        if not line.startswith("- ") or ":" not in line:
+    lines = block.splitlines()
+    i = 0
+
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+
+        # Skip non-bullet lines
+        if not stripped.startswith("- ") or ":" not in stripped:
+            i += 1
             continue
 
-        # Split on first colon
-        key, raw_value = line[2:].split(":", 1)
-        result[key.strip()] = coerce_value(raw_value)
+        # Extract key from bullet item
+        key_part = stripped[2:]  # Remove "- "
+        key, raw_value = key_part.split(":", 1)
+        key = key.strip()
+        raw_value = raw_value.strip()
+
+        # Check if this is a nested structure (value is empty or whitespace)
+        if not raw_value:
+            # Collect indented lines that follow
+            nested_lines = []
+            indent_level = None
+            i += 1
+
+            while i < len(lines):
+                next_line = lines[i]
+
+                # Check if line is indented (part of nested structure)
+                if next_line and not next_line[0].isspace():
+                    # Not indented, end of nested structure
+                    break
+
+                if next_line.strip():  # Non-empty indented line
+                    # Determine indent level from first indented line
+                    if indent_level is None:
+                        indent_level = len(next_line) - len(next_line.lstrip())
+
+                    # Remove the base indent level to get relative indentation
+                    if len(next_line) - len(next_line.lstrip()) >= indent_level:
+                        nested_lines.append(next_line[indent_level:])
+                    else:
+                        nested_lines.append(next_line.lstrip())
+
+                i += 1
+
+            # Parse nested structure as YAML
+            if nested_lines:
+                import yaml
+
+                nested_yaml = "\n".join(nested_lines)
+                try:
+                    result[key] = yaml.safe_load(nested_yaml)
+                except yaml.YAMLError:
+                    # If YAML parsing fails, store as string
+                    result[key] = nested_yaml
+            else:
+                result[key] = ""
+        else:
+            # Simple key-value pair on same line
+            result[key] = coerce_value(raw_value)
+            i += 1
 
     return result
 

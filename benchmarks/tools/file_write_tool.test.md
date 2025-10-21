@@ -13,7 +13,7 @@ description: Test ability to call write_file tool correctly on first try
 
 **Evaluation:**
 - tool_called: write_file
-- contains: ["Success", "wrote"]
+- matches: "(success|wrote|written|created)"
 - min_length: 10
 
 ## Test Case 2: Write Multiple Lines
@@ -21,13 +21,19 @@ description: Test ability to call write_file tool correctly on first try
 
 **Evaluation:**
 - tool_called: write_file
-- contains: ["Success", "wrote"]
-- min_length: 10
+- file_check:
+    path: /tmp/test_write_2.txt
+    exists: true
+    contains: ["Line 1", "Line 2", "Line 3"]
+- matches: "(success|wrote|written|created)"
 
 ## Test Case 3: Write JSON Content
 **Prompt:** "Write this JSON to /tmp/test_write_3.json: {\"name\": \"test\", \"value\": 123}"
 
 **Evaluation:**
 - tool_called: write_file
-- contains: ["Success", "wrote"]
-- min_length: 10
+- file_check:
+    path: /tmp/test_write_3.json
+    exists: true
+    contains: ["\"name\"", "\"test\"", "\"value\"", "123"]
+- matches: "(success|wrote|written|created)"

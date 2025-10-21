@@ -459,6 +459,76 @@ Make sure your plan includes the key steps and reasoning before you start execut
         elif criterion == "content_pattern":
             return bool(re.search(expected_value, result))
 
+        elif criterion == "matches":
+            # Regex pattern matching on agent output
+            # expected_value can be a single pattern or list of patterns
+            if isinstance(expected_value, list):
+                # ALL patterns must match
+                return all(bool(re.search(pattern, result)) for pattern in expected_value)
+            else:
+                # Single pattern must match
+                return bool(re.search(expected_value, result))
+
+        elif criterion == "file_check":
+            # Verify file contents directly
+            # expected_value is a dict with: path, exists, contains, matches, exact
+            if not isinstance(expected_value, dict):
+                return False
+
+            file_path = expected_value.get("path")
+            if not file_path:
+                return False
+
+            from pathlib import Path
+
+            path = Path(file_path)
+
+            # Check existence
+            if expected_value.get("exists"):
+                if not path.exists():
+                    return False
+
+            # If file doesn't exist and we're not checking existence, fail
+            if not path.exists():
+                return False
+
+            # Read file content for verification
+            try:
+                file_content = path.read_text(encoding="utf-8")
+            except Exception:
+                # File read failed
+                return False
+
+            # Check exact match
+            if "exact" in expected_value:
+                if file_content.strip() != expected_value["exact"].strip():
+                    return False
+
+            # Check contains (list of strings that must all appear)
+            if "contains" in expected_value:
+                contains_list = expected_value["contains"]
+                if isinstance(contains_list, list):
+                    if not all(str(item) in file_content for item in contains_list):
+                        return False
+                else:
+                    if str(contains_list) not in file_content:
+                        return False
+
+            # Check regex matches
+            if "matches" in expected_value:
+                pattern = expected_value["matches"]
+                if isinstance(pattern, list):
+                    # All patterns must match
+                    if not all(bool(re.search(p, file_content)) for p in pattern):
+                        return False
+                else:
+                    # Single pattern must match
+                    if not bool(re.search(pattern, file_content)):
+                        return False
+
+            # All checks passed
+            return True
+
         elif criterion == "min_length":
             return len(result) >= expected_value
 
