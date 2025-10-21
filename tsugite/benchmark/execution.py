@@ -10,7 +10,6 @@ import yaml
 
 from ..agent_runner import run_agent
 from .config import (
-    BEHAVIOR_SCORES,
     EVALUATION_WEIGHTS,
     SIMILARITY_THRESHOLDS,
 )
@@ -104,6 +103,37 @@ class TestExecutor:
 
         except Exception as e:
             duration = time.time() - start_time
+
+            # Try to extract execution steps from exception if available
+            # (agent_runner attaches these when agent hits max_steps)
+            execution_trace = None
+            steps_taken = 0
+            token_usage = {}
+            cost = 0.0
+
+            if hasattr(e, "execution_steps") and e.execution_steps:
+                # Build execution trace from steps attached to exception
+                execution_trace = [
+                    {
+                        "step": step.step_number,
+                        "thought": step.thought,
+                        "code": step.code,
+                        "output": step.output,
+                        "tools_called": step.tools_called,
+                        "error": step.error,
+                    }
+                    for step in e.execution_steps
+                ]
+                steps_taken = getattr(e, "step_count", len(e.execution_steps))
+                if hasattr(e, "token_usage") and e.token_usage:
+                    token_usage = {"total": e.token_usage}
+                if hasattr(e, "cost") and e.cost:
+                    cost = e.cost
+
+            metrics = {}
+            if execution_trace:
+                metrics["execution_trace"] = execution_trace
+
             return BenchmarkTestResult(
                 test_id=test.test_id,
                 model=model_name,
@@ -114,10 +144,10 @@ class TestExecutor:
                 expected_output="",
                 category=test.category,
                 error=str(e),
-                token_usage={},
-                cost=0.0,
-                steps_taken=0,
-                metrics={},
+                token_usage=token_usage,
+                cost=cost,
+                steps_taken=steps_taken,
+                metrics=metrics,
             )
 
     def _create_temp_agent(self, test: BenchmarkTest, model_name: str) -> Path:
@@ -209,8 +239,8 @@ class TestExecutor:
                 return_token_usage=True,
             )
 
-            # Unpack result: (output, token_count, cost, steps)
-            result, token_count, cost, steps = result_tuple
+            # Unpack result: (output, token_count, cost, step_count, execution_steps)
+            result, token_count, cost, steps, execution_steps = result_tuple
             total_steps += steps
             total_tokens += token_count or 0
             total_cost += cost or 0.0
@@ -218,7 +248,7 @@ class TestExecutor:
             case_duration = time.time() - case_start
 
             # Evaluate this test case
-            case_evaluation = await self._evaluate_test_case(test_case, result, case_duration)
+            case_evaluation = await self._evaluate_test_case(test_case, result, case_duration, execution_steps, test)
 
             case_results.append(case_evaluation)
             raw_outputs.append(str(result))
@@ -257,13 +287,22 @@ Make sure your plan includes the key steps and reasoning before you start execut
 
         return test_case.prompt + planning_instruction
 
-    async def _evaluate_test_case(self, test_case: TestCase, result: str, duration: float) -> Dict[str, Any]:
+    async def _evaluate_test_case(
+        self,
+        test_case: TestCase,
+        result: str,
+        duration: float,
+        execution_steps: list = None,
+        test: BenchmarkTest = None,
+    ) -> Dict[str, Any]:
         """Evaluate a single test case result.
 
         Args:
             test_case: Test case definition
             result: Agent output
             duration: Execution duration
+            execution_steps: List of StepResult objects from execution
+            test: BenchmarkTest object with agent configuration
 
         Returns:
             Evaluation dictionary with passed, score, and metrics
@@ -280,24 +319,35 @@ Make sure your plan includes the key steps and reasoning before you start execut
             if test_case.expected_output:
                 evaluation = self._evaluate_correctness(test_case, result, evaluation)
 
-            # 2. Expected behaviors evaluation
-            if test_case.expected_behaviors:
-                evaluation = self._evaluate_behaviors(test_case, result, evaluation)
-
-            # 3. Custom evaluation criteria
+            # 2. Custom evaluation criteria (includes tool checking)
             if test_case.evaluation:
-                evaluation = self._evaluate_custom_criteria(test_case, result, evaluation)
+                evaluation = self._evaluate_custom_criteria(test_case, result, evaluation, execution_steps, test)
 
-            # 4. LLM evaluation (if enabled)
+            # 3. LLM evaluation (if enabled)
             if test_case.use_llm_evaluation and test_case.llm_evaluation_criteria:
                 evaluation = await self._evaluate_with_llm(test_case, result, evaluation)
 
-            # 5. Plan evaluation (if required)
+            # 4. Plan evaluation (if required)
             if test_case.requires_plan:
                 evaluation = self._evaluate_planning(test_case, result, evaluation)
 
         except Exception as e:
             evaluation["error"] = str(e)
+
+        # Add execution trace for failed tests (for debugging)
+        # Only save for failures to reduce JSON size
+        if execution_steps and not evaluation["passed"]:
+            evaluation["execution_trace"] = [
+                {
+                    "step": step.step_number,
+                    "thought": step.thought,
+                    "code": step.code,
+                    "output": step.output,
+                    "tools_called": step.tools_called,
+                    "error": step.error,
+                }
+                for step in execution_steps
+            ]
 
         return evaluation
 
@@ -313,66 +363,71 @@ Make sure your plan includes the key steps and reasoning before you start execut
         evaluation["metrics"]["correctness"] = correctness
         return evaluation
 
-    def _evaluate_behaviors(self, test_case: TestCase, result: str, evaluation: Dict[str, Any]) -> Dict[str, Any]:
-        """Evaluate expected behaviors."""
-        behavior_checks = {}
-        behavior_score = 0.0
-
-        for behavior, expected_value in test_case.expected_behaviors.items():
-            if behavior == "tool_usage":
-                tool_used = any(keyword in result.lower() for keyword in ["using tool", "calling", "executed"])
-                behavior_checks[behavior] = tool_used == expected_value
-                if tool_used == expected_value:
-                    behavior_score += BEHAVIOR_SCORES.tool_usage
-
-            elif behavior == "file_created":
-                file_created = any(keyword in result.lower() for keyword in ["created", "saved", "written"])
-                behavior_checks[behavior] = file_created == expected_value
-                if file_created == expected_value:
-                    behavior_score += BEHAVIOR_SCORES.file_created
-
-        evaluation["metrics"]["behaviors"] = behavior_checks
-
-        # Use behavior score if no exact output expected
-        if not test_case.expected_output:
-            evaluation["score"] = behavior_score
-            evaluation["passed"] = behavior_score >= SIMILARITY_THRESHOLDS.behavior_pass_threshold
-
-        return evaluation
-
-    def _evaluate_custom_criteria(self, test_case: TestCase, result: str, evaluation: Dict[str, Any]) -> Dict[str, Any]:
+    def _evaluate_custom_criteria(
+        self,
+        test_case: TestCase,
+        result: str,
+        evaluation: Dict[str, Any],
+        execution_steps: list = None,
+        test: BenchmarkTest = None,
+    ) -> Dict[str, Any]:
         """Evaluate custom criteria."""
         custom_checks = {}
-        custom_score = 0.0
-        total_criteria = len(test_case.evaluation)
 
         for criterion, expected_value in test_case.evaluation.items():
-            check_passed = self._check_criterion(criterion, expected_value, result)
+            check_passed = self._check_criterion(criterion, expected_value, result, execution_steps, test)
             custom_checks[criterion] = check_passed
-            if check_passed:
-                custom_score += 1.0 / total_criteria
 
         evaluation["metrics"]["custom"] = custom_checks
 
-        # Use custom score if no output/behaviors specified
-        if not test_case.expected_output and not test_case.expected_behaviors:
-            evaluation["score"] = custom_score
-            evaluation["passed"] = custom_score >= SIMILARITY_THRESHOLDS.custom_criteria_threshold
+        # ALL custom criteria must pass for score of 1.0, otherwise 0.0
+        if not test_case.expected_output:
+            all_custom_pass = all(custom_checks.values()) if custom_checks else True
+            evaluation["score"] = 1.0 if all_custom_pass else 0.0
+            evaluation["passed"] = all_custom_pass
 
         return evaluation
 
-    def _check_criterion(self, criterion: str, expected_value: Any, result: str) -> bool:
+    def _check_criterion(
+        self,
+        criterion: str,
+        expected_value: Any,
+        result: str,
+        execution_steps: list = None,
+        test: BenchmarkTest = None,
+    ) -> bool:
         """Check a single custom criterion.
 
         Args:
             criterion: Criterion name
             expected_value: Expected value
             result: Agent output
+            execution_steps: List of StepResult objects from execution
+            test: BenchmarkTest object with agent configuration
 
         Returns:
             True if criterion passes
         """
-        if criterion == "exact_match":
+        if criterion == "tool_called":
+            # Check if specific tools were called during execution
+            if not execution_steps:
+                return False
+
+            # Collect all tools called across all steps
+            tools_called = set()
+            for step in execution_steps:
+                if hasattr(step, "tools_called") and step.tools_called:
+                    tools_called.update(step.tools_called)
+
+            # expected_value can be a single tool name or a list of required tools
+            if isinstance(expected_value, list):
+                # ALL listed tools must have been called
+                return all(tool in tools_called for tool in expected_value)
+            else:
+                # Single tool must have been called
+                return expected_value in tools_called
+
+        elif criterion == "exact_match":
             return result.strip() == expected_value
 
         elif criterion == "contains":

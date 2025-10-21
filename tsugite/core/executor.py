@@ -11,8 +11,8 @@ import io
 import pprint
 import sys
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
@@ -24,6 +24,7 @@ class ExecutionResult:
     stdout: str
     stderr: str
     final_answer: Optional[Any] = None
+    tools_called: List[str] = field(default_factory=list)
 
 
 class CodeExecutor(ABC):
@@ -78,6 +79,7 @@ class LocalExecutor(CodeExecutor):
         """Initialize executor with empty namespace."""
         self.namespace = {}
         self._final_answer_value = None
+        self._tools_called = []
 
         # Inject final_answer function into namespace
         def final_answer(value):
@@ -142,6 +144,61 @@ class LocalExecutor(CodeExecutor):
         else:
             return repr(value)
 
+    def _check_code_safety(self, code: str) -> Optional[str]:
+        """Check code for anti-patterns before execution.
+
+        Detects common mistakes where LLMs use built-in Python functions
+        instead of the provided tools.
+
+        Args:
+            code: Python code to check
+
+        Returns:
+            Error message string if violations found, None if code is safe
+        """
+        import re
+
+        # Check for file operations using open() instead of read_file/write_file
+        # Match: word boundary before 'open', then whitespace, then '('
+        # This avoids false positives like 'reopen(' or 'is_open()'
+        # Pattern explanation:
+        #   \b       - word boundary (not preceded by alphanumeric or _)
+        #   open     - literal 'open'
+        #   \s*      - optional whitespace
+        #   \(       - opening parenthesis
+        if re.search(r"\bopen\s*\(", code):
+            # Quick check to avoid false positives in strings/comments
+            # Remove strings and comments before checking
+            # This is a simple heuristic - not perfect but good enough
+            code_without_strings = re.sub(r'["\'].*?["\']', "", code)  # Remove string contents
+            code_without_comments = re.sub(r"#.*$", "", code_without_strings, flags=re.MULTILINE)  # Remove comments
+
+            # Check again after removing strings/comments
+            if re.search(r"\bopen\s*\(", code_without_comments):
+                return """Code Safety Check Failed: Detected use of 'open()' for file operations.
+
+Please use the provided tools instead:
+  - read_file(path) - to read file contents
+  - write_file(path, content) - to write to files
+
+Example:
+  # Instead of:
+  with open('file.txt') as f:
+      content = f.read()
+
+  # Use:
+  content = read_file('file.txt')
+
+  # Instead of:
+  with open('output.txt', 'w') as f:
+      f.write(data)
+
+  # Use:
+  write_file('output.txt', data)"""
+
+        # Code passed all safety checks
+        return None
+
     async def execute(self, code: str) -> ExecutionResult:
         """Execute code using exec().
 
@@ -151,10 +208,23 @@ class LocalExecutor(CodeExecutor):
             code: Python code to execute
 
         Returns:
-            ExecutionResult with output, error, stdout, stderr, and final_answer
+            ExecutionResult with output, error, stdout, stderr, final_answer, and tools_called
         """
-        # Reset final answer
+        # Reset final answer and tool tracking
         self._final_answer_value = None
+        self._tools_called = []
+
+        # Check code safety before execution
+        safety_error = self._check_code_safety(code)
+        if safety_error:
+            return ExecutionResult(
+                output="",
+                error=safety_error,
+                stdout="",
+                stderr=safety_error,
+                final_answer=None,
+                tools_called=[],
+            )
 
         # Capture stdout/stderr
         stdout_capture = io.StringIO()
@@ -197,6 +267,7 @@ class LocalExecutor(CodeExecutor):
                 stdout=output,
                 stderr=stderr_output,
                 final_answer=self._final_answer_value,
+                tools_called=self._tools_called.copy(),
             )
 
         except Exception as e:
@@ -208,6 +279,7 @@ class LocalExecutor(CodeExecutor):
                 stdout=stdout_capture.getvalue(),
                 stderr=stderr_capture.getvalue() + "\n" + error_msg,
                 final_answer=None,
+                tools_called=self._tools_called.copy(),
             )
 
         finally:

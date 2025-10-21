@@ -16,6 +16,7 @@ class StepResult:
     code: str
     output: str
     error: Optional[str] = None
+    tools_called: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -38,7 +39,14 @@ class AgentMemory:
         """Set the task."""
         self.task = task
 
-    def add_step(self, thought: str, code: str, output: str, error: Optional[str] = None) -> None:
+    def add_step(
+        self,
+        thought: str,
+        code: str,
+        output: str,
+        error: Optional[str] = None,
+        tools_called: Optional[List[str]] = None,
+    ) -> None:
         """Add a step to history."""
         step = StepResult(
             step_number=len(self.steps) + 1,
@@ -46,6 +54,7 @@ class AgentMemory:
             code=code,
             output=output,
             error=error,
+            tools_called=tools_called or [],
         )
         self.steps.append(step)
 

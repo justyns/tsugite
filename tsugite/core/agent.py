@@ -24,6 +24,7 @@ class AgentResult:
     token_usage: Optional[int] = None
     cost: Optional[float] = None
     steps: Optional[List[StepResult]] = None
+    error: Optional[str] = None
 
 
 class TsugiteAgent:
@@ -120,6 +121,10 @@ class TsugiteAgent:
                     Accepts both positional and keyword arguments for flexibility,
                     but tool.execute() expects keyword arguments only.
                     """
+                    # Record that this tool was called
+                    if hasattr(self.executor, "_tools_called"):
+                        self.executor._tools_called.append(tool_obj.name)
+
                     # Convert positional args to keyword args if needed
                     if args:
                         # Tools should be called with keyword args, but if positional
@@ -339,7 +344,13 @@ class TsugiteAgent:
                         )
 
             # Add this step to memory (always, even if final_answer was called)
-            self.memory.add_step(thought=thought, code=code, output=exec_result.output, error=exec_result.error)
+            self.memory.add_step(
+                thought=thought,
+                code=code,
+                output=exec_result.output,
+                error=exec_result.error,
+                tools_called=exec_result.tools_called,
+            )
 
             # Check if final_answer was called during execution
             if exec_result.final_answer is not None:
@@ -383,7 +394,19 @@ class TsugiteAgent:
         if self.ui_handler:
             self.ui_handler.handle_event(UIEvent.ERROR, {"error": error_msg, "error_type": "RuntimeError"})
 
-        raise RuntimeError(error_msg)
+        # For benchmark/testing use cases that need execution trace even on error,
+        # return AgentResult with error field set instead of raising
+        if return_full_result:
+            return AgentResult(
+                output=None,
+                token_usage=None,
+                cost=self.total_cost,
+                steps=self.memory.steps,
+                error=error_msg,
+            )
+        else:
+            # Backward compatibility: raise exception for non-benchmark usage
+            raise RuntimeError(error_msg)
 
     def _build_messages(self) -> List[Dict[str, str]]:
         """Build message list for LLM from memory.

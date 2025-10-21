@@ -208,7 +208,7 @@ async def _execute_agent_with_prompt(
     injectable_vars: Optional[Dict[str, Any]] = None,
     return_token_usage: bool = False,
     stream: bool = False,
-) -> str | tuple[str, Optional[int], Optional[float], int]:
+) -> str | tuple[str, Optional[int], Optional[float], int, list]:
     """Execute agent with a pre-rendered prompt.
 
     Low-level execution function used by both run_agent and run_multistep_agent.
@@ -393,9 +393,23 @@ async def _execute_agent_with_prompt(
 
             if isinstance(result, AgentResult):
                 step_count = len(result.steps) if result.steps else 0
-                return str(result.output), result.token_usage, result.cost, step_count
+                steps_list = result.steps if result.steps else []
+
+                # If result has error, raise it AFTER we've already extracted the steps
+                # The exception will be caught by the benchmark, but steps are already available
+                if result.error:
+                    # Create custom exception that includes execution details
+                    error = RuntimeError(f"Agent execution failed: {result.error}")
+                    # Attach execution details to exception for debugging
+                    error.execution_steps = steps_list
+                    error.token_usage = result.token_usage
+                    error.cost = result.cost
+                    error.step_count = step_count
+                    raise error
+
+                return str(result.output), result.token_usage, result.cost, step_count, steps_list
             else:
-                return str(result), None, None, 0
+                return str(result), None, None, 0, []
         else:
             from tsugite.core.agent import AgentResult
 
@@ -405,7 +419,17 @@ async def _execute_agent_with_prompt(
                 return str(result)
 
     except Exception as e:
-        raise RuntimeError(f"Agent execution failed: {e}")
+        # Preserve execution details if they're attached to the original exception
+        # (This happens when agent hits max_steps and we want execution trace for debugging)
+        if hasattr(e, "execution_steps"):
+            new_error = RuntimeError(f"Agent execution failed: {e}")
+            new_error.execution_steps = e.execution_steps
+            new_error.token_usage = getattr(e, "token_usage", None)
+            new_error.cost = getattr(e, "cost", None)
+            new_error.step_count = getattr(e, "step_count", 0)
+            raise new_error
+        else:
+            raise RuntimeError(f"Agent execution failed: {e}")
     finally:
         # Clean up MCP client connections
         for client in mcp_clients:
@@ -427,7 +451,7 @@ def run_agent(
     return_token_usage: bool = False,
     stream: bool = False,
     force_text_mode: bool = False,
-) -> str | tuple[str, Optional[int], Optional[float], int]:
+) -> str | tuple[str, Optional[int], Optional[float], int, list]:
     """Run a Tsugite agent.
 
     Args:
@@ -444,7 +468,7 @@ def run_agent(
         force_text_mode: Force text_mode=True regardless of agent config (useful for chat UI)
 
     Returns:
-        Agent execution result as string, or tuple of (result, token_count, cost, steps) if return_token_usage=True
+        Agent execution result as string, or tuple of (result, token_count, cost, step_count, execution_steps) if return_token_usage=True
 
     Raises:
         ValueError: If agent file is invalid

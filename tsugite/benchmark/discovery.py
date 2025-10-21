@@ -7,7 +7,6 @@ from typing import Any, Dict, List, Optional
 
 from ..utils import parse_yaml_frontmatter
 from .utils import (
-    derive_behavior_expectations,
     extract_block,
     extract_inline_field,
     extract_prompt_from_markdown,
@@ -23,7 +22,6 @@ class TestCase:
     name: str
     prompt: str
     expected_output: Optional[str] = None
-    expected_behaviors: Dict[str, Any] = field(default_factory=dict)
     evaluation: Dict[str, Any] = field(default_factory=dict)
     weight: float = 1.0
     requires_plan: bool = False
@@ -230,7 +228,6 @@ class TestDiscovery:
                 name=f"{common['test_id']}_default",
                 prompt=prompt,
                 expected_output=common["expected_output"],
-                expected_behaviors=metadata.get("expected_behaviors", {}),
                 evaluation=metadata.get("evaluation", {}),
                 weight=common["weight"],
                 requires_plan=metadata.get("requires_plan", False),
@@ -344,10 +341,6 @@ class TestDiscovery:
         # Extract expected output
         expected_output = extract_inline_field(content, "Expected Output")
 
-        # Parse expected behaviors
-        behaviors_block = extract_block(content, "Expected Behaviors")
-        expected_behaviors = derive_behavior_expectations(parse_bullet_list(behaviors_block))
-
         # Parse evaluation criteria
         evaluation = parse_key_value_block(extract_block(content, "Evaluation"))
 
@@ -373,7 +366,6 @@ class TestDiscovery:
             name=name,
             prompt=prompt,
             expected_output=expected_output,
-            expected_behaviors=expected_behaviors,
             evaluation=evaluation,
             weight=1.0,
             requires_plan=requires_plan,

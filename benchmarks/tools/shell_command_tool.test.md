@@ -11,28 +11,22 @@ description: Test ability to call run_shell_command tool correctly on first try
 ## Test Case 1: Simple Echo Command
 **Prompt:** "Run the command: echo 'Hello Shell'"
 
-**Expected Behaviors:**
-- Should use run_shell_command tool
-
 **Evaluation:**
+- tool_called: run
 - contains: ["Hello Shell"]
 - min_length: 10
 
 ## Test Case 2: List Directory
 **Prompt:** "Run: ls /tmp | head -5"
 
-**Expected Behaviors:**
-- Should use run_shell_command tool
-
 **Evaluation:**
+- tool_called: run
 - min_length: 5
 
 ## Test Case 3: Print Working Directory
 **Prompt:** "What is the current directory? Run pwd"
 
-**Expected Behaviors:**
-- Should use run_shell_command tool
-
 **Evaluation:**
+- tool_called: run
 - contains: ["/"]
 - min_length: 3

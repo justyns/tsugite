@@ -129,25 +129,6 @@ def parse_key_value_block(block: Optional[str]) -> Dict[str, Any]:
     return result
 
 
-def derive_behavior_expectations(items: List[str]) -> Dict[str, Any]:
-    """Derive behavior expectations from a list of requirement items.
-
-    Args:
-        items: List of requirement strings
-
-    Returns:
-        Dictionary of expected behaviors
-    """
-    expectations: Dict[str, Any] = {}
-    for item in items:
-        lowered = item.lower()
-        if "use" in lowered and "tool" in lowered:
-            expectations["tool_usage"] = True
-        elif "file" in lowered and "create" in lowered:
-            expectations["file_created"] = True
-    return expectations
-
-
 def get_test_category(test_id: str) -> str:
     """Extract category from test ID.
 

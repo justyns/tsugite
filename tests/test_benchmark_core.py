@@ -60,7 +60,7 @@ def benchmark_config():
 def mock_agent_run():
     """Mock the agent runner."""
     with patch("tsugite.benchmark.execution.run_agent") as mock:
-        mock.return_value = ("42", 0, 0.0, 0)
+        mock.return_value = ("42", 0, 0.0, 0, [])
         yield mock
 
 
