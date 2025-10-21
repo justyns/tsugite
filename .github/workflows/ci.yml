@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [master, development]
   pull_request:
-    branches: [main]
+    branches: [master]
 
 jobs:
   lint:
@@ -58,3 +58,13 @@ jobs:
 
       - name: Run tests
         run: uv run pytest -v
+
+      - name: Upload coverage reports
+        if: matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            coverage.xml
+            htmlcov/
+          retention-days: 30
