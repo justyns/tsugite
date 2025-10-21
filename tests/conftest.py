@@ -34,6 +34,7 @@ def sample_agent_content() -> str:
     """Sample agent markdown content for testing."""
     return """---
 name: test_agent
+extends: none
 model: openai:gpt-4o-mini
 max_steps: 5
 tools: [read_file, write_file]
@@ -70,6 +71,7 @@ def simple_agent_content() -> str:
     """Simple agent content without complex features."""
     return """---
 name: simple_test_agent
+extends: none
 model: ollama:qwen2.5-coder:7b
 max_steps: 3
 tools: []
@@ -88,6 +90,7 @@ def spawn_agent_content() -> str:
     """Agent content that uses spawn_agent tool."""
     return """---
 name: parent_agent
+extends: none
 model: ollama:qwen2.5-coder:7b
 max_steps: 5
 tools: [spawn_agent]
@@ -108,6 +111,7 @@ def evaluator_agent_content() -> str:
     """Agent content for LLM evaluation tests."""
     return """---
 name: evaluator_agent
+extends: none
 model: openai:gpt-4o-mini
 max_steps: 3
 tools: []
@@ -162,6 +166,20 @@ def reset_tool_registry():
     yield
     _tools.clear()
     _tools.update(original_tools)
+
+
+@pytest.fixture(autouse=True)
+def isolate_config_files(tmp_path, monkeypatch):
+    """Isolate config files for each test to prevent cross-test contamination.
+
+    Uses XDG_CONFIG_HOME instead of HOME because Path.home() doesn't respect
+    the HOME environment variable on Unix systems (it reads from password database).
+    """
+    test_config = tmp_path / "config"
+    test_config.mkdir(exist_ok=True)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(test_config))
+
+    yield
 
 
 @pytest.fixture
@@ -250,10 +268,12 @@ def agent_content_factory():
         prefetch=None,
         instructions=None,
         content="# Task\n{{ user_prompt }}",
+        extends="none",
     ):
         tools_str = str(tools) if tools is not None else "[]"
         frontmatter = f"""---
 name: {name}
+extends: {extends}
 model: {model}
 tools: {tools_str}"""
 

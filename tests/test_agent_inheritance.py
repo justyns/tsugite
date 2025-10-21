@@ -214,6 +214,7 @@ def test_resolve_agent_inheritance_with_parent(tmp_path):
     parent_file.write_text(
         """---
 name: base
+extends: none
 model: ollama:base-model
 tools: [read_file, write_file]
 instructions: Base instructions.
