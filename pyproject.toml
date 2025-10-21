@@ -49,7 +49,7 @@ line-length = 120
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-n auto --dist loadscope"
+addopts = "-n auto --dist loadscope --cov=tsugite --cov-report=term-missing --cov-report=html"
 asyncio_mode = "strict"
 asyncio_default_fixture_loop_scope = "function"
 filterwarnings = ["ignore::RuntimeWarning"]
@@ -64,11 +64,35 @@ norecursedirs = [
   '_*',
 ]
 
+[tool.coverage.run]
+source = ["tsugite"]
+omit = [
+  "*/tests/*",
+  "*/test_*.py",
+  "*/__pycache__/*",
+  "*/site-packages/*",
+]
+
+[tool.coverage.report]
+precision = 2
+show_missing = true
+skip_covered = false
+exclude_lines = [
+  "pragma: no cover",
+  "def __repr__",
+  "raise AssertionError",
+  "raise NotImplementedError",
+  "if __name__ == .__main__.:",
+  "if TYPE_CHECKING:",
+  "@abstractmethod",
+]
+
 [dependency-groups]
 dev = [
   "black>=25.9.0",
   "pytest>=8.4.2",
   "pytest-asyncio>=0.23.0",
+  "pytest-cov>=6.0.0",
   "pytest-xdist>=3.5.0",
   "ruff>=0.1",
   "vulture>=2.14",
