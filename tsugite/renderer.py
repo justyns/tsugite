@@ -148,4 +148,4 @@ class AgentRenderer:
             template = self.env.from_string(preprocessed)
             return template.render(**context)
         except Exception as e:
-            raise ValueError(f"Template rendering failed: {e}")
+            raise ValueError(f"Template rendering failed: {e}") from e

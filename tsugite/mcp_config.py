@@ -66,7 +66,7 @@ def load_mcp_config(path: Optional[Path] = None) -> Dict[str, MCPServerConfig]:
         return {}
 
     try:
-        with open(path, "r") as f:
+        with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
 
         if "mcpServers" not in data:
@@ -133,7 +133,7 @@ def save_mcp_config(servers: Dict[str, MCPServerConfig], path: Optional[Path] = 
         config_data["mcpServers"][name] = server_dict
 
     # Write with pretty formatting
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(config_data, f, indent=2)
 
 

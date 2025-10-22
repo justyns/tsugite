@@ -141,6 +141,47 @@ class CustomUIHandler:
             return "  └─ "
         return ""
 
+    @staticmethod
+    def _parse_execution_content(content: str) -> tuple:
+        """Parse execution result content into logs and output.
+
+        Args:
+            content: The execution result content to parse
+
+        Returns:
+            Tuple of (execution_logs, output_lines)
+        """
+        lines = content.split("\n")
+        execution_logs = []
+        output_lines = []
+
+        current_section = None
+        for line in lines:
+            if line.startswith("Execution logs:"):
+                current_section = "logs"
+            elif line.startswith("Out:"):
+                current_section = "output"
+                output_lines.append(line[4:].strip())  # Remove 'Out:' prefix
+            elif current_section == "logs" and line.strip():
+                execution_logs.append(line.strip())
+            elif current_section == "output" and line.strip():
+                output_lines.append(line.strip())
+
+        return execution_logs, output_lines
+
+    @staticmethod
+    def _contains_error(text: str) -> bool:
+        """Check if text contains error keywords.
+
+        Args:
+            text: Text to check for error keywords
+
+        Returns:
+            True if text contains error indicators
+        """
+        error_keywords = ["error", "failed", "exception", "not found", "invalid", "traceback"]
+        return any(keyword in text.lower() for keyword in error_keywords)
+
     def _handle_task_start(self, data: Dict[str, Any]) -> None:
         """Handle task start event."""
         self.state.task = data.get("task")
@@ -219,11 +260,8 @@ class CustomUIHandler:
             # Clean up observation for display
             clean_obs = observation.replace("|", "[").strip()
 
-            # Check if this looks like an error
-            is_error = any(
-                keyword in clean_obs.lower()
-                for keyword in ["error", "failed", "exception", "traceback", "not found", "invalid"]
-            )
+            # Check if this looks like an error using shared helper
+            is_error = self._contains_error(clean_obs)
 
             if is_error:
                 # Display errors prominently in red without truncation
@@ -411,22 +449,8 @@ class CustomUIHandler:
         content = data.get("content", "")
 
         if content.strip():
-            # Parse execution logs and output
-            lines = content.split("\n")
-            execution_logs = []
-            output_lines = []
-
-            current_section = None
-            for line in lines:
-                if line.startswith("Execution logs:"):
-                    current_section = "logs"
-                elif line.startswith("Out:"):
-                    current_section = "output"
-                    output_lines.append(line[4:].strip())  # Remove 'Out:' prefix
-                elif current_section == "logs" and line.strip():
-                    execution_logs.append(line.strip())
-                elif current_section == "output" and line.strip():
-                    output_lines.append(line.strip())
+            # Parse execution logs and output using shared helper
+            execution_logs, output_lines = self._parse_execution_content(content)
 
             # Display execution logs if present (always show with execution results)
             if execution_logs:
@@ -437,11 +461,7 @@ class CustomUIHandler:
             # Display output if present and meaningful
             if output_lines:
                 output_text = "\n".join(output_lines)
-                # Check if output contains error information
-                contains_error = any(
-                    keyword in output_text.lower()
-                    for keyword in ["error", "failed", "exception", "not found", "invalid", "traceback"]
-                )
+                contains_error = self._contains_error(output_text)
 
                 # Always show errors, filter non-meaningful outputs otherwise
                 if contains_error:

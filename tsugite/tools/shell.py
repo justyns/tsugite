@@ -90,10 +90,10 @@ def run(command: str, timeout: int = 30, shell: bool = True) -> str:
 
         return output or "[No output]"
 
-    except subprocess.TimeoutExpired:
-        raise RuntimeError(f"Command timed out after {timeout} seconds")
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"Command timed out after {timeout} seconds") from exc
     except Exception as e:
-        raise RuntimeError(f"Command execution failed: {e}")
+        raise RuntimeError(f"Command execution failed: {e}") from e
 
 
 @tool
@@ -126,7 +126,7 @@ def run_safe(command: str, timeout: int = 30) -> str:
         return run(command, timeout=timeout, shell=False)
 
     except Exception as e:
-        raise RuntimeError(f"Safe command execution failed: {e}")
+        raise RuntimeError(f"Safe command execution failed: {e}") from e
 
 
 @tool

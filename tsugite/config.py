@@ -42,7 +42,7 @@ def load_config(path: Optional[Path] = None) -> Config:
         return Config()
 
     try:
-        with open(path, "r") as f:
+        with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
 
         return Config(
@@ -89,7 +89,7 @@ def save_config(config: Config, path: Optional[Path] = None) -> None:
     if config.chat_theme:
         config_data["chat_theme"] = config.chat_theme
 
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(config_data, f, indent=2)
 
 

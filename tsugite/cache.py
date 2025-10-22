@@ -71,7 +71,7 @@ def save_to_cache(source: str, content: str) -> None:
         # Update metadata
         _update_cache_metadata(source, cache_file)
     except IOError as e:
-        raise RuntimeError(f"Failed to save cache for {source}: {e}")
+        raise RuntimeError(f"Failed to save cache for {source}: {e}") from e
 
 
 def _update_cache_metadata(source: str, cache_file: Path) -> None:

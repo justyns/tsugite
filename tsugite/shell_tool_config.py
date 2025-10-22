@@ -46,7 +46,7 @@ def load_custom_tools_config(path: Optional[Path] = None) -> List[ShellToolDefin
         return []
 
     try:
-        with open(path, "r") as f:
+        with open(path, "r", encoding="utf-8") as f:
             config = yaml.safe_load(f)
 
         if not config or "tools" not in config:
@@ -122,9 +122,9 @@ def load_custom_tools_config(path: Optional[Path] = None) -> List[ShellToolDefin
         return definitions
 
     except yaml.YAMLError as e:
-        raise ValueError(f"Failed to parse custom tools config: {e}")
+        raise ValueError(f"Failed to parse custom tools config: {e}") from e
     except Exception as e:
-        raise RuntimeError(f"Failed to load custom tools config: {e}")
+        raise RuntimeError(f"Failed to load custom tools config: {e}") from e
 
 
 def save_custom_tools_config(definitions: List[ShellToolDefinition], path: Optional[Path] = None) -> None:
@@ -171,7 +171,7 @@ def save_custom_tools_config(definitions: List[ShellToolDefinition], path: Optio
 
     config = {"tools": tools_config}
 
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         yaml.safe_dump(config, f, default_flow_style=False, sort_keys=False)
 
 

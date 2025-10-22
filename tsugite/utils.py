@@ -32,7 +32,7 @@ def parse_yaml_frontmatter(content: str, label: str = "content") -> Tuple[Dict[s
     try:
         metadata = yaml.safe_load(parts[1]) or {}
     except yaml.YAMLError as e:
-        raise ValueError(f"Invalid YAML frontmatter in {label.lower()}: {e}")
+        raise ValueError(f"Invalid YAML frontmatter in {label.lower()}: {e}") from e
 
     markdown_content = parts[2].strip()
     return metadata, markdown_content
@@ -171,7 +171,7 @@ def resolve_attachments(
 
             resolved.append((ref, fetched_content))
         except Exception as e:
-            raise ValueError(f"Failed to fetch attachment '{ref}' from {source}: {e}")
+            raise ValueError(f"Failed to fetch attachment '{ref}' from {source}: {e}") from e
 
     return resolved
 
@@ -223,12 +223,12 @@ def expand_file_references(prompt: str, base_dir: Path) -> Tuple[str, List[str]]
 
         try:
             content = file_path.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
-            raise ValueError(f"File is not a text file or has encoding issues: {filename}")
-        except PermissionError:
-            raise ValueError(f"Permission denied reading file: {filename}")
+        except UnicodeDecodeError as exc:
+            raise ValueError(f"File is not a text file or has encoding issues: {filename}") from exc
+        except PermissionError as exc:
+            raise ValueError(f"Permission denied reading file: {filename}") from exc
         except Exception as e:
-            raise ValueError(f"Failed to read file {filename}: {e}")
+            raise ValueError(f"Failed to read file {filename}: {e}") from e
 
         # Track expanded files and their contents
         expanded_files.append(filename)
