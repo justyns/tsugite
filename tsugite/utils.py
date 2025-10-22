@@ -80,6 +80,46 @@ def should_use_plain_output() -> bool:
     return False
 
 
+def ensure_file_exists(path: Path, context: str = "File") -> Path:
+    """Ensure a file exists and return its resolved path.
+
+    Args:
+        path: Path to validate
+        context: Context for error message (e.g., "Agent file", "Config file")
+
+    Returns:
+        Resolved absolute path
+
+    Raises:
+        ValueError: If path doesn't exist or is not a file
+    """
+    if not path.exists():
+        raise ValueError(f"{context} not found: {path}")
+    if not path.is_file():
+        raise ValueError(f"{context} is not a file: {path}")
+    return path.resolve()
+
+
+def ensure_dir_exists(path: Path, context: str = "Directory") -> Path:
+    """Ensure a directory exists and return its resolved path.
+
+    Args:
+        path: Path to validate
+        context: Context for error message (e.g., "Working directory", "Cache directory")
+
+    Returns:
+        Resolved absolute path
+
+    Raises:
+        ValueError: If path doesn't exist or is not a directory
+    """
+    if not path.exists():
+        raise ValueError(f"{context} not found: {path}")
+    if not path.is_dir():
+        raise ValueError(f"{context} is not a directory: {path}")
+    return path.resolve()
+
+
 def resolve_attachments(
     attachment_refs: List[str], base_dir: Path, refresh_cache: bool = False
 ) -> List[Tuple[str, str]]:

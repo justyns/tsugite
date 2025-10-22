@@ -1,12 +1,10 @@
 """Plain text UI handler without colors, panels, or emojis."""
 
 import re
-import sys
 from contextlib import contextmanager
 from typing import Any, Dict, Generator
 
-from rich.console import Console
-
+from tsugite.console import get_stdout_console
 from tsugite.ui.base import CustomUIHandler
 from tsugite.ui_context import clear_ui_context, set_ui_context
 
@@ -25,7 +23,7 @@ class PlainUIHandler(CustomUIHandler):
     def __init__(self):
         """Initialize plain UI handler with no-color console."""
         # Create a console with no color support
-        no_color_console = Console(file=sys.stdout, no_color=True)
+        no_color_console = get_stdout_console(no_color=True)
 
         # Initialize parent with panels disabled
         super().__init__(

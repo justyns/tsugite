@@ -210,7 +210,7 @@ description: Helps with tasks
         if context["available_agents"]:  # Only if agents found
             assert "helper" in context["available_agents"]
 
-    @patch("tsugite.agent_runner.TsugiteAgent")
+    @patch("tsugite.agent_runner.runner.TsugiteAgent")
     @patch("tsugite.core.tools.create_tool_from_tsugite")
     def test_builtin_default_has_delegation_tools(self, mock_create_tool, mock_agent):
         """Test that builtin-default provides delegation tools."""

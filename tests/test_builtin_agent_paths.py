@@ -43,7 +43,7 @@ class TestBuiltinAgentPathHandling:
         assert "spawn_agent" in info["tools"]
         assert info["prefetch_count"] == 1
 
-    @patch("tsugite.agent_runner.TsugiteAgent")
+    @patch("tsugite.agent_runner.runner.TsugiteAgent")
     @patch("tsugite.core.tools.create_tool_from_tsugite")
     def test_run_agent_with_builtin(self, mock_create_tool, mock_agent_class):
         """Test run_agent can execute builtin agents."""

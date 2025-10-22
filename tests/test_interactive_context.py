@@ -55,7 +55,7 @@ Task: {{ user_prompt }}
     # Use fixture to create mock
     mock_instance, captured_prompts = mock_agent_runner()
 
-    with patch("tsugite.agent_runner.TsugiteAgent", return_value=mock_instance):
+    with patch("tsugite.agent_runner.runner.TsugiteAgent", return_value=mock_instance):
         run_agent(agent_file, "test prompt")
 
     # Verify is_interactive was True in the rendered prompt
@@ -90,7 +90,7 @@ Task: {{ user_prompt }}
     # Use fixture to create mock
     mock_instance, captured_prompts = mock_agent_runner()
 
-    with patch("tsugite.agent_runner.TsugiteAgent", return_value=mock_instance):
+    with patch("tsugite.agent_runner.runner.TsugiteAgent", return_value=mock_instance):
         run_agent(agent_file, "test prompt")
 
     # Verify is_interactive was False in the rendered prompt
@@ -131,7 +131,7 @@ Task: {{ user_prompt }}
     # Use fixture to create mock
     mock_instance, captured_prompts = mock_agent_runner("Step complete")
 
-    with patch("tsugite.agent_runner.TsugiteAgent", return_value=mock_instance):
+    with patch("tsugite.agent_runner.runner.TsugiteAgent", return_value=mock_instance):
         run_multistep_agent(agent_file, "test prompt")
 
     # Verify at least one prompt was captured
@@ -172,7 +172,7 @@ Task: {{ user_prompt }}
     # Use fixture to create mock
     mock_instance, captured_prompts = mock_agent_runner()
 
-    with patch("tsugite.agent_runner.TsugiteAgent", return_value=mock_instance):
+    with patch("tsugite.agent_runner.runner.TsugiteAgent", return_value=mock_instance):
         run_agent(agent_file, "test prompt")
 
     # Verify the conditional worked

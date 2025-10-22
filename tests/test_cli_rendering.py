@@ -78,7 +78,7 @@ tools: []
         assert "Slug: hello-world" in result.stdout
         assert "test task" in result.stdout
 
-    @patch("tsugite.agent_runner.call_tool")
+    @patch("tsugite.agent_runner.runner.call_tool")
     def test_render_with_prefetch(self, mock_call_tool, temp_dir, file_tools, task_tools):
         """Test rendering agent with prefetch tools."""
         mock_call_tool.return_value = "mock file content"
@@ -236,7 +236,7 @@ class TestComplexScenarios:
         """Set up test runner."""
         self.runner = CliRunner()
 
-    @patch("tsugite.agent_runner.call_tool")
+    @patch("tsugite.agent_runner.runner.call_tool")
     def test_multi_prefetch_rendering(self, mock_call_tool, temp_dir, file_tools, task_tools):
         """Test rendering with multiple prefetch tools."""
         mock_call_tool.side_effect = [
@@ -329,7 +329,7 @@ class TestBuiltinAgentRendering:
         assert "test task" in result.stdout
         assert "builtin-default" in result.stdout
 
-    @patch("tsugite.agent_runner.call_tool")
+    @patch("tsugite.agent_runner.runner.call_tool")
     def test_render_builtin_executes_prefetch(self, mock_call_tool, agents_tools, task_tools):
         """Test that builtin agent prefetch tools are executed."""
         # builtin-default has list_agents in prefetch

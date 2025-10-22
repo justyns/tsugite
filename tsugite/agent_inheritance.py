@@ -4,6 +4,8 @@ import os
 from pathlib import Path
 from typing import List, Optional, Set
 
+from tsugite.utils import ensure_file_exists
+
 
 def get_global_agents_paths() -> List[Path]:
     """Get global agent directory paths in precedence order.
@@ -146,8 +148,7 @@ def load_extended_agent(extends_ref: str, current_agent_path: Path, inheritance_
         else:
             raise ValueError(f"Unknown built-in agent: {agent_path}")
 
-    if not agent_path.exists():
-        raise ValueError(f"Agent file not found: {agent_path}")
+    ensure_file_exists(agent_path, "Agent file")
 
     content = agent_path.read_text(encoding="utf-8")
     return parse_agent(content, agent_path)

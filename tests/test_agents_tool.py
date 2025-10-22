@@ -197,7 +197,7 @@ class TestSubagentContext:
         self.agent_file = create_agent_file(temp_dir, simple_agent_content, "test_agent.md")
 
     @patch("tsugite.agent_runner.run_agent")
-    @patch("tsugite.agent_runner._get_current_agent")
+    @patch("tsugite.agent_runner.get_current_agent")
     def test_spawn_agent_injects_subagent_context(self, mock_get_current_agent, mock_run_agent):
         """Test that spawn_agent injects is_subagent=True into context."""
         mock_get_current_agent.return_value = "parent_agent"
@@ -212,7 +212,7 @@ class TestSubagentContext:
         assert context["parent_agent"] == "parent_agent"
 
     @patch("tsugite.agent_runner.run_agent")
-    @patch("tsugite.agent_runner._get_current_agent")
+    @patch("tsugite.agent_runner.get_current_agent")
     def test_spawn_agent_merges_with_existing_context(self, mock_get_current_agent, mock_run_agent):
         """Test that spawn_agent preserves existing context variables."""
         mock_get_current_agent.return_value = "coordinator"
@@ -230,7 +230,7 @@ class TestSubagentContext:
         assert context["parent_agent"] == "coordinator"
 
     @patch("tsugite.agent_runner.run_agent")
-    @patch("tsugite.agent_runner._get_current_agent")
+    @patch("tsugite.agent_runner.get_current_agent")
     def test_spawn_agent_when_no_parent(self, mock_get_current_agent, mock_run_agent):
         """Test spawn_agent when there's no parent agent set."""
         mock_get_current_agent.return_value = None

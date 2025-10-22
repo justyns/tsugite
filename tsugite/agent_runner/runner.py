@@ -1,47 +1,29 @@
 """Agent execution engine using TsugiteAgent."""
 
 import asyncio
-import sys
-import threading
 import time
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-from rich.console import Console
-
 from tsugite.core.agent import TsugiteAgent
 from tsugite.core.executor import LocalExecutor
-from tsugite.md_agents import AgentConfig, parse_agent_file, validate_agent_execution
+from tsugite.md_agents import AgentConfig, parse_agent_file
 from tsugite.renderer import AgentRenderer
 from tsugite.tools import call_tool
 from tsugite.tools.tasks import get_task_manager, reset_task_manager
 from tsugite.utils import is_interactive
 
+from .helpers import (
+    _stderr_console,
+    clear_current_agent,
+    get_display_console,
+    get_ui_handler,
+    set_current_agent,
+)
+from .metrics import StepMetrics, display_step_metrics
+
 if TYPE_CHECKING:
     from tsugite.agent_preparation import PreparedAgent
-
-# Console for warnings and debug output (stderr)
-_stderr_console = Console(file=sys.stderr, no_color=False)
-
-# Thread-local storage for tracking currently executing agent
-_current_agent_context = threading.local()
-
-
-def _set_current_agent(name: str) -> None:
-    """Set the name of the currently executing agent in thread-local storage."""
-    _current_agent_context.name = name
-
-
-def _get_current_agent() -> Optional[str]:
-    """Get the name of the currently executing agent from thread-local storage."""
-    return getattr(_current_agent_context, "name", None)
-
-
-def _clear_current_agent() -> None:
-    """Clear the currently executing agent from thread-local storage."""
-    if hasattr(_current_agent_context, "name"):
-        delattr(_current_agent_context, "name")
 
 
 def _get_model_string(model_override: Optional[str], agent_config: AgentConfig) -> str:
@@ -132,43 +114,17 @@ def _build_step_error_message(
     return "\n".join(error_lines)
 
 
-def _get_display_console(custom_logger: Optional[Any]) -> Console:
-    """Get console for displaying output, with fallback to stderr.
+def _combine_instructions(*segments: str) -> str:
+    """Join instruction segments, skipping empties.
 
     Args:
-        custom_logger: Custom logger instance (may be None)
+        *segments: Variable number of instruction strings
 
     Returns:
-        Console instance to use for output
+        Combined instructions with segments separated by double newlines
     """
-    if custom_logger and hasattr(custom_logger, "console"):
-        return custom_logger.console
-    return _stderr_console
-
-
-def _get_ui_handler(custom_logger: Optional[Any]) -> Optional[Any]:
-    """Safely get UI handler from custom logger.
-
-    Args:
-        custom_logger: Custom logger instance (may be None)
-
-    Returns:
-        UI handler if available, None otherwise
-    """
-    return custom_logger.ui_handler if custom_logger and hasattr(custom_logger, "ui_handler") else None
-
-
-@dataclass
-class StepMetrics:
-    """Metrics for a single step execution."""
-
-    step_name: str
-    step_number: int
-    duration: float  # seconds
-    tokens_used: Optional[int] = None
-    cost: Optional[float] = None
-    status: str = "success"  # success, failed, skipped
-    error: Optional[str] = None
+    parts = [segment.strip() for segment in segments if segment and segment.strip()]
+    return "\n\n".join(parts)
 
 
 def get_default_instructions(text_mode: bool = False) -> str:
@@ -204,13 +160,6 @@ def get_default_instructions(text_mode: bool = False) -> str:
     )
 
     return base + completion + interactive
-
-
-def _combine_instructions(*segments: str) -> str:
-    """Join instruction segments, skipping empties."""
-
-    parts = [segment.strip() for segment in segments if segment and segment.strip()]
-    return "\n\n".join(parts)
 
 
 def execute_prefetch(prefetch_config: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -313,7 +262,7 @@ def _extract_reasoning_content(agent: TsugiteAgent, custom_logger: Optional[Any]
     for reasoning_content in agent.memory.reasoning_history:
         if reasoning_content and custom_logger:
             # Check if custom_logger has ui_handler (custom UI mode)
-            ui_handler = _get_ui_handler(custom_logger)
+            ui_handler = get_ui_handler(custom_logger)
             if ui_handler:
                 from tsugite.ui import UIEvent
 
@@ -465,7 +414,7 @@ async def _execute_agent_with_prompt(
     # Create and run agent
     try:
         # Extract ui_handler from custom_logger if available
-        ui_handler = _get_ui_handler(custom_logger)
+        ui_handler = get_ui_handler(custom_logger)
 
         agent = TsugiteAgent(
             model_string=model_string,
@@ -587,7 +536,7 @@ def run_agent(
         raise ValueError(f"Failed to parse agent file: {e}")
 
     # Set current agent in thread-local storage for spawn_agent tracking
-    _set_current_agent(agent_config.name)
+    set_current_agent(agent_config.name)
 
     try:
         # Override text_mode if force_text_mode is True (for chat UI)
@@ -626,70 +575,7 @@ def run_agent(
         )
     finally:
         # Always clear the current agent context when done
-        _clear_current_agent()
-
-
-def validate_agent_file(agent_path: Path) -> tuple[bool, str]:
-    """Validate that an agent file can be executed.
-
-    Args:
-        agent_path: Path to agent markdown file (or builtin agent path like <builtin-default>)
-
-    Returns:
-        Tuple of (is_valid, error_message)
-    """
-    try:
-        # Parse agent with inheritance resolution
-        agent = parse_agent_file(agent_path)
-
-        # Use centralized validation
-        return validate_agent_execution(agent)
-
-    except Exception as e:
-        return False, f"Agent file validation failed: {e}"
-
-
-def get_agent_info(agent_path: Path) -> Dict[str, Any]:
-    """Get information about an agent without executing it.
-
-    Args:
-        agent_path: Path to agent markdown file (or builtin agent path like <builtin-default>)
-
-    Returns:
-        Dictionary with agent information
-    """
-    try:
-        # Parse agent with inheritance resolution
-        agent = parse_agent_file(agent_path)
-        agent_config = agent.config
-
-        model_display = agent_config.model
-        if not model_display:
-            from tsugite.config import load_config
-
-            config = load_config()
-            if config.default_model:
-                model_display = f"{config.default_model} (default)"
-            else:
-                model_display = "not set"
-
-        return {
-            "name": agent_config.name,
-            "description": getattr(agent_config, "description", "No description"),
-            "model": model_display,
-            "max_steps": agent_config.max_steps,
-            "tools": agent_config.tools,
-            "prefetch_count": (len(agent_config.prefetch) if agent_config.prefetch else 0),
-            "attachments": agent_config.attachments,
-            "permissions_profile": getattr(agent_config, "permissions_profile", None),
-            "valid": validate_agent_file(agent_path)[0],
-            "instructions": getattr(agent_config, "instructions", ""),
-        }
-    except Exception as e:
-        return {
-            "error": str(e),
-            "valid": False,
-        }
+        clear_current_agent()
 
 
 def run_multistep_agent(
@@ -739,7 +625,7 @@ def run_multistep_agent(
         raise ValueError(f"Failed to parse agent file: {e}")
 
     # Set current agent in thread-local storage for spawn_agent tracking
-    _set_current_agent(agent.config.name)
+    set_current_agent(agent.config.name)
 
     try:
         # Extract steps from raw markdown (before any rendering)
@@ -817,7 +703,7 @@ def run_multistep_agent(
 
                 if custom_logger and not debug:
                     # Set multi-step context for nested progress display
-                    ui_handler = _get_ui_handler(custom_logger)
+                    ui_handler = get_ui_handler(custom_logger)
                     if ui_handler:
                         ui_handler.set_multistep_context(i, step.name, len(steps))
 
@@ -866,7 +752,7 @@ def run_multistep_agent(
                     errors.append(error_msg)
 
                     if attempt == max_attempts - 1:
-                        ui_handler = _get_ui_handler(custom_logger)
+                        ui_handler = get_ui_handler(custom_logger)
                         if ui_handler:
                             ui_handler.clear_multistep_context()
 
@@ -982,7 +868,7 @@ def run_multistep_agent(
                     # Show step completion
                     if custom_logger and not debug:
                         # Clear multi-step context after step completes
-                        ui_handler = _get_ui_handler(custom_logger)
+                        ui_handler = get_ui_handler(custom_logger)
                         if ui_handler:
                             ui_handler.clear_multistep_context()
 
@@ -1015,12 +901,12 @@ def run_multistep_agent(
                     # Check if we should continue despite the error
                     if step.continue_on_error:
                         # Log warning but continue execution
-                        ui_handler = _get_ui_handler(custom_logger)
+                        ui_handler = get_ui_handler(custom_logger)
                         if ui_handler:
                             ui_handler.clear_multistep_context()
 
                         warning_msg = f"⚠ Step '{step.name}' failed but continuing (continue_on_error=true)"
-                        console = _get_display_console(custom_logger)
+                        console = get_display_console(custom_logger)
                         console.print(f"[yellow]{warning_msg}[/yellow]")
                         console.print(f"[dim]Error: {error_msg}[/dim]")
 
@@ -1046,7 +932,7 @@ def run_multistep_agent(
                         break
 
                     if attempt == max_attempts - 1:
-                        ui_handler = _get_ui_handler(custom_logger)
+                        ui_handler = get_ui_handler(custom_logger)
                         if ui_handler:
                             ui_handler.clear_multistep_context()
 
@@ -1079,72 +965,12 @@ def run_multistep_agent(
 
             # Display metrics summary
             if step_metrics:
-                _display_step_metrics(step_metrics, custom_logger if custom_logger else None)
+                display_step_metrics(step_metrics, custom_logger if custom_logger else None)
 
             return final_result or ""
     finally:
         # Always clear the current agent context when done
-        _clear_current_agent()
-
-
-def _display_step_metrics(metrics: List[StepMetrics], custom_logger: Optional[Any] = None):
-    """Display step execution metrics in a table."""
-    from rich.table import Table
-
-    console = _get_display_console(custom_logger)
-
-    table = Table(title="Multi-Step Execution Metrics", show_header=True)
-    table.add_column("Step", style="cyan")
-    table.add_column("Duration", justify="right", style="yellow")
-    table.add_column("Status", justify="center")
-
-    total_duration = 0
-    successful = 0
-    failed = 0
-    skipped = 0
-
-    for m in metrics:
-        status_color = {
-            "success": "green",
-            "failed": "red",
-            "skipped": "yellow",
-        }.get(m.status, "white")
-
-        status_symbol = {
-            "success": "✓",
-            "failed": "✗",
-            "skipped": "⚠",
-        }.get(m.status, "?")
-
-        table.add_row(
-            f"{m.step_number}. {m.step_name}",
-            f"{m.duration:.1f}s",
-            f"[{status_color}]{status_symbol} {m.status}[/{status_color}]",
-        )
-
-        total_duration += m.duration
-        if m.status == "success":
-            successful += 1
-        elif m.status == "failed":
-            failed += 1
-        elif m.status == "skipped":
-            skipped += 1
-
-    console.print()
-    console.print(table)
-
-    # Summary line
-    summary_parts = []
-    summary_parts.append(f"Total: {total_duration:.1f}s")
-    if successful > 0:
-        summary_parts.append(f"[green]Success: {successful}[/green]")
-    if skipped > 0:
-        summary_parts.append(f"[yellow]Skipped: {skipped}[/yellow]")
-    if failed > 0:
-        summary_parts.append(f"[red]Failed: {failed}[/red]")
-
-    console.print(" | ".join(summary_parts))
-    console.print()
+        clear_current_agent()
 
 
 def preview_multistep_agent(

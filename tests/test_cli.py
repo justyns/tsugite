@@ -12,7 +12,7 @@ def mock_agent_execution():
     """Mock both run_agent and validate_agent_execution for CLI tests."""
     with (
         patch("tsugite.agent_runner.run_agent") as mock_run_agent,
-        patch("tsugite.agent_runner.validate_agent_execution") as mock_validate,
+        patch("tsugite.md_agents.validate_agent_execution") as mock_validate,
     ):
         mock_run_agent.return_value = "Test agent execution completed"
         mock_validate.return_value = (True, "Agent is valid")
@@ -347,7 +347,7 @@ class TestAnimationCLIIntegration:
         mock_context = MagicMock()
         mock_custom_ui.return_value = mock_context
 
-        with patch("tsugite.agent_runner.validate_agent_execution") as mock_validate:
+        with patch("tsugite.md_agents.validate_agent_execution") as mock_validate:
             mock_validate.return_value = (True, "Agent is valid")
 
             result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--native-ui"])
@@ -367,7 +367,7 @@ class TestAnimationCLIIntegration:
 
         with (
             patch("tsugite.agent_runner.run_agent") as mock_run_agent,
-            patch("tsugite.agent_runner.validate_agent_execution") as mock_validate,
+            patch("tsugite.md_agents.validate_agent_execution") as mock_validate,
         ):
             mock_validate.return_value = (True, "Agent is valid")
             mock_run_agent.side_effect = RuntimeError("Agent execution failed")
@@ -545,7 +545,7 @@ class TestAutoDiscovery:
         assert "test_agent.md" in result.stdout
 
     @patch("tsugite.agent_runner.run_agent")
-    @patch("tsugite.agent_runner.validate_agent_execution")
+    @patch("tsugite.md_agents.validate_agent_execution")
     def test_builtin_default_agent_execution(self, mock_validate, mock_run, cli_runner):
         """Test that builtin-default agent can be executed."""
         mock_validate.return_value = (True, "Agent is valid")
@@ -572,7 +572,7 @@ class TestAutoDiscovery:
         # (This validates the CLI path handling logic)
 
     @patch("tsugite.agent_runner.run_agent")
-    @patch("tsugite.agent_runner.validate_agent_execution")
+    @patch("tsugite.md_agents.validate_agent_execution")
     def test_auto_discovery_with_available_agents(self, mock_validate, mock_run, cli_runner, tmp_path, monkeypatch):
         """Test auto-discovery when agents are available."""
         monkeypatch.chdir(tmp_path)

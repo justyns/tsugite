@@ -90,7 +90,8 @@ def run(
         tsu run +assistant --with-agents "jira,coder" "prompt"
     """
     # Lazy imports - only load heavy dependencies when actually running agents
-    from tsugite.agent_runner import get_agent_info, run_agent, validate_agent_execution
+    from tsugite.agent_runner import get_agent_info, run_agent
+    from tsugite.md_agents import validate_agent_execution
     from tsugite.ui import create_live_template_logger, create_plain_logger, create_silent_logger, custom_agent_ui
     from tsugite.utils import should_use_plain_output
 

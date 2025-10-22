@@ -1,7 +1,6 @@
 """CLI helper functions."""
 
 import os
-import sys
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, List, Optional, Tuple
@@ -9,22 +8,14 @@ from typing import Any, List, Optional, Tuple
 import typer
 from rich.console import Console
 
+# Re-export console utilities for backwards compatibility
+from tsugite.console import get_error_console, get_output_console  # noqa: F401
 from tsugite.constants import TSUGITE_LOGO_NARROW, TSUGITE_LOGO_WIDE
 
 
 def get_logo(console: Console) -> str:
     """Get appropriate logo based on terminal width."""
     return TSUGITE_LOGO_NARROW if console.width < 80 else TSUGITE_LOGO_WIDE
-
-
-def get_error_console(headless: bool, console: Console) -> Console:
-    """Get console for error output based on mode."""
-    return Console(file=sys.stderr, no_color=True) if headless else console
-
-
-def get_output_console() -> Console:
-    """Get console for standard output."""
-    return Console(file=sys.stdout, no_color=True)
 
 
 def print_plain_section(console: Console, title: str, content: str, style: str = "") -> None:
