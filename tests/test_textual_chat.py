@@ -186,6 +186,29 @@ class TestMessageListWidget:
 
         assert len(widget.messages) == 0
 
+    def test_status_message_with_special_characters(self):
+        """Test that status messages with special chars don't cause markup errors."""
+        widget = MessageList()
+
+        # Add status message with apostrophes and other markup-sensitive chars
+        content = "[{'title': \"Today's and tonight's weather\", 'url': 'http://example.com'}]"
+        widget.add_message("status", content)
+
+        assert len(widget.messages) == 1
+        assert widget.messages[0]["type"] == "status"
+        assert widget.messages[0]["content"] == content
+
+        # Ensure compose doesn't raise MarkupError
+        # This would previously fail with MarkupError due to apostrophes
+        try:
+            list(widget.compose())
+            success = True
+        except Exception as e:
+            success = False
+            error = str(e)
+
+        assert success, f"compose() raised error: {error if not success else ''}"
+
 
 class TestChatAppIntegration:
     """Integration tests for ChatApp."""

@@ -30,9 +30,9 @@ class Message(Static):
             content_style: Rich style for content
             render_markdown: Whether to render content as markdown
         """
-        super().__init__()
+        super().__init__(markup=False)
         self.sender = sender
-        self.content = content
+        self._message_content = content
         self.sender_style = sender_style
         self.content_style = content_style
         self.render_markdown = render_markdown
@@ -46,12 +46,12 @@ class Message(Static):
         # Render content based on mode
         if self.render_markdown:
             # Use markdown rendering
-            content_rendered = Markdown(str(self.content), code_theme="monokai", inline_code_theme="monokai")
+            content_rendered = Markdown(str(self._message_content), code_theme="monokai", inline_code_theme="monokai")
             # Group sender and markdown content together
             return Group(sender_text, content_rendered)
         else:
             # Use plain text rendering
-            sender_text.append(str(self.content), style=self.content_style)
+            sender_text.append(str(self._message_content), style=self.content_style)
             return sender_text
 
 
@@ -88,9 +88,9 @@ class MessageList(BaseScrollLog):
             elif msg["type"] == "observation":
                 yield Message("💡 Info", msg["content"], sender_style="#83a598", content_style="dim #83a598")
             elif msg["type"] == "separator":
-                yield Static("─" * 40, classes="separator")
+                yield Static("─" * 40, classes="separator", markup=False)
             elif msg["type"] == "status":
-                yield Static(msg["content"], classes="status")
+                yield Static(msg["content"], classes="status", markup=False)
 
     def add_message(self, sender_type: str, content: str):
         """Add a new message to the list.

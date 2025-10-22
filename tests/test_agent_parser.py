@@ -279,6 +279,7 @@ def test_complex_frontmatter(temp_dir):
     """Test parsing agent with complex frontmatter structure."""
     content = """---
 name: complex_agent
+extends: none
 model: ollama:qwen2.5-coder:14b
 max_steps: 10
 tools:

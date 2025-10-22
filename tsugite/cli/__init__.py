@@ -15,7 +15,6 @@ from .benchmark import benchmark_command
 from .cache import cache_app
 from .config import config_app
 from .helpers import (
-    agent_context,
     get_error_console,
     get_logo,
     get_output_console,
@@ -540,114 +539,206 @@ def run(
 
 @app.command()
 def render(
-    agent_path: str = typer.Argument(help="Path to agent markdown file"),
+    agent_path: str = typer.Argument(help="Path to agent markdown file or builtin agent name (e.g., +builtin-default)"),
     prompt: Optional[str] = typer.Argument(default="", help="Prompt/task for the agent (optional)"),
     root: Optional[str] = typer.Option(None, "--root", help="Working directory"),
     no_color: bool = typer.Option(False, "--no-color", help="Disable ANSI colors"),
+    raw: bool = typer.Option(False, "--raw", help="Show raw Jinja templates in instructions without rendering"),
     attachment: Optional[List[str]] = typer.Option(
         None, "-f", "--attachment", help="Attachment(s) to include (repeatable)"
     ),
     refresh_cache: bool = typer.Option(False, "--refresh-cache", help="Force refresh cached attachment content"),
 ):
-    """Render an agent template without executing it."""
+    """Render an agent template without executing it.
+
+    Examples:
+        tsu render agent.md "prompt"
+        tsu render +builtin-default "prompt"
+        tsu render builtin-default "prompt"
+    """
     # Lazy imports - only load dependencies when rendering
-    from tsugite.md_agents import parse_agent
+    from tsugite.agent_runner import _combine_instructions, get_default_instructions
+    from tsugite.builtin_agents import get_builtin_chat_assistant, get_builtin_default_agent, is_builtin_agent
+    from tsugite.md_agents import parse_agent_file
     from tsugite.renderer import AgentRenderer
     from tsugite.utils import expand_file_references, is_interactive
 
     if no_color:
         console.no_color = True
 
-    with agent_context(agent_path, root, console) as agent_file:
-        try:
-            base_dir = Path.cwd()
+    # Handle root directory change
+    original_cwd = None
+    if root:
+        root_path = Path(root)
+        if not root_path.exists():
+            console.print(f"[red]Working directory not found: {root}[/red]")
+            raise typer.Exit(1)
+        original_cwd = os.getcwd()
+        os.chdir(str(root_path))
 
-            # Parse agent first to get its configuration
-            agent_text = agent_file.read_text()
-            agent = parse_agent(agent_text, agent_file)
+    try:
+        # Check if this is a builtin agent reference
+        agent_name = agent_path.lstrip("+")  # Remove leading + if present
+        looks_like_builtin = agent_path.startswith("+") or agent_name.startswith("builtin-")
 
-            # Resolve agent attachments (from agent definition)
-            agent_attachment_contents = []
-            if agent.config.attachments:
-                from tsugite.utils import resolve_attachments
-
-                try:
-                    agent_attachment_contents = resolve_attachments(agent.config.attachments, base_dir, refresh_cache)
-                except ValueError as e:
-                    console.print(f"[red]Agent attachment error: {e}[/red]")
-                    raise typer.Exit(1)
-
-            # Resolve CLI attachments (-f flag)
-            cli_attachment_contents = []
-            if attachment:
-                from tsugite.utils import resolve_attachments
-
-                try:
-                    cli_attachment_contents = resolve_attachments(attachment, base_dir, refresh_cache)
-                except ValueError as e:
-                    console.print(f"[red]Attachment error: {e}[/red]")
-                    raise typer.Exit(1)
-
-            # Expand file references in prompt
-            try:
-                prompt_expanded, _ = expand_file_references(prompt, base_dir)
-            except ValueError as e:
-                console.print(f"[red]File reference error: {e}[/red]")
+        if looks_like_builtin:
+            # User is trying to reference a builtin agent - validate it exists
+            if not is_builtin_agent(agent_name):
+                console.print(f"[red]Unknown builtin agent: {agent_name}[/red]")
+                console.print("[yellow]Available builtin agents: builtin-default, builtin-chat-assistant[/yellow]")
                 raise typer.Exit(1)
 
-            # Assemble prompt with proper order: agent attachments -> CLI attachments -> file refs -> prompt
-            all_attachments = []
-            if agent_attachment_contents:
-                all_attachments.extend(agent_attachment_contents)
-            if cli_attachment_contents:
-                all_attachments.extend(cli_attachment_contents)
+            # Get the valid builtin agent
+            if agent_name == "builtin-default":
+                agent = get_builtin_default_agent()
+            elif agent_name == "builtin-chat-assistant":
+                agent = get_builtin_chat_assistant()
 
-            if all_attachments:
-                attachment_sections = [
-                    f"<Attachment: {name}>\n{content}\n</Attachment: {name}>" for name, content in all_attachments
-                ]
-                prompt_expanded = "\n\n".join(attachment_sections) + "\n\n" + prompt_expanded
+            agent_display_name = agent_name
+            agent_file_path = Path(f"<{agent_name}>")
+        else:
+            # Regular file-based agent
+            agent_file_path = Path(agent_name)
+            if not agent_file_path.exists():
+                console.print(f"[red]Agent file not found: {agent_name}[/red]")
+                raise typer.Exit(1)
 
-            # Execute prefetch tools if any
-            from tsugite.agent_runner import execute_prefetch
+            if agent_file_path.suffix != ".md":
+                console.print(f"[red]Agent file must be a .md file: {agent_name}[/red]")
+                raise typer.Exit(1)
 
-            prefetch_context = {}
-            if agent.config.prefetch:
-                try:
-                    prefetch_context = execute_prefetch(agent.config.prefetch)
-                except Exception as e:
-                    console.print(f"[yellow]Warning: Prefetch execution failed: {e}[/yellow]")
+            # Use parse_agent_file to properly resolve inheritance
+            agent = parse_agent_file(agent_file_path)
+            agent_display_name = agent_file_path.name
 
-            # Prepare context
-            context = {
-                **prefetch_context,
-                "user_prompt": prompt_expanded,
-                "is_interactive": is_interactive(),
-                "task_summary": "## Current Tasks\nNo tasks yet.",
-            }
+        base_dir = Path.cwd()
 
-            # Render template
-            renderer = AgentRenderer()
-            rendered_content = renderer.render(agent.content, context)
+        # Resolve agent attachments (from agent definition)
+        agent_attachment_contents = []
+        if agent.config.attachments:
+            from tsugite.utils import resolve_attachments
 
-            console.print(
-                Panel(
-                    f"[cyan]Agent:[/cyan] {agent_file.name}\n"
-                    f"[cyan]Prompt:[/cyan] {prompt}\n"
-                    f"[cyan]Directory:[/cyan] {Path.cwd()}",
-                    title="Tsugite Template Renderer",
-                    border_style="green",
-                )
-            )
+            try:
+                agent_attachment_contents = resolve_attachments(agent.config.attachments, base_dir, refresh_cache)
+            except ValueError as e:
+                console.print(f"[red]Agent attachment error: {e}[/red]")
+                raise typer.Exit(1)
 
-            console.print("\n" + "=" * 50)
-            console.print("[bold green]Rendered Template[/bold green]")
-            console.print("=" * 50)
-            console.print(rendered_content)
+        # Resolve CLI attachments (-f flag)
+        cli_attachment_contents = []
+        if attachment:
+            from tsugite.utils import resolve_attachments
 
-        except Exception as e:
-            console.print(f"[red]Render error: {e}[/red]")
+            try:
+                cli_attachment_contents = resolve_attachments(attachment, base_dir, refresh_cache)
+            except ValueError as e:
+                console.print(f"[red]Attachment error: {e}[/red]")
+                raise typer.Exit(1)
+
+        # Expand file references in prompt
+        try:
+            prompt_expanded, _ = expand_file_references(prompt, base_dir)
+        except ValueError as e:
+            console.print(f"[red]File reference error: {e}[/red]")
             raise typer.Exit(1)
+
+        # Assemble prompt with proper order: agent attachments -> CLI attachments -> file refs -> prompt
+        all_attachments = []
+        if agent_attachment_contents:
+            all_attachments.extend(agent_attachment_contents)
+        if cli_attachment_contents:
+            all_attachments.extend(cli_attachment_contents)
+
+        if all_attachments:
+            attachment_sections = [
+                f"<Attachment: {name}>\n{content}\n</Attachment: {name}>" for name, content in all_attachments
+            ]
+            prompt_expanded = "\n\n".join(attachment_sections) + "\n\n" + prompt_expanded
+
+        # Execute prefetch tools if any
+        from tsugite.agent_runner import execute_prefetch
+
+        prefetch_context = {}
+        if agent.config.prefetch:
+            try:
+                prefetch_context = execute_prefetch(agent.config.prefetch)
+            except Exception as e:
+                console.print(f"[yellow]Warning: Prefetch execution failed: {e}[/yellow]")
+
+        # Prepare context with all necessary variables
+        context = {
+            **prefetch_context,
+            "user_prompt": prompt_expanded,
+            "is_interactive": is_interactive(),
+            "task_summary": "## Current Tasks\nNo tasks yet.",
+            "tools": agent.config.tools,  # Include tools list for conditional rendering
+            "text_mode": agent.config.text_mode,  # Include text_mode for conditional rendering
+            "chat_history": [],  # For chat agents that reference conversation history
+            "is_subagent": False,  # Rendering is always top-level
+            "parent_agent": None,
+        }
+
+        # Render template
+        renderer = AgentRenderer()
+        rendered_content = renderer.render(agent.content, context)
+
+        # Build full instructions (same as what gets sent to LLM)
+        base_instructions = get_default_instructions(text_mode=agent.config.text_mode)
+
+        # Render agent instructions if they contain template syntax (unless --raw)
+        agent_instructions_raw = getattr(agent.config, "instructions", "")
+        if agent_instructions_raw and not raw:
+            try:
+                agent_instructions = renderer.render(agent_instructions_raw, context)
+            except Exception:
+                # If rendering fails, use as-is
+                agent_instructions = agent_instructions_raw
+        else:
+            agent_instructions = agent_instructions_raw
+
+        combined_instructions = _combine_instructions(base_instructions, agent_instructions)
+
+        # Build tools for system prompt
+        from tsugite.core.agent import build_system_prompt
+        from tsugite.core.tools import create_tool_from_tsugite
+        from tsugite.tools import expand_tool_specs
+
+        # Expand tool specs the same way as agent_runner
+        expanded_tools = expand_tool_specs(agent.config.tools) if agent.config.tools else []
+        tools = [create_tool_from_tsugite(name) for name in expanded_tools]
+
+        # Build system message (what LLM actually sees)
+        system_message = build_system_prompt(tools, combined_instructions, agent.config.text_mode)
+
+        # User message is just the rendered content
+        user_message = rendered_content
+
+        console.print(
+            Panel(
+                f"[cyan]Agent:[/cyan] {agent_display_name}\n"
+                f"[cyan]Prompt:[/cyan] {prompt}\n"
+                f"[cyan]Directory:[/cyan] {Path.cwd()}",
+                title="Tsugite Template Renderer",
+                border_style="green",
+            )
+        )
+
+        console.print("\n" + "=" * 50)
+        console.print("[bold green]System Message[/bold green] [dim](sent to LLM)[/dim]")
+        console.print("=" * 50)
+        console.print(system_message)
+
+        console.print("\n" + "=" * 50)
+        console.print("[bold green]User Message[/bold green] [dim](sent to LLM)[/dim]")
+        console.print("=" * 50)
+        console.print(user_message)
+
+    except Exception as e:
+        console.print(f"[red]Render error: {e}[/red]")
+        raise typer.Exit(1)
+    finally:
+        if original_cwd:
+            os.chdir(original_cwd)
 
 
 @app.command()

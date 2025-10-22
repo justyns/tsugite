@@ -42,7 +42,13 @@ def spawn_agent(
 
     try:
         # Import here to avoid circular imports
-        from ..agent_runner import run_agent
+        from ..agent_runner import _get_current_agent, run_agent
+
+        # Inject subagent context
+        sub_context["is_subagent"] = True
+        parent = _get_current_agent()
+        if parent:
+            sub_context["parent_agent"] = parent
 
         # Run the sub-agent
         result = run_agent(

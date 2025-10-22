@@ -233,6 +233,38 @@ def interactive_tools(reset_tool_registry):
 
 
 @pytest.fixture
+def agents_tools(reset_tool_registry):
+    """Register agent delegation tools for testing."""
+    from tsugite.tools import tool
+    from tsugite.tools.agents import list_agents, spawn_agent
+
+    # Re-register the tools after registry reset
+    tool(list_agents)
+    tool(spawn_agent)
+
+
+@pytest.fixture
+def http_tools(reset_tool_registry):
+    """Register HTTP tools for testing."""
+    from tsugite.tools import tool
+    from tsugite.tools.http import fetch_text, web_search
+
+    # Re-register the tools after registry reset
+    tool(fetch_text)
+    tool(web_search)
+
+
+@pytest.fixture
+def shell_tools(reset_tool_registry):
+    """Register shell execution tools for testing."""
+    from tsugite.tools import tool
+    from tsugite.tools.shell import run
+
+    # Re-register the tools after registry reset
+    tool(run)
+
+
+@pytest.fixture
 def cli_runner():
     """Create a CLI test runner."""
     from typer.testing import CliRunner

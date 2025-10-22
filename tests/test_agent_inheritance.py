@@ -127,6 +127,119 @@ def test_merge_agent_configs_empty_instructions():
     assert merged.instructions == "Parent only."
 
 
+def test_merge_agent_configs_attachments():
+    """Test merging attachments list (merge and deduplicate)."""
+    parent = AgentConfig(
+        name="parent",
+        attachments=["standards", "api-docs"],
+    )
+
+    child = AgentConfig(
+        name="child",
+        attachments=["examples", "standards"],  # standards is duplicate
+    )
+
+    merged = merge_agent_configs(parent, child)
+
+    # Attachments should be merged and deduplicated, order preserved
+    assert merged.attachments == ["standards", "api-docs", "examples"]
+
+
+def test_merge_agent_configs_reasoning_effort():
+    """Test merging reasoning_effort scalar (child overwrites parent)."""
+    parent = AgentConfig(
+        name="parent",
+        reasoning_effort="low",
+    )
+
+    child = AgentConfig(
+        name="child",
+        reasoning_effort="high",
+    )
+
+    merged = merge_agent_configs(parent, child)
+    assert merged.reasoning_effort == "high"
+
+    # Test child with None inherits from parent
+    child_none = AgentConfig(
+        name="child2",
+        reasoning_effort=None,
+    )
+
+    merged2 = merge_agent_configs(parent, child_none)
+    assert merged2.reasoning_effort == "low"
+
+
+def test_merge_agent_configs_custom_tools():
+    """Test merging custom_tools (merge and deduplicate by name)."""
+    parent = AgentConfig(
+        name="parent",
+        custom_tools=[
+            {"name": "tool1", "command": "echo parent1"},
+            {"name": "tool2", "command": "echo parent2"},
+        ],
+    )
+
+    child = AgentConfig(
+        name="child",
+        custom_tools=[
+            {"name": "tool2", "command": "echo child2"},  # Overrides parent's tool2
+            {"name": "tool3", "command": "echo child3"},
+        ],
+    )
+
+    merged = merge_agent_configs(parent, child)
+
+    # Should have 3 tools total (tool1 from parent, tool2 from child, tool3 from child)
+    assert len(merged.custom_tools) == 3
+
+    # Build dict by name for easier testing
+    tools_by_name = {tool["name"]: tool for tool in merged.custom_tools}
+    assert tools_by_name["tool1"]["command"] == "echo parent1"
+    assert tools_by_name["tool2"]["command"] == "echo child2"  # Child overrides parent
+    assert tools_by_name["tool3"]["command"] == "echo child3"
+
+
+def test_merge_agent_configs_text_mode():
+    """Test merging text_mode boolean (child overwrites if True).
+
+    Since text_mode defaults to False, we can't distinguish between "not set"
+    and "explicitly set to False". The merge logic treats False as the default,
+    so parent's value is inherited unless child explicitly sets True.
+    """
+    parent = AgentConfig(
+        name="parent",
+        text_mode=True,
+    )
+
+    child = AgentConfig(
+        name="child",
+        text_mode=False,  # Default value, so parent's True is inherited
+    )
+
+    merged = merge_agent_configs(parent, child)
+    # Child has default value (False), so parent's True is inherited
+    assert merged.text_mode
+
+    # When child explicitly sets True, it overrides parent
+    child_true = AgentConfig(
+        name="child2",
+        text_mode=True,
+    )
+
+    merged2 = merge_agent_configs(parent, child_true)
+    assert merged2.text_mode
+
+    # When both are False, result is False
+    parent_false = AgentConfig(
+        name="parent2",
+        text_mode=False,
+    )
+
+    merged3 = merge_agent_configs(parent_false, child)
+    assert not merged3.text_mode
+
+
 def test_detect_circular_inheritance():
     """Test circular inheritance detection."""
     path1 = Path("/fake/agent1.md")
@@ -246,7 +359,10 @@ Child content
     assert set(resolved.config.tools) == {"read_file", "write_file", "web_search"}
     assert "Base instructions." in resolved.config.instructions
     assert "Child instructions." in resolved.config.instructions
-    assert resolved.content.strip() == "Child content"
+    # Content should be merged (parent first, then child)
+    assert "Base content" in resolved.content
+    assert "Child content" in resolved.content
+    assert resolved.content.index("Base content") < resolved.content.index("Child content")
 
 
 def test_resolve_agent_inheritance_chain(tmp_path):

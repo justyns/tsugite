@@ -11,7 +11,8 @@ Quick reference for building, composing, and running Tsugite agents.
 | Debug prompt | `tsugite run agent.md "task" --debug` |
 | Plain output | `tsugite run +agent "task" --plain` |
 | Headless (CI) | `tsugite run +agent "task" --headless` |
-| Render only | `tsugite render agent.md "task"` |
+| Render prompt | `tsugite render agent.md "task"` |
+| Render raw | `tsugite render agent.md "task" --raw` |
 | Multi-agent | `tsugite run +coordinator +helper1 +helper2 "task"` |
 | MCP register | `tsugite mcp add name --url http://host/mcp` |
 | MCP test | `tsugite mcp test name --trust-code` |
@@ -57,6 +58,8 @@ Task: {{ user_prompt }}
 | Helper | Example |
 |--------|---------|
 | `{{ user_prompt }}` | CLI prompt argument |
+| `{{ is_subagent }}` | `True` if spawned by another agent, `False` otherwise |
+| `{{ parent_agent }}` | Name of parent agent (e.g., `"coordinator"`) or `None` if not a subagent |
 | `{{ now() }}` | ISO 8601 timestamp |
 | `{{ today() }}` | `YYYY-MM-DD` date |
 | `{{ slugify(text) }}` | Filesystem-safe slug |
@@ -589,6 +592,31 @@ tsugite run +coordinator +helper1 +helper2 "task"
 ```
 
 First agent = coordinator. Gets `spawn_{name}()` tools for each helper.
+
+### Subagent Context Awareness
+
+When an agent spawns another agent using `spawn_agent()`, the spawned agent receives context variables:
+
+```yaml
+---
+name: helper
+---
+{% if is_subagent %}
+I was spawned by {{ parent_agent }}.
+{% else %}
+I'm running as a top-level agent.
+{% endif %}
+```
+
+**Context variables:**
+- `{{ is_subagent }}` - `True` when spawned by another agent, `False` otherwise
+- `{{ parent_agent }}` - Name of the parent agent (e.g., `"coordinator"`), or `None` if top-level
+
+**Example use cases:**
+- Adjust verbosity (subagents might be less verbose)
+- Skip user interaction in subagents (they can't prompt the user)
+- Return structured data instead of formatted output
+- Track delegation chains for debugging
 
 ## Development
 

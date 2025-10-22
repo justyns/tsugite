@@ -572,3 +572,102 @@ Still normal
         assert "<!-- Another comment -->" in result
         assert "Normal content" in result
         assert "Still normal" in result
+
+
+class TestSubagentContextRendering:
+    """Tests for rendering is_subagent and parent_agent context variables."""
+
+    def test_render_toplevel_agent_context(self):
+        """Test rendering top-level agent with is_subagent=False."""
+        renderer = AgentRenderer()
+
+        content = """
+{% if is_subagent %}
+I am a subagent spawned by {{ parent_agent }}.
+{% else %}
+I am a top-level agent.
+{% endif %}
+""".strip()
+
+        result = renderer.render(content, {"is_subagent": False, "parent_agent": None})
+
+        assert "I am a top-level agent." in result
+        assert "I am a subagent" not in result
+
+    def test_render_subagent_context(self):
+        """Test rendering subagent with is_subagent=True."""
+        renderer = AgentRenderer()
+
+        content = """
+{% if is_subagent %}
+I am a subagent spawned by {{ parent_agent }}.
+{% else %}
+I am a top-level agent.
+{% endif %}
+""".strip()
+
+        result = renderer.render(content, {"is_subagent": True, "parent_agent": "coordinator"})
+
+        assert "I am a subagent spawned by coordinator." in result
+        assert "I am a top-level agent." not in result
+
+    def test_render_subagent_with_no_parent(self):
+        """Test rendering subagent without parent_agent set."""
+        renderer = AgentRenderer()
+
+        content = """
+{% if is_subagent %}
+{% if parent_agent %}
+Spawned by {{ parent_agent }}.
+{% else %}
+Spawned by unknown parent.
+{% endif %}
+{% else %}
+Top-level agent.
+{% endif %}
+""".strip()
+
+        result = renderer.render(content, {"is_subagent": True, "parent_agent": None})
+
+        assert "Spawned by unknown parent." in result
+        assert "Top-level agent." not in result
+
+    def test_render_complex_subagent_logic(self):
+        """Test complex conditional logic with subagent context."""
+        renderer = AgentRenderer()
+
+        content = """
+# Agent Instructions
+
+{% if is_subagent %}
+**Mode:** Subagent for {{ parent_agent }}
+**Output:** Return structured data
+**Verbosity:** Low
+{% else %}
+**Mode:** Interactive
+**Output:** Formatted for user
+**Verbosity:** High
+{% endif %}
+
+Task: {{ user_prompt }}
+""".strip()
+
+        # Test as subagent
+        result_sub = renderer.render(
+            content, {"is_subagent": True, "parent_agent": "orchestrator", "user_prompt": "analyze data"}
+        )
+
+        assert "**Mode:** Subagent for orchestrator" in result_sub
+        assert "**Output:** Return structured data" in result_sub
+        assert "**Verbosity:** Low" in result_sub
+        assert "Task: analyze data" in result_sub
+
+        # Test as top-level
+        result_top = renderer.render(
+            content, {"is_subagent": False, "parent_agent": None, "user_prompt": "analyze data"}
+        )
+
+        assert "**Mode:** Interactive" in result_top
+        assert "**Output:** Formatted for user" in result_top
+        assert "**Verbosity:** High" in result_top
+        assert "Task: analyze data" in result_top

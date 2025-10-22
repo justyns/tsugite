@@ -4,7 +4,8 @@ from pathlib import Path
 
 from tsugite.agent_inheritance import find_agent_file
 from tsugite.agent_utils import list_local_agents
-from tsugite.builtin_agents import get_builtin_default_agent, is_builtin_agent
+from tsugite.builtin_agents import get_builtin_chat_assistant, get_builtin_default_agent, is_builtin_agent
+from tsugite.renderer import AgentRenderer
 
 
 class TestBuiltinAgents:
@@ -182,3 +183,84 @@ class TestBuiltinDefaultAutoDiscovery:
         # Content should explain when/how to delegate
         content_lower = agent.content.lower()
         assert "specialized" in content_lower or "delegate" in content_lower
+
+    def test_builtin_default_web_search_guidelines_conditional(self):
+        """Test that web search guidelines only appear when web_search tool is available."""
+        agent = get_builtin_default_agent()
+        renderer = AgentRenderer()
+
+        # Base context needed for builtin-default template
+        base_context = {
+            "user_prompt": "test",
+            "task_summary": "",
+            "text_mode": False,
+            "is_interactive": False,
+            "available_agents": "",  # From prefetch
+        }
+
+        # Test WITH web_search tool
+        context_with_web_search = {
+            **base_context,
+            "tools": ["read_file", "write_file", "web_search"],
+        }
+        rendered_with = renderer.render(agent.content, context_with_web_search)
+        assert "Web Search Guidelines" in rendered_with
+        assert "web_search(query=" in rendered_with
+
+        # Test WITHOUT web_search tool
+        context_without_web_search = {
+            **base_context,
+            "tools": ["read_file", "write_file"],
+        }
+        rendered_without = renderer.render(agent.content, context_without_web_search)
+        assert "Web Search Guidelines" not in rendered_without
+        assert "web_search(query=" not in rendered_without
+
+
+class TestBuiltinChatAssistant:
+    """Test builtin-chat-assistant agent configuration."""
+
+    def test_chat_assistant_has_web_search_tool(self):
+        """Test that chat assistant includes web_search tool."""
+        agent = get_builtin_chat_assistant()
+
+        assert "web_search" in agent.config.tools
+
+    def test_chat_assistant_has_fetch_text_tool(self):
+        """Test that chat assistant includes fetch_text tool."""
+        agent = get_builtin_chat_assistant()
+
+        assert "fetch_text" in agent.config.tools
+
+    def test_chat_assistant_documents_web_search_format(self):
+        """Test that chat assistant explains web_search return format."""
+        agent = get_builtin_chat_assistant()
+
+        content = agent.content.lower()
+
+        # Should document the return format with all three fields
+        assert "title" in content
+        assert "url" in content
+        assert "snippet" in content
+
+        # Should show example structure (the [{"... format)
+        assert "[{" in content or "returns:" in content
+
+    def test_chat_assistant_warns_against_raw_json(self):
+        """Test that chat assistant warns against returning raw JSON."""
+        agent = get_builtin_chat_assistant()
+
+        content = agent.content.lower()
+
+        # Should instruct to format results nicely
+        assert "format" in content and "nicely" in content or "extract" in content
+
+    def test_chat_assistant_mentions_fetch_text_usage(self):
+        """Test that chat assistant explains when to use fetch_text."""
+        agent = get_builtin_chat_assistant()
+
+        content = agent.content.lower()
+
+        # Should mention using fetch_text for full page content
+        assert "fetch_text" in content
+        assert "full" in content or "page" in content or "content" in content

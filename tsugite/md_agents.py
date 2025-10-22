@@ -103,7 +103,7 @@ def parse_agent_file(file_path: Path) -> Agent:
     agent = parse_agent(content, file_path)
 
     # Resolve inheritance if needed
-    if agent.config.extends or agent.config.extends != "none":
+    if agent.config.extends != "none":
         from .agent_inheritance import resolve_agent_inheritance
 
         agent = resolve_agent_inheritance(agent, file_path)
@@ -539,6 +539,11 @@ def validate_agent_execution(agent: Agent | Path) -> tuple[bool, str]:
             "user_prompt": "test",
             "task_summary": "## Current Tasks\nNo tasks yet.",
             "is_interactive": False,
+            "tools": agent.config.tools or [],  # Make tools list available for conditional rendering
+            "text_mode": agent.config.text_mode,
+            "is_subagent": False,
+            "parent_agent": None,
+            "chat_history": [],  # For chat agents that reference conversation history
         }
 
         # If agent has prefetch, create mock variables

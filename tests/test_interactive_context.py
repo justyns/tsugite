@@ -36,6 +36,7 @@ def test_is_interactive_flag_true_in_tty(temp_dir, monkeypatch, mock_agent_runne
     # Create a simple test agent that checks is_interactive
     agent_content = """---
 name: test_interactive_flag
+extends: none
 model: openai:gpt-4o-mini
 max_steps: 1
 tools: []
@@ -70,6 +71,7 @@ def test_is_interactive_flag_false_in_non_tty(temp_dir, monkeypatch, mock_agent_
     # Create a simple test agent that checks is_interactive
     agent_content = """---
 name: test_interactive_flag
+extends: none
 model: openai:gpt-4o-mini
 max_steps: 1
 tools: []
@@ -106,6 +108,7 @@ def test_multistep_agent_receives_interactive_flag(temp_dir, monkeypatch, mock_a
     # Create a multi-step test agent
     agent_content = """---
 name: test_multistep_interactive
+extends: none
 model: openai:gpt-4o-mini
 max_steps: 1
 tools: []
@@ -146,6 +149,7 @@ def test_interactive_flag_available_in_templates(temp_dir, monkeypatch, mock_age
     # Create an agent that uses conditional logic
     agent_content = """---
 name: test_conditional
+extends: none
 model: openai:gpt-4o-mini
 max_steps: 1
 tools: []

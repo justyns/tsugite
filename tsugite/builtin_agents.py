@@ -29,7 +29,11 @@ instructions: |
 ---
 # Context
 
-**Interactive Mode**: {{ is_interactive }}
+{% if is_interactive %}
+**Interactive Mode**: You are currently in an interactive session with the user, you can ask questions to clarify the task.
+{% else %}
+**Non-Interactive Mode**: You are in a headless/non-interactive session. You cannot ask the user questions.
+{% endif %}
 
 {% if step_number is defined %}
 ## Multi-Step Execution
@@ -52,6 +56,16 @@ Only delegate when:
 
 Example: `result = spawn_agent("agents/code_review.md", "Review app.py for security issues")`
 
+{% endif %}
+{% if 'web_search' in tools %}
+
+## Web Search Guidelines
+
+When searching the web:
+- Use `web_search(query="...", max_results=5)` to get search results
+- Returns: `[{"title": "...", "url": "...", "snippet": "..."}]`
+- **Important:** Format results nicely for the user! Extract and summarize relevant information from snippets
+- Use `fetch_text(url="...")` to get full page content when snippets aren't enough
 {% endif %}
 
 ## Current Tasks
@@ -76,9 +90,8 @@ def get_builtin_default_agent():
 
 
 BUILTIN_CHAT_ASSISTANT_CONTENT = """---
-name: chat_assistant
+name: builtin-chat-assistant
 description: A conversational assistant that can respond naturally or use tools when needed
-model: openai:gpt-4o
 text_mode: true
 max_steps: 10
 tools:
@@ -86,6 +99,7 @@ tools:
   - write_file
   - list_files
   - web_search
+  - fetch_text
   - run
 ---
 
@@ -112,7 +126,12 @@ final_answer(result)
 - `list_files(path=".", pattern="*")` - List files in a directory
 - `read_file(path="file.txt")` - Read file contents
 - `write_file(path="file.txt", content="...")` - Write to a file
-- `web_search(query="...")` - Search the web
+- `web_search(query="...", max_results=5)` - Search the web and get a list of results
+  - Returns: `[{"title": "...", "url": "...", "snippet": "..."}]`
+  - **Important:** Format results nicely for the user! Extract relevant info from snippets and present clearly.
+  - Example for weather: Read the snippets and summarize the current conditions/forecast
+- `fetch_text(url="...")` - Fetch full content from a webpage as text
+  - Use this when search snippets aren't enough and you need the full page
 - `run(command="...")` - Run shell commands
 
 **Important:** When the user asks about files, directories, or anything requiring system information, ALWAYS use the appropriate tool with a code block!

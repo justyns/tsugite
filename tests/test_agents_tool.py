@@ -46,7 +46,8 @@ class TestSpawnAgentTool:
         call_args = mock_run_agent.call_args
         assert call_args[1]["agent_path"] == self.agent_file
         assert call_args[1]["prompt"] == "Test task"
-        assert call_args[1]["context"] == {}
+        # Context should have is_subagent injected
+        assert call_args[1]["context"]["is_subagent"] is True
         assert call_args[1]["model_override"] is None
         assert call_args[1]["debug"] is False
 
@@ -60,7 +61,10 @@ class TestSpawnAgentTool:
 
         assert result == "Context passed successfully"
         call_args = mock_run_agent.call_args
-        assert call_args[1]["context"] == context
+        # Context should have custom keys plus is_subagent
+        assert call_args[1]["context"]["key1"] == "value1"
+        assert call_args[1]["context"]["key2"] == 42
+        assert call_args[1]["context"]["is_subagent"] is True
 
     @patch("tsugite.agent_runner.run_agent")
     def test_spawn_agent_with_model_override(self, mock_run_agent):
@@ -179,3 +183,64 @@ class TestSpawnAgentParameters:
 
         with pytest.raises(ValueError, match="Invalid parameter 'prompt'.*missing"):
             call_tool("spawn_agent", agent_path="test.md")
+
+
+class TestSubagentContext:
+    """Test subagent context injection (is_subagent and parent_agent)."""
+
+    @pytest.fixture(autouse=True)
+    def setup_test_agent(self, temp_dir, simple_agent_content):
+        """Set up test fixtures."""
+        from .conftest import create_agent_file
+
+        self.temp_dir = temp_dir
+        self.agent_file = create_agent_file(temp_dir, simple_agent_content, "test_agent.md")
+
+    @patch("tsugite.agent_runner.run_agent")
+    @patch("tsugite.agent_runner._get_current_agent")
+    def test_spawn_agent_injects_subagent_context(self, mock_get_current_agent, mock_run_agent):
+        """Test that spawn_agent injects is_subagent=True into context."""
+        mock_get_current_agent.return_value = "parent_agent"
+        mock_run_agent.return_value = "Success"
+
+        spawn_agent(agent_path=str(self.agent_file), prompt="Test task")
+
+        # Verify context was injected
+        call_args = mock_run_agent.call_args
+        context = call_args[1]["context"]
+        assert context["is_subagent"] is True
+        assert context["parent_agent"] == "parent_agent"
+
+    @patch("tsugite.agent_runner.run_agent")
+    @patch("tsugite.agent_runner._get_current_agent")
+    def test_spawn_agent_merges_with_existing_context(self, mock_get_current_agent, mock_run_agent):
+        """Test that spawn_agent preserves existing context variables."""
+        mock_get_current_agent.return_value = "coordinator"
+        mock_run_agent.return_value = "Success"
+
+        existing_context = {"custom_var": "value", "number": 42}
+        spawn_agent(agent_path=str(self.agent_file), prompt="Test task", context=existing_context)
+
+        # Verify both custom and subagent context are present
+        call_args = mock_run_agent.call_args
+        context = call_args[1]["context"]
+        assert context["custom_var"] == "value"
+        assert context["number"] == 42
+        assert context["is_subagent"] is True
+        assert context["parent_agent"] == "coordinator"
+
+    @patch("tsugite.agent_runner.run_agent")
+    @patch("tsugite.agent_runner._get_current_agent")
+    def test_spawn_agent_when_no_parent(self, mock_get_current_agent, mock_run_agent):
+        """Test spawn_agent when there's no parent agent set."""
+        mock_get_current_agent.return_value = None
+        mock_run_agent.return_value = "Success"
+
+        spawn_agent(agent_path=str(self.agent_file), prompt="Test task")
+
+        # Verify is_subagent is still set even without parent
+        call_args = mock_run_agent.call_args
+        context = call_args[1]["context"]
+        assert context["is_subagent"] is True
+        # parent_agent should not be in context if no parent
+        assert "parent_agent" not in context
