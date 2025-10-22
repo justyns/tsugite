@@ -6,18 +6,20 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from rich.console import Console
 
 from tsugite.core.agent import TsugiteAgent
 from tsugite.core.executor import LocalExecutor
-from tsugite.core.tools import create_tool_from_tsugite
 from tsugite.md_agents import AgentConfig, parse_agent_file, validate_agent_execution
 from tsugite.renderer import AgentRenderer
 from tsugite.tools import call_tool
 from tsugite.tools.tasks import get_task_manager, reset_task_manager
 from tsugite.utils import is_interactive
+
+if TYPE_CHECKING:
+    from tsugite.agent_preparation import PreparedAgent
 
 # Console for warnings and debug output (stderr)
 _stderr_console = Console(file=sys.stderr, no_color=False)
@@ -330,8 +332,7 @@ def _extract_reasoning_content(agent: TsugiteAgent, custom_logger: Optional[Any]
 
 
 async def _execute_agent_with_prompt(
-    rendered_prompt: str,
-    agent_config: AgentConfig,
+    prepared: "PreparedAgent",
     model_override: Optional[str] = None,
     custom_logger: Optional[Any] = None,
     trust_mcp_code: bool = False,
@@ -342,13 +343,12 @@ async def _execute_agent_with_prompt(
     return_token_usage: bool = False,
     stream: bool = False,
 ) -> str | tuple[str, Optional[int], Optional[float], int, list]:
-    """Execute agent with a pre-rendered prompt.
+    """Execute agent with a prepared agent.
 
     Low-level execution function used by both run_agent and run_multistep_agent.
 
     Args:
-        rendered_prompt: Pre-rendered prompt to execute
-        agent_config: Agent configuration
+        prepared: Prepared agent with all context, tools, and instructions
         model_override: Override agent's model
         custom_logger: Custom logger
         trust_mcp_code: Trust MCP server code
@@ -365,17 +365,15 @@ async def _execute_agent_with_prompt(
     Raises:
         RuntimeError: If execution fails
     """
+
     # Initialize task manager for this execution (unless skipped for multi-step)
     if not skip_task_reset:
         reset_task_manager()
 
-    # Build base instructions
-    base_instructions = _combine_instructions(
-        get_default_instructions(text_mode=agent_config.text_mode),
-        getattr(agent_config, "instructions", ""),
-    )
+    agent_config = prepared.agent_config
 
-    # Add variable documentation if variables are available
+    # Add variable documentation to instructions if variables are available
+    combined_instructions = prepared.combined_instructions
     if injectable_vars:
         var_docs = "\n\nAVAILABLE PYTHON VARIABLES:\n"
         for var_name, var_value in injectable_vars.items():
@@ -383,49 +381,29 @@ async def _execute_agent_with_prompt(
             if len(str(var_value)) > 100:
                 preview += "..."
             var_docs += f"- {var_name}: {preview}\n"
-        combined_instructions = base_instructions + var_docs
-    else:
-        combined_instructions = base_instructions
+        combined_instructions = prepared.combined_instructions + var_docs
 
-    # Create Tool objects from tsugite tools
-    try:
-        from tsugite.tools import expand_tool_specs
+    # Start with tools from prepared agent
+    tools = list(prepared.tools)  # Make a copy
 
-        # Expand tool specifications (categories, globs, regular names)
-        expanded_tools = expand_tool_specs(agent_config.tools) if agent_config.tools else []
+    # Register per-agent custom shell tools (if any)
+    if agent_config.custom_tools:
+        from tsugite.shell_tool_config import parse_tool_definition_from_dict
+        from tsugite.tools.shell_tools import register_shell_tools
 
-        # Add task management tools
-        task_tools = ["task_add", "task_update", "task_complete", "task_list", "task_get"]
-        all_tool_names = expanded_tools + task_tools
+        try:
+            custom_tool_definitions = [
+                parse_tool_definition_from_dict(tool_dict) for tool_dict in agent_config.custom_tools
+            ]
+            register_shell_tools(custom_tool_definitions)
 
-        if delegation_agents:
-            all_tool_names.append("spawn_agent")
+            # Add custom tool names to the tool list
+            for tool_def in custom_tool_definitions:
+                from tsugite.core.tools import create_tool_from_tsugite
 
-        # Filter out ask_user tool in non-interactive mode
-        if not is_interactive() and "ask_user" in all_tool_names:
-            all_tool_names.remove("ask_user")
-
-        # Register per-agent custom shell tools (if any)
-        if agent_config.custom_tools:
-            from tsugite.shell_tool_config import parse_tool_definition_from_dict
-            from tsugite.tools.shell_tools import register_shell_tools
-
-            try:
-                custom_tool_definitions = [
-                    parse_tool_definition_from_dict(tool_dict) for tool_dict in agent_config.custom_tools
-                ]
-                register_shell_tools(custom_tool_definitions)
-
-                # Add custom tool names to the tool list
-                for tool_def in custom_tool_definitions:
-                    all_tool_names.append(tool_def.name)
-            except Exception as e:
-                _stderr_console.print(f"[yellow]Warning: Failed to register custom tools: {e}[/yellow]")
-
-        # Convert to Tool objects
-        tools = [create_tool_from_tsugite(name) for name in all_tool_names]
-    except Exception as e:
-        raise RuntimeError(f"Failed to create tools: {e}")
+                tools.append(create_tool_from_tsugite(tool_def.name))
+        except Exception as e:
+            _stderr_console.print(f"[yellow]Warning: Failed to register custom tools: {e}[/yellow]")
 
     # Add delegation tools if provided
     if delegation_agents:
@@ -502,7 +480,7 @@ async def _execute_agent_with_prompt(
         )
 
         # Run agent
-        result = await agent.run(rendered_prompt, return_full_result=return_token_usage, stream=stream)
+        result = await agent.run(prepared.rendered_prompt, return_full_result=return_token_usage, stream=stream)
 
         # Extract and display reasoning content if present
         _extract_reasoning_content(agent, custom_logger)
@@ -616,56 +594,28 @@ def run_agent(
         if force_text_mode:
             agent_config.text_mode = True
 
-        # Execute prefetch tools if any
-        prefetch_context = {}
-        if agent_config.prefetch:
-            try:
-                prefetch_context = execute_prefetch(agent_config.prefetch)
-            except Exception as e:
-                _stderr_console.print(f"[yellow]Warning: Prefetch execution failed: {e}[/yellow]")
+        # Prepare agent using unified preparation pipeline
+        from tsugite.agent_preparation import AgentPreparer
 
-        # Execute tool directives in content
-        modified_content, tool_context = execute_tool_directives(agent.content, prefetch_context)
+        preparer = AgentPreparer()
+        prepared = preparer.prepare(
+            agent=agent,
+            prompt=prompt,
+            context=context,
+            delegation_agents=delegation_agents,
+            task_summary=task_manager.get_task_summary(),
+        )
 
-        # Add task context (will be updated as agent creates tasks)
-        task_context = task_manager.get_task_summary()
-
-        # Check if running in interactive mode
-        interactive_mode = is_interactive()
-
-        # Prepare full context for template rendering
-        full_context = {
-            **context,
-            **prefetch_context,
-            **tool_context,  # Add tool directive results
-            "user_prompt": prompt,
-            "task_summary": task_context,
-            "is_interactive": interactive_mode,
-            "text_mode": agent_config.text_mode,
-            "tools": agent_config.tools,  # Make tools list available to templates
-            # Subagent context (set by spawn_agent if this is a spawned agent)
-            "is_subagent": context.get("is_subagent", False),
-            "parent_agent": context.get("parent_agent", None),
-        }
-
-        # Render agent template (use modified content with directives replaced)
-        renderer = AgentRenderer()
-        try:
-            rendered_prompt = renderer.render(modified_content, full_context)
-
-            if debug:
-                _stderr_console.rule("[bold cyan]DEBUG: Rendered Prompt[/bold cyan]")
-                _stderr_console.print(rendered_prompt)
-                _stderr_console.rule("[bold cyan]End Rendered Prompt[/bold cyan]")
-
-        except Exception as e:
-            raise ValueError(f"Template rendering failed: {e}")
+        # Debug output if requested
+        if debug:
+            _stderr_console.rule("[bold cyan]DEBUG: Rendered Prompt[/bold cyan]")
+            _stderr_console.print(prepared.rendered_prompt)
+            _stderr_console.rule("[bold cyan]End Rendered Prompt[/bold cyan]")
 
         # Execute with the low-level helper (wrapping async call)
         return asyncio.run(
             _execute_agent_with_prompt(
-                rendered_prompt=rendered_prompt,
-                agent_config=agent_config,
+                prepared=prepared,
                 model_override=model_override,
                 custom_logger=custom_logger,
                 trust_mcp_code=trust_mcp_code,
@@ -959,13 +909,48 @@ def run_multistep_agent(
                 }
                 injectable_vars = {k: v for k, v in step_context.items() if k not in metadata_vars}
 
+                # Build PreparedAgent manually since we've already rendered
+                # (multistep has its own rendering with accumulated context)
+                from tsugite.agent_preparation import PreparedAgent
+                from tsugite.core.agent import build_system_prompt
+                from tsugite.core.tools import create_tool_from_tsugite
+                from tsugite.tools import expand_tool_specs
+
+                # Build instructions
+                base_instructions = get_default_instructions(text_mode=agent.config.text_mode)
+                agent_instructions = getattr(agent.config, "instructions", "")
+                combined_instructions = _combine_instructions(base_instructions, agent_instructions)
+
+                # Expand and create tools
+                expanded_tools = expand_tool_specs(agent.config.tools) if agent.config.tools else []
+                task_tools = ["task_add", "task_update", "task_complete", "task_list", "task_get"]
+                all_tool_names = expanded_tools + task_tools
+                if delegation_agents:
+                    all_tool_names.append("spawn_agent")
+                tools = [create_tool_from_tsugite(name) for name in all_tool_names]
+
+                # Build system message
+                system_message = build_system_prompt(tools, combined_instructions, agent.config.text_mode)
+
+                # Create PreparedAgent
+                prepared = PreparedAgent(
+                    agent=agent,
+                    agent_config=agent.config,
+                    system_message=system_message,
+                    user_message=rendered_step_prompt,
+                    rendered_prompt=rendered_step_prompt,
+                    tools=tools,
+                    context=step_context,
+                    combined_instructions=combined_instructions,
+                    prefetch_results={},  # Already executed in preamble
+                )
+
                 # Execute this step as a full agent run (wrapping async call)
                 try:
                     # Wrap execution with timeout if specified
                     async def execute_step():
                         coro = _execute_agent_with_prompt(
-                            rendered_prompt=rendered_step_prompt,
-                            agent_config=agent.config,
+                            prepared=prepared,
                             model_override=model_override,
                             custom_logger=custom_logger,
                             trust_mcp_code=trust_mcp_code,

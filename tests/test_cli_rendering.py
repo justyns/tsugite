@@ -15,7 +15,7 @@ class TestCliRenderCommand:
         """Set up test runner."""
         self.runner = CliRunner()
 
-    def test_render_simple_agent(self, temp_dir):
+    def test_render_simple_agent(self, temp_dir, task_tools):
         """Test rendering a simple agent."""
         agent_content = """---
 name: simple_test
@@ -34,7 +34,7 @@ Hello {{ user_prompt }}!
         assert result.exit_code == 0
         assert "Hello world!" in result.stdout
 
-    def test_render_with_empty_prompt(self, temp_dir):
+    def test_render_with_empty_prompt(self, temp_dir, task_tools):
         """Test rendering with empty prompt (optional)."""
         agent_content = """---
 name: no_prompt_test
@@ -53,7 +53,7 @@ This agent doesn't need user input.
         assert result.exit_code == 0
         assert "This agent doesn't need user input." in result.stdout
 
-    def test_render_with_helper_functions(self, temp_dir):
+    def test_render_with_helper_functions(self, temp_dir, task_tools):
         """Test rendering with helper functions."""
         agent_content = """---
 name: helpers_test
@@ -79,7 +79,7 @@ tools: []
         assert "test task" in result.stdout
 
     @patch("tsugite.agent_runner.call_tool")
-    def test_render_with_prefetch(self, mock_call_tool, temp_dir, file_tools):
+    def test_render_with_prefetch(self, mock_call_tool, temp_dir, file_tools, task_tools):
         """Test rendering agent with prefetch tools."""
         mock_call_tool.return_value = "mock file content"
 
@@ -237,7 +237,7 @@ class TestComplexScenarios:
         self.runner = CliRunner()
 
     @patch("tsugite.agent_runner.call_tool")
-    def test_multi_prefetch_rendering(self, mock_call_tool, temp_dir, file_tools):
+    def test_multi_prefetch_rendering(self, mock_call_tool, temp_dir, file_tools, task_tools):
         """Test rendering with multiple prefetch tools."""
         mock_call_tool.side_effect = [
             '{"theme": "dark", "lang": "en"}',  # config.json
@@ -276,7 +276,7 @@ prefetch:
         assert "Important notes here" in result.stdout
         assert "process data" in result.stdout
 
-    def test_conditional_template_rendering(self, temp_dir):
+    def test_conditional_template_rendering(self, temp_dir, task_tools):
         """Test conditional template rendering."""
         agent_content = """---
 name: conditional_test
@@ -321,7 +321,7 @@ class TestBuiltinAgentRendering:
         """Set up test runner."""
         self.runner = CliRunner()
 
-    def test_render_builtin_default_with_plus_prefix(self, agents_tools):
+    def test_render_builtin_default_with_plus_prefix(self, agents_tools, task_tools):
         """Test rendering builtin-default with + prefix."""
         result = self.runner.invoke(app, ["render", "+builtin-default", "test task"])
 
@@ -330,7 +330,7 @@ class TestBuiltinAgentRendering:
         assert "builtin-default" in result.stdout
 
     @patch("tsugite.agent_runner.call_tool")
-    def test_render_builtin_executes_prefetch(self, mock_call_tool, agents_tools):
+    def test_render_builtin_executes_prefetch(self, mock_call_tool, agents_tools, task_tools):
         """Test that builtin agent prefetch tools are executed."""
         # builtin-default has list_agents in prefetch
         mock_call_tool.return_value = "agents/helper.md\nagents/coder.md"
@@ -348,7 +348,7 @@ class TestBuiltinAgentRendering:
         assert result.exit_code == 1
         assert "Unknown builtin agent" in result.stdout
 
-    def test_render_builtin_chat_assistant(self, file_tools, http_tools, shell_tools):
+    def test_render_builtin_chat_assistant(self, file_tools, http_tools, shell_tools, task_tools):
         """Test rendering builtin-chat-assistant with chat_history."""
         result = self.runner.invoke(app, ["render", "builtin-chat-assistant", "test prompt"])
 

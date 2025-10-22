@@ -19,6 +19,7 @@ from .helpers import (
     get_error_console,
     get_logo,
     get_output_console,
+    load_and_validate_agent,
     parse_cli_arguments,
     print_plain_info,
 )
@@ -507,51 +508,16 @@ def render(
         tsu render +builtin-default "prompt"
         tsu render builtin-default "prompt"
     """
-    # Lazy imports - only load dependencies when rendering
-    from tsugite.agent_runner import _combine_instructions, get_default_instructions
-    from tsugite.builtin_agents import get_builtin_chat_assistant, get_builtin_default_agent, is_builtin_agent
-    from tsugite.md_agents import parse_agent_file
-    from tsugite.renderer import AgentRenderer
-    from tsugite.utils import is_interactive
+    # Lazy imports
+    from tsugite.agent_preparation import AgentPreparer
 
     if no_color:
         console.no_color = True
 
     with change_to_root_directory(root, console):
         try:
-            # Check if this is a builtin agent reference
-            agent_name = agent_path.lstrip("+")  # Remove leading + if present
-            looks_like_builtin = agent_path.startswith("+") or agent_name.startswith("builtin-")
-
-            if looks_like_builtin:
-                # User is trying to reference a builtin agent - validate it exists
-                if not is_builtin_agent(agent_name):
-                    console.print(f"[red]Unknown builtin agent: {agent_name}[/red]")
-                    console.print("[yellow]Available builtin agents: builtin-default, builtin-chat-assistant[/yellow]")
-                    raise typer.Exit(1)
-
-                # Get the valid builtin agent
-                if agent_name == "builtin-default":
-                    agent = get_builtin_default_agent()
-                elif agent_name == "builtin-chat-assistant":
-                    agent = get_builtin_chat_assistant()
-
-                agent_display_name = agent_name
-                agent_file_path = Path(f"<{agent_name}>")
-            else:
-                # Regular file-based agent
-                agent_file_path = Path(agent_name)
-                if not agent_file_path.exists():
-                    console.print(f"[red]Agent file not found: {agent_name}[/red]")
-                    raise typer.Exit(1)
-
-                if agent_file_path.suffix != ".md":
-                    console.print(f"[red]Agent file must be a .md file: {agent_name}[/red]")
-                    raise typer.Exit(1)
-
-                # Use parse_agent_file to properly resolve inheritance
-                agent = parse_agent_file(agent_file_path)
-                agent_display_name = agent_file_path.name
+            # Load and validate agent (handles both builtin and file-based agents)
+            agent, agent_file_path, agent_display_name = load_and_validate_agent(agent_path, console)
 
             base_dir = Path.cwd()
 
@@ -565,64 +531,15 @@ def render(
                 console=console,
             )
 
-            # Execute prefetch tools if any
-            from tsugite.agent_runner import execute_prefetch
+            # Prepare agent (all rendering + tool building logic)
+            preparer = AgentPreparer()
+            prepared = preparer.prepare(
+                agent=agent,
+                prompt=prompt_expanded,
+                skip_tool_directives=True,  # Render doesn't execute tool directives
+            )
 
-            prefetch_context = {}
-            if agent.config.prefetch:
-                try:
-                    prefetch_context = execute_prefetch(agent.config.prefetch)
-                except Exception as e:
-                    console.print(f"[yellow]Warning: Prefetch execution failed: {e}[/yellow]")
-
-            # Prepare context with all necessary variables
-            context = {
-                **prefetch_context,
-                "user_prompt": prompt_expanded,
-                "is_interactive": is_interactive(),
-                "task_summary": "## Current Tasks\nNo tasks yet.",
-                "tools": agent.config.tools,  # Include tools list for conditional rendering
-                "text_mode": agent.config.text_mode,  # Include text_mode for conditional rendering
-                "chat_history": [],  # For chat agents that reference conversation history
-                "is_subagent": False,  # Rendering is always top-level
-                "parent_agent": None,
-            }
-
-            # Render template
-            renderer = AgentRenderer()
-            rendered_content = renderer.render(agent.content, context)
-
-            # Build full instructions (same as what gets sent to LLM)
-            base_instructions = get_default_instructions(text_mode=agent.config.text_mode)
-
-            # Render agent instructions if they contain template syntax (unless --raw)
-            agent_instructions_raw = getattr(agent.config, "instructions", "")
-            if agent_instructions_raw and not raw:
-                try:
-                    agent_instructions = renderer.render(agent_instructions_raw, context)
-                except Exception:
-                    # If rendering fails, use as-is
-                    agent_instructions = agent_instructions_raw
-            else:
-                agent_instructions = agent_instructions_raw
-
-            combined_instructions = _combine_instructions(base_instructions, agent_instructions)
-
-            # Build tools for system prompt
-            from tsugite.core.agent import build_system_prompt
-            from tsugite.core.tools import create_tool_from_tsugite
-            from tsugite.tools import expand_tool_specs
-
-            # Expand tool specs the same way as agent_runner
-            expanded_tools = expand_tool_specs(agent.config.tools) if agent.config.tools else []
-            tools = [create_tool_from_tsugite(name) for name in expanded_tools]
-
-            # Build system message (what LLM actually sees)
-            system_message = build_system_prompt(tools, combined_instructions, agent.config.text_mode)
-
-            # User message is just the rendered content
-            user_message = rendered_content
-
+            # Display what will be sent to LLM
             console.print(
                 Panel(
                     f"[cyan]Agent:[/cyan] {agent_display_name}\n"
@@ -636,12 +553,12 @@ def render(
             console.print("\n" + "=" * 50)
             console.print("[bold green]System Message[/bold green] [dim](sent to LLM)[/dim]")
             console.print("=" * 50)
-            console.print(system_message)
+            console.print(prepared.system_message)
 
             console.print("\n" + "=" * 50)
             console.print("[bold green]User Message[/bold green] [dim](sent to LLM)[/dim]")
             console.print("=" * 50)
-            console.print(user_message)
+            console.print(prepared.user_message)
 
         except Exception as e:
             console.print(f"[red]Render error: {e}[/red]")

@@ -211,7 +211,7 @@ description: Helps with tasks
             assert "helper" in context["available_agents"]
 
     @patch("tsugite.agent_runner.TsugiteAgent")
-    @patch("tsugite.agent_runner.create_tool_from_tsugite")
+    @patch("tsugite.core.tools.create_tool_from_tsugite")
     def test_builtin_default_has_delegation_tools(self, mock_create_tool, mock_agent):
         """Test that builtin-default provides delegation tools."""
         from tsugite.builtin_agents import get_builtin_default_agent

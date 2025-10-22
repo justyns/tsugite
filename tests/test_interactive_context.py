@@ -7,7 +7,7 @@ import pytest
 
 # Import task tools to ensure they're registered
 import tsugite.tools.tasks  # noqa: F401
-from tsugite.agent_runner import _execute_agent_with_prompt, run_agent
+from tsugite.agent_runner import run_agent
 from tsugite.md_agents import AgentConfig
 
 
@@ -202,46 +202,27 @@ def test_ask_user_tool_not_available_in_headless(monkeypatch, task_tools, file_t
     )
 
     # Capture the tools list
-    captured_tools = None
+    captured_tools = []
 
     def mock_create_tool(tool_name):
-        nonlocal captured_tools
-        if captured_tools is None:
-            captured_tools = []
         captured_tools.append(tool_name)
         from tsugite.core.tools import Tool
 
         return Tool(name=tool_name, description=f"Mock {tool_name}", function=lambda: None, parameters={})
 
-    with patch("tsugite.agent_runner.create_tool_from_tsugite", side_effect=mock_create_tool):
-        with patch("tsugite.agent_runner.TsugiteAgent") as mock_agent_class:
-            mock_instance = MagicMock()
+    with patch("tsugite.core.tools.create_tool_from_tsugite", side_effect=mock_create_tool):
+        from pathlib import Path
 
-            async def mock_run(prompt, return_full_result=False, stream=False):
-                return "Test complete"
+        from tsugite.agent_preparation import AgentPreparer
+        from tsugite.md_agents import Agent
 
-            mock_instance.run = MagicMock(side_effect=mock_run)
-            mock_agent_class.return_value = mock_instance
-
-            try:
-                import asyncio
-
-                asyncio.run(
-                    _execute_agent_with_prompt(
-                        rendered_prompt="Test prompt",
-                        agent_config=agent_config,
-                        model_override=None,
-                        custom_logger=None,
-                        trust_mcp_code=False,
-                        delegation_agents=None,
-                    )
-                )
-            except Exception:
-                # We expect this to potentially fail due to mocking, but we just want to check the tools
-                pass
+        # Create agent and use AgentPreparer to trigger tool creation
+        agent = Agent(content="Test", config=agent_config, file_path=Path("<test>"))
+        preparer = AgentPreparer()
+        preparer.prepare(agent=agent, prompt="Test prompt", context={}, delegation_agents=None)
 
     # Verify ask_user was filtered out
-    assert captured_tools is not None
+    assert len(captured_tools) > 0
     assert "ask_user" not in captured_tools
     assert "write_file" in captured_tools  # Other tools should still be there
 
@@ -267,45 +248,26 @@ def test_ask_user_tool_available_in_interactive(monkeypatch, task_tools, file_to
     )
 
     # Capture the tools list
-    captured_tools = None
+    captured_tools = []
 
     def mock_create_tool(tool_name):
-        nonlocal captured_tools
-        if captured_tools is None:
-            captured_tools = []
         captured_tools.append(tool_name)
         from tsugite.core.tools import Tool
 
         return Tool(name=tool_name, description=f"Mock {tool_name}", function=lambda: None, parameters={})
 
-    with patch("tsugite.agent_runner.create_tool_from_tsugite", side_effect=mock_create_tool):
-        with patch("tsugite.agent_runner.TsugiteAgent") as mock_agent_class:
-            mock_instance = MagicMock()
+    with patch("tsugite.core.tools.create_tool_from_tsugite", side_effect=mock_create_tool):
+        from pathlib import Path
 
-            async def mock_run(prompt, return_full_result=False, stream=False):
-                return "Test complete"
+        from tsugite.agent_preparation import AgentPreparer
+        from tsugite.md_agents import Agent
 
-            mock_instance.run = MagicMock(side_effect=mock_run)
-            mock_agent_class.return_value = mock_instance
-
-            try:
-                import asyncio
-
-                asyncio.run(
-                    _execute_agent_with_prompt(
-                        rendered_prompt="Test prompt",
-                        agent_config=agent_config,
-                        model_override=None,
-                        custom_logger=None,
-                        trust_mcp_code=False,
-                        delegation_agents=None,
-                    )
-                )
-            except Exception:
-                # We expect this to potentially fail due to mocking, but we just want to check the tools
-                pass
+        # Create agent and use AgentPreparer to trigger tool creation
+        agent = Agent(content="Test", config=agent_config, file_path=Path("<test>"))
+        preparer = AgentPreparer()
+        preparer.prepare(agent=agent, prompt="Test prompt", context={}, delegation_agents=None)
 
     # Verify ask_user is still present in interactive mode
-    assert captured_tools is not None
+    assert len(captured_tools) > 0
     assert "ask_user" in captured_tools
     assert "write_file" in captured_tools
