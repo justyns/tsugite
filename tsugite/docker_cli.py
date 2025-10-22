@@ -30,6 +30,7 @@ def docker_main():
             ["docker", "ps", "-a", "-q", "-f", f"name=^{args.container}$"],
             capture_output=True,
             text=True,
+            check=False,
         )
 
         if check.stdout.strip():
@@ -44,7 +45,7 @@ def docker_main():
         cmd = _build_run_command(args, tsugite_args, container_name)
 
     # Execute
-    result = subprocess.run(cmd)
+    result = subprocess.run(cmd, check=False)
     sys.exit(result.returncode)
 
 
@@ -171,7 +172,7 @@ def _start_session(args):
 
     cmd.extend(["-w", "/workspace", image, "tail", "-f", "/dev/null"])
 
-    result = subprocess.run(cmd)
+    result = subprocess.run(cmd, check=False)
     if result.returncode == 0:
         print(f"✓ Session '{name}' started")
         print(f'  Use: tsugite-docker --container {name} run agent.md "task"')
@@ -189,13 +190,13 @@ def _stop_session(args):
     remove = "--remove" in args
 
     # Stop container
-    result = subprocess.run(["docker", "stop", name])
+    result = subprocess.run(["docker", "stop", name], check=False)
     if result.returncode != 0:
         sys.exit(result.returncode)
 
     # Remove if requested
     if remove:
-        result = subprocess.run(["docker", "rm", name])
+        result = subprocess.run(["docker", "rm", name], check=False)
         if result.returncode == 0:
             print(f"✓ Session '{name}' stopped and removed")
     else:
@@ -215,7 +216,8 @@ def _list_sessions():
             "name=tsugite-",
             "--format",
             "table {{.Names}}\t{{.Status}}\t{{.CreatedAt}}",
-        ]
+        ],
+        check=False,
     )
 
 
@@ -230,14 +232,14 @@ def _exec_session(args):
     command = args[1:]
 
     # Check if running, start if needed
-    check = subprocess.run(["docker", "ps", "-q", "-f", f"name=^{name}$"], capture_output=True, text=True)
+    check = subprocess.run(["docker", "ps", "-q", "-f", f"name=^{name}$"], capture_output=True, text=True, check=False)
 
     if not check.stdout.strip():
         print(f"Starting stopped session '{name}'...")
-        subprocess.run(["docker", "start", name])
+        subprocess.run(["docker", "start", name], check=False)
 
     # Execute
-    result = subprocess.run(["docker", "exec", "-it", name] + command)
+    result = subprocess.run(["docker", "exec", "-it", name] + command, check=False)
     sys.exit(result.returncode)
 
 

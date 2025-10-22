@@ -272,7 +272,7 @@ def tools_edit(
 
         # Open in editor
         editor = os.environ.get("EDITOR", "nano")
-        subprocess.run([editor, str(config_path)])
+        subprocess.run([editor, str(config_path)], check=False)
 
         console.print("[green]✓[/green] Config updated")
         console.print("\n[dim]Restart tsugite to load changes[/dim]")

@@ -199,7 +199,7 @@ def run(
             cmd.append("--refresh-cache")
 
         # Execute wrapper
-        result = subprocess.run(cmd)
+        result = subprocess.run(cmd, check=False)
         raise typer.Exit(result.returncode)
 
     # Parse CLI arguments into agents and prompt

@@ -4,6 +4,7 @@ import shlex
 import subprocess
 
 from tsugite.tools import tool
+from tsugite.utils import execute_shell_command
 
 DANGEROUS_SHELL_SUBSTRINGS = (
     "rm -rf /",
@@ -51,49 +52,12 @@ def run(command: str, timeout: int = 30, shell: bool = True) -> str:
         timeout: Maximum execution time in seconds (default: 30)
         shell: Whether to use shell execution (default: True)
     """
-    try:
-        # Basic safety check for dangerous patterns
-        for pattern in DANGEROUS_SHELL_SUBSTRINGS:
-            if pattern in command.lower():
-                raise ValueError(f"Dangerous command pattern detected: {pattern}")
+    # Basic safety check for dangerous patterns
+    for pattern in DANGEROUS_SHELL_SUBSTRINGS:
+        if pattern in command.lower():
+            raise ValueError(f"Dangerous command pattern detected: {pattern}")
 
-        if shell:
-            result = subprocess.run(
-                command,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                check=False,
-            )
-        else:
-            cmd_parts = shlex.split(command)
-            result = subprocess.run(
-                cmd_parts,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                check=False,
-            )
-
-        output = ""
-        if result.stdout:
-            output += result.stdout
-        if result.stderr:
-            if output:
-                output += "\n" + result.stderr
-            else:
-                output = result.stderr
-
-        if result.returncode != 0:
-            output += f"\n[Exit code: {result.returncode}]"
-
-        return output or "[No output]"
-
-    except subprocess.TimeoutExpired as exc:
-        raise RuntimeError(f"Command timed out after {timeout} seconds") from exc
-    except Exception as e:
-        raise RuntimeError(f"Command execution failed: {e}") from e
+    return execute_shell_command(command, timeout=timeout, shell=shell)
 
 
 @tool

@@ -2,6 +2,8 @@
 
 import os
 import re
+import shlex
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -48,6 +50,60 @@ def tool_error(tool_name: str, operation: str, details: str) -> RuntimeError:
 
 def validation_error(item_type: str, item_name: str, issue: str) -> ValueError:
     return ValueError(f"Invalid {item_type} '{item_name}': {issue}")
+
+
+def execute_shell_command(command: str, timeout: int = 30, shell: bool = True) -> str:
+    """Execute a shell command and return its output.
+
+    Args:
+        command: Shell command to execute
+        timeout: Maximum execution time in seconds
+        shell: Whether to use shell execution
+
+    Returns:
+        Command output including stdout, stderr, and exit code
+
+    Raises:
+        RuntimeError: If command execution fails or times out
+    """
+    try:
+        if shell:
+            result = subprocess.run(
+                command,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+            )
+        else:
+            cmd_parts = shlex.split(command)
+            result = subprocess.run(
+                cmd_parts,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+            )
+
+        output = ""
+        if result.stdout:
+            output += result.stdout
+        if result.stderr:
+            if output:
+                output += "\n" + result.stderr
+            else:
+                output = result.stderr
+
+        if result.returncode != 0:
+            output += f"\n[Exit code: {result.returncode}]"
+
+        return output or "[No output]"
+
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"Command timed out after {timeout} seconds") from exc
+    except Exception as e:
+        raise RuntimeError(f"Command execution failed: {e}") from e
 
 
 def is_interactive() -> bool:

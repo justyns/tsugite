@@ -141,7 +141,7 @@ class AgentPreparer:
         try:
             rendered_prompt = renderer.render(modified_content, full_context)
         except Exception as e:
-            raise RuntimeError(f"Template rendering failed: {e}")
+            raise RuntimeError(f"Template rendering failed: {e}") from e
 
         # Step 5: Build instructions
         base_instructions = get_default_instructions(text_mode=agent_config.text_mode)
@@ -167,7 +167,7 @@ class AgentPreparer:
             # Convert to Tool objects
             tools = [create_tool_from_tsugite(name) for name in all_tool_names]
         except Exception as e:
-            raise RuntimeError(f"Failed to create tools: {e}")
+            raise RuntimeError(f"Failed to create tools: {e}") from e
 
         # Step 7: Build system message (what LLM actually sees)
         system_message = build_system_prompt(tools, combined_instructions, agent_config.text_mode)

@@ -407,30 +407,53 @@ class CustomUIHandler:
                 # In headless mode, still show it but more concisely
                 self.console.print(f"[dim magenta]{message}[/dim magenta]")
 
+    def _build_cost_summary_text(
+        self,
+        cost: Optional[float],
+        total_tokens: Optional[int],
+        reasoning_tokens: Optional[int],
+        include_emojis: bool = True,
+    ) -> Optional[str]:
+        """Build cost summary text from metrics.
+
+        Args:
+            cost: Execution cost in dollars
+            total_tokens: Total tokens used
+            reasoning_tokens: Reasoning tokens used
+            include_emojis: Whether to include emoji decorations
+
+        Returns:
+            Formatted summary text or None if no metrics available
+        """
+        if cost is None and total_tokens is None:
+            return None
+
+        parts = []
+        if cost is not None and cost > 0:
+            cost_prefix = "💰 " if include_emojis else ""
+            parts.append(f"{cost_prefix}Cost: ${cost:.6f}")
+
+        if total_tokens is not None:
+            token_prefix = "📊 " if include_emojis else ""
+            if reasoning_tokens is not None and reasoning_tokens > 0:
+                parts.append(f"{token_prefix}Tokens: {total_tokens:,} total ({reasoning_tokens:,} reasoning)")
+            else:
+                parts.append(f"{token_prefix}Tokens: {total_tokens:,}")
+
+        if not parts:
+            return None
+
+        return " | ".join(parts)
+
     def _handle_cost_summary(self, data: Dict[str, Any]) -> None:
         """Handle cost summary display after final answer."""
         cost = data.get("cost")
         total_tokens = data.get("total_tokens")
         reasoning_tokens = data.get("reasoning_tokens")
 
-        if cost is None and total_tokens is None:
+        summary_text = self._build_cost_summary_text(cost, total_tokens, reasoning_tokens)
+        if not summary_text:
             return
-
-        # Build summary parts
-        parts = []
-        if cost is not None and cost > 0:
-            parts.append(f"💰 Cost: ${cost:.6f}")
-
-        if total_tokens is not None:
-            if reasoning_tokens is not None and reasoning_tokens > 0:
-                parts.append(f"📊 Tokens: {total_tokens:,} total ({reasoning_tokens:,} reasoning)")
-            else:
-                parts.append(f"📊 Tokens: {total_tokens:,}")
-
-        if not parts:
-            return
-
-        summary_text = " | ".join(parts)
 
         if self.show_panels:
             self.console.print(Text(summary_text, style="dim cyan"))

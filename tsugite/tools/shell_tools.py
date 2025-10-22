@@ -4,12 +4,11 @@ This module provides a lightweight system for defining tools that wrap shell com
 allowing users to create custom tools without writing Python code.
 """
 
-import shlex
-import subprocess
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from tsugite.tools import tool
+from tsugite.utils import execute_shell_command
 
 
 @dataclass
@@ -138,45 +137,7 @@ def create_shell_tool_function(definition: ShellToolDefinition):
             raise RuntimeError(f"Failed to build command: {e}")
 
         # Execute command
-        try:
-            if definition.shell:
-                result = subprocess.run(
-                    command,
-                    shell=True,
-                    capture_output=True,
-                    text=True,
-                    timeout=definition.timeout,
-                    check=False,
-                )
-            else:
-                cmd_parts = shlex.split(command)
-                result = subprocess.run(
-                    cmd_parts,
-                    capture_output=True,
-                    text=True,
-                    timeout=definition.timeout,
-                    check=False,
-                )
-
-            # Combine stdout and stderr
-            output = ""
-            if result.stdout:
-                output += result.stdout
-            if result.stderr:
-                if output:
-                    output += "\n" + result.stderr
-                else:
-                    output = result.stderr
-
-            if result.returncode != 0:
-                output += f"\n[Exit code: {result.returncode}]"
-
-            return output or "[No output]"
-
-        except subprocess.TimeoutExpired:
-            raise RuntimeError(f"Command timed out after {definition.timeout} seconds")
-        except Exception as e:
-            raise RuntimeError(f"Command execution failed: {e}")
+        return execute_shell_command(command, timeout=definition.timeout, shell=definition.shell)
 
     # Set function metadata for tool registration
     shell_tool_func.__name__ = definition.name

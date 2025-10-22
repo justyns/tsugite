@@ -250,24 +250,10 @@ class PlainUIHandler(CustomUIHandler):
         total_tokens = data.get("total_tokens")
         reasoning_tokens = data.get("reasoning_tokens")
 
-        if cost is None and total_tokens is None:
+        summary_text = self._build_cost_summary_text(cost, total_tokens, reasoning_tokens, include_emojis=False)
+        if not summary_text:
             return
 
-        # Build summary parts
-        parts = []
-        if cost is not None and cost > 0:
-            parts.append(f"Cost: ${cost:.6f}")
-
-        if total_tokens is not None:
-            if reasoning_tokens is not None and reasoning_tokens > 0:
-                parts.append(f"Tokens: {total_tokens:,} total ({reasoning_tokens:,} reasoning)")
-            else:
-                parts.append(f"Tokens: {total_tokens:,}")
-
-        if not parts:
-            return
-
-        summary_text = " | ".join(parts)
         self.console.print(f"\n{summary_text}\n")
 
     def _handle_execution_result(self, data: Dict[str, Any]) -> None:

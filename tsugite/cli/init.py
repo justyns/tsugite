@@ -58,6 +58,7 @@ def detect_ollama() -> bool:
             ["ollama", "list"],
             capture_output=True,
             timeout=2,
+            check=False,
         )
         return result.returncode == 0
     except (FileNotFoundError, subprocess.TimeoutExpired):

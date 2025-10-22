@@ -257,7 +257,7 @@ def extract_tool_directives(content: str) -> List[ToolDirective]:
             args_json_str = raw_args[json_start:json_end]
             args_dict = json.loads(args_json_str)
         except json.JSONDecodeError as e:
-            raise ValueError(f"Invalid JSON in tool directive args for '{tool_name}': {e}")
+            raise ValueError(f"Invalid JSON in tool directive args for '{tool_name}': {e}") from e
 
         # Extract assign (required)
         assign_match = re.search(r'assign=(["\']?)(\w+)\1', raw_args)
@@ -379,7 +379,7 @@ def extract_step_directives(content: str, include_preamble: bool = True) -> tupl
                 rf_value = rf_match.group(2)
                 model_kwargs["response_format"] = json.loads(rf_value)
             except json.JSONDecodeError as e:
-                raise ValueError(f"Invalid JSON in response_format for step '{step_name}': {e}")
+                raise ValueError(f"Invalid JSON in response_format for step '{step_name}': {e}") from e
 
         # Parse temperature
         temperature = _parse_directive_attribute(args, "temperature", r"[0-9.]+", float)
