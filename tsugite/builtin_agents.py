@@ -175,3 +175,15 @@ def is_builtin_agent(name: str) -> bool:
         True if the name refers to a built-in agent
     """
     return name in ("builtin-default", "builtin-chat-assistant")
+
+
+def is_builtin_agent_path(path) -> bool:
+    """Check if a path represents a builtin agent.
+
+    Args:
+        path: Path object or string to check
+
+    Returns:
+        True if the path represents a builtin agent (starts with "<builtin-")
+    """
+    return str(path).startswith("<builtin-")

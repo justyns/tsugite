@@ -4,9 +4,39 @@ import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from .utils import parse_yaml_frontmatter
+
+
+def _parse_directive_attribute(
+    args: str,
+    attr_name: str,
+    value_pattern: str = r"([^\"']+)",
+    converter: Optional[Callable[[str], Any]] = None,
+    default: Any = None,
+) -> Any:
+    """Parse an attribute from directive arguments using regex.
+
+    Args:
+        args: The directive arguments string
+        attr_name: Name of the attribute to extract
+        value_pattern: Regex pattern for the value (default: any non-quote chars)
+        converter: Optional function to convert the string value (e.g., int, float)
+        default: Default value if attribute not found
+
+    Returns:
+        Parsed and converted value, or default if not found
+    """
+    pattern = rf'{attr_name}=(["\']?)({value_pattern})\1'
+    match = re.search(pattern, args)
+    if not match:
+        return default
+
+    value = match.group(2)
+    if converter:
+        return converter(value)
+    return value
 
 
 @dataclass
@@ -332,10 +362,7 @@ def extract_step_directives(content: str, include_preamble: bool = True) -> tupl
         step_name = name_match.group(2)
 
         # Parse assign attribute (optional)
-        assign_var = None
-        assign_match = re.search(r'assign=(["\']?)(\w+)\1', args)
-        if assign_match:
-            assign_var = assign_match.group(2)
+        assign_var = _parse_directive_attribute(args, "assign", r"\w+")
 
         # Parse model_kwargs from remaining attributes
         model_kwargs = {}
@@ -355,58 +382,47 @@ def extract_step_directives(content: str, include_preamble: bool = True) -> tupl
                 raise ValueError(f"Invalid JSON in response_format for step '{step_name}': {e}")
 
         # Parse temperature
-        temp_match = re.search(r'temperature=(["\']?)([0-9.]+)\1', args)
-        if temp_match:
-            model_kwargs["temperature"] = float(temp_match.group(2))
+        temperature = _parse_directive_attribute(args, "temperature", r"[0-9.]+", float)
+        if temperature is not None:
+            model_kwargs["temperature"] = temperature
 
         # Parse max_tokens
-        tokens_match = re.search(r'max_tokens=(["\']?)([0-9]+)\1', args)
-        if tokens_match:
-            model_kwargs["max_tokens"] = int(tokens_match.group(2))
+        max_tokens = _parse_directive_attribute(args, "max_tokens", r"[0-9]+", int)
+        if max_tokens is not None:
+            model_kwargs["max_tokens"] = max_tokens
 
         # Parse top_p
-        top_p_match = re.search(r'top_p=(["\']?)([0-9.]+)\1', args)
-        if top_p_match:
-            model_kwargs["top_p"] = float(top_p_match.group(2))
+        top_p = _parse_directive_attribute(args, "top_p", r"[0-9.]+", float)
+        if top_p is not None:
+            model_kwargs["top_p"] = top_p
 
         # Parse frequency_penalty
-        freq_match = re.search(r'frequency_penalty=(["\']?)([0-9.]+)\1', args)
-        if freq_match:
-            model_kwargs["frequency_penalty"] = float(freq_match.group(2))
+        freq_penalty = _parse_directive_attribute(args, "frequency_penalty", r"[0-9.]+", float)
+        if freq_penalty is not None:
+            model_kwargs["frequency_penalty"] = freq_penalty
 
         # Parse presence_penalty
-        pres_match = re.search(r'presence_penalty=(["\']?)([0-9.]+)\1', args)
-        if pres_match:
-            model_kwargs["presence_penalty"] = float(pres_match.group(2))
+        pres_penalty = _parse_directive_attribute(args, "presence_penalty", r"[0-9.]+", float)
+        if pres_penalty is not None:
+            model_kwargs["presence_penalty"] = pres_penalty
 
         # Parse reasoning_effort (for o1, o3, Claude extended thinking)
-        reasoning_match = re.search(r'reasoning_effort=(["\']?)(low|medium|high)\1', args)
-        if reasoning_match:
-            model_kwargs["reasoning_effort"] = reasoning_match.group(2)
+        reasoning_effort = _parse_directive_attribute(args, "reasoning_effort", r"low|medium|high")
+        if reasoning_effort:
+            model_kwargs["reasoning_effort"] = reasoning_effort
 
         # Parse max_retries
-        max_retries = 0
-        retries_match = re.search(r'max_retries=(["\']?)([0-9]+)\1', args)
-        if retries_match:
-            max_retries = int(retries_match.group(2))
+        max_retries = _parse_directive_attribute(args, "max_retries", r"[0-9]+", int, default=0)
 
         # Parse retry_delay
-        retry_delay = 0.0
-        delay_match = re.search(r'retry_delay=(["\']?)([0-9.]+)\1', args)
-        if delay_match:
-            retry_delay = float(delay_match.group(2))
+        retry_delay = _parse_directive_attribute(args, "retry_delay", r"[0-9.]+", float, default=0.0)
 
         # Parse continue_on_error
-        continue_on_error = False
-        continue_match = re.search(r'continue_on_error=(["\']?)(true|false)\1', args, re.IGNORECASE)
-        if continue_match:
-            continue_on_error = continue_match.group(2).lower() == "true"
+        continue_str = _parse_directive_attribute(args, "continue_on_error", r"true|false", default="false")
+        continue_on_error = continue_str.lower() == "true"
 
         # Parse timeout
-        timeout = None
-        timeout_match = re.search(r'timeout=(["\']?)([0-9]+)\1', args)
-        if timeout_match:
-            timeout = int(timeout_match.group(2))
+        timeout = _parse_directive_attribute(args, "timeout", r"[0-9]+", int)
 
         steps.append(
             StepDirective(

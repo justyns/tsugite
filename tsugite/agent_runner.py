@@ -42,6 +42,120 @@ def _clear_current_agent() -> None:
         delattr(_current_agent_context, "name")
 
 
+def _get_model_string(model_override: Optional[str], agent_config: AgentConfig) -> str:
+    """Get model string with fallback to config default.
+
+    Args:
+        model_override: Model override from CLI
+        agent_config: Agent configuration
+
+    Returns:
+        Model string
+
+    Raises:
+        RuntimeError: If no model is specified anywhere
+    """
+    model_string = model_override or agent_config.model
+    if not model_string:
+        from tsugite.config import load_config
+
+        config = load_config()
+        model_string = config.default_model
+
+    if not model_string:
+        raise RuntimeError(
+            "No model specified. Set a model in agent frontmatter, use --model flag, "
+            "or set a default with 'tsugite config set-default <model>'"
+        )
+
+    return model_string
+
+
+def _build_step_error_message(
+    error_type: str,
+    step_name: str,
+    step_number: int,
+    total_steps: int,
+    errors: List[str],
+    available_vars: List[str],
+    previous_step: str,
+    max_attempts: int,
+    debug_tips: List[str],
+) -> str:
+    """Build detailed error message for step failures.
+
+    Args:
+        error_type: Type of error (e.g., "Template Rendering Failed", "Step Execution Failed")
+        step_name: Name of the failed step
+        step_number: Current step number (1-indexed)
+        total_steps: Total number of steps
+        errors: List of error messages from all attempts
+        available_vars: List of available variable names
+        previous_step: Name of the previous step
+        max_attempts: Maximum number of retry attempts
+        debug_tips: List of debugging suggestions
+
+    Returns:
+        Formatted error message string
+    """
+    error_lines = [
+        "",
+        f"Step {error_type}",
+        "━" * 60,
+        f"Step: {step_name} ({step_number}/{total_steps})",
+        f"Previous Step: {previous_step}",
+        f"Attempts: {max_attempts}",
+        "",
+    ]
+
+    # Add variables section (format depends on whether we have any)
+    if available_vars:
+        var_label = "Context Variables" if "Template" in error_type else "Available Variables"
+        error_lines.append(f"{var_label}: {', '.join(available_vars)}")
+    else:
+        error_lines.append("Available Variables: None")
+
+    error_lines.extend(["", "Errors:"])
+
+    # Add all error attempts
+    for idx, err in enumerate(errors, 1):
+        error_lines.append(f"  Attempt {idx}: {err}")
+
+    # Add debugging tips
+    error_lines.extend(["━" * 60, "", "To debug:"])
+    for tip in debug_tips:
+        error_lines.append(f"  {tip}")
+    error_lines.append("")
+
+    return "\n".join(error_lines)
+
+
+def _get_display_console(custom_logger: Optional[Any]) -> Console:
+    """Get console for displaying output, with fallback to stderr.
+
+    Args:
+        custom_logger: Custom logger instance (may be None)
+
+    Returns:
+        Console instance to use for output
+    """
+    if custom_logger and hasattr(custom_logger, "console"):
+        return custom_logger.console
+    return _stderr_console
+
+
+def _get_ui_handler(custom_logger: Optional[Any]) -> Optional[Any]:
+    """Safely get UI handler from custom logger.
+
+    Args:
+        custom_logger: Custom logger instance (may be None)
+
+    Returns:
+        UI handler if available, None otherwise
+    """
+    return custom_logger.ui_handler if custom_logger and hasattr(custom_logger, "ui_handler") else None
+
+
 @dataclass
 class StepMetrics:
     """Metrics for a single step execution."""
@@ -197,12 +311,11 @@ def _extract_reasoning_content(agent: TsugiteAgent, custom_logger: Optional[Any]
     for reasoning_content in agent.memory.reasoning_history:
         if reasoning_content and custom_logger:
             # Check if custom_logger has ui_handler (custom UI mode)
-            if hasattr(custom_logger, "ui_handler"):
+            ui_handler = _get_ui_handler(custom_logger)
+            if ui_handler:
                 from tsugite.ui import UIEvent
 
-                custom_logger.ui_handler.handle_event(
-                    UIEvent.REASONING_CONTENT, {"content": reasoning_content, "step": None}
-                )
+                ui_handler.handle_event(UIEvent.REASONING_CONTENT, {"content": reasoning_content, "step": None})
             # Otherwise try to log directly (fallback)
             elif hasattr(custom_logger, "console"):
                 from rich.panel import Panel
@@ -355,18 +468,7 @@ async def _execute_agent_with_prompt(
             _stderr_console.print("[yellow]Continuing without MCP tools.[/yellow]")
 
     # Get model string
-    model_string = model_override or agent_config.model
-    if not model_string:
-        from tsugite.config import load_config
-
-        config = load_config()
-        model_string = config.default_model
-
-    if not model_string:
-        raise RuntimeError(
-            "No model specified. Set a model in agent frontmatter, use --model flag, "
-            "or set a default with 'tsugite config set-default <model>'"
-        )
+    model_string = _get_model_string(model_override, agent_config)
 
     # Merge reasoning_effort from agent config into model_kwargs
     final_model_kwargs = dict(model_kwargs or {})
@@ -385,9 +487,7 @@ async def _execute_agent_with_prompt(
     # Create and run agent
     try:
         # Extract ui_handler from custom_logger if available
-        ui_handler = None
-        if custom_logger and hasattr(custom_logger, "ui_handler"):
-            ui_handler = custom_logger.ui_handler
+        ui_handler = _get_ui_handler(custom_logger)
 
         agent = TsugiteAgent(
             model_string=model_string,
@@ -767,8 +867,9 @@ def run_multistep_agent(
 
                 if custom_logger and not debug:
                     # Set multi-step context for nested progress display
-                    if hasattr(custom_logger, "ui_handler"):
-                        custom_logger.ui_handler.set_multistep_context(i, step.name, len(steps))
+                    ui_handler = _get_ui_handler(custom_logger)
+                    if ui_handler:
+                        ui_handler.set_multistep_context(i, step.name, len(steps))
 
                     # Show retry attempt if applicable
                     if attempt > 0:
@@ -815,42 +916,28 @@ def run_multistep_agent(
                     errors.append(error_msg)
 
                     if attempt == max_attempts - 1:
-                        if custom_logger and hasattr(custom_logger, "ui_handler"):
-                            custom_logger.ui_handler.clear_multistep_context()
+                        ui_handler = _get_ui_handler(custom_logger)
+                        if ui_handler:
+                            ui_handler.clear_multistep_context()
 
                         # Build detailed error message for rendering failure
-                        available_vars = list(step_context.keys())
-                        previous_step = steps[i - 2].name if i > 1 else "None"
-
-                        error_lines = [
-                            "",
-                            "Step Template Rendering Failed",
-                            "━" * 60,
-                            f"Step: {step.name} ({i}/{len(steps)})",
-                            f"Previous Step: {previous_step}",
-                            f"Attempts: {max_attempts}",
-                            "",
-                            f"Context Variables: {', '.join(available_vars)}",
-                            "",
-                            "Errors:",
-                        ]
-
-                        for idx, err in enumerate(errors, 1):
-                            error_lines.append(f"  Attempt {idx}: {err}")
-
-                        error_lines.extend(
-                            [
-                                "━" * 60,
-                                "",
-                                "To debug:",
-                                "  1. Check for undefined variables in step template",
-                                "  2. Verify previous steps assigned expected variables",
-                                "  3. Run with --debug to see full context",
-                                "",
-                            ]
+                        error_msg = _build_step_error_message(
+                            error_type="Template Rendering Failed",
+                            step_name=step.name,
+                            step_number=i,
+                            total_steps=len(steps),
+                            errors=errors,
+                            available_vars=list(step_context.keys()),
+                            previous_step=steps[i - 2].name if i > 1 else "None",
+                            max_attempts=max_attempts,
+                            debug_tips=[
+                                "1. Check for undefined variables in step template",
+                                "2. Verify previous steps assigned expected variables",
+                                "3. Run with --debug to see full context",
+                            ],
                         )
 
-                        raise RuntimeError("\n".join(error_lines))
+                        raise RuntimeError(error_msg)
 
                     if step.retry_delay > 0:
                         time.sleep(step.retry_delay)
@@ -910,8 +997,9 @@ def run_multistep_agent(
                     # Show step completion
                     if custom_logger and not debug:
                         # Clear multi-step context after step completes
-                        if hasattr(custom_logger, "ui_handler"):
-                            custom_logger.ui_handler.clear_multistep_context()
+                        ui_handler = _get_ui_handler(custom_logger)
+                        if ui_handler:
+                            ui_handler.clear_multistep_context()
 
                         custom_logger.console.print(f"[green]{step_header} Complete[/green]")
                     elif not debug:
@@ -942,16 +1030,14 @@ def run_multistep_agent(
                     # Check if we should continue despite the error
                     if step.continue_on_error:
                         # Log warning but continue execution
-                        if custom_logger and hasattr(custom_logger, "ui_handler"):
-                            custom_logger.ui_handler.clear_multistep_context()
+                        ui_handler = _get_ui_handler(custom_logger)
+                        if ui_handler:
+                            ui_handler.clear_multistep_context()
 
                         warning_msg = f"⚠ Step '{step.name}' failed but continuing (continue_on_error=true)"
-                        if custom_logger:
-                            custom_logger.console.print(f"[yellow]{warning_msg}[/yellow]")
-                            custom_logger.console.print(f"[dim]Error: {error_msg}[/dim]")
-                        else:
-                            _stderr_console.print(f"[yellow]{warning_msg}[/yellow]")
-                            _stderr_console.print(f"[dim]Error: {error_msg}[/dim]")
+                        console = _get_display_console(custom_logger)
+                        console.print(f"[yellow]{warning_msg}[/yellow]")
+                        console.print(f"[dim]Error: {error_msg}[/dim]")
 
                         # Assign None to the variable if specified
                         if step.assign_var:
@@ -975,42 +1061,28 @@ def run_multistep_agent(
                         break
 
                     if attempt == max_attempts - 1:
-                        if custom_logger and hasattr(custom_logger, "ui_handler"):
-                            custom_logger.ui_handler.clear_multistep_context()
+                        ui_handler = _get_ui_handler(custom_logger)
+                        if ui_handler:
+                            ui_handler.clear_multistep_context()
 
                         # Build detailed error message with context
-                        available_vars = list(injectable_vars.keys())
-                        previous_step = steps[i - 2].name if i > 1 else "None"
-
-                        error_lines = [
-                            "",
-                            "Step Execution Failed",
-                            "━" * 60,
-                            f"Step: {step.name} ({i}/{len(steps)})",
-                            f"Previous Step: {previous_step}",
-                            f"Attempts: {max_attempts}",
-                            "",
-                            f"Available Variables: {', '.join(available_vars) if available_vars else 'None'}",
-                            "",
-                            "Errors:",
-                        ]
-
-                        for idx, err in enumerate(errors, 1):
-                            error_lines.append(f"  Attempt {idx}: {err}")
-
-                        error_lines.extend(
-                            [
-                                "━" * 60,
-                                "",
-                                "To debug:",
-                                "  1. Run with --debug to see rendered prompts",
-                                "  2. Check variable values in previous steps",
-                                "  3. Verify step dependencies are correct",
-                                "",
-                            ]
+                        error_msg = _build_step_error_message(
+                            error_type="Execution Failed",
+                            step_name=step.name,
+                            step_number=i,
+                            total_steps=len(steps),
+                            errors=errors,
+                            available_vars=list(injectable_vars.keys()),
+                            previous_step=steps[i - 2].name if i > 1 else "None",
+                            max_attempts=max_attempts,
+                            debug_tips=[
+                                "1. Run with --debug to see rendered prompts",
+                                "2. Check variable values in previous steps",
+                                "3. Verify step dependencies are correct",
+                            ],
                         )
 
-                        raise RuntimeError("\n".join(error_lines))
+                        raise RuntimeError(error_msg)
 
                     if step.retry_delay > 0:
                         time.sleep(step.retry_delay)
@@ -1034,7 +1106,7 @@ def _display_step_metrics(metrics: List[StepMetrics], custom_logger: Optional[An
     """Display step execution metrics in a table."""
     from rich.table import Table
 
-    console = custom_logger.console if custom_logger and hasattr(custom_logger, "console") else _stderr_console
+    console = _get_display_console(custom_logger)
 
     table = Table(title="Multi-Step Execution Metrics", show_header=True)
     table.add_column("Step", style="cyan")

@@ -4,7 +4,7 @@ import os
 import sys
 from contextlib import contextmanager
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import typer
 from rich.console import Console
@@ -64,6 +64,96 @@ def print_plain_info(console: Console, title: str, items: dict, style: str = "cy
     console.print()
 
 
+def resolve_attachments_with_error_handling(
+    attachments: List[str],
+    base_dir: Path,
+    refresh_cache: bool,
+    console: Console,
+    error_context: str = "Attachment",
+) -> List[Tuple[str, str]]:
+    """Resolve attachments with error handling.
+
+    Args:
+        attachments: List of attachment names/paths
+        base_dir: Base directory for resolving paths
+        refresh_cache: Whether to refresh cached content
+        console: Console for error messages
+        error_context: Context for error message (e.g., "Agent attachment" or "Attachment")
+
+    Returns:
+        List of (name, content) tuples
+
+    Raises:
+        typer.Exit: If attachment resolution fails
+    """
+    from tsugite.utils import resolve_attachments
+
+    try:
+        return resolve_attachments(attachments, base_dir, refresh_cache)
+    except ValueError as e:
+        console.print(f"[red]{error_context} error: {e}[/red]")
+        raise typer.Exit(1)
+
+
+def assemble_prompt_with_attachments(
+    prompt: str,
+    agent_attachments: Optional[List[str]],
+    cli_attachments: Optional[List[str]],
+    base_dir: Path,
+    refresh_cache: bool,
+    console: Console,
+) -> Tuple[str, List[str]]:
+    """Resolve all attachments and assemble final prompt with proper ordering.
+
+    Args:
+        prompt: Base prompt text
+        agent_attachments: Attachments from agent definition
+        cli_attachments: Attachments from CLI (-f flag)
+        base_dir: Base directory for resolving paths
+        refresh_cache: Whether to refresh cached content
+        console: Console for error messages
+
+    Returns:
+        Tuple of (assembled_prompt, expanded_file_list)
+
+    Raises:
+        typer.Exit: If attachment or file reference resolution fails
+    """
+    from tsugite.utils import expand_file_references
+
+    # Resolve agent attachments
+    agent_attachment_contents = (
+        resolve_attachments_with_error_handling(agent_attachments, base_dir, refresh_cache, console, "Agent attachment")
+        if agent_attachments
+        else []
+    )
+
+    # Resolve CLI attachments
+    cli_attachment_contents = (
+        resolve_attachments_with_error_handling(cli_attachments, base_dir, refresh_cache, console, "Attachment")
+        if cli_attachments
+        else []
+    )
+
+    # Expand @filename references in prompt
+    try:
+        prompt, expanded_files = expand_file_references(prompt, base_dir)
+    except ValueError as e:
+        console.print(f"[red]File reference error: {e}[/red]")
+        raise typer.Exit(1)
+
+    # Assemble all attachments in proper order: agent -> CLI -> file refs -> prompt
+    all_attachments = agent_attachment_contents + cli_attachment_contents
+
+    if all_attachments:
+        attachment_sections = [
+            f"<Attachment: {name}>\n{content}\n</Attachment: {name}>" for name, content in all_attachments
+        ]
+        prompt = "\n\n".join(attachment_sections) + "\n\n" + prompt
+
+    return prompt, expanded_files
+
+
 def parse_cli_arguments(args: List[str]) -> tuple[List[str], str]:
     """Parse CLI arguments into agent references and prompt.
 
@@ -113,6 +203,38 @@ def parse_cli_arguments(args: List[str]) -> tuple[List[str], str]:
         prompt = " ".join(prompt_parts)
 
     return agents, prompt
+
+
+@contextmanager
+def change_to_root_directory(root: Optional[str], console: Console):
+    """Context manager for temporarily changing to a root directory.
+
+    Args:
+        root: Optional path to root directory
+        console: Console for error messages
+
+    Yields:
+        None
+
+    Raises:
+        typer.Exit: If root directory doesn't exist
+    """
+    original_cwd = None
+
+    try:
+        if root:
+            root_path = Path(root)
+            if not root_path.exists():
+                console.print(f"[red]Working directory not found: {root}[/red]")
+                raise typer.Exit(1)
+            original_cwd = os.getcwd()
+            os.chdir(str(root_path))
+
+        yield
+
+    finally:
+        if original_cwd:
+            os.chdir(original_cwd)
 
 
 @contextmanager

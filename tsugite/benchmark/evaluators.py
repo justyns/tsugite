@@ -395,6 +395,29 @@ class LLMEvaluator(BaseEvaluator):
         """
         self.evaluator_model = evaluator_model
 
+    @staticmethod
+    def _normalize_score(score: Any) -> float:
+        """Normalize a score to 0-1 range.
+
+        Args:
+            score: Score value (can be string, int, or float)
+
+        Returns:
+            Normalized score between 0.0 and 1.0
+        """
+        # Convert to numeric if it's a string
+        if isinstance(score, str):
+            try:
+                score = float(score)
+            except ValueError:
+                return 0.5  # Default to middle score for non-numeric
+
+        # Normalize 0-10 range to 0-1
+        if isinstance(score, (int, float)) and score > 1:
+            score = score / 10.0
+
+        return max(0.0, min(1.0, float(score)))
+
     async def evaluate(
         self,
         output: str,
@@ -585,34 +608,13 @@ Analyze the provided output carefully and return a properly formatted JSON respo
             result = json.loads(json_str)
 
             # Normalize score to 0-1 range if it's 0-10
-            score = result.get("score", 0)
-
-            # Convert to numeric if it's a string
-            if isinstance(score, str):
-                try:
-                    score = float(score)
-                except ValueError:
-                    score = 0.5  # Default to middle score for non-numeric
-
-            if isinstance(score, (int, float)) and score > 1:
-                score = score / 10.0
-
-            result["score"] = max(0.0, min(1.0, float(score)))
+            result["score"] = self._normalize_score(result.get("score", 0))
 
             # Normalize criteria breakdown scores
             if "criteria_breakdown" in result:
                 normalized_breakdown = {}
                 for criterion, score in result["criteria_breakdown"].items():
-                    # Convert to numeric if it's a string
-                    if isinstance(score, str):
-                        try:
-                            score = float(score)
-                        except ValueError:
-                            score = 0.5  # Default to middle score for non-numeric
-
-                    if isinstance(score, (int, float)) and score > 1:
-                        score = score / 10.0
-                    normalized_breakdown[criterion] = max(0.0, min(1.0, float(score)))
+                    normalized_breakdown[criterion] = self._normalize_score(score)
                 result["criteria_breakdown"] = normalized_breakdown
 
             return result
