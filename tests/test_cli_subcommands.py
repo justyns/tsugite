@@ -72,7 +72,7 @@ class TestAgentsSubcommands:
             mock_agent.config.name = "builtin-default"
             mock_agent.config.description = None
             mock_agent.config.model = "ollama:qwen2.5-coder:7b"
-            mock_agent.config.max_steps = 5
+            mock_agent.config.max_turns = 5
             mock_agent.config.tools = []
             mock_agent.config.extends = None
             mock_get.return_value = mock_agent

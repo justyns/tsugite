@@ -1,7 +1,7 @@
 ---
 name: file_write_read_tool
 description: Test agent's ability to chain multiple tool calls (write then read)
-max_steps: 6
+max_turns: 6
 tools: [write_file, read_file]
 ---
 

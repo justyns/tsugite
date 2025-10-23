@@ -2,7 +2,7 @@
 name: test_agent
 description: Simple test agent for verification
 model: ollama:qwen2.5-coder:14b
-max_steps: 3
+max_turns: 3
 tools: [read_file, write_file, get_system_info]
 ---
 

@@ -256,7 +256,7 @@ class TestCustomShellToolInjection:
             model_string="ollama:qwen2.5-coder:7b",
             tools=[tool_obj],
             instructions="",
-            max_steps=1,
+            max_turns=1,
         )
 
         # Verify the tool was injected into executor namespace
@@ -297,7 +297,7 @@ class TestCustomShellToolInjection:
             model_string="ollama:qwen2.5-coder:7b",
             tools=tool_objs,
             instructions="",
-            max_steps=1,
+            max_turns=1,
         )
 
         # Verify both tools were injected
@@ -330,7 +330,7 @@ class TestCustomShellToolInjection:
             model_string="ollama:qwen2.5-coder:7b",
             tools=[tool_obj],
             instructions="",
-            max_steps=1,
+            max_turns=1,
         )
 
         # Try calling the tool from the executor namespace

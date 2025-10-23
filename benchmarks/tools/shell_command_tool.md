@@ -1,7 +1,7 @@
 ---
 name: shell_command_tool
 description: Test agent's ability to execute shell commands
-max_steps: 5
+max_turns: 5
 tools: [run]
 ---
 

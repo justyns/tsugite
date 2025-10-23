@@ -1,7 +1,7 @@
 ---
 name: json_formatter
 description: A simple agent that outputs valid JSON data
-max_steps: 5
+max_turns: 5
 tools: []
 ---
 

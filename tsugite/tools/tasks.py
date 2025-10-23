@@ -26,6 +26,7 @@ class Task:
     title: str
     status: TaskStatus
     parent_id: Optional[int] = None
+    optional: bool = False
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
     completed_at: Optional[datetime] = None
@@ -38,7 +39,13 @@ class TaskManager:
         self.tasks: Dict[int, Task] = {}
         self._next_id = 1
 
-    def add_task(self, title: str, status: TaskStatus = TaskStatus.PENDING, parent_id: Optional[int] = None) -> int:
+    def add_task(
+        self,
+        title: str,
+        status: TaskStatus = TaskStatus.PENDING,
+        parent_id: Optional[int] = None,
+        optional: bool = False,
+    ) -> int:
         """Add a new task and return its ID."""
         task_id = self._next_id
         self._next_id += 1
@@ -46,7 +53,7 @@ class TaskManager:
         if parent_id is not None and parent_id not in self.tasks:
             raise ValueError(f"Parent task {parent_id} does not exist")
 
-        task = Task(id=task_id, title=title, status=status, parent_id=parent_id)
+        task = Task(id=task_id, title=title, status=status, parent_id=parent_id, optional=optional)
 
         self.tasks[task_id] = task
         return task_id
@@ -81,6 +88,31 @@ class TaskManager:
 
         # Sort by creation time
         return sorted(tasks, key=lambda t: t.created_at)
+
+    def get_tasks_for_template(self) -> List[Dict[str, Any]]:
+        """Get all tasks as template-friendly dicts.
+
+        Returns same format as task_list() tool for consistency.
+        Useful for iterating over tasks in Jinja2 templates.
+
+        Returns:
+            List of task dictionaries with all fields
+        """
+        tasks = self.list_tasks()
+
+        return [
+            {
+                "id": task.id,
+                "title": task.title,
+                "status": task.status.value,
+                "parent_id": task.parent_id,
+                "optional": task.optional,
+                "created_at": task.created_at.isoformat(),
+                "updated_at": task.updated_at.isoformat(),
+                "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+            }
+            for task in tasks
+        ]
 
     def get_task_summary(self) -> str:
         """Generate a formatted summary of all tasks for agent context."""
@@ -121,14 +153,16 @@ class TaskManager:
 
             for parent in parent_tasks:
                 icon = status_icons[parent.status]
-                summary.append(f"[{parent.id}] {icon} {parent.title}")
+                optional_marker = " ✨ (optional)" if parent.optional else ""
+                summary.append(f"[{parent.id}] {icon} {parent.title}{optional_marker}")
 
                 # Show subtasks indented
                 subtasks = [t for t in group_tasks if t.parent_id == parent.id]
                 subtasks.sort(key=lambda t: t.id)
                 for subtask in subtasks:
                     sub_icon = status_icons[subtask.status]
-                    summary.append(f"  └─ [{subtask.id}] {sub_icon} {subtask.title}")
+                    sub_optional = " ✨ (optional)" if subtask.optional else ""
+                    summary.append(f"  └─ [{subtask.id}] {sub_icon} {subtask.title}{sub_optional}")
 
             # Show orphaned subtasks (parent not in this group)
             orphaned = [
@@ -136,7 +170,8 @@ class TaskManager:
             ]
             for orphan in orphaned:
                 icon = status_icons[orphan.status]
-                summary.append(f"[{orphan.id}] {icon} {orphan.title} (subtask of #{orphan.parent_id})")
+                optional_marker = " ✨ (optional)" if orphan.optional else ""
+                summary.append(f"[{orphan.id}] {icon} {orphan.title}{optional_marker} (subtask of #{orphan.parent_id})")
 
             summary.append("")
 
@@ -164,13 +199,14 @@ def reset_task_manager() -> None:
 
 
 @tool
-def task_add(title: str, status: str = "pending", parent_id: Optional[int] = None) -> int:
+def task_add(title: str, status: str = "pending", parent_id: Optional[int] = None, optional: bool = False) -> int:
     """Add a new task or subtask.
 
     Args:
         title: Description of the task
         status: Task status (pending/in_progress/completed/blocked/cancelled)
         parent_id: ID of parent task if this is a subtask (omit or use None for root tasks)
+        optional: Whether this task is optional (nice-to-have vs required)
 
     Returns:
         ID of the created task
@@ -186,16 +222,19 @@ def task_add(title: str, status: str = "pending", parent_id: Optional[int] = Non
         parent_id = None
 
     manager = get_task_manager()
-    return manager.add_task(title, task_status, parent_id)
+    return manager.add_task(title, task_status, parent_id, optional)
 
 
 @tool
-def task_update(task_id: int, status: str) -> None:
+def task_update(task_id: int, status: str) -> str:
     """Update a task's status.
 
     Args:
         task_id: ID of the task to update
         status: New status (pending/in_progress/completed/blocked/cancelled)
+
+    Returns:
+        Confirmation message with task details and new status
     """
     try:
         task_status = TaskStatus(status)
@@ -204,18 +243,35 @@ def task_update(task_id: int, status: str) -> None:
         raise ValueError(f"Invalid status '{status}'. Valid options: {valid_statuses}")
 
     manager = get_task_manager()
+    task = manager.get_task(task_id)  # Get task before updating to include title in response
     manager.update_task(task_id, task_status)
+
+    # Use status icons for visual clarity
+    status_icons = {
+        "pending": "⏸️",
+        "in_progress": "⏳",
+        "completed": "✅",
+        "blocked": "🚫",
+        "cancelled": "❌",
+    }
+    icon = status_icons.get(status, "")
+    return f"{icon} Updated task #{task_id}: '{task.title}' → {status}"
 
 
 @tool
-def task_complete(task_id: int) -> None:
+def task_complete(task_id: int) -> str:
     """Mark a task as completed (shortcut for task_update).
 
     Args:
         task_id: ID of the task to mark as completed
+
+    Returns:
+        Confirmation message with task details
     """
     manager = get_task_manager()
+    task = manager.get_task(task_id)  # Get task before updating to include title in response
     manager.update_task(task_id, TaskStatus.COMPLETED)
+    return f"✅ Completed task #{task_id}: '{task.title}'"
 
 
 @tool
@@ -245,6 +301,7 @@ def task_list(status: Optional[str] = None) -> List[Dict[str, Any]]:
             "title": task.title,
             "status": task.status.value,
             "parent_id": task.parent_id,
+            "optional": task.optional,
             "created_at": task.created_at.isoformat(),
             "updated_at": task.updated_at.isoformat(),
             "completed_at": task.completed_at.isoformat() if task.completed_at else None,
@@ -271,6 +328,7 @@ def task_get(task_id: int) -> Dict[str, Any]:
         "title": task.title,
         "status": task.status.value,
         "parent_id": task.parent_id,
+        "optional": task.optional,
         "created_at": task.created_at.isoformat(),
         "updated_at": task.updated_at.isoformat(),
         "completed_at": task.completed_at.isoformat() if task.completed_at else None,

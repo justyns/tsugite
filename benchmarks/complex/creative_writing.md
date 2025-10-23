@@ -1,6 +1,6 @@
 ---
 name: creative_writing_agent
-max_steps: 5
+max_turns: 5
 tools: []
 description: Tests creative writing capabilities with LLM evaluation
 category: complex

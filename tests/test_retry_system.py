@@ -100,7 +100,7 @@ class TestRetryExecution:
 name: test_retry_agent
 model: ollama:qwen2.5-coder:7b
 tools: [python_interpreter]
-max_steps: 5
+max_turns: 5
 ---
 
 <!-- tsu:step name="attempt" assign="result" max_retries="2" retry_delay="0.1" -->
@@ -124,7 +124,7 @@ Use python_interpreter to execute: `final_answer("success")`
 
         agent = parse_agent_file(retry_agent_file)
         assert agent.config.name == "test_retry_agent"
-        assert agent.config.max_steps == 5
+        assert agent.config.max_turns == 5
 
         from tsugite.md_agents import extract_step_directives, has_step_directives
 

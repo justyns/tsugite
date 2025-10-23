@@ -15,7 +15,7 @@ class TestChatCLI:
 name: test_chat
 model: ollama:qwen2.5-coder:7b
 tools: []
-max_steps: 3
+max_turns: 3
 ---
 
 You are a helpful test assistant.
@@ -66,7 +66,7 @@ Assistant: {{ turn.agent_response }}
 
         assert agent.config.name == "test_chat"
         assert agent.config.model == "ollama:qwen2.5-coder:7b"
-        assert agent.config.max_steps == 3
+        assert agent.config.max_turns == 3
 
     def test_chat_cli_loads_agent_info(self, test_agent):
         """Test that chat CLI can load agent info without crashing."""

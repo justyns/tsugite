@@ -1,7 +1,7 @@
 ---
 name: simple_math
 description: A simple agent that performs basic arithmetic operations
-max_steps: 5
+max_turns: 5
 tools: []
 ---
 

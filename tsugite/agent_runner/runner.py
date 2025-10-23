@@ -10,7 +10,7 @@ from tsugite.core.executor import LocalExecutor
 from tsugite.md_agents import AgentConfig, parse_agent_file
 from tsugite.renderer import AgentRenderer
 from tsugite.tools import call_tool
-from tsugite.tools.tasks import get_task_manager, reset_task_manager
+from tsugite.tools.tasks import TaskStatus, get_task_manager, reset_task_manager
 from tsugite.utils import is_interactive
 
 from .helpers import (
@@ -53,6 +53,35 @@ def _get_model_string(model_override: Optional[str], agent_config: AgentConfig) 
         )
 
     return model_string
+
+
+def _populate_initial_tasks(agent_config: AgentConfig) -> None:
+    """Populate task manager with initial tasks from agent config.
+
+    Args:
+        agent_config: Agent configuration with initial_tasks list
+    """
+    if not agent_config.initial_tasks:
+        return
+
+    task_manager = get_task_manager()
+
+    for task_def in agent_config.initial_tasks:
+        # At this point, all tasks should be normalized dicts (done in AgentConfig.__post_init__)
+        title = task_def.get("title", "")
+        status_str = task_def.get("status", "pending")
+        optional = task_def.get("optional", False)
+
+        if not title:
+            continue
+
+        try:
+            status = TaskStatus(status_str)
+        except ValueError:
+            # If invalid status, default to pending
+            status = TaskStatus.PENDING
+
+        task_manager.add_task(title, status, parent_id=None, optional=optional)
 
 
 def _build_step_error_message(
@@ -321,6 +350,10 @@ async def _execute_agent_with_prompt(
 
     agent_config = prepared.agent_config
 
+    # Populate initial tasks if any
+    if not skip_task_reset:
+        _populate_initial_tasks(agent_config)
+
     # Add variable documentation to instructions if variables are available
     combined_instructions = prepared.combined_instructions
     if injectable_vars:
@@ -420,7 +453,7 @@ async def _execute_agent_with_prompt(
             model_string=model_string,
             tools=tools,
             instructions=combined_instructions or "",
-            max_steps=agent_config.max_steps,
+            max_turns=agent_config.max_turns,
             executor=executor,
             model_kwargs=final_model_kwargs,
             ui_handler=ui_handler,
@@ -467,7 +500,7 @@ async def _execute_agent_with_prompt(
 
     except Exception as e:
         # Preserve execution details if they're attached to the original exception
-        # (This happens when agent hits max_steps and we want execution trace for debugging)
+        # (This happens when agent hits max_turns and we want execution trace for debugging)
         if hasattr(e, "execution_steps"):
             new_error = RuntimeError(f"Agent execution failed: {e}")
             new_error.execution_steps = e.execution_steps
@@ -535,6 +568,9 @@ def run_agent(
     except Exception as e:
         raise ValueError(f"Failed to parse agent file: {e}")
 
+    # Populate initial tasks from agent config
+    _populate_initial_tasks(agent_config)
+
     # Set current agent in thread-local storage for spawn_agent tracking
     set_current_agent(agent_config.name)
 
@@ -553,6 +589,7 @@ def run_agent(
             context=context,
             delegation_agents=delegation_agents,
             task_summary=task_manager.get_task_summary(),
+            tasks=task_manager.get_tasks_for_template(),
         )
 
         # Debug output if requested
@@ -576,6 +613,52 @@ def run_agent(
     finally:
         # Always clear the current agent context when done
         clear_current_agent()
+
+
+# Predefined loop condition helpers
+# These are plain Jinja2 expressions (no {{ }}) that can be used in {% if %} blocks
+LOOP_HELPERS = {
+    "has_pending_tasks": "tasks | selectattr('status', 'equalto', 'pending') | list | length > 0",
+    "has_pending_required_tasks": (
+        "tasks | selectattr('status', 'equalto', 'pending') | "
+        "selectattr('optional', 'equalto', false) | list | length > 0"
+    ),
+    "all_tasks_complete": "(tasks | selectattr('status', 'equalto', 'completed') | list | length) == (tasks | length)",
+    "has_incomplete_tasks": "tasks | rejectattr('status', 'equalto', 'completed') | list | length > 0",
+    "has_in_progress_tasks": "tasks | selectattr('status', 'equalto', 'in_progress') | list | length > 0",
+    "has_blocked_tasks": "tasks | selectattr('status', 'equalto', 'blocked') | list | length > 0",
+}
+
+
+def evaluate_loop_condition(expression: str, context: Dict[str, Any]) -> bool:
+    """Evaluate a Jinja2 expression or helper as a boolean condition.
+
+    Args:
+        expression: Jinja2 template expression or predefined helper name
+        context: Template context with tasks, variables, etc.
+
+    Returns:
+        Boolean result of condition evaluation
+
+    Raises:
+        ValueError: If expression is invalid or evaluation fails
+    """
+    from jinja2 import Template, TemplateSyntaxError
+
+    # Check if it's a predefined helper
+    if expression in LOOP_HELPERS:
+        expression = LOOP_HELPERS[expression]
+
+    try:
+        # Wrap expression in {% if %} to get boolean result
+        template_str = f"{{% if {expression} %}}true{{% endif %}}"
+        template = Template(template_str)
+        result = template.render(**context)
+        return result.strip() == "true"
+    except TemplateSyntaxError as e:
+        raise ValueError(f"Invalid loop condition expression '{expression}': {e}") from e
+    except Exception as e:
+        raise ValueError(f"Error evaluating loop condition '{expression}': {e}") from e
 
 
 def run_multistep_agent(
@@ -651,6 +734,9 @@ def run_multistep_agent(
         reset_task_manager()
         task_manager = get_task_manager()
 
+        # Populate initial tasks from agent config
+        _populate_initial_tasks(agent.config)
+
         # Check if running in interactive mode
         interactive_mode = is_interactive()
 
@@ -659,6 +745,7 @@ def run_multistep_agent(
             **context,
             "user_prompt": prompt,
             "task_summary": task_manager.get_task_summary(),
+            "tasks": task_manager.get_tasks_for_template(),
             "is_interactive": interactive_mode,
             "text_mode": agent.config.text_mode,
             "tools": agent.config.tools,  # Make tools list available to templates
@@ -685,17 +772,32 @@ def run_multistep_agent(
             step_context["step_name"] = step.name
             step_context["total_steps"] = len(steps)
 
-            # Show step progress (unless in debug mode which has its own output)
-            step_header = f"[Step {i}/{len(steps)}: {step.name}]"
+            # Loop control: iterate if step has repeat_while or repeat_until
+            iteration = 0
+            step_is_looping = bool(step.repeat_while or step.repeat_until)
 
-            # Retry loop
-            max_attempts = step.max_retries + 1
-            errors = []
-            step_start_time = time.time()
+            while True:
+                iteration += 1
 
-            for attempt in range(max_attempts):
-                # Add retry context variables
-                step_context["is_retry"] = attempt > 0
+                # Add iteration context
+                step_context["iteration"] = iteration
+                step_context["max_iterations"] = step.max_iterations
+                step_context["is_looping_step"] = step_is_looping
+
+                # Show step progress (unless in debug mode which has its own output)
+                if step_is_looping:
+                    step_header = f"[Step {i}/{len(steps)}: {step.name} (Iteration {iteration})]"
+                else:
+                    step_header = f"[Step {i}/{len(steps)}: {step.name}]"
+
+                # Retry loop
+                max_attempts = step.max_retries + 1
+                errors = []
+                step_start_time = time.time()
+
+                for attempt in range(max_attempts):
+                    # Add retry context variables
+                    step_context["is_retry"] = attempt > 0
                 step_context["retry_count"] = attempt
                 step_context["max_retries"] = step.max_retries
                 step_context["last_error"] = errors[-1] if errors else ""
@@ -862,8 +964,9 @@ def run_multistep_agent(
                         if debug:
                             _stderr_console.print(f"[dim]Assigned result to variable: {step.assign_var}[/dim]")
 
-                    # Update task summary for next step
+                    # Update task summary and tasks list for next step
                     step_context["task_summary"] = task_manager.get_task_summary()
+                    step_context["tasks"] = task_manager.get_tasks_for_template()
 
                     # Show step completion
                     if custom_logger and not debug:
@@ -963,11 +1066,64 @@ def run_multistep_agent(
                     elif not debug:
                         _stderr_console.print(f"[yellow]Step '{step.name}' failed: {error_msg}[/yellow]")
 
-            # Display metrics summary
-            if step_metrics:
-                display_step_metrics(step_metrics, custom_logger if custom_logger else None)
+                # End of retry loop - now check if we should repeat the step
 
-            return final_result or ""
+                # Check if we should repeat this step (loop control)
+                should_repeat = False
+
+                if step.repeat_while:
+                    try:
+                        should_repeat = evaluate_loop_condition(step.repeat_while, step_context)
+                        if debug:
+                            _stderr_console.print(f"[dim]Loop condition (while): {should_repeat}[/dim]")
+                    except Exception as e:
+                        _stderr_console.print(f"[yellow]Warning: Loop condition evaluation failed: {e}[/yellow]")
+                        should_repeat = False
+
+                elif step.repeat_until:
+                    try:
+                        condition_met = evaluate_loop_condition(step.repeat_until, step_context)
+                        should_repeat = not condition_met  # Repeat UNTIL condition is true
+                        if debug:
+                            _stderr_console.print(
+                                f"[dim]Loop condition (until): condition_met={condition_met}, repeat={should_repeat}[/dim]"
+                            )
+                    except Exception as e:
+                        _stderr_console.print(f"[yellow]Warning: Loop condition evaluation failed: {e}[/yellow]")
+                        should_repeat = False
+
+                # Safety check: max iterations
+                if should_repeat and iteration >= step.max_iterations:
+                    _stderr_console.print(
+                        f"[yellow]⚠️  Step '{step.name}' reached max_iterations ({step.max_iterations}). "
+                        f'Use max_iterations="N" to increase limit.[/yellow]'
+                    )
+                    should_repeat = False
+
+                # Exit while loop if we shouldn't repeat
+                if not should_repeat:
+                    if step_is_looping and iteration > 1 and not debug:
+                        _stderr_console.print(f"[dim]Step '{step.name}' completed after {iteration} iterations[/dim]")
+                    break
+
+                # Update task context for next iteration
+                step_context["task_summary"] = task_manager.get_task_summary()
+                step_context["tasks"] = task_manager.get_tasks_for_template()
+
+                if custom_logger and not debug:
+                    custom_logger.console.print(
+                        f"[cyan]🔁 Repeating step '{step.name}' (iteration {iteration + 1})[/cyan]"
+                    )
+                elif not debug:
+                    _stderr_console.print(f"[cyan]🔁 Repeating step '{step.name}' (iteration {iteration + 1})[/cyan]")
+
+            # End of while True loop for step iteration
+
+        # Display metrics summary
+        if step_metrics:
+            display_step_metrics(step_metrics, custom_logger if custom_logger else None)
+
+        return final_result or ""
     finally:
         # Always clear the current agent context when done
         clear_current_agent()

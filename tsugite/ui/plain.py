@@ -93,11 +93,8 @@ class PlainUIHandler(CustomUIHandler):
         """Handle step start event with plain text output."""
         self.state.current_step = data.get("step", self.state.current_step + 1)
 
-        # Check if we're in a multi-step execution context
-        if self.state.multistep_context:
-            label = f"Round {self.state.current_step}"
-        else:
-            label = f"Step {self.state.current_step}"
+        # Show "Turn" for reasoning iterations
+        label = f"Turn {self.state.current_step}"
 
         self.console.print(f"{label}: Waiting for LLM response...")
 
@@ -210,9 +207,9 @@ class PlainUIHandler(CustomUIHandler):
         step = data.get("step")
 
         if content and content.strip():
-            # Build title with step number if available
+            # Build title with turn number if available
             if step is not None:
-                title = f"Model Reasoning (Step {step})"
+                title = f"Model Reasoning (Turn {step})"
             else:
                 title = "Model Reasoning"
 
@@ -236,9 +233,9 @@ class PlainUIHandler(CustomUIHandler):
         step = data.get("step")
 
         if tokens:
-            # Build message with step number if available
+            # Build message with turn number if available
             if step is not None:
-                message = f"Step {step}: Used {tokens} reasoning tokens"
+                message = f"Turn {step}: Used {tokens} reasoning tokens"
             else:
                 message = f"Used {tokens} reasoning tokens"
 

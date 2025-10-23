@@ -7,6 +7,7 @@ from enum import IntEnum
 from typing import Any, Dict, Generator, List, Optional
 
 from rich.console import Console
+from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.syntax import Syntax
@@ -205,13 +206,9 @@ class CustomUIHandler:
 
         prefix = self._get_display_prefix()
 
-        # Check if we're in a multi-step execution context
-        if self.state.multistep_context:
-            # Show "Round" instead of "Step" when nested in multi-step
-            label = f"Round {self.state.current_step}"
-        else:
-            # Normal single-step agent
-            label = f"Step {self.state.current_step}"
+        # Show "Turn" for reasoning iterations
+        # (workflow steps are shown separately in multistep_context)
+        label = f"Turn {self.state.current_step}"
 
         # Update progress
         self.update_progress(f"{prefix}🤔 {label}: Waiting for LLM response...")
@@ -235,6 +232,9 @@ class CustomUIHandler:
                     border_style="yellow",
                 )
             )
+        elif not self.show_panels:
+            # In minimal mode, show lightweight indicator
+            self.console.print("[dim yellow]⚡ Executing code...[/dim yellow]")
 
     def _handle_tool_call(self, data: Dict[str, Any]) -> None:
         """Handle tool call event."""
@@ -243,6 +243,12 @@ class CustomUIHandler:
         prefix = self._get_display_prefix()
         # Update progress
         self.update_progress(f"{prefix}🔧 Calling tool...")
+
+        # In minimal mode, show lightweight indicator with tool name
+        if not self.show_panels and content:
+            # Parse tool name from content (format: "Tool: tool_name")
+            tool_name = content.replace("Tool: ", "").strip() if "Tool: " in content else content
+            self.console.print(f"[dim cyan]🔧 Called: {tool_name}[/dim cyan]")
 
         # Add to current step history
         if self.state.steps_history:
@@ -260,6 +266,9 @@ class CustomUIHandler:
             # Clean up observation for display
             clean_obs = observation.replace("|", "[").strip()
 
+            # Check if this is a final answer
+            is_final_answer = "__FINAL_ANSWER__:" in clean_obs
+
             # Check if this looks like an error using shared helper
             is_error = self._contains_error(clean_obs)
 
@@ -275,11 +284,36 @@ class CustomUIHandler:
                     )
                 else:
                     self.console.print(f"[red]⚠️  {clean_obs}[/red]")
+            elif is_final_answer:
+                # Final answer - don't truncate, render as markdown in minimal mode
+                # Extract answer content after "__FINAL_ANSWER__: "
+                answer_content = clean_obs.split("__FINAL_ANSWER__:", 1)[1].strip()
+                if self.show_panels:
+                    # In panel mode, display with panel
+                    self.console.print(
+                        Panel(
+                            answer_content,
+                            title="[bold green]✅ Final Answer[/bold green]",
+                            border_style="green",
+                        )
+                    )
+                else:
+                    # In minimal mode, render as markdown
+                    self.console.print(Markdown(answer_content))
             else:
                 # Normal observation - truncate if too long
                 if len(clean_obs) > 200:
                     clean_obs = clean_obs[:200] + "..."
                 self.console.print(f"[dim]💡 {clean_obs}[/dim]")
+        elif not self.show_panels and observation:
+            # In minimal mode when not showing observations, show completion indicator
+            # But still show errors
+            clean_obs = observation.replace("|", "[").strip()
+            is_error = self._contains_error(clean_obs)
+            if is_error:
+                self.console.print(f"[red]⚠️  {clean_obs}[/red]")
+            else:
+                self.console.print("[dim green]✓ Completed[/dim green]")
 
         # Add to current step history
         if self.state.steps_history:
@@ -349,8 +383,8 @@ class CustomUIHandler:
                     )
                 )
             else:
-                # In headless/no-panel mode, just print the content
-                self.console.print(content.strip())
+                # In minimal mode, render as markdown
+                self.console.print(Markdown(content.strip()))
 
     def _handle_reasoning_content(self, data: Dict[str, Any]) -> None:
         """Handle reasoning content from reasoning models (Claude, Deepseek with exposed reasoning)."""
@@ -363,7 +397,7 @@ class CustomUIHandler:
             # Build title with step number if available
             title_parts = ["[bold magenta]🧠 Model Reasoning"]
             if step is not None:
-                title_parts.append(f" (Step {step})")
+                title_parts.append(f" (Turn {step})")
             title_parts.append("[/bold magenta]")
             title = "".join(title_parts)
 
@@ -395,9 +429,9 @@ class CustomUIHandler:
         step = data.get("step")
 
         if tokens:
-            # Build message with step number if available
+            # Build message with turn number if available
             if step is not None:
-                message = f"🧠 Step {step}: Used {tokens} reasoning tokens"
+                message = f"🧠 Turn {step}: Used {tokens} reasoning tokens"
             else:
                 message = f"🧠 Used {tokens} reasoning tokens"
 

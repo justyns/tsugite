@@ -1,7 +1,7 @@
 ---
 name: hello_world
 description: A simple agent that outputs greetings
-max_steps: 10
+max_turns: 10
 tools: []
 text_mode: true
 ---

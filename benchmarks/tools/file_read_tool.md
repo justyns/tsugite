@@ -1,7 +1,7 @@
 ---
 name: file_read_tool
 description: Test agent's ability to read files using the read_file tool
-max_steps: 5
+max_turns: 5
 tools: [read_file]
 ---
 

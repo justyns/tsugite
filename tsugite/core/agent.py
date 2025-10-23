@@ -132,14 +132,14 @@ class TsugiteAgent:
     How it works:
     1. Build system prompt from tools + instructions
     2. Loop: Send messages → Get response → Execute code → Repeat
-    3. Stop when final_answer() is called or max_steps reached
+    3. Stop when final_answer() is called or max_turns reached
 
     Example:
         agent = TsugiteAgent(
             model_string="openai:gpt-4o-mini",
             tools=[tool1, tool2],
             instructions="You are a helpful assistant",
-            max_steps=10
+            max_turns=10
         )
 
         result = await agent.run("Calculate 5 + 3")
@@ -151,7 +151,7 @@ class TsugiteAgent:
         model_string: str,
         tools: List[Tool],
         instructions: str = "",
-        max_steps: int = 10,
+        max_turns: int = 10,
         executor: CodeExecutor = None,
         model_kwargs: dict = None,
         ui_handler: Any = None,
@@ -164,7 +164,7 @@ class TsugiteAgent:
             model_string: Model identifier like "openai:gpt-4o-mini"
             tools: List of Tool objects the agent can use
             instructions: Additional instructions to append to system prompt
-            max_steps: Maximum number of reasoning steps before giving up
+            max_turns: Maximum number of reasoning turns (think-act cycles) before giving up
             executor: Code executor (microsandbox or local). If None, uses LocalExecutor
             model_kwargs: Extra parameters for LiteLLM (reasoning_effort, response_format, etc.)
             ui_handler: Optional UI handler for displaying progress
@@ -176,7 +176,7 @@ class TsugiteAgent:
         self.model_string = model_string
         self.tools = tools
         self.instructions = instructions
-        self.max_steps = max_steps
+        self.max_turns = max_turns
         self.executor = executor or LocalExecutor()
         self.memory = AgentMemory()
         self.ui_handler = ui_handler
@@ -284,10 +284,10 @@ class TsugiteAgent:
 
         Returns:
             str: The final answer from the agent
-            or AgentResult: Full result with token usage and steps
+            or AgentResult: Full result with token usage and turns
 
         Raises:
-            RuntimeError: If agent reaches max_steps without finishing
+            RuntimeError: If agent reaches max_turns without finishing
         """
         # Add task to memory
         self.memory.add_task(task)
@@ -297,10 +297,10 @@ class TsugiteAgent:
             self.ui_handler.handle_event(UIEvent.TASK_START, {"task": task, "model": self.model_name})
 
         # Main agent loop
-        for step_num in range(self.max_steps):
-            # Trigger step start event
+        for turn_num in range(self.max_turns):
+            # Trigger turn start event
             if self.ui_handler:
-                self.ui_handler.handle_event(UIEvent.STEP_START, {"step": step_num + 1})
+                self.ui_handler.handle_event(UIEvent.STEP_START, {"step": turn_num + 1})
 
             # Build conversation messages from memory
             messages = self._build_messages()
@@ -329,7 +329,7 @@ class TsugiteAgent:
                             # Emit stream chunk event
                             if self.ui_handler:
                                 self.ui_handler.handle_event(
-                                    UIEvent.STREAM_CHUNK, {"chunk": chunk_text, "step": step_num + 1}
+                                    UIEvent.STREAM_CHUNK, {"chunk": chunk_text, "step": turn_num + 1}
                                 )
 
                     # Save the last chunk as response for usage/cost tracking
@@ -337,7 +337,7 @@ class TsugiteAgent:
 
                 # Emit stream complete event
                 if self.ui_handler:
-                    self.ui_handler.handle_event(UIEvent.STREAM_COMPLETE, {"step": step_num + 1})
+                    self.ui_handler.handle_event(UIEvent.STREAM_COMPLETE, {"step": turn_num + 1})
 
                 # Parse accumulated content
                 thought, code, _ = self._parse_response_from_text(accumulated_content)
@@ -363,7 +363,7 @@ class TsugiteAgent:
                 # Trigger reasoning content event
                 if self.ui_handler:
                     self.ui_handler.handle_event(
-                        UIEvent.REASONING_CONTENT, {"content": reasoning_content, "step": step_num + 1}
+                        UIEvent.REASONING_CONTENT, {"content": reasoning_content, "step": turn_num + 1}
                     )
 
             # Check for reasoning tokens (o1/o3 models)
@@ -372,7 +372,7 @@ class TsugiteAgent:
                 if hasattr(details, "reasoning_tokens") and details.reasoning_tokens:
                     if self.ui_handler:
                         self.ui_handler.handle_event(
-                            UIEvent.REASONING_TOKENS, {"tokens": details.reasoning_tokens, "step": step_num + 1}
+                            UIEvent.REASONING_TOKENS, {"tokens": details.reasoning_tokens, "step": turn_num + 1}
                         )
 
             # Show LLM's thought/reasoning (always show what the LLM is saying)
@@ -383,7 +383,7 @@ class TsugiteAgent:
                 display_content = thought if thought else response.choices[0].message.content
                 if display_content and display_content.strip():
                     self.ui_handler.handle_event(
-                        UIEvent.LLM_MESSAGE, {"content": display_content, "title": f"Step {step_num + 1} Reasoning"}
+                        UIEvent.LLM_MESSAGE, {"content": display_content, "title": f"Turn {turn_num + 1} Reasoning"}
                     )
 
             # Only execute code if the LLM actually generated some
@@ -485,8 +485,8 @@ class TsugiteAgent:
 
             # Continue loop (LLM will see the observation in next iteration)
 
-        # If we get here, we hit max_steps
-        error_msg = f"Agent reached max_steps ({self.max_steps}) without completing task"
+        # If we get here, we hit max_turns
+        error_msg = f"Agent reached max_turns ({self.max_turns}) without completing task"
         if self.ui_handler:
             self.ui_handler.handle_event(UIEvent.ERROR, {"error": error_msg, "error_type": "RuntimeError"})
 

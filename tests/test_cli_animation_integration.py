@@ -26,7 +26,7 @@ name: test-agent
 model: gpt-4o-mini
 tools:
   - shell
-max_steps: 5
+max_turns: 5
 ---
 # Test Agent
 

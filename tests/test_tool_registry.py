@@ -368,7 +368,7 @@ def test_expand_tool_specs_exclude_nonexistent(file_tools):
     # Should have all fs tools (exclusions silently ignored)
     assert "read_file" in expanded
     assert "write_file" in expanded
-    assert len(expanded) == 5  # All 5 fs tools
+    assert len(expanded) == 7  # All 7 fs tools
 
 
 def test_expand_tool_specs_only_exclusions(file_tools):

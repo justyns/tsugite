@@ -72,9 +72,13 @@ def list_agents() -> str:
         Returns empty string if no agents are found.
     """
     from ..agent_inheritance import get_global_agents_paths
+    from ..agent_runner import get_current_agent
 
     agents_info: List[Dict[str, str]] = []
     seen_names = set()
+
+    # Get current agent name to exclude it from the list
+    current_agent_name = get_current_agent()
 
     # Define search paths in priority order
     search_paths = [
@@ -105,6 +109,10 @@ def list_agents() -> str:
 
                 name = frontmatter.get("name", agent_file.stem)
                 description = frontmatter.get("description", "No description")
+
+                # Skip the currently running agent to prevent self-spawning
+                if current_agent_name and name == current_agent_name:
+                    continue
 
                 # Store relative path from cwd if possible, otherwise absolute
                 try:

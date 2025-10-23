@@ -105,7 +105,7 @@ class TestExecutor:
             duration = time.time() - start_time
 
             # Try to extract execution steps from exception if available
-            # (agent_runner attaches these when agent hits max_steps)
+            # (agent_runner attaches these when agent hits max_turns)
             execution_trace = None
             steps_taken = 0
             token_usage = {}
@@ -183,7 +183,7 @@ class TestExecutor:
             "name": yaml_data.get("name", test.test_id),
             "description": yaml_data.get("description", ""),
             "model": model_name,  # Override model
-            "max_steps": yaml_data.get("max_steps", 5),
+            "max_turns": yaml_data.get("max_turns", 5),
             "tools": yaml_data.get("tools", []),
             "text_mode": yaml_data.get("text_mode"),
             "prefetch": yaml_data.get("prefetch", []),

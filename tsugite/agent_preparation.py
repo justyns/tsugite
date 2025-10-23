@@ -58,6 +58,37 @@ class AgentPreparer:
     This ensures that render shows EXACTLY what run executes.
     """
 
+    def _extract_tool_directive_placeholders(self, content: str) -> Dict[str, str]:
+        """Extract variable names from tool directives and return placeholders.
+
+        When rendering without executing directives, we still need variables to
+        be defined so the template doesn't fail. This extracts all assign="var"
+        names and creates placeholder values.
+
+        Args:
+            content: Markdown content with tool directives
+
+        Returns:
+            Dict mapping variable names to placeholder values
+        """
+        from tsugite.md_agents import extract_tool_directives
+
+        try:
+            directives = extract_tool_directives(content)
+        except Exception:
+            # If extraction fails, return empty dict
+            return {}
+
+        placeholders = {}
+        for directive in directives:
+            if directive.assign_var:
+                # Create a descriptive placeholder showing what would be executed
+                placeholders[directive.assign_var] = (
+                    f"[Tool directive: {directive.name}(...) - not executed in render mode]"
+                )
+
+        return placeholders
+
     def prepare(
         self,
         agent: Agent,
@@ -66,6 +97,7 @@ class AgentPreparer:
         delegation_agents: Optional[List[tuple[str, Path]]] = None,
         skip_tool_directives: bool = False,
         task_summary: str = "## Current Tasks\nNo tasks yet.",
+        tasks: Optional[List[Dict[str, Any]]] = None,
     ) -> PreparedAgent:
         """Prepare agent with all context, tools, and instructions.
 
@@ -76,6 +108,7 @@ class AgentPreparer:
             delegation_agents: List of (name, path) tuples for delegation
             skip_tool_directives: Skip executing tool directives (for render)
             task_summary: Current task summary (from task manager)
+            tasks: List of task dicts for template iteration (from task manager)
 
         Returns:
             PreparedAgent ready for execution or display
@@ -114,7 +147,8 @@ class AgentPreparer:
         # Step 2: Execute tool directives (unless skip_tool_directives=True for render)
         if skip_tool_directives:
             modified_content = agent.content
-            tool_context = {}
+            # Extract tool directive variable names and provide placeholders
+            tool_context = self._extract_tool_directive_placeholders(agent.content)
         else:
             modified_content, tool_context = execute_tool_directives(agent.content, prefetch_context)
 
@@ -126,6 +160,7 @@ class AgentPreparer:
             **tool_context,
             "user_prompt": prompt,
             "task_summary": task_summary,
+            "tasks": tasks or [],
             "is_interactive": interactive_mode,
             "text_mode": agent_config.text_mode,
             "tools": agent_config.tools,

@@ -31,20 +31,20 @@ def test_merge_agent_configs_scalars():
         name="parent",
         description="Parent agent",
         model="ollama:parent-model",
-        max_steps=3,
+        max_turns=3,
     )
 
     child = AgentConfig(
         name="child",
         model="openai:gpt-4",
-        max_steps=10,
+        max_turns=10,
     )
 
     merged = merge_agent_configs(parent, child)
 
     assert merged.name == "child"
     assert merged.model == "openai:gpt-4"
-    assert merged.max_steps == 10
+    assert merged.max_turns == 10
 
 
 def test_merge_agent_configs_lists():
@@ -497,12 +497,71 @@ def test_merge_with_empty_parent():
     assert merged.tools == ["tool1"]
 
 
-def test_default_max_steps_inheritance():
-    """Test that default max_steps value doesn't override parent."""
-    parent = AgentConfig(name="parent", max_steps=10)
-    child = AgentConfig(name="child")  # max_steps defaults to 5
+def test_default_max_turns_inheritance():
+    """Test that default max_turns value doesn't override parent."""
+    parent = AgentConfig(name="parent", max_turns=10)
+    child = AgentConfig(name="child")  # max_turns defaults to 5
 
     merged = merge_agent_configs(parent, child)
 
     # Child's default 5 should not override parent's explicit 10
-    assert merged.max_steps == 10
+    assert merged.max_turns == 10
+
+
+def test_merge_agent_configs_initial_tasks():
+    """Test merging initial_tasks (concatenates parent + child)."""
+    parent = AgentConfig(
+        name="parent",
+        initial_tasks=[
+            {"title": "Parent task 1", "status": "pending", "optional": False},
+            {"title": "Parent task 2", "status": "pending", "optional": True},
+        ],
+    )
+
+    child = AgentConfig(
+        name="child",
+        initial_tasks=[
+            {"title": "Child task 1", "status": "in_progress", "optional": False},
+        ],
+    )
+
+    merged = merge_agent_configs(parent, child)
+
+    # initial_tasks should be concatenated (parent first, then child)
+    assert len(merged.initial_tasks) == 3
+    assert merged.initial_tasks[0]["title"] == "Parent task 1"
+    assert merged.initial_tasks[1]["title"] == "Parent task 2"
+    assert merged.initial_tasks[2]["title"] == "Child task 1"
+
+    # Check that optional status is preserved
+    assert merged.initial_tasks[0]["optional"] is False
+    assert merged.initial_tasks[1]["optional"] is True
+    assert merged.initial_tasks[2]["optional"] is False
+
+
+def test_merge_initial_tasks_with_empty_parent():
+    """Test merging initial_tasks when parent has none."""
+    parent = AgentConfig(name="parent")
+    child = AgentConfig(
+        name="child",
+        initial_tasks=[{"title": "Child task", "status": "pending", "optional": False}],
+    )
+
+    merged = merge_agent_configs(parent, child)
+
+    assert len(merged.initial_tasks) == 1
+    assert merged.initial_tasks[0]["title"] == "Child task"
+
+
+def test_merge_initial_tasks_with_empty_child():
+    """Test merging initial_tasks when child has none."""
+    parent = AgentConfig(
+        name="parent",
+        initial_tasks=[{"title": "Parent task", "status": "pending", "optional": False}],
+    )
+    child = AgentConfig(name="child")
+
+    merged = merge_agent_configs(parent, child)
+
+    assert len(merged.initial_tasks) == 1
+    assert merged.initial_tasks[0]["title"] == "Parent task"

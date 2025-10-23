@@ -38,7 +38,7 @@ def test_is_interactive_flag_true_in_tty(temp_dir, monkeypatch, mock_agent_runne
 name: test_interactive_flag
 extends: none
 model: openai:gpt-4o-mini
-max_steps: 1
+max_turns: 1
 tools: []
 ---
 
@@ -73,7 +73,7 @@ def test_is_interactive_flag_false_in_non_tty(temp_dir, monkeypatch, mock_agent_
 name: test_interactive_flag
 extends: none
 model: openai:gpt-4o-mini
-max_steps: 1
+max_turns: 1
 tools: []
 ---
 
@@ -110,7 +110,7 @@ def test_multistep_agent_receives_interactive_flag(temp_dir, monkeypatch, mock_a
 name: test_multistep_interactive
 extends: none
 model: openai:gpt-4o-mini
-max_steps: 1
+max_turns: 1
 tools: []
 ---
 
@@ -151,7 +151,7 @@ def test_interactive_flag_available_in_templates(temp_dir, monkeypatch, mock_age
 name: test_conditional
 extends: none
 model: openai:gpt-4o-mini
-max_steps: 1
+max_turns: 1
 tools: []
 ---
 
@@ -191,7 +191,7 @@ def test_ask_user_tool_not_available_in_headless(monkeypatch, task_tools, file_t
         name="test_headless",
         description="Test agent",
         model="openai:gpt-4o-mini",
-        max_steps=1,
+        max_turns=1,
         tools=["ask_user", "write_file"],  # ask_user should be filtered out
         prefetch=[],
         permissions_profile="default",
@@ -237,7 +237,7 @@ def test_ask_user_tool_available_in_interactive(monkeypatch, task_tools, file_to
         name="test_interactive",
         description="Test agent",
         model="openai:gpt-4o-mini",
-        max_steps=1,
+        max_turns=1,
         tools=["ask_user", "write_file"],
         prefetch=[],
         permissions_profile="default",

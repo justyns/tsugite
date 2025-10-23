@@ -28,7 +28,7 @@ def config_show():
     if config.default_base_agent is not None:
         console.print(f"[bold]Default Base Agent:[/bold] {config.default_base_agent}\n")
     else:
-        console.print("[bold]Default Base Agent:[/bold] default (fallback)\n")
+        console.print("[bold]Default Base Agent:[/bold] builtin-default (fallback)\n")
 
     console.print(f"[bold]Chat Theme:[/bold] {config.chat_theme}\n")
 

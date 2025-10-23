@@ -26,6 +26,9 @@ def resolve_agent_reference(ref: str, base_dir: Path) -> Path:
 
         found = find_agent_file(agent_name, base_dir)
         if not found:
+            # Check if this looks like a builtin agent request
+            if agent_name.startswith("builtin-"):
+                raise ValueError(f"Unknown builtin agent: {agent_name}")
             raise ValueError(f"Agent not found: {ref} (searched standard locations)")
         return found
 

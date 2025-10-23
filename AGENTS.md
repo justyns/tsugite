@@ -28,7 +28,7 @@ Agents are Markdown + YAML frontmatter:
 ---
 name: my_agent
 model: ollama:qwen2.5-coder:7b
-max_steps: 5
+max_turns: 5
 tools: [read_file, write_file]
 ---
 
@@ -41,10 +41,11 @@ Task: {{ user_prompt }}
 |-----|---------|-------------|
 | `name` | — (required) | Agent identifier |
 | `model` | Config default | `provider:model[:variant]` |
-| `max_steps` | `5` | Reasoning iterations |
+| `max_turns` | `5` | Reasoning turns (think-act cycles) per workflow step |
 | `tools` | `[]` | Tool names, globs (`*_search`), categories (`@fs`), exclusions (`-delete_file`) |
 | `custom_tools` | `[]` | Per-agent shell command wrappers |
 | `prefetch` | `[]` | Tools to run before rendering |
+| `initial_tasks` | `[]` | Tasks to pre-populate (strings or dicts with title/status/optional) |
 | `attachments` | `[]` | Context to auto-load |
 | `instructions` | — | Extra system guidance |
 | `extends` | Config default | Parent agent to inherit from |
@@ -58,6 +59,8 @@ Task: {{ user_prompt }}
 | Helper | Example |
 |--------|---------|
 | `{{ user_prompt }}` | CLI prompt argument |
+| `{{ tasks }}` | List of all tasks with id, title, status, optional fields (for iteration) |
+| `{{ task_summary }}` | Formatted string summary of all tasks (for display) |
 | `{{ is_subagent }}` | `True` if spawned by another agent, `False` otherwise |
 | `{{ parent_agent }}` | Name of parent agent (e.g., `"coordinator"`) or `None` if not a subagent |
 | `{{ now() }}` | ISO 8601 timestamp |
@@ -116,7 +119,7 @@ tools: [read_file, run]    # Add tools
 **Inheritance chain:** Default base → Extended → Current
 
 **Merge rules:**
-- Scalars (model, max_steps): Child overwrites
+- Scalars (model, max_turns): Child overwrites
 - Lists (tools): Merge + deduplicate
 - Dicts (mcp_servers): Merge, child keys override
 - Strings (instructions): Concatenate with `\n\n`
@@ -128,6 +131,117 @@ tools: [read_file, run]    # Add tools
 ```bash
 tsugite config set default_base_agent builtin-default
 tsugite config set default_base_agent none  # Disable
+```
+
+## Pre-populating Tasks
+
+Agents can start with predefined tasks using `initial_tasks` in frontmatter. Tasks are automatically populated when the agent starts and persist across multi-step execution.
+
+**Simple format** (strings default to pending/required):
+```yaml
+---
+name: code_reviewer
+initial_tasks:
+  - "Read and analyze the code"
+  - "Check for security issues"
+  - "Check for performance problems"
+---
+```
+
+**Detailed format** (specify status and optional flag):
+```yaml
+---
+name: project_manager
+initial_tasks:
+  - title: "Core feature implementation"
+    status: pending
+    optional: false
+  - title: "Add nice formatting"
+    status: pending
+    optional: true
+  - title: "Write documentation"
+    optional: true  # status defaults to pending
+---
+```
+
+**Mixed format**:
+```yaml
+---
+name: developer
+initial_tasks:
+  - "Must implement authentication"  # Required
+  - title: "Performance optimization"
+    optional: true  # Nice-to-have
+  - "Write tests"  # Required
+---
+```
+
+**Inheritance**: Parent tasks are inherited first, then child tasks:
+```yaml
+---
+name: specialized_reviewer
+extends: code_reviewer  # Gets parent's tasks
+initial_tasks:
+  - "Check code style"  # Added to parent's tasks
+---
+```
+
+Optional tasks are marked with ✨ in the task summary. Agents are instructed to complete all required tasks, while optional tasks are nice-to-have.
+
+## Looping Through Tasks in Templates
+
+Tasks are available as the `tasks` variable for Jinja2 iteration in agent templates:
+
+```yaml
+---
+name: task_processor
+initial_tasks:
+  - "Analyze data"
+  - title: "Generate report"
+    optional: true
+  - "Write summary"
+---
+
+# Task List
+
+{% for task in tasks %}
+{{ loop.index }}. {{ task.title }} ({{ task.status }})
+   {% if task.optional %}✨ Optional{% endif %}
+{% endfor %}
+
+# Instructions
+
+Process each task systematically...
+```
+
+**Available task fields:**
+- `task.id` - Task ID (integer)
+- `task.title` - Task description
+- `task.status` - Current status (pending/in_progress/completed/blocked/cancelled)
+- `task.optional` - Boolean (true/false)
+- `task.parent_id` - Parent task ID or null
+- `task.created_at`, `task.updated_at`, `task.completed_at` - ISO 8601 timestamps
+
+**Common patterns:**
+
+Filter by status:
+```jinja2
+{% for task in tasks if task.status == "pending" %}
+- TODO: {{ task.title }}
+{% endfor %}
+```
+
+Show only required tasks:
+```jinja2
+{% for task in tasks if not task.optional %}
+- {{ task.title }} (REQUIRED)
+{% endfor %}
+```
+
+Count tasks by type:
+```jinja2
+Required: {{ tasks | selectattr('optional', 'equalto', false) | list | length }}
+Optional: {{ tasks | selectattr('optional', 'equalto', true) | list | length }}
 ```
 
 ## Context Injection
@@ -281,12 +395,210 @@ tools: [ask_user_batch, write_file]
 
 Interactive tools are automatically filtered out in non-interactive mode (e.g., CI/headless). Check `{{ is_interactive }}` variable in templates.
 
+## File Editing Tools
+
+Tsugite provides intelligent file editing tools that allow LLMs to make precise edits without reading/writing entire files.
+
+### read_file - Read Files with Optional Line Range
+
+Read entire files or specific line ranges:
+
+```python
+read_file(path, start_line=None, end_line=None)
+```
+
+**Parameters:**
+- `path`: File path (required)
+- `start_line`: Starting line number, 1-indexed (0 also accepted, treated as 1) (optional)
+- `end_line`: Ending line number, 1-indexed, inclusive (optional)
+
+**Returns:**
+- If `start_line` is None: Full file content as plain text
+- If `start_line` is provided: Numbered lines in format "LINE_NUM: content"
+
+**Examples:**
+```yaml
+---
+tools: [read_file]
+---
+
+# Read entire file
+{{ read_file("config.json") }}
+
+# Read specific lines
+{{ read_file("src/main.py", start_line=10, end_line=20) }}
+
+# Read from line 50 to end
+{{ read_file("data.txt", start_line=50) }}
+```
+
+**Use cases:**
+- Reading entire files (backward compatible)
+- Reading specific functions or sections
+- Verifying content before editing
+- Reducing context usage for large files
+
+### get_file_info - File Metadata
+
+Get file information without reading full content:
+
+```python
+get_file_info(path)
+```
+
+**Returns:**
+- `line_count`: Total lines in file
+- `size_bytes`: File size
+- `last_modified`: ISO timestamp
+- `exists`: Whether file exists
+- `is_directory`: Whether path is a directory
+
+**Example:**
+```yaml
+---
+tools: [get_file_info, read_file_lines]
+---
+
+{% set info = get_file_info("config.json") %}
+File has {{ info.line_count }} lines
+```
+
+### edit_file - Smart File Editing (Single or Batch)
+
+Edit files with intelligent multi-strategy matching. Supports both single edits and batch edits in one tool.
+
+```python
+# Single edit mode
+edit_file(path, old_string, new_string, expected_replacements=1)
+
+# Batch edit mode
+edit_file(path, edits=[...])
+```
+
+**Parameters:**
+- `path`: File path (required)
+- **Single edit mode:**
+  - `old_string`: Text to find (include 3+ lines of context)
+  - `new_string`: Replacement text (must differ from old_string)
+  - `expected_replacements`: Expected number of matches (default: 1)
+- **Batch edit mode:**
+  - `edits`: List of edit operations, each with:
+    - `old_string`: Text to find (required)
+    - `new_string`: Replacement text (required)
+    - `expected_replacements`: Match count (optional, default: 1)
+
+**Replacement Strategies** (tried in order):
+1. **Exact match** - Direct string matching
+2. **Line-trimmed** - Ignores leading/trailing whitespace per line
+3. **Block-anchor** - Matches using first/last lines as anchors with fuzzy middle content
+4. **Whitespace-normalized** - Normalizes all whitespace to single spaces
+5. **Indentation-flexible** - Strips minimum indentation before matching
+
+**Examples:**
+
+Single edit:
+```yaml
+---
+tools: [read_file, edit_file]
+---
+
+<!-- First, read to verify content -->
+Current content:
+{{ read_file("app.py", start_line=15, end_line=20) }}
+
+<!-- Then edit with context -->
+{{ edit_file(
+    path="app.py",
+    old_string="def process_data():\n    return raw_data\n    # TODO: add validation",
+    new_string="def process_data():\n    validate(raw_data)\n    return raw_data"
+) }}
+```
+
+Batch edits (atomic operation):
+```yaml
+---
+tools: [edit_file]
+---
+
+{{ edit_file(
+    path="config.py",
+    edits=[
+        {"old_string": "DEBUG = True", "new_string": "DEBUG = False"},
+        {"old_string": "TIMEOUT = 30", "new_string": "TIMEOUT = 60"},
+        {"old_string": "LOG_LEVEL = 'INFO'", "new_string": "LOG_LEVEL = 'ERROR'"}
+    ]
+) }}
+```
+
+**Best practices:**
+- Include 3+ lines of context in `old_string` for single edits
+- Use `read_file` with line range first to verify content
+- For multiple occurrences, specify `expected_replacements`
+- Batch mode is atomic: if any edit fails, none are applied
+- Each batch edit operates on the result of the previous edit
+
+**Use cases:**
+- Single edits: Precise code changes with context validation
+- Batch edits: Multiple related changes in one atomic operation
+- Configuration updates: Change multiple settings together
+- Refactoring: Rename variables consistently throughout a file
+
+### Common Workflow
+
+```markdown
+---
+name: code_updater
+tools: [get_file_info, read_file, edit_file]
+---
+
+1. Check file info:
+{% set info = get_file_info("{{ user_prompt }}") %}
+File exists: {{ info.exists }}, Lines: {{ info.line_count }}
+
+2. Read relevant section:
+{% if info.exists and info.line_count < 100 %}
+{{ read_file("{{ user_prompt }}") }}
+{% else %}
+{{ read_file("{{ user_prompt }}", start_line=1, end_line=50) }}
+{% endif %}
+
+3. Make targeted edit (single or batch):
+{{ edit_file(
+    path="{{ user_prompt }}",
+    old_string="[exact text with context]",
+    new_string="[modified text]"
+) }}
+```
+
+### Error Handling
+
+All file editing tools provide clear, actionable error messages:
+
+- **No matches found**: "No matches found. Ensure old_string matches file content exactly. Use read_file to verify."
+- **Multiple matches**: "Found 3 matches but expected 1. Either add more context or use expected_replacements=3."
+- **Identical strings**: "Search and replace strings must be different."
+- **File not found**: "File not found: /path/to/file"
+- **Conflicting parameters**: "Provide either old_string/new_string OR edits, not both"
+- **Missing parameters**: "Must provide either old_string/new_string OR edits"
+
+### Tool Summary
+
+Tsugite's file editing tools are now consolidated for simplicity:
+
+| Tool | Purpose | Modes |
+|------|---------|-------|
+| `read_file` | Read files | Full file OR line range |
+| `edit_file` | Edit files | Single edit OR batch edits |
+| `get_file_info` | File metadata | Info without reading content |
+
+**Total: 3 tools** (down from 5, simpler for LLMs to use)
+
 ## Multi-Step Agents
 
 ```markdown
 ---
 name: researcher
-max_steps: 10
+max_turns: 10
 tools: [web_search, write_file]
 ---
 
@@ -476,6 +788,70 @@ Total              94.4s
 - Optimizing slow steps
 - Tracking agent performance
 - Debugging execution flow
+
+### Looping Steps
+
+Steps can repeat based on conditions using `repeat_while` or `repeat_until`:
+
+**Repeat while condition is true:**
+```markdown
+<!-- tsu:step name="task_worker" repeat_while="has_pending_required_tasks" max_iterations="20" -->
+Process one task. This step repeats while there are pending required tasks.
+```
+
+**Repeat until condition is true:**
+```markdown
+<!-- tsu:step name="process" repeat_until="all_tasks_complete" max_iterations="15" -->
+Work on tasks. Repeats until all tasks are marked complete.
+```
+
+**Custom Jinja2 expressions:**
+```markdown
+<!-- tsu:step name="worker" repeat_while="{{ tasks | selectattr('status', 'equalto', 'pending') | list | length > 0 }}" -->
+Process pending tasks. Uses Jinja2 to check if any pending tasks remain.
+```
+
+**Available helper conditions:**
+- `has_pending_tasks` - Any tasks with status=pending
+- `has_pending_required_tasks` - Any non-optional pending tasks
+- `all_tasks_complete` - All tasks are completed
+- `has_incomplete_tasks` - Any tasks not completed
+- `has_in_progress_tasks` - Any tasks currently in progress
+- `has_blocked_tasks` - Any tasks marked as blocked
+
+**Loop context variables:**
+- `{{ iteration }}` - Current iteration number (1-indexed)
+- `{{ max_iterations }}` - Maximum allowed iterations
+- `{{ is_looping_step }}` - Boolean indicating if step can loop
+
+**Parameters:**
+- `repeat_while` - Condition to continue repeating (Jinja2 expression or helper name)
+- `repeat_until` - Condition to stop repeating (Jinja2 expression or helper name)
+- `max_iterations` - Maximum iterations (default: 10)
+
+**Example: Process all tasks one at a time**
+```yaml
+---
+name: task_processor
+initial_tasks:
+  - "Task 1"
+  - "Task 2"
+  - "Task 3"
+max_turns: 50
+---
+
+<!-- tsu:step name="process_one_task" repeat_while="has_pending_tasks" max_iterations="20" -->
+
+## Iteration {{ iteration }} / {{ max_iterations }}
+
+Find the first pending task, work on it, and mark it complete.
+This step will repeat until all tasks are done.
+```
+
+**Safety:**
+- Steps stop at `max_iterations` to prevent infinite loops
+- Default `max_iterations` is 10 (can be overridden)
+- Warning displayed when limit is reached
 
 ## Directives
 

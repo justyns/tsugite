@@ -63,7 +63,7 @@ final_answer(42)
             model_string="openai:gpt-4o-mini",
             tools=[],
             instructions="",
-            max_steps=5,
+            max_turns=5,
             ui_handler=mock_ui_handler,
             model_name="gpt-4o-mini",
         )
@@ -112,7 +112,7 @@ final_answer(x * 2)
             model_string="openai:gpt-4o-mini",
             tools=[],
             instructions="",
-            max_steps=5,
+            max_turns=5,
             ui_handler=mock_ui_handler,
         )
 
@@ -145,7 +145,7 @@ final_answer(result)
             model_string="openai:gpt-4o-mini",
             tools=[],
             instructions="",
-            max_steps=5,
+            max_turns=5,
             ui_handler=mock_ui_handler,
         )
 
@@ -178,7 +178,7 @@ final_answer("done")
             model_string="openai:gpt-4o-mini",
             tools=[],
             instructions="",
-            max_steps=5,
+            max_turns=5,
             ui_handler=mock_ui_handler,
         )
 
@@ -209,7 +209,7 @@ final_answer("The answer is 42")
             model_string="openai:gpt-4o-mini",
             tools=[],
             instructions="",
-            max_steps=5,
+            max_turns=5,
             ui_handler=mock_ui_handler,
         )
 
@@ -257,7 +257,7 @@ final_answer(1)
             model_string="openai:gpt-4o-mini",
             tools=[],
             instructions="",
-            max_steps=5,
+            max_turns=5,
             ui_handler=mock_ui_handler,
         )
 
@@ -271,8 +271,8 @@ final_answer(1)
 
 
 @pytest.mark.asyncio
-async def test_ui_event_error_on_max_steps(mock_ui_handler, mock_litellm_response):
-    """Test that ERROR event is triggered when max_steps is reached."""
+async def test_ui_event_error_on_max_turns(mock_ui_handler, mock_litellm_response):
+    """Test that ERROR event is triggered when max_turns is reached."""
 
     with patch("tsugite.core.agent.litellm") as mock_litellm:
         # Always return code without final_answer
@@ -291,7 +291,7 @@ print(x)
             model_string="openai:gpt-4o-mini",
             tools=[],
             instructions="",
-            max_steps=2,
+            max_turns=2,
             ui_handler=mock_ui_handler,
         )
 
@@ -301,7 +301,7 @@ print(x)
         # Verify ERROR was triggered
         error_events = [e for e in mock_ui_handler.events if e["event"] == UIEvent.ERROR]
         assert len(error_events) == 1
-        assert "max_steps" in error_events[0]["data"]["error"]
+        assert "max_turns" in error_events[0]["data"]["error"]
         assert error_events[0]["data"]["error_type"] == "RuntimeError"
 
 
@@ -325,7 +325,7 @@ final_answer(100)
             model_string="anthropic:claude-3-7-sonnet",
             tools=[],
             instructions="",
-            max_steps=5,
+            max_turns=5,
             ui_handler=mock_ui_handler,
         )
 
@@ -360,7 +360,7 @@ final_answer(100)
             model_string="openai:o1",
             tools=[],
             instructions="",
-            max_steps=5,
+            max_turns=5,
             ui_handler=mock_ui_handler,
         )
 
@@ -393,7 +393,7 @@ final_answer(42)
             model_string="openai:gpt-4o-mini",
             tools=[],
             instructions="",
-            max_steps=5,
+            max_turns=5,
             ui_handler=None,  # No UI handler
         )
 
@@ -422,7 +422,7 @@ final_answer(42)
             model_string="openai:gpt-4o-mini",
             tools=[],
             instructions="",
-            max_steps=5,
+            max_turns=5,
             ui_handler=mock_ui_handler,
         )
 
@@ -472,7 +472,7 @@ final_answer(42)
             model_string="openai:gpt-4o-mini",
             tools=[],
             instructions="",
-            max_steps=5,
+            max_turns=5,
             ui_handler=mock_ui_handler,
         )
 

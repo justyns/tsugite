@@ -1,7 +1,7 @@
 ---
 name: steps_test
 model: openai:gpt-4o-mini
-max_steps: 2
+max_turns: 2
 tools: [write_file]
 ---
 

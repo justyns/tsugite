@@ -115,7 +115,7 @@ def agents_show(
         else:
             console.print("[bold]Model:[/bold] [dim](uses default)[/dim]")
 
-        console.print(f"[bold]Max Steps:[/bold] {config.max_steps}")
+        console.print(f"[bold]Max Steps:[/bold] {config.max_turns}")
 
         if config.tools:
             console.print(f"\n[bold]Tools ({len(config.tools)}):[/bold]")

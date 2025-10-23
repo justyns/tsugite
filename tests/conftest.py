@@ -36,7 +36,7 @@ def sample_agent_content() -> str:
 name: test_agent
 extends: none
 model: openai:gpt-4o-mini
-max_steps: 5
+max_turns: 5
 tools: [read_file, write_file]
 prefetch:
   - tool: search_memory
@@ -73,7 +73,7 @@ def simple_agent_content() -> str:
 name: simple_test_agent
 extends: none
 model: ollama:qwen2.5-coder:7b
-max_steps: 3
+max_turns: 3
 tools: []
 ---
 
@@ -92,7 +92,7 @@ def spawn_agent_content() -> str:
 name: parent_agent
 extends: none
 model: ollama:qwen2.5-coder:7b
-max_steps: 5
+max_turns: 5
 tools: [spawn_agent]
 ---
 
@@ -113,7 +113,7 @@ def evaluator_agent_content() -> str:
 name: evaluator_agent
 extends: none
 model: openai:gpt-4o-mini
-max_steps: 3
+max_turns: 3
 tools: []
 ---
 
@@ -188,7 +188,9 @@ def file_tools(reset_tool_registry):
     from tsugite.tools import tool
     from tsugite.tools.fs import (
         create_directory,
+        edit_file,
         file_exists,
+        get_file_info,
         list_files,
         read_file,
         write_file,
@@ -200,6 +202,8 @@ def file_tools(reset_tool_registry):
     tool(list_files)
     tool(file_exists)
     tool(create_directory)
+    tool(get_file_info)
+    tool(edit_file)
 
 
 @pytest.fixture

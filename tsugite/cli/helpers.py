@@ -165,19 +165,25 @@ def load_and_validate_agent(agent_path: str, console: Console) -> Tuple[Any, Pat
         >>> agent, path, name = load_and_validate_agent("+builtin-default", console)
         >>> agent, path, name = load_and_validate_agent("agents/my_agent.md", console)
     """
-    from tsugite.builtin_agents import get_builtin_chat_assistant, get_builtin_default_agent, is_builtin_agent
+    from tsugite.agent_composition import resolve_agent_reference
+    from tsugite.builtin_agents import (
+        get_builtin_chat_assistant,
+        get_builtin_default_agent,
+        is_builtin_agent_path,
+    )
     from tsugite.md_agents import parse_agent_file
 
-    # Check if this is a builtin agent reference
-    agent_name = agent_path.lstrip("+")  # Remove leading + if present
-    looks_like_builtin = agent_path.startswith("+") or agent_name.startswith("builtin-")
+    # Use resolve_agent_reference to handle +name shorthand and builtin agents
+    try:
+        base_dir = Path.cwd()
+        resolved_path = resolve_agent_reference(agent_path, base_dir)
+    except ValueError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1)
 
-    if looks_like_builtin:
-        # User is trying to reference a builtin agent - validate it exists
-        if not is_builtin_agent(agent_name):
-            console.print(f"[red]Unknown builtin agent: {agent_name}[/red]")
-            console.print("[yellow]Available builtin agents: builtin-default, builtin-chat-assistant[/yellow]")
-            raise typer.Exit(1)
+    # Check if this is a builtin agent path
+    if is_builtin_agent_path(resolved_path):
+        agent_name = str(resolved_path).strip("<>")
 
         # Get the valid builtin agent
         if agent_name == "builtin-default":
@@ -185,21 +191,21 @@ def load_and_validate_agent(agent_path: str, console: Console) -> Tuple[Any, Pat
         elif agent_name == "builtin-chat-assistant":
             agent = get_builtin_chat_assistant()
         else:
-            # Should never reach here due to is_builtin_agent() check above
+            # Should never reach here due to resolve_agent_reference validation
             console.print(f"[red]Unknown builtin agent: {agent_name}[/red]")
             raise typer.Exit(1)
 
         agent_display_name = agent_name
-        agent_file_path = Path(f"<{agent_name}>")
+        agent_file_path = resolved_path
     else:
         # Regular file-based agent
-        agent_file_path = Path(agent_name)
+        agent_file_path = resolved_path
         if not agent_file_path.exists():
-            console.print(f"[red]Agent file not found: {agent_name}[/red]")
+            console.print(f"[red]Agent file not found: {agent_file_path}[/red]")
             raise typer.Exit(1)
 
         if agent_file_path.suffix != ".md":
-            console.print(f"[red]Agent file must be a .md file: {agent_name}[/red]")
+            console.print(f"[red]Agent file must be a .md file: {agent_file_path}[/red]")
             raise typer.Exit(1)
 
         # Use parse_agent_file to properly resolve inheritance
@@ -226,21 +232,67 @@ def parse_cli_arguments(args: List[str]) -> tuple[List[str], str]:
     if not args:
         raise ValueError("No arguments provided")
 
+    # Check if common CLI options appear in positional args (common user error)
+    common_options = [
+        "--ui",
+        "--model",
+        "--verbose",
+        "--debug",
+        "--silent",
+        "--headless",
+        "--plain",
+        "--stream",
+        "--native-ui",
+        "--non-interactive",
+        "--no-color",
+        "--show-reasoning",
+        "--no-show-reasoning",
+        "--trust-mcp-code",
+        "--attachment",
+        "-f",
+        "--with-agents",
+        "--root",
+        "--history-dir",
+        "--log-json",
+        "--dry-run",
+        "--refresh-cache",
+        "--docker",
+        "--keep",
+        "--container",
+        "--network",
+    ]
+
+    misplaced_options = [arg for arg in args if arg in common_options]
+    if misplaced_options:
+        option_str = ", ".join(misplaced_options)
+        raise ValueError(
+            f"Options must come before the prompt or agent name.\n"
+            f"Found: {option_str}\n\n"
+            f"Correct usage:\n"
+            f'  tsugite run --ui minimal +agent "prompt"\n'
+            f'  tsugite run +agent "prompt" --ui minimal\n\n'
+            f"Incorrect:\n"
+            f'  tsugite run +agent --ui minimal "prompt"'
+        )
+
     agents = []
     prompt_parts = []
 
     for i, arg in enumerate(args):
         # Check if this looks like an agent reference
         # Exclude arguments containing @ (file references) from being treated as agents
-        # Also exclude arguments with spaces unless they're file paths (contain /)
         has_file_reference = "@" in arg
         has_path_separator = "/" in arg
         has_spaces = " " in arg
+
+        # Agent detection logic:
+        # - Starts with + (shorthand like +agent) OR
+        # - Ends with .md (agent file) BUT no spaces (to avoid "text in file.md" prompts) OR
+        # - Has path separator BUT no spaces (file path like path/to/agent.md)
+        # - Must not contain @ (file reference marker)
         is_agent = (
-            (arg.startswith("+") or arg.endswith(".md") or has_path_separator)
-            and not has_file_reference
-            and not (has_spaces and not has_path_separator)
-        )
+            arg.startswith("+") or (arg.endswith(".md") and not has_spaces) or (has_path_separator and not has_spaces)
+        ) and not has_file_reference
 
         if is_agent and not prompt_parts:
             # Still collecting agents

@@ -1,7 +1,7 @@
 ---
 name: echo
 description: A simple agent that repeats exactly what is asked
-max_steps: 10
+max_turns: 10
 tools: []
 text_mode: true
 ---

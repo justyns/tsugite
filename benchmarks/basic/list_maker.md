@@ -1,7 +1,7 @@
 ---
 name: list_maker
 description: A simple agent that creates Python lists
-max_steps: 5
+max_turns: 5
 tools: []
 ---
 

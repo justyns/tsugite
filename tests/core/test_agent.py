@@ -48,13 +48,13 @@ async def test_agent_creation():
         model_string="openai:gpt-4o-mini",
         tools=[tool],
         instructions="You are a helpful assistant",
-        max_steps=10,
+        max_turns=10,
     )
 
     assert agent.model_string == "openai:gpt-4o-mini"
     assert len(agent.tools) == 1
     assert agent.instructions == "You are a helpful assistant"
-    assert agent.max_steps == 10
+    assert agent.max_turns == 10
     assert isinstance(agent.executor, LocalExecutor)
     assert agent.tool_map["add"] == tool
 
@@ -80,7 +80,7 @@ final_answer(result)
             model_string="openai:gpt-4o-mini",
             tools=[],
             instructions="",
-            max_steps=5,
+            max_turns=5,
         )
 
         result = await agent.run("What is 5 + 3?")
@@ -130,7 +130,7 @@ final_answer(result)
             model_string="openai:gpt-4o-mini",
             tools=[],
             instructions="",
-            max_steps=5,
+            max_turns=5,
         )
 
         result = await agent.run("Calculate 5 * 2")
@@ -175,7 +175,7 @@ final_answer(result)
             model_string="openai:gpt-4o-mini",
             tools=[tool],
             instructions="",
-            max_steps=5,
+            max_turns=5,
         )
 
         # Inject the tool into the executor namespace so it can be called
@@ -188,8 +188,8 @@ final_answer(result)
 
 
 @pytest.mark.asyncio
-async def test_agent_max_steps_reached(mock_litellm_response):
-    """Test agent raises error when max_steps is reached."""
+async def test_agent_max_turns_reached(mock_litellm_response):
+    """Test agent raises error when max_turns is reached."""
 
     with patch("tsugite.core.agent.litellm") as mock_litellm:
         # Always return code without final_answer
@@ -208,14 +208,14 @@ print(x)
             model_string="openai:gpt-4o-mini",
             tools=[],
             instructions="",
-            max_steps=3,
+            max_turns=3,
         )
 
         # Should raise RuntimeError
         with pytest.raises(RuntimeError) as exc_info:
             await agent.run("Some task")
 
-        assert "max_steps" in str(exc_info.value)
+        assert "max_turns" in str(exc_info.value)
         assert "3" in str(exc_info.value)
 
 
@@ -238,7 +238,7 @@ final_answer(42)
             model_string="openai:gpt-4o-mini",
             tools=[],
             instructions="",
-            max_steps=5,
+            max_turns=5,
         )
 
         result = await agent.run("What is the answer?", return_full_result=True)
@@ -270,7 +270,7 @@ final_answer(100)
             model_string="openai:o1",
             tools=[],
             instructions="",
-            max_steps=5,
+            max_turns=5,
             model_kwargs={"reasoning_effort": "high"},
         )
 
@@ -305,7 +305,7 @@ final_answer("test")
             model_string="openai:gpt-4o-mini",
             tools=[],
             instructions="",
-            max_steps=5,
+            max_turns=5,
             model_kwargs={
                 "temperature": 0.7,
                 "max_tokens": 1000,
@@ -360,7 +360,7 @@ final_answer(result)
             model_string="openai:gpt-4o-mini",
             tools=[],
             instructions="",
-            max_steps=5,
+            max_turns=5,
         )
 
         result = await agent.run("Calculate something")
@@ -390,7 +390,7 @@ async def test_agent_build_system_prompt():
         model_string="openai:gpt-4o-mini",
         tools=[tool],
         instructions="You are an expert researcher.",
-        max_steps=5,
+        max_turns=5,
     )
 
     prompt = agent._build_system_prompt()
@@ -416,7 +416,7 @@ async def test_agent_parse_response():
         model_string="openai:gpt-4o-mini",
         tools=[],
         instructions="",
-        max_steps=5,
+        max_turns=5,
     )
 
     # Mock response object
@@ -459,7 +459,7 @@ async def test_agent_litellm_params():
         model_string="openai:gpt-4o-mini",
         tools=[],
         instructions="",
-        max_steps=5,
+        max_turns=5,
     )
 
     # Should have pre-computed litellm_params with model key
@@ -471,7 +471,7 @@ async def test_agent_litellm_params():
         model_string="openai:o1",
         tools=[],
         instructions="",
-        max_steps=5,
+        max_turns=5,
         model_kwargs={"temperature": 0.7, "reasoning_effort": "high"},
     )
 
@@ -488,7 +488,7 @@ async def test_agent_build_messages():
         model_string="openai:gpt-4o-mini",
         tools=[],
         instructions="",
-        max_steps=5,
+        max_turns=5,
     )
 
     # Set task
@@ -532,7 +532,7 @@ async def test_agent_extract_reasoning_content():
         model_string="openai:o1",
         tools=[],
         instructions="",
-        max_steps=5,
+        max_turns=5,
     )
 
     # Mock response with reasoning_content
@@ -583,7 +583,7 @@ final_answer(42)
             model_string="openai:gpt-4o-mini",
             tools=[],
             instructions="",
-            max_steps=5,
+            max_turns=5,
             executor=mock_executor,
         )
 
@@ -630,7 +630,7 @@ def test_tool_execution_no_task_warnings():
         model_string="openai:gpt-4o-mini",
         tools=[tool],
         instructions="",
-        max_steps=5,
+        max_turns=5,
     )
 
     # Capture stderr to check for Task warnings
@@ -699,7 +699,7 @@ def test_tool_exception_propagation_from_async():
         model_string="openai:gpt-4o-mini",
         tools=[tool],
         instructions="",
-        max_steps=5,
+        max_turns=5,
     )
 
     # Capture stderr

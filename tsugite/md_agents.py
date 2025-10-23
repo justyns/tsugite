@@ -46,7 +46,7 @@ class AgentConfig:
     name: str
     description: str = ""
     model: Optional[str] = None
-    max_steps: int = 5
+    max_turns: int = 5
     tools: List[str] = field(default_factory=list)
     prefetch: List[Dict[str, Any]] = field(default_factory=list)
     attachments: List[str] = field(default_factory=list)
@@ -58,6 +58,7 @@ class AgentConfig:
     reasoning_effort: Optional[str] = None  # For reasoning models (low, medium, high)
     custom_tools: List[Dict[str, Any]] = field(default_factory=list)  # Per-agent shell tools
     text_mode: bool = False  # Allow text-only responses (code blocks optional)
+    initial_tasks: List[Any] = field(default_factory=list)  # Tasks to pre-populate (strings or dicts)
 
     def __post_init__(self):
         if self.tools is None:
@@ -74,6 +75,27 @@ class AgentConfig:
             self.mcp_servers = {}
         if self.custom_tools is None:
             self.custom_tools = []
+        if self.initial_tasks is None:
+            self.initial_tasks = []
+
+        # Normalize initial_tasks: convert strings to dicts
+        normalized_tasks = []
+        for task in self.initial_tasks:
+            if isinstance(task, str):
+                # Simple string format: convert to dict with defaults
+                normalized_tasks.append({"title": task, "status": "pending", "optional": False})
+            elif isinstance(task, dict):
+                # Dict format: ensure all required fields exist with defaults
+                normalized = {
+                    "title": task.get("title", ""),
+                    "status": task.get("status", "pending"),
+                    "optional": task.get("optional", False),
+                }
+                normalized_tasks.append(normalized)
+            else:
+                raise ValueError(f"Invalid initial_tasks entry: {task}. Must be string or dict.")
+
+        self.initial_tasks = normalized_tasks
 
 
 @dataclass
@@ -295,6 +317,11 @@ class StepDirective:
     start_pos: int = 0
     end_pos: int = 0
 
+    # Loop control
+    repeat_while: Optional[str] = None  # Jinja2 expression or helper name to continue repeating
+    repeat_until: Optional[str] = None  # Jinja2 expression or helper name to stop repeating
+    max_iterations: int = 10  # Maximum loop iterations (safety valve)
+
 
 def extract_step_directives(content: str, include_preamble: bool = True) -> tuple[str, List[StepDirective]]:
     """Extract step directives and preamble from markdown content.
@@ -424,6 +451,18 @@ def extract_step_directives(content: str, include_preamble: bool = True) -> tupl
         # Parse timeout
         timeout = _parse_directive_attribute(args, "timeout", r"[0-9]+", int)
 
+        # Parse loop control parameters
+        # Use non-greedy match to stop at first quote/boundary
+        repeat_while = _parse_directive_attribute(args, "repeat_while", r".+?")
+        repeat_until = _parse_directive_attribute(args, "repeat_until", r".+?")
+        max_iterations = _parse_directive_attribute(args, "max_iterations", r"[0-9]+", int, default=10)
+
+        # Validate: cannot specify both repeat_while and repeat_until
+        if repeat_while and repeat_until:
+            raise ValueError(
+                f"Step '{step_name}' cannot specify both repeat_while and repeat_until. Use one or the other."
+            )
+
         steps.append(
             StepDirective(
                 name=step_name,
@@ -434,6 +473,9 @@ def extract_step_directives(content: str, include_preamble: bool = True) -> tupl
                 retry_delay=retry_delay,
                 continue_on_error=continue_on_error,
                 timeout=timeout,
+                repeat_while=repeat_while,
+                repeat_until=repeat_until,
+                max_iterations=max_iterations,
                 start_pos=start_pos,
                 end_pos=end_pos,
             )
@@ -474,9 +516,9 @@ def validate_agent(agent: Agent) -> List[str]:
         if not isinstance(tool, str):
             errors.append(f"Tool name must be string: {tool}")
 
-    # Validate max_steps is positive
-    if agent.config.max_steps <= 0:
-        errors.append("max_steps must be positive")
+    # Validate max_turns is positive
+    if agent.config.max_turns <= 0:
+        errors.append("max_turns must be positive")
 
     # Validate directives in content
     directives = extract_directives(agent.content)
@@ -582,6 +624,17 @@ def validate_agent_execution(agent: Agent | Path) -> tuple[bool, str]:
                 # If step parsing fails, that's a different validation error
                 # Let it be caught by the normal validation flow
                 pass
+
+        # If agent has tool directives, create mock variables for their assignments
+        # This allows validation to pass when tools are executed during rendering
+        try:
+            tool_directives = extract_tool_directives(agent.content)
+            for directive in tool_directives:
+                if directive.assign_var:
+                    test_context[directive.assign_var] = "mock_tool_result"
+        except Exception:
+            # If tool directive parsing fails, let it be caught by normal validation
+            pass
 
         renderer.render(agent.content, test_context)
     except Exception as e:

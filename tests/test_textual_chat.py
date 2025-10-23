@@ -220,7 +220,7 @@ class TestChatAppIntegration:
 name: test_textual_chat
 model: ollama:qwen2.5-coder:7b
 tools: []
-max_steps: 3
+max_turns: 3
 ---
 
 You are a test assistant for Textual UI testing.

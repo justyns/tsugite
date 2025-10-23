@@ -17,6 +17,7 @@ instructions: |
   - Be concise and direct in your responses
   - Use available tools when they help accomplish the task
   - Use task tracking tools (task_add, task_update, task_complete) to organize your work
+  - Complete all required tasks (optional tasks marked with ✨ are nice-to-have)
   - Break down complex tasks into clear steps
   - Ask clarifying questions when the task is ambiguous
   {% if text_mode %}
@@ -38,6 +39,18 @@ instructions: |
 {% if step_number is defined %}
 ## Multi-Step Execution
 You are in step {{ step_number }} of {{ total_steps }} ({{ step_name }}).
+
+**IMPORTANT Step Completion**:
+- Complete ONLY the task assigned in this step
+{% if text_mode %}- After completing the task, call final_answer(result) with your result
+{% else %}- After completing the task, write a Python code block with final_answer(result)
+- Example: ```python
+final_answer("step result")
+```
+{% endif %}- Do NOT generate additional conversational text after calling final_answer()
+- The framework will automatically present the next step - you do not need to ask or wait
+- Each step is independent - focus on this step's goal only
+
 {% endif %}
 
 {% if available_agents %}
@@ -93,7 +106,7 @@ BUILTIN_CHAT_ASSISTANT_CONTENT = """---
 name: builtin-chat-assistant
 description: A conversational assistant that can respond naturally or use tools when needed
 text_mode: true
-max_steps: 10
+max_turns: 10
 tools:
   - read_file
   - write_file

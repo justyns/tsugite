@@ -165,7 +165,7 @@ def merge_agent_configs(parent, child):
         Merged AgentConfig with child taking precedence
 
     Merge rules:
-    - Scalars (model, max_steps, reasoning_effort, text_mode, etc.): child overwrites parent
+    - Scalars (model, max_turns, reasoning_effort, text_mode, etc.): child overwrites parent
     - Lists (tools, attachments): merge and deduplicate
     - Lists (prefetch): concatenate (parent first, no deduplication)
     - Lists of dicts (custom_tools): merge and deduplicate by "name" field
@@ -178,7 +178,7 @@ def merge_agent_configs(parent, child):
     merged_data["name"] = child.name if child.name else parent.name
     merged_data["description"] = child.description if child.description else parent.description
     merged_data["model"] = child.model if child.model else parent.model
-    merged_data["max_steps"] = child.max_steps if child.max_steps != 5 else parent.max_steps
+    merged_data["max_turns"] = child.max_turns if child.max_turns != 5 else parent.max_turns
     merged_data["permissions_profile"] = (
         child.permissions_profile if child.permissions_profile != "default" else parent.permissions_profile
     )
@@ -195,6 +195,10 @@ def merge_agent_configs(parent, child):
     parent_prefetch = parent.prefetch if parent.prefetch else []
     child_prefetch = child.prefetch if child.prefetch else []
     merged_data["prefetch"] = parent_prefetch + child_prefetch
+
+    parent_initial_tasks = parent.initial_tasks if parent.initial_tasks else []
+    child_initial_tasks = child.initial_tasks if child.initial_tasks else []
+    merged_data["initial_tasks"] = parent_initial_tasks + child_initial_tasks
 
     parent_attachments = parent.attachments if parent.attachments else []
     child_attachments = child.attachments if child.attachments else []
@@ -382,14 +386,14 @@ def _get_default_base_agent_name() -> Optional[str]:
     """Get the default base agent name from config.
 
     Returns:
-        Default base agent name, or "default" as fallback, or None if disabled
+        Default base agent name, or "builtin-default" as fallback, or None if disabled
     """
     from .config import load_config
 
     try:
         config = load_config()
         if config.default_base_agent is None:
-            return "default"
+            return "builtin-default"
         return config.default_base_agent
     except Exception:
-        return "default"
+        return "builtin-default"

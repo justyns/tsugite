@@ -465,8 +465,8 @@ def run(
                 # Headless: plain result to stdout
                 get_output_console().print(result)
             elif native_ui:
-                # Minimal: just the result, no banner
-                console.print(result)
+                # Minimal: UI handler already showed output during execution
+                pass
             elif not silent:
                 console.print("\n" + "=" * 50)
                 console.print("[bold green]Agent Execution Complete[/bold green]")

@@ -1,7 +1,7 @@
 ---
 name: file_write_tool
 description: Test agent's ability to write files using the write_file tool
-max_steps: 5
+max_turns: 5
 tools: [write_file, read_file]
 ---
 

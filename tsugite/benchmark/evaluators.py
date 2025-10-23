@@ -561,7 +561,7 @@ Provide thorough, constructive feedback that would help improve the agent's perf
         return f"""---
 name: llm_evaluator
 model: {model}
-max_steps: 3
+max_turns: 3
 tools: []
 ---
 
