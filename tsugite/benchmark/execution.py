@@ -9,6 +9,7 @@ from typing import Any, Dict
 import yaml
 
 from ..agent_runner import run_agent
+from ..exceptions import AgentExecutionError
 from .config import (
     EVALUATION_WEIGHTS,
     SIMILARITY_THRESHOLDS,
@@ -101,18 +102,13 @@ class TestExecutor:
                 if temp_agent_path.exists():
                     temp_agent_path.unlink()
 
-        except Exception as e:
+        except AgentExecutionError as e:
+            # Agent execution failed with execution details
             duration = time.time() - start_time
 
-            # Try to extract execution steps from exception if available
-            # (agent_runner attaches these when agent hits max_turns)
             execution_trace = None
-            steps_taken = 0
-            token_usage = {}
-            cost = 0.0
-
-            if hasattr(e, "execution_steps") and e.execution_steps:
-                # Build execution trace from steps attached to exception
+            if e.execution_steps:
+                # Build execution trace from steps in exception
                 execution_trace = [
                     {
                         "step": step.step_number,
@@ -124,11 +120,6 @@ class TestExecutor:
                     }
                     for step in e.execution_steps
                 ]
-                steps_taken = getattr(e, "step_count", len(e.execution_steps))
-                if hasattr(e, "token_usage") and e.token_usage:
-                    token_usage = {"total": e.token_usage}
-                if hasattr(e, "cost") and e.cost:
-                    cost = e.cost
 
             metrics = {}
             if execution_trace:
@@ -144,10 +135,30 @@ class TestExecutor:
                 expected_output="",
                 category=test.category,
                 error=str(e),
-                token_usage=token_usage,
-                cost=cost,
-                steps_taken=steps_taken,
+                token_usage={"total": e.token_usage} if e.token_usage else {},
+                cost=e.cost or 0.0,
+                steps_taken=e.step_count,
                 metrics=metrics,
+            )
+
+        except Exception as e:
+            # Other unexpected errors without execution details
+            duration = time.time() - start_time
+
+            return BenchmarkTestResult(
+                test_id=test.test_id,
+                model=model_name,
+                passed=False,
+                score=0.0,
+                duration=duration,
+                output="",
+                expected_output="",
+                category=test.category,
+                error=str(e),
+                token_usage={},
+                cost=0.0,
+                steps_taken=0,
+                metrics={},
             )
 
     def _create_temp_agent(self, test: BenchmarkTest, model_name: str) -> Path:

@@ -16,7 +16,7 @@ from tsugite.mcp_config import MCPServerConfig
 class MCPClient:
     """Client for connecting to MCP servers.
 
-    Handles both stdio and HTTP transports.
+    Handles both stdio and HTTP transports. Use as async context manager.
 
     Example:
         # Create config
@@ -26,13 +26,17 @@ class MCPClient:
             args=["basic-memory-mcp"]
         )
 
-        # Connect and load tools
+        # Connect and load tools (preferred - automatic cleanup)
+        async with MCPClient(config) as client:
+            tools = await client.get_tools()
+            # Use tools in agent
+            agent = TsugiteAgent(model="...", tools=tools)
+
+        # Or use connect/disconnect manually if needed
         client = MCPClient(config)
         await client.connect()
         tools = await client.get_tools()
-
-        # Use tools in agent
-        agent = TsugiteAgent(model="...", tools=tools)
+        await client.disconnect()
     """
 
     def __init__(self, server_config: MCPServerConfig):
@@ -46,11 +50,22 @@ class MCPClient:
         self.session_ctx = None
         self.mcp_tools = []  # Raw MCP tool objects
         self.transport = None
+        self.transport_ctx = None
+
+    async def __aenter__(self):
+        """Enter async context manager - connect to server."""
+        await self.connect()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Exit async context manager - disconnect from server."""
+        await self.disconnect()
+        return False  # Don't suppress exceptions
 
     async def connect(self):
         """Connect to MCP server and initialize session.
 
-        Must be called before get_tools().
+        Must be called before get_tools() if not using context manager.
         """
         if self.config.is_stdio():
             # Connect via stdio (command-line server)
@@ -60,20 +75,20 @@ class MCPClient:
                 env=self.config.env,
             )
 
-            # Start stdio transport
-            transport_ctx = stdio_client(server_params)
-            self.transport = transport_ctx
-            read, write = await transport_ctx.__aenter__()
+            # Start stdio transport using async with
+            self.transport_ctx = stdio_client(server_params)
+            # stdio_client returns a proper async context manager, but pylint can't introspect it
+            read, write = await self.transport_ctx.__aenter__()  # pylint: disable=no-member
 
         elif self.config.is_http():
-            # Connect via HTTP
-            transport_ctx = streamablehttp_client(self.config.url)
-            self.transport = transport_ctx
-            read, write, _ = await transport_ctx.__aenter__()
+            # Connect via HTTP using async with
+            self.transport_ctx = streamablehttp_client(self.config.url)
+            # streamablehttp_client returns a proper async context manager, but pylint can't introspect it
+            read, write, _ = await self.transport_ctx.__aenter__()  # pylint: disable=no-member
         else:
             raise ValueError(f"Unknown transport type: {self.config.type}")
 
-        # Create session
+        # Create session using async with
         self.session_ctx = ClientSession(read, write)
         self.session = await self.session_ctx.__aenter__()
 
@@ -88,7 +103,7 @@ class MCPClient:
         """Disconnect from MCP server and cleanup resources.
 
         Closes the session and transport, preventing resource leaks.
-        Should be called when done using the client.
+        Should be called when done using the client (unless using context manager).
         """
         # Exit session context manager
         if self.session_ctx:
@@ -100,11 +115,13 @@ class MCPClient:
             self.session = None
 
         # Exit transport context manager
-        if self.transport:
+        if self.transport_ctx:
             try:
-                await self.transport.__aexit__(None, None, None)
+                # Proper async context manager, but pylint can't introspect it
+                await self.transport_ctx.__aexit__(None, None, None)  # pylint: disable=no-member
             except Exception:
                 pass  # Best effort cleanup
+            self.transport_ctx = None
             self.transport = None
 
     async def get_tools(self, allowed_tools: Optional[List[str]] = None) -> List[Tool]:

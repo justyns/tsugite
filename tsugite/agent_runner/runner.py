@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from tsugite.core.agent import TsugiteAgent
 from tsugite.core.executor import LocalExecutor
+from tsugite.exceptions import AgentExecutionError
 from tsugite.md_agents import AgentConfig, parse_agent_file
 from tsugite.renderer import AgentRenderer
 from tsugite.tools import call_tool
@@ -389,7 +390,7 @@ async def _execute_agent_with_prompt(
 
     # Add delegation tools if provided
     if delegation_agents:
-        from .agent_composition import create_delegation_tools
+        from tsugite.agent_composition import create_delegation_tools
 
         delegation_tools = create_delegation_tools(delegation_agents)
         tools.extend(delegation_tools)
@@ -479,13 +480,13 @@ async def _execute_agent_with_prompt(
                 # The exception will be caught by the benchmark, but steps are already available
                 if result.error:
                     # Create custom exception that includes execution details
-                    error = RuntimeError(f"Agent execution failed: {result.error}")
-                    # Attach execution details to exception for debugging
-                    error.execution_steps = steps_list
-                    error.token_usage = result.token_usage
-                    error.cost = result.cost
-                    error.step_count = step_count
-                    raise error
+                    raise AgentExecutionError(
+                        f"Agent execution failed: {result.error}",
+                        execution_steps=steps_list,
+                        token_usage=result.token_usage,
+                        cost=result.cost,
+                        step_count=step_count,
+                    )
 
                 return str(result.output), result.token_usage, result.cost, step_count, steps_list
             else:
@@ -501,13 +502,18 @@ async def _execute_agent_with_prompt(
     except Exception as e:
         # Preserve execution details if they're attached to the original exception
         # (This happens when agent hits max_turns and we want execution trace for debugging)
-        if hasattr(e, "execution_steps"):
-            new_error = RuntimeError(f"Agent execution failed: {e}")
-            new_error.execution_steps = e.execution_steps
-            new_error.token_usage = getattr(e, "token_usage", None)
-            new_error.cost = getattr(e, "cost", None)
-            new_error.step_count = getattr(e, "step_count", 0)
-            raise new_error
+        if isinstance(e, AgentExecutionError):
+            # Already has execution details, just re-raise
+            raise
+        elif hasattr(e, "execution_steps"):
+            # Some other exception with attached details, convert to AgentExecutionError
+            raise AgentExecutionError(
+                f"Agent execution failed: {e}",
+                execution_steps=e.execution_steps,
+                token_usage=getattr(e, "token_usage", None),
+                cost=getattr(e, "cost", None),
+                step_count=getattr(e, "step_count", 0),
+            )
         else:
             raise RuntimeError(f"Agent execution failed: {e}")
     finally:

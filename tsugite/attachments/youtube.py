@@ -49,7 +49,7 @@ class YouTubeHandler(AttachmentHandler):
 
         try:
             # Fetch transcript
-            transcript = YouTubeTranscriptApi.get_transcript(video_id)
+            transcript = YouTubeTranscriptApi.get_transcript(video_id)  # pylint: disable=no-member
 
             # Format as text
             lines = []
