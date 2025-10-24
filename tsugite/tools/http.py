@@ -36,14 +36,14 @@ def fetch_json(
             try:
                 return response.json()
             except json.JSONDecodeError as e:
-                raise RuntimeError(f"Invalid JSON response: {e}")
+                raise RuntimeError(f"Invalid JSON response: {e}") from e
 
-    except httpx.TimeoutException:
-        raise RuntimeError(f"Request timed out after {timeout} seconds")
+    except httpx.TimeoutException as exc:
+        raise RuntimeError(f"Request timed out after {timeout} seconds") from exc
     except httpx.HTTPStatusError as e:
-        raise RuntimeError(f"HTTP error {e.response.status_code}: {e.response.text}")
+        raise RuntimeError(f"HTTP error {e.response.status_code}: {e.response.text}") from e
     except Exception as e:
-        raise RuntimeError(f"Request failed: {e}")
+        raise RuntimeError(f"Request failed: {e}") from e
 
 
 @tool
@@ -77,12 +77,12 @@ def fetch_text(
             response.raise_for_status()
             return response.text
 
-    except httpx.TimeoutException:
-        raise RuntimeError(f"Request timed out after {timeout} seconds")
+    except httpx.TimeoutException as exc:
+        raise RuntimeError(f"Request timed out after {timeout} seconds") from exc
     except httpx.HTTPStatusError as e:
-        raise RuntimeError(f"HTTP error {e.response.status_code}: {e.response.text}")
+        raise RuntimeError(f"HTTP error {e.response.status_code}: {e.response.text}") from e
     except Exception as e:
-        raise RuntimeError(f"Request failed: {e}")
+        raise RuntimeError(f"Request failed: {e}") from e
 
 
 @tool
@@ -125,12 +125,12 @@ def post_json(
             except json.JSONDecodeError:
                 return response.text
 
-    except httpx.TimeoutException:
-        raise RuntimeError(f"Request timed out after {timeout} seconds")
+    except httpx.TimeoutException as exc:
+        raise RuntimeError(f"Request timed out after {timeout} seconds") from exc
     except httpx.HTTPStatusError as e:
-        raise RuntimeError(f"HTTP error {e.response.status_code}: {e.response.text}")
+        raise RuntimeError(f"HTTP error {e.response.status_code}: {e.response.text}") from e
     except Exception as e:
-        raise RuntimeError(f"Request failed: {e}")
+        raise RuntimeError(f"Request failed: {e}") from e
 
 
 @tool
@@ -161,14 +161,14 @@ def download_file(url: str, local_path: str, timeout: int = 60) -> str:
 
                 return f"Downloaded {total_size} bytes to {local_path}"
 
-    except httpx.TimeoutException:
-        raise RuntimeError(f"Download timed out after {timeout} seconds")
+    except httpx.TimeoutException as exc:
+        raise RuntimeError(f"Download timed out after {timeout} seconds") from exc
     except httpx.HTTPStatusError as e:
-        raise RuntimeError(f"HTTP error {e.response.status_code}")
+        raise RuntimeError(f"HTTP error {e.response.status_code}") from e
     except OSError as e:
-        raise RuntimeError(f"File write error: {e}")
+        raise RuntimeError(f"File write error: {e}") from e
     except Exception as e:
-        raise RuntimeError(f"Download failed: {e}")
+        raise RuntimeError(f"Download failed: {e}") from e
 
 
 @tool
@@ -236,4 +236,4 @@ def web_search(query: str, max_results: int = 5) -> list[Dict[str, str]]:
         return results
 
     except Exception as e:
-        raise RuntimeError(f"Web search failed: {e}")
+        raise RuntimeError(f"Web search failed: {e}") from e

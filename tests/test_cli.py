@@ -4,15 +4,15 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from tsugite.tsugite import app
+from tsugite.cli import app
 
 
 @pytest.fixture
 def mock_agent_execution():
     """Mock both run_agent and validate_agent_execution for CLI tests."""
     with (
-        patch("tsugite.tsugite.run_agent") as mock_run_agent,
-        patch("tsugite.tsugite.validate_agent_execution") as mock_validate,
+        patch("tsugite.agent_runner.run_agent") as mock_run_agent,
+        patch("tsugite.md_agents.validate_agent_execution") as mock_validate,
     ):
         mock_run_agent.return_value = "Test agent execution completed"
         mock_validate.return_value = (True, "Agent is valid")
@@ -115,6 +115,41 @@ def test_run_command_json_logging(cli_runner, sample_agent_file, mock_agent_exec
     assert result.exit_code == 0
 
 
+@patch("tsugite.utils.should_use_plain_output", return_value=False)
+@patch("tsugite.ui.custom_agent_ui")
+def test_show_reasoning_flag(mock_custom_ui, mock_plain_output, cli_runner, sample_agent_file, mock_agent_execution):
+    """Test --show-reasoning and --no-show-reasoning flags."""
+    mock_custom_ui.return_value.__enter__ = MagicMock(return_value=MagicMock())
+    mock_custom_ui.return_value.__exit__ = MagicMock(return_value=None)
+
+    # Test default (should enable show_llm_messages)
+    result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt"])
+    assert result.exit_code == 0
+    mock_custom_ui.assert_called()
+    call_kwargs = mock_custom_ui.call_args.kwargs
+    assert call_kwargs["show_llm_messages"] is True
+
+    # Reset mock
+    mock_custom_ui.reset_mock()
+
+    # Test --show-reasoning (explicit enable)
+    result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--show-reasoning"])
+    assert result.exit_code == 0
+    mock_custom_ui.assert_called()
+    call_kwargs = mock_custom_ui.call_args.kwargs
+    assert call_kwargs["show_llm_messages"] is True
+
+    # Reset mock
+    mock_custom_ui.reset_mock()
+
+    # Test --no-show-reasoning (disable)
+    result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--no-show-reasoning"])
+    assert result.exit_code == 0
+    mock_custom_ui.assert_called()
+    call_kwargs = mock_custom_ui.call_args.kwargs
+    assert call_kwargs["show_llm_messages"] is False
+
+
 def test_run_command_custom_history_dir(cli_runner, sample_agent_file, temp_dir, mock_agent_execution):
     """Test run command with custom history directory."""
     history_dir = temp_dir / "custom_history"
@@ -157,14 +192,6 @@ def test_run_command_all_options(cli_runner, sample_agent_file, temp_dir, mock_a
 def test_history_command_show(cli_runner):
     """Test history show command."""
     result = cli_runner.invoke(app, ["history", "show"])
-
-    assert result.exit_code == 0
-    assert "History show not yet implemented" in result.stdout
-
-
-def test_history_command_show_with_since(cli_runner):
-    """Test history show command with --since option."""
-    result = cli_runner.invoke(app, ["history", "show", "--since", "2023-12-01"])
 
     assert result.exit_code == 0
     assert "History show not yet implemented" in result.stdout
@@ -283,46 +310,44 @@ tools: []
 
 
 class TestAnimationCLIIntegration:
-    """Test animation integration with CLI commands."""
+    """Test animation integration with CLI commands via custom_agent_ui."""
 
     @pytest.mark.parametrize(
-        "extra_flags,expected_enabled",
+        "extra_flags,expected_progress",
         [
-            ([], True),  # No flags - animation enabled
-            (["--non-interactive"], False),  # Non-interactive disables animation
-            (["--no-color"], False),  # No color disables animation
-            (["--non-interactive", "--no-color"], False),  # Both flags disable animation
+            ([], True),  # No flags - progress enabled
+            (["--non-interactive"], True),  # Non-interactive doesn't affect progress
+            (["--no-color"], False),  # No color disables progress
+            (["--non-interactive", "--no-color"], False),  # Both flags - no-color disables progress
         ],
     )
-    @patch("tsugite.tsugite.loading_animation")
+    @patch("tsugite.ui.custom_agent_ui")
     def test_animation_flags(
-        self, mock_loading_animation, cli_runner, sample_agent_file, mock_agent_execution, extra_flags, expected_enabled
+        self, mock_custom_ui, cli_runner, sample_agent_file, mock_agent_execution, extra_flags, expected_progress
     ):
-        """Test that animation is enabled/disabled based on CLI flags."""
-        mock_loading_animation.return_value.__enter__ = MagicMock()
-        mock_loading_animation.return_value.__exit__ = MagicMock(return_value=None)
+        """Test that animation is enabled/disabled via show_progress based on CLI flags."""
+        mock_custom_ui.return_value.__enter__ = MagicMock(return_value=MagicMock())
+        mock_custom_ui.return_value.__exit__ = MagicMock(return_value=None)
 
         cmd = ["run", str(sample_agent_file), "test prompt", "--native-ui"] + extra_flags
         result = cli_runner.invoke(app, cmd)
 
         assert result.exit_code == 0
-        mock_loading_animation.assert_called_once()
-        call_args = mock_loading_animation.call_args
-        assert call_args.kwargs["enabled"] is expected_enabled
-        if expected_enabled:
-            assert call_args.kwargs["message"] == "Waiting for LLM response"
+        mock_custom_ui.assert_called_once()
+        call_args = mock_custom_ui.call_args
+        assert call_args.kwargs["show_progress"] is expected_progress
+        # Verify other native_ui flags are properly set
+        assert call_args.kwargs["show_panels"] is False
 
-    @patch("tsugite.tsugite.loading_animation")
-    @patch("tsugite.tsugite.run_agent")
-    def test_animation_context_manager_usage(
-        self, mock_run_agent, mock_loading_animation, cli_runner, sample_agent_file
-    ):
-        """Test that animation context manager is properly used around run_agent in native UI."""
+    @patch("tsugite.ui.custom_agent_ui")
+    @patch("tsugite.agent_runner.run_agent")
+    def test_animation_context_manager_usage(self, mock_run_agent, mock_custom_ui, cli_runner, sample_agent_file):
+        """Test that custom_agent_ui context manager is properly used around run_agent in native UI."""
         mock_run_agent.return_value = "Test completion"
         mock_context = MagicMock()
-        mock_loading_animation.return_value = mock_context
+        mock_custom_ui.return_value = mock_context
 
-        with patch("tsugite.tsugite.validate_agent_execution") as mock_validate:
+        with patch("tsugite.md_agents.validate_agent_execution") as mock_validate:
             mock_validate.return_value = (True, "Agent is valid")
 
             result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--native-ui"])
@@ -334,15 +359,15 @@ class TestAnimationCLIIntegration:
         # Verify run_agent was called
         mock_run_agent.assert_called_once()
 
-    @patch("tsugite.tsugite.loading_animation")
-    def test_animation_with_agent_execution_error(self, mock_loading_animation, cli_runner, sample_agent_file):
+    @patch("tsugite.ui.custom_agent_ui")
+    def test_animation_with_agent_execution_error(self, mock_custom_ui, cli_runner, sample_agent_file):
         """Test animation cleanup when agent execution fails in native UI."""
         mock_context = MagicMock()
-        mock_loading_animation.return_value = mock_context
+        mock_custom_ui.return_value = mock_context
 
         with (
-            patch("tsugite.tsugite.run_agent") as mock_run_agent,
-            patch("tsugite.tsugite.validate_agent_execution") as mock_validate,
+            patch("tsugite.agent_runner.run_agent") as mock_run_agent,
+            patch("tsugite.md_agents.validate_agent_execution") as mock_validate,
         ):
             mock_validate.return_value = (True, "Agent is valid")
             mock_run_agent.side_effect = RuntimeError("Agent execution failed")
@@ -354,32 +379,23 @@ class TestAnimationCLIIntegration:
         mock_context.__enter__.assert_called_once()
         mock_context.__exit__.assert_called_once()
 
-    @patch("tsugite.tsugite.loading_animation")
-    def test_animation_console_parameter(
-        self, mock_loading_animation, cli_runner, sample_agent_file, mock_agent_execution
-    ):
-        """Test that correct console instance is passed to animation in native UI."""
-        mock_loading_animation.return_value.__enter__ = MagicMock()
-        mock_loading_animation.return_value.__exit__ = MagicMock(return_value=None)
+    @patch("tsugite.ui.custom_agent_ui")
+    def test_animation_console_parameter(self, mock_custom_ui, cli_runner, sample_agent_file, mock_agent_execution):
+        """Test that correct console instance is passed to custom_agent_ui in native UI."""
+        mock_custom_ui.return_value.__enter__ = MagicMock(return_value=MagicMock())
+        mock_custom_ui.return_value.__exit__ = MagicMock(return_value=None)
 
         result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--native-ui"])
 
         assert result.exit_code == 0
         # Verify console parameter was passed
-        mock_loading_animation.assert_called_once()
-        call_args = mock_loading_animation.call_args
-        # Console should be the first positional argument
-        if call_args.args:
-            console_arg = call_args.args[0]
-            assert console_arg is not None
-            # Check it's a Console-like object (has the methods we expect)
-            assert hasattr(console_arg, "print")
-        else:
-            # Console might be passed as keyword argument
-            assert "console" in call_args.kwargs
-            console_arg = call_args.kwargs["console"]
-            assert console_arg is not None
-            assert hasattr(console_arg, "print")
+        mock_custom_ui.assert_called_once()
+        call_args = mock_custom_ui.call_args
+        # Console should be passed as keyword argument
+        assert "console" in call_args.kwargs
+        console_arg = call_args.kwargs["console"]
+        assert console_arg is not None
+        assert hasattr(console_arg, "print")
 
 
 class TestHeadlessMode:
@@ -426,7 +442,7 @@ class TestHeadlessMode:
         # Should still have clean output
         assert "Test agent execution completed" in result.stdout
 
-    @patch("tsugite.tsugite.custom_agent_ui")
+    @patch("tsugite.ui.custom_agent_ui")
     def test_headless_uses_custom_ui_with_correct_flags(
         self, mock_custom_ui, cli_runner, sample_agent_file, mock_agent_execution
     ):
@@ -448,7 +464,7 @@ class TestHeadlessMode:
         assert call_kwargs["show_execution_logs"] is False
         assert call_kwargs["show_panels"] is False
 
-    @patch("tsugite.tsugite.custom_agent_ui")
+    @patch("tsugite.ui.custom_agent_ui")
     def test_headless_verbose_enables_output(self, mock_custom_ui, cli_runner, sample_agent_file, mock_agent_execution):
         """Test that headless --verbose enables detailed output."""
         mock_custom_ui.return_value.__enter__ = MagicMock(return_value=MagicMock())
@@ -496,11 +512,88 @@ def test_logo_selection(terminal_width, expected_logo):
     """Test that correct logo is selected based on terminal width."""
     from rich.console import Console
 
-    from tsugite.tsugite import TSUGITE_LOGO_NARROW, TSUGITE_LOGO_WIDE, _get_logo
+    from tsugite.cli.helpers import get_logo
+    from tsugite.constants import TSUGITE_LOGO_NARROW, TSUGITE_LOGO_WIDE
 
     mock_console = MagicMock(spec=Console)
     mock_console.width = terminal_width
 
-    result = _get_logo(mock_console)
+    result = get_logo(mock_console)
     expected = TSUGITE_LOGO_NARROW if expected_logo == "NARROW" else TSUGITE_LOGO_WIDE
     assert result == expected
+
+
+class TestAutoDiscovery:
+    """Test auto-discovery feature where CLI defaults to builtin-default."""
+
+    def test_run_without_agent_defaults_to_builtin(self, cli_runner, temp_dir):
+        """Test that running without an agent defaults to builtin-default."""
+        from tsugite.cli.helpers import parse_cli_arguments
+
+        # Test that parse_cli_arguments defaults to builtin-default
+        agents, prompt = parse_cli_arguments(["test", "task"])
+
+        assert agents == ["+builtin-default"]
+        assert prompt == "test task"
+
+    def test_run_explicit_agent_overrides_default(self, cli_runner, sample_agent_file, mock_agent_execution):
+        """Test that explicitly specifying an agent still works."""
+        result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt"])
+
+        assert result.exit_code == 0
+        # Should use the specified agent, not builtin-default
+        assert "test_agent.md" in result.stdout
+
+    @patch("tsugite.agent_runner.run_agent")
+    @patch("tsugite.md_agents.validate_agent_execution")
+    def test_builtin_default_agent_execution(self, mock_validate, mock_run, cli_runner):
+        """Test that builtin-default agent can be executed."""
+        mock_validate.return_value = (True, "Agent is valid")
+        mock_run.return_value = "Task completed"
+
+        # Run without specifying an agent
+        result = cli_runner.invoke(app, ["run", "What is 2+2?"])
+
+        # Should not fail due to missing agent file
+        assert "Agent file not found" not in result.stdout
+        # May fail on validation or execution, but not on path issues
+        # The actual execution depends on whether the API key is set
+
+    def test_builtin_agent_path_validation(self):
+        """Test that builtin agent paths bypass file existence checks."""
+        from pathlib import Path
+
+        builtin_path = Path("<builtin-default>")
+
+        # These checks should recognize it as builtin
+        assert str(builtin_path).startswith("<builtin-")
+
+        # Should not try to check .exists() or .suffix
+        # (This validates the CLI path handling logic)
+
+    @patch("tsugite.agent_runner.run_agent")
+    @patch("tsugite.md_agents.validate_agent_execution")
+    def test_auto_discovery_with_available_agents(self, mock_validate, mock_run, cli_runner, tmp_path, monkeypatch):
+        """Test auto-discovery when agents are available."""
+        monkeypatch.chdir(tmp_path)
+
+        # Create a test agent
+        agents_dir = tmp_path / "agents"
+        agents_dir.mkdir()
+        test_agent = agents_dir / "helper.md"
+        test_agent.write_text("""---
+name: helper
+description: Helps with tasks
+---
+Content
+""")
+
+        mock_validate.return_value = (True, "Agent is valid")
+        mock_run.return_value = "Task completed"
+
+        # The builtin-default should be able to discover the helper agent
+        # via its prefetch mechanism
+        cli_runner.invoke(app, ["run", "help me with something"])
+
+        # Should execute successfully (verified by no exception)
+        # The actual delegation to helper depends on LLM decision

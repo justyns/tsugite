@@ -1,7 +1,6 @@
 ---
 name: creative_writing_agent
-model: ollama:qwen2.5-coder:7b
-max_steps: 5
+max_turns: 5
 tools: []
 description: Tests creative writing capabilities with LLM evaluation
 category: complex
@@ -31,5 +30,6 @@ You are a creative writing specialist capable of producing engaging, original co
 2. Plan your approach considering genre, tone, and audience
 3. Create original, engaging content that fulfills the request
 4. Ensure your writing demonstrates creativity while maintaining quality
+5. When finished, call final_answer() with your completed work
 
 Focus on producing work that is both imaginative and well-crafted.

@@ -1,6 +1,6 @@
 # tsugite
 
-Tsugite (Japanese: 継手, meaning "joint" in woodworking) is a developer-facing agentic CLI inspired by Claude Code, built on smolagents.
+Tsugite (Japanese: 継ぎ手, meaning "joint" in woodworking) is a developer-facing agentic CLI.
 
 Define AI agents as markdown files with YAML frontmatter. Chain multiple steps together, pass data between them, and use any LLM (OpenAI, Anthropic, Ollama, etc).
 
@@ -35,5 +35,19 @@ tsugite run my_agent.md "greet the user"
 - **Multiple LLM providers** - OpenAI, Anthropic, Ollama, Google, GitHub Copilot
 - **MCP integration** - Connect to Model Context Protocol servers
 - **Temperature control** - Set per-step model parameters
+- **Copy-paste friendly output** - `--plain` flag or auto-detection for pipe/redirect
+
+## CLI Options
+
+```bash
+# Plain output (no box-drawing characters, copy-paste friendly)
+tsugite run +assistant "task" --plain
+
+# Auto-detection: plain mode activates when piped or NO_COLOR is set
+tsugite run +assistant "task" | grep result
+
+# Headless mode for scripts (result to stdout, progress to stderr)
+tsugite run +assistant "task" --headless
+```
 
 See `examples/` for working agents and `CLAUDE.md` for AI-generated documentation.

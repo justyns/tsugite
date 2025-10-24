@@ -1,10 +1,10 @@
 """Agent orchestration tools for spawning and managing sub-agents."""
 
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from ..tools import tool
-from ..utils import validation_error
+from ..utils import parse_yaml_frontmatter, validation_error
 
 
 @tool
@@ -42,7 +42,13 @@ def spawn_agent(
 
     try:
         # Import here to avoid circular imports
-        from ..agent_runner import run_agent
+        from ..agent_runner import get_current_agent, run_agent
+
+        # Inject subagent context
+        sub_context["is_subagent"] = True
+        parent = get_current_agent()
+        if parent:
+            sub_context["parent_agent"] = parent
 
         # Run the sub-agent
         result = run_agent(
@@ -51,3 +57,88 @@ def spawn_agent(
         return result
     except Exception as e:
         raise RuntimeError(f"Sub-agent execution failed: {e}")
+
+
+@tool
+def list_agents() -> str:
+    """List all available agents for delegation.
+
+    Scans standard agent directories and returns information about
+    available specialized agents. Use this to discover which agents
+    are available for delegation.
+
+    Returns:
+        Formatted list of available agents with their descriptions.
+        Returns empty string if no agents are found.
+    """
+    from ..agent_inheritance import get_global_agents_paths
+    from ..agent_runner import get_current_agent
+
+    agents_info: List[Dict[str, str]] = []
+    seen_names = set()
+
+    # Get current agent name to exclude it from the list
+    current_agent_name = get_current_agent()
+
+    # Define search paths in priority order
+    search_paths = [
+        Path.cwd() / ".tsugite" / "agents",
+        Path.cwd() / "agents",
+    ]
+
+    # Add global paths
+    search_paths.extend(get_global_agents_paths())
+
+    # Scan each directory for agent files
+    for search_dir in search_paths:
+        if not search_dir.exists() or not search_dir.is_dir():
+            continue
+
+        for agent_file in search_dir.glob("*.md"):
+            # Skip builtin agents to avoid confusion
+            if agent_file.stem.startswith("builtin-"):
+                continue
+
+            # Skip if we've already seen this agent name (higher priority paths win)
+            if agent_file.stem in seen_names:
+                continue
+
+            try:
+                content = agent_file.read_text(encoding="utf-8")
+                frontmatter, _ = parse_yaml_frontmatter(content, str(agent_file))
+
+                name = frontmatter.get("name", agent_file.stem)
+                description = frontmatter.get("description", "No description")
+
+                # Skip the currently running agent to prevent self-spawning
+                if current_agent_name and name == current_agent_name:
+                    continue
+
+                # Store relative path from cwd if possible, otherwise absolute
+                try:
+                    display_path = str(agent_file.relative_to(Path.cwd()))
+                except ValueError:
+                    display_path = str(agent_file)
+
+                agents_info.append(
+                    {
+                        "name": name,
+                        "description": description,
+                        "path": display_path,
+                    }
+                )
+
+                seen_names.add(agent_file.stem)
+            except Exception:
+                # Skip files that can't be parsed
+                continue
+
+    if not agents_info:
+        return ""
+
+    # Format as a simple markdown list
+    lines = []
+    for agent in agents_info:
+        lines.append(f"- **{agent['name']}** (`{agent['path']}`): {agent['description']}")
+
+    return "\n".join(lines)

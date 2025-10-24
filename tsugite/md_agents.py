@@ -4,9 +4,39 @@ import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from .utils import parse_yaml_frontmatter
+
+
+def _parse_directive_attribute(
+    args: str,
+    attr_name: str,
+    value_pattern: str = r"([^\"']+)",
+    converter: Optional[Callable[[str], Any]] = None,
+    default: Any = None,
+) -> Any:
+    """Parse an attribute from directive arguments using regex.
+
+    Args:
+        args: The directive arguments string
+        attr_name: Name of the attribute to extract
+        value_pattern: Regex pattern for the value (default: any non-quote chars)
+        converter: Optional function to convert the string value (e.g., int, float)
+        default: Default value if attribute not found
+
+    Returns:
+        Parsed and converted value, or default if not found
+    """
+    pattern = rf'{attr_name}=(["\']?)({value_pattern})\1'
+    match = re.search(pattern, args)
+    if not match:
+        return default
+
+    value = match.group(2)
+    if converter:
+        return converter(value)
+    return value
 
 
 @dataclass
@@ -16,26 +46,56 @@ class AgentConfig:
     name: str
     description: str = ""
     model: Optional[str] = None
-    max_steps: int = 5
+    max_turns: int = 5
     tools: List[str] = field(default_factory=list)
     prefetch: List[Dict[str, Any]] = field(default_factory=list)
+    attachments: List[str] = field(default_factory=list)
     permissions_profile: str = "default"
     context_budget: Dict[str, Any] = field(default_factory=dict)
     instructions: str = ""
     mcp_servers: Optional[Dict[str, Optional[List[str]]]] = None
     extends: Optional[str] = None
+    reasoning_effort: Optional[str] = None  # For reasoning models (low, medium, high)
+    custom_tools: List[Dict[str, Any]] = field(default_factory=list)  # Per-agent shell tools
+    text_mode: bool = False  # Allow text-only responses (code blocks optional)
+    initial_tasks: List[Any] = field(default_factory=list)  # Tasks to pre-populate (strings or dicts)
 
     def __post_init__(self):
         if self.tools is None:
             self.tools = []
         if self.prefetch is None:
             self.prefetch = []
+        if self.attachments is None:
+            self.attachments = []
         if not self.context_budget:
             self.context_budget = {"tokens": 8000, "priority": ["system", "task"]}
         if self.instructions is None:
             self.instructions = ""
         if self.mcp_servers is None:
             self.mcp_servers = {}
+        if self.custom_tools is None:
+            self.custom_tools = []
+        if self.initial_tasks is None:
+            self.initial_tasks = []
+
+        # Normalize initial_tasks: convert strings to dicts
+        normalized_tasks = []
+        for task in self.initial_tasks:
+            if isinstance(task, str):
+                # Simple string format: convert to dict with defaults
+                normalized_tasks.append({"title": task, "status": "pending", "optional": False})
+            elif isinstance(task, dict):
+                # Dict format: ensure all required fields exist with defaults
+                normalized = {
+                    "title": task.get("title", ""),
+                    "status": task.get("status", "pending"),
+                    "optional": task.get("optional", False),
+                }
+                normalized_tasks.append(normalized)
+            else:
+                raise ValueError(f"Invalid initial_tasks entry: {task}. Must be string or dict.")
+
+        self.initial_tasks = normalized_tasks
 
 
 @dataclass
@@ -68,7 +128,7 @@ def parse_agent_file(file_path: Path) -> Agent:
     This function also resolves agent inheritance if configured.
 
     Args:
-        file_path: Path to agent markdown file
+        file_path: Path to agent markdown file (can be a built-in agent with path like <builtin-name>)
 
     Returns:
         Parsed Agent with resolved inheritance
@@ -77,6 +137,17 @@ def parse_agent_file(file_path: Path) -> Agent:
         FileNotFoundError: If agent file doesn't exist
         ValueError: If circular inheritance or missing parent agent
     """
+    # Handle built-in agents (special paths like "<builtin-default>")
+    if str(file_path).startswith("<builtin-"):
+        from .builtin_agents import get_builtin_chat_assistant, get_builtin_default_agent
+
+        if "builtin-default" in str(file_path):
+            return get_builtin_default_agent()
+        elif "builtin-chat-assistant" in str(file_path):
+            return get_builtin_chat_assistant()
+        else:
+            raise ValueError(f"Unknown built-in agent: {file_path}")
+
     if not file_path.exists():
         raise FileNotFoundError(f"Agent file not found: {file_path}")
 
@@ -84,7 +155,7 @@ def parse_agent_file(file_path: Path) -> Agent:
     agent = parse_agent(content, file_path)
 
     # Resolve inheritance if needed
-    if agent.config.extends or agent.config.extends != "none":
+    if agent.config.extends != "none":
         from .agent_inheritance import resolve_agent_inheritance
 
         agent = resolve_agent_inheritance(agent, file_path)
@@ -128,6 +199,110 @@ def extract_directives(content: str) -> List[Dict[str, Any]]:
 
 
 @dataclass
+class ToolDirective:
+    """Represents a tool directive in agent content."""
+
+    name: str
+    args: Dict[str, Any]
+    assign_var: str
+    start_pos: int
+    end_pos: int
+    raw_match: str
+
+
+def extract_tool_directives(content: str) -> List[ToolDirective]:
+    """Extract <!-- tsu:tool --> directives from content.
+
+    Args:
+        content: Raw markdown content
+
+    Returns:
+        List of ToolDirective objects with parsed name, args, and assignment
+
+    Example:
+        >>> content = '''
+        ... <!-- tsu:tool name="fetch_json" args={"url": "http://example.com"} assign="data" -->
+        ... '''
+        >>> directives = extract_tool_directives(content)
+        >>> directives[0].name
+        'fetch_json'
+        >>> directives[0].args
+        {'url': 'http://example.com'}
+    """
+    directives = []
+
+    # Pattern to match <!-- tsu:tool name="..." args={...} assign="..." -->
+    # Uses non-greedy match to handle multiple directives
+    pattern = r"<!--\s*tsu:tool\s+([^>]+?)\s*-->"
+
+    for match in re.finditer(pattern, content):
+        raw_args = match.group(1).strip()
+        start_pos = match.start()
+        end_pos = match.end()
+        raw_match = match.group(0)
+
+        # Extract name (required)
+        name_match = re.search(r'name=(["\']?)(\w+)\1', raw_args)
+        if not name_match:
+            raise ValueError(f"Tool directive missing required 'name' attribute: {raw_args}")
+
+        tool_name = name_match.group(2)
+
+        # Extract args (required, should be JSON)
+        # Find args= and extract the JSON object that follows
+        args_start = raw_args.find("args=")
+        if args_start == -1:
+            raise ValueError(f"Tool directive missing required 'args' attribute: {raw_args}")
+
+        # Find the opening brace after args=
+        json_start = raw_args.find("{", args_start)
+        if json_start == -1:
+            raise ValueError(f"Tool directive args must be a JSON object: {raw_args}")
+
+        # Find the matching closing brace (handle nested braces)
+        brace_count = 0
+        json_end = json_start
+        for i in range(json_start, len(raw_args)):
+            if raw_args[i] == "{":
+                brace_count += 1
+            elif raw_args[i] == "}":
+                brace_count -= 1
+                if brace_count == 0:
+                    json_end = i + 1
+                    break
+
+        if brace_count != 0:
+            raise ValueError(f"Unmatched braces in tool directive args: {raw_args}")
+
+        # Parse JSON args
+        try:
+            args_json_str = raw_args[json_start:json_end]
+            args_dict = json.loads(args_json_str)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON in tool directive args for '{tool_name}': {e}") from e
+
+        # Extract assign (required)
+        assign_match = re.search(r'assign=(["\']?)(\w+)\1', raw_args)
+        if not assign_match:
+            raise ValueError(f"Tool directive missing required 'assign' attribute: {raw_args}")
+
+        assign_var = assign_match.group(2)
+
+        directives.append(
+            ToolDirective(
+                name=tool_name,
+                args=args_dict,
+                assign_var=assign_var,
+                start_pos=start_pos,
+                end_pos=end_pos,
+                raw_match=raw_match,
+            )
+        )
+
+    return directives
+
+
+@dataclass
 class StepDirective:
     """Represents a step in multi-step agent execution."""
 
@@ -135,8 +310,17 @@ class StepDirective:
     content: str
     assign_var: Optional[str] = None
     model_kwargs: Dict[str, Any] = field(default_factory=dict)
+    max_retries: int = 0
+    retry_delay: float = 0.0
+    continue_on_error: bool = False
+    timeout: Optional[int] = None  # Timeout in seconds, None = no timeout
     start_pos: int = 0
     end_pos: int = 0
+
+    # Loop control
+    repeat_while: Optional[str] = None  # Jinja2 expression or helper name to continue repeating
+    repeat_until: Optional[str] = None  # Jinja2 expression or helper name to stop repeating
+    max_iterations: int = 10  # Maximum loop iterations (safety valve)
 
 
 def extract_step_directives(content: str, include_preamble: bool = True) -> tuple[str, List[StepDirective]]:
@@ -205,10 +389,7 @@ def extract_step_directives(content: str, include_preamble: bool = True) -> tupl
         step_name = name_match.group(2)
 
         # Parse assign attribute (optional)
-        assign_var = None
-        assign_match = re.search(r'assign=(["\']?)(\w+)\1', args)
-        if assign_match:
-            assign_var = assign_match.group(2)
+        assign_var = _parse_directive_attribute(args, "assign", r"\w+")
 
         # Parse model_kwargs from remaining attributes
         model_kwargs = {}
@@ -225,32 +406,62 @@ def extract_step_directives(content: str, include_preamble: bool = True) -> tupl
                 rf_value = rf_match.group(2)
                 model_kwargs["response_format"] = json.loads(rf_value)
             except json.JSONDecodeError as e:
-                raise ValueError(f"Invalid JSON in response_format for step '{step_name}': {e}")
+                raise ValueError(f"Invalid JSON in response_format for step '{step_name}': {e}") from e
 
         # Parse temperature
-        temp_match = re.search(r'temperature=(["\']?)([0-9.]+)\1', args)
-        if temp_match:
-            model_kwargs["temperature"] = float(temp_match.group(2))
+        temperature = _parse_directive_attribute(args, "temperature", r"[0-9.]+", float)
+        if temperature is not None:
+            model_kwargs["temperature"] = temperature
 
         # Parse max_tokens
-        tokens_match = re.search(r'max_tokens=(["\']?)([0-9]+)\1', args)
-        if tokens_match:
-            model_kwargs["max_tokens"] = int(tokens_match.group(2))
+        max_tokens = _parse_directive_attribute(args, "max_tokens", r"[0-9]+", int)
+        if max_tokens is not None:
+            model_kwargs["max_tokens"] = max_tokens
 
         # Parse top_p
-        top_p_match = re.search(r'top_p=(["\']?)([0-9.]+)\1', args)
-        if top_p_match:
-            model_kwargs["top_p"] = float(top_p_match.group(2))
+        top_p = _parse_directive_attribute(args, "top_p", r"[0-9.]+", float)
+        if top_p is not None:
+            model_kwargs["top_p"] = top_p
 
         # Parse frequency_penalty
-        freq_match = re.search(r'frequency_penalty=(["\']?)([0-9.]+)\1', args)
-        if freq_match:
-            model_kwargs["frequency_penalty"] = float(freq_match.group(2))
+        freq_penalty = _parse_directive_attribute(args, "frequency_penalty", r"[0-9.]+", float)
+        if freq_penalty is not None:
+            model_kwargs["frequency_penalty"] = freq_penalty
 
         # Parse presence_penalty
-        pres_match = re.search(r'presence_penalty=(["\']?)([0-9.]+)\1', args)
-        if pres_match:
-            model_kwargs["presence_penalty"] = float(pres_match.group(2))
+        pres_penalty = _parse_directive_attribute(args, "presence_penalty", r"[0-9.]+", float)
+        if pres_penalty is not None:
+            model_kwargs["presence_penalty"] = pres_penalty
+
+        # Parse reasoning_effort (for o1, o3, Claude extended thinking)
+        reasoning_effort = _parse_directive_attribute(args, "reasoning_effort", r"low|medium|high")
+        if reasoning_effort:
+            model_kwargs["reasoning_effort"] = reasoning_effort
+
+        # Parse max_retries
+        max_retries = _parse_directive_attribute(args, "max_retries", r"[0-9]+", int, default=0)
+
+        # Parse retry_delay
+        retry_delay = _parse_directive_attribute(args, "retry_delay", r"[0-9.]+", float, default=0.0)
+
+        # Parse continue_on_error
+        continue_str = _parse_directive_attribute(args, "continue_on_error", r"true|false", default="false")
+        continue_on_error = continue_str.lower() == "true"
+
+        # Parse timeout
+        timeout = _parse_directive_attribute(args, "timeout", r"[0-9]+", int)
+
+        # Parse loop control parameters
+        # Use non-greedy match to stop at first quote/boundary
+        repeat_while = _parse_directive_attribute(args, "repeat_while", r".+?")
+        repeat_until = _parse_directive_attribute(args, "repeat_until", r".+?")
+        max_iterations = _parse_directive_attribute(args, "max_iterations", r"[0-9]+", int, default=10)
+
+        # Validate: cannot specify both repeat_while and repeat_until
+        if repeat_while and repeat_until:
+            raise ValueError(
+                f"Step '{step_name}' cannot specify both repeat_while and repeat_until. Use one or the other."
+            )
 
         steps.append(
             StepDirective(
@@ -258,6 +469,13 @@ def extract_step_directives(content: str, include_preamble: bool = True) -> tupl
                 content=step_content,
                 assign_var=assign_var,
                 model_kwargs=model_kwargs,
+                max_retries=max_retries,
+                retry_delay=retry_delay,
+                continue_on_error=continue_on_error,
+                timeout=timeout,
+                repeat_while=repeat_while,
+                repeat_until=repeat_until,
+                max_iterations=max_iterations,
                 start_pos=start_pos,
                 end_pos=end_pos,
             )
@@ -298,9 +516,9 @@ def validate_agent(agent: Agent) -> List[str]:
         if not isinstance(tool, str):
             errors.append(f"Tool name must be string: {tool}")
 
-    # Validate max_steps is positive
-    if agent.config.max_steps <= 0:
-        errors.append("max_steps must be positive")
+    # Validate max_turns is positive
+    if agent.config.max_turns <= 0:
+        errors.append("max_turns must be positive")
 
     # Validate directives in content
     directives = extract_directives(agent.content)
@@ -324,7 +542,7 @@ def validate_agent_execution(agent: Agent | Path) -> tuple[bool, str]:
     """Validate that an agent can be executed.
 
     Args:
-        agent: Parsed agent or path to agent file
+        agent: Parsed agent or path to agent file (including builtin paths like <builtin-default>)
 
     Returns:
         Tuple of (is_valid, error_message)
@@ -332,8 +550,12 @@ def validate_agent_execution(agent: Agent | Path) -> tuple[bool, str]:
     # Handle both Path objects and Agent objects
     if isinstance(agent, Path):
         try:
-            agent_text = agent.read_text()
-            agent = parse_agent(agent_text, agent)
+            # Handle builtin agents
+            if str(agent).startswith("<builtin-"):
+                agent = parse_agent_file(agent)
+            else:
+                agent_text = agent.read_text()
+                agent = parse_agent(agent_text, agent)
         except Exception as e:
             return False, f"Failed to parse agent file: {e}"
 
@@ -345,26 +567,42 @@ def validate_agent_execution(agent: Agent | Path) -> tuple[bool, str]:
     # Only validate model if specified in agent config
     if agent.config.model:
         try:
-            from .models import get_model
+            from .models import parse_model_string
 
-            get_model(agent.config.model)
+            parse_model_string(agent.config.model)
         except Exception as e:
             return False, f"Model validation failed: {e}"
 
-    try:
-        # Check if tools exist
-        from .tool_adapter import get_smolagents_tools
+    # Validate tool syntax (don't check existence - that happens at runtime)
+    # Just validate that tool specs can be parsed
+    if agent.config.tools:
+        try:
+            # Make sure we can import expand_tool_specs
+            from .tools import expand_tool_specs  # noqa: F401
 
-        get_smolagents_tools(agent.config.tools)
-    except Exception as e:
-        return False, f"Tool validation failed: {e}"
+            # Don't actually expand here - just check syntax is valid
+            # Tool existence will be checked at execution time when modules are loaded
+            for tool_spec in agent.config.tools:
+                if not isinstance(tool_spec, str):
+                    return False, f"Tool specification must be string: {tool_spec}"
+        except Exception as e:
+            return False, f"Tool import error: {e}"
 
     # Check template rendering with minimal context
     from .renderer import AgentRenderer
 
     renderer = AgentRenderer()
     try:
-        test_context = {"user_prompt": "test", "task_summary": "## Current Tasks\nNo tasks yet."}
+        test_context = {
+            "user_prompt": "test",
+            "task_summary": "## Current Tasks\nNo tasks yet.",
+            "is_interactive": False,
+            "tools": agent.config.tools or [],  # Make tools list available for conditional rendering
+            "text_mode": agent.config.text_mode,
+            "is_subagent": False,
+            "parent_agent": None,
+            "chat_history": [],  # For chat agents that reference conversation history
+        }
 
         # If agent has prefetch, create mock variables
         if agent.config.prefetch:
@@ -386,6 +624,17 @@ def validate_agent_execution(agent: Agent | Path) -> tuple[bool, str]:
                 # If step parsing fails, that's a different validation error
                 # Let it be caught by the normal validation flow
                 pass
+
+        # If agent has tool directives, create mock variables for their assignments
+        # This allows validation to pass when tools are executed during rendering
+        try:
+            tool_directives = extract_tool_directives(agent.content)
+            for directive in tool_directives:
+                if directive.assign_var:
+                    test_context[directive.assign_var] = "mock_tool_result"
+        except Exception:
+            # If tool directive parsing fails, let it be caught by normal validation
+            pass
 
         renderer.render(agent.content, test_context)
     except Exception as e:

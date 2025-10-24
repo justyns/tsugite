@@ -125,6 +125,17 @@ class TestTaskTools:
         task = manager.get_task(task_id)
         assert task.title == "Test task"
 
+    def test_task_add_with_parent_id_zero(self):
+        """Test that parent_id=0 is treated as None (root task)."""
+        task_id = task_add("Root task", parent_id=0)
+        assert task_id == 1
+
+        # Verify the task was created as a root task (parent_id=None)
+        manager = get_task_manager()
+        task = manager.get_task(task_id)
+        assert task.title == "Root task"
+        assert task.parent_id is None
+
     def test_task_add_with_invalid_status(self):
         """Test task_add with invalid status."""
         with pytest.raises(ValueError, match="Invalid status 'invalid'"):
@@ -133,8 +144,15 @@ class TestTaskTools:
     def test_task_update_tool(self):
         """Test task_update tool function."""
         task_id = task_add("Test task")
-        task_update(task_id, "in_progress")
+        result = task_update(task_id, "in_progress")
 
+        # Verify return message
+        assert "Updated task" in result
+        assert "in_progress" in result
+        assert "Test task" in result
+        assert f"#{task_id}" in result
+
+        # Verify state changed
         manager = get_task_manager()
         task = manager.get_task(task_id)
         assert task.status == TaskStatus.IN_PROGRESS
@@ -142,8 +160,14 @@ class TestTaskTools:
     def test_task_complete_tool(self):
         """Test task_complete tool function."""
         task_id = task_add("Test task")
-        task_complete(task_id)
+        result = task_complete(task_id)
 
+        # Verify return message
+        assert "Completed task" in result
+        assert "Test task" in result
+        assert f"#{task_id}" in result
+
+        # Verify state changed
         manager = get_task_manager()
         task = manager.get_task(task_id)
         assert task.status == TaskStatus.COMPLETED
@@ -199,3 +223,140 @@ class TestTaskStatusEnum:
         """Test that invalid values raise ValueError."""
         with pytest.raises(ValueError):
             TaskStatus("invalid_status")
+
+
+class TestTaskOptionalField:
+    """Test the optional field in tasks."""
+
+    def setup_method(self):
+        """Reset task manager for each test."""
+        reset_task_manager()
+
+    def test_task_add_optional_parameter(self):
+        """Test adding a task with optional=True."""
+        task_id = task_add("Optional task", optional=True)
+        task_data = task_get(task_id)
+
+        assert task_data["optional"] is True
+
+    def test_task_add_required_default(self):
+        """Test that tasks are required by default."""
+        task_id = task_add("Required task")
+        task_data = task_get(task_id)
+
+        assert task_data["optional"] is False
+
+    def test_task_list_includes_optional_field(self):
+        """Test that task_list includes optional field."""
+        task_add("Required task", optional=False)
+        task_add("Optional task", optional=True)
+
+        tasks = task_list()
+        assert len(tasks) == 2
+        assert tasks[0]["optional"] is False
+        assert tasks[1]["optional"] is True
+
+    def test_task_summary_shows_optional_indicator(self):
+        """Test that optional tasks are marked in summary."""
+        manager = get_task_manager()
+        manager.add_task("Required task", optional=False)
+        manager.add_task("Optional task", optional=True)
+
+        summary = manager.get_task_summary()
+        assert "✨ (optional)" in summary
+        assert summary.count("✨ (optional)") == 1  # Only one optional task
+
+
+class TestTasksForTemplate:
+    """Test get_tasks_for_template method."""
+
+    def setup_method(self):
+        """Reset task manager for each test."""
+        reset_task_manager()
+
+    def test_get_tasks_for_template_empty(self):
+        """Test get_tasks_for_template with no tasks."""
+        manager = get_task_manager()
+        tasks = manager.get_tasks_for_template()
+
+        assert tasks == []
+
+    def test_get_tasks_for_template_basic(self):
+        """Test get_tasks_for_template returns correct format."""
+        manager = get_task_manager()
+        task_id = manager.add_task("Test task", optional=False)
+
+        tasks = manager.get_tasks_for_template()
+
+        assert len(tasks) == 1
+        assert tasks[0]["id"] == task_id
+        assert tasks[0]["title"] == "Test task"
+        assert tasks[0]["status"] == "pending"
+        assert tasks[0]["optional"] is False
+        assert "created_at" in tasks[0]
+        assert "updated_at" in tasks[0]
+
+    def test_get_tasks_for_template_multiple(self):
+        """Test get_tasks_for_template with multiple tasks."""
+        manager = get_task_manager()
+        manager.add_task("Task 1", optional=False)
+        manager.add_task("Task 2", optional=True)
+        manager.add_task("Task 3", optional=False)
+
+        tasks = manager.get_tasks_for_template()
+
+        assert len(tasks) == 3
+        assert tasks[0]["title"] == "Task 1"
+        assert tasks[0]["optional"] is False
+        assert tasks[1]["title"] == "Task 2"
+        assert tasks[1]["optional"] is True
+        assert tasks[2]["title"] == "Task 3"
+
+    def test_get_tasks_for_template_with_status(self):
+        """Test get_tasks_for_template includes task status."""
+        manager = get_task_manager()
+        task_id = manager.add_task("Test task")
+        manager.update_task(task_id, TaskStatus.IN_PROGRESS)
+
+        tasks = manager.get_tasks_for_template()
+
+        assert len(tasks) == 1
+        assert tasks[0]["status"] == "in_progress"
+
+    def test_get_tasks_for_template_completed_task(self):
+        """Test get_tasks_for_template includes completed_at timestamp."""
+        manager = get_task_manager()
+        task_id = manager.add_task("Test task")
+        manager.update_task(task_id, TaskStatus.COMPLETED)
+
+        tasks = manager.get_tasks_for_template()
+
+        assert len(tasks) == 1
+        assert tasks[0]["status"] == "completed"
+        assert tasks[0]["completed_at"] is not None
+
+    def test_get_tasks_for_template_with_parent(self):
+        """Test get_tasks_for_template includes parent_id."""
+        manager = get_task_manager()
+        parent_id = manager.add_task("Parent task")
+        child_id = manager.add_task("Child task", parent_id=parent_id)
+
+        tasks = manager.get_tasks_for_template()
+
+        # Find the child task
+        child_task = next(t for t in tasks if t["id"] == child_id)
+        assert child_task["parent_id"] == parent_id
+
+    def test_get_tasks_for_template_same_format_as_task_list(self):
+        """Test that get_tasks_for_template returns same format as task_list tool."""
+        manager = get_task_manager()
+        manager.add_task("Test task", optional=True)
+
+        template_tasks = manager.get_tasks_for_template()
+        tool_tasks = task_list()
+
+        # Should have same structure
+        assert len(template_tasks) == len(tool_tasks)
+        assert template_tasks[0].keys() == tool_tasks[0].keys()
+        assert template_tasks[0]["title"] == tool_tasks[0]["title"]
+        assert template_tasks[0]["optional"] == tool_tasks[0]["optional"]

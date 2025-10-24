@@ -4,6 +4,8 @@ import os
 from pathlib import Path
 from typing import List, Optional, Set
 
+from tsugite.utils import ensure_file_exists
+
 
 def get_global_agents_paths() -> List[Path]:
     """Get global agent directory paths in precedence order.
@@ -48,11 +50,14 @@ def find_agent_file(agent_ref: str, current_agent_dir: Path) -> Optional[Path]:
     5. ./{name}.md (current directory)
     6. Global agent directories (XDG order)
     """
-    # Check if it's a built-in agent
+    # Check if it's a built-in agent (normalize format by stripping angle brackets)
     from .builtin_agents import is_builtin_agent
 
-    if is_builtin_agent(agent_ref):
-        return Path(f"<{agent_ref}>")
+    # Normalize agent_ref by stripping angle brackets if present
+    normalized_ref = agent_ref.strip("<>")
+
+    if is_builtin_agent(normalized_ref):
+        return Path(f"<{normalized_ref}>")
 
     # If it looks like a path, resolve it relative to current agent
     if "/" in agent_ref or agent_ref.endswith(".md"):
@@ -131,8 +136,19 @@ def load_extended_agent(extends_ref: str, current_agent_path: Path, inheritance_
 
     # Load the parent agent WITHOUT resolving its inheritance yet
     # (we'll do that recursively in resolve_agent_inheritance)
-    if not agent_path.exists():
-        raise ValueError(f"Agent file not found: {agent_path}")
+
+    # Handle built-in agents
+    if str(agent_path).startswith("<builtin-"):
+        from .builtin_agents import get_builtin_chat_assistant, get_builtin_default_agent
+
+        if "builtin-default" in str(agent_path):
+            return get_builtin_default_agent()
+        elif "builtin-chat-assistant" in str(agent_path):
+            return get_builtin_chat_assistant()
+        else:
+            raise ValueError(f"Unknown built-in agent: {agent_path}")
+
+    ensure_file_exists(agent_path, "Agent file")
 
     content = agent_path.read_text(encoding="utf-8")
     return parse_agent(content, agent_path)
@@ -149,9 +165,11 @@ def merge_agent_configs(parent, child):
         Merged AgentConfig with child taking precedence
 
     Merge rules:
-    - Scalars (model, max_steps, etc.): child overwrites parent
-    - Lists (tools, prefetch): merge and deduplicate
-    - Dicts (mcp_servers): merge, child keys override
+    - Scalars (model, max_turns, reasoning_effort, text_mode, etc.): child overwrites parent
+    - Lists (tools, attachments): merge and deduplicate
+    - Lists (prefetch): concatenate (parent first, no deduplication)
+    - Lists of dicts (custom_tools): merge and deduplicate by "name" field
+    - Dicts (mcp_servers, context_budget): merge, child keys override
     - Strings (instructions): concatenate with newline
     """
     merged_data = {}
@@ -160,10 +178,13 @@ def merge_agent_configs(parent, child):
     merged_data["name"] = child.name if child.name else parent.name
     merged_data["description"] = child.description if child.description else parent.description
     merged_data["model"] = child.model if child.model else parent.model
-    merged_data["max_steps"] = child.max_steps if child.max_steps != 5 else parent.max_steps
+    merged_data["max_turns"] = child.max_turns if child.max_turns != 5 else parent.max_turns
     merged_data["permissions_profile"] = (
         child.permissions_profile if child.permissions_profile != "default" else parent.permissions_profile
     )
+    merged_data["reasoning_effort"] = child.reasoning_effort if child.reasoning_effort else parent.reasoning_effort
+    # text_mode: use child's value if True (explicitly enabled), otherwise inherit from parent
+    merged_data["text_mode"] = child.text_mode if child.text_mode else parent.text_mode
 
     # Lists - merge and deduplicate
     parent_tools = parent.tools if parent.tools else []
@@ -174,6 +195,23 @@ def merge_agent_configs(parent, child):
     parent_prefetch = parent.prefetch if parent.prefetch else []
     child_prefetch = child.prefetch if child.prefetch else []
     merged_data["prefetch"] = parent_prefetch + child_prefetch
+
+    parent_initial_tasks = parent.initial_tasks if parent.initial_tasks else []
+    child_initial_tasks = child.initial_tasks if child.initial_tasks else []
+    merged_data["initial_tasks"] = parent_initial_tasks + child_initial_tasks
+
+    parent_attachments = parent.attachments if parent.attachments else []
+    child_attachments = child.attachments if child.attachments else []
+    merged_attachments = list(dict.fromkeys(parent_attachments + child_attachments))
+    merged_data["attachments"] = merged_attachments
+
+    parent_custom = parent.custom_tools if parent.custom_tools else []
+    child_custom = child.custom_tools if child.custom_tools else []
+    # Build dict by name to dedupe (child tools override parent tools with same name)
+    custom_tool_dict = {}
+    for tool in parent_custom + child_custom:
+        custom_tool_dict[tool["name"]] = tool
+    merged_data["custom_tools"] = list(custom_tool_dict.values())
 
     # Dicts - merge with child override
     parent_mcp = parent.mcp_servers if parent.mcp_servers else {}
@@ -241,31 +279,78 @@ def resolve_agent_inheritance(agent, agent_path: Path, inheritance_chain: Option
 
     # Build inheritance chain
     configs_to_merge = []
+    contents_to_merge = []
 
-    # 1. Load default base agent (if not the current agent and not opted out)
-    default_base_name = _get_default_base_agent_name()
-    if default_base_name and current_config.extends != "none":
-        # Don't load default if current agent IS the default
-        default_path = find_agent_file(default_base_name, agent_path.parent)
-        if default_path and default_path.resolve() != resolved_path:
-            # Only load if not already in chain (prevents infinite recursion)
-            if default_path.resolve() not in inheritance_chain:
+    # 1. Load default base agent (only for implicit inheritance)
+    # - If extends is None: auto-inherit from default base
+    # - If extends is a parent name: don't auto-inherit (explicit inheritance only)
+    # - If extends is "none": opt out of all inheritance
+    # Search priority for default base:
+    # a) User's project-local default.md (if exists)
+    # b) Config's default_base_agent
+    # c) Builtin fallback
+    if current_config.extends is None:
+        # First, try to find user's project-local default.md
+        user_default_path = agent_path.parent / ".tsugite" / "default.md"
+        loaded_default = False
+
+        if user_default_path.exists() and user_default_path.resolve() != resolved_path:
+            # Load user's local default.md
+            if user_default_path.resolve() not in inheritance_chain:
                 try:
-                    default_agent = load_extended_agent(default_base_name, agent_path, inheritance_chain.copy())
-                    # Recursively resolve default agent's inheritance
-                    default_agent = resolve_agent_inheritance(default_agent, default_path, inheritance_chain.copy())
-                    configs_to_merge.append(default_agent.config)
+                    default_agent = load_extended_agent("default", agent_path, inheritance_chain.copy())
+                    # User's default.md should opt out of builtin inheritance unless it explicitly extends something
+                    # This gives users full control when they create a project-specific default
+                    if default_agent.config.extends is None:
+                        # Don't recursively resolve - user's default is standalone
+                        configs_to_merge.append(default_agent.config)
+                        contents_to_merge.append(default_agent.content)
+                    else:
+                        # User explicitly extended something, so resolve it
+                        default_agent = resolve_agent_inheritance(
+                            default_agent, user_default_path, inheritance_chain.copy()
+                        )
+                        configs_to_merge.append(default_agent.config)
+                        contents_to_merge.append(default_agent.content)
+                    loaded_default = True
                 except ValueError:
                     pass
-        elif default_base_name == "default" and default_path is None:
-            # No user default.md found, use built-in fallback
-            from .builtin_agents import get_builtin_default_agent
 
-            try:
-                builtin_agent = get_builtin_default_agent()
-                configs_to_merge.append(builtin_agent.config)
-            except Exception:
-                pass  # Silently fail if built-in can't be loaded
+        # If no user default.md found (or current agent IS default.md), use config or builtin
+        if not loaded_default:
+            default_base_name = _get_default_base_agent_name()
+            if default_base_name:
+                # Normalize to strip angle brackets
+                normalized_name = default_base_name.strip("<>")
+
+                # If config specifies builtin, use it directly
+                from .builtin_agents import is_builtin_agent
+
+                if is_builtin_agent(normalized_name):
+                    from .builtin_agents import get_builtin_default_agent
+
+                    try:
+                        builtin_agent = get_builtin_default_agent()
+                        configs_to_merge.append(builtin_agent.config)
+                        contents_to_merge.append(builtin_agent.content)
+                    except Exception:
+                        pass
+                else:
+                    # Try to find the configured default agent
+                    default_path = find_agent_file(default_base_name, agent_path.parent)
+                    if default_path and default_path.resolve() != resolved_path:
+                        if default_path.resolve() not in inheritance_chain:
+                            try:
+                                default_agent = load_extended_agent(
+                                    default_base_name, agent_path, inheritance_chain.copy()
+                                )
+                                default_agent = resolve_agent_inheritance(
+                                    default_agent, default_path, inheritance_chain.copy()
+                                )
+                                configs_to_merge.append(default_agent.config)
+                                contents_to_merge.append(default_agent.content)
+                            except ValueError:
+                                pass
 
     # 2. Load explicitly extended agent
     if current_config.extends and current_config.extends != "none":
@@ -275,9 +360,11 @@ def resolve_agent_inheritance(agent, agent_path: Path, inheritance_chain: Option
         # Recursively resolve parent's inheritance
         parent_agent = resolve_agent_inheritance(parent_agent, parent_path, inheritance_chain.copy())
         configs_to_merge.append(parent_agent.config)
+        contents_to_merge.append(parent_agent.content)
 
     # 3. Current agent is last (highest precedence)
     configs_to_merge.append(current_config)
+    contents_to_merge.append(agent.content)
 
     # Merge all configs in order (earlier = lower precedence)
     if len(configs_to_merge) == 1:
@@ -288,22 +375,25 @@ def resolve_agent_inheritance(agent, agent_path: Path, inheritance_chain: Option
     for config in configs_to_merge[1:]:
         merged_config = merge_agent_configs(merged_config, config)
 
-    # Return new Agent with merged config
-    return Agent(config=merged_config, content=agent.content, file_path=agent_path)
+    # Merge all contents in order (parent first, child last)
+    merged_content = "\n\n".join(contents_to_merge)
+
+    # Return new Agent with merged config and content
+    return Agent(config=merged_config, content=merged_content, file_path=agent_path)
 
 
 def _get_default_base_agent_name() -> Optional[str]:
     """Get the default base agent name from config.
 
     Returns:
-        Default base agent name, or "default" as fallback, or None if disabled
+        Default base agent name, or "builtin-default" as fallback, or None if disabled
     """
     from .config import load_config
 
     try:
         config = load_config()
         if config.default_base_agent is None:
-            return "default"
+            return "builtin-default"
         return config.default_base_agent
     except Exception:
-        return "default"
+        return "builtin-default"

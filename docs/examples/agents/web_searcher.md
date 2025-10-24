@@ -2,7 +2,7 @@
 name: web_searcher
 description: Focused web search agent for specific queries
 model: ollama:qwen2.5-coder:7b  # Smaller model for simple searches
-max_steps: 5
+max_turns: 5
 tools: [web_search, fetch_json]
 permissions_profile: web_read_only
 context_budget:

@@ -2,7 +2,7 @@
 name: morning_brief
 description: Generate a comprehensive morning brief with weather, calendar, news, and tasks
 model: ollama:qwen2.5-coder:14b
-max_steps: 10
+max_turns: 10
 tools: [fetch_json, search_memory, write_file, run]
 prefetch:
   - tool: search_memory

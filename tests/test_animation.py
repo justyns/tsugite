@@ -34,7 +34,7 @@ class TestLoadingAnimation:
         assert animation.thread.daemon is True
 
         # Let it run briefly
-        time.sleep(0.1)
+        time.sleep(0.05)
 
         # Stop animation
         animation.stop()
@@ -53,7 +53,7 @@ class TestLoadingAnimation:
         assert animation.thread.daemon is True
 
         # Let it run briefly
-        time.sleep(0.1)
+        time.sleep(0.05)
 
         # Stop animation
         animation.stop()
@@ -154,7 +154,7 @@ class TestLoadingAnimation:
         animation = LoadingAnimation(console)
 
         animation.start("Testing output")
-        time.sleep(0.6)  # Long enough for at least one animation cycle
+        time.sleep(0.15)  # Long enough for at least one animation cycle
         animation.stop()
 
         output_content = output.getvalue()
@@ -294,7 +294,7 @@ class TestAnimationOutputVerification:
         animation = LoadingAnimation(console)
 
         animation.start("Loading data")
-        time.sleep(0.2)  # Let spinner run briefly
+        time.sleep(0.05)  # Let spinner run briefly
         animation.stop()
 
         # Check that Live was used (implicitly through no direct text output)
@@ -309,7 +309,7 @@ class TestAnimationOutputVerification:
         animation = LoadingAnimation(console)
 
         animation.start("Processing")
-        time.sleep(0.6)  # Let it cycle through dots
+        time.sleep(0.15)  # Let it cycle through dots
         animation.stop()
 
         output_content = output.getvalue()
@@ -322,7 +322,7 @@ class TestAnimationOutputVerification:
         animation = LoadingAnimation(console)
 
         animation.start("Clearing test")
-        time.sleep(0.6)  # Let it run long enough to see output
+        time.sleep(0.15)  # Let it run long enough to see output
         animation.stop()
 
         output_content = output.getvalue()

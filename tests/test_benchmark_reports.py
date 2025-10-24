@@ -47,16 +47,16 @@ def sample_benchmark_result():
 
     test_results = {
         "model1": {
-            "basic_001": BenchmarkTestResult("basic_001", "model1", True, 0.9, 1.5, "42", "42"),
-            "basic_002": BenchmarkTestResult("basic_002", "model1", False, 0.3, 2.0, "24", "42"),
-            "tools_001": BenchmarkTestResult("tools_001", "model1", True, 0.8, 2.5, "success", "success"),
-            "tools_002": BenchmarkTestResult("tools_002", "model1", True, 0.7, 2.0, "done", "done"),
+            "basic_001": BenchmarkTestResult("basic_001", "model1", True, 0.9, 1.5, "42", "42", "basic"),
+            "basic_002": BenchmarkTestResult("basic_002", "model1", False, 0.3, 2.0, "24", "42", "basic"),
+            "tools_001": BenchmarkTestResult("tools_001", "model1", True, 0.8, 2.5, "success", "success", "tools"),
+            "tools_002": BenchmarkTestResult("tools_002", "model1", True, 0.7, 2.0, "done", "done", "tools"),
         },
         "model2": {
-            "basic_001": BenchmarkTestResult("basic_001", "model2", True, 1.0, 2.0, "42", "42"),
-            "basic_002": BenchmarkTestResult("basic_002", "model2", True, 0.9, 3.0, "42", "42"),
-            "tools_001": BenchmarkTestResult("tools_001", "model2", True, 1.0, 4.0, "success", "success"),
-            "tools_002": BenchmarkTestResult("tools_002", "model2", True, 0.8, 3.0, "done", "done"),
+            "basic_001": BenchmarkTestResult("basic_001", "model2", True, 1.0, 2.0, "42", "42", "basic"),
+            "basic_002": BenchmarkTestResult("basic_002", "model2", True, 0.9, 3.0, "42", "42", "basic"),
+            "tools_001": BenchmarkTestResult("tools_001", "model2", True, 1.0, 4.0, "success", "success", "tools"),
+            "tools_002": BenchmarkTestResult("tools_002", "model2", True, 0.8, 3.0, "done", "done", "tools"),
         },
     }
 
@@ -177,9 +177,9 @@ class TestReportGenerator:
         assert "**Performance Tier**: Good" in content
 
         # Verify test details table
-        assert "| Test ID | Category | Result | Score | Duration |" in content
-        assert "| basic_001 | basic | ✅ PASS | 0.90 | 1.50s |" in content
-        assert "| basic_002 | basic | ❌ FAIL | 0.30 | 2.00s |" in content
+        assert "| Test ID | Category | Result | Score | Duration | Steps | Cost |" in content
+        assert "| basic_001 | basic | ✅ PASS | 0.90 | 1.50s | 0 | $0.00 |" in content
+        assert "| basic_002 | basic | ❌ FAIL | 0.30 | 2.00s | 0 | $0.00 |" in content
 
         # Verify errors section
         assert "timeout" in content
@@ -255,29 +255,29 @@ class TestReportGenerator:
         assert len(lines) == 9  # 1 header + 8 data rows
 
         # Verify some specific data
-        assert "model1,basic_001,basic,True,0.9,1.5,0,0.0," in content
-        assert "model1,basic_002,basic,False,0.3,2.0,0,0.0," in content
-        assert "model2,basic_001,basic,True,1.0,2.0,0,0.0," in content
+        assert "model1,basic_001,basic,True,0.9,1.5,0,0,0.0," in content
+        assert "model1,basic_002,basic,False,0.3,2.0,0,0,0.0," in content
+        assert "model2,basic_001,basic,True,1.0,2.0,0,0,0.0," in content
 
     def test_get_test_category(self, sample_benchmark_result):
         """Test test category extraction."""
-        generator = ReportGenerator(sample_benchmark_result)
+        from tsugite.benchmark.utils import get_test_category
 
-        assert generator._get_test_category("basic_001") == "basic"
-        assert generator._get_test_category("tools_002") == "tools"
-        assert generator._get_test_category("scenarios_003") == "scenarios"
-        assert generator._get_test_category("performance_004") == "performance"
-        assert generator._get_test_category("unknown_test") == "unknown"
+        assert get_test_category("basic_001") == "basic"
+        assert get_test_category("tools_002") == "tools"
+        assert get_test_category("scenarios_003") == "scenarios"
+        assert get_test_category("performance_004") == "performance"
+        assert get_test_category("unknown_test") == "unknown"
 
     def test_get_performance_tier(self, sample_benchmark_result):
         """Test performance tier classification."""
-        generator = ReportGenerator(sample_benchmark_result)
+        from tsugite.benchmark.config import get_performance_tier
 
-        assert generator._get_performance_tier(0.95) == "Excellent"
-        assert generator._get_performance_tier(0.80) == "Good"
-        assert generator._get_performance_tier(0.65) == "Fair"
-        assert generator._get_performance_tier(0.50) == "Poor"
-        assert generator._get_performance_tier(0.30) == "Very Poor"
+        assert get_performance_tier(0.95) == "Excellent"
+        assert get_performance_tier(0.80) == "Good"
+        assert get_performance_tier(0.65) == "Fair"
+        assert get_performance_tier(0.50) == "Poor"
+        assert get_performance_tier(0.30) == "Very Poor"
 
     def test_calculate_category_breakdown(self, sample_benchmark_result):
         """Test category performance breakdown calculation."""

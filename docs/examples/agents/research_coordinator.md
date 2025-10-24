@@ -2,7 +2,7 @@
 name: research_coordinator
 description: Orchestrate research on a topic using multiple search agents
 model: ollama:qwen2.5-coder:14b
-max_steps: 12
+max_turns: 12
 tools: [write_file, memory_write]
 prefetch:
   - tool: search_memory

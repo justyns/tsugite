@@ -4,7 +4,8 @@ from pathlib import Path
 
 from tsugite.agent_inheritance import find_agent_file
 from tsugite.agent_utils import list_local_agents
-from tsugite.builtin_agents import get_builtin_default_agent, is_builtin_agent
+from tsugite.builtin_agents import get_builtin_chat_assistant, get_builtin_default_agent, is_builtin_agent
+from tsugite.renderer import AgentRenderer
 
 
 class TestBuiltinAgents:
@@ -127,3 +128,139 @@ Task: {{ user_prompt }}
         assert agent.config.name == "builtin-default"
         assert agent.content
         assert "{{ user_prompt }}" in agent.content
+
+
+class TestBuiltinDefaultAutoDiscovery:
+    """Test builtin-default agent's auto-discovery features."""
+
+    def test_builtin_default_has_spawn_agent_tool(self):
+        """Test that builtin-default includes spawn_agent tool."""
+        agent = get_builtin_default_agent()
+
+        assert "spawn_agent" in agent.config.tools
+
+    def test_builtin_default_has_prefetch(self):
+        """Test that builtin-default has prefetch configured."""
+        agent = get_builtin_default_agent()
+
+        assert agent.config.prefetch is not None
+        assert len(agent.config.prefetch) > 0
+
+        # Check that list_agents is in prefetch
+        prefetch_tools = [p.get("tool") for p in agent.config.prefetch]
+        assert "list_agents" in prefetch_tools
+
+    def test_builtin_default_prefetch_assigns_variable(self):
+        """Test that prefetch assigns to available_agents variable."""
+        agent = get_builtin_default_agent()
+
+        list_agents_prefetch = next((p for p in agent.config.prefetch if p.get("tool") == "list_agents"), None)
+
+        assert list_agents_prefetch is not None
+        assert list_agents_prefetch.get("assign") == "available_agents"
+
+    def test_builtin_default_content_structure(self):
+        """Test that builtin-default has delegation instructions."""
+        agent = get_builtin_default_agent()
+
+        # Should have conditional block for available agents
+        assert "{% if available_agents %}" in agent.content
+
+        # Should mention delegation
+        assert "delegate" in agent.content.lower()
+        assert "spawn_agent" in agent.content
+
+        # Should have example usage
+        assert "agents/" in agent.content or "agent_path" in agent.content
+
+    def test_builtin_default_instructions_mention_delegation(self):
+        """Test that instructions guide on delegation."""
+        agent = get_builtin_default_agent()
+
+        # Instructions should be set
+        assert agent.config.instructions
+
+        # Content should explain when/how to delegate
+        content_lower = agent.content.lower()
+        assert "specialized" in content_lower or "delegate" in content_lower
+
+    def test_builtin_default_web_search_guidelines_conditional(self):
+        """Test that web search guidelines only appear when web_search tool is available."""
+        agent = get_builtin_default_agent()
+        renderer = AgentRenderer()
+
+        # Base context needed for builtin-default template
+        base_context = {
+            "user_prompt": "test",
+            "task_summary": "",
+            "text_mode": False,
+            "is_interactive": False,
+            "available_agents": "",  # From prefetch
+        }
+
+        # Test WITH web_search tool
+        context_with_web_search = {
+            **base_context,
+            "tools": ["read_file", "write_file", "web_search"],
+        }
+        rendered_with = renderer.render(agent.content, context_with_web_search)
+        assert "Web Search Guidelines" in rendered_with
+        assert "web_search(query=" in rendered_with
+
+        # Test WITHOUT web_search tool
+        context_without_web_search = {
+            **base_context,
+            "tools": ["read_file", "write_file"],
+        }
+        rendered_without = renderer.render(agent.content, context_without_web_search)
+        assert "Web Search Guidelines" not in rendered_without
+        assert "web_search(query=" not in rendered_without
+
+
+class TestBuiltinChatAssistant:
+    """Test builtin-chat-assistant agent configuration."""
+
+    def test_chat_assistant_has_web_search_tool(self):
+        """Test that chat assistant includes web_search tool."""
+        agent = get_builtin_chat_assistant()
+
+        assert "web_search" in agent.config.tools
+
+    def test_chat_assistant_has_fetch_text_tool(self):
+        """Test that chat assistant includes fetch_text tool."""
+        agent = get_builtin_chat_assistant()
+
+        assert "fetch_text" in agent.config.tools
+
+    def test_chat_assistant_documents_web_search_format(self):
+        """Test that chat assistant explains web_search return format."""
+        agent = get_builtin_chat_assistant()
+
+        content = agent.content.lower()
+
+        # Should document the return format with all three fields
+        assert "title" in content
+        assert "url" in content
+        assert "snippet" in content
+
+        # Should show example structure (the [{"... format)
+        assert "[{" in content or "returns:" in content
+
+    def test_chat_assistant_warns_against_raw_json(self):
+        """Test that chat assistant warns against returning raw JSON."""
+        agent = get_builtin_chat_assistant()
+
+        content = agent.content.lower()
+
+        # Should instruct to format results nicely
+        assert "format" in content and "nicely" in content or "extract" in content
+
+    def test_chat_assistant_mentions_fetch_text_usage(self):
+        """Test that chat assistant explains when to use fetch_text."""
+        agent = get_builtin_chat_assistant()
+
+        content = agent.content.lower()
+
+        # Should mention using fetch_text for full page content
+        assert "fetch_text" in content
+        assert "full" in content or "page" in content or "content" in content
