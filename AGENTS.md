@@ -137,6 +137,10 @@ Write `article.md`, confirm it exists, and surface the final text.
 
 - Model strings follow `provider:model[:variant]`; parsed by `tsugite.models.parse_model_string`.
 - Built-in providers via LiteLLM: `ollama` (local, default URL `http://localhost:11434/v1`), `openai`, `anthropic`, `google`, `github_copilot`, plus any other LiteLLM-supported providers.
+- **ACP (Agent Client Protocol)**: Connect to external agent services like Claude Code via `acp:model_name[:url]` format.
+  - `acp:claude-code` - Uses default localhost:8080
+  - `acp:claude-code:http://localhost:8080` - Explicit URL
+  - `acp:claude-3-5-sonnet-20241022:http://custom-server:9000` - Custom server with specific model
 - Ensure requisite API keys (e.g., `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) are present before running agents.
 - Ollama requires the local server; override base URL via environment variables when needed.
 
