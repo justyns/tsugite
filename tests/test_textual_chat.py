@@ -1,5 +1,6 @@
 """Tests for Textual chat UI functionality."""
 
+import sys
 from unittest.mock import Mock, patch
 
 import pytest
@@ -210,6 +211,10 @@ class TestMessageListWidget:
         assert success, f"compose() raised error: {error if not success else ''}"
 
 
+@pytest.mark.skipif(
+    sys.version_info >= (3, 14),
+    reason="Textual has compatibility issues with Python 3.14+ (current_task() returns None in RLock)",
+)
 class TestChatAppIntegration:
     """Integration tests for ChatApp."""
 
