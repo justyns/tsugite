@@ -7,7 +7,7 @@ import pytest
 
 # Import task tools to ensure they're registered
 import tsugite.tools.tasks  # noqa: F401
-from tsugite.agent_runner import run_agent
+from tsugite.agent_runner import run_agent_async, run_multistep_agent_async
 from tsugite.md_agents import AgentConfig
 
 
@@ -28,7 +28,8 @@ def mock_agent_runner():
     return create_mock
 
 
-def test_is_interactive_flag_true_in_tty(temp_dir, monkeypatch, mock_agent_runner, task_tools):
+@pytest.mark.asyncio
+async def test_is_interactive_flag_true_in_tty(temp_dir, monkeypatch, mock_agent_runner, task_tools):
     """Test that is_interactive flag is True when running in a TTY."""
     # Mock TTY check to return True
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
@@ -56,14 +57,15 @@ Task: {{ user_prompt }}
     mock_instance, captured_prompts = mock_agent_runner()
 
     with patch("tsugite.agent_runner.runner.TsugiteAgent", return_value=mock_instance):
-        run_agent(agent_file, "test prompt")
+        await run_agent_async(agent_file, "test prompt")
 
     # Verify is_interactive was True in the rendered prompt
     assert len(captured_prompts) > 0
     assert "Interactive mode: True" in captured_prompts[0]
 
 
-def test_is_interactive_flag_false_in_non_tty(temp_dir, monkeypatch, mock_agent_runner, task_tools):
+@pytest.mark.asyncio
+async def test_is_interactive_flag_false_in_non_tty(temp_dir, monkeypatch, mock_agent_runner, task_tools):
     """Test that is_interactive flag is False when not running in a TTY."""
     # Mock TTY check to return False
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
@@ -91,17 +93,16 @@ Task: {{ user_prompt }}
     mock_instance, captured_prompts = mock_agent_runner()
 
     with patch("tsugite.agent_runner.runner.TsugiteAgent", return_value=mock_instance):
-        run_agent(agent_file, "test prompt")
+        await run_agent_async(agent_file, "test prompt")
 
     # Verify is_interactive was False in the rendered prompt
     assert len(captured_prompts) > 0
     assert "Interactive mode: False" in captured_prompts[0]
 
 
-def test_multistep_agent_receives_interactive_flag(temp_dir, monkeypatch, mock_agent_runner, task_tools):
+@pytest.mark.asyncio
+async def test_multistep_agent_receives_interactive_flag(temp_dir, monkeypatch, mock_agent_runner, task_tools):
     """Test that multi-step agents receive the is_interactive flag."""
-    from tsugite.agent_runner import run_multistep_agent
-
     # Mock TTY check
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
@@ -132,7 +133,7 @@ Task: {{ user_prompt }}
     mock_instance, captured_prompts = mock_agent_runner("Step complete")
 
     with patch("tsugite.agent_runner.runner.TsugiteAgent", return_value=mock_instance):
-        run_multistep_agent(agent_file, "test prompt")
+        await run_multistep_agent_async(agent_file, "test prompt")
 
     # Verify at least one prompt was captured
     assert len(captured_prompts) > 0
@@ -141,7 +142,8 @@ Task: {{ user_prompt }}
     assert any("Check interactive mode: True" in p for p in captured_prompts)
 
 
-def test_interactive_flag_available_in_templates(temp_dir, monkeypatch, mock_agent_runner, task_tools):
+@pytest.mark.asyncio
+async def test_interactive_flag_available_in_templates(temp_dir, monkeypatch, mock_agent_runner, task_tools):
     """Test that is_interactive can be used in template conditionals."""
     # Mock TTY check
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
@@ -173,7 +175,7 @@ Task: {{ user_prompt }}
     mock_instance, captured_prompts = mock_agent_runner()
 
     with patch("tsugite.agent_runner.runner.TsugiteAgent", return_value=mock_instance):
-        run_agent(agent_file, "test prompt")
+        await run_agent_async(agent_file, "test prompt")
 
     # Verify the conditional worked
     assert len(captured_prompts) > 0

@@ -621,6 +621,103 @@ def run_agent(
         clear_current_agent()
 
 
+async def run_agent_async(
+    agent_path: Path,
+    prompt: str,
+    context: Optional[Dict[str, Any]] = None,
+    model_override: Optional[str] = None,
+    debug: bool = False,
+    custom_logger: Optional[Any] = None,
+    trust_mcp_code: bool = False,
+    delegation_agents: Optional[List[tuple[str, Path]]] = None,
+    return_token_usage: bool = False,
+    stream: bool = False,
+    force_text_mode: bool = False,
+) -> str | tuple[str, Optional[int], Optional[float], int, list]:
+    """Run a Tsugite agent (async version for tests and async contexts).
+
+    This is the async version of run_agent() that can be awaited directly.
+    Use this in async contexts (like pytest-asyncio tests) to avoid event loop conflicts.
+
+    Args:
+        agent_path: Path to agent markdown file
+        prompt: User prompt/task for the agent
+        context: Additional context variables
+        model_override: Override agent's default model
+        debug: Enable debug output (rendered prompt)
+        custom_logger: Custom logger for agent output
+        trust_mcp_code: Whether to trust remote code from MCP servers
+        delegation_agents: List of (name, path) tuples for agents to make available for delegation
+        return_token_usage: Whether to return token usage and cost from LiteLLM
+        stream: Whether to stream responses in real-time
+        force_text_mode: Force text_mode=True regardless of agent config (useful for chat UI)
+
+    Returns:
+        Agent execution result as string, or tuple of (result, token_count, cost, step_count, execution_steps) if return_token_usage=True
+
+    Raises:
+        ValueError: If agent file is invalid
+        RuntimeError: If agent execution fails
+    """
+    if context is None:
+        context = {}
+
+    # Initialize task manager for this agent session
+    reset_task_manager()
+    task_manager = get_task_manager()
+
+    # Parse agent configuration (with inheritance resolution)
+    try:
+        agent = parse_agent_file(agent_path)
+        agent_config = agent.config
+    except Exception as e:
+        raise ValueError(f"Failed to parse agent file: {e}")
+
+    # Populate initial tasks from agent config
+    _populate_initial_tasks(agent_config)
+
+    # Set current agent in thread-local storage for spawn_agent tracking
+    set_current_agent(agent_config.name)
+
+    try:
+        # Override text_mode if force_text_mode is True (for chat UI)
+        if force_text_mode:
+            agent_config.text_mode = True
+
+        # Prepare agent using unified preparation pipeline
+        from tsugite.agent_preparation import AgentPreparer
+
+        preparer = AgentPreparer()
+        prepared = preparer.prepare(
+            agent=agent,
+            prompt=prompt,
+            context=context,
+            delegation_agents=delegation_agents,
+            task_summary=task_manager.get_task_summary(),
+            tasks=task_manager.get_tasks_for_template(),
+        )
+
+        # Debug output if requested
+        if debug:
+            _stderr_console.rule("[bold cyan]DEBUG: Rendered Prompt[/bold cyan]")
+            _stderr_console.print(prepared.rendered_prompt)
+            _stderr_console.rule("[bold cyan]End Rendered Prompt[/bold cyan]")
+
+        # Execute with the low-level helper (async - no asyncio.run wrapper)
+        return await _execute_agent_with_prompt(
+            prepared=prepared,
+            model_override=model_override,
+            custom_logger=custom_logger,
+            trust_mcp_code=trust_mcp_code,
+            delegation_agents=delegation_agents,
+            return_token_usage=return_token_usage,
+            stream=stream,
+        )
+    finally:
+        # Always clear the current agent context when done
+        clear_current_agent()
+
+
 # Predefined loop condition helpers
 # These are plain Jinja2 expressions (no {{ }}) that can be used in {% if %} blocks
 LOOP_HELPERS = {
@@ -961,6 +1058,474 @@ def run_multistep_agent(
                             return await coro
 
                     step_result = asyncio.run(execute_step())
+
+                    final_result = step_result
+
+                    # Store result in context if assign variable specified
+                    if step.assign_var:
+                        step_context[step.assign_var] = step_result
+                        if debug:
+                            _stderr_console.print(f"[dim]Assigned result to variable: {step.assign_var}[/dim]")
+
+                    # Update task summary and tasks list for next step
+                    step_context["task_summary"] = task_manager.get_task_summary()
+                    step_context["tasks"] = task_manager.get_tasks_for_template()
+
+                    # Show step completion
+                    if custom_logger and not debug:
+                        # Clear multi-step context after step completes
+                        ui_handler = get_ui_handler(custom_logger)
+                        if ui_handler:
+                            ui_handler.clear_multistep_context()
+
+                        custom_logger.console.print(f"[green]{step_header} Complete[/green]")
+                    elif not debug:
+                        _stderr_console.print(f"[green]{step_header} Complete[/green]")
+
+                    # Record metrics for successful step
+                    step_duration = time.time() - step_start_time
+                    step_metrics.append(
+                        StepMetrics(
+                            step_name=step.name,
+                            step_number=i,
+                            duration=step_duration,
+                            status="success",
+                        )
+                    )
+
+                    # Success - break retry loop
+                    break
+
+                except asyncio.TimeoutError:
+                    error_msg = f"Step timed out after {step.timeout} seconds"
+                    errors.append(error_msg)
+
+                except Exception as e:
+                    error_msg = str(e)
+                    errors.append(error_msg)
+
+                    # Check if we should continue despite the error
+                    if step.continue_on_error:
+                        # Log warning but continue execution
+                        ui_handler = get_ui_handler(custom_logger)
+                        if ui_handler:
+                            ui_handler.clear_multistep_context()
+
+                        warning_msg = f"⚠ Step '{step.name}' failed but continuing (continue_on_error=true)"
+                        console = get_display_console(custom_logger)
+                        console.print(f"[yellow]{warning_msg}[/yellow]")
+                        console.print(f"[dim]Error: {error_msg}[/dim]")
+
+                        # Assign None to the variable if specified
+                        if step.assign_var:
+                            step_context[step.assign_var] = None
+                            if debug:
+                                _stderr_console.print(f"[dim]Assigned None to variable: {step.assign_var}[/dim]")
+
+                        # Record metrics for skipped step
+                        step_duration = time.time() - step_start_time
+                        step_metrics.append(
+                            StepMetrics(
+                                step_name=step.name,
+                                step_number=i,
+                                duration=step_duration,
+                                status="skipped",
+                                error=error_msg,
+                            )
+                        )
+
+                        # Break retry loop and move to next step
+                        break
+
+                    if attempt == max_attempts - 1:
+                        ui_handler = get_ui_handler(custom_logger)
+                        if ui_handler:
+                            ui_handler.clear_multistep_context()
+
+                        # Build detailed error message with context
+                        error_msg = _build_step_error_message(
+                            error_type="Execution Failed",
+                            step_name=step.name,
+                            step_number=i,
+                            total_steps=len(steps),
+                            errors=errors,
+                            available_vars=list(injectable_vars.keys()),
+                            previous_step=steps[i - 2].name if i > 1 else "None",
+                            max_attempts=max_attempts,
+                            debug_tips=[
+                                "1. Run with --debug to see rendered prompts",
+                                "2. Check variable values in previous steps",
+                                "3. Verify step dependencies are correct",
+                            ],
+                        )
+
+                        raise RuntimeError(error_msg)
+
+                    if step.retry_delay > 0:
+                        time.sleep(step.retry_delay)
+
+                    if custom_logger and not debug:
+                        custom_logger.console.print(f"[yellow]Step '{step.name}' failed: {error_msg}[/yellow]")
+                    elif not debug:
+                        _stderr_console.print(f"[yellow]Step '{step.name}' failed: {error_msg}[/yellow]")
+
+                # End of retry loop - now check if we should repeat the step
+
+                # Check if we should repeat this step (loop control)
+                should_repeat = False
+
+                if step.repeat_while:
+                    try:
+                        should_repeat = evaluate_loop_condition(step.repeat_while, step_context)
+                        if debug:
+                            _stderr_console.print(f"[dim]Loop condition (while): {should_repeat}[/dim]")
+                    except Exception as e:
+                        _stderr_console.print(f"[yellow]Warning: Loop condition evaluation failed: {e}[/yellow]")
+                        should_repeat = False
+
+                elif step.repeat_until:
+                    try:
+                        condition_met = evaluate_loop_condition(step.repeat_until, step_context)
+                        should_repeat = not condition_met  # Repeat UNTIL condition is true
+                        if debug:
+                            _stderr_console.print(
+                                f"[dim]Loop condition (until): condition_met={condition_met}, repeat={should_repeat}[/dim]"
+                            )
+                    except Exception as e:
+                        _stderr_console.print(f"[yellow]Warning: Loop condition evaluation failed: {e}[/yellow]")
+                        should_repeat = False
+
+                # Safety check: max iterations
+                if should_repeat and iteration >= step.max_iterations:
+                    _stderr_console.print(
+                        f"[yellow]⚠️  Step '{step.name}' reached max_iterations ({step.max_iterations}). "
+                        f'Use max_iterations="N" to increase limit.[/yellow]'
+                    )
+                    should_repeat = False
+
+                # Exit while loop if we shouldn't repeat
+                if not should_repeat:
+                    if step_is_looping and iteration > 1 and not debug:
+                        _stderr_console.print(f"[dim]Step '{step.name}' completed after {iteration} iterations[/dim]")
+                    break
+
+                # Update task context for next iteration
+                step_context["task_summary"] = task_manager.get_task_summary()
+                step_context["tasks"] = task_manager.get_tasks_for_template()
+
+                if custom_logger and not debug:
+                    custom_logger.console.print(
+                        f"[cyan]🔁 Repeating step '{step.name}' (iteration {iteration + 1})[/cyan]"
+                    )
+                elif not debug:
+                    _stderr_console.print(f"[cyan]🔁 Repeating step '{step.name}' (iteration {iteration + 1})[/cyan]")
+
+            # End of while True loop for step iteration
+
+        # Display metrics summary
+        if step_metrics:
+            display_step_metrics(step_metrics, custom_logger if custom_logger else None)
+
+        return final_result or ""
+    finally:
+        # Always clear the current agent context when done
+        clear_current_agent()
+
+
+async def run_multistep_agent_async(
+    agent_path: Path,
+    prompt: str,
+    context: Optional[Dict[str, Any]] = None,
+    model_override: Optional[str] = None,
+    debug: bool = False,
+    custom_logger: Optional[Any] = None,
+    trust_mcp_code: bool = False,
+    delegation_agents: Optional[List[tuple[str, Path]]] = None,
+    stream: bool = False,
+) -> str:
+    """Run a multi-step Tsugite agent (async version for tests and async contexts).
+
+    Multi-step agents use <!-- tsu:step --> directives to execute sequentially,
+    with each step being a full agent run. Results from earlier steps can be
+    assigned to variables and used in later steps.
+
+    Args:
+        agent_path: Path to agent markdown file
+        prompt: User prompt/task for the agent
+        context: Additional context variables
+        model_override: Override agent's default model
+        debug: Enable debug output (rendered prompts for each step)
+        custom_logger: Custom logger for agent output
+        trust_mcp_code: Whether to trust remote code from MCP servers
+        delegation_agents: List of (name, path) tuples for agents to make available
+        stream: Whether to stream responses in real-time (currently unused for multi-step agents)
+
+    Returns:
+        Result from the final step
+
+    Raises:
+        ValueError: If agent file is invalid or step parsing fails
+        RuntimeError: If any step execution fails
+    """
+    from tsugite.md_agents import extract_step_directives, has_step_directives
+
+    if context is None:
+        context = {}
+
+    # Parse agent (with inheritance resolution)
+    try:
+        agent = parse_agent_file(agent_path)
+    except Exception as e:
+        raise ValueError(f"Failed to parse agent file: {e}")
+
+    # Set current agent in thread-local storage for spawn_agent tracking
+    set_current_agent(agent.config.name)
+
+    try:
+        # Extract steps from raw markdown (before any rendering)
+        if not has_step_directives(agent.content):
+            raise ValueError(f"Agent {agent_path} does not contain step directives. Use run_agent() instead.")
+
+        preamble, steps = extract_step_directives(agent.content)
+    except Exception as e:
+        raise ValueError(f"Failed to parse step directives: {e}")
+
+    try:
+        if not steps:
+            raise ValueError("No valid step directives found in agent")
+
+        # Validate unique step names
+        step_names = [s.name for s in steps]
+        if len(step_names) != len(set(step_names)):
+            duplicates = [name for name in step_names if step_names.count(name) > 1]
+            raise ValueError(f"Duplicate step names found: {', '.join(set(duplicates))}")
+
+        # Initialize task manager ONCE for entire multi-step execution
+        # This allows tasks to persist and accumulate across steps
+        reset_task_manager()
+        task_manager = get_task_manager()
+
+        # Populate initial tasks from agent config
+        _populate_initial_tasks(agent.config)
+
+        # Check if running in interactive mode
+        interactive_mode = is_interactive()
+
+        # Initialize context with user prompt
+        step_context = {
+            **context,
+            "user_prompt": prompt,
+            "task_summary": task_manager.get_task_summary(),
+            "tasks": task_manager.get_tasks_for_template(),
+            "is_interactive": interactive_mode,
+            "text_mode": agent.config.text_mode,
+            "tools": agent.config.tools,  # Make tools list available to templates
+            # Subagent context (set by spawn_agent if this is a spawned agent)
+            "is_subagent": context.get("is_subagent", False),
+            "parent_agent": context.get("parent_agent", None),
+        }
+
+        # Execute prefetch once (before any steps)
+        if agent.config.prefetch:
+            try:
+                prefetch_context = execute_prefetch(agent.config.prefetch)
+                step_context.update(prefetch_context)
+            except Exception as e:
+                _stderr_console.print(f"[yellow]Warning: Prefetch execution failed: {e}[/yellow]")
+
+        # Execute each step sequentially
+        final_result = None
+        step_metrics: List[StepMetrics] = []
+
+        for i, step in enumerate(steps, 1):
+            # Add step information to context for this step
+            step_context["step_number"] = i
+            step_context["step_name"] = step.name
+            step_context["total_steps"] = len(steps)
+
+            # Loop control: iterate if step has repeat_while or repeat_until
+            iteration = 0
+            step_is_looping = bool(step.repeat_while or step.repeat_until)
+
+            while True:
+                iteration += 1
+
+                # Add iteration context
+                step_context["iteration"] = iteration
+                step_context["max_iterations"] = step.max_iterations
+                step_context["is_looping_step"] = step_is_looping
+
+                # Show step progress (unless in debug mode which has its own output)
+                if step_is_looping:
+                    step_header = f"[Step {i}/{len(steps)}: {step.name} (Iteration {iteration})]"
+                else:
+                    step_header = f"[Step {i}/{len(steps)}: {step.name}]"
+
+                # Retry loop
+                max_attempts = step.max_retries + 1
+                errors = []
+                step_start_time = time.time()
+
+                for attempt in range(max_attempts):
+                    # Add retry context variables
+                    step_context["is_retry"] = attempt > 0
+                step_context["retry_count"] = attempt
+                step_context["max_retries"] = step.max_retries
+                step_context["last_error"] = errors[-1] if errors else ""
+                step_context["all_errors"] = errors
+
+                if custom_logger and not debug:
+                    # Set multi-step context for nested progress display
+                    ui_handler = get_ui_handler(custom_logger)
+                    if ui_handler:
+                        ui_handler.set_multistep_context(i, step.name, len(steps))
+
+                    # Show retry attempt if applicable
+                    if attempt > 0:
+                        custom_logger.console.print(
+                            f"[yellow]{step_header} Retry {attempt}/{step.max_retries}...[/yellow]"
+                        )
+                    else:
+                        custom_logger.console.print(f"[cyan]{step_header} Starting...[/cyan]")
+                elif not debug:
+                    # Direct output for native-ui/silent modes
+                    if attempt > 0:
+                        _stderr_console.print(f"{step_header} Retry {attempt}/{step.max_retries}...")
+                    else:
+                        _stderr_console.print(f"{step_header} Starting...")
+
+                if debug:
+                    if attempt > 0:
+                        _stderr_console.rule(
+                            f"[bold cyan]DEBUG: Retrying Step {i}/{len(steps)}: {step.name} (Attempt {attempt + 1}/{max_attempts})[/bold cyan]"
+                        )
+                    else:
+                        _stderr_console.rule(
+                            f"[bold cyan]DEBUG: Executing Step {i}/{len(steps)}: {step.name}[/bold cyan]"
+                        )
+
+                # Execute tool directives in this step's content
+                step_modified_content, step_tool_context = execute_tool_directives(step.content, step_context)
+
+                # Update step context with tool results
+                step_context.update(step_tool_context)
+
+                # Render this step's content with current context
+                renderer = AgentRenderer()
+                try:
+                    rendered_step_prompt = renderer.render(step_modified_content, step_context)
+
+                    if debug:
+                        _stderr_console.print("\n[bold]Rendered Prompt:[/bold]")
+                        _stderr_console.print(rendered_step_prompt)
+                        _stderr_console.rule()
+
+                except Exception as e:
+                    error_msg = f"Template rendering failed: {e}"
+                    errors.append(error_msg)
+
+                    if attempt == max_attempts - 1:
+                        ui_handler = get_ui_handler(custom_logger)
+                        if ui_handler:
+                            ui_handler.clear_multistep_context()
+
+                        # Build detailed error message for rendering failure
+                        error_msg = _build_step_error_message(
+                            error_type="Template Rendering Failed",
+                            step_name=step.name,
+                            step_number=i,
+                            total_steps=len(steps),
+                            errors=errors,
+                            available_vars=list(step_context.keys()),
+                            previous_step=steps[i - 2].name if i > 1 else "None",
+                            max_attempts=max_attempts,
+                            debug_tips=[
+                                "1. Check for undefined variables in step template",
+                                "2. Verify previous steps assigned expected variables",
+                                "3. Run with --debug to see full context",
+                            ],
+                        )
+
+                        raise RuntimeError(error_msg)
+
+                    if step.retry_delay > 0:
+                        time.sleep(step.retry_delay)
+                    continue
+
+                # Prepare variables to inject into Python namespace
+                # Filter out metadata variables, only inject step results
+                metadata_vars = {
+                    "user_prompt",
+                    "task_summary",
+                    "step_number",
+                    "step_name",
+                    "total_steps",
+                    "is_retry",
+                    "retry_count",
+                    "max_retries",
+                    "last_error",
+                    "all_errors",
+                }
+                injectable_vars = {k: v for k, v in step_context.items() if k not in metadata_vars}
+
+                # Build PreparedAgent manually since we've already rendered
+                # (multistep has its own rendering with accumulated context)
+                from tsugite.agent_preparation import PreparedAgent
+                from tsugite.core.agent import build_system_prompt
+                from tsugite.core.tools import create_tool_from_tsugite
+                from tsugite.tools import expand_tool_specs
+
+                # Build instructions
+                base_instructions = get_default_instructions(text_mode=agent.config.text_mode)
+                agent_instructions = getattr(agent.config, "instructions", "")
+                combined_instructions = _combine_instructions(base_instructions, agent_instructions)
+
+                # Expand and create tools
+                expanded_tools = expand_tool_specs(agent.config.tools) if agent.config.tools else []
+                task_tools = ["task_add", "task_update", "task_complete", "task_list", "task_get"]
+                all_tool_names = expanded_tools + task_tools
+                if delegation_agents:
+                    all_tool_names.append("spawn_agent")
+                tools = [create_tool_from_tsugite(name) for name in all_tool_names]
+
+                # Build system message
+                system_message = build_system_prompt(tools, combined_instructions, agent.config.text_mode)
+
+                # Create PreparedAgent
+                prepared = PreparedAgent(
+                    agent=agent,
+                    agent_config=agent.config,
+                    system_message=system_message,
+                    user_message=rendered_step_prompt,
+                    rendered_prompt=rendered_step_prompt,
+                    tools=tools,
+                    context=step_context,
+                    combined_instructions=combined_instructions,
+                    prefetch_results={},  # Already executed in preamble
+                )
+
+                # Execute this step as a full agent run (wrapping async call)
+                try:
+                    # Wrap execution with timeout if specified
+                    async def execute_step():
+                        coro = _execute_agent_with_prompt(
+                            prepared=prepared,
+                            model_override=model_override,
+                            custom_logger=custom_logger,
+                            trust_mcp_code=trust_mcp_code,
+                            delegation_agents=delegation_agents,
+                            skip_task_reset=True,  # Don't reset tasks between steps
+                            model_kwargs=step.model_kwargs,
+                            injectable_vars=injectable_vars,
+                            stream=stream,
+                        )
+
+                        if step.timeout:
+                            return await asyncio.wait_for(coro, timeout=step.timeout)
+                        else:
+                            return await coro
+
+                    step_result = await execute_step()
 
                     final_result = step_result
 

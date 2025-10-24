@@ -17,14 +17,18 @@ from tsugite.agent_runner.runner import (  # noqa: F401
     get_default_instructions,
     preview_multistep_agent,
     run_agent,
+    run_agent_async,
     run_multistep_agent,
+    run_multistep_agent_async,
 )
 from tsugite.agent_runner.validation import get_agent_info, validate_agent_file  # noqa: F401
 from tsugite.tools import call_tool  # noqa: F401 - Re-export for test compatibility
 
 __all__ = [
     "run_agent",
+    "run_agent_async",
     "run_multistep_agent",
+    "run_multistep_agent_async",
     "preview_multistep_agent",
     "execute_prefetch",
     "execute_tool_directives",
