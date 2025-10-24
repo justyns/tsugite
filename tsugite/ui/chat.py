@@ -6,7 +6,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from tsugite.agent_runner import run_agent
 from tsugite.md_agents import parse_agent_file
 from tsugite.ui import CustomUILogger
 
@@ -106,6 +105,9 @@ class ChatManager:
         Returns:
             Agent's response
         """
+        # Import here to avoid circular dependency
+        from tsugite.agent_runner import run_agent
+
         try:
             result = run_agent(
                 agent_path=self.agent_path,

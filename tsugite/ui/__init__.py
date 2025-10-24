@@ -14,6 +14,7 @@ Use the helper functions to create loggers:
 """
 
 from tsugite.ui.base import CustomUIHandler, CustomUILogger, UIEvent, UIState
+from tsugite.ui.chat import ChatManager, ChatTurn
 from tsugite.ui.helpers import (
     create_live_template_logger,
     create_plain_logger,
@@ -23,6 +24,10 @@ from tsugite.ui.helpers import (
 from tsugite.ui.live_template import LiveTemplateHandler
 from tsugite.ui.plain import PlainUIHandler
 from tsugite.ui.textual_handler import TextualUIHandler
+
+# Import textual_chat to make it accessible as attribute for tests
+# Must be after other imports since textual_chat imports from tsugite.ui
+from tsugite.ui import textual_chat  # noqa: F401  # isort: skip
 
 __all__ = [
     # Core classes
@@ -34,6 +39,9 @@ __all__ = [
     "PlainUIHandler",
     "LiveTemplateHandler",
     "TextualUIHandler",
+    # Chat functionality
+    "ChatManager",
+    "ChatTurn",
     # Helper functions
     "custom_agent_ui",
     "create_silent_logger",

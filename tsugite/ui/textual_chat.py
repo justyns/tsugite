@@ -11,10 +11,10 @@ from textual.widgets import Footer, Header, Input
 from textual.worker import Worker, WorkerState
 from textual_autocomplete import AutoComplete, DropdownItem, TargetState
 
-from tsugite.chat import ChatManager
 from tsugite.config import get_chat_theme
 from tsugite.md_agents import parse_agent_file
 from tsugite.ui import CustomUILogger
+from tsugite.ui.chat import ChatManager
 from tsugite.ui.textual_handler import TextualUIHandler
 from tsugite.ui.widgets import MessageList, ThoughtLog
 

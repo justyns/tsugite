@@ -79,12 +79,14 @@ class MCPClient:
             self.transport_ctx = stdio_client(server_params)
             # stdio_client returns a proper async context manager, but pylint can't introspect it
             read, write = await self.transport_ctx.__aenter__()  # pylint: disable=no-member
+            self.transport = (read, write)
 
         elif self.config.is_http():
             # Connect via HTTP using async with
             self.transport_ctx = streamablehttp_client(self.config.url)
             # streamablehttp_client returns a proper async context manager, but pylint can't introspect it
             read, write, _ = await self.transport_ctx.__aenter__()  # pylint: disable=no-member
+            self.transport = (read, write)
         else:
             raise ValueError(f"Unknown transport type: {self.config.type}")
 

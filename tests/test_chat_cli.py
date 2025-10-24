@@ -2,7 +2,7 @@
 
 import pytest
 
-from tsugite.chat import ChatManager
+from tsugite.ui.chat import ChatManager
 
 
 class TestChatCLI:
@@ -121,7 +121,7 @@ Assistant: {{ turn.agent_response }}
     def test_chat_history_context_format(self, test_agent):
         """Test that chat_history is passed as list to agent."""
 
-        from tsugite.chat import ChatTurn
+        from tsugite.ui.chat import ChatTurn
 
         manager = ChatManager(agent_path=test_agent)
 
