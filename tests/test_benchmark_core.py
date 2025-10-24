@@ -1,6 +1,5 @@
 """Tests for the benchmark core functionality."""
 
-import asyncio
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
@@ -282,19 +281,21 @@ async def test_benchmark_error_handling(benchmark_config, temp_benchmark_dir, mo
         assert test_result.error is not None
 
 
-def test_benchmark_with_no_tests(benchmark_config):
+@pytest.mark.asyncio
+async def test_benchmark_with_no_tests(benchmark_config):
     """Test benchmark behavior with no tests found."""
     runner = BenchmarkRunner(benchmark_config)
 
     # Should raise error when no tests found
     with pytest.raises(ValueError, match="No tests found"):
-        asyncio.run(runner.run_benchmark(models=["test-model:v1"], categories=["nonexistent"]))
+        await runner.run_benchmark(models=["test-model:v1"], categories=["nonexistent"])
 
 
-def test_benchmark_with_no_models(benchmark_config):
+@pytest.mark.asyncio
+async def test_benchmark_with_no_models(benchmark_config):
     """Test benchmark behavior with no models specified."""
     runner = BenchmarkRunner(benchmark_config)
 
     # Should raise error when no models specified
     with pytest.raises(ValueError, match="No models specified"):
-        asyncio.run(runner.run_benchmark(models=[], categories=["basic"]))
+        await runner.run_benchmark(models=[], categories=["basic"])
