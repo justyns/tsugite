@@ -33,6 +33,7 @@ tsugite run my_agent.md "greet the user"
 - **Multi-step workflows** - Chain steps with `<!-- tsu:step -->`, pass data between them
 - **Variable injection** - Step outputs automatically available as Python variables
 - **Multiple LLM providers** - OpenAI, Anthropic, Ollama, Google, GitHub Copilot
+- **ACP integration** - Connect to Agent Client Protocol services (Claude Code, etc.)
 - **MCP integration** - Connect to Model Context Protocol servers
 - **Temperature control** - Set per-step model parameters
 

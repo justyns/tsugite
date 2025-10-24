@@ -2,8 +2,9 @@
 
 import pytest
 
+from tsugite.acp_model import ACPModel
 from tsugite.config import Config, add_model_alias
-from tsugite.models import parse_model_string, resolve_model_alias
+from tsugite.models import get_model, parse_model_string, resolve_model_alias
 
 
 def test_parse_model_string():
@@ -54,3 +55,61 @@ def test_resolve_model_alias_nonexistent(tmp_path, monkeypatch):
 
     resolved = resolve_model_alias("nonexistent")
     assert resolved == "nonexistent"
+
+
+def test_parse_model_string_acp():
+    """Test parsing ACP model strings."""
+    # Simple ACP model
+    provider, model, variant = parse_model_string("acp:claude-code")
+    assert provider == "acp"
+    assert model == "claude-code"
+    assert variant is None
+
+    # ACP model with URL
+    provider, model, variant = parse_model_string("acp:claude-code:http://localhost:8080")
+    assert provider == "acp"
+    assert model == "claude-code"
+    assert variant == "http://localhost:8080"
+
+    # ACP model with custom server
+    provider, model, variant = parse_model_string("acp:claude-3-5-sonnet-20241022:http://custom-server:9000")
+    assert provider == "acp"
+    assert model == "claude-3-5-sonnet-20241022"
+    assert variant == "http://custom-server:9000"
+
+
+def test_get_model_acp():
+    """Test creating ACP model."""
+    # Test default ACP model
+    model = get_model("acp:claude-code")
+    assert isinstance(model, ACPModel)
+    assert model.server_url == "http://localhost:8080"
+    assert model.model_id == "claude-code"
+
+    # Test ACP model with custom URL
+    model = get_model("acp:claude-code:http://localhost:9000")
+    assert isinstance(model, ACPModel)
+    assert model.server_url == "http://localhost:9000"
+    assert model.model_id == "claude-code"
+
+    # Test ACP model with explicit server_url parameter
+    model = get_model("acp:custom-model", server_url="http://example.com:8080")
+    assert isinstance(model, ACPModel)
+    assert model.server_url == "http://example.com:8080"
+    assert model.model_id == "custom-model"
+
+
+def test_acp_model_initialization():
+    """Test ACPModel initialization."""
+    model = ACPModel(server_url="http://localhost:8080", model_id="test-model")
+    assert model.server_url == "http://localhost:8080"
+    assert model.model_id == "test-model"
+    assert model.timeout == 300.0
+
+    # Test with custom timeout
+    model = ACPModel(server_url="http://localhost:8080", timeout=60.0)
+    assert model.timeout == 60.0
+
+    # Test URL normalization (trailing slash removal)
+    model = ACPModel(server_url="http://localhost:8080/")
+    assert model.server_url == "http://localhost:8080"

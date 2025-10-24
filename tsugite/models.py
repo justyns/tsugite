@@ -4,6 +4,8 @@ from typing import Optional
 
 from smolagents import LiteLLMModel, OpenAIServerModel
 
+from tsugite.acp_model import ACPModel
+
 
 def resolve_model_alias(model_string: str) -> str:
     """Resolve a model alias to its full model string.
@@ -37,11 +39,13 @@ def parse_model_string(model_string: str) -> tuple[str, str, Optional[str]]:
 
     Args:
         model_string: Format like "ollama:qwen2.5-coder:14b" or "openai:gpt-4"
+                     For ACP with URLs: "acp:claude-code:http://localhost:8080"
 
     Returns:
         Tuple of (provider, model_name, variant)
     """
-    parts = model_string.split(":")
+    # Split only on first two colons to handle URLs in variant
+    parts = model_string.split(":", 2)
     if len(parts) < 2:
         raise ValueError(f"Invalid model string format: {model_string}")
 
@@ -123,6 +127,30 @@ def get_model(model_string: str, **kwargs):
 
         kwargs_with_headers = {**kwargs, "extra_headers": extra_headers}
         return LiteLLMModel(model_id=litellm_model, **kwargs_with_headers)
+
+    elif provider == "acp":
+        # Use ACP (Agent Client Protocol) for external agent services
+        # Format: acp:server_name or acp:server_name:url
+        # Examples:
+        #   acp:claude-code (uses default localhost:8080)
+        #   acp:claude-code:http://localhost:8080
+        #   acp:claude-3-5-sonnet-20241022:http://custom-server:9000
+
+        # Determine server URL
+        if variant:
+            # Variant contains the full URL
+            server_url = variant
+        else:
+            # Default to localhost:8080 for ACP servers
+            server_url = kwargs.get("server_url", "http://localhost:8080")
+
+        # model_name can be used to specify which model the ACP server should use
+        # (if the server supports multiple models)
+        return ACPModel(
+            server_url=server_url,
+            model_id=model_name if model_name != "default" else None,
+            **{k: v for k, v in kwargs.items() if k != "server_url"},
+        )
 
     else:
         # Fallback: try LiteLLM with the provider prefix
