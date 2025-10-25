@@ -4,9 +4,11 @@ import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import List, Optional, Union
 
 from tsugite.xdg import get_xdg_data_path
+
+from .models import ConversationMetadata, Turn
 
 
 def get_history_dir() -> Path:
@@ -62,7 +64,7 @@ def _get_conversation_path(conversation_id: str) -> Path:
     return history_dir / f"{conversation_id}.jsonl"
 
 
-def save_turn_to_history(conversation_id: str, turn_data: Dict[str, Any]) -> None:
+def save_turn_to_history(conversation_id: str, turn_data: Union[Turn, ConversationMetadata]) -> None:
     """Append a turn to conversation history.
 
     Creates the history directory and file if they don't exist.
@@ -70,7 +72,7 @@ def save_turn_to_history(conversation_id: str, turn_data: Dict[str, Any]) -> Non
 
     Args:
         conversation_id: Conversation ID
-        turn_data: Turn data to append (will be JSON serialized)
+        turn_data: Turn or ConversationMetadata model to append
 
     Raises:
         RuntimeError: If write fails
@@ -82,20 +84,20 @@ def save_turn_to_history(conversation_id: str, turn_data: Dict[str, Any]) -> Non
 
     try:
         with open(conversation_path, "a", encoding="utf-8") as f:
-            json.dump(turn_data, f, ensure_ascii=False)
+            f.write(turn_data.model_dump_json(exclude_none=True))
             f.write("\n")
     except IOError as e:
         raise RuntimeError(f"Failed to save turn to {conversation_path}: {e}")
 
 
-def load_conversation(conversation_id: str) -> List[Dict[str, Any]]:
+def load_conversation(conversation_id: str) -> List[Union[ConversationMetadata, Turn]]:
     """Load full conversation from JSONL file.
 
     Args:
         conversation_id: Conversation ID
 
     Returns:
-        List of turn data dictionaries (in order)
+        List of ConversationMetadata/Turn models
 
     Raises:
         FileNotFoundError: If conversation doesn't exist
@@ -106,7 +108,7 @@ def load_conversation(conversation_id: str) -> List[Dict[str, Any]]:
     if not conversation_path.exists():
         raise FileNotFoundError(f"Conversation not found: {conversation_id}")
 
-    turns = []
+    records = []
     try:
         with open(conversation_path, "r", encoding="utf-8") as f:
             for line_num, line in enumerate(f, 1):
@@ -115,40 +117,24 @@ def load_conversation(conversation_id: str) -> List[Dict[str, Any]]:
                     continue  # Skip empty lines
 
                 try:
-                    turn = json.loads(line)
-                    turns.append(turn)
+                    data = json.loads(line)
+                    record_type = data.get("type")
+
+                    if record_type == "metadata":
+                        records.append(ConversationMetadata.model_validate(data))
+                    elif record_type == "turn":
+                        records.append(Turn.model_validate(data))
+                    else:
+                        print(f"Warning: Unknown record type '{record_type}' at line {line_num}")
+
                 except json.JSONDecodeError as e:
                     # Skip malformed lines but log warning
-                    print(f"Warning: Skipping malformed line {line_num} in {conversation_id}: {e}")
+                    print(f"Warning: Skipping malformed JSON at line {line_num} in {conversation_id}: {e}")
                     continue
 
-        return turns
+        return records
     except IOError as e:
         raise RuntimeError(f"Failed to load conversation {conversation_id}: {e}")
-
-
-def delete_conversation(conversation_id: str) -> bool:
-    """Delete a conversation file.
-
-    Args:
-        conversation_id: Conversation ID to delete
-
-    Returns:
-        True if conversation was deleted, False if it didn't exist
-
-    Raises:
-        RuntimeError: If deletion fails
-    """
-    conversation_path = _get_conversation_path(conversation_id)
-
-    if not conversation_path.exists():
-        return False
-
-    try:
-        conversation_path.unlink()
-        return True
-    except IOError as e:
-        raise RuntimeError(f"Failed to delete conversation {conversation_id}: {e}")
 
 
 def list_conversation_files() -> List[Path]:
@@ -169,72 +155,3 @@ def list_conversation_files() -> List[Path]:
         return files
     except OSError:
         return []
-
-
-def prune_conversations(
-    keep_count: Optional[int] = None,
-    older_than_days: Optional[int] = None,
-) -> int:
-    """Delete old conversations based on retention policy.
-
-    Args:
-        keep_count: Keep only this many most recent conversations
-        older_than_days: Delete conversations older than this many days
-
-    Returns:
-        Number of conversations deleted
-
-    Raises:
-        ValueError: If no pruning criteria specified
-    """
-    if keep_count is None and older_than_days is None:
-        raise ValueError("Must specify either keep_count or older_than_days")
-
-    deleted_count = 0
-    files = list_conversation_files()
-
-    # Prune by count
-    if keep_count is not None and len(files) > keep_count:
-        for file_path in files[keep_count:]:
-            try:
-                file_path.unlink()
-                deleted_count += 1
-            except OSError:
-                pass
-
-    # Prune by age
-    if older_than_days is not None:
-        cutoff_time = datetime.now(timezone.utc).timestamp() - (older_than_days * 24 * 3600)
-
-        for file_path in files:
-            try:
-                if file_path.stat().st_mtime < cutoff_time:
-                    file_path.unlink()
-                    deleted_count += 1
-            except OSError:
-                pass
-
-    return deleted_count
-
-
-def list_conversations(
-    machine: Optional[str] = None,
-    agent: Optional[str] = None,
-    limit: Optional[int] = None,
-) -> List[Dict[str, Any]]:
-    """List conversations with optional filtering.
-
-    This is a simple implementation that reads metadata from each file.
-    For better performance with many conversations, use the index module.
-
-    Args:
-        machine: Filter by machine name
-        agent: Filter by agent name
-        limit: Maximum number of conversations to return
-
-    Returns:
-        List of conversation metadata dictionaries
-    """
-    from .index import query_index
-
-    return query_index(machine=machine, agent=agent, limit=limit)

@@ -3,8 +3,9 @@
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
+from .models import ConversationMetadata, IndexEntry, Turn
 from .storage import get_history_dir, list_conversation_files, load_conversation
 
 
@@ -17,11 +18,11 @@ def _get_index_path() -> Path:
     return get_history_dir() / "index.json"
 
 
-def load_index() -> Dict[str, Dict[str, Any]]:
+def load_index() -> Dict[str, IndexEntry]:
     """Load conversation index from JSON file.
 
     Returns:
-        Dictionary mapping conversation IDs to metadata
+        Dictionary mapping conversation IDs to IndexEntry models
         Empty dict if index doesn't exist
     """
     index_path = _get_index_path()
@@ -31,18 +32,21 @@ def load_index() -> Dict[str, Dict[str, Any]]:
 
     try:
         with open(index_path, "r", encoding="utf-8") as f:
-            return json.load(f)
+            raw_index = json.load(f)
+
+        return {conv_id: IndexEntry.model_validate(metadata) for conv_id, metadata in raw_index.items()}
+
     except (json.JSONDecodeError, IOError):
         # Index corrupted, return empty dict
         # Will be rebuilt on next update
         return {}
 
 
-def save_index(index: Dict[str, Dict[str, Any]]) -> None:
+def save_index(index: Dict[str, IndexEntry]) -> None:
     """Save conversation index to JSON file.
 
     Args:
-        index: Index data to save
+        index: Index data to save (IndexEntry models)
 
     Raises:
         RuntimeError: If save fails
@@ -53,13 +57,17 @@ def save_index(index: Dict[str, Dict[str, Any]]) -> None:
     index_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
+        serializable_index = {
+            conv_id: entry.model_dump(mode="json", exclude_none=True) for conv_id, entry in index.items()
+        }
+
         with open(index_path, "w", encoding="utf-8") as f:
-            json.dump(index, f, indent=2, ensure_ascii=False)
+            json.dump(serializable_index, f, indent=2, ensure_ascii=False)
     except IOError as e:
         raise RuntimeError(f"Failed to save index to {index_path}: {e}")
 
 
-def update_index(conversation_id: str, metadata: Dict[str, Any]) -> None:
+def update_index(conversation_id: str, metadata: IndexEntry) -> None:
     """Update index entry for a conversation.
 
     Creates or updates the index entry with provided metadata.
@@ -67,44 +75,25 @@ def update_index(conversation_id: str, metadata: Dict[str, Any]) -> None:
 
     Args:
         conversation_id: Conversation ID
-        metadata: Metadata to store (agent, model, machine, etc.)
+        metadata: IndexEntry model with metadata
 
     Raises:
         RuntimeError: If save fails
     """
     index = load_index()
 
+    metadata_dict = metadata.model_dump(mode="json")
+
     # Preserve created_at if entry exists
     if conversation_id in index:
-        existing_created_at = index[conversation_id].get("created_at")
-        if existing_created_at:
-            metadata["created_at"] = existing_created_at
+        metadata_dict["created_at"] = index[conversation_id].created_at.isoformat()
 
     # Ensure updated_at is set
-    if "updated_at" not in metadata:
-        metadata["updated_at"] = datetime.now(timezone.utc).isoformat()
+    if "updated_at" not in metadata_dict:
+        metadata_dict["updated_at"] = datetime.now(timezone.utc).isoformat()
 
-    index[conversation_id] = metadata
+    index[conversation_id] = IndexEntry.model_validate(metadata_dict)
     save_index(index)
-
-
-def remove_from_index(conversation_id: str) -> bool:
-    """Remove conversation from index.
-
-    Args:
-        conversation_id: Conversation ID to remove
-
-    Returns:
-        True if removed, False if not in index
-    """
-    index = load_index()
-
-    if conversation_id not in index:
-        return False
-
-    del index[conversation_id]
-    save_index(index)
-    return True
 
 
 def rebuild_index() -> int:
@@ -127,28 +116,32 @@ def rebuild_index() -> int:
 
         try:
             # Load conversation and extract metadata
-            turns = load_conversation(conversation_id)
+            records = load_conversation(conversation_id)
 
-            if not turns:
+            if not records:
                 continue
 
-            # Extract metadata from first turn (should be metadata line)
-            first_turn = turns[0]
-            last_turn = turns[-1]
+            first_record = records[0]
+            last_record = records[-1]
 
-            # Build metadata from turns
-            metadata = {
-                "agent": first_turn.get("agent", "unknown"),
-                "model": first_turn.get("model", "unknown"),
-                "machine": first_turn.get("machine", "unknown"),
-                "created_at": first_turn.get("timestamp", "unknown"),
-                "updated_at": last_turn.get("timestamp", "unknown"),
-                "turn_count": len([t for t in turns if t.get("type") == "turn"]),
-                "total_tokens": sum(t.get("tokens", 0) for t in turns),
-                "total_cost": sum(t.get("cost", 0.0) for t in turns),
+            # Build metadata from records
+            turns = [r for r in records if isinstance(r, Turn)]
+            metadata_dict = {
+                "agent": first_record.agent if isinstance(first_record, ConversationMetadata) else "unknown",
+                "model": first_record.model if isinstance(first_record, ConversationMetadata) else "unknown",
+                "machine": first_record.machine if isinstance(first_record, ConversationMetadata) else "unknown",
+                "created_at": first_record.timestamp.isoformat()
+                if hasattr(first_record, "timestamp")
+                else datetime.now(timezone.utc).isoformat(),
+                "updated_at": last_record.timestamp.isoformat()
+                if hasattr(last_record, "timestamp")
+                else datetime.now(timezone.utc).isoformat(),
+                "turn_count": len(turns),
+                "total_tokens": sum(r.tokens or 0 for r in turns),
+                "total_cost": sum(r.cost or 0.0 for r in turns),
             }
 
-            new_index[conversation_id] = metadata
+            new_index[conversation_id] = IndexEntry.model_validate(metadata_dict)
 
         except Exception as e:
             # Skip files that can't be read
@@ -163,7 +156,7 @@ def query_index(
     machine: Optional[str] = None,
     agent: Optional[str] = None,
     limit: Optional[int] = None,
-) -> List[Dict[str, Any]]:
+) -> List[Dict[str, str]]:
     """Query conversation index with filters.
 
     Args:
@@ -172,12 +165,16 @@ def query_index(
         limit: Maximum number of results
 
     Returns:
-        List of conversation metadata (sorted by updated_at, newest first)
+        List of conversation metadata dicts (sorted by updated_at, newest first)
     """
     index = load_index()
 
     # Convert to list of dicts with conversation_id included
-    results = [{"conversation_id": conv_id, **metadata} for conv_id, metadata in index.items()]
+    results = []
+    for conv_id, entry in index.items():
+        entry_dict = entry.model_dump(mode="json")
+        entry_dict["conversation_id"] = conv_id
+        results.append(entry_dict)
 
     # Apply filters
     if machine:
@@ -196,14 +193,14 @@ def query_index(
     return results
 
 
-def get_conversation_metadata(conversation_id: str) -> Optional[Dict[str, Any]]:
+def get_conversation_metadata(conversation_id: str) -> Optional[IndexEntry]:
     """Get metadata for a specific conversation from index.
 
     Args:
         conversation_id: Conversation ID
 
     Returns:
-        Metadata dict if found, None otherwise
+        IndexEntry model if found, None otherwise
     """
     index = load_index()
     return index.get(conversation_id)

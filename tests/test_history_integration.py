@@ -350,10 +350,10 @@ class TestRunHistoryIntegration:
 
             # Should have metadata + 1 turn
             assert len(turns) == 2
-            assert turns[0]["type"] == "metadata"
-            assert turns[1]["type"] == "turn"
-            assert turns[1]["user"] == "hello"
-            assert turns[1]["assistant"] == "world"
+            assert turns[0].type == "metadata"
+            assert turns[1].type == "turn"
+            assert turns[1].user == "hello"
+            assert turns[1].assistant == "world"
 
     def test_run_index_updated(self, tmp_path, sample_agent_file):
         """Test that index is updated with run."""
@@ -384,11 +384,11 @@ class TestRunHistoryIntegration:
             # Verify index was updated
             metadata = get_conversation_metadata(conv_id)
             assert metadata is not None
-            assert metadata["agent"] == "test_agent"
-            assert metadata["model"] == "test_model"
-            assert metadata["turn_count"] == 1
-            assert metadata["total_tokens"] == 500
-            assert metadata["total_cost"] == 0.01
+            assert metadata.agent == "test_agent"
+            assert metadata.model == "test_model"
+            assert metadata.turn_count == 1
+            assert metadata.total_tokens == 500
+            assert metadata.total_cost == 0.01
 
     def test_run_conversation_queryable(self, tmp_path, sample_agent_file):
         """Test that saved run is queryable from index."""

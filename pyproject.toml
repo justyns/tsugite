@@ -23,6 +23,7 @@ dependencies = [
   "textual>=6.2.1",
   "textual-autocomplete>=4.0.6",
   "nest-asyncio>=1.6.0",
+  "pydantic>=2.12.3",
 ]
 
 [project.scripts]

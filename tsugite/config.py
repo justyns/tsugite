@@ -1,29 +1,30 @@
 """Tsugite configuration management."""
 
 import json
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Optional
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from .xdg import get_xdg_config_path
 
 
-@dataclass
-class Config:
+class Config(BaseModel):
     """Tsugite configuration."""
 
+    model_config = ConfigDict(
+        extra="allow",
+        str_strip_whitespace=True,
+    )
+
     default_model: Optional[str] = None
-    model_aliases: Dict[str, str] = field(default_factory=dict)
+    model_aliases: Dict[str, str] = Field(default_factory=dict)
     default_base_agent: Optional[str] = None
     chat_theme: str = "gruvbox"
     history_enabled: bool = True
     history_dir: Optional[Path] = None
     machine_name: Optional[str] = None
     max_history_days: Optional[int] = None
-
-    def __post_init__(self):
-        if self.model_aliases is None:
-            self.model_aliases = {}
 
 
 def get_config_path() -> Path:
@@ -49,20 +50,12 @@ def load_config(path: Optional[Path] = None) -> Config:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
 
-        history_dir = None
+        # Convert history_dir string to Path if present
         if "history_dir" in data and data["history_dir"]:
-            history_dir = Path(data["history_dir"])
+            data["history_dir"] = Path(data["history_dir"])
 
-        return Config(
-            default_model=data.get("default_model"),
-            model_aliases=data.get("model_aliases", {}),
-            default_base_agent=data.get("default_base_agent"),
-            chat_theme=data.get("chat_theme", "gruvbox"),
-            history_enabled=data.get("history_enabled", True),
-            history_dir=history_dir,
-            machine_name=data.get("machine_name"),
-            max_history_days=data.get("max_history_days"),
-        )
+        # Use Pydantic's model_validate for validation and construction
+        return Config.model_validate(data)
 
     except json.JSONDecodeError as e:
         print(f"Warning: Failed to parse config at {path}: {e}")
@@ -87,31 +80,16 @@ def save_config(config: Config, path: Optional[Path] = None) -> None:
 
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    config_data = {}
+    # Use Pydantic's model_dump to serialize, excluding None values for cleaner output
+    config_data = config.model_dump(exclude_none=True, mode="json")
 
-    if config.default_model:
-        config_data["default_model"] = config.default_model
+    # Convert Path to string for JSON serialization
+    if "history_dir" in config_data and config_data["history_dir"]:
+        config_data["history_dir"] = str(config_data["history_dir"])
 
-    if config.model_aliases:
-        config_data["model_aliases"] = config.model_aliases
-
-    if config.default_base_agent is not None:
-        config_data["default_base_agent"] = config.default_base_agent
-
-    if config.chat_theme:
-        config_data["chat_theme"] = config.chat_theme
-
-    # Always save history_enabled (defaults to True)
-    config_data["history_enabled"] = config.history_enabled
-
-    if config.history_dir:
-        config_data["history_dir"] = str(config.history_dir)
-
-    if config.machine_name:
-        config_data["machine_name"] = config.machine_name
-
-    if config.max_history_days is not None:
-        config_data["max_history_days"] = config.max_history_days
+    # Remove empty model_aliases dict for cleaner output
+    if "model_aliases" in config_data and not config_data["model_aliases"]:
+        del config_data["model_aliases"]
 
     with open(path, "w", encoding="utf-8") as f:
         json.dump(config_data, f, indent=2)

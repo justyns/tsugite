@@ -2,10 +2,13 @@
 
 import socket
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import List, Optional, Union
 
 from tsugite.config import load_config
 from tsugite.history import (
+    ConversationMetadata,
+    IndexEntry,
+    Turn,
     generate_conversation_id,
     save_turn_to_history,
     update_index,
@@ -59,30 +62,29 @@ def start_conversation(
     conversation_id = generate_conversation_id(agent_name, timestamp)
     machine = get_machine_name()
 
-    # Save metadata line to JSONL
-    metadata = {
-        "type": "metadata",
-        "id": conversation_id,
-        "agent": agent_name,
-        "model": model,
-        "machine": machine,
-        "created_at": timestamp.isoformat(),
-        "timestamp": timestamp.isoformat(),
-    }
+    # Create ConversationMetadata model
+    metadata = ConversationMetadata(
+        id=conversation_id,
+        agent=agent_name,
+        model=model,
+        machine=machine,
+        created_at=timestamp,
+        timestamp=timestamp,
+    )
 
     save_turn_to_history(conversation_id, metadata)
 
-    # Initialize index entry
-    index_metadata = {
-        "agent": agent_name,
-        "model": model,
-        "machine": machine,
-        "created_at": timestamp.isoformat(),
-        "updated_at": timestamp.isoformat(),
-        "turn_count": 0,
-        "total_tokens": 0,
-        "total_cost": 0.0,
-    }
+    # Initialize index entry using IndexEntry model
+    index_metadata = IndexEntry(
+        agent=agent_name,
+        model=model,
+        machine=machine,
+        created_at=timestamp,
+        updated_at=timestamp,
+        turn_count=0,
+        total_tokens=0,
+        total_cost=0.0,
+    )
     update_index(conversation_id, index_metadata)
 
     return conversation_id
@@ -116,18 +118,17 @@ def save_chat_turn(
     if timestamp is None:
         timestamp = datetime.now(timezone.utc)
 
-    # Save turn to JSONL
-    turn_data = {
-        "type": "turn",
-        "timestamp": timestamp.isoformat(),
-        "user": user_message,
-        "assistant": agent_response,
-        "tools": tool_calls,
-        "tokens": token_count or 0,
-        "cost": cost or 0.0,
-    }
+    # Create Turn model
+    turn = Turn(
+        timestamp=timestamp,
+        user=user_message,
+        assistant=agent_response,
+        tools=tool_calls,
+        tokens=token_count,
+        cost=cost,
+    )
 
-    save_turn_to_history(conversation_id, turn_data)
+    save_turn_to_history(conversation_id, turn)
 
     # Update index with cumulative stats
     from tsugite.history import get_conversation_metadata
@@ -135,18 +136,25 @@ def save_chat_turn(
     metadata = get_conversation_metadata(conversation_id)
 
     if metadata:
-        metadata["turn_count"] = metadata.get("turn_count", 0) + 1
-        metadata["total_tokens"] = metadata.get("total_tokens", 0) + (token_count or 0)
-        metadata["total_cost"] = metadata.get("total_cost", 0.0) + (cost or 0.0)
-        metadata["updated_at"] = timestamp.isoformat()
-        update_index(conversation_id, metadata)
+        # metadata is always IndexEntry
+        updated_metadata = IndexEntry(
+            agent=metadata.agent,
+            model=metadata.model,
+            machine=metadata.machine,
+            created_at=metadata.created_at,
+            updated_at=timestamp,
+            turn_count=metadata.turn_count + 1,
+            total_tokens=(metadata.total_tokens or 0) + (token_count or 0),
+            total_cost=(metadata.total_cost or 0.0) + (cost or 0.0),
+        )
+        update_index(conversation_id, updated_metadata)
 
 
-def format_conversation_for_display(turns: List[Dict[str, Any]]) -> str:
+def format_conversation_for_display(turns: List[Union[ConversationMetadata, Turn]]) -> str:
     """Format conversation turns for display.
 
     Args:
-        turns: List of turn dictionaries from load_conversation()
+        turns: List of ConversationMetadata/Turn models from load_conversation()
 
     Returns:
         Formatted string for display
@@ -154,37 +162,28 @@ def format_conversation_for_display(turns: List[Dict[str, Any]]) -> str:
     lines = []
 
     for turn in turns:
-        turn_type = turn.get("type")
-
-        if turn_type == "metadata":
-            # Header
+        if isinstance(turn, ConversationMetadata):
+            # Header from ConversationMetadata model
             lines.append("=" * 60)
-            lines.append(f"Conversation: {turn.get('id', 'unknown')}")
-            lines.append(f"Agent: {turn.get('agent', 'unknown')}")
-            lines.append(f"Model: {turn.get('model', 'unknown')}")
-            lines.append(f"Machine: {turn.get('machine', 'unknown')}")
-            lines.append(f"Created: {turn.get('created_at', 'unknown')}")
+            lines.append(f"Conversation: {turn.id}")
+            lines.append(f"Agent: {turn.agent}")
+            lines.append(f"Model: {turn.model}")
+            lines.append(f"Machine: {turn.machine}")
+            lines.append(f"Created: {turn.created_at}")
             lines.append("=" * 60)
             lines.append("")
 
-        elif turn_type == "turn":
-            # Turn
-            timestamp = turn.get("timestamp", "")
-            user = turn.get("user", "")
-            assistant = turn.get("assistant", "")
-            tools = turn.get("tools", [])
-            tokens = turn.get("tokens", 0)
-            cost = turn.get("cost", 0.0)
-
-            lines.append(f"[{timestamp}]")
-            lines.append(f"User: {user}")
+        elif isinstance(turn, Turn):
+            # Turn from Turn model
+            lines.append(f"[{turn.timestamp}]")
+            lines.append(f"User: {turn.user}")
             lines.append("")
-            lines.append(f"Assistant: {assistant}")
+            lines.append(f"Assistant: {turn.assistant}")
 
-            if tools:
-                lines.append(f"  Tools: {', '.join(tools)}")
+            if turn.tools:
+                lines.append(f"  Tools: {', '.join(turn.tools)}")
 
-            lines.append(f"  Tokens: {tokens} | Cost: ${cost:.4f}")
+            lines.append(f"  Tokens: {turn.tokens or 0} | Cost: ${turn.cost or 0.0:.4f}")
             lines.append("")
             lines.append("-" * 60)
             lines.append("")
