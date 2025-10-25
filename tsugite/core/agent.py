@@ -31,85 +31,14 @@ def build_system_prompt(tools: List[Tool], instructions: str = "", text_mode: bo
         Complete system prompt string
     """
     # Build tools section (only if tools exist)
-    tools_section = ""
-    if tools:
-        tool_definitions = "\n\n".join([tool.to_code_prompt() for tool in tools])
-        tools_section = f"""
-## Available tools:
+    tools_section = build_tools_section(tools)
+    has_tools = bool(tools)
 
-You have access to these Python functions:
-
-```python
-{tool_definitions}
-```
-"""
-
+    # Build mode-specific prompt
     if text_mode:
-        # Text mode: code blocks are optional
-        prompt = f"""You are an expert assistant who helps with tasks.
-
-You can respond in two ways:
-
-**For conversational questions or simple responses:**
-Just provide your Thought with the answer directly:
-
-Thought: [Your response here]
-
-**When you need to use tools or perform actions:**
-Provide a Thought and write Python code:
-
-Thought: [What you'll do and why]
-```python
-# Your code here
-final_answer(result)
-```
-{tools_section}
-## Rules:
-
-1. Start with "Thought:" to explain your reasoning
-2. Code blocks are OPTIONAL - only use them when you need tools or complex logic
-3. For direct answers, just provide the Thought without code
-{"4. When using code, call tools with keyword arguments: result = tool_name(arg1=value1, arg2=value2)" if tools else "4. Use Python when you need to perform actions"}
-5. When using code blocks, call final_answer() with the result
-6. Variables persist across code blocks
-
-{instructions}
-
-Now begin!"""
+        return build_text_mode_prompt(tools_section, instructions, has_tools)
     else:
-        # Standard mode: code blocks required
-        prompt = f"""You are an expert assistant who solves tasks using Python code.
-
-To solve a task, you proceed in steps using this pattern:
-
-1. **Thought:** Explain your reasoning (what you'll do and why)
-2. **Code:** Write Python code in a code block
-3. **Observation:** You'll see the code execution result
-
-You repeat this Thought → Code → Observation cycle until you have the final answer.
-
-## How to write code:
-
-- Always start with a Thought explaining your approach
-- Write code in triple-backtick code blocks: ```python
-- Use print() to output important information
-- Variables persist between code blocks
-- When you have the final answer, call: final_answer(your_answer)
-{tools_section}
-## Rules:
-
-1. Always provide Thought before code
-2. Only use variables you've defined
-{"3. Call tools with keyword arguments: result = tool_name(arg1=value1, arg2=value2)" if tools else "3. Use standard Python to solve the task"}
-4. Call final_answer() when you have the answer
-5. If you get an error, try a different approach
-6. State persists - variables remain available across code blocks
-
-{instructions}
-
-Now begin!"""
-
-    return prompt
+        return build_standard_mode_prompt(tools_section, instructions, has_tools)
 
 
 @dataclass
@@ -439,7 +368,33 @@ class TsugiteAgent:
                             },
                         )
 
-            # Add this step to memory (always, even if final_answer was called)
+                    # Add a correction to memory to guide the LLM
+                    # Instead of adding a step with empty code, add an observation telling LLM what to do
+                    correction_msg = (
+                        "Format Error: You must provide your response in a Python code block.\n\n"
+                        "Use this format:\n\n"
+                        "Thought: <your explanation>\n"
+                        "```python\n"
+                        "# Your code here\n"
+                        'final_answer("your answer")\n'
+                        "```\n\n"
+                        "Remember to call final_answer() with your result."
+                    )
+
+                    # Add the thought and correction as a step
+                    # This will show the LLM what it did wrong and how to fix it
+                    self.memory.add_step(
+                        thought=thought if thought else "(No thought provided)",
+                        code="",
+                        output=correction_msg,
+                        error=None,
+                        tools_called=[],
+                    )
+
+                    # Continue to next turn - the correction will be in the observation
+                    continue
+
+            # Add this step to memory (only for successful executions or text mode)
             self.memory.add_step(
                 thought=thought,
                 code=code,
@@ -599,3 +554,125 @@ class TsugiteAgent:
             pass
 
         return None
+
+
+def build_tools_section(tools: List[Tool]) -> str:
+    """Build the tools section of the system prompt.
+
+    Args:
+        tools: List of Tool objects available to the agent
+
+    Returns:
+        Formatted tools section or empty string if no tools
+    """
+    if not tools:
+        return ""
+
+    tool_definitions = "\n\n".join([tool.to_code_prompt() for tool in tools])
+    return f"""
+## Available tools:
+
+You have access to these Python functions:
+
+```python
+{tool_definitions}
+```
+"""
+
+
+def build_text_mode_prompt(tools_section: str, instructions: str, has_tools: bool) -> str:
+    """Build system prompt for text mode (code blocks optional).
+
+    Args:
+        tools_section: Formatted tools section
+        instructions: Additional instructions from agent config
+        has_tools: Whether tools are available
+
+    Returns:
+        Complete system prompt for text mode
+    """
+    tool_rule = (
+        "4. When using code, call tools with keyword arguments: result = tool_name(arg1=value1, arg2=value2)"
+        if has_tools
+        else "4. Use Python when you need to perform actions"
+    )
+
+    return f"""You are an expert assistant who helps with tasks.
+
+You can respond in two ways:
+
+**For conversational questions or simple responses:**
+Just provide your Thought with the answer directly:
+
+Thought: [Your response here]
+
+**When you need to use tools or perform actions:**
+Provide a Thought and write Python code:
+
+Thought: [What you'll do and why]
+```python
+# Your code here
+final_answer(result)
+```
+{tools_section}
+## Rules:
+
+1. Start with "Thought:" to explain your reasoning
+2. Code blocks are OPTIONAL - only use them when you need tools or complex logic
+3. For direct answers, just provide the Thought without code
+{tool_rule}
+5. When using code blocks, call final_answer() with the result
+6. Variables persist across code blocks
+
+{instructions}
+
+Now begin!"""
+
+
+def build_standard_mode_prompt(tools_section: str, instructions: str, has_tools: bool) -> str:
+    """Build system prompt for standard mode (code blocks required).
+
+    Args:
+        tools_section: Formatted tools section
+        instructions: Additional instructions from agent config
+        has_tools: Whether tools are available
+
+    Returns:
+        Complete system prompt for standard mode
+    """
+    tool_rule = (
+        "3. Call tools with keyword arguments: result = tool_name(arg1=value1, arg2=value2)"
+        if has_tools
+        else "3. Use standard Python to solve the task"
+    )
+
+    return f"""You are an expert assistant who solves tasks using Python code.
+
+To solve a task, you proceed in steps using this pattern:
+
+1. **Thought:** Explain your reasoning (what you'll do and why)
+2. **Code:** Write Python code in a code block
+3. **Observation:** You'll see the code execution result
+
+You repeat this Thought → Code → Observation cycle until you have the final answer.
+
+## How to write code:
+
+- Always start with a Thought explaining your approach
+- Write code in triple-backtick code blocks: ```python
+- Use print() to output important information
+- Variables persist between code blocks
+- When you have the final answer, call: final_answer(your_answer)
+{tools_section}
+## Rules:
+
+1. Always provide Thought before code
+2. Only use variables you've defined
+{tool_rule}
+4. Call final_answer() when you have the answer
+5. If you get an error, try a different approach
+6. State persists - variables remain available across code blocks
+
+{instructions}
+
+Now begin!"""

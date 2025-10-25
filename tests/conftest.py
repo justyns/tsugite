@@ -169,6 +169,16 @@ def reset_tool_registry():
 
 
 @pytest.fixture(autouse=True)
+def reset_task_manager():
+    """Reset the task manager before each test."""
+    from tsugite.tools.tasks import reset_task_manager as reset_tm
+
+    reset_tm()
+    yield
+    reset_tm()
+
+
+@pytest.fixture(autouse=True)
 def isolate_config_files(tmp_path, monkeypatch):
     """Isolate config files for each test to prevent cross-test contamination.
 
@@ -206,9 +216,19 @@ def file_tools(reset_tool_registry):
     tool(edit_file)
 
 
-@pytest.fixture
-def task_tools(reset_tool_registry):
-    """Register task management tools for testing."""
+@pytest.fixture(autouse=True)
+def task_tools(reset_tool_registry, request):
+    """Register task management tools for testing.
+
+    Autouse fixture because task tools are automatically added to all agents
+    in runner.py line 1020-1021.
+
+    Skips registration for test_tool_registry.py tests that need an empty registry.
+    """
+    # Skip for tool registry tests that need an empty registry
+    if "test_tool_registry" in request.node.nodeid:
+        return
+
     from tsugite.tools import tool
     from tsugite.tools.tasks import (
         task_add,

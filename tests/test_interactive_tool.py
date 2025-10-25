@@ -368,9 +368,7 @@ def test_ask_user_batch_choice_too_few_options(interactive_tool, monkeypatch):
     """Test that choice questions need at least 2 options."""
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
-    questions = [
-        {"id": "color", "question": "Favorite color?", "type": "choice", "options": ["red"]}  # Only 1 option
-    ]
+    questions = [{"id": "color", "question": "Favorite color?", "type": "choice", "options": ["red"]}]  # Only 1 option
 
     with pytest.raises(RuntimeError, match="Tool 'ask_user_batch' failed"):
         call_tool("ask_user_batch", questions=questions)

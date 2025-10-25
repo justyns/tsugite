@@ -19,7 +19,7 @@ class TestAttachmentResolution:
         add_attachment("mycode", source="inline", content="def hello(): pass")
 
         # Resolve it
-        results = resolve_attachments(["mycode"], tmp_path)
+        results = resolve_attachments(["mycode"])
         assert len(results) == 1
         name, content = results[0]
         assert name == "mycode"
@@ -37,7 +37,7 @@ class TestAttachmentResolution:
         add_attachment("myfile", source=str(test_file))
 
         # Resolve it
-        results = resolve_attachments(["myfile"], tmp_path)
+        results = resolve_attachments(["myfile"])
         assert len(results) == 1
         name, content = results[0]
         assert name == "myfile"
@@ -58,7 +58,7 @@ class TestAttachmentResolution:
             mock_response.headers.get.return_value = "text/plain"
             mock_response.read.return_value = mock_content.encode()
 
-            results = resolve_attachments(["myurl"], tmp_path)
+            results = resolve_attachments(["myurl"])
             assert len(results) == 1
             name, content = results[0]
             assert name == "myurl"
@@ -85,7 +85,7 @@ class TestAttachmentResolution:
             mock_response.headers.get.return_value = "text/plain"
             mock_response.read.return_value = b"URL content"
 
-            results = resolve_attachments(["alias1", "file1", "url1"], tmp_path)
+            results = resolve_attachments(["alias1", "file1", "url1"])
 
             assert len(results) == 3
             assert results[0] == ("alias1", "Alias content")
@@ -97,13 +97,13 @@ class TestAttachmentResolution:
         monkeypatch.setenv("HOME", str(tmp_path))
 
         with pytest.raises(ValueError, match="Attachment not found"):
-            resolve_attachments(["nonexistent"], tmp_path)
+            resolve_attachments(["nonexistent"])
 
     def test_resolve_empty_list(self, tmp_path, monkeypatch):
         """Test resolving empty list."""
         monkeypatch.setenv("HOME", str(tmp_path))
 
-        results = resolve_attachments([], tmp_path)
+        results = resolve_attachments([])
         assert results == []
 
     def test_caching_works(self, tmp_path, monkeypatch):
@@ -117,18 +117,18 @@ class TestAttachmentResolution:
 
         # Register and resolve
         add_attachment("myfile", source=str(test_file))
-        results1 = resolve_attachments(["myfile"], tmp_path)
+        results1 = resolve_attachments(["myfile"])
         assert results1[0][1] == "Original content"
 
         # Modify file
         test_file.write_text("Modified content")
 
         # Resolve again - should get cached version
-        results2 = resolve_attachments(["myfile"], tmp_path)
+        results2 = resolve_attachments(["myfile"])
         assert results2[0][1] == "Original content"  # Still cached
 
         # Resolve with refresh_cache - should get new version
-        results3 = resolve_attachments(["myfile"], tmp_path, refresh_cache=True)
+        results3 = resolve_attachments(["myfile"], refresh_cache=True)
         assert results3[0][1] == "Modified content"
 
     def test_youtube_handler_integration(self, tmp_path, monkeypatch):
@@ -147,7 +147,7 @@ class TestAttachmentResolution:
         with patch("youtube_transcript_api.YouTubeTranscriptApi") as mock_api:
             mock_api.get_transcript.return_value = mock_transcript
 
-            results = resolve_attachments(["tutorial"], tmp_path)
+            results = resolve_attachments(["tutorial"])
             assert len(results) == 1
             name, content = results[0]
             assert name == "tutorial"
@@ -167,7 +167,7 @@ class TestAttachmentResolution:
         add_attachment("myfile", source=str(test_file))
 
         # Resolve to create cache
-        resolve_attachments(["myfile"], tmp_path)
+        resolve_attachments(["myfile"])
 
         # Get cache metadata
         cache_entries = list_cache()

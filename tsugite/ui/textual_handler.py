@@ -15,7 +15,6 @@ class TextualUIHandler(CustomUIHandler):
         on_stream_chunk: Optional[Callable[[str], None]] = None,
         on_stream_complete: Optional[Callable[[], None]] = None,
         on_intermediate_message: Optional[Callable[[str], None]] = None,
-        on_execution_event: Optional[Callable[[str, str], None]] = None,
         on_thought_log: Optional[Callable[[str, str], None]] = None,
     ):
         """Initialize Textual UI handler.
@@ -26,7 +25,6 @@ class TextualUIHandler(CustomUIHandler):
             on_stream_chunk: Callback for streaming chunks
             on_stream_complete: Callback when streaming completes
             on_intermediate_message: Callback for intermediate agent messages
-            on_execution_event: Callback for execution events (deprecated, use on_thought_log)
             on_thought_log: Callback for thought log entries (type, content)
         """
         # Initialize with a no-op console (we won't use it)
@@ -45,7 +43,6 @@ class TextualUIHandler(CustomUIHandler):
         self.on_stream_chunk = on_stream_chunk
         self.on_stream_complete = on_stream_complete
         self.on_intermediate_message = on_intermediate_message
-        self.on_execution_event = on_execution_event
         self.on_thought_log = on_thought_log
 
         # Track tools used in current turn

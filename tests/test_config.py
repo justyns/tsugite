@@ -99,8 +99,8 @@ def test_config_with_empty_values(tmp_path):
     with open(config_path) as f:
         data = json.load(f)
 
-    # chat_theme has a default value of "gruvbox" so it will always be saved
-    assert data == {"chat_theme": "gruvbox"}
+    # chat_theme and history_enabled have default values so they will always be saved
+    assert data == {"chat_theme": "gruvbox", "history_enabled": True}
 
 
 def test_update_existing_alias(tmp_path):

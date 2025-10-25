@@ -54,3 +54,51 @@ def get_ui_handler(custom_logger: Optional[Any]) -> Optional[Any]:
         UI handler if available, None otherwise
     """
     return custom_logger.ui_handler if custom_logger and hasattr(custom_logger, "ui_handler") else None
+
+
+def set_multistep_ui_context(custom_logger: Optional[Any], step_number: int, step_name: str, total_steps: int) -> None:
+    """Set multistep context in UI handler if available.
+
+    Args:
+        custom_logger: Custom logger instance (may be None)
+        step_number: Current step number
+        step_name: Name of current step
+        total_steps: Total number of steps
+    """
+    ui_handler = get_ui_handler(custom_logger)
+    if ui_handler:
+        ui_handler.set_multistep_context(step_number, step_name, total_steps)
+
+
+def clear_multistep_ui_context(custom_logger: Optional[Any]) -> None:
+    """Clear multistep context from UI handler if available.
+
+    Args:
+        custom_logger: Custom logger instance (may be None)
+    """
+    ui_handler = get_ui_handler(custom_logger)
+    if ui_handler:
+        ui_handler.clear_multistep_context()
+
+
+def print_step_progress(
+    custom_logger: Optional[Any], step_header: str, message: str, debug: bool = False, style: str = "cyan"
+) -> None:
+    """Print step progress message to appropriate console.
+
+    Args:
+        custom_logger: Custom logger instance (may be None)
+        step_header: Step header string
+        message: Message to display
+        debug: Whether debug mode is active (skips output if True)
+        style: Rich style string (e.g., "cyan", "green", "yellow")
+    """
+    if debug:
+        return
+
+    full_message = f"[{style}]{step_header} {message}[/{style}]"
+
+    if custom_logger and hasattr(custom_logger, "console"):
+        custom_logger.console.print(full_message)
+    else:
+        _stderr_console.print(full_message)

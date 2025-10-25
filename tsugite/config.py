@@ -16,6 +16,10 @@ class Config:
     model_aliases: Dict[str, str] = field(default_factory=dict)
     default_base_agent: Optional[str] = None
     chat_theme: str = "gruvbox"
+    history_enabled: bool = True
+    history_dir: Optional[Path] = None
+    machine_name: Optional[str] = None
+    max_history_days: Optional[int] = None
 
     def __post_init__(self):
         if self.model_aliases is None:
@@ -45,11 +49,19 @@ def load_config(path: Optional[Path] = None) -> Config:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
 
+        history_dir = None
+        if "history_dir" in data and data["history_dir"]:
+            history_dir = Path(data["history_dir"])
+
         return Config(
             default_model=data.get("default_model"),
             model_aliases=data.get("model_aliases", {}),
             default_base_agent=data.get("default_base_agent"),
             chat_theme=data.get("chat_theme", "gruvbox"),
+            history_enabled=data.get("history_enabled", True),
+            history_dir=history_dir,
+            machine_name=data.get("machine_name"),
+            max_history_days=data.get("max_history_days"),
         )
 
     except json.JSONDecodeError as e:
@@ -88,6 +100,18 @@ def save_config(config: Config, path: Optional[Path] = None) -> None:
 
     if config.chat_theme:
         config_data["chat_theme"] = config.chat_theme
+
+    # Always save history_enabled (defaults to True)
+    config_data["history_enabled"] = config.history_enabled
+
+    if config.history_dir:
+        config_data["history_dir"] = str(config.history_dir)
+
+    if config.machine_name:
+        config_data["machine_name"] = config.machine_name
+
+    if config.max_history_days is not None:
+        config_data["max_history_days"] = config.max_history_days
 
     with open(path, "w", encoding="utf-8") as f:
         json.dump(config_data, f, indent=2)

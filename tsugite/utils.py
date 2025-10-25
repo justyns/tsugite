@@ -176,14 +176,11 @@ def ensure_dir_exists(path: Path, context: str = "Directory") -> Path:
     return path.resolve()
 
 
-def resolve_attachments(
-    attachment_refs: List[str], base_dir: Path, refresh_cache: bool = False
-) -> List[Tuple[str, str]]:
+def resolve_attachments(attachment_refs: List[str], refresh_cache: bool = False) -> List[Tuple[str, str]]:
     """Resolve attachment references to their content using handler system.
 
     Args:
         attachment_refs: List of attachment aliases
-        base_dir: Base directory for resolving relative file paths (unused but kept for API compatibility)
         refresh_cache: If True, bypass cache and re-fetch content
 
     Returns:

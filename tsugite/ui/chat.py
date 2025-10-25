@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from tsugite.config import load_config
 from tsugite.md_agents import parse_agent_file
 from tsugite.ui import CustomUILogger
 
@@ -55,6 +56,7 @@ class ChatManager:
         max_history: int = 50,
         custom_logger: Optional[CustomUILogger] = None,
         stream: bool = False,
+        disable_history: bool = False,
     ):
         """Initialize chat manager.
 
@@ -64,6 +66,7 @@ class ChatManager:
             max_history: Maximum turns to keep in context
             custom_logger: Optional custom logger for UI
             stream: Whether to stream responses in real-time
+            disable_history: Disable conversation history persistence
         """
         self.agent_path = agent_path
         self.model_override = model_override
@@ -72,6 +75,28 @@ class ChatManager:
         self.stream = stream
         self.conversation_history: List[ChatTurn] = []
         self.session_start = datetime.now()
+
+        # History support
+        self.conversation_id: Optional[str] = None
+        config = load_config()
+        history_enabled = getattr(config, "history_enabled", True) and not disable_history
+
+        if history_enabled:
+            try:
+                from tsugite.ui.chat_history import start_conversation
+
+                agent = parse_agent_file(agent_path)
+                model = model_override or agent.config.model or "unknown"
+
+                self.conversation_id = start_conversation(
+                    agent_name=agent.config.name or agent_path.stem,
+                    model=model,
+                    timestamp=self.session_start,
+                )
+            except Exception as e:
+                # Don't fail if history can't be initialized
+                print(f"Warning: Failed to initialize conversation history: {e}")
+                self.conversation_id = None
 
     def add_turn(
         self,
@@ -91,6 +116,24 @@ class ChatManager:
             cost=cost,
         )
         self.conversation_history.append(turn)
+
+        # Save to persistent history if enabled
+        if self.conversation_id:
+            try:
+                from tsugite.ui.chat_history import save_chat_turn
+
+                save_chat_turn(
+                    conversation_id=self.conversation_id,
+                    user_message=user_message,
+                    agent_response=agent_response,
+                    tool_calls=tool_calls or [],
+                    token_count=token_count,
+                    cost=cost,
+                    timestamp=turn.timestamp,
+                )
+            except Exception as e:
+                # Don't fail the turn if history save fails
+                print(f"Warning: Failed to save turn to history: {e}")
 
         # Prune old history if needed
         if len(self.conversation_history) > self.max_history:

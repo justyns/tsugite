@@ -321,7 +321,7 @@ class TestBuiltinAgentRendering:
         """Set up test runner."""
         self.runner = CliRunner()
 
-    def test_render_builtin_default_with_plus_prefix(self, agents_tools, task_tools):
+    def test_render_builtin_default_with_plus_prefix(self, file_tools, agents_tools, task_tools):
         """Test rendering builtin-default with + prefix."""
         result = self.runner.invoke(app, ["render", "+builtin-default", "test task"])
 
@@ -330,7 +330,7 @@ class TestBuiltinAgentRendering:
         assert "builtin-default" in result.stdout
 
     @patch("tsugite.agent_runner.runner.call_tool")
-    def test_render_builtin_executes_prefetch(self, mock_call_tool, agents_tools, task_tools):
+    def test_render_builtin_executes_prefetch(self, mock_call_tool, file_tools, agents_tools, task_tools):
         """Test that builtin agent prefetch tools are executed."""
         # builtin-default has list_agents in prefetch
         mock_call_tool.return_value = "agents/helper.md\nagents/coder.md"

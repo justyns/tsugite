@@ -142,7 +142,7 @@ def attachments_show(
         # For references, fetch and show content if requested
         from tsugite.utils import resolve_attachments
 
-        resolved = resolve_attachments([alias], Path.cwd())
+        resolved = resolve_attachments([alias])
         if resolved:
             _, resolved_content = resolved[0]
             panel_content += f"[cyan]Size:[/cyan] {len(resolved_content):,} characters\n"

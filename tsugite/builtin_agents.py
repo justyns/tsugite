@@ -5,7 +5,11 @@ from pathlib import Path
 BUILTIN_DEFAULT_AGENT_CONTENT = """---
 name: builtin-default
 description: Built-in default base agent with sensible defaults
-tools: [spawn_agent]
+tools:
+  - spawn_agent
+  - read_file
+  - list_files
+  - task_*
 prefetch:
   - tool: list_agents
     args: {}

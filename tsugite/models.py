@@ -1,5 +1,6 @@
 """Model adapters for Tsugite agents."""
 
+import os
 import re
 from typing import Optional
 
@@ -101,63 +102,156 @@ def get_model_params(model_string: str, **kwargs) -> dict:
         >>> "temperature" not in params  # Filtered for o1
         True
     """
-    import os
-
-    # Resolve aliases
+    # Resolve aliases and parse model string
     resolved_model = resolve_model_alias(model_string)
     provider, model_name, variant = parse_model_string(resolved_model)
 
     # Build parameters dict
     params = dict(kwargs)
 
-    # Handle reasoning models - filter out unsupported parameters
+    # Filter parameters for reasoning models
     if is_reasoning_model_without_stop_support(resolved_model):
-        unsupported_params = ["stop", "temperature", "top_p", "presence_penalty", "frequency_penalty"]
+        params = filter_reasoning_model_params(model_name, params)
 
-        # o1-mini specifically doesn't support reasoning_effort
-        if "o1-mini" in model_name:
-            unsupported_params.append("reasoning_effort")
-
-        # Remove unsupported parameters
-        for param in unsupported_params:
-            params.pop(param, None)
-
-    # Build model ID for LiteLLM
+    # Build provider-specific parameters
     if provider == "ollama":
-        # Ollama: use full model name with variant
-        full_model_name = f"{model_name}:{variant}" if variant else model_name
-        params["model"] = full_model_name
-        params.setdefault("api_base", os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1"))
-        params.setdefault("api_key", "ollama")  # Ollama doesn't need real API key
-
+        return build_ollama_params(model_name, variant, params)
     elif provider == "openai":
-        params["model"] = f"openai/{model_name}"
-        if "api_key" not in params:
-            params["api_key"] = os.getenv("OPENAI_API_KEY")
-
+        return build_openai_params(model_name, params)
     elif provider == "anthropic":
-        params["model"] = f"anthropic/{model_name}"
-        if "api_key" not in params:
-            params["api_key"] = os.getenv("ANTHROPIC_API_KEY")
-
+        return build_anthropic_params(model_name, params)
     elif provider == "google":
-        params["model"] = f"gemini/{model_name}"
-        if "api_key" not in params:
-            params["api_key"] = os.getenv("GOOGLE_API_KEY")
-
+        return build_google_params(model_name, params)
     elif provider == "github_copilot":
-        params["model"] = f"github_copilot/{model_name}"
-
-        # GitHub Copilot requires specific headers
-        extra_headers = params.get("extra_headers", {})
-        if "editor-version" not in extra_headers:
-            extra_headers["editor-version"] = "vscode/1.95.0"
-        if "Copilot-Integration-Id" not in extra_headers:
-            extra_headers["Copilot-Integration-Id"] = "vscode-chat"
-        params["extra_headers"] = extra_headers
-
+        return build_github_copilot_params(model_name, params)
     else:
-        # Fallback: try LiteLLM with the provider prefix
-        params["model"] = f"{provider}/{model_name}"
+        return build_fallback_params(provider, model_name, params)
 
+
+def filter_reasoning_model_params(model_name: str, params: dict) -> dict:
+    """Filter out unsupported parameters for reasoning models.
+
+    OpenAI's o1/o3 reasoning models don't support certain parameters.
+
+    Args:
+        model_name: The model name (e.g., "o1", "o1-mini")
+        params: Dictionary of parameters
+
+    Returns:
+        Filtered parameters dict (modifies in-place and returns)
+    """
+    unsupported_params = ["stop", "temperature", "top_p", "presence_penalty", "frequency_penalty"]
+
+    # o1-mini specifically doesn't support reasoning_effort
+    if "o1-mini" in model_name:
+        unsupported_params.append("reasoning_effort")
+
+    # Remove unsupported parameters
+    for param in unsupported_params:
+        params.pop(param, None)
+
+    return params
+
+
+def build_ollama_params(model_name: str, variant: str | None, params: dict) -> dict:
+    """Build parameters for Ollama provider.
+
+    Args:
+        model_name: The model name
+        variant: Optional model variant
+        params: Base parameters dict
+
+    Returns:
+        Updated parameters dict
+    """
+    full_model_name = f"{model_name}:{variant}" if variant else model_name
+    params["model"] = full_model_name
+    params.setdefault("api_base", os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1"))
+    params.setdefault("api_key", "ollama")
+    return params
+
+
+def build_openai_params(model_name: str, params: dict) -> dict:
+    """Build parameters for OpenAI provider.
+
+    Args:
+        model_name: The model name
+        params: Base parameters dict
+
+    Returns:
+        Updated parameters dict
+    """
+    params["model"] = f"openai/{model_name}"
+    if "api_key" not in params:
+        params["api_key"] = os.getenv("OPENAI_API_KEY")
+    return params
+
+
+def build_anthropic_params(model_name: str, params: dict) -> dict:
+    """Build parameters for Anthropic provider.
+
+    Args:
+        model_name: The model name
+        params: Base parameters dict
+
+    Returns:
+        Updated parameters dict
+    """
+    params["model"] = f"anthropic/{model_name}"
+    if "api_key" not in params:
+        params["api_key"] = os.getenv("ANTHROPIC_API_KEY")
+    return params
+
+
+def build_google_params(model_name: str, params: dict) -> dict:
+    """Build parameters for Google provider.
+
+    Args:
+        model_name: The model name
+        params: Base parameters dict
+
+    Returns:
+        Updated parameters dict
+    """
+    params["model"] = f"gemini/{model_name}"
+    if "api_key" not in params:
+        params["api_key"] = os.getenv("GOOGLE_API_KEY")
+    return params
+
+
+def build_github_copilot_params(model_name: str, params: dict) -> dict:
+    """Build parameters for GitHub Copilot provider.
+
+    Args:
+        model_name: The model name
+        params: Base parameters dict
+
+    Returns:
+        Updated parameters dict
+    """
+    params["model"] = f"github_copilot/{model_name}"
+
+    # GitHub Copilot requires specific headers
+    extra_headers = params.get("extra_headers", {})
+    if "editor-version" not in extra_headers:
+        extra_headers["editor-version"] = "vscode/1.95.0"
+    if "Copilot-Integration-Id" not in extra_headers:
+        extra_headers["Copilot-Integration-Id"] = "vscode-chat"
+    params["extra_headers"] = extra_headers
+
+    return params
+
+
+def build_fallback_params(provider: str, model_name: str, params: dict) -> dict:
+    """Build parameters for fallback/unknown providers.
+
+    Args:
+        provider: The provider name
+        model_name: The model name
+        params: Base parameters dict
+
+    Returns:
+        Updated parameters dict
+    """
+    params["model"] = f"{provider}/{model_name}"
     return params

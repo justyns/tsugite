@@ -23,6 +23,7 @@ from .helpers import (
     parse_cli_arguments,
     print_plain_info,
 )
+from .history import history_app
 from .init import init
 from .mcp import mcp_app
 from .tools import tools_app
@@ -38,6 +39,172 @@ app = typer.Typer(
 )
 
 console = Console()
+
+
+def _build_docker_command(
+    args: List[str],
+    network: str,
+    keep: bool,
+    container: Optional[str],
+    model: Optional[str],
+    with_agents: Optional[str],
+    root: Optional[str],
+    history_dir: Optional[str],
+    ui: Optional[str],
+    debug: bool,
+    verbose: bool,
+    headless: bool,
+    plain: bool,
+    show_reasoning: bool,
+    no_color: bool,
+    silent: bool,
+    log_json: bool,
+    non_interactive: bool,
+    native_ui: bool,
+    trust_mcp_code: bool,
+    attachment: Optional[List[str]],
+    refresh_cache: bool,
+) -> List[str]:
+    """Build Docker wrapper command with all flags.
+
+    Args:
+        args: Agent references and prompt
+        network: Docker network mode
+        keep: Keep container running flag
+        container: Existing container name
+        model: Model override
+        with_agents: Additional agents
+        root: Working directory
+        history_dir: History directory
+        ui: UI mode
+        debug: Debug flag
+        verbose: Verbose flag
+        headless: Headless flag
+        plain: Plain output flag
+        show_reasoning: Show reasoning flag
+        no_color: No color flag
+        silent: Silent flag
+        log_json: JSON logging flag
+        non_interactive: Non-interactive flag
+        native_ui: Native UI flag
+        trust_mcp_code: Trust MCP code flag
+        attachment: Attachment list
+        refresh_cache: Refresh cache flag
+
+    Returns:
+        Complete command list for subprocess execution
+    """
+    cmd = ["tsugite-docker"]
+
+    # Add wrapper-specific flags
+    if network != "host":
+        cmd.extend(["--network", network])
+    if keep:
+        cmd.append("--keep")
+    if container:
+        cmd.extend(["--container", container])
+
+    # Add 'run' subcommand
+    cmd.append("run")
+
+    # Add all the original args (agent refs and prompt words)
+    cmd.extend(args)
+
+    # Add tsugite flags (not wrapper flags)
+    if model:
+        cmd.extend(["--model", model])
+    if with_agents:
+        cmd.extend(["--with-agents", with_agents])
+    if root:
+        cmd.extend(["--root", str(root)])
+    if history_dir:
+        cmd.extend(["--history-dir", str(history_dir)])
+    if ui:
+        cmd.extend(["--ui", ui])
+    if debug:
+        cmd.append("--debug")
+    if verbose:
+        cmd.append("--verbose")
+    if headless:
+        cmd.append("--headless")
+    if plain:
+        cmd.append("--plain")
+    if show_reasoning:
+        cmd.append("--show-reasoning")
+    if no_color:
+        cmd.append("--no-color")
+    if silent:
+        cmd.append("--silent")
+    if log_json:
+        cmd.append("--log-json")
+    if non_interactive:
+        cmd.append("--non-interactive")
+    if native_ui:
+        cmd.append("--native-ui")
+    if trust_mcp_code:
+        cmd.append("--trust-mcp-code")
+    if attachment:
+        for att in attachment:
+            cmd.extend(["--attachment", att])
+    if refresh_cache:
+        cmd.append("--refresh-cache")
+
+    return cmd
+
+
+def _resolve_ui_mode(
+    ui: Optional[str], plain: bool, headless: bool, silent: bool, native_ui: bool, console: Console
+) -> tuple[bool, bool, bool, bool, bool]:
+    """Resolve UI mode flag to individual UI control flags.
+
+    Args:
+        ui: UI mode string (rich, plain, minimal, headless, silent, live)
+        plain: Plain output flag
+        headless: Headless mode flag
+        silent: Silent mode flag
+        native_ui: Native UI flag
+        console: Console for error output
+
+    Returns:
+        Tuple of (plain, headless, silent, native_ui, live_ui) flags
+
+    Raises:
+        typer.Exit: If invalid UI mode or conflicting flags
+    """
+    live_ui = False
+
+    if not ui:
+        return plain, headless, silent, native_ui, live_ui
+
+    # Check for conflicts
+    if any([plain, headless, silent, native_ui]):
+        console.print("[red]Error: --ui cannot be used with --plain, --headless, --silent, or --native-ui[/red]")
+        raise typer.Exit(1)
+
+    # Map UI mode to flags
+    ui_modes = {
+        "rich": {},  # Default - no changes
+        "plain": {"plain": True},
+        "minimal": {"native_ui": True},
+        "headless": {"headless": True},
+        "silent": {"silent": True},
+        "live": {"live_ui": True},
+    }
+
+    ui_lower = ui.lower()
+    if ui_lower not in ui_modes:
+        console.print(f"[red]Error: Invalid UI mode '{ui}'. Choose from: {', '.join(ui_modes.keys())}[/red]")
+        raise typer.Exit(1)
+
+    # Apply mode settings
+    mode_settings = ui_modes[ui_lower]
+    plain = mode_settings.get("plain", plain)
+    headless = mode_settings.get("headless", headless)
+    silent = mode_settings.get("silent", silent)
+    native_ui = mode_settings.get("native_ui", native_ui)
+    live_ui = mode_settings.get("live_ui", live_ui)
+
+    return plain, headless, silent, native_ui, live_ui
 
 
 @app.command()
@@ -79,6 +246,7 @@ def run(
     keep: bool = typer.Option(False, "--keep", help="Keep Docker container running (use with --docker)"),
     container: Optional[str] = typer.Option(None, "--container", help="Use existing Docker container"),
     network: str = typer.Option("host", "--network", help="Docker network mode (use with --docker)"),
+    no_history: bool = typer.Option(False, "--no-history", help="Disable conversation history persistence"),
 ):
     """Run an agent with the given prompt.
 
@@ -101,33 +269,8 @@ def run(
     if no_color:
         console.no_color = True
 
-    # Handle --ui flag (maps to existing UI flags for convenience)
-    live_ui = False  # Initialize live_ui flag
-    if ui:
-        ui_lower = ui.lower()
-        # Check for conflicts
-        if any([plain, headless, silent, native_ui]):
-            console.print("[red]Error: --ui cannot be used with --plain, --headless, --silent, or --native-ui[/red]")
-            raise typer.Exit(1)
-
-        # Map UI mode to appropriate flags
-        if ui_lower == "rich":
-            pass  # Default - no changes needed
-        elif ui_lower == "plain":
-            plain = True
-        elif ui_lower == "minimal":
-            native_ui = True
-        elif ui_lower == "headless":
-            headless = True
-        elif ui_lower == "silent":
-            silent = True
-        elif ui_lower == "live":
-            live_ui = True
-        else:
-            console.print(
-                f"[red]Error: Invalid UI mode '{ui}'. Choose from: rich, plain, minimal, headless, silent, live[/red]"
-            )
-            raise typer.Exit(1)
+    # Resolve UI mode to individual flags
+    plain, headless, silent, native_ui, live_ui = _resolve_ui_mode(ui, plain, headless, silent, native_ui, console)
 
     # Delegate to tsugite-docker wrapper if Docker flags are present
     if docker or container:
@@ -142,63 +285,31 @@ def run(
             console.print("[dim]See bin/README.md for installation instructions[/dim]")
             raise typer.Exit(1)
 
-        # Build command for wrapper
-        cmd = ["tsugite-docker"]
-
-        # Add wrapper-specific flags
-        if network != "host":
-            cmd.extend(["--network", network])
-        if keep:
-            cmd.append("--keep")
-        if container:
-            cmd.extend(["--container", container])
-
-        # Add 'run' subcommand
-        cmd.append("run")
-
-        # Add all the original args (agent refs and prompt words)
-        cmd.extend(args)
-
-        # Add tsugite flags (not wrapper flags)
-        if model:
-            cmd.extend(["--model", model])
-        if with_agents:
-            cmd.extend(["--with-agents", with_agents])
-        if root:
-            cmd.extend(["--root", str(root)])
-        if history_dir:
-            cmd.extend(["--history-dir", str(history_dir)])
-        if ui:
-            cmd.extend(["--ui", ui])
-        if debug:
-            cmd.append("--debug")
-        if verbose:
-            cmd.append("--verbose")
-        if headless:
-            cmd.append("--headless")
-        if plain:
-            cmd.append("--plain")
-        if show_reasoning:
-            cmd.append("--show-reasoning")
-        if no_color:
-            cmd.append("--no-color")
-        if silent:
-            cmd.append("--silent")
-        if log_json:
-            cmd.append("--log-json")
-        if non_interactive:
-            cmd.append("--non-interactive")
-        if native_ui:
-            cmd.append("--native-ui")
-        if trust_mcp_code:
-            cmd.append("--trust-mcp-code")
-        if attachment:
-            for att in attachment:
-                cmd.extend(["--attachment", att])
-        if refresh_cache:
-            cmd.append("--refresh-cache")
-
-        # Execute wrapper
+        # Build and execute Docker wrapper command
+        cmd = _build_docker_command(
+            args,
+            network,
+            keep,
+            container,
+            model,
+            with_agents,
+            root,
+            history_dir,
+            ui,
+            debug,
+            verbose,
+            headless,
+            plain,
+            show_reasoning,
+            no_color,
+            silent,
+            log_json,
+            non_interactive,
+            native_ui,
+            trust_mcp_code,
+            attachment,
+            refresh_cache,
+        )
         result = subprocess.run(cmd, check=False)
         raise typer.Exit(result.returncode)
 
@@ -341,6 +452,9 @@ def run(
         # Choose executor function
         executor = run_multistep_agent if is_multistep else run_agent
 
+        # Determine if we should save to history (enabled by default unless --no-history flag)
+        should_save_history = not no_history
+
         # Skip "Starting agent execution" in headless mode
         if not headless:
             execution_type = "multi-step agent" if is_multistep else "agent"
@@ -350,16 +464,20 @@ def run(
             # Choose execution mode based on flags
             if silent:
                 # Completely silent execution
-                result = executor(
-                    agent_path=agent_file,
-                    prompt=prompt,
-                    model_override=model,
-                    debug=debug,
-                    custom_logger=create_silent_logger(),
-                    trust_mcp_code=trust_mcp_code,
-                    delegation_agents=delegation_agents,
-                    stream=stream,
-                )
+                executor_kwargs = {
+                    "agent_path": agent_file,
+                    "prompt": prompt,
+                    "model_override": model,
+                    "debug": debug,
+                    "custom_logger": create_silent_logger(),
+                    "trust_mcp_code": trust_mcp_code,
+                    "delegation_agents": delegation_agents,
+                    "stream": stream,
+                }
+                # Only pass return_token_usage if history is enabled and we're using run_agent
+                if should_save_history and executor == run_agent:
+                    executor_kwargs["return_token_usage"] = True
+                result = executor(**executor_kwargs)
             elif headless:
                 # Headless mode: stderr for progress (if verbose), stdout for result
                 stderr_console = get_error_console(True, console)
@@ -374,16 +492,19 @@ def run(
                     show_execution_logs=verbose,
                     show_panels=False,  # No panels in headless
                 ) as custom_logger:
-                    result = executor(
-                        agent_path=agent_file,
-                        prompt=prompt,
-                        model_override=model,
-                        debug=debug,
-                        custom_logger=custom_logger,
-                        trust_mcp_code=trust_mcp_code,
-                        delegation_agents=delegation_agents,
-                        stream=stream,
-                    )
+                    executor_kwargs = {
+                        "agent_path": agent_file,
+                        "prompt": prompt,
+                        "model_override": model,
+                        "debug": debug,
+                        "custom_logger": custom_logger,
+                        "trust_mcp_code": trust_mcp_code,
+                        "delegation_agents": delegation_agents,
+                        "stream": stream,
+                    }
+                    if should_save_history and executor == run_agent:
+                        executor_kwargs["return_token_usage"] = True
+                    result = executor(**executor_kwargs)
             elif native_ui:
                 # Minimal: colors and animations, but no panel boxes
                 with custom_agent_ui(
@@ -396,30 +517,36 @@ def run(
                     show_execution_logs=verbose,
                     show_panels=False,  # No panel boxes - just colors and animations
                 ) as custom_logger:
-                    result = executor(
-                        agent_path=agent_file,
-                        prompt=prompt,
-                        model_override=model,
-                        debug=debug,
-                        custom_logger=custom_logger,
-                        trust_mcp_code=trust_mcp_code,
-                        delegation_agents=delegation_agents,
-                        stream=stream,
-                    )
+                    executor_kwargs = {
+                        "agent_path": agent_file,
+                        "prompt": prompt,
+                        "model_override": model,
+                        "debug": debug,
+                        "custom_logger": custom_logger,
+                        "trust_mcp_code": trust_mcp_code,
+                        "delegation_agents": delegation_agents,
+                        "stream": stream,
+                    }
+                    if should_save_history and executor == run_agent:
+                        executor_kwargs["return_token_usage"] = True
+                    result = executor(**executor_kwargs)
             elif live_ui:
                 # Live UI: Rich Live Display with Tree visualization and interactive prompts
                 custom_logger = create_live_template_logger(interactive=not non_interactive)
                 with custom_logger.ui_handler.progress_context():
-                    result = executor(
-                        agent_path=agent_file,
-                        prompt=prompt,
-                        model_override=model,
-                        debug=debug,
-                        custom_logger=custom_logger,
-                        trust_mcp_code=trust_mcp_code,
-                        delegation_agents=delegation_agents,
-                        stream=stream,
-                    )
+                    executor_kwargs = {
+                        "agent_path": agent_file,
+                        "prompt": prompt,
+                        "model_override": model,
+                        "debug": debug,
+                        "custom_logger": custom_logger,
+                        "trust_mcp_code": trust_mcp_code,
+                        "delegation_agents": delegation_agents,
+                        "stream": stream,
+                    }
+                    if should_save_history and executor == run_agent:
+                        executor_kwargs["return_token_usage"] = True
+                    result = executor(**executor_kwargs)
             else:
                 # Choose UI handler based on plain mode
                 if use_plain_output:
@@ -427,16 +554,19 @@ def run(
                     custom_logger = create_plain_logger()
                     # Wrap in progress_context to register UI handler for interactive tools
                     with custom_logger.ui_handler.progress_context():
-                        result = executor(
-                            agent_path=agent_file,
-                            prompt=prompt,
-                            model_override=model,
-                            debug=debug,
-                            custom_logger=custom_logger,
-                            trust_mcp_code=trust_mcp_code,
-                            delegation_agents=delegation_agents,
-                            stream=stream,
-                        )
+                        executor_kwargs = {
+                            "agent_path": agent_file,
+                            "prompt": prompt,
+                            "model_override": model,
+                            "debug": debug,
+                            "custom_logger": custom_logger,
+                            "trust_mcp_code": trust_mcp_code,
+                            "delegation_agents": delegation_agents,
+                            "stream": stream,
+                        }
+                        if should_save_history and executor == run_agent:
+                            executor_kwargs["return_token_usage"] = True
+                        result = executor(**executor_kwargs)
                 else:
                     # Use custom UI with panels and formatting
                     with custom_agent_ui(
@@ -449,21 +579,55 @@ def run(
                         show_execution_logs=verbose,
                         show_panels=True,
                     ) as custom_logger:
-                        result = executor(
-                            agent_path=agent_file,
-                            prompt=prompt,
-                            model_override=model,
-                            debug=debug,
-                            custom_logger=custom_logger,
-                            trust_mcp_code=trust_mcp_code,
-                            delegation_agents=delegation_agents,
-                            stream=stream,
-                        )
+                        executor_kwargs = {
+                            "agent_path": agent_file,
+                            "prompt": prompt,
+                            "model_override": model,
+                            "debug": debug,
+                            "custom_logger": custom_logger,
+                            "trust_mcp_code": trust_mcp_code,
+                            "delegation_agents": delegation_agents,
+                            "stream": stream,
+                        }
+                        if should_save_history and executor == run_agent:
+                            executor_kwargs["return_token_usage"] = True
+                        result = executor(**executor_kwargs)
+
+            # Unpack result if history was enabled (run_agent returns tuple with metadata)
+            if should_save_history and executor == run_agent and isinstance(result, tuple):
+                result_str, token_count, cost, step_count, execution_steps = result
+            else:
+                result_str = result if not isinstance(result, tuple) else result[0]
+                token_count = None
+                cost = None
+                execution_steps = None
+
+            # Save to history (unless disabled)
+            if should_save_history:
+                import sys
+
+                try:
+                    from tsugite.agent_runner.history_integration import save_run_to_history
+
+                    agent_info = get_agent_info(agent_file)
+                    save_run_to_history(
+                        agent_path=agent_file,
+                        agent_name=agent_info["name"],
+                        prompt=prompt,
+                        result=result_str,
+                        model=model or agent_info.get("model", "default"),
+                        token_count=token_count,
+                        cost=cost,
+                        execution_steps=execution_steps,
+                    )
+                except Exception as e:
+                    # Don't fail the run if history save fails
+                    print(f"Warning: Failed to save to history: {e}", file=sys.stderr)
 
             # Display result
             if headless:
                 # Headless: plain result to stdout
-                get_output_console().print(result)
+                get_output_console().print(result_str)
             elif native_ui:
                 # Minimal: UI handler already showed output during execution
                 pass
@@ -471,7 +635,7 @@ def run(
                 console.print("\n" + "=" * 50)
                 console.print("[bold green]Agent Execution Complete[/bold green]")
                 console.print("=" * 50)
-                console.print(result)
+                console.print(result_str)
 
         except ValueError as e:
             get_error_console(headless, console).print(f"[red]Configuration error: {e}[/red]")
@@ -567,14 +731,6 @@ def render(
 
 
 @app.command()
-def history(
-    action: str = typer.Argument(help="Action: show, clear"),
-):
-    """View or manage execution history."""
-    console.print(f"[yellow]History {action} not yet implemented[/yellow]")
-
-
-@app.command()
 def version():
     """Show version information."""
     from tsugite import __version__
@@ -588,6 +744,7 @@ def chat(
     model: Optional[str] = typer.Option(None, "--model", help="Override agent model"),
     max_history: int = typer.Option(50, "--max-history", help="Maximum turns to keep in context"),
     stream: bool = typer.Option(False, "--stream", help="Stream LLM responses in real-time"),
+    no_history: bool = typer.Option(False, "--no-history", help="Disable conversation history persistence"),
     root: Optional[str] = typer.Option(None, "--root", help="Working directory"),
 ):
     """Start an interactive chat session with an agent."""
@@ -621,6 +778,7 @@ def chat(
             model_override=model,
             max_history=max_history,
             stream=stream,
+            disable_history=no_history,
         )
 
 
@@ -631,5 +789,6 @@ app.add_typer(config_app, name="config")
 app.add_typer(attachments_app, name="attachments")
 app.add_typer(cache_app, name="cache")
 app.add_typer(tools_app, name="tools")
+app.add_typer(history_app, name="history")
 app.command("benchmark")(benchmark_command)
 app.command("init")(init)

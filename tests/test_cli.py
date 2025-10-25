@@ -26,7 +26,6 @@ def test_cli_help(cli_runner):
     assert result.exit_code == 0
     assert "Micro-agent runner for task automation" in result.stdout
     assert "run" in result.stdout
-    assert "history" in result.stdout
     assert "version" in result.stdout
 
 
@@ -187,22 +186,6 @@ def test_run_command_all_options(cli_runner, sample_agent_file, temp_dir, mock_a
         ],
     )
     assert result.exit_code == 0
-
-
-def test_history_command_show(cli_runner):
-    """Test history show command."""
-    result = cli_runner.invoke(app, ["history", "show"])
-
-    assert result.exit_code == 0
-    assert "History show not yet implemented" in result.stdout
-
-
-def test_history_command_clear(cli_runner):
-    """Test history clear command."""
-    result = cli_runner.invoke(app, ["history", "clear"])
-
-    assert result.exit_code == 0
-    assert "History clear not yet implemented" in result.stdout
 
 
 def test_run_command_directory_change(cli_runner, sample_agent_file, temp_dir, mock_agent_execution):
@@ -581,12 +564,14 @@ class TestAutoDiscovery:
         agents_dir = tmp_path / "agents"
         agents_dir.mkdir()
         test_agent = agents_dir / "helper.md"
-        test_agent.write_text("""---
+        test_agent.write_text(
+            """---
 name: helper
 description: Helps with tasks
 ---
 Content
-""")
+"""
+        )
 
         mock_validate.return_value = (True, "Agent is valid")
         mock_run.return_value = "Task completed"
@@ -597,3 +582,166 @@ Content
 
         # Should execute successfully (verified by no exception)
         # The actual delegation to helper depends on LLM decision
+
+
+class TestRunCommandHistory:
+    """Tests for history integration with run command."""
+
+    def test_run_command_saves_history_by_default(self, cli_runner, sample_agent_file, tmp_path, monkeypatch):
+        """Test that history is saved by default when running an agent."""
+        # Mock history functions
+        with (
+            patch("tsugite.agent_runner.run_agent") as mock_run_agent,
+            patch("tsugite.md_agents.validate_agent_execution") as mock_validate,
+            patch("tsugite.agent_runner.history_integration.save_run_to_history") as mock_save_history,
+        ):
+            # Mock run_agent to return tuple with metadata (simulating return_token_usage=True)
+            mock_run_agent.return_value = ("Test result", 1000, 0.05, 3, [])
+            mock_validate.return_value = (True, "Valid")
+            mock_save_history.return_value = "test_conv_id"
+
+            result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt"])
+
+            assert result.exit_code == 0
+
+            # Verify save_run_to_history was called
+            mock_save_history.assert_called_once()
+            call_kwargs = mock_save_history.call_args[1]
+            assert call_kwargs["prompt"] == "test prompt"
+            assert call_kwargs["result"] == "Test result"
+            assert call_kwargs["token_count"] == 1000
+            assert call_kwargs["cost"] == 0.05
+
+    def test_run_command_no_history_flag(self, cli_runner, sample_agent_file, tmp_path):
+        """Test that --no-history flag prevents saving to history."""
+        with (
+            patch("tsugite.agent_runner.run_agent") as mock_run_agent,
+            patch("tsugite.md_agents.validate_agent_execution") as mock_validate,
+            patch("tsugite.agent_runner.history_integration.save_run_to_history") as mock_save_history,
+        ):
+            mock_run_agent.return_value = "Test result"
+            mock_validate.return_value = (True, "Valid")
+
+            result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--no-history"])
+
+            assert result.exit_code == 0
+
+            # Verify save_run_to_history was NOT called
+            mock_save_history.assert_not_called()
+
+    def test_run_command_history_with_metadata(self, cli_runner, sample_agent_file):
+        """Test that token count and cost are passed to history."""
+        with (
+            patch("tsugite.agent_runner.run_agent") as mock_run_agent,
+            patch("tsugite.md_agents.validate_agent_execution") as mock_validate,
+            patch("tsugite.agent_runner.history_integration.save_run_to_history") as mock_save_history,
+        ):
+            # Return tuple with metadata
+            mock_run_agent.return_value = ("Result", 2500, 0.12, 5, [])
+            mock_validate.return_value = (True, "Valid")
+            mock_save_history.return_value = "conv_123"
+
+            result = cli_runner.invoke(app, ["run", str(sample_agent_file), "complex task"])
+
+            assert result.exit_code == 0
+
+            # Verify metadata was passed
+            call_kwargs = mock_save_history.call_args[1]
+            assert call_kwargs["token_count"] == 2500
+            assert call_kwargs["cost"] == 0.12
+            assert call_kwargs["execution_steps"] == []
+
+    def test_run_command_history_conversation_created(self, cli_runner, sample_agent_file, tmp_path):
+        """Test that conversation file is created after run."""
+        with (
+            patch("tsugite.history.storage.get_history_dir", return_value=tmp_path),
+            patch("tsugite.history.index.get_history_dir", return_value=tmp_path),
+            patch("tsugite.ui.chat_history.get_machine_name", return_value="test_machine"),
+            patch("tsugite.agent_runner.run_agent") as mock_run_agent,
+            patch("tsugite.md_agents.validate_agent_execution") as mock_validate,
+            patch("tsugite.config.load_config") as mock_config,
+            patch("tsugite.md_agents.parse_agent_file") as mock_parse,
+        ):
+            from tsugite.history import load_conversation
+
+            mock_run_agent.return_value = ("Result", 100, 0.01, 1, [])
+            mock_validate.return_value = (True, "Valid")
+            mock_config.return_value = MagicMock(history_enabled=True)
+
+            mock_agent = MagicMock()
+            mock_agent.config = MagicMock(disable_history=False, name="test_agent")
+            mock_parse.return_value = mock_agent
+
+            result = cli_runner.invoke(app, ["run", str(sample_agent_file), "task"])
+
+            assert result.exit_code == 0
+
+            # Verify conversation file was created
+            conv_files = list(tmp_path.glob("*.jsonl"))
+            assert len(conv_files) > 0
+
+            # Verify it can be loaded
+            conv_id = conv_files[0].stem
+            turns = load_conversation(conv_id)
+            assert len(turns) == 2  # metadata + turn
+
+    def test_run_command_history_error_handling(self, cli_runner, sample_agent_file, capsys):
+        """Test that history errors don't crash the run."""
+        with (
+            patch("tsugite.agent_runner.run_agent") as mock_run_agent,
+            patch("tsugite.md_agents.validate_agent_execution") as mock_validate,
+            patch("tsugite.agent_runner.history_integration.save_run_to_history") as mock_save_history,
+        ):
+            mock_run_agent.return_value = ("Result", 100, 0.01, 1, [])
+            mock_validate.return_value = (True, "Valid")
+
+            # save_run_to_history raises exception
+            mock_save_history.side_effect = Exception("Database error")
+
+            result = cli_runner.invoke(app, ["run", str(sample_agent_file), "task"])
+
+            # Run should still succeed
+            assert result.exit_code == 0
+            assert "Result" in result.stdout
+
+    def test_run_command_multistep_history_saves(self, cli_runner, tmp_path):
+        """Test that multi-step agents save to history (without metadata)."""
+        # Create a multi-step agent
+        multistep_agent = tmp_path / "multistep.md"
+        multistep_agent.write_text(
+            """---
+name: multistep_test
+model: openai:gpt-4o-mini
+tools: []
+---
+# Multi-step agent
+
+<!-- tsu:step name="step1" -->
+Step 1
+
+<!-- tsu:step name="step2" -->
+Step 2
+"""
+        )
+
+        with (
+            patch("tsugite.agent_runner.run_multistep_agent") as mock_run_multistep,
+            patch("tsugite.md_agents.validate_agent_execution") as mock_validate,
+            patch("tsugite.agent_runner.history_integration.save_run_to_history") as mock_save_history,
+        ):
+            # Multi-step returns just a string, not a tuple
+            mock_run_multistep.return_value = "Multi-step complete"
+            mock_validate.return_value = (True, "Valid")
+            mock_save_history.return_value = "conv_456"
+
+            result = cli_runner.invoke(app, ["run", str(multistep_agent), "run steps"])
+
+            assert result.exit_code == 0
+
+            # Verify save_run_to_history was called (even without metadata)
+            mock_save_history.assert_called_once()
+            call_kwargs = mock_save_history.call_args[1]
+            assert call_kwargs["result"] == "Multi-step complete"
+            # Token count and cost should be None for multi-step
+            assert call_kwargs["token_count"] is None
+            assert call_kwargs["cost"] is None

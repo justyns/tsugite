@@ -119,7 +119,7 @@ Task: {{ user_prompt }}
         agent = parse_agent(agent_text)
 
         # Resolve agent's attachments
-        resolved = resolve_attachments(agent.config.attachments, tmp_path)
+        resolved = resolve_attachments(agent.config.attachments)
 
         assert len(resolved) == 1
         name, content = resolved[0]

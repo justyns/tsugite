@@ -82,3 +82,23 @@ def get_xdg_cache_path(subdir: str = "") -> Path:
     if subdir:
         cache_path = cache_path / subdir
     return cache_path
+
+
+def get_xdg_data_path(subdir: str = "") -> Path:
+    """Get XDG-compliant data directory path.
+
+    Uses XDG Base Directory specification for data:
+    - $XDG_DATA_HOME/tsugite/{subdir} (if XDG_DATA_HOME is set)
+    - ~/.local/share/tsugite/{subdir} (XDG default)
+
+    Args:
+        subdir: Optional subdirectory within tsugite data (e.g., "history")
+
+    Returns:
+        Path to data directory
+    """
+    xdg_data = os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local" / "share"))
+    data_path = Path(xdg_data) / "tsugite"
+    if subdir:
+        data_path = data_path / subdir
+    return data_path

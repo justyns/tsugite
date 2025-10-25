@@ -50,6 +50,7 @@ class ChatApp(App):
         max_history: int = 50,
         stream: bool = False,
         show_execution_details: bool = True,
+        disable_history: bool = False,
     ):
         """Initialize chat app.
 
@@ -59,6 +60,7 @@ class ChatApp(App):
             max_history: Maximum conversation history turns
             stream: Whether to stream responses
             show_execution_details: Whether to show tool calls and code execution
+            disable_history: Disable conversation history persistence
         """
         super().__init__()
         self.agent_path = agent_path
@@ -66,6 +68,7 @@ class ChatApp(App):
         self.max_history = max_history
         self.stream_enabled = stream
         self.show_execution_details = show_execution_details
+        self.disable_history = disable_history
 
         # Parse agent info
         agent = parse_agent_file(agent_path)
@@ -194,7 +197,6 @@ class ChatApp(App):
             on_stream_chunk=self._handle_stream_chunk,
             on_stream_complete=self._handle_stream_complete,
             on_intermediate_message=self._handle_intermediate_message,
-            on_execution_event=self._handle_execution_event,
             on_thought_log=self._handle_thought_log,
         )
 
@@ -209,6 +211,7 @@ class ChatApp(App):
             max_history=self.max_history,
             custom_logger=custom_logger,
             stream=self.stream_enabled,
+            disable_history=self.disable_history,
         )
 
         # Focus the input
@@ -298,16 +301,6 @@ class ChatApp(App):
         message_list = self.query_one(MessageList)
         # Show as agent message but slightly different styling could be added
         message_list.add_message("agent", f"[Step] {content}")
-
-    def _handle_execution_event(self, event_type: str, content: str) -> None:
-        """Handle execution event from UI handler - now deprecated.
-
-        Args:
-            event_type: Type of execution event (tool_call, code_execution, etc.)
-            content: Event content
-        """
-        # Execution events now go only to thought log, not to chat
-        pass
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
         """Handle user message submission.
@@ -585,6 +578,7 @@ def run_textual_chat(
     max_history: int = 50,
     stream: bool = False,
     show_execution_details: bool = True,
+    disable_history: bool = False,
 ) -> None:
     """Run the Textual chat interface.
 
@@ -594,6 +588,7 @@ def run_textual_chat(
         max_history: Maximum conversation history turns
         stream: Whether to stream responses
         show_execution_details: Whether to show tool calls and code execution
+        disable_history: Disable conversation history persistence
     """
     app = ChatApp(
         agent_path=agent_path,
@@ -601,5 +596,6 @@ def run_textual_chat(
         max_history=max_history,
         stream=stream,
         show_execution_details=show_execution_details,
+        disable_history=disable_history,
     )
     app.run()

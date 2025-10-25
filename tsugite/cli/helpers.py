@@ -80,7 +80,7 @@ def resolve_attachments_with_error_handling(
     from tsugite.utils import resolve_attachments
 
     try:
-        return resolve_attachments(attachments, base_dir, refresh_cache)
+        return resolve_attachments(attachments, refresh_cache)
     except ValueError as e:
         console.print(f"[red]{error_context} error: {e}[/red]")
         raise typer.Exit(1)

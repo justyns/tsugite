@@ -4,6 +4,7 @@ import re
 import sys
 import termios
 import time
+from contextlib import contextmanager
 from typing import List, Optional
 
 import nest_asyncio
@@ -124,94 +125,13 @@ def ask_user(question: str, question_type: str = "text", options: Optional[List[
                 "must provide at least 2 options for choice type questions",
             )
 
-    # Create a console that writes directly to the real terminal
-    # This bypasses any stdout redirection from the executor
-    terminal_console = Console(file=sys.__stdout__, force_terminal=True)
-
-    # Save current stdin (may be redirected by executor)
-    old_stdin = sys.stdin
-
     try:
-        # Restore real terminal stdin for user input
-        # Only stdin needs to be restored - we use terminal_console for output
-        sys.stdin = sys.__stdin__
-
-        # Pause progress spinner while showing prompts
-        with paused_progress():
-            if question_type == "text":
-                # Freeform text input
-                terminal_console.print(f"\n[cyan]Question:[/cyan] {question}")
-
-                # Flush input buffer to prevent accidental Enter presses
-                _flush_input_buffer()
-
-                response = Prompt.ask("[yellow]Your answer[/yellow]", console=terminal_console)
-
-                # Write answer to captured stdout so it appears in observation for LLM
-                print(f"User answered: {response}")
-
-                return response
-
-            elif question_type == "yes_no":
-                # Yes/No question
-                terminal_console.print(f"\n[cyan]Question:[/cyan] {question}")
-
-                # Flush input buffer to prevent accidental Enter presses
-                _flush_input_buffer()
-
-                result = Confirm.ask("[yellow]Your answer[/yellow]", console=terminal_console)
-                answer = "yes" if result else "no"
-
-                # Write answer to captured stdout so it appears in observation for LLM
-                print(f"User answered: {answer}")
-
-                return answer
-
-            elif question_type == "choice":
-                # Multiple choice with arrow key navigation
-                terminal_console.print()  # Add blank line for spacing
-
-                # Flush input buffer to prevent accidental Enter presses
-                _flush_input_buffer()
-
-                # Small delay to prevent rapid double-press issues
-                time.sleep(0.15)
-
-                # Questionary needs real stdout for its TUI - temporarily restore it
-                old_stdout_temp = sys.stdout
-                sys.stdout = sys.__stdout__
-
-                try:
-                    # Show choice prompt with clear instructions
-                    answer = questionary.select(
-                        question,
-                        choices=options,
-                        style=QUESTIONARY_STYLE,
-                        use_arrow_keys=True,
-                        use_shortcuts=True,
-                        use_jk_keys=True,
-                        instruction="(Use arrow keys or j/k, Enter to select)",
-                    ).ask()
-
-                    # questionary returns None on Ctrl+C
-                    if answer is None:
-                        raise KeyboardInterrupt()
-                finally:
-                    # Restore captured stdout for executor
-                    sys.stdout = old_stdout_temp
-
-                # Write answer to captured stdout so it appears in observation for LLM
-                print(f"User answered: {answer}")
-
-                return answer
-
+        with terminal_context() as console:
+            return handle_question_by_type(question_type, question, options, console, _flush_input_buffer)
     except KeyboardInterrupt:
         raise RuntimeError("User input interrupted by keyboard interrupt")
     except Exception as e:
         raise RuntimeError(f"Failed to get user input: {e}")
-    finally:
-        # Restore stdin (for executor)
-        sys.stdin = old_stdin
 
 
 @tool
@@ -271,30 +191,178 @@ def ask_user_batch(questions: List[dict]) -> dict:
 
     # Validate each question structure and auto-generate IDs if needed
     valid_types = ["text", "yes_no", "choice"]
+    validate_batch_questions(questions, valid_types)
+
+    # Collect responses
+    responses = {}
+
+    try:
+        with terminal_context() as console:
+            console.print("\n[bold cyan]Please answer the following questions:[/bold cyan]\n")
+
+            for i, q in enumerate(questions, 1):
+                q_id = q["id"]
+                q_text = q["question"]
+                q_type = q["type"]
+                options = q.get("options")
+
+                # Show question number
+                console.print(f"[dim]Question {i}/{len(questions)}[/dim]")
+
+                # Handle question based on type
+                answer = handle_question_by_type(q_type, q_text, options, console, _flush_input_buffer)
+                responses[q_id] = answer
+
+                # Add spacing between questions (except after last one)
+                if i < len(questions):
+                    console.print()
+
+            console.print("\n[green]✓ All questions answered[/green]\n")
+
+            # Write summary of answers to captured stdout so it appears in observation for LLM
+            print("\nUser responses:")
+            for q_id, answer in responses.items():
+                print(f"  {q_id}: {answer}")
+
+    except KeyboardInterrupt:
+        raise RuntimeError("User input interrupted by keyboard interrupt")
+    except Exception as e:
+        raise RuntimeError(f"Failed to get user input: {e}")
+
+    return responses
+
+
+@contextmanager
+def terminal_context():
+    """Context manager for terminal I/O with proper stdin/stdout handling.
+
+    Yields:
+        Console: A terminal console that writes directly to real terminal
+    """
+    terminal_console = Console(file=sys.__stdout__, force_terminal=True)
+    old_stdin = sys.stdin
+
+    try:
+        # Restore real terminal stdin for user input
+        sys.stdin = sys.__stdin__
+
+        # Pause progress spinner while showing prompts
+        with paused_progress():
+            yield terminal_console
+    finally:
+        # Restore stdin for executor
+        sys.stdin = old_stdin
+
+
+def ask_text_question(question: str, console: Console, flush_fn) -> str:
+    """Ask a freeform text question.
+
+    Args:
+        question: Question text
+        console: Rich console for output
+        flush_fn: Function to flush input buffer
+
+    Returns:
+        User's text response
+    """
+    console.print(f"\n[cyan]Question:[/cyan] {question}")
+    flush_fn()
+    response = Prompt.ask("[yellow]Your answer[/yellow]", console=console)
+    print(f"User answered: {response}")
+    return response
+
+
+def ask_yes_no_question(question: str, console: Console, flush_fn) -> str:
+    """Ask a yes/no question.
+
+    Args:
+        question: Question text
+        console: Rich console for output
+        flush_fn: Function to flush input buffer
+
+    Returns:
+        "yes" or "no"
+    """
+    console.print(f"\n[cyan]Question:[/cyan] {question}")
+    flush_fn()
+    result = Confirm.ask("[yellow]Your answer[/yellow]", console=console)
+    answer = "yes" if result else "no"
+    print(f"User answered: {answer}")
+    return answer
+
+
+def ask_choice_question(question: str, options: List[str], console: Console, flush_fn) -> str:
+    """Ask a multiple choice question with arrow key navigation.
+
+    Args:
+        question: Question text
+        options: List of choice options
+        console: Rich console for output
+        flush_fn: Function to flush input buffer
+
+    Returns:
+        Selected option
+
+    Raises:
+        KeyboardInterrupt: If user cancels with Ctrl+C
+    """
+    console.print()  # Add blank line for spacing
+    flush_fn()
+
+    # Small delay to prevent rapid double-press issues
+    time.sleep(0.15)
+
+    # Questionary needs real stdout for its TUI - temporarily restore it
+    old_stdout = sys.stdout
+    sys.stdout = sys.__stdout__
+
+    try:
+        answer = questionary.select(
+            question,
+            choices=options,
+            style=QUESTIONARY_STYLE,
+            use_arrow_keys=True,
+            use_shortcuts=True,
+            use_jk_keys=True,
+            instruction="(Use arrow keys or j/k, Enter to select)",
+        ).ask()
+
+        # questionary returns None on Ctrl+C
+        if answer is None:
+            raise KeyboardInterrupt()
+
+        print(f"User answered: {answer}")
+        return answer
+    finally:
+        # Restore captured stdout for executor
+        sys.stdout = old_stdout
+
+
+def validate_batch_questions(questions: List[dict], valid_types: List[str]) -> None:
+    """Validate batch questions structure and auto-generate IDs.
+
+    Modifies questions in-place to add auto-generated IDs where missing.
+
+    Args:
+        questions: List of question dictionaries to validate
+        valid_types: List of valid question types
+
+    Raises:
+        ValueError: If validation fails
+    """
     seen_ids = set()
 
     for i, q in enumerate(questions):
         if not isinstance(q, dict):
-            raise validation_error(
-                f"questions[{i}]",
-                str(q),
-                "must be a dictionary",
-            )
+            raise validation_error(f"questions[{i}]", str(q), "must be a dictionary")
 
         # Check required fields
         if "question" not in q:
-            raise validation_error(
-                f"questions[{i}]",
-                str(q),
-                "missing required field 'question'",
-            )
+            raise validation_error(f"questions[{i}]", str(q), "missing required field 'question'")
+
         # Accept both 'type' and 'question_type' for compatibility
         if "type" not in q and "question_type" not in q:
-            raise validation_error(
-                f"questions[{i}]",
-                str(q),
-                "missing required field 'type' or 'question_type'",
-            )
+            raise validation_error(f"questions[{i}]", str(q), "missing required field 'type' or 'question_type'")
 
         # Normalize to 'type' if 'question_type' was provided
         if "question_type" in q and "type" not in q:
@@ -303,7 +371,6 @@ def ask_user_batch(questions: List[dict]) -> dict:
         # Auto-generate ID if not provided
         if "id" not in q:
             base_id = _generate_id_from_question(q["question"])
-            # Handle duplicates by appending a number
             q_id = base_id
             counter = 1
             while q_id in seen_ids:
@@ -315,9 +382,7 @@ def ask_user_batch(questions: List[dict]) -> dict:
             # Check for duplicate explicit IDs
             if q_id in seen_ids:
                 raise validation_error(
-                    f"questions[{i}].id",
-                    q_id,
-                    "duplicate question ID - all question IDs must be unique",
+                    f"questions[{i}].id", q_id, "duplicate question ID - all question IDs must be unique"
                 )
 
         seen_ids.add(q_id)
@@ -325,11 +390,7 @@ def ask_user_batch(questions: List[dict]) -> dict:
         # Validate type
         q_type = q["type"]
         if q_type not in valid_types:
-            raise validation_error(
-                f"questions[{i}].type",
-                q_type,
-                f"must be one of {', '.join(valid_types)}",
-            )
+            raise validation_error(f"questions[{i}].type", q_type, f"must be one of {', '.join(valid_types)}")
 
         # Validate options for choice type
         if q_type == "choice":
@@ -340,104 +401,30 @@ def ask_user_batch(questions: List[dict]) -> dict:
                     "must provide at least 2 options for choice type questions",
                 )
 
-    # Create a console that writes directly to the real terminal
-    # This bypasses any stdout redirection from the executor
-    terminal_console = Console(file=sys.__stdout__, force_terminal=True)
 
-    # Save current stdin (may be redirected by executor)
-    old_stdin = sys.stdin
+def handle_question_by_type(q_type: str, q_text: str, options: Optional[List[str]], console: Console, flush_fn) -> str:
+    """Handle a question based on its type.
 
-    # Collect responses
-    responses = {}
+    Args:
+        q_type: Question type ("text", "yes_no", or "choice")
+        q_text: Question text
+        options: Options for choice questions (required if q_type == "choice")
+        console: Rich console for output
+        flush_fn: Function to flush input buffer
 
-    try:
-        # Restore real terminal stdin for user input
-        # Only stdin needs to be restored - we use terminal_console for output
-        sys.stdin = sys.__stdin__
+    Returns:
+        User's response
 
-        # Pause progress spinner while showing prompts
-        with paused_progress():
-            terminal_console.print("\n[bold cyan]Please answer the following questions:[/bold cyan]\n")
-
-            for i, q in enumerate(questions, 1):
-                q_id = q["id"]
-                q_text = q["question"]
-                q_type = q["type"]
-
-                # Show question number
-                terminal_console.print(f"[dim]Question {i}/{len(questions)}[/dim]")
-
-                if q_type == "text":
-                    # Freeform text input
-                    terminal_console.print(f"[cyan]{q_text}[/cyan]")
-
-                    # Flush input buffer to prevent accidental Enter presses
-                    _flush_input_buffer()
-
-                    response = Prompt.ask("[yellow]Your answer[/yellow]", console=terminal_console)
-                    responses[q_id] = response
-
-                elif q_type == "yes_no":
-                    # Yes/No question
-                    terminal_console.print(f"[cyan]{q_text}[/cyan]")
-
-                    # Flush input buffer to prevent accidental Enter presses
-                    _flush_input_buffer()
-
-                    result = Confirm.ask("[yellow]Your answer[/yellow]", console=terminal_console)
-                    responses[q_id] = "yes" if result else "no"
-
-                elif q_type == "choice":
-                    # Multiple choice
-                    options = q["options"]
-
-                    # Flush input buffer to prevent accidental Enter presses
-                    _flush_input_buffer()
-
-                    # Small delay to prevent rapid double-press issues
-                    time.sleep(0.15)
-
-                    # Questionary needs real stdout for its TUI - temporarily restore it
-                    old_stdout_temp = sys.stdout
-                    sys.stdout = sys.__stdout__
-
-                    try:
-                        answer = questionary.select(
-                            q_text,
-                            choices=options,
-                            style=QUESTIONARY_STYLE,
-                            use_arrow_keys=True,
-                            use_shortcuts=True,
-                            use_jk_keys=True,
-                            instruction="(Use arrow keys or j/k, Enter to select)",
-                        ).ask()
-
-                        # questionary returns None on Ctrl+C
-                        if answer is None:
-                            raise KeyboardInterrupt()
-                    finally:
-                        # Restore captured stdout for executor
-                        sys.stdout = old_stdout_temp
-
-                    responses[q_id] = answer
-
-                # Add spacing between questions (except after last one)
-                if i < len(questions):
-                    terminal_console.print()
-
-            terminal_console.print("\n[green]✓ All questions answered[/green]\n")
-
-            # Write summary of answers to captured stdout so it appears in observation for LLM
-            print("\nUser responses:")
-            for q_id, answer in responses.items():
-                print(f"  {q_id}: {answer}")
-
-    except KeyboardInterrupt:
-        raise RuntimeError("User input interrupted by keyboard interrupt")
-    except Exception as e:
-        raise RuntimeError(f"Failed to get user input: {e}")
-    finally:
-        # Restore stdin (for executor)
-        sys.stdin = old_stdin
-
-    return responses
+    Raises:
+        ValueError: If invalid question type or missing options
+    """
+    if q_type == "text":
+        return ask_text_question(q_text, console, flush_fn)
+    elif q_type == "yes_no":
+        return ask_yes_no_question(q_text, console, flush_fn)
+    elif q_type == "choice":
+        if not options:
+            raise ValueError("Options required for choice type questions")
+        return ask_choice_question(q_text, options, console, flush_fn)
+    else:
+        raise ValueError(f"Invalid question type: {q_type}")

@@ -2,7 +2,7 @@
 
 import os
 from pathlib import Path
-from typing import List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 from tsugite.utils import ensure_file_exists
 
@@ -172,72 +172,14 @@ def merge_agent_configs(parent, child):
     - Dicts (mcp_servers, context_budget): merge, child keys override
     - Strings (instructions): concatenate with newline
     """
-    merged_data = {}
-
-    # Scalars - child overwrites parent if set
-    merged_data["name"] = child.name if child.name else parent.name
-    merged_data["description"] = child.description if child.description else parent.description
-    merged_data["model"] = child.model if child.model else parent.model
-    merged_data["max_turns"] = child.max_turns if child.max_turns != 5 else parent.max_turns
-    merged_data["permissions_profile"] = (
-        child.permissions_profile if child.permissions_profile != "default" else parent.permissions_profile
-    )
-    merged_data["reasoning_effort"] = child.reasoning_effort if child.reasoning_effort else parent.reasoning_effort
-    # text_mode: use child's value if True (explicitly enabled), otherwise inherit from parent
-    merged_data["text_mode"] = child.text_mode if child.text_mode else parent.text_mode
-
-    # Lists - merge and deduplicate
-    parent_tools = parent.tools if parent.tools else []
-    child_tools = child.tools if child.tools else []
-    merged_tools = list(dict.fromkeys(parent_tools + child_tools))  # Preserves order, deduplicates
-    merged_data["tools"] = merged_tools
-
-    parent_prefetch = parent.prefetch if parent.prefetch else []
-    child_prefetch = child.prefetch if child.prefetch else []
-    merged_data["prefetch"] = parent_prefetch + child_prefetch
-
-    parent_initial_tasks = parent.initial_tasks if parent.initial_tasks else []
-    child_initial_tasks = child.initial_tasks if child.initial_tasks else []
-    merged_data["initial_tasks"] = parent_initial_tasks + child_initial_tasks
-
-    parent_attachments = parent.attachments if parent.attachments else []
-    child_attachments = child.attachments if child.attachments else []
-    merged_attachments = list(dict.fromkeys(parent_attachments + child_attachments))
-    merged_data["attachments"] = merged_attachments
-
-    parent_custom = parent.custom_tools if parent.custom_tools else []
-    child_custom = child.custom_tools if child.custom_tools else []
-    # Build dict by name to dedupe (child tools override parent tools with same name)
-    custom_tool_dict = {}
-    for tool in parent_custom + child_custom:
-        custom_tool_dict[tool["name"]] = tool
-    merged_data["custom_tools"] = list(custom_tool_dict.values())
-
-    # Dicts - merge with child override
-    parent_mcp = parent.mcp_servers if parent.mcp_servers else {}
-    child_mcp = child.mcp_servers if child.mcp_servers else {}
-    merged_mcp = {**parent_mcp, **child_mcp}
-    merged_data["mcp_servers"] = merged_mcp if merged_mcp else None
-
-    parent_context = parent.context_budget if parent.context_budget else {}
-    child_context = child.context_budget if child.context_budget else {}
-    merged_context = {**parent_context, **child_context}
-    merged_data["context_budget"] = merged_context
-
-    # Strings - concatenate instructions
-    parent_instructions = parent.instructions if parent.instructions else ""
-    child_instructions = child.instructions if child.instructions else ""
-
-    if parent_instructions and child_instructions:
-        merged_data["instructions"] = f"{parent_instructions}\n\n{child_instructions}"
-    elif parent_instructions:
-        merged_data["instructions"] = parent_instructions
-    elif child_instructions:
-        merged_data["instructions"] = child_instructions
-    else:
-        merged_data["instructions"] = ""
-
     from .md_agents import AgentConfig
+
+    # Merge all field types
+    merged_data = {}
+    merged_data.update(merge_scalar_fields(parent, child))
+    merged_data.update(merge_list_fields(parent, child))
+    merged_data.update(merge_dict_fields(parent, child))
+    merged_data["instructions"] = merge_instructions(parent, child)
 
     return AgentConfig(**merged_data)
 
@@ -270,11 +212,8 @@ def resolve_agent_inheritance(agent, agent_path: Path, inheritance_chain: Option
     resolved_path = agent_path.resolve()
     inheritance_chain.add(resolved_path)
 
-    # Start with current agent's config
-    current_config = agent.config
-
     # Check if explicitly opted out
-    if current_config.extends == "none":
+    if agent.config.extends == "none":
         return agent
 
     # Build inheritance chain
@@ -282,103 +221,27 @@ def resolve_agent_inheritance(agent, agent_path: Path, inheritance_chain: Option
     contents_to_merge = []
 
     # 1. Load default base agent (only for implicit inheritance)
-    # - If extends is None: auto-inherit from default base
-    # - If extends is a parent name: don't auto-inherit (explicit inheritance only)
-    # - If extends is "none": opt out of all inheritance
-    # Search priority for default base:
-    # a) User's project-local default.md (if exists)
-    # b) Config's default_base_agent
-    # c) Builtin fallback
-    if current_config.extends is None:
-        # First, try to find user's project-local default.md
-        user_default_path = agent_path.parent / ".tsugite" / "default.md"
-        loaded_default = False
-
-        if user_default_path.exists() and user_default_path.resolve() != resolved_path:
-            # Load user's local default.md
-            if user_default_path.resolve() not in inheritance_chain:
-                try:
-                    default_agent = load_extended_agent("default", agent_path, inheritance_chain.copy())
-                    # User's default.md should opt out of builtin inheritance unless it explicitly extends something
-                    # This gives users full control when they create a project-specific default
-                    if default_agent.config.extends is None:
-                        # Don't recursively resolve - user's default is standalone
-                        configs_to_merge.append(default_agent.config)
-                        contents_to_merge.append(default_agent.content)
-                    else:
-                        # User explicitly extended something, so resolve it
-                        default_agent = resolve_agent_inheritance(
-                            default_agent, user_default_path, inheritance_chain.copy()
-                        )
-                        configs_to_merge.append(default_agent.config)
-                        contents_to_merge.append(default_agent.content)
-                    loaded_default = True
-                except ValueError:
-                    pass
-
-        # If no user default.md found (or current agent IS default.md), use config or builtin
-        if not loaded_default:
-            default_base_name = _get_default_base_agent_name()
-            if default_base_name:
-                # Normalize to strip angle brackets
-                normalized_name = default_base_name.strip("<>")
-
-                # If config specifies builtin, use it directly
-                from .builtin_agents import is_builtin_agent
-
-                if is_builtin_agent(normalized_name):
-                    from .builtin_agents import get_builtin_default_agent
-
-                    try:
-                        builtin_agent = get_builtin_default_agent()
-                        configs_to_merge.append(builtin_agent.config)
-                        contents_to_merge.append(builtin_agent.content)
-                    except Exception:
-                        pass
-                else:
-                    # Try to find the configured default agent
-                    default_path = find_agent_file(default_base_name, agent_path.parent)
-                    if default_path and default_path.resolve() != resolved_path:
-                        if default_path.resolve() not in inheritance_chain:
-                            try:
-                                default_agent = load_extended_agent(
-                                    default_base_name, agent_path, inheritance_chain.copy()
-                                )
-                                default_agent = resolve_agent_inheritance(
-                                    default_agent, default_path, inheritance_chain.copy()
-                                )
-                                configs_to_merge.append(default_agent.config)
-                                contents_to_merge.append(default_agent.content)
-                            except ValueError:
-                                pass
+    if agent.config.extends is None:
+        default_config, default_content = load_default_base_agent(agent_path, resolved_path, inheritance_chain)
+        if default_config:
+            configs_to_merge.append(default_config)
+            contents_to_merge.append(default_content)
 
     # 2. Load explicitly extended agent
-    if current_config.extends and current_config.extends != "none":
-        parent_agent = load_extended_agent(current_config.extends, agent_path, inheritance_chain.copy())
-        parent_path = parent_agent.file_path
-
-        # Recursively resolve parent's inheritance
-        parent_agent = resolve_agent_inheritance(parent_agent, parent_path, inheritance_chain.copy())
-        configs_to_merge.append(parent_agent.config)
-        contents_to_merge.append(parent_agent.content)
+    if agent.config.extends and agent.config.extends != "none":
+        parent_config, parent_content = load_explicit_parent_agent(agent.config.extends, agent_path, inheritance_chain)
+        configs_to_merge.append(parent_config)
+        contents_to_merge.append(parent_content)
 
     # 3. Current agent is last (highest precedence)
-    configs_to_merge.append(current_config)
+    configs_to_merge.append(agent.config)
     contents_to_merge.append(agent.content)
 
-    # Merge all configs in order (earlier = lower precedence)
+    # Merge all configs and content
     if len(configs_to_merge) == 1:
-        # No inheritance, return as-is
         return agent
 
-    merged_config = configs_to_merge[0]
-    for config in configs_to_merge[1:]:
-        merged_config = merge_agent_configs(merged_config, config)
-
-    # Merge all contents in order (parent first, child last)
-    merged_content = "\n\n".join(contents_to_merge)
-
-    # Return new Agent with merged config and content
+    merged_config, merged_content = merge_configs_and_content(configs_to_merge, contents_to_merge)
     return Agent(config=merged_config, content=merged_content, file_path=agent_path)
 
 
@@ -397,3 +260,243 @@ def _get_default_base_agent_name() -> Optional[str]:
         return config.default_base_agent
     except Exception:
         return "builtin-default"
+
+
+def merge_scalar_fields(parent, child) -> Dict[str, Any]:
+    """Merge scalar fields from parent and child configs.
+
+    Child values take precedence when explicitly set.
+
+    Args:
+        parent: Parent AgentConfig
+        child: Child AgentConfig
+
+    Returns:
+        Dict of merged scalar fields
+    """
+    return {
+        "name": child.name if child.name else parent.name,
+        "description": child.description if child.description else parent.description,
+        "model": child.model if child.model else parent.model,
+        "max_turns": child.max_turns if child.max_turns != 5 else parent.max_turns,
+        "permissions_profile": (
+            child.permissions_profile if child.permissions_profile != "default" else parent.permissions_profile
+        ),
+        "reasoning_effort": child.reasoning_effort if child.reasoning_effort else parent.reasoning_effort,
+        "text_mode": child.text_mode if child.text_mode else parent.text_mode,
+    }
+
+
+def merge_list_fields(parent, child) -> Dict[str, List]:
+    """Merge list fields from parent and child configs.
+
+    Different list types have different merge strategies:
+    - tools, attachments: merge and deduplicate
+    - prefetch, initial_tasks: concatenate (parent first)
+    - custom_tools: deduplicate by "name" field
+
+    Args:
+        parent: Parent AgentConfig
+        child: Child AgentConfig
+
+    Returns:
+        Dict of merged list fields
+    """
+    # Simple lists - merge and deduplicate while preserving order
+    parent_tools = parent.tools if parent.tools else []
+    child_tools = child.tools if child.tools else []
+    merged_tools = list(dict.fromkeys(parent_tools + child_tools))
+
+    parent_attachments = parent.attachments if parent.attachments else []
+    child_attachments = child.attachments if child.attachments else []
+    merged_attachments = list(dict.fromkeys(parent_attachments + child_attachments))
+
+    # Lists that concatenate without deduplication
+    parent_prefetch = parent.prefetch if parent.prefetch else []
+    child_prefetch = child.prefetch if child.prefetch else []
+
+    parent_initial_tasks = parent.initial_tasks if parent.initial_tasks else []
+    child_initial_tasks = child.initial_tasks if child.initial_tasks else []
+
+    # Custom tools - deduplicate by "name" field (child overrides parent)
+    parent_custom = parent.custom_tools if parent.custom_tools else []
+    child_custom = child.custom_tools if child.custom_tools else []
+    custom_tool_dict = {}
+    for tool in parent_custom + child_custom:
+        custom_tool_dict[tool["name"]] = tool
+
+    return {
+        "tools": merged_tools,
+        "attachments": merged_attachments,
+        "prefetch": parent_prefetch + child_prefetch,
+        "initial_tasks": parent_initial_tasks + child_initial_tasks,
+        "custom_tools": list(custom_tool_dict.values()),
+    }
+
+
+def merge_dict_fields(parent, child) -> Dict[str, Any]:
+    """Merge dictionary fields from parent and child configs.
+
+    Child keys override parent keys.
+
+    Args:
+        parent: Parent AgentConfig
+        child: Child AgentConfig
+
+    Returns:
+        Dict of merged dict fields
+    """
+    # MCP servers
+    parent_mcp = parent.mcp_servers if parent.mcp_servers else {}
+    child_mcp = child.mcp_servers if child.mcp_servers else {}
+    merged_mcp = {**parent_mcp, **child_mcp}
+
+    # Context budget
+    parent_context = parent.context_budget if parent.context_budget else {}
+    child_context = child.context_budget if child.context_budget else {}
+    merged_context = {**parent_context, **child_context}
+
+    return {
+        "mcp_servers": merged_mcp if merged_mcp else None,
+        "context_budget": merged_context,
+    }
+
+
+def merge_instructions(parent, child) -> str:
+    """Merge instructions from parent and child configs.
+
+    Concatenates with double newline separator.
+
+    Args:
+        parent: Parent AgentConfig
+        child: Child AgentConfig
+
+    Returns:
+        Merged instructions string
+    """
+    parent_instructions = parent.instructions if parent.instructions else ""
+    child_instructions = child.instructions if child.instructions else ""
+
+    if parent_instructions and child_instructions:
+        return f"{parent_instructions}\n\n{child_instructions}"
+    elif parent_instructions:
+        return parent_instructions
+    elif child_instructions:
+        return child_instructions
+    else:
+        return ""
+
+
+def load_default_base_agent(
+    agent_path: Path, resolved_path: Path, inheritance_chain: Set[Path]
+) -> tuple[Optional[Any], Optional[str]]:
+    """Load default base agent for implicit inheritance.
+
+    Search priority:
+    1. User's project-local default.md (if exists)
+    2. Config's default_base_agent
+    3. Builtin fallback
+
+    Args:
+        agent_path: Path to current agent file
+        resolved_path: Resolved path to current agent
+        inheritance_chain: Set of agent paths already in chain
+
+    Returns:
+        Tuple of (loaded_agent, loaded_content) or (None, None) if not loaded
+    """
+    # Try project-local default.md first
+    user_default_path = agent_path.parent / ".tsugite" / "default.md"
+
+    if user_default_path.exists() and user_default_path.resolve() != resolved_path:
+        if user_default_path.resolve() not in inheritance_chain:
+            try:
+                default_agent = load_extended_agent("default", agent_path, inheritance_chain.copy())
+                # User's default.md should opt out of builtin inheritance unless explicit
+                if default_agent.config.extends is None:
+                    # Standalone user default
+                    return default_agent.config, default_agent.content
+                else:
+                    # User explicitly extended something, resolve it
+                    default_agent = resolve_agent_inheritance(
+                        default_agent, user_default_path, inheritance_chain.copy()
+                    )
+                    return default_agent.config, default_agent.content
+            except ValueError:
+                pass
+
+    # Fall back to config or builtin
+    default_base_name = _get_default_base_agent_name()
+    if not default_base_name:
+        return None, None
+
+    # Normalize to strip angle brackets
+    normalized_name = default_base_name.strip("<>")
+
+    # If config specifies builtin, use it directly
+    from .builtin_agents import is_builtin_agent
+
+    if is_builtin_agent(normalized_name):
+        from .builtin_agents import get_builtin_default_agent
+
+        try:
+            builtin_agent = get_builtin_default_agent()
+            return builtin_agent.config, builtin_agent.content
+        except Exception:
+            return None, None
+
+    # Try to find the configured default agent
+    default_path = find_agent_file(default_base_name, agent_path.parent)
+    if default_path and default_path.resolve() != resolved_path:
+        if default_path.resolve() not in inheritance_chain:
+            try:
+                default_agent = load_extended_agent(default_base_name, agent_path, inheritance_chain.copy())
+                default_agent = resolve_agent_inheritance(default_agent, default_path, inheritance_chain.copy())
+                return default_agent.config, default_agent.content
+            except ValueError:
+                pass
+
+    return None, None
+
+
+def load_explicit_parent_agent(extends_ref: str, agent_path: Path, inheritance_chain: Set[Path]) -> tuple[Any, str]:
+    """Load explicitly extended parent agent.
+
+    Args:
+        extends_ref: Reference to parent agent
+        agent_path: Path to current agent file
+        inheritance_chain: Set of agent paths already in chain
+
+    Returns:
+        Tuple of (parent_config, parent_content)
+    """
+    parent_agent = load_extended_agent(extends_ref, agent_path, inheritance_chain.copy())
+    parent_path = parent_agent.file_path
+
+    # Recursively resolve parent's inheritance
+    parent_agent = resolve_agent_inheritance(parent_agent, parent_path, inheritance_chain.copy())
+    return parent_agent.config, parent_agent.content
+
+
+def merge_configs_and_content(configs: List, contents: List):
+    """Merge a list of configs and contents.
+
+    Args:
+        configs: List of AgentConfig objects (earlier = lower precedence)
+        contents: List of content strings
+
+    Returns:
+        Tuple of (merged_config, merged_content)
+    """
+    if len(configs) == 1:
+        return configs[0], contents[0]
+
+    # Merge configs in order
+    merged_config = configs[0]
+    for config in configs[1:]:
+        merged_config = merge_agent_configs(merged_config, config)
+
+    # Merge contents
+    merged_content = "\n\n".join(contents)
+
+    return merged_config, merged_content

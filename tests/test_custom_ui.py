@@ -257,7 +257,7 @@ class TestCustomAgentUI:
         """Test custom UI with progress enabled."""
         console = Console(file=StringIO())
 
-        with patch("tsugite.custom_ui.CustomUIHandler.progress_context") as mock_context:
+        with patch("tsugite.ui.CustomUIHandler.progress_context") as mock_context:
             mock_context.return_value.__enter__ = MagicMock()
             mock_context.return_value.__exit__ = MagicMock()
 

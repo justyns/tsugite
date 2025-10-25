@@ -1,6 +1,5 @@
 """Agent markdown parser and template renderer."""
 
-import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -59,6 +58,7 @@ class AgentConfig:
     custom_tools: List[Dict[str, Any]] = field(default_factory=list)  # Per-agent shell tools
     text_mode: bool = False  # Allow text-only responses (code blocks optional)
     initial_tasks: List[Any] = field(default_factory=list)  # Tasks to pre-populate (strings or dicts)
+    disable_history: bool = False  # Disable conversation history persistence for this agent
 
     def __post_init__(self):
         if self.tools is None:
@@ -230,9 +230,6 @@ def extract_tool_directives(content: str) -> List[ToolDirective]:
         {'url': 'http://example.com'}
     """
     directives = []
-
-    # Pattern to match <!-- tsu:tool name="..." args={...} assign="..." -->
-    # Uses non-greedy match to handle multiple directives
     pattern = r"<!--\s*tsu:tool\s+([^>]+?)\s*-->"
 
     for match in re.finditer(pattern, content):
@@ -245,47 +242,15 @@ def extract_tool_directives(content: str) -> List[ToolDirective]:
         name_match = re.search(r'name=(["\']?)(\w+)\1', raw_args)
         if not name_match:
             raise ValueError(f"Tool directive missing required 'name' attribute: {raw_args}")
-
         tool_name = name_match.group(2)
 
-        # Extract args (required, should be JSON)
-        # Find args= and extract the JSON object that follows
-        args_start = raw_args.find("args=")
-        if args_start == -1:
-            raise ValueError(f"Tool directive missing required 'args' attribute: {raw_args}")
-
-        # Find the opening brace after args=
-        json_start = raw_args.find("{", args_start)
-        if json_start == -1:
-            raise ValueError(f"Tool directive args must be a JSON object: {raw_args}")
-
-        # Find the matching closing brace (handle nested braces)
-        brace_count = 0
-        json_end = json_start
-        for i in range(json_start, len(raw_args)):
-            if raw_args[i] == "{":
-                brace_count += 1
-            elif raw_args[i] == "}":
-                brace_count -= 1
-                if brace_count == 0:
-                    json_end = i + 1
-                    break
-
-        if brace_count != 0:
-            raise ValueError(f"Unmatched braces in tool directive args: {raw_args}")
-
-        # Parse JSON args
-        try:
-            args_json_str = raw_args[json_start:json_end]
-            args_dict = json.loads(args_json_str)
-        except json.JSONDecodeError as e:
-            raise ValueError(f"Invalid JSON in tool directive args for '{tool_name}': {e}") from e
+        # Extract and parse JSON args (required)
+        args_dict = extract_and_parse_json_args(raw_args, tool_name)
 
         # Extract assign (required)
         assign_match = re.search(r'assign=(["\']?)(\w+)\1', raw_args)
         if not assign_match:
             raise ValueError(f"Tool directive missing required 'assign' attribute: {raw_args}")
-
         assign_var = assign_match.group(2)
 
         directives.append(
@@ -352,11 +317,7 @@ def extract_step_directives(content: str, include_preamble: bool = True) -> tupl
         True
     """
     steps = []
-
-    # Pattern to match <!-- tsu:step name="..." assign="..." -->
-    # Both name and assign can use single or double quotes, or no quotes
     pattern = r"<!--\s*tsu:step\s+([^>]+?)\s*-->"
-
     matches = list(re.finditer(pattern, content))
 
     # Extract preamble (content before first step)
@@ -369,15 +330,12 @@ def extract_step_directives(content: str, include_preamble: bool = True) -> tupl
         start_pos = match.end()
 
         # Determine end position (next step or EOF)
-        if i + 1 < len(matches):
-            end_pos = matches[i + 1].start()
-        else:
-            end_pos = len(content)
+        end_pos = matches[i + 1].start() if i + 1 < len(matches) else len(content)
 
         # Extract step content
         step_content = content[start_pos:end_pos].strip()
 
-        # Prepend preamble to each step if requested and preamble exists
+        # Prepend preamble if requested
         if include_preamble and preamble:
             step_content = f"{preamble}\n\n{step_content}"
 
@@ -385,83 +343,16 @@ def extract_step_directives(content: str, include_preamble: bool = True) -> tupl
         name_match = re.search(r'name=(["\']?)(\w+)\1', args)
         if not name_match:
             raise ValueError(f"Step directive missing required 'name' attribute: {args}")
-
         step_name = name_match.group(2)
 
-        # Parse assign attribute (optional)
+        # Parse optional attributes
         assign_var = _parse_directive_attribute(args, "assign", r"\w+")
-
-        # Parse model_kwargs from remaining attributes
-        model_kwargs = {}
-
-        # Check for json shorthand
-        json_match = re.search(r'json=(["\']?)(true|false)\1', args)
-        if json_match and json_match.group(2) == "true":
-            model_kwargs["response_format"] = {"type": "json_object"}
-
-        # Check for response_format (overrides json shorthand)
-        rf_match = re.search(r'response_format=(["\'])(.+?)\1', args)
-        if rf_match:
-            try:
-                rf_value = rf_match.group(2)
-                model_kwargs["response_format"] = json.loads(rf_value)
-            except json.JSONDecodeError as e:
-                raise ValueError(f"Invalid JSON in response_format for step '{step_name}': {e}") from e
-
-        # Parse temperature
-        temperature = _parse_directive_attribute(args, "temperature", r"[0-9.]+", float)
-        if temperature is not None:
-            model_kwargs["temperature"] = temperature
-
-        # Parse max_tokens
-        max_tokens = _parse_directive_attribute(args, "max_tokens", r"[0-9]+", int)
-        if max_tokens is not None:
-            model_kwargs["max_tokens"] = max_tokens
-
-        # Parse top_p
-        top_p = _parse_directive_attribute(args, "top_p", r"[0-9.]+", float)
-        if top_p is not None:
-            model_kwargs["top_p"] = top_p
-
-        # Parse frequency_penalty
-        freq_penalty = _parse_directive_attribute(args, "frequency_penalty", r"[0-9.]+", float)
-        if freq_penalty is not None:
-            model_kwargs["frequency_penalty"] = freq_penalty
-
-        # Parse presence_penalty
-        pres_penalty = _parse_directive_attribute(args, "presence_penalty", r"[0-9.]+", float)
-        if pres_penalty is not None:
-            model_kwargs["presence_penalty"] = pres_penalty
-
-        # Parse reasoning_effort (for o1, o3, Claude extended thinking)
-        reasoning_effort = _parse_directive_attribute(args, "reasoning_effort", r"low|medium|high")
-        if reasoning_effort:
-            model_kwargs["reasoning_effort"] = reasoning_effort
-
-        # Parse max_retries
-        max_retries = _parse_directive_attribute(args, "max_retries", r"[0-9]+", int, default=0)
-
-        # Parse retry_delay
-        retry_delay = _parse_directive_attribute(args, "retry_delay", r"[0-9.]+", float, default=0.0)
-
-        # Parse continue_on_error
-        continue_str = _parse_directive_attribute(args, "continue_on_error", r"true|false", default="false")
-        continue_on_error = continue_str.lower() == "true"
-
-        # Parse timeout
         timeout = _parse_directive_attribute(args, "timeout", r"[0-9]+", int)
 
-        # Parse loop control parameters
-        # Use non-greedy match to stop at first quote/boundary
-        repeat_while = _parse_directive_attribute(args, "repeat_while", r".+?")
-        repeat_until = _parse_directive_attribute(args, "repeat_until", r".+?")
-        max_iterations = _parse_directive_attribute(args, "max_iterations", r"[0-9]+", int, default=10)
-
-        # Validate: cannot specify both repeat_while and repeat_until
-        if repeat_while and repeat_until:
-            raise ValueError(
-                f"Step '{step_name}' cannot specify both repeat_while and repeat_until. Use one or the other."
-            )
+        # Use helpers for complex parsing
+        model_kwargs = parse_model_kwargs_from_args(args, step_name)
+        max_retries, retry_delay, continue_on_error = parse_retry_params_from_args(args)
+        repeat_while, repeat_until, max_iterations = parse_loop_params_from_args(args, step_name)
 
         steps.append(
             StepDirective(
@@ -550,7 +441,6 @@ def validate_agent_execution(agent: Agent | Path) -> tuple[bool, str]:
     # Handle both Path objects and Agent objects
     if isinstance(agent, Path):
         try:
-            # Handle builtin agents
             if str(agent).startswith("<builtin-"):
                 agent = parse_agent_file(agent)
             else:
@@ -559,85 +449,323 @@ def validate_agent_execution(agent: Agent | Path) -> tuple[bool, str]:
         except Exception as e:
             return False, f"Failed to parse agent file: {e}"
 
-    # First do basic validation
+    # Basic validation
     errors = validate_agent(agent)
     if errors:
         return False, "; ".join(errors)
 
-    # Only validate model if specified in agent config
+    # Validate model if specified
     if agent.config.model:
-        try:
-            from .models import parse_model_string
+        is_valid, error = validate_model_string(agent.config.model)
+        if not is_valid:
+            return False, error
 
-            parse_model_string(agent.config.model)
-        except Exception as e:
-            return False, f"Model validation failed: {e}"
-
-    # Validate tool syntax (don't check existence - that happens at runtime)
-    # Just validate that tool specs can be parsed
+    # Validate tool syntax
     if agent.config.tools:
-        try:
-            # Make sure we can import expand_tool_specs
-            from .tools import expand_tool_specs  # noqa: F401
-
-            # Don't actually expand here - just check syntax is valid
-            # Tool existence will be checked at execution time when modules are loaded
-            for tool_spec in agent.config.tools:
-                if not isinstance(tool_spec, str):
-                    return False, f"Tool specification must be string: {tool_spec}"
-        except Exception as e:
-            return False, f"Tool import error: {e}"
+        is_valid, error = validate_tool_specs(agent.config.tools)
+        if not is_valid:
+            return False, error
 
     # Check template rendering with minimal context
     from .renderer import AgentRenderer
 
     renderer = AgentRenderer()
     try:
-        test_context = {
-            "user_prompt": "test",
-            "task_summary": "## Current Tasks\nNo tasks yet.",
-            "is_interactive": False,
-            "tools": agent.config.tools or [],  # Make tools list available for conditional rendering
-            "text_mode": agent.config.text_mode,
-            "is_subagent": False,
-            "parent_agent": None,
-            "chat_history": [],  # For chat agents that reference conversation history
-        }
-
-        # If agent has prefetch, create mock variables
-        if agent.config.prefetch:
-            for prefetch_item in agent.config.prefetch:
-                assign_name = prefetch_item.get("assign")
-                if assign_name:
-                    test_context[assign_name] = "mock_prefetch_data"
-
-        # If agent has steps, create mock variables for step assignments
-        # This allows validation to pass for multi-step agents where variables
-        # are created dynamically by earlier steps
-        if has_step_directives(agent.content):
-            try:
-                preamble, steps = extract_step_directives(agent.content)
-                for step in steps:
-                    if step.assign_var:
-                        test_context[step.assign_var] = "mock_step_result"
-            except Exception:
-                # If step parsing fails, that's a different validation error
-                # Let it be caught by the normal validation flow
-                pass
-
-        # If agent has tool directives, create mock variables for their assignments
-        # This allows validation to pass when tools are executed during rendering
-        try:
-            tool_directives = extract_tool_directives(agent.content)
-            for directive in tool_directives:
-                if directive.assign_var:
-                    test_context[directive.assign_var] = "mock_tool_result"
-        except Exception:
-            # If tool directive parsing fails, let it be caught by normal validation
-            pass
-
+        test_context = build_validation_test_context(agent)
+        add_mock_step_variables(test_context, agent.content)
+        add_mock_tool_variables(test_context, agent.content)
         renderer.render(agent.content, test_context)
     except Exception as e:
         return False, f"Template validation failed: {e}"
 
     return True, "Agent is valid"
+
+
+def parse_model_kwargs_from_args(args: str, step_name: str) -> dict[str, Any]:
+    """Parse model kwargs from step directive arguments.
+
+    Extracts temperature, max_tokens, top_p, penalties, response_format,
+    and reasoning_effort from directive args.
+
+    Args:
+        args: Raw directive arguments string
+        step_name: Name of step (for error messages)
+
+    Returns:
+        Dict of model kwargs to pass to LLM
+
+    Raises:
+        ValueError: If JSON parsing fails for response_format
+    """
+    import json
+
+    model_kwargs = {}
+
+    # Check for json shorthand
+    json_match = re.search(r'json=(["\']?)(true|false)\1', args)
+    if json_match and json_match.group(2) == "true":
+        model_kwargs["response_format"] = {"type": "json_object"}
+
+    # Check for response_format (overrides json shorthand)
+    rf_match = re.search(r'response_format=(["\'])(.+?)\1', args)
+    if rf_match:
+        try:
+            rf_value = rf_match.group(2)
+            model_kwargs["response_format"] = json.loads(rf_value)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON in response_format for step '{step_name}': {e}") from e
+
+    # Parse numeric parameters
+    temperature = _parse_directive_attribute(args, "temperature", r"[0-9.]+", float)
+    if temperature is not None:
+        model_kwargs["temperature"] = temperature
+
+    max_tokens = _parse_directive_attribute(args, "max_tokens", r"[0-9]+", int)
+    if max_tokens is not None:
+        model_kwargs["max_tokens"] = max_tokens
+
+    top_p = _parse_directive_attribute(args, "top_p", r"[0-9.]+", float)
+    if top_p is not None:
+        model_kwargs["top_p"] = top_p
+
+    freq_penalty = _parse_directive_attribute(args, "frequency_penalty", r"[0-9.]+", float)
+    if freq_penalty is not None:
+        model_kwargs["frequency_penalty"] = freq_penalty
+
+    pres_penalty = _parse_directive_attribute(args, "presence_penalty", r"[0-9.]+", float)
+    if pres_penalty is not None:
+        model_kwargs["presence_penalty"] = pres_penalty
+
+    # Parse reasoning_effort (for o1, o3, Claude extended thinking)
+    reasoning_effort = _parse_directive_attribute(args, "reasoning_effort", r"low|medium|high")
+    if reasoning_effort:
+        model_kwargs["reasoning_effort"] = reasoning_effort
+
+    return model_kwargs
+
+
+def parse_retry_params_from_args(args: str) -> tuple[int, float, bool]:
+    """Parse retry parameters from step directive arguments.
+
+    Args:
+        args: Raw directive arguments string
+
+    Returns:
+        Tuple of (max_retries, retry_delay, continue_on_error)
+    """
+    max_retries = _parse_directive_attribute(args, "max_retries", r"[0-9]+", int, default=0)
+    retry_delay = _parse_directive_attribute(args, "retry_delay", r"[0-9.]+", float, default=0.0)
+    continue_str = _parse_directive_attribute(args, "continue_on_error", r"true|false", default="false")
+    continue_on_error = continue_str.lower() == "true"
+
+    return max_retries, retry_delay, continue_on_error
+
+
+def parse_loop_params_from_args(args: str, step_name: str) -> tuple[Optional[str], Optional[str], int]:
+    """Parse loop control parameters from step directive arguments.
+
+    Args:
+        args: Raw directive arguments string
+        step_name: Name of step (for error messages)
+
+    Returns:
+        Tuple of (repeat_while, repeat_until, max_iterations)
+
+    Raises:
+        ValueError: If both repeat_while and repeat_until are specified
+    """
+    repeat_while = _parse_directive_attribute(args, "repeat_while", r".+?")
+    repeat_until = _parse_directive_attribute(args, "repeat_until", r".+?")
+    max_iterations = _parse_directive_attribute(args, "max_iterations", r"[0-9]+", int, default=10)
+
+    # Validate: cannot specify both
+    if repeat_while and repeat_until:
+        raise ValueError(f"Step '{step_name}' cannot specify both repeat_while and repeat_until. Use one or the other.")
+
+    return repeat_while, repeat_until, max_iterations
+
+
+def find_json_object_in_string(text: str, start_keyword: str) -> tuple[int, int]:
+    """Find a JSON object in a string starting after a keyword.
+
+    Handles nested braces correctly.
+
+    Args:
+        text: Text to search in
+        start_keyword: Keyword before JSON (e.g., "args=")
+
+    Returns:
+        Tuple of (json_start_pos, json_end_pos)
+
+    Raises:
+        ValueError: If JSON object not found or has unmatched braces
+    """
+    keyword_pos = text.find(start_keyword)
+    if keyword_pos == -1:
+        raise ValueError(f"Keyword '{start_keyword}' not found in text")
+
+    # Find the opening brace after keyword
+    json_start = text.find("{", keyword_pos)
+    if json_start == -1:
+        raise ValueError(f"No JSON object found after '{start_keyword}'")
+
+    # Find matching closing brace (handle nested braces)
+    brace_count = 0
+    json_end = json_start
+    for i in range(json_start, len(text)):
+        if text[i] == "{":
+            brace_count += 1
+        elif text[i] == "}":
+            brace_count -= 1
+            if brace_count == 0:
+                json_end = i + 1
+                break
+
+    if brace_count != 0:
+        raise ValueError(f"Unmatched braces in JSON object after '{start_keyword}'")
+
+    return json_start, json_end
+
+
+def extract_and_parse_json_args(raw_args: str, tool_name: str) -> dict[str, Any]:
+    """Extract and parse JSON args from tool directive arguments.
+
+    Args:
+        raw_args: Raw directive arguments string
+        tool_name: Name of tool (for error messages)
+
+    Returns:
+        Parsed args dict
+
+    Raises:
+        ValueError: If args missing, invalid JSON, or has syntax errors
+    """
+    import json
+
+    # Find args= and extract JSON object
+    args_start = raw_args.find("args=")
+    if args_start == -1:
+        raise ValueError(f"Tool directive missing required 'args' attribute: {raw_args}")
+
+    try:
+        json_start, json_end = find_json_object_in_string(raw_args, "args=")
+    except ValueError as e:
+        raise ValueError(f"Tool directive args must be a JSON object: {raw_args}") from e
+
+    # Parse JSON args
+    try:
+        args_json_str = raw_args[json_start:json_end]
+        return json.loads(args_json_str)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON in tool directive args for '{tool_name}': {e}") from e
+
+
+def build_validation_test_context(agent, include_prefetch: bool = True) -> dict[str, Any]:
+    """Build minimal test context for agent validation.
+
+    Args:
+        agent: Agent object to build context for
+        include_prefetch: Whether to include mock prefetch variables
+
+    Returns:
+        Dict of context variables for template rendering
+    """
+    test_context = {
+        "user_prompt": "test",
+        "task_summary": "## Current Tasks\nNo tasks yet.",
+        "is_interactive": False,
+        "tools": agent.config.tools or [],
+        "text_mode": agent.config.text_mode,
+        "is_subagent": False,
+        "parent_agent": None,
+        "chat_history": [],
+    }
+
+    # Add mock prefetch variables
+    if include_prefetch and agent.config.prefetch:
+        for item in agent.config.prefetch:
+            assign_name = item.get("assign")
+            if assign_name:
+                test_context[assign_name] = "mock_prefetch_data"
+
+    return test_context
+
+
+def add_mock_step_variables(test_context: dict[str, Any], agent_content: str) -> None:
+    """Add mock variables for step assignments to test context.
+
+    Modifies test_context in place.
+
+    Args:
+        test_context: Context dict to modify
+        agent_content: Agent content to extract steps from
+    """
+    if has_step_directives(agent_content):
+        try:
+            preamble, steps = extract_step_directives(agent_content)
+            for step in steps:
+                if step.assign_var:
+                    test_context[step.assign_var] = "mock_step_result"
+        except Exception:
+            # If step parsing fails, let it be caught by normal validation
+            pass
+
+
+def add_mock_tool_variables(test_context: dict[str, Any], agent_content: str) -> None:
+    """Add mock variables for tool directive assignments to test context.
+
+    Modifies test_context in place.
+
+    Args:
+        test_context: Context dict to modify
+        agent_content: Agent content to extract tool directives from
+    """
+    try:
+        directives = extract_tool_directives(agent_content)
+        for directive in directives:
+            if directive.assign_var:
+                test_context[directive.assign_var] = "mock_tool_result"
+    except Exception:
+        # If tool directive parsing fails, let it be caught by normal validation
+        pass
+
+
+def validate_model_string(model: str) -> tuple[bool, Optional[str]]:
+    """Validate model string format.
+
+    Args:
+        model: Model string to validate (e.g., "openai:gpt-4")
+
+    Returns:
+        Tuple of (is_valid, error_message). Error is None if valid.
+    """
+    try:
+        from .models import parse_model_string
+
+        parse_model_string(model)
+        return True, None
+    except Exception as e:
+        return False, f"Model validation failed: {e}"
+
+
+def validate_tool_specs(tool_specs: list[str]) -> tuple[bool, Optional[str]]:
+    """Validate tool specifications are syntactically correct.
+
+    Args:
+        tool_specs: List of tool specification strings
+
+    Returns:
+        Tuple of (is_valid, error_message). Error is None if valid.
+    """
+    try:
+        # Import to ensure module can be loaded
+        from .tools import expand_tool_specs  # noqa: F401
+
+        # Check syntax is valid
+        for tool_spec in tool_specs:
+            if not isinstance(tool_spec, str):
+                return False, f"Tool specification must be string: {tool_spec}"
+
+        return True, None
+    except Exception as e:
+        return False, f"Tool import error: {e}"
