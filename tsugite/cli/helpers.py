@@ -215,11 +215,12 @@ def load_and_validate_agent(agent_path: str, console: Console) -> Tuple[Any, Pat
     return agent, agent_file_path, agent_display_name
 
 
-def parse_cli_arguments(args: List[str]) -> tuple[List[str], str]:
+def parse_cli_arguments(args: List[str], allow_empty_agents: bool = False) -> tuple[List[str], str]:
     """Parse CLI arguments into agent references and prompt.
 
     Args:
         args: List of positional arguments from CLI
+        allow_empty_agents: If True, allow returning empty agent list (for continuation mode)
 
     Returns:
         Tuple of (agent_refs, prompt)
@@ -228,6 +229,7 @@ def parse_cli_arguments(args: List[str]) -> tuple[List[str], str]:
         ["+a", "+b", "task"] -> (["+a", "+b"], "task")
         ["+a", "create", "ticket"] -> (["+a"], "create ticket")
         ["agent.md", "helper.md", "do", "work"] -> (["agent.md", "helper.md"], "do work")
+        ["task"], allow_empty_agents=True -> ([], "task")
     """
     if not args:
         raise ValueError("No arguments provided")
@@ -302,10 +304,15 @@ def parse_cli_arguments(args: List[str]) -> tuple[List[str], str]:
             prompt_parts.append(arg)
 
     if not agents:
-        # Default to builtin-default for auto-discovery
-        agents = ["+builtin-default"]
-        # All args become the prompt
-        prompt = " ".join(args)
+        if allow_empty_agents:
+            # Return empty list when continuing conversations - agent will be auto-detected
+            agents = []
+            prompt = " ".join(args)
+        else:
+            # Default to builtin-default for auto-discovery
+            agents = ["+builtin-default"]
+            # All args become the prompt
+            prompt = " ".join(args)
     else:
         prompt = " ".join(prompt_parts)
 

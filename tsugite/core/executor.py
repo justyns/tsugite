@@ -84,7 +84,7 @@ class LocalExecutor(CodeExecutor):
         # Inject final_answer function into namespace
         def final_answer(value):
             self._final_answer_value = value
-            print(f"__FINAL_ANSWER__: {value}")
+            # Don't print here - the UI handler will display it properly via FINAL_ANSWER event
 
         self.namespace["final_answer"] = final_answer
 

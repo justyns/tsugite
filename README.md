@@ -1,6 +1,6 @@
 # tsugite
 
-Tsugite (Japanese: 継ぎ手, meaning "joint" in woodworking) is a developer-facing agentic CLI.
+Tsugite (Japanese: 継ぎ手, the art of joinery in woodworking) is a developer-facing agentic CLI.
 
 Define AI agents as markdown files with YAML frontmatter. Chain multiple steps together, pass data between them, and use any LLM (OpenAI, Anthropic, Ollama, etc).
 
@@ -48,6 +48,17 @@ tsugite run +assistant "task" | grep result
 
 # Headless mode for scripts (result to stdout, progress to stderr)
 tsugite run +assistant "task" --headless
+
+# Continue latest conversation (auto-detects agent)
+tsugite run --continue "follow-up prompt"
+
+# Continue specific conversation
+tsugite run --continue --conversation-id CONV_ID "follow-up prompt"
+tsugite chat --continue CONV_ID
+
+# View conversation history
+tsugite history list
+tsugite history show CONV_ID
 ```
 
 See `examples/` for working agents and `CLAUDE.md` for AI-generated documentation.

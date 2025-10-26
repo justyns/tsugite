@@ -527,6 +527,18 @@ async def _execute_agent_with_prompt(
             except Exception:
                 pass  # Best effort cleanup
 
+        # Clean up any pending asyncio tasks (e.g., LiteLLM logging tasks)
+        # to prevent RuntimeWarning about tasks being destroyed while pending
+        # ONLY run cleanup for top-level agents, not spawned agents
+        # Spawned agents run in ThreadPoolExecutor threads and their event loops
+        # are cleaned up automatically by asyncio.run()
+        import threading
+
+        from tsugite.utils import cleanup_pending_tasks
+
+        if threading.current_thread() == threading.main_thread():
+            await cleanup_pending_tasks()
+
 
 def run_agent(
     agent_path: Path,
@@ -540,6 +552,7 @@ def run_agent(
     return_token_usage: bool = False,
     stream: bool = False,
     force_text_mode: bool = False,
+    continue_conversation_id: Optional[str] = None,
 ) -> str | tuple[str, Optional[int], Optional[float], int, list]:
     """Run a Tsugite agent.
 
@@ -555,6 +568,7 @@ def run_agent(
         return_token_usage: Whether to return token usage and cost from LiteLLM
         stream: Whether to stream responses in real-time
         force_text_mode: Force text_mode=True regardless of agent config (useful for chat UI)
+        continue_conversation_id: Optional conversation ID to continue (makes run mode multi-turn)
 
     Returns:
         Agent execution result as string, or tuple of (result, token_count, cost, step_count, execution_steps) if return_token_usage=True
@@ -565,6 +579,18 @@ def run_agent(
     """
     if context is None:
         context = {}
+
+    # Load conversation history if continuing
+    if continue_conversation_id:
+        try:
+            from tsugite.agent_runner.history_integration import load_conversation_context
+
+            chat_history = load_conversation_context(continue_conversation_id)
+            context["chat_history"] = chat_history
+        except FileNotFoundError:
+            raise ValueError(f"Conversation not found: {continue_conversation_id}")
+        except Exception as e:
+            raise RuntimeError(f"Failed to load conversation history: {e}")
 
     # Initialize task manager for this agent session
     reset_task_manager()
@@ -584,8 +610,8 @@ def run_agent(
     set_current_agent(agent_config.name)
 
     try:
-        # Override text_mode if force_text_mode is True (for chat UI)
-        if force_text_mode:
+        # Override text_mode if force_text_mode is True (for chat UI) or continuing conversation
+        if force_text_mode or continue_conversation_id:
             agent_config.text_mode = True
 
         # Prepare agent using unified preparation pipeline
@@ -636,6 +662,7 @@ async def run_agent_async(
     return_token_usage: bool = False,
     stream: bool = False,
     force_text_mode: bool = False,
+    continue_conversation_id: Optional[str] = None,
 ) -> str | tuple[str, Optional[int], Optional[float], int, list]:
     """Run a Tsugite agent (async version for tests and async contexts).
 
@@ -654,6 +681,7 @@ async def run_agent_async(
         return_token_usage: Whether to return token usage and cost from LiteLLM
         stream: Whether to stream responses in real-time
         force_text_mode: Force text_mode=True regardless of agent config (useful for chat UI)
+        continue_conversation_id: Optional conversation ID to continue (makes run mode multi-turn)
 
     Returns:
         Agent execution result as string, or tuple of (result, token_count, cost, step_count, execution_steps) if return_token_usage=True
@@ -664,6 +692,18 @@ async def run_agent_async(
     """
     if context is None:
         context = {}
+
+    # Load conversation history if continuing
+    if continue_conversation_id:
+        try:
+            from tsugite.agent_runner.history_integration import load_conversation_context
+
+            chat_history = load_conversation_context(continue_conversation_id)
+            context["chat_history"] = chat_history
+        except FileNotFoundError:
+            raise ValueError(f"Conversation not found: {continue_conversation_id}")
+        except Exception as e:
+            raise RuntimeError(f"Failed to load conversation history: {e}")
 
     # Initialize task manager for this agent session
     reset_task_manager()
@@ -683,8 +723,8 @@ async def run_agent_async(
     set_current_agent(agent_config.name)
 
     try:
-        # Override text_mode if force_text_mode is True (for chat UI)
-        if force_text_mode:
+        # Override text_mode if force_text_mode is True (for chat UI) or continuing conversation
+        if force_text_mode or continue_conversation_id:
             agent_config.text_mode = True
 
         # Prepare agent using unified preparation pipeline
@@ -1331,6 +1371,18 @@ async def _run_multistep_agent_impl(
     finally:
         # Always clear the current agent context when done
         clear_current_agent()
+
+        # Clean up any pending asyncio tasks (e.g., LiteLLM logging tasks)
+        # to prevent RuntimeWarning about tasks being destroyed while pending
+        # ONLY run cleanup for top-level agents, not spawned agents
+        # Spawned agents run in ThreadPoolExecutor threads and their event loops
+        # are cleaned up automatically by asyncio.run()
+        import threading
+
+        from tsugite.utils import cleanup_pending_tasks
+
+        if threading.current_thread() == threading.main_thread():
+            await cleanup_pending_tasks()
 
 
 def run_multistep_agent(

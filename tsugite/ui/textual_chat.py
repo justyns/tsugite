@@ -51,6 +51,8 @@ class ChatApp(App):
         stream: bool = False,
         show_execution_details: bool = True,
         disable_history: bool = False,
+        resume_conversation_id: Optional[str] = None,
+        resume_turns: Optional[list] = None,
     ):
         """Initialize chat app.
 
@@ -61,6 +63,8 @@ class ChatApp(App):
             stream: Whether to stream responses
             show_execution_details: Whether to show tool calls and code execution
             disable_history: Disable conversation history persistence
+            resume_conversation_id: Optional conversation ID to resume
+            resume_turns: Optional list of Turn objects from history to resume
         """
         super().__init__()
         self.agent_path = agent_path
@@ -69,6 +73,8 @@ class ChatApp(App):
         self.stream_enabled = stream
         self.show_execution_details = show_execution_details
         self.disable_history = disable_history
+        self.resume_conversation_id = resume_conversation_id
+        self.resume_turns = resume_turns
 
         # Parse agent info
         agent = parse_agent_file(agent_path)
@@ -212,20 +218,49 @@ class ChatApp(App):
             custom_logger=custom_logger,
             stream=self.stream_enabled,
             disable_history=self.disable_history,
+            resume_conversation_id=self.resume_conversation_id,
         )
+
+        # Load conversation history if resuming
+        message_list = self.query_one(MessageList)
+        if self.resume_conversation_id and self.resume_turns:
+            try:
+                self.manager.load_from_history(self.resume_conversation_id, self.resume_turns)
+
+                # Display resumed conversation history
+                message_list.add_message("status", f"📜 Resumed conversation: {self.resume_conversation_id}")
+                message_list.add_separator()
+
+                # Add all previous turns to message list
+                for turn in self.manager.conversation_history:
+                    message_list.add_message("user", turn.user_message)
+                    message_list.add_message("assistant", turn.agent_response, markdown=True)
+                    self.turn_count += 1
+
+                # Update stats
+                for turn in self.manager.conversation_history:
+                    if turn.token_count:
+                        self.total_tokens += turn.token_count
+                    if turn.cost:
+                        self.total_cost += turn.cost
+
+                message_list.add_separator()
+                message_list.add_message("status", "Type your message to continue the conversation")
+
+            except Exception as e:
+                message_list.add_message("status", f"⚠️ Failed to load conversation history: {e}")
+        else:
+            # Show welcome message for new conversations
+            message_list.add_message("status", f"💬 Chat with {self.agent_name} ({self.model})")
+            message_list.add_message("status", "Type your message and press Enter to send")
+            message_list.add_message(
+                "status", "💡 Tip: Type / to see command dropdown (↑↓ to navigate, Tab/Enter to select)"
+            )
+            message_list.add_message("status", "Type /help for all commands")
+            message_list.add_separator()
 
         # Focus the input
         self.query_one(Input).focus()
-
-        # Show welcome message
-        message_list = self.query_one(MessageList)
-        message_list.add_message("status", f"💬 Chat with {self.agent_name} ({self.model})")
-        message_list.add_message("status", "Type your message and press Enter to send")
-        message_list.add_message(
-            "status", "💡 Tip: Type / to see command dropdown (↑↓ to navigate, Tab/Enter to select)"
-        )
-        message_list.add_message("status", "Type /help for all commands")
-        message_list.add_separator()
 
     def _update_status(self, status: str) -> None:
         """Update status (called from UI handler).
@@ -579,6 +614,8 @@ def run_textual_chat(
     stream: bool = False,
     show_execution_details: bool = True,
     disable_history: bool = False,
+    resume_conversation_id: Optional[str] = None,
+    resume_turns: Optional[list] = None,
 ) -> None:
     """Run the Textual chat interface.
 
@@ -589,6 +626,8 @@ def run_textual_chat(
         stream: Whether to stream responses
         show_execution_details: Whether to show tool calls and code execution
         disable_history: Disable conversation history persistence
+        resume_conversation_id: Optional conversation ID to resume
+        resume_turns: Optional list of Turn objects from history to resume
     """
     app = ChatApp(
         agent_path=agent_path,
@@ -597,5 +636,7 @@ def run_textual_chat(
         stream=stream,
         show_execution_details=show_execution_details,
         disable_history=disable_history,
+        resume_conversation_id=resume_conversation_id,
+        resume_turns=resume_turns,
     )
     app.run()

@@ -8,6 +8,10 @@ Quick reference for building, composing, and running Tsugite agents.
 |------|---------|
 | Run agent | `tsugite run agent.md "task"` or `tsugite run +name "task"` |
 | Chat mode | `tsugite chat` or `tsugite chat +agent` |
+| Continue latest | `tsugite run --continue "prompt"` or `tsugite chat --continue` |
+| Continue specific | `tsugite run --continue --conversation-id CONV_ID "prompt"` or `tsugite chat --continue CONV_ID` |
+| List history | `tsugite history list` |
+| Show conversation | `tsugite history show CONV_ID` |
 | Debug prompt | `tsugite run agent.md "task" --debug` |
 | Plain output | `tsugite run +agent "task" --plain` |
 | Headless (CI) | `tsugite run +agent "task" --headless` |
@@ -19,6 +23,94 @@ Quick reference for building, composing, and running Tsugite agents.
 | Custom tool | `tsugite tools add name -c "cmd {arg}" -p arg:required` |
 | Config | `tsugite config set model provider:model` |
 | Model alias | `tsugite config set model-alias fast openai:gpt-4o-mini` |
+
+## Conversation Continuity
+
+Both `run` and `chat` modes support continuing previous conversations using the `--continue` flag.
+
+### Chat Mode Resume
+
+```bash
+# Resume latest conversation
+tsugite chat --continue
+
+# Resume specific conversation
+tsugite chat --continue CONV_ID
+
+# Resume latest conversation with different agent
+tsugite chat +different-agent --continue
+```
+
+**Behavior:**
+- Loads conversation history into chat UI
+- Displays all previous turns
+- Continues appending to same conversation ID
+- Resumes from last turn timestamp
+
+### Run Mode Continuation
+
+Run mode becomes multi-turn when using `--continue`:
+
+```bash
+# Continue latest conversation (auto-detects agent)
+tsugite run --continue "next prompt"
+
+# Continue latest conversation with specific agent
+tsugite run +agent --continue "next prompt"
+
+# Continue specific conversation by ID (auto-detects agent)
+tsugite run --continue --conversation-id CONV_ID "next prompt"
+
+# Continue with different agent than original (agent switching)
+tsugite run +different-agent --continue --conversation-id CONV_ID "prompt"
+```
+
+**Behavior:**
+- Loads previous conversation as `chat_history` context
+- Agent sees full conversation history
+- Executes next turn with new prompt
+- Appends to same conversation ID
+
+### Finding Conversations
+
+```bash
+# List all conversations
+tsugite history list
+
+# List by machine
+tsugite history list --machine laptop
+
+# List by agent
+tsugite history list --agent researcher
+
+# Show conversation details
+tsugite history show CONV_ID
+
+# Show as JSON
+tsugite history show CONV_ID --format json
+```
+
+### Disabling History
+
+**Global:**
+```yaml
+# ~/.config/tsugite/config.yaml
+history_enabled: false
+```
+
+**Per-agent:**
+```yaml
+---
+name: my_agent
+disable_history: true
+---
+```
+
+**Per-run:**
+```bash
+tsugite run +agent "task" --no-history
+tsugite chat --no-history
+```
 
 ## Agent Structure
 

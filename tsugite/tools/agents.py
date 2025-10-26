@@ -43,6 +43,7 @@ def spawn_agent(
     try:
         # Import here to avoid circular imports
         from ..agent_runner import get_current_agent, run_agent
+        from ..ui_context import get_console, get_ui_handler
 
         # Inject subagent context
         sub_context["is_subagent"] = True
@@ -50,9 +51,41 @@ def spawn_agent(
         if parent:
             sub_context["parent_agent"] = parent
 
-        # Run the sub-agent
+        # Add explicit subagent instructions
+        sub_context["subagent_instructions"] = """
+IMPORTANT: You are a subagent spawned by another agent.
+You MUST return your result using final_answer().
+
+Example:
+```python
+# Do your work
+result = "your output here"
+final_answer(result)
+```
+
+Do NOT respond with plain text or markdown outside of a code block.
+Your parent agent expects a clean string result from final_answer().
+"""
+
+        # Inherit parent's UI handler to avoid nested progress spinners
+        custom_logger = None
+        ui_handler = get_ui_handler()
+        console = get_console()
+        if ui_handler and console:
+            from ..ui.base import CustomUILogger
+
+            custom_logger = CustomUILogger(ui_handler, console)
+
+        # Run the sub-agent with forced text_mode=False
+        # Subagents MUST use code blocks and final_answer() for clean data flow
         result = run_agent(
-            agent_path=agent_file, prompt=prompt, context=sub_context, model_override=model_override, debug=False
+            agent_path=agent_file,
+            prompt=prompt,
+            context=sub_context,
+            model_override=model_override,
+            debug=False,
+            custom_logger=custom_logger,
+            force_text_mode=False,  # Force code blocks, prevent raw text/markdown responses
         )
         return result
     except Exception as e:

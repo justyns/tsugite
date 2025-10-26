@@ -130,25 +130,38 @@ class PlainUIHandler(CustomUIHandler):
 
         self.console.print("Processing results...")
 
-        if self.show_observations and observation:
+        if observation:
             # Clean up observation for display
             clean_obs = observation.replace("|", "[").strip()
+
+            # Check if this is a final answer
+            is_final_answer = "__FINAL_ANSWER__:" in clean_obs
 
             # Check if this looks like an error using shared helper from parent class
             is_error = self._contains_error(clean_obs)
 
-            if is_error:
-                # Display errors prominently
-                self.console.print()
-                self.console.rule("ERROR", style="dim")
-                self.console.print(clean_obs)
-                self.console.rule(style="dim")
-                self.console.print()
-            else:
-                # Normal observation - truncate if too long
-                if len(clean_obs) > 200:
-                    clean_obs = clean_obs[:200] + "..."
-                self.console.print(f"Result: {clean_obs}")
+            # Always show final answers and errors, even if show_observations is False
+            if self.show_observations or is_final_answer or is_error:
+                if is_error:
+                    # Display errors prominently
+                    self.console.print()
+                    self.console.rule("ERROR", style="dim")
+                    self.console.print(clean_obs)
+                    self.console.rule(style="dim")
+                    self.console.print()
+                elif is_final_answer:
+                    # Extract answer content after "__FINAL_ANSWER__: " and render as markdown
+                    answer_content = clean_obs.split("__FINAL_ANSWER__:", 1)[1].strip()
+                    if answer_content:
+                        from rich.markdown import Markdown
+
+                        self.console.print()
+                        self.console.print(Markdown(answer_content))
+                else:
+                    # Normal observation - truncate if too long
+                    if len(clean_obs) > 200:
+                        clean_obs = clean_obs[:200] + "..."
+                    self.console.print(f"Result: {clean_obs}")
 
         # Add to current step history
         if self.state.steps_history:
@@ -277,6 +290,9 @@ class PlainUIHandler(CustomUIHandler):
                 output_text = "\n".join(output_lines)
                 contains_error = self._contains_error(output_text)
 
+                # Check if this is a final answer
+                is_final_answer = "__FINAL_ANSWER__:" in output_text
+
                 # Always show errors, filter non-meaningful outputs otherwise
                 if contains_error:
                     self.console.print()
@@ -284,6 +300,14 @@ class PlainUIHandler(CustomUIHandler):
                     self.console.print(output_text)
                     self.console.rule(style="dim")
                     self.console.print()
+                elif is_final_answer:
+                    # Extract answer content after "__FINAL_ANSWER__: " and render as markdown
+                    answer_content = output_text.split("__FINAL_ANSWER__:", 1)[1].strip()
+                    if answer_content:
+                        from rich.markdown import Markdown
+
+                        self.console.print()
+                        self.console.print(Markdown(answer_content))
                 elif output_text.strip() and output_text.strip().lower() not in ("none", "null", ""):
                     self.console.print(f"Output: {output_text}")
 
@@ -299,6 +323,24 @@ class PlainUIHandler(CustomUIHandler):
             logs = content.replace("Execution logs:", "").strip()
             if logs:
                 self.console.print(f"Logs: {logs}")
+
+    def _handle_subagent_start(self, data: Dict[str, Any]) -> None:
+        """Handle subagent start event with plain text output."""
+        agent_name = data.get("agent_name", "unknown")
+
+        self.console.print(f"Spawning {agent_name}...")
+        self.console.print()
+        self.console.rule(f"{agent_name} agent")
+        self.console.print()
+
+    def _handle_subagent_end(self, data: Dict[str, Any]) -> None:
+        """Handle subagent end event with plain text output."""
+        agent_name = data.get("agent_name", "unknown")
+
+        self.console.print()
+        self.console.rule()
+        self.console.print(f"{agent_name} completed")
+        self.console.print()
 
     @contextmanager
     def progress_context(self) -> Generator[None, None, None]:

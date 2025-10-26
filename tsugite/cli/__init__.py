@@ -20,7 +20,6 @@ from .helpers import (
     get_logo,
     get_output_console,
     load_and_validate_agent,
-    parse_cli_arguments,
     print_plain_info,
 )
 from .history import history_app
@@ -247,6 +246,10 @@ def run(
     container: Optional[str] = typer.Option(None, "--container", help="Use existing Docker container"),
     network: str = typer.Option("host", "--network", help="Docker network mode (use with --docker)"),
     no_history: bool = typer.Option(False, "--no-history", help="Disable conversation history persistence"),
+    continue_conversation: bool = typer.Option(False, "--continue", "-c", help="Continue previous conversation"),
+    conversation_id: Optional[str] = typer.Option(
+        None, "--conversation-id", help="Specific conversation ID to continue (use with --continue)"
+    ),
 ):
     """Run an agent with the given prompt.
 
@@ -256,6 +259,9 @@ def run(
         tsu run +assistant +jira +coder "prompt"
         tsu run +assistant create a ticket for bug 123
         tsu run +assistant --with-agents "jira,coder" "prompt"
+        tsu run --continue "prompt"  # Continue latest conversation (auto-detect agent)
+        tsu run +assistant --continue "prompt"  # Continue latest with specific agent
+        tsu run --continue --conversation-id CONV_ID "prompt"  # Continue specific conversation
     """
     # Lazy imports - only load heavy dependencies when actually running agents
     from tsugite.agent_runner import get_agent_info, run_agent
@@ -313,9 +319,27 @@ def run(
         result = subprocess.run(cmd, check=False)
         raise typer.Exit(result.returncode)
 
-    # Parse CLI arguments into agents and prompt
+    # Handle conversation continuation - check before parsing args
+    continue_conversation_id = None
+    if continue_conversation:
+        from tsugite.ui.chat_history import get_latest_conversation
+
+        # Determine conversation ID
+        if conversation_id:
+            continue_conversation_id = conversation_id
+            console.print(f"[cyan]Continuing conversation: {continue_conversation_id}[/cyan]")
+        else:
+            continue_conversation_id = get_latest_conversation()
+            if not continue_conversation_id:
+                console.print("[red]No conversations found to resume[/red]")
+                raise typer.Exit(1)
+            console.print(f"[cyan]Continuing latest conversation: {continue_conversation_id}[/cyan]")
+
+    # Parse CLI arguments into agents and prompt (allow empty agents when continuing)
     try:
-        agent_refs, prompt = parse_cli_arguments(args)
+        from tsugite.cli.helpers import parse_cli_arguments
+
+        agent_refs, prompt = parse_cli_arguments(args, allow_empty_agents=continue_conversation)
     except ValueError as e:
         console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1)
@@ -327,6 +351,21 @@ def run(
     with change_to_root_directory(root, console):
         try:
             base_dir = Path.cwd()
+
+            # If no agent specified and we're continuing, auto-detect from conversation
+            if not agent_refs and continue_conversation:
+                from tsugite.history import get_conversation_metadata
+
+                metadata = get_conversation_metadata(continue_conversation_id)
+                if not metadata:
+                    console.print(f"[red]Could not load metadata for conversation: {continue_conversation_id}[/red]")
+                    raise typer.Exit(1)
+
+                agent_name = metadata.agent
+                console.print(f"[cyan]Auto-detected agent from conversation: {agent_name}[/cyan]")
+
+                # Use agent name as reference (will be resolved below)
+                agent_refs = [f"+{agent_name}"]
 
             primary_agent_path, delegation_agents = parse_agent_references(agent_refs, with_agents, base_dir)
 
@@ -473,6 +512,7 @@ def run(
                     "trust_mcp_code": trust_mcp_code,
                     "delegation_agents": delegation_agents,
                     "stream": stream,
+                    "continue_conversation_id": continue_conversation_id,
                 }
                 # Only pass return_token_usage if history is enabled and we're using run_agent
                 if should_save_history and executor == run_agent:
@@ -501,6 +541,7 @@ def run(
                         "trust_mcp_code": trust_mcp_code,
                         "delegation_agents": delegation_agents,
                         "stream": stream,
+                        "continue_conversation_id": continue_conversation_id,
                     }
                     if should_save_history and executor == run_agent:
                         executor_kwargs["return_token_usage"] = True
@@ -526,6 +567,7 @@ def run(
                         "trust_mcp_code": trust_mcp_code,
                         "delegation_agents": delegation_agents,
                         "stream": stream,
+                        "continue_conversation_id": continue_conversation_id,
                     }
                     if should_save_history and executor == run_agent:
                         executor_kwargs["return_token_usage"] = True
@@ -543,6 +585,7 @@ def run(
                         "trust_mcp_code": trust_mcp_code,
                         "delegation_agents": delegation_agents,
                         "stream": stream,
+                        "continue_conversation_id": continue_conversation_id,
                     }
                     if should_save_history and executor == run_agent:
                         executor_kwargs["return_token_usage"] = True
@@ -563,6 +606,7 @@ def run(
                             "trust_mcp_code": trust_mcp_code,
                             "delegation_agents": delegation_agents,
                             "stream": stream,
+                            "continue_conversation_id": continue_conversation_id,
                         }
                         if should_save_history and executor == run_agent:
                             executor_kwargs["return_token_usage"] = True
@@ -588,6 +632,7 @@ def run(
                             "trust_mcp_code": trust_mcp_code,
                             "delegation_agents": delegation_agents,
                             "stream": stream,
+                            "continue_conversation_id": continue_conversation_id,
                         }
                         if should_save_history and executor == run_agent:
                             executor_kwargs["return_token_usage"] = True
@@ -619,6 +664,7 @@ def run(
                         token_count=token_count,
                         cost=cost,
                         execution_steps=execution_steps,
+                        continue_conversation_id=continue_conversation_id,
                     )
                 except Exception as e:
                     # Don't fail the run if history save fails
@@ -656,7 +702,9 @@ def run(
 
 @app.command()
 def render(
-    agent_path: str = typer.Argument(help="Path to agent markdown file or builtin agent name (e.g., +builtin-default)"),
+    agent_path: Optional[str] = typer.Argument(
+        None, help="Path to agent markdown file or builtin agent name (optional when using --continue)"
+    ),
     prompt: Optional[str] = typer.Argument(default="", help="Prompt/task for the agent (optional)"),
     root: Optional[str] = typer.Option(None, "--root", help="Working directory"),
     no_color: bool = typer.Option(False, "--no-color", help="Disable ANSI colors"),
@@ -665,6 +713,12 @@ def render(
         None, "-f", "--attachment", help="Attachment(s) to include (repeatable)"
     ),
     refresh_cache: bool = typer.Option(False, "--refresh-cache", help="Force refresh cached attachment content"),
+    continue_conversation: bool = typer.Option(
+        False, "--continue", "-c", help="Show prompt for continuing conversation"
+    ),
+    conversation_id: Optional[str] = typer.Option(
+        None, "--conversation-id", help="Specific conversation ID (use with --continue)"
+    ),
 ):
     """Render an agent template without executing it.
 
@@ -672,12 +726,47 @@ def render(
         tsu render agent.md "prompt"
         tsu render +builtin-default "prompt"
         tsu render builtin-default "prompt"
+        tsu render --continue "prompt"  # Auto-detects agent
+        tsu render agent.md "prompt" --continue
+        tsu render --continue --conversation-id CONV_ID "prompt"
     """
     # Lazy imports
     from tsugite.agent_preparation import AgentPreparer
 
     if no_color:
         console.no_color = True
+
+    # Handle conversation continuation
+    continue_conversation_id = None
+    if continue_conversation:
+        from tsugite.ui.chat_history import get_latest_conversation
+
+        if conversation_id:
+            continue_conversation_id = conversation_id
+            console.print(f"[cyan]Rendering for conversation: {continue_conversation_id}[/cyan]")
+        else:
+            continue_conversation_id = get_latest_conversation()
+            if not continue_conversation_id:
+                console.print("[red]No conversations found[/red]")
+                raise typer.Exit(1)
+            console.print(f"[cyan]Rendering for latest conversation: {continue_conversation_id}[/cyan]")
+
+    # Auto-detect agent from conversation if not specified
+    if continue_conversation_id and not agent_path:
+        from tsugite.history import get_conversation_metadata
+
+        metadata = get_conversation_metadata(continue_conversation_id)
+        if not metadata:
+            console.print(f"[red]Could not load metadata for conversation: {continue_conversation_id}[/red]")
+            raise typer.Exit(1)
+
+        agent_path = f"+{metadata.agent}"
+        console.print(f"[cyan]Auto-detected agent from conversation: {metadata.agent}[/cyan]")
+
+    # Validate agent_path is provided
+    if not agent_path:
+        console.print("[red]Error: AGENT_PATH is required (or use --continue to auto-detect)[/red]")
+        raise typer.Exit(1)
 
     with change_to_root_directory(root, console):
         try:
@@ -696,12 +785,27 @@ def render(
                 console=console,
             )
 
+            # Build context and load conversation history if continuing
+            context = {}
+            if continue_conversation_id:
+                from tsugite.agent_runner.history_integration import load_conversation_context
+
+                try:
+                    chat_history = load_conversation_context(continue_conversation_id)
+                    context["chat_history"] = chat_history
+                    # Enable text_mode when continuing (matches run behavior)
+                    agent.config.text_mode = True
+                except FileNotFoundError:
+                    console.print(f"[red]Conversation not found: {continue_conversation_id}[/red]")
+                    raise typer.Exit(1)
+
             # Prepare agent (all rendering + tool building logic)
             preparer = AgentPreparer()
             prepared = preparer.prepare(
                 agent=agent,
                 prompt=prompt_expanded,
                 skip_tool_directives=True,  # Render doesn't execute tool directives
+                context=context,
             )
 
             # Display what will be sent to LLM
@@ -745,6 +849,9 @@ def chat(
     max_history: int = typer.Option(50, "--max-history", help="Maximum turns to keep in context"),
     stream: bool = typer.Option(False, "--stream", help="Stream LLM responses in real-time"),
     no_history: bool = typer.Option(False, "--no-history", help="Disable conversation history persistence"),
+    continue_: Optional[str] = typer.Option(
+        None, "--continue", "-c", help="Resume conversation by ID, or latest if no ID given"
+    ),
     root: Optional[str] = typer.Option(None, "--root", help="Working directory"),
 ):
     """Start an interactive chat session with an agent."""
@@ -753,6 +860,35 @@ def chat(
     from tsugite.ui.textual_chat import run_textual_chat
 
     with change_to_root_directory(root, console):
+        # Handle conversation resume
+        resume_conversation_id = None
+        resume_turns = None
+
+        if continue_ is not None:
+            from tsugite.ui.chat_history import get_latest_conversation, load_conversation_history
+
+            # Determine conversation ID to resume
+            if continue_ == "" or continue_.lower() == "latest":
+                resume_conversation_id = get_latest_conversation()
+                if not resume_conversation_id:
+                    console.print("[red]No conversations found to resume[/red]")
+                    raise typer.Exit(1)
+                console.print(f"[cyan]Resuming latest conversation: {resume_conversation_id}[/cyan]")
+            else:
+                resume_conversation_id = continue_
+                console.print(f"[cyan]Resuming conversation: {resume_conversation_id}[/cyan]")
+
+            # Load conversation history
+            try:
+                resume_turns = load_conversation_history(resume_conversation_id)
+                console.print(f"[cyan]Loaded {len(resume_turns)} previous turns[/cyan]")
+            except FileNotFoundError:
+                console.print(f"[red]Conversation not found: {resume_conversation_id}[/red]")
+                raise typer.Exit(1)
+            except Exception as e:
+                console.print(f"[red]Failed to load conversation: {e}[/red]")
+                raise typer.Exit(1)
+
         # Resolve agent path
         if agent:
             # Parse agent reference
@@ -779,6 +915,8 @@ def chat(
             max_history=max_history,
             stream=stream,
             disable_history=no_history,
+            resume_conversation_id=resume_conversation_id,
+            resume_turns=resume_turns,
         )
 
 

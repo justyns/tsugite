@@ -10,6 +10,8 @@ from tsugite.history import (
     IndexEntry,
     Turn,
     generate_conversation_id,
+    load_conversation,
+    query_index,
     save_turn_to_history,
     update_index,
 )
@@ -189,3 +191,40 @@ def format_conversation_for_display(turns: List[Union[ConversationMetadata, Turn
             lines.append("")
 
     return "\n".join(lines)
+
+
+def get_latest_conversation() -> Optional[str]:
+    """Get the most recent conversation ID.
+
+    Returns:
+        Conversation ID of the most recent conversation, or None if no conversations exist
+
+    Raises:
+        RuntimeError: If query fails
+    """
+    try:
+        results = query_index(limit=1)
+        if results:
+            return results[0].get("conversation_id")
+        return None
+    except Exception as e:
+        raise RuntimeError(f"Failed to query conversation index: {e}")
+
+
+def load_conversation_history(conversation_id: str) -> List[Turn]:
+    """Load conversation history turns (without metadata).
+
+    Args:
+        conversation_id: Conversation ID to load
+
+    Returns:
+        List of Turn objects (excludes ConversationMetadata)
+
+    Raises:
+        FileNotFoundError: If conversation doesn't exist
+        RuntimeError: If load fails
+    """
+    records = load_conversation(conversation_id)
+
+    # Filter out metadata, return only Turn objects
+    return [record for record in records if isinstance(record, Turn)]

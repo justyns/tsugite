@@ -57,6 +57,7 @@ class ChatManager:
         custom_logger: Optional[CustomUILogger] = None,
         stream: bool = False,
         disable_history: bool = False,
+        resume_conversation_id: Optional[str] = None,
     ):
         """Initialize chat manager.
 
@@ -67,6 +68,7 @@ class ChatManager:
             custom_logger: Optional custom logger for UI
             stream: Whether to stream responses in real-time
             disable_history: Disable conversation history persistence
+            resume_conversation_id: Optional conversation ID to resume (skips auto-generation)
         """
         self.agent_path = agent_path
         self.model_override = model_override
@@ -77,11 +79,12 @@ class ChatManager:
         self.session_start = datetime.now()
 
         # History support
-        self.conversation_id: Optional[str] = None
+        self.conversation_id: Optional[str] = resume_conversation_id
         config = load_config()
         history_enabled = getattr(config, "history_enabled", True) and not disable_history
 
-        if history_enabled:
+        # Only create new conversation if not resuming
+        if history_enabled and not resume_conversation_id:
             try:
                 from tsugite.ui.chat_history import start_conversation
 
@@ -97,6 +100,48 @@ class ChatManager:
                 # Don't fail if history can't be initialized
                 print(f"Warning: Failed to initialize conversation history: {e}")
                 self.conversation_id = None
+
+    def load_from_history(self, conversation_id: str, turns: List[Any]) -> None:
+        """Load conversation history from JSONL storage.
+
+        Args:
+            conversation_id: Conversation ID to resume
+            turns: List of Turn objects from history
+
+        Raises:
+            RuntimeError: If loading fails
+        """
+        try:
+            from tsugite.history import Turn
+
+            self.conversation_id = conversation_id
+            self.conversation_history = []
+
+            # Convert Turn objects from history to ChatTurn objects
+            for turn in turns:
+                if not isinstance(turn, Turn):
+                    continue
+
+                chat_turn = ChatTurn(
+                    timestamp=turn.timestamp,
+                    user_message=turn.user,
+                    agent_response=turn.assistant,
+                    tool_calls=turn.tools or [],
+                    token_count=turn.tokens,
+                    cost=turn.cost,
+                )
+                self.conversation_history.append(chat_turn)
+
+            # Update session_start to first turn's timestamp if available
+            if self.conversation_history:
+                self.session_start = self.conversation_history[0].timestamp
+
+            # Prune if history exceeds max_history
+            if len(self.conversation_history) > self.max_history:
+                self.conversation_history = self.conversation_history[-self.max_history :]
+
+        except Exception as e:
+            raise RuntimeError(f"Failed to load conversation from history: {e}")
 
     def add_turn(
         self,

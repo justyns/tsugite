@@ -5,6 +5,50 @@ from pathlib import Path
 from typing import Optional
 
 
+def load_conversation_context(conversation_id: str) -> list:
+    """Load conversation history as chat context.
+
+    Args:
+        conversation_id: Conversation ID to load
+
+    Returns:
+        List of ChatTurn-like dicts for context injection
+
+    Raises:
+        FileNotFoundError: If conversation doesn't exist
+        RuntimeError: If load fails
+    """
+    from tsugite.ui.chat_history import load_conversation_history
+
+    turns = load_conversation_history(conversation_id)
+
+    # Convert Turn objects to ChatTurn-like format for context
+    chat_turns = []
+    for turn in turns:
+        from dataclasses import dataclass
+
+        @dataclass
+        class ChatTurn:
+            timestamp: datetime
+            user_message: str
+            agent_response: str
+            tool_calls: list = None
+            token_count: Optional[int] = None
+            cost: Optional[float] = None
+
+        chat_turn = ChatTurn(
+            timestamp=turn.timestamp,
+            user_message=turn.user,
+            agent_response=turn.assistant,
+            tool_calls=turn.tools or [],
+            token_count=turn.tokens,
+            cost=turn.cost,
+        )
+        chat_turns.append(chat_turn)
+
+    return chat_turns
+
+
 def save_run_to_history(
     agent_path: Path,
     agent_name: str,
@@ -14,6 +58,7 @@ def save_run_to_history(
     token_count: Optional[int] = None,
     cost: Optional[float] = None,
     execution_steps: Optional[list] = None,
+    continue_conversation_id: Optional[str] = None,
 ) -> Optional[str]:
     """Save a single agent run to history.
 
@@ -26,6 +71,7 @@ def save_run_to_history(
         token_count: Number of tokens used
         cost: Cost of execution
         execution_steps: List of execution steps (from agent memory)
+        continue_conversation_id: Optional conversation ID to continue (for multi-turn run mode)
 
     Returns:
         Conversation ID if saved, None if history disabled or failed
@@ -50,15 +96,19 @@ def save_run_to_history(
             # If we can't parse agent, assume history is enabled
             pass
 
-        # Start conversation
         timestamp = datetime.now(timezone.utc)
-        conv_id = start_conversation(
-            agent_name=agent_name,
-            model=model,
-            timestamp=timestamp,
-        )
 
-        # Save as a single turn (run mode is single-shot)
+        # Use existing conversation ID or start new one
+        if continue_conversation_id:
+            conv_id = continue_conversation_id
+        else:
+            conv_id = start_conversation(
+                agent_name=agent_name,
+                model=model,
+                timestamp=timestamp,
+            )
+
+        # Save turn to conversation
         save_chat_turn(
             conversation_id=conv_id,
             user_message=prompt,

@@ -34,6 +34,8 @@ class UIEvent(IntEnum):
     COST_SUMMARY = 15
     STREAM_CHUNK = 16  # For streaming LLM responses
     STREAM_COMPLETE = 17  # When streaming finishes
+    SUBAGENT_START = 18  # When spawn_agent is called
+    SUBAGENT_END = 19  # When spawn_agent completes
 
 
 @dataclass
@@ -133,6 +135,10 @@ class CustomUIHandler:
                 self._handle_stream_chunk(data)
             elif event == UIEvent.STREAM_COMPLETE:
                 self._handle_stream_complete(data)
+            elif event == UIEvent.SUBAGENT_START:
+                self._handle_subagent_start(data)
+            elif event == UIEvent.SUBAGENT_END:
+                self._handle_subagent_end(data)
 
             self._update_display()
 
@@ -262,7 +268,7 @@ class CustomUIHandler:
         # Update progress
         self.update_progress(f"{prefix}💡 Processing results...")
 
-        if self.show_observations and observation:
+        if observation:
             # Clean up observation for display
             clean_obs = observation.replace("|", "[").strip()
 
@@ -272,47 +278,43 @@ class CustomUIHandler:
             # Check if this looks like an error using shared helper
             is_error = self._contains_error(clean_obs)
 
-            if is_error:
-                # Display errors prominently in red without truncation
-                if self.show_panels:
-                    self.console.print(
-                        Panel(
-                            f"[red]{clean_obs}[/red]",
-                            title="[bold red]⚠️  Error[/bold red]",
-                            border_style="red",
+            # Always show final answers and errors, even if show_observations is False
+            if self.show_observations or is_final_answer or is_error:
+                if is_error:
+                    # Display errors prominently in red without truncation
+                    if self.show_panels:
+                        self.console.print(
+                            Panel(
+                                f"[red]{clean_obs}[/red]",
+                                title="[bold red]⚠️  Error[/bold red]",
+                                border_style="red",
+                            )
                         )
-                    )
-                else:
-                    self.console.print(f"[red]⚠️  {clean_obs}[/red]")
-            elif is_final_answer:
-                # Final answer - don't truncate, render as markdown in minimal mode
-                # Extract answer content after "__FINAL_ANSWER__: "
-                answer_content = clean_obs.split("__FINAL_ANSWER__:", 1)[1].strip()
-                if self.show_panels:
-                    # In panel mode, display with panel
-                    self.console.print(
-                        Panel(
-                            answer_content,
-                            title="[bold green]✅ Final Answer[/bold green]",
-                            border_style="green",
+                    else:
+                        self.console.print(f"[red]⚠️  {clean_obs}[/red]")
+                elif is_final_answer:
+                    # Final answer - don't truncate, render as markdown in minimal mode
+                    # Extract answer content after "__FINAL_ANSWER__: "
+                    answer_content = clean_obs.split("__FINAL_ANSWER__:", 1)[1].strip()
+                    if self.show_panels:
+                        # In panel mode, display with panel
+                        self.console.print(
+                            Panel(
+                                answer_content,
+                                title="[bold green]✅ Final Answer[/bold green]",
+                                border_style="green",
+                            )
                         )
-                    )
+                    else:
+                        # In minimal mode, render as markdown
+                        self.console.print(Markdown(answer_content))
                 else:
-                    # In minimal mode, render as markdown
-                    self.console.print(Markdown(answer_content))
-            else:
-                # Normal observation - truncate if too long
-                if len(clean_obs) > 200:
-                    clean_obs = clean_obs[:200] + "..."
-                self.console.print(f"[dim]💡 {clean_obs}[/dim]")
-        elif not self.show_panels and observation:
-            # In minimal mode when not showing observations, show completion indicator
-            # But still show errors
-            clean_obs = observation.replace("|", "[").strip()
-            is_error = self._contains_error(clean_obs)
-            if is_error:
-                self.console.print(f"[red]⚠️  {clean_obs}[/red]")
-            else:
+                    # Normal observation - truncate if too long
+                    if len(clean_obs) > 200:
+                        clean_obs = clean_obs[:200] + "..."
+                    self.console.print(f"[dim]💡 {clean_obs}[/dim]")
+            elif not self.show_panels:
+                # In minimal mode when not showing observations, show completion indicator
                 self.console.print("[dim green]✓ Completed[/dim green]")
 
         # Add to current step history
@@ -336,6 +338,11 @@ class CustomUIHandler:
                     border_style="green",
                 )
             )
+        else:
+            # In minimal mode, render the answer as markdown
+            from rich.markdown import Markdown
+
+            self.console.print(Markdown(str(answer)))
 
     def _handle_error(self, data: Dict[str, Any]) -> None:
         """Handle error event."""
@@ -520,6 +527,9 @@ class CustomUIHandler:
                 output_text = "\n".join(output_lines)
                 contains_error = self._contains_error(output_text)
 
+                # Check if this is a final answer
+                is_final_answer = "__FINAL_ANSWER__:" in output_text
+
                 # Always show errors, filter non-meaningful outputs otherwise
                 if contains_error:
                     # Show errors prominently
@@ -533,6 +543,13 @@ class CustomUIHandler:
                         )
                     else:
                         self.console.print(f"[red]📤 Output (Error): {output_text}[/red]")
+                elif is_final_answer:
+                    # Extract answer content after "__FINAL_ANSWER__: " and render as markdown
+                    answer_content = output_text.split("__FINAL_ANSWER__:", 1)[1].strip()
+                    if answer_content:
+                        from rich.markdown import Markdown
+
+                        self.console.print(Markdown(answer_content))
                 elif output_text.strip() and output_text.strip().lower() not in ("none", "null", ""):
                     # Show normal meaningful output
                     self.console.print(f"[bold cyan]📤 Output:[/bold cyan] {output_text}")
@@ -576,6 +593,42 @@ class CustomUIHandler:
 
         # Clear streaming content for next step
         self.streaming_content = ""
+
+    def _handle_subagent_start(self, data: Dict[str, Any]) -> None:
+        """Handle subagent start event."""
+        agent_name = data.get("agent_name", "unknown")
+
+        # Stop progress spinner to prevent interference with subagent output
+        if self.progress and self.task_id is not None:
+            self.progress.stop()
+
+        if self.show_panels:
+            # Show header with agent name
+            width = self.console.width - 4  # Leave room for borders
+            header_text = f" {agent_name} agent "
+            padding = max(0, (width - len(header_text)) // 2)
+            header_line = "─" * padding + header_text + "─" * (width - padding - len(header_text))
+            self.console.print(f"[dim cyan]╭{header_line}╮[/dim cyan]")
+        else:
+            # Minimal mode: simple indicator
+            self.console.print(f"[dim cyan]→ Spawning {agent_name}...[/dim cyan]")
+
+    def _handle_subagent_end(self, data: Dict[str, Any]) -> None:
+        """Handle subagent end event."""
+        agent_name = data.get("agent_name", "unknown")
+
+        if self.show_panels:
+            # Show footer
+            width = self.console.width - 4
+            footer_line = "─" * width
+            self.console.print(f"[dim cyan]╰{footer_line}╯[/dim cyan]")
+        else:
+            # Minimal mode: simple indicator
+            self.console.print(f"[dim green]✓ {agent_name} completed[/dim green]")
+
+        # Restart progress spinner after subagent completes
+        if self.progress and self.task_id is not None:
+            self.progress.start()
 
     def _update_display(self) -> None:
         """Update the live display with current state."""

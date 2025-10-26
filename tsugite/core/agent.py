@@ -152,13 +152,46 @@ class TsugiteAgent:
 
                     # Convert positional args to keyword args if needed
                     if args:
-                        # Tools should be called with keyword args, but if positional
-                        # args are provided, this is likely an error
-                        raise TypeError(
-                            f"Tool '{tool_obj.name}' must be called with keyword arguments, "
-                            f"not positional arguments. "
-                            f"Example: {tool_obj.name}(param1=value1, param2=value2)"
-                        )
+                        # Map positional arguments to parameter names using function signature
+                        import inspect
+
+                        try:
+                            sig = inspect.signature(tool_obj.function)
+                            param_names = list(sig.parameters.keys())
+
+                            # Convert positional args to kwargs
+                            for i, arg in enumerate(args):
+                                if i < len(param_names):
+                                    param_name = param_names[i]
+                                    # Don't override if already provided as kwarg
+                                    if param_name not in kwargs:
+                                        kwargs[param_name] = arg
+                                else:
+                                    # Too many positional args
+                                    raise TypeError(
+                                        f"Tool '{tool_obj.name}' takes at most {len(param_names)} "
+                                        f"positional arguments but {len(args)} were given"
+                                    )
+                        except Exception:
+                            # If signature inspection fails, fall back to error
+                            raise TypeError(
+                                f"Tool '{tool_obj.name}' must be called with keyword arguments, "
+                                f"not positional arguments. "
+                                f"Example: {tool_obj.name}(param1=value1, param2=value2)"
+                            )
+
+                    # Special handling for spawn_agent to show subagent visibility
+                    is_spawn_agent = tool_obj.name == "spawn_agent"
+                    agent_name = None
+                    if is_spawn_agent and self.ui_handler:
+                        # Extract agent name from path
+                        from pathlib import Path
+
+                        agent_path = kwargs.get("agent_path", "")
+                        agent_name = Path(agent_path).stem if agent_path else "unknown"
+
+                        # Emit SUBAGENT_START event
+                        self.ui_handler.handle_event(UIEvent.SUBAGENT_START, {"agent_name": agent_name})
 
                     # Get the running event loop, or create one if needed
                     try:
@@ -174,17 +207,37 @@ class TsugiteAgent:
                                 try:
                                     return new_loop.run_until_complete(tool_obj.execute(**kwargs))
                                 finally:
+                                    # Clean up any pending tasks before closing the loop
+                                    # to prevent RuntimeWarning about tasks being destroyed
+                                    pending = asyncio.all_tasks(new_loop)
+                                    for task in pending:
+                                        task.cancel()
+                                    if pending:
+                                        new_loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
                                     new_loop.close()
 
-                            return executor.submit(run_async).result()
+                            result = executor.submit(run_async).result()
                     except RuntimeError:
                         # No running event loop - create one and run synchronously
                         loop = asyncio.new_event_loop()
                         asyncio.set_event_loop(loop)
                         try:
-                            return loop.run_until_complete(tool_obj.execute(**kwargs))
+                            result = loop.run_until_complete(tool_obj.execute(**kwargs))
                         finally:
+                            # Clean up any pending tasks before closing the loop
+                            # to prevent RuntimeWarning about tasks being destroyed
+                            pending = asyncio.all_tasks(loop)
+                            for task in pending:
+                                task.cancel()
+                            if pending:
+                                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
                             loop.close()
+
+                    # Emit SUBAGENT_END event for spawn_agent
+                    if is_spawn_agent and self.ui_handler:
+                        self.ui_handler.handle_event(UIEvent.SUBAGENT_END, {"agent_name": agent_name, "result": result})
+
+                    return result
 
                 # Copy the tool's function signature and metadata to the wrapper
                 # This ensures the wrapper appears identical to the original function
@@ -327,6 +380,7 @@ class TsugiteAgent:
                 # Trigger observation event
                 if self.ui_handler:
                     observation = exec_result.output
+
                     if exec_result.error:
                         # Trigger error event for execution errors
                         self.ui_handler.handle_event(
