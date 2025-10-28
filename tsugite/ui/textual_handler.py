@@ -63,8 +63,6 @@ class TextualUIHandler(CustomUIHandler):
             UIEvent.STREAM_CHUNK: self._handle_stream_chunk,
             UIEvent.STREAM_COMPLETE: self._handle_stream_complete,
             UIEvent.EXECUTION_RESULT: self._handle_execution_result,
-            UIEvent.SUBAGENT_START: self._handle_subagent_start,
-            UIEvent.SUBAGENT_END: self._handle_subagent_end,
         }
 
         with self._lock:
@@ -208,30 +206,3 @@ class TextualUIHandler(CustomUIHandler):
                 if len(result_text) > 200:
                     result_text = result_text[:200] + "..."
                 self.on_thought_log("execution_result", result_text)
-
-    def _handle_subagent_start(self, data: Dict[str, Any]) -> None:
-        """Handle subagent start."""
-        agent_name = data.get("agent_name", "unknown")
-        self._update_status(f"Spawning {agent_name} agent...")
-
-        # Log to thought log
-        if self.on_thought_log:
-            self.on_thought_log("subagent", f"→ Spawning {agent_name}")
-
-    def _handle_subagent_end(self, data: Dict[str, Any]) -> None:
-        """Handle subagent end."""
-        agent_name = data.get("agent_name", "unknown")
-        result = data.get("result", "")
-
-        self._update_status(f"{agent_name} completed")
-
-        # Log to thought log
-        if self.on_thought_log:
-            log_msg = f"✓ {agent_name} completed"
-            # Add result preview if available and not too long
-            if result:
-                result_preview = str(result)[:100]
-                if len(str(result)) > 100:
-                    result_preview += "..."
-                log_msg += f"\n  Result: {result_preview}"
-            self.on_thought_log("subagent", log_msg)

@@ -100,6 +100,8 @@ def save_chat_turn(
     token_count: Optional[int] = None,
     cost: Optional[float] = None,
     timestamp: Optional[datetime] = None,
+    execution_steps: Optional[list] = None,
+    messages: Optional[list] = None,
 ) -> None:
     """Save a chat turn to history.
 
@@ -113,12 +115,33 @@ def save_chat_turn(
         token_count: Number of tokens used
         cost: Cost of the turn
         timestamp: Optional timestamp (defaults to now)
+        execution_steps: Optional list of execution step objects (StepResult)
+        messages: Optional full LiteLLM message history
 
     Raises:
         RuntimeError: If save fails
     """
     if timestamp is None:
         timestamp = datetime.now(timezone.utc)
+
+    # Convert execution_steps to dicts if provided
+    steps_dicts = None
+    if execution_steps:
+        steps_dicts = []
+        for step in execution_steps:
+            if hasattr(step, "__dict__"):
+                # Convert dataclass/object to dict
+                step_dict = {
+                    "step_number": getattr(step, "step_number", None),
+                    "thought": getattr(step, "thought", ""),
+                    "code": getattr(step, "code", ""),
+                    "output": getattr(step, "output", ""),
+                    "error": getattr(step, "error", None),
+                    "tools_called": getattr(step, "tools_called", []),
+                }
+                steps_dicts.append(step_dict)
+            elif isinstance(step, dict):
+                steps_dicts.append(step)
 
     # Create Turn model
     turn = Turn(
@@ -128,6 +151,8 @@ def save_chat_turn(
         tools=tool_calls,
         tokens=token_count,
         cost=cost,
+        steps=steps_dicts,
+        messages=messages,
     )
 
     save_turn_to_history(conversation_id, turn)

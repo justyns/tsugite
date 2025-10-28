@@ -250,6 +250,9 @@ def run(
     conversation_id: Optional[str] = typer.Option(
         None, "--conversation-id", help="Specific conversation ID to continue (use with --continue)"
     ),
+    subagent_mode: bool = typer.Option(
+        False, "--subagent-mode", help="Run as subagent: read JSON from stdin, emit JSONL to stdout"
+    ),
 ):
     """Run an agent with the given prompt.
 
@@ -277,6 +280,26 @@ def run(
 
     # Resolve UI mode to individual flags
     plain, headless, silent, native_ui, live_ui = _resolve_ui_mode(ui, plain, headless, silent, native_ui, console)
+
+    # Handle subagent mode - override incompatible settings
+    if subagent_mode:
+        import os
+
+        # Validate no conflicting flags
+        if plain or headless or native_ui:
+            console.print(
+                "[red]Error: --subagent-mode cannot be combined with --plain, --headless, or --native-ui[/red]"
+            )
+            raise typer.Exit(1)
+
+        # Force compatible settings
+        ui = "silent"
+        silent = True
+        non_interactive = True
+        no_history = True
+
+        # Set environment variable for downstream components
+        os.environ["TSUGITE_SUBAGENT_MODE"] = "1"
 
     # Delegate to tsugite-docker wrapper if Docker flags are present
     if docker or container:
@@ -395,8 +418,9 @@ def run(
         # 1. User explicitly sets --plain flag, OR
         # 2. User explicitly sets --ui minimal (native_ui), OR
         # 3. Output is being piped/redirected (auto-detection), OR
-        # 4. NO_COLOR environment variable is set (auto-detection)
-        use_plain_output = plain or native_ui or should_use_plain_output()
+        # 4. NO_COLOR environment variable is set (auto-detection), OR
+        # 5. User explicitly sets --no-color flag
+        use_plain_output = plain or native_ui or no_color or should_use_plain_output()
 
         # Get agent info for display
         agent_info = get_agent_info(agent_file)
@@ -548,8 +572,12 @@ def run(
                     result = executor(**executor_kwargs)
             elif native_ui:
                 # Minimal: colors and animations, but no panel boxes
+                # Force terminal mode for progress rendering
+                import sys
+
+                minimal_console = Console(file=sys.stdout, force_terminal=True, no_color=no_color)
                 with custom_agent_ui(
-                    console=console,
+                    console=minimal_console,
                     show_code=not non_interactive,
                     show_observations=not non_interactive,
                     show_progress=not no_color,
@@ -621,7 +649,7 @@ def run(
                         show_llm_messages=show_reasoning,
                         show_execution_results=True,
                         show_execution_logs=verbose,
-                        show_panels=True,
+                        show_panels=not no_color,  # Disable panels when no_color to avoid ANSI codes
                     ) as custom_logger:
                         executor_kwargs = {
                             "agent_path": agent_file,

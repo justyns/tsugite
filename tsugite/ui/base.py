@@ -34,8 +34,7 @@ class UIEvent(IntEnum):
     COST_SUMMARY = 15
     STREAM_CHUNK = 16  # For streaming LLM responses
     STREAM_COMPLETE = 17  # When streaming finishes
-    SUBAGENT_START = 18  # When spawn_agent is called
-    SUBAGENT_END = 19  # When spawn_agent completes
+    INFO = 20  # Informational messages
 
 
 @dataclass
@@ -102,6 +101,17 @@ class CustomUIHandler:
         self.streaming_content = ""
         self.is_streaming = False
 
+    def _print(self, *args, **kwargs) -> None:
+        """Print helper that uses progress.console when progress is active.
+
+        This ensures output doesn't interfere with Rich's Progress Live display.
+        When Progress Live is active, direct console.print() calls break rendering.
+        """
+        if self.progress:
+            self.progress.console.print(*args, **kwargs)
+        else:
+            self.console.print(*args, **kwargs)
+
     def handle_event(self, event: UIEvent, data: Dict[str, Any]) -> None:
         """Handle a UI event and update the display."""
         with self._lock:
@@ -135,10 +145,8 @@ class CustomUIHandler:
                 self._handle_stream_chunk(data)
             elif event == UIEvent.STREAM_COMPLETE:
                 self._handle_stream_complete(data)
-            elif event == UIEvent.SUBAGENT_START:
-                self._handle_subagent_start(data)
-            elif event == UIEvent.SUBAGENT_END:
-                self._handle_subagent_end(data)
+            elif event == UIEvent.INFO:
+                self._handle_info(data)
 
             self._update_display()
 
@@ -197,7 +205,7 @@ class CustomUIHandler:
 
         # Show initial task panel
         if self.show_panels:
-            self.console.print(
+            self._print(
                 Panel(
                     f"[bold]{self.state.task}[/bold]",
                     title="[bold cyan]🚀 Starting Agent Execution[/bold cyan]",
@@ -231,7 +239,7 @@ class CustomUIHandler:
         self.update_progress(f"{prefix}⚡ Executing code...")
 
         if self.show_code and self.show_panels and self.state.code_being_executed:
-            self.console.print(
+            self._print(
                 Panel(
                     Syntax(self.state.code_being_executed, "python", theme="monokai"),
                     title="[bold yellow]⚡ Executing Code[/bold yellow]",
@@ -240,7 +248,7 @@ class CustomUIHandler:
             )
         elif not self.show_panels:
             # In minimal mode, show lightweight indicator
-            self.console.print("[dim yellow]⚡ Executing code...[/dim yellow]")
+            self._print("[dim yellow]⚡ Executing code...[/dim yellow]")
 
     def _handle_tool_call(self, data: Dict[str, Any]) -> None:
         """Handle tool call event."""
@@ -254,7 +262,7 @@ class CustomUIHandler:
         if not self.show_panels and content:
             # Parse tool name from content (format: "Tool: tool_name")
             tool_name = content.replace("Tool: ", "").strip() if "Tool: " in content else content
-            self.console.print(f"[dim cyan]🔧 Called: {tool_name}[/dim cyan]")
+            self._print(f"[dim cyan]🔧 Called: {tool_name}[/dim cyan]")
 
         # Add to current step history
         if self.state.steps_history:
@@ -283,7 +291,7 @@ class CustomUIHandler:
                 if is_error:
                     # Display errors prominently in red without truncation
                     if self.show_panels:
-                        self.console.print(
+                        self._print(
                             Panel(
                                 f"[red]{clean_obs}[/red]",
                                 title="[bold red]⚠️  Error[/bold red]",
@@ -291,14 +299,14 @@ class CustomUIHandler:
                             )
                         )
                     else:
-                        self.console.print(f"[red]⚠️  {clean_obs}[/red]")
+                        self._print(f"[red]⚠️  {clean_obs}[/red]")
                 elif is_final_answer:
                     # Final answer - don't truncate, render as markdown in minimal mode
                     # Extract answer content after "__FINAL_ANSWER__: "
                     answer_content = clean_obs.split("__FINAL_ANSWER__:", 1)[1].strip()
                     if self.show_panels:
                         # In panel mode, display with panel
-                        self.console.print(
+                        self._print(
                             Panel(
                                 answer_content,
                                 title="[bold green]✅ Final Answer[/bold green]",
@@ -307,15 +315,17 @@ class CustomUIHandler:
                         )
                     else:
                         # In minimal mode, render as markdown
-                        self.console.print(Markdown(answer_content))
+                        self._print(Markdown(answer_content))
                 else:
-                    # Normal observation - truncate if too long
-                    if len(clean_obs) > 200:
-                        clean_obs = clean_obs[:200] + "..."
-                    self.console.print(f"[dim]💡 {clean_obs}[/dim]")
+                    # Normal observation - skip if progress is active to avoid rendering conflicts
+                    # Progress display can't handle mixed print/progress updates
+                    if not self.progress:
+                        if len(clean_obs) > 200:
+                            clean_obs = clean_obs[:200] + "..."
+                        self._print(f"[dim]💡 {clean_obs}[/dim]")
             elif not self.show_panels:
                 # In minimal mode when not showing observations, show completion indicator
-                self.console.print("[dim green]✓ Completed[/dim green]")
+                self._print("[dim green]✓ Completed[/dim green]")
 
         # Add to current step history
         if self.state.steps_history:
@@ -331,7 +341,7 @@ class CustomUIHandler:
         self.update_progress(f"{prefix}✅ Finalizing answer...")
 
         if self.show_panels:
-            self.console.print(
+            self._print(
                 Panel(
                     f"[bold green]{answer}[/bold green]",
                     title="[bold green]✅ Final Answer[/bold green]",
@@ -342,7 +352,7 @@ class CustomUIHandler:
             # In minimal mode, render the answer as markdown
             from rich.markdown import Markdown
 
-            self.console.print(Markdown(str(answer)))
+            self._print(Markdown(str(answer)))
 
     def _handle_error(self, data: Dict[str, Any]) -> None:
         """Handle error event."""
@@ -355,7 +365,7 @@ class CustomUIHandler:
 
         # Always show errors prominently
         if self.show_panels:
-            self.console.print(
+            self._print(
                 Panel(
                     f"[bold red]{error}[/bold red]",
                     title=f"[bold red]⚠️  {error_type}[/bold red]",
@@ -363,7 +373,7 @@ class CustomUIHandler:
                 )
             )
         else:
-            self.console.print(f"[bold red]⚠️  {error_type}: {error}[/bold red]")
+            self._print(f"[bold red]⚠️  {error_type}: {error}[/bold red]")
 
         # Add to current step history
         if self.state.steps_history:
@@ -381,7 +391,7 @@ class CustomUIHandler:
         if content.strip():
             # Clean up the content and show as reasoning
             if self.show_panels:
-                self.console.print(
+                self._print(
                     Panel(
                         content.strip(),
                         title=f"[bold blue]🤔 {title}[/bold blue]",
@@ -391,7 +401,7 @@ class CustomUIHandler:
                 )
             else:
                 # In minimal mode, render as markdown
-                self.console.print(Markdown(content.strip()))
+                self._print(Markdown(content.strip()))
 
     def _handle_reasoning_content(self, data: Dict[str, Any]) -> None:
         """Handle reasoning content from reasoning models (Claude, Deepseek with exposed reasoning)."""
@@ -418,7 +428,7 @@ class CustomUIHandler:
                 if len(display_content) > max_length:
                     display_content = display_content[:max_length] + "\n\n[dim]... (truncated)[/dim]"
 
-                self.console.print(
+                self._print(
                     Panel(
                         display_content,
                         title=title,
@@ -428,7 +438,7 @@ class CustomUIHandler:
                 )
             else:
                 # In headless/no-panel mode, print with prefix
-                self.console.print(f"[magenta]🧠 Reasoning: {content.strip()}[/magenta]")
+                self._print(f"[magenta]🧠 Reasoning: {content.strip()}[/magenta]")
 
     def _handle_reasoning_tokens(self, data: Dict[str, Any]) -> None:
         """Handle reasoning token counts from models like o1/o3 that don't expose reasoning content."""
@@ -443,10 +453,10 @@ class CustomUIHandler:
                 message = f"🧠 Used {tokens} reasoning tokens"
 
             if self.show_panels:
-                self.console.print(Text(message, style="dim magenta"))
+                self._print(Text(message, style="dim magenta"))
             else:
                 # In headless mode, still show it but more concisely
-                self.console.print(f"[dim magenta]{message}[/dim magenta]")
+                self._print(f"[dim magenta]{message}[/dim magenta]")
 
     def _build_cost_summary_text(
         self,
@@ -497,9 +507,9 @@ class CustomUIHandler:
             return
 
         if self.show_panels:
-            self.console.print(Text(summary_text, style="dim cyan"))
+            self._print(Text(summary_text, style="dim cyan"))
         else:
-            self.console.print(f"[dim cyan]{summary_text}[/dim cyan]")
+            self._print(f"[dim cyan]{summary_text}[/dim cyan]")
 
     def _handle_execution_result(self, data: Dict[str, Any]) -> None:
         """Handle code execution result event."""
@@ -520,7 +530,7 @@ class CustomUIHandler:
             if execution_logs:
                 logs_text = "\n".join(execution_logs)
                 if logs_text.strip():
-                    self.console.print(f"[dim]📝 {logs_text}[/dim]")
+                    self._print(f"[dim]📝 {logs_text}[/dim]")
 
             # Display output if present and meaningful
             if output_lines:
@@ -534,7 +544,7 @@ class CustomUIHandler:
                 if contains_error:
                     # Show errors prominently
                     if self.show_panels:
-                        self.console.print(
+                        self._print(
                             Panel(
                                 f"[red]{output_text}[/red]",
                                 title="[bold red]⚠️  Error in Output[/bold red]",
@@ -542,17 +552,17 @@ class CustomUIHandler:
                             )
                         )
                     else:
-                        self.console.print(f"[red]📤 Output (Error): {output_text}[/red]")
+                        self._print(f"[red]📤 Output (Error): {output_text}[/red]")
                 elif is_final_answer:
                     # Extract answer content after "__FINAL_ANSWER__: " and render as markdown
                     answer_content = output_text.split("__FINAL_ANSWER__:", 1)[1].strip()
                     if answer_content:
                         from rich.markdown import Markdown
 
-                        self.console.print(Markdown(answer_content))
+                        self._print(Markdown(answer_content))
                 elif output_text.strip() and output_text.strip().lower() not in ("none", "null", ""):
                     # Show normal meaningful output
-                    self.console.print(f"[bold cyan]📤 Output:[/bold cyan] {output_text}")
+                    self._print(f"[bold cyan]📤 Output:[/bold cyan] {output_text}")
 
     def _handle_execution_logs(self, data: Dict[str, Any]) -> None:
         """Handle execution logs event."""
@@ -565,7 +575,7 @@ class CustomUIHandler:
             # Extract just the log content
             logs = content.replace("Execution logs:", "").strip()
             if logs:
-                self.console.print(f"[dim]📝 {logs}[/dim]")
+                self._print(f"[dim]📝 {logs}[/dim]")
 
     def _handle_stream_chunk(self, data: Dict[str, Any]) -> None:
         """Handle streaming chunk event."""
@@ -578,14 +588,14 @@ class CustomUIHandler:
         self.update_progress(f"{prefix}💬 Streaming response...")
 
         # Print the chunk directly for real-time feedback
-        self.console.print(chunk, end="", highlight=False)
+        self._print(chunk, end="", highlight=False)
 
     def _handle_stream_complete(self, data: Dict[str, Any]) -> None:
         """Handle streaming complete event."""
         self.is_streaming = False
 
         # Print newline after streaming completes
-        self.console.print()
+        self._print()
 
         prefix = self._get_display_prefix()
         # Update progress
@@ -594,41 +604,11 @@ class CustomUIHandler:
         # Clear streaming content for next step
         self.streaming_content = ""
 
-    def _handle_subagent_start(self, data: Dict[str, Any]) -> None:
-        """Handle subagent start event."""
-        agent_name = data.get("agent_name", "unknown")
-
-        # Stop progress spinner to prevent interference with subagent output
-        if self.progress and self.task_id is not None:
-            self.progress.stop()
-
-        if self.show_panels:
-            # Show header with agent name
-            width = self.console.width - 4  # Leave room for borders
-            header_text = f" {agent_name} agent "
-            padding = max(0, (width - len(header_text)) // 2)
-            header_line = "─" * padding + header_text + "─" * (width - padding - len(header_text))
-            self.console.print(f"[dim cyan]╭{header_line}╮[/dim cyan]")
-        else:
-            # Minimal mode: simple indicator
-            self.console.print(f"[dim cyan]→ Spawning {agent_name}...[/dim cyan]")
-
-    def _handle_subagent_end(self, data: Dict[str, Any]) -> None:
-        """Handle subagent end event."""
-        agent_name = data.get("agent_name", "unknown")
-
-        if self.show_panels:
-            # Show footer
-            width = self.console.width - 4
-            footer_line = "─" * width
-            self.console.print(f"[dim cyan]╰{footer_line}╯[/dim cyan]")
-        else:
-            # Minimal mode: simple indicator
-            self.console.print(f"[dim green]✓ {agent_name} completed[/dim green]")
-
-        # Restart progress spinner after subagent completes
-        if self.progress and self.task_id is not None:
-            self.progress.start()
+    def _handle_info(self, data: Dict[str, Any]) -> None:
+        """Handle info event for informational messages."""
+        message = data.get("message", "")
+        if message:
+            self._print(f"[dim]{message}[/dim]")
 
     def _update_display(self) -> None:
         """Update the live display with current state."""
@@ -642,8 +622,9 @@ class CustomUIHandler:
         self.progress = Progress(
             SpinnerColumn(),
             TextColumn("[bold blue]{task.description}", justify="left"),
-            transient=True,
+            transient=False,
             console=self.console,
+            refresh_per_second=20,  # Higher refresh rate for real-time updates
         )
 
         # Store console, progress, and ui_handler in thread-local for tool access

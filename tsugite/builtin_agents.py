@@ -5,6 +5,7 @@ from pathlib import Path
 BUILTIN_DEFAULT_AGENT_CONTENT = """---
 name: builtin-default
 description: Built-in default base agent with sensible defaults
+max_turns: 10
 tools:
   - spawn_agent
   - read_file
@@ -96,13 +97,13 @@ Only delegate when:
 2. The task would benefit from specialized knowledge or tools
 3. You can provide a clear, specific prompt for the agent
 
-**Example 1: Return subagent result directly (if it fully answers the request)**
+**CRITICAL: When a subagent fully completes the task, return its result immediately:**
 ```python
 result = spawn_agent("agents/code_review.md", "Review app.py for security issues")
-final_answer(result)  # Done - the review is complete
+final_answer(result)  # STOP HERE - task is done, return the result
 ```
 
-**Example 2: Process results further (don't call final_answer yet)**
+**Example 2: Only process results further if the subagent output needs additional work**
 ```python
 # Spawn agent and store result
 review = spawn_agent("agents/code_review.md", "Review app.py")
@@ -116,8 +117,9 @@ Then in the next turn, you can:
 - Finally call `final_answer()` when truly done
 
 **Key principles:**
-- Only call `final_answer()` when you have nothing more to do
-- If you want to process subagent results, print() them so you can see them in the next turn
+- **If the subagent result fully answers the user's request → call final_answer(result) immediately**
+- Only process results further if you genuinely need to combine/transform them
+- Don't waste turns analyzing results that already answer the question
 - Tool/agent results are NOT automatically visible unless printed or passed to final_answer()
 
 {% endif %}

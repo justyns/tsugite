@@ -101,6 +101,7 @@ name: test_retry_agent
 model: ollama:qwen2.5-coder:7b
 tools: [python_interpreter]
 max_turns: 5
+extends: none
 ---
 
 <!-- tsu:step name="attempt" assign="result" max_retries="2" retry_delay="0.1" -->

@@ -180,24 +180,15 @@ class TsugiteAgent:
                                 f"Example: {tool_obj.name}(param1=value1, param2=value2)"
                             )
 
-                    # Special handling for spawn_agent to show subagent visibility
-                    is_spawn_agent = tool_obj.name == "spawn_agent"
-                    agent_name = None
-                    if is_spawn_agent and self.ui_handler:
-                        # Extract agent name from path
-                        from pathlib import Path
-
-                        agent_path = kwargs.get("agent_path", "")
-                        agent_name = Path(agent_path).stem if agent_path else "unknown"
-
-                        # Emit SUBAGENT_START event
-                        self.ui_handler.handle_event(UIEvent.SUBAGENT_START, {"agent_name": agent_name})
-
                     # Get the running event loop, or create one if needed
                     try:
                         loop = asyncio.get_running_loop()
                         # Already in async context - use thread to block on async result
                         import concurrent.futures
+                        import contextvars
+
+                        # Capture current context to propagate to executor thread
+                        ctx = contextvars.copy_context()
 
                         with concurrent.futures.ThreadPoolExecutor() as executor:
 
@@ -216,7 +207,8 @@ class TsugiteAgent:
                                         new_loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
                                     new_loop.close()
 
-                            result = executor.submit(run_async).result()
+                            # Run in copied context to propagate UI context to thread
+                            result = executor.submit(ctx.run, run_async).result()
                     except RuntimeError:
                         # No running event loop - create one and run synchronously
                         loop = asyncio.new_event_loop()
@@ -232,10 +224,6 @@ class TsugiteAgent:
                             if pending:
                                 loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
                             loop.close()
-
-                    # Emit SUBAGENT_END event for spawn_agent
-                    if is_spawn_agent and self.ui_handler:
-                        self.ui_handler.handle_event(UIEvent.SUBAGENT_END, {"agent_name": agent_name, "result": result})
 
                     return result
 

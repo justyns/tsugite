@@ -372,6 +372,12 @@ async def _execute_agent_with_prompt(
     # Start with tools from prepared agent
     tools = list(prepared.tools)  # Make a copy
 
+    # Filter out interactive tools in subagent mode
+    import os
+
+    if os.environ.get("TSUGITE_SUBAGENT_MODE") == "1":
+        tools = [t for t in tools if t.name not in ["ask_user", "ask_user_batch"]]
+
     # Register per-agent custom shell tools (if any)
     if agent_config.custom_tools:
         from tsugite.shell_tool_config import parse_tool_definition_from_dict
@@ -577,6 +583,29 @@ def run_agent(
         ValueError: If agent file is invalid
         RuntimeError: If agent execution fails
     """
+    # Check if running in subagent mode (subprocess-based execution)
+    import json
+    import os
+    import sys
+
+    subagent_mode = os.environ.get("TSUGITE_SUBAGENT_MODE") == "1"
+
+    if subagent_mode:
+        # Read context from stdin
+        try:
+            stdin_data = json.loads(sys.stdin.read())
+            prompt = stdin_data["prompt"]
+            context = stdin_data.get("context", {})
+        except Exception as e:
+            error_event = {"type": "error", "error": f"Failed to parse stdin JSON: {e}"}
+            print(json.dumps(error_event), flush=True)
+            sys.exit(1)
+
+        # Set up JSONL UI handler
+        from tsugite.ui.jsonl import JSONLUIHandler
+
+        custom_logger = type("CustomLogger", (), {"ui_handler": JSONLUIHandler()})()
+
     if context is None:
         context = {}
 

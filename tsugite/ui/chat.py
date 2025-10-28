@@ -150,6 +150,8 @@ class ChatManager:
         tool_calls: List[str] = None,
         token_count: Optional[int] = None,
         cost: Optional[float] = None,
+        execution_steps: Optional[list] = None,
+        messages: Optional[list] = None,
     ) -> None:
         """Add a turn to conversation history."""
         turn = ChatTurn(
@@ -175,6 +177,8 @@ class ChatManager:
                     token_count=token_count,
                     cost=cost,
                     timestamp=turn.timestamp,
+                    execution_steps=execution_steps,
+                    messages=messages,
                 )
             except Exception as e:
                 # Don't fail the turn if history save fails

@@ -471,3 +471,233 @@ class TestEdgeCases:
 
         index = load_index()
         assert index == {}
+
+
+class TestExecutionSteps:
+    """Tests for execution steps in conversation history."""
+
+    def test_save_turn_with_execution_steps(self, tmp_path, monkeypatch):
+        """Test saving and loading turn with execution steps."""
+        monkeypatch.setattr("tsugite.history.storage.get_history_dir", lambda: tmp_path)
+
+        conv_id = "test_with_steps"
+        timestamp = datetime(2025, 10, 24, 10, 30, 0, tzinfo=timezone.utc)
+
+        # Create execution steps like StepResult objects
+        execution_steps = [
+            {
+                "step_number": 1,
+                "thought": "I need to read the file",
+                "code": "content = read_file('test.txt')",
+                "output": "File contents here",
+                "error": None,
+                "tools_called": ["read_file"],
+            },
+            {
+                "step_number": 2,
+                "thought": "Now I'll process the data",
+                "code": "result = process(content)",
+                "output": "Processed result",
+                "error": None,
+                "tools_called": [],
+            },
+        ]
+
+        # Save turn with execution steps
+        turn = Turn(
+            timestamp=timestamp,
+            user="Read and process test.txt",
+            assistant="I've read and processed the file successfully.",
+            tools=["read_file"],
+            tokens=100,
+            cost=0.002,
+            steps=execution_steps,
+        )
+        save_turn_to_history(conv_id, turn)
+
+        # Load and verify
+        turns = load_conversation(conv_id)
+        assert len(turns) == 1
+        loaded_turn = turns[0]
+        assert loaded_turn.steps is not None
+        assert len(loaded_turn.steps) == 2
+        assert loaded_turn.steps[0]["thought"] == "I need to read the file"
+        assert loaded_turn.steps[0]["tools_called"] == ["read_file"]
+        assert loaded_turn.steps[1]["step_number"] == 2
+
+    def test_save_turn_with_messages(self, tmp_path, monkeypatch):
+        """Test saving and loading turn with LiteLLM messages."""
+        monkeypatch.setattr("tsugite.history.storage.get_history_dir", lambda: tmp_path)
+
+        conv_id = "test_with_messages"
+        timestamp = datetime(2025, 10, 24, 10, 30, 0, tzinfo=timezone.utc)
+
+        # Create LiteLLM-style message history
+        messages = [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": "Calculate 5 + 3"},
+            {"role": "assistant", "content": "Thought: I'll use Python\n\n```python\nresult = 5 + 3\n```"},
+            {"role": "user", "content": "Observation: 8"},
+        ]
+
+        # Save turn with messages
+        turn = Turn(
+            timestamp=timestamp,
+            user="Calculate 5 + 3",
+            assistant="The result is 8",
+            tools=[],
+            tokens=50,
+            cost=0.001,
+            messages=messages,
+        )
+        save_turn_to_history(conv_id, turn)
+
+        # Load and verify
+        turns = load_conversation(conv_id)
+        assert len(turns) == 1
+        loaded_turn = turns[0]
+        assert loaded_turn.messages is not None
+        assert len(loaded_turn.messages) == 4
+        assert loaded_turn.messages[0]["role"] == "system"
+        assert loaded_turn.messages[1]["content"] == "Calculate 5 + 3"
+
+    def test_backward_compatibility_old_format(self, tmp_path, monkeypatch):
+        """Test loading old conversation format without steps/messages fields."""
+        monkeypatch.setattr("tsugite.history.storage.get_history_dir", lambda: tmp_path)
+
+        conv_id = "old_format_conv"
+        conv_file = tmp_path / f"{conv_id}.jsonl"
+
+        # Write old format (without steps/messages fields)
+        old_turn = '{"type": "turn", "timestamp": "2025-10-24T10:30:00+00:00", "user": "Hello", "assistant": "Hi!", "tools": ["web_search"], "tokens": 25, "cost": 0.0005}\n'
+        conv_file.write_text(old_turn)
+
+        # Should load successfully with None for new fields
+        turns = load_conversation(conv_id)
+        assert len(turns) == 1
+        turn = turns[0]
+        assert turn.user == "Hello"
+        assert turn.assistant == "Hi!"
+        assert turn.tools == ["web_search"]
+        assert turn.steps is None  # Old format doesn't have this
+        assert turn.messages is None  # Old format doesn't have this
+
+    def test_save_chat_turn_with_execution_steps(self, tmp_path, monkeypatch):
+        """Test save_chat_turn function with execution steps."""
+        monkeypatch.setattr("tsugite.history.storage.get_history_dir", lambda: tmp_path)
+        monkeypatch.setattr("tsugite.history.index.get_history_dir", lambda: tmp_path)
+
+        conv_id = start_conversation(
+            agent_name="test_agent", model="openai:gpt-4o", timestamp=datetime.now(timezone.utc)
+        )
+
+        # Mock execution steps (like StepResult objects)
+        from dataclasses import dataclass
+
+        @dataclass
+        class MockStepResult:
+            step_number: int
+            thought: str
+            code: str
+            output: str
+            error: str = None
+            tools_called: list = None
+
+        execution_steps = [
+            MockStepResult(
+                step_number=1,
+                thought="Reading file",
+                code="data = read_file('test.txt')",
+                output="File data",
+                error=None,
+                tools_called=["read_file"],
+            )
+        ]
+
+        # Save turn with execution steps
+        save_chat_turn(
+            conversation_id=conv_id,
+            user_message="Read test.txt",
+            agent_response="File read successfully",
+            tool_calls=["read_file"],
+            token_count=50,
+            cost=0.001,
+            execution_steps=execution_steps,
+        )
+
+        # Load and verify
+        from tsugite.ui.chat_history import load_conversation_history
+
+        turns = load_conversation_history(conv_id)
+        assert len(turns) == 1
+        turn = turns[0]
+        assert turn.steps is not None
+        assert len(turn.steps) == 1
+        assert turn.steps[0]["thought"] == "Reading file"
+        assert turn.steps[0]["tools_called"] == ["read_file"]
+
+    def test_load_conversation_context_includes_steps(self, tmp_path, monkeypatch):
+        """Test that load_conversation_context includes execution steps."""
+        monkeypatch.setattr("tsugite.history.storage.get_history_dir", lambda: tmp_path)
+        monkeypatch.setattr("tsugite.history.index.get_history_dir", lambda: tmp_path)
+
+        # Start conversation
+        conv_id = start_conversation(
+            agent_name="test_agent", model="openai:gpt-4o", timestamp=datetime.now(timezone.utc)
+        )
+
+        # Save turn with steps
+        execution_steps = [
+            {
+                "step_number": 1,
+                "thought": "Processing request",
+                "code": "result = process()",
+                "output": "Done",
+                "error": None,
+                "tools_called": ["process"],
+            }
+        ]
+
+        save_chat_turn(
+            conversation_id=conv_id,
+            user_message="Process this",
+            agent_response="Processed",
+            tool_calls=["process"],
+            execution_steps=execution_steps,
+        )
+
+        # Load conversation context
+        from tsugite.agent_runner.history_integration import load_conversation_context
+
+        chat_turns = load_conversation_context(conv_id)
+        assert len(chat_turns) == 1
+        turn = chat_turns[0]
+        assert turn.user_message == "Process this"
+        assert turn.agent_response == "Processed"
+        assert turn.steps is not None
+        assert len(turn.steps) == 1
+        assert turn.steps[0]["thought"] == "Processing request"
+
+    def test_load_conversation_context_backward_compatible(self, tmp_path, monkeypatch):
+        """Test that load_conversation_context works with old format."""
+        monkeypatch.setattr("tsugite.history.storage.get_history_dir", lambda: tmp_path)
+
+        conv_id = "old_conv"
+        conv_file = tmp_path / f"{conv_id}.jsonl"
+
+        # Write old format conversation
+        conv_file.write_text(
+            '{"type": "metadata", "id": "old_conv", "agent": "test", "model": "test", "machine": "test", "created_at": "2025-10-24T10:00:00+00:00"}\n'
+            + '{"type": "turn", "timestamp": "2025-10-24T10:30:00+00:00", "user": "Hello", "assistant": "Hi!", "tools": []}\n'
+        )
+
+        # Load conversation context
+        from tsugite.agent_runner.history_integration import load_conversation_context
+
+        chat_turns = load_conversation_context(conv_id)
+        assert len(chat_turns) == 1
+        turn = chat_turns[0]
+        assert turn.user_message == "Hello"
+        assert turn.agent_response == "Hi!"
+        assert turn.steps is None  # Old format doesn't have steps
+        assert turn.messages is None  # Old format doesn't have messages

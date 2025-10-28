@@ -22,8 +22,8 @@ class PlainUIHandler(CustomUIHandler):
 
     def __init__(self):
         """Initialize plain UI handler with no-color console."""
-        # Create a console with no color support
-        no_color_console = get_stdout_console(no_color=True)
+        # Create a console with no color support and force terminal for Progress spinners
+        no_color_console = get_stdout_console(no_color=True, force_terminal=True)
 
         # Initialize parent with panels disabled
         super().__init__(
@@ -346,15 +346,46 @@ class PlainUIHandler(CustomUIHandler):
     def progress_context(self) -> Generator[None, None, None]:
         """Context manager for showing progress during execution.
 
-        Plain UI handler uses no-op progress (no spinner, no animations).
+        Plain UI handler shows minimal progress spinners for subagent tracking.
+        When no_color is enabled, completely disables progress spinners to avoid ANSI codes.
         """
-        # Store console and ui_handler in thread-local for tool access
-        set_ui_context(console=self.console, progress=None, ui_handler=self)
+        # If no_color is enabled, skip all progress/spinner output
+        if self.console.no_color:
+            # Just set the UI context without any progress
+            set_ui_context(console=self.console, progress=None, ui_handler=self)
+            try:
+                yield
+            finally:
+                clear_ui_context()
+            return
 
-        try:
-            yield
-        finally:
-            clear_ui_context()
+        from rich.progress import Progress, SpinnerColumn, TextColumn
+
+        # Create progress with simple spinner for minimal UI
+        # Non-transient so subagent spinners remain visible during execution
+        progress = Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=self.console,
+            transient=False,
+            refresh_per_second=4,  # Ensure regular refreshes for spinner animation
+        )
+
+        # Store console, progress, and ui_handler in thread-local for tool access
+        set_ui_context(console=self.console, progress=progress, ui_handler=self)
+
+        # Use context manager to start live rendering
+        with progress:
+            # Add a hidden task to keep Progress Live display active
+            # Without this, the Live display may not render properly when tasks are added dynamically
+            dummy_task = progress.add_task("[dim]Executing...[/dim]", total=None)
+
+            try:
+                yield
+            finally:
+                if dummy_task is not None:
+                    progress.remove_task(dummy_task)
+                clear_ui_context()
 
     def update_progress(self, description: str) -> None:
         """Update progress description.

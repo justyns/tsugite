@@ -46,9 +46,14 @@ def print_plain_info(console: Console, title: str, items: dict, style: str = "cy
         style: Optional Rich style for labels
     """
     console.print()
-    console.rule(f"[bold]{title}[/bold]", style="dim")
+    # Use simple header if no_color is enabled (to avoid ANSI codes from rule)
+    if console.no_color:
+        console.print(title)
+        console.print("-" * len(title))
+    else:
+        console.rule(f"[bold]{title}[/bold]", style="dim")
     for label, value in items.items():
-        if style:
+        if style and not console.no_color:
             console.print(f"[{style}]{label}:[/{style}] {value}")
         else:
             console.print(f"{label}: {value}")

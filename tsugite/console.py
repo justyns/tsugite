@@ -17,16 +17,17 @@ def get_stderr_console(no_color: bool = False) -> Console:
     return Console(file=sys.stderr, no_color=no_color)
 
 
-def get_stdout_console(no_color: bool = False) -> Console:
+def get_stdout_console(no_color: bool = False, force_terminal: bool = False) -> Console:
     """Get console for standard output to stdout.
 
     Args:
         no_color: Disable color output
+        force_terminal: Force terminal mode even if TTY not detected
 
     Returns:
         Console instance configured for stdout
     """
-    return Console(file=sys.stdout, no_color=no_color)
+    return Console(file=sys.stdout, no_color=no_color, force_terminal=force_terminal)
 
 
 def get_output_console() -> Console:

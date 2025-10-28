@@ -35,6 +35,8 @@ def load_conversation_context(conversation_id: str) -> list:
             tool_calls: list = None
             token_count: Optional[int] = None
             cost: Optional[float] = None
+            steps: Optional[list] = None
+            messages: Optional[list] = None
 
         chat_turn = ChatTurn(
             timestamp=turn.timestamp,
@@ -43,6 +45,8 @@ def load_conversation_context(conversation_id: str) -> list:
             tool_calls=turn.tools or [],
             token_count=turn.tokens,
             cost=turn.cost,
+            steps=turn.steps,  # Include execution steps if available
+            messages=turn.messages,  # Include message history if available
         )
         chat_turns.append(chat_turn)
 
@@ -76,6 +80,12 @@ def save_run_to_history(
     Returns:
         Conversation ID if saved, None if history disabled or failed
     """
+    # Don't save subagent runs to history
+    import os
+
+    if os.environ.get("TSUGITE_SUBAGENT_MODE") == "1":
+        return None
+
     try:
         from tsugite.config import load_config
         from tsugite.ui.chat_history import save_chat_turn, start_conversation
@@ -108,7 +118,7 @@ def save_run_to_history(
                 timestamp=timestamp,
             )
 
-        # Save turn to conversation
+        # Save turn to conversation with full execution steps
         save_chat_turn(
             conversation_id=conv_id,
             user_message=prompt,
@@ -117,6 +127,8 @@ def save_run_to_history(
             token_count=token_count,
             cost=cost,
             timestamp=timestamp,
+            execution_steps=execution_steps,  # Pass full execution steps
+            messages=None,  # Could add LiteLLM messages here in the future
         )
 
         return conv_id

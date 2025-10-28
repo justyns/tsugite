@@ -64,6 +64,8 @@ class Turn(BaseModel):
     tools: list[str] = Field(default_factory=list, description="Tools used in this turn")
     tokens: Optional[int] = Field(default=None, description="Total tokens used in this turn")
     cost: Optional[float] = Field(default=None, description="Estimated cost for this turn")
+    steps: Optional[list[dict]] = Field(default=None, description="Detailed execution steps (thought/code/output)")
+    messages: Optional[list[dict]] = Field(default=None, description="Full LiteLLM message history for this turn")
 
     @field_validator("timestamp", mode="before")
     @classmethod
