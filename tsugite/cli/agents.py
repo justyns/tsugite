@@ -74,7 +74,6 @@ def agents_show(
     an agent name to search globally (e.g., 'default', 'builtin-default').
     """
     from tsugite.agent_inheritance import find_agent_file
-    from tsugite.builtin_agents import is_builtin_agent_path
     from tsugite.md_agents import parse_agent_file
 
     try:
@@ -85,12 +84,7 @@ def agents_show(
             found_path = find_agent_file(agent_path, Path.cwd())
             if found_path:
                 agent_file = found_path
-
-                # Show if it's a package-provided agent
-                if is_builtin_agent_path(agent_file):
-                    console.print(f"[dim]Package agent: {agent_file.stem}[/dim]\n")
-                else:
-                    console.print(f"[dim]Found: {agent_file}[/dim]\n")
+                console.print(f"[dim]Found: {agent_file}[/dim]\n")
             else:
                 console.print(f"[red]Agent not found: {agent_path}[/red]")
                 console.print("\nSearched in:")

@@ -352,7 +352,6 @@ def run(
 
     # Parse agent references and resolve paths
     from tsugite.agent_composition import parse_agent_references
-    from tsugite.builtin_agents import is_builtin_agent_path
 
     with change_to_root_directory(root, console):
         try:
@@ -376,21 +375,15 @@ def run(
             primary_agent_path, delegation_agents = parse_agent_references(agent_refs, with_agents, base_dir)
 
             # Validate primary agent
-            # Built-in agents have special paths starting with "<builtin-"
-            # These don't need to exist on disk, so only check exists() for real files
-            if not is_builtin_agent_path(primary_agent_path) and not primary_agent_path.exists():
+            if not primary_agent_path.exists():
                 console.print(f"[red]Agent file not found: {primary_agent_path}[/red]")
                 raise typer.Exit(1)
 
-            if not is_builtin_agent_path(primary_agent_path) and primary_agent_path.suffix != ".md":
+            if primary_agent_path.suffix != ".md":
                 console.print(f"[red]Agent file must be a .md file: {primary_agent_path}[/red]")
                 raise typer.Exit(1)
 
-            # Don't resolve builtin agent paths
-            if is_builtin_agent_path(primary_agent_path):
-                agent_file = primary_agent_path
-            else:
-                agent_file = primary_agent_path.resolve()
+            agent_file = primary_agent_path.resolve()
 
         except ValueError as e:
             console.print(f"[red]Error: {e}[/red]")
@@ -465,14 +458,7 @@ def run(
         from tsugite.agent_runner import preview_multistep_agent, run_multistep_agent
         from tsugite.md_agents import has_step_directives
 
-        # Handle builtin agents for step directive checking
-        if is_builtin_agent_path(agent_file):
-            from tsugite.md_agents import parse_agent_file
-
-            agent_obj = parse_agent_file(agent_file)
-            agent_text = agent_obj.content
-        else:
-            agent_text = agent_file.read_text()
+        agent_text = agent_file.read_text()
         is_multistep = has_step_directives(agent_text)
 
         # Handle dry-run mode
@@ -818,7 +804,6 @@ def chat(
 ):
     """Start an interactive chat session with an agent."""
     from tsugite.agent_composition import parse_agent_references
-    from tsugite.builtin_agents import is_builtin_agent_path
     from tsugite.ui.textual_chat import run_textual_chat
 
     with change_to_root_directory(root, console):
@@ -864,9 +849,8 @@ def chat(
             agent_refs = ["chat-assistant"]
             primary_agent_path, _ = parse_agent_references(agent_refs, None, base_dir)
 
-        # Built-in agents have special paths starting with "<builtin-"
-        # These don't need to exist on disk, so only check exists() for real files
-        if not is_builtin_agent_path(primary_agent_path) and not primary_agent_path.exists():
+        # Validate agent file exists
+        if not primary_agent_path.exists():
             console.print(f"[red]Agent file not found: {primary_agent_path}[/red]")
             raise typer.Exit(1)
 

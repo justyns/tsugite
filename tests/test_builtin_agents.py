@@ -4,52 +4,59 @@ from pathlib import Path
 
 from tsugite.agent_inheritance import find_agent_file, get_builtin_agents_path
 from tsugite.agent_utils import list_local_agents
-from tsugite.builtin_agents import is_builtin_agent_path
 from tsugite.md_agents import parse_agent_file
 from tsugite.renderer import AgentRenderer
 
 
 class TestBuiltinAgents:
     def test_get_builtin_default_agent(self):
-        """Test getting the built-in default agent."""
+        """Test getting the package-provided default agent."""
         builtin_path = get_builtin_agents_path() / "default.md"
-        assert builtin_path.exists(), f"Built-in agent file not found: {builtin_path}"
+        assert builtin_path.exists(), f"Package agent file not found: {builtin_path}"
 
         agent = parse_agent_file(builtin_path)
 
         assert agent.config.name == "default"
         assert agent.config.description
         assert "helpful" in agent.config.instructions.lower()
-        assert is_builtin_agent_path(agent.file_path)
+        # Verify the agent path is within the builtin_agents directory
+        assert get_builtin_agents_path() in agent.file_path.parents
 
-    def test_is_builtin_agent_path(self):
-        """Test checking if agent path is in built-in directory."""
+    def test_package_agents_in_correct_directory(self):
+        """Test that package agents are in the builtin_agents directory."""
         builtin_path = get_builtin_agents_path() / "default.md"
-        assert is_builtin_agent_path(builtin_path) is True
+        builtin_dir = get_builtin_agents_path()
 
-        # Test with a non-builtin path
-        assert is_builtin_agent_path(Path("/tmp/custom.md")) is False
+        # Package agent should be in the builtin_agents directory
+        assert builtin_dir in builtin_path.parents or builtin_path.parent == builtin_dir
+
+        # Non-package path should not be in builtin_agents directory
+        custom_path = Path("/tmp/custom.md")
+        assert builtin_dir not in custom_path.parents and custom_path.parent != builtin_dir
 
     def test_find_builtin_agent(self, tmp_path):
-        """Test that find_agent_file finds built-in agents."""
+        """Test that find_agent_file finds package-provided agents."""
         found = find_agent_file("default", tmp_path)
 
         assert found is not None
         assert found.exists()
-        assert is_builtin_agent_path(found)
+        # Verify it's from the package directory
+        builtin_dir = get_builtin_agents_path()
+        assert builtin_dir in found.parents or found.parent == builtin_dir
 
     def test_list_includes_builtin(self, tmp_path):
-        """Test that list_local_agents includes built-in agents."""
+        """Test that list_local_agents includes package-provided agents."""
         agents = list_local_agents(tmp_path)
 
-        # Built-in agents should be in the "Built-in" category or mixed with others
-        # Check that at least one built-in agent is present
+        # Package agents should be in the "Built-in" category or mixed with others
+        # Check that at least one package agent is present
         all_agents = []
         for category_agents in agents.values():
             all_agents.extend(category_agents)
 
-        builtin_agents = [a for a in all_agents if is_builtin_agent_path(a)]
-        assert len(builtin_agents) > 0, "No built-in agents found in list"
+        builtin_dir = get_builtin_agents_path()
+        builtin_agents = [a for a in all_agents if builtin_dir in a.parents or a.parent == builtin_dir]
+        assert len(builtin_agents) > 0, "No package agents found in list"
 
 
 class TestBuiltinInheritance:
