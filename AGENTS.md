@@ -43,6 +43,7 @@ tsugite chat +different-agent --continue
 ```
 
 **Behavior:**
+
 - Loads conversation history into chat UI
 - Displays all previous turns
 - Continues appending to same conversation ID
@@ -67,6 +68,7 @@ tsugite run +different-agent --continue --conversation-id CONV_ID "prompt"
 ```
 
 **Behavior:**
+
 - Loads previous conversation as `chat_history` context
 - Agent sees full conversation history
 - Executes next turn with new prompt
@@ -94,12 +96,14 @@ tsugite history show CONV_ID --format json
 ### Disabling History
 
 **Global:**
+
 ```yaml
 # ~/.config/tsugite/config.yaml
 history_enabled: false
 ```
 
 **Per-agent:**
+
 ```yaml
 ---
 name: my_agent
@@ -108,6 +112,7 @@ disable_history: true
 ```
 
 **Per-run:**
+
 ```bash
 tsugite run +agent "task" --no-history
 tsugite chat --no-history
@@ -133,6 +138,7 @@ Task: {{ user_prompt }}
 | Key | Default | Description |
 |-----|---------|-------------|
 | `name` | — (required) | Agent identifier |
+| `description` | `""` | Agent description (optional) |
 | `model` | Config default | `provider:model[:variant]` |
 | `max_turns` | `5` | Reasoning turns (think-act cycles) per workflow step |
 | `tools` | `[]` | Tool names, globs (`*_search`), categories (`@fs`), exclusions (`-delete_file`) |
@@ -146,6 +152,7 @@ Task: {{ user_prompt }}
 | `context_budget` | Unlimited | Prompt length cap |
 | `reasoning_effort` | — | For o1/o3 models: `low`, `medium`, `high` |
 | `text_mode` | `false` | Allow text responses without code blocks |
+| `disable_history` | `false` | Disable conversation history for this agent |
 
 ### Template Helpers
 
@@ -216,6 +223,7 @@ tools: [read_file, run]    # Add tools
 **Inheritance chain:** Default base → Extended → Current
 
 **Merge rules:**
+
 - Scalars (model, max_turns): Child overwrites
 - Lists (tools): Merge + deduplicate
 - Dicts (mcp_servers): Merge, child keys override
@@ -235,6 +243,7 @@ tsugite config set default_base_agent none  # Disable
 Agents can start with predefined tasks using `initial_tasks` in frontmatter. Tasks are automatically populated when the agent starts and persist across multi-step execution.
 
 **Simple format** (strings default to pending/required):
+
 ```yaml
 ---
 name: code_reviewer
@@ -246,6 +255,7 @@ initial_tasks:
 ```
 
 **Detailed format** (specify status and optional flag):
+
 ```yaml
 ---
 name: project_manager
@@ -262,6 +272,7 @@ initial_tasks:
 ```
 
 **Mixed format**:
+
 ```yaml
 ---
 name: developer
@@ -274,6 +285,7 @@ initial_tasks:
 ```
 
 **Inheritance**: Parent tasks are inherited first, then child tasks:
+
 ```yaml
 ---
 name: specialized_reviewer
@@ -312,6 +324,7 @@ Process each task systematically...
 ```
 
 **Available task fields:**
+
 - `task.id` - Task ID (integer)
 - `task.title` - Task description
 - `task.status` - Current status (pending/in_progress/completed/blocked/cancelled)
@@ -322,6 +335,7 @@ Process each task systematically...
 **Common patterns:**
 
 Filter by status:
+
 ```jinja2
 {% for task in tasks if task.status == "pending" %}
 - TODO: {{ task.title }}
@@ -329,6 +343,7 @@ Filter by status:
 ```
 
 Show only required tasks:
+
 ```jinja2
 {% for task in tasks if not task.optional %}
 - {{ task.title }} (REQUIRED)
@@ -336,6 +351,7 @@ Show only required tasks:
 ```
 
 Count tasks by type:
+
 ```jinja2
 Required: {{ tasks | selectattr('optional', 'equalto', false) | list | length }}
 Optional: {{ tasks | selectattr('optional', 'equalto', true) | list | length }}
@@ -423,23 +439,16 @@ Tsugite provides two tools for collecting user input during agent execution, ava
 
 Ask one question at a time:
 
-```python
-# Text input
-name = ask_user(question="What is your name?", question_type="text")
+**Signature:** `ask_user(question, question_type, options=None)`
 
-# Yes/No question
-save = ask_user(question="Save to file?", question_type="yes_no")
-# Returns: "yes" or "no"
+**Examples:**
 
-# Multiple choice (arrow key navigation)
-format = ask_user(
-    question="Choose format:",
-    question_type="choice",
-    options=["json", "txt", "md"]
-)
-```
+- Text input: `ask_user(question="What is your name?", question_type="text")`
+- Yes/No question: `ask_user(question="Save to file?", question_type="yes_no")` → Returns "yes" or "no"
+- Multiple choice: `ask_user(question="Choose format:", question_type="choice", options=["json", "txt", "md"])`
 
 **Question types:**
+
 - `text`: Freeform text input
 - `yes_no`: Binary yes/no question
 - `choice`: Multiple choice with arrow key navigation (requires `options` list)
@@ -448,33 +457,30 @@ format = ask_user(
 
 For better UX when collecting multiple related inputs, use `ask_user_batch` to ask all questions at once:
 
-```python
+**Signature:** `ask_user_batch(questions=[...])`
+
+**Example:**
+
+```yaml
 responses = ask_user_batch(questions=[
     {"id": "name", "question": "What is your name?", "type": "text"},
     {"id": "email", "question": "Email address?", "type": "text"},
     {"id": "save", "question": "Save to file?", "type": "yes_no"},
-    {
-        "id": "format",
-        "question": "Choose format:",
-        "type": "choice",
-        "options": ["json", "txt", "md"]
-    }
+    {"id": "format", "question": "Choose format:", "type": "choice", "options": ["json", "txt", "md"]}
 ])
-
-# Access responses by ID
-user_name = responses["name"]
-user_email = responses["email"]
-should_save = responses["save"]  # "yes" or "no"
-file_format = responses["format"]
 ```
 
+Access responses: `responses["name"]`, `responses["email"]`, `responses["save"]` ("yes" or "no"), `responses["format"]`
+
 **Question structure:**
+
 - `id` (required): Unique identifier used as key in response dict
 - `question` (required): The question text
 - `type` (required): Question type - "text", "yes_no", or "choice"
 - `options` (optional): List of options for "choice" type (minimum 2)
 
 **Features:**
+
 - Arrow key navigation (↑/↓) or vim-style (j/k) for choice questions
 - Colored interface with highlighting
 - Protection against accidental double-Enter
@@ -500,20 +506,21 @@ Tsugite provides intelligent file editing tools that allow LLMs to make precise 
 
 Read entire files or specific line ranges:
 
-```python
-read_file(path, start_line=None, end_line=None)
-```
+**Signature:** `read_file(path, start_line=None, end_line=None)`
 
 **Parameters:**
+
 - `path`: File path (required)
 - `start_line`: Starting line number, 1-indexed (0 also accepted, treated as 1) (optional)
 - `end_line`: Ending line number, 1-indexed, inclusive (optional)
 
 **Returns:**
+
 - If `start_line` is None: Full file content as plain text
 - If `start_line` is provided: Numbered lines in format "LINE_NUM: content"
 
 **Examples:**
+
 ```yaml
 ---
 tools: [read_file]
@@ -530,6 +537,7 @@ tools: [read_file]
 ```
 
 **Use cases:**
+
 - Reading entire files (backward compatible)
 - Reading specific functions or sections
 - Verifying content before editing
@@ -539,11 +547,10 @@ tools: [read_file]
 
 Get file information without reading full content:
 
-```python
-get_file_info(path)
-```
+**Signature:** `get_file_info(path)`
 
 **Returns:**
+
 - `line_count`: Total lines in file
 - `size_bytes`: File size
 - `last_modified`: ISO timestamp
@@ -551,6 +558,7 @@ get_file_info(path)
 - `is_directory`: Whether path is a directory
 
 **Example:**
+
 ```yaml
 ---
 tools: [get_file_info, read_file_lines]
@@ -564,15 +572,13 @@ File has {{ info.line_count }} lines
 
 Edit files with intelligent multi-strategy matching. Supports both single edits and batch edits in one tool.
 
-```python
-# Single edit mode
-edit_file(path, old_string, new_string, expected_replacements=1)
+**Signatures:**
 
-# Batch edit mode
-edit_file(path, edits=[...])
-```
+- Single edit: `edit_file(path, old_string, new_string, expected_replacements=1)`
+- Batch edit: `edit_file(path, edits=[...])`
 
 **Parameters:**
+
 - `path`: File path (required)
 - **Single edit mode:**
   - `old_string`: Text to find (include 3+ lines of context)
@@ -585,6 +591,7 @@ edit_file(path, edits=[...])
     - `expected_replacements`: Match count (optional, default: 1)
 
 **Replacement Strategies** (tried in order):
+
 1. **Exact match** - Direct string matching
 2. **Line-trimmed** - Ignores leading/trailing whitespace per line
 3. **Block-anchor** - Matches using first/last lines as anchors with fuzzy middle content
@@ -594,6 +601,7 @@ edit_file(path, edits=[...])
 **Examples:**
 
 Single edit:
+
 ```yaml
 ---
 tools: [read_file, edit_file]
@@ -612,6 +620,7 @@ Current content:
 ```
 
 Batch edits (atomic operation):
+
 ```yaml
 ---
 tools: [edit_file]
@@ -628,6 +637,7 @@ tools: [edit_file]
 ```
 
 **Best practices:**
+
 - Include 3+ lines of context in `old_string` for single edits
 - Use `read_file` with line range first to verify content
 - For multiple occurrences, specify `expected_replacements`
@@ -635,6 +645,7 @@ tools: [edit_file]
 - Each batch edit operates on the result of the previous edit
 
 **Use cases:**
+
 - Single edits: Precise code changes with context validation
 - Batch edits: Multiple related changes in one atomic operation
 - Configuration updates: Change multiple settings together
@@ -712,6 +723,7 @@ Write {{ summary }} to file.
 ```
 
 **Key concepts:**
+
 - Content before first directive = preamble (shared across steps)
 - Step context: `{{ step_number }}`, `{{ total_steps }}`, `{{ step_name }}`
 - Variables persist across steps
@@ -730,6 +742,7 @@ Phase 1 improvements for robust long-running agents:
 #### Better Error Messages
 
 When a step fails, errors now include:
+
 - Step number and name
 - Previous step context
 - Available variables
@@ -737,6 +750,7 @@ When a step fails, errors now include:
 - Debugging suggestions
 
 Example error:
+
 ```
 Step Execution Failed
 ────────────────────────────────────────────────────────────
@@ -770,12 +784,14 @@ Process results. Extra data: {{ extra_data or "Not available" }}
 ```
 
 **Use cases:**
+
 - Optional data enrichment
 - Non-critical API calls
 - Best-effort operations
 - Partial results acceptable
 
 **Behavior:**
+
 - Step executes normally
 - On failure, assigns `None` to variable
 - Logs warning with error details
@@ -797,12 +813,14 @@ Deep analysis that needs more time.
 ```
 
 **Behavior:**
+
 - Step canceled after timeout
 - Raises `asyncio.TimeoutError`
 - Respects `continue_on_error` if set
 - No timeout = unlimited (default)
 
 **Combine features:**
+
 ```markdown
 <!-- tsu:step name="external_api" assign="api_data" timeout="30" continue_on_error="true" -->
 Fetch from external API with 30s timeout. Continue if it fails.
@@ -817,6 +835,7 @@ tsugite run +my_agent "task" --dry-run
 ```
 
 **Output:**
+
 ```
 Agent: my_agent
 Model: anthropic:claude-3-5-sonnet
@@ -849,6 +868,7 @@ Estimated Duration: ~3-5 minutes
 ```
 
 **Use for:**
+
 - Validating step dependencies
 - Estimating costs before long runs
 - Debugging agent structure
@@ -874,6 +894,7 @@ Total              94.4s
 ```
 
 **Metrics tracked:**
+
 - Step name and number
 - Duration in seconds
 - Status (success, failed, skipped)
@@ -881,6 +902,7 @@ Total              94.4s
 - Total execution time
 
 **Use for:**
+
 - Identifying bottlenecks
 - Optimizing slow steps
 - Tracking agent performance
@@ -891,24 +913,28 @@ Total              94.4s
 Steps can repeat based on conditions using `repeat_while` or `repeat_until`:
 
 **Repeat while condition is true:**
+
 ```markdown
 <!-- tsu:step name="task_worker" repeat_while="has_pending_required_tasks" max_iterations="20" -->
 Process one task. This step repeats while there are pending required tasks.
 ```
 
 **Repeat until condition is true:**
+
 ```markdown
 <!-- tsu:step name="process" repeat_until="all_tasks_complete" max_iterations="15" -->
 Work on tasks. Repeats until all tasks are marked complete.
 ```
 
 **Custom Jinja2 expressions:**
+
 ```markdown
 <!-- tsu:step name="worker" repeat_while="{{ tasks | selectattr('status', 'equalto', 'pending') | list | length > 0 }}" -->
 Process pending tasks. Uses Jinja2 to check if any pending tasks remain.
 ```
 
 **Available helper conditions:**
+
 - `has_pending_tasks` - Any tasks with status=pending
 - `has_pending_required_tasks` - Any non-optional pending tasks
 - `all_tasks_complete` - All tasks are completed
@@ -917,16 +943,19 @@ Process pending tasks. Uses Jinja2 to check if any pending tasks remain.
 - `has_blocked_tasks` - Any tasks marked as blocked
 
 **Loop context variables:**
+
 - `{{ iteration }}` - Current iteration number (1-indexed)
 - `{{ max_iterations }}` - Maximum allowed iterations
 - `{{ is_looping_step }}` - Boolean indicating if step can loop
 
 **Parameters:**
+
 - `repeat_while` - Condition to continue repeating (Jinja2 expression or helper name)
 - `repeat_until` - Condition to stop repeating (Jinja2 expression or helper name)
 - `max_iterations` - Maximum iterations (default: 10)
 
 **Example: Process all tasks one at a time**
+
 ```yaml
 ---
 name: task_processor
@@ -946,6 +975,7 @@ This step will repeat until all tasks are done.
 ```
 
 **Safety:**
+
 - Steps stop at `max_iterations` to prevent infinite loops
 - Default `max_iterations` is 10 (can be overridden)
 - Warning displayed when limit is reached
@@ -987,6 +1017,7 @@ Research using {{ context }} and {{ sources }}
 ```
 
 **Scoping:**
+
 - Preamble directives: Execute once, available to all steps
 - Step directives: Execute per step, scoped to that step
 - Previous step variables always available
@@ -998,6 +1029,7 @@ Research using {{ context }} and {{ sources }}
 Format: `provider:model[:variant]`
 
 **Examples:**
+
 - `ollama:qwen2.5-coder:7b`
 - `openai:gpt-4o`
 - `anthropic:claude-3-5-sonnet`
@@ -1015,10 +1047,12 @@ tsugite run +agent "task" --model fast
 ## Reasoning Models
 
 **Full reasoning visible:**
+
 - Claude (`claude-3-7-sonnet`)
 - Deepseek
 
 **Token counts only:**
+
 - OpenAI o1/o3 (shows "🧠 Used N reasoning tokens")
 
 **Control effort** (o1, o1-preview, o3, o3-mini only):
@@ -1082,10 +1116,12 @@ I'm running as a top-level agent.
 ```
 
 **Context variables:**
+
 - `{{ is_subagent }}` - `True` when spawned by another agent, `False` otherwise
 - `{{ parent_agent }}` - Name of the parent agent (e.g., `"coordinator"`), or `None` if top-level
 
 **Example use cases:**
+
 - Adjust verbosity (subagents might be less verbose)
 - Skip user interaction in subagents (they can't prompt the user)
 - Return structured data instead of formatted output
@@ -1145,27 +1181,6 @@ tools: []
 4. Add tests to verify the agent works
 5. Ensure `pyproject.toml` includes the builtin_agents directory in package data
 
-### Testing
-
-```python
-from tsugite.md_agents import parse_agent_file
-from tsugite.chat import ChatManager
-from tsugite.tools import get_tool
-
-def test_agent():
-    agent = parse_agent_file(Path("agent.md"))
-    assert agent.config.name == "expected"
-
-def test_chat():
-    manager = ChatManager(Path("agent.md"), max_history=10)
-    response = manager.run_turn("Hello")
-    assert len(manager.conversation_history) == 1
-
-def test_tool():
-    tool = get_tool("read_file")
-    assert tool is not None
-```
-
 ## Event System
 
 Tsugite uses an event-driven architecture for UI and progress tracking. Events are emitted during agent execution and handled by UI modules (rich console, plain text, JSONL, Textual TUI).
@@ -1173,11 +1188,13 @@ Tsugite uses an event-driven architecture for UI and progress tracking. Events a
 ### Event Structure
 
 **Location:** `tsugite/events/`
+
 - `base.py` - EventType enum, BaseEvent class
 - `events.py` - All 19 event classes (consolidated)
 - `bus.py` - EventBus for dispatching events
 
 **19 Event Types:**
+
 - Execution: `TASK_START`, `STEP_START`, `CODE_EXECUTION`, `TOOL_CALL`, `OBSERVATION`, `FINAL_ANSWER`
 - LLM: `LLM_MESSAGE`, `EXECUTION_RESULT`, `EXECUTION_LOGS`, `REASONING_CONTENT`, `REASONING_TOKENS`
 - Meta: `COST_SUMMARY`, `STREAM_CHUNK`, `STREAM_COMPLETE`, `INFO`, `ERROR`
@@ -1200,6 +1217,7 @@ Tsugite uses an event-driven architecture for UI and progress tracking. Events a
 ### JSONL Protocol
 
 For subprocess-based subagents, events are serialized to JSONL:
+
 - Tool results: `{"type": "tool_result", "tool": "name", "success": bool, "output"?: str, "error"?: str}`
 - Errors: `{"type": "error", "error": str, "step": int}`
 - Full schema documented in `tsugite/ui/jsonl.py`

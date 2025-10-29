@@ -9,7 +9,7 @@ Tsugite is a micro-agent CLI: agents are Markdown + YAML frontmatter, rendered v
 **Key Modules:**
 - `cli/__init__.py` - Typer CLI (run, chat, render, config, mcp, tools, agents, attachments, cache, benchmark)
 - `md_agents.py` - Parse frontmatter + agent resolution + directives
-- `builtin_agents.py` - Built-in agent definitions (builtin-default, builtin-chat-assistant)
+- `builtin_agents/` - File-based built-in agent definitions (default.md, chat-assistant.md)
 - `agent_inheritance.py` - Agent resolution pipeline + inheritance chain
 - `chat.py` - Chat session management with history
 - `ui/textual_chat.py` - Textual TUI for interactive chat
@@ -29,45 +29,31 @@ uv run black . && uv run ruff check .
 ```
 
 **Agent Resolution Order:**
-1. Built-in agents (`builtin-default`, `builtin-chat-assistant`) - embedded in code
-2. `.tsugite/{name}.md` - project-local shared
-3. `agents/{name}.md` - project convention
-4. `./{name}.md` - current directory
-5. `~/.config/tsugite/agents/{name}.md` - global user agents
+1. `.tsugite/{name}.md` - project-local shared
+2. `agents/{name}.md` - project convention
+3. `./{name}.md` - current directory
+4. Package agents directory (`tsugite/builtin_agents/`)
+5. Global agent directories (`~/.config/tsugite/agents/`, etc.)
 
 **Model String:** `provider:model[:variant]` (e.g., `ollama:qwen2.5-coder:7b`, `openai:gpt-4o`)
 
 ### Built-in Agents System
 
-Embedded agents accessible without file distribution. Special paths like `<builtin-default>` bypass filesystem checks.
+File-based agents distributed with the package in `tsugite/builtin_agents/` directory.
 
 **Current Built-ins:**
-1. `builtin-default` - Base agent with task tracking
-2. `builtin-chat-assistant` - Chat agent with tools (read_file, write_file, list_files, web_search, run), text_mode enabled
+1. `default.md` - Base agent with task tracking, spawn_agent, and file tools
+2. `chat-assistant.md` - Chat agent with tools (read_file, write_file, list_files, web_search, fetch_text, run), text_mode enabled
 
-**Implementation:**
-```python
-# In builtin_agents.py
-BUILTIN_FOO_CONTENT = """---
-name: foo
-model: ollama:qwen2.5-coder:7b
-tools: []
----
-{{ user_prompt }}
-"""
+**Location:** `tsugite/builtin_agents/{name}.md`
 
-def get_builtin_foo():
-    from .md_agents import parse_agent
-    return parse_agent(BUILTIN_FOO_CONTENT, Path("<builtin-foo>"))
+**Resolution:** Built-in agents are resolved as part of the normal agent resolution order (step 4). Project agents can override them by creating agents with the same name in project directories.
 
-def is_builtin_agent(name: str) -> bool:
-    return name in ("builtin-default", "builtin-chat-assistant", "builtin-foo")
-```
-
-**Integration:**
-- `agent_inheritance.py:find_agent_file()` - Check `is_builtin_agent()`, return `Path("<builtin-name>")`
-- `agent_inheritance.py:load_extended_agent()` - Handle `<builtin-*>` paths, call getter
-- `md_agents.py:parse_agent_file()` - Handle `<builtin-*>` paths before `.exists()` check
+**Adding New Built-ins:**
+1. Create `tsugite/builtin_agents/new_agent.md` with frontmatter and template
+2. Agent is automatically discovered - no code changes needed
+3. Users reference it with `+new_agent` or `new_agent`
+4. Ensure `pyproject.toml` includes builtin_agents directory in package data
 
 ### Agent Inheritance
 
@@ -88,7 +74,7 @@ def is_builtin_agent(name: str) -> bool:
 - `ui/textual_chat.py:ChatApp` - Textual TUI
 - `ui/widgets/` - MessageList, ThoughtLog
 
-**Default Agent:** `builtin-chat-assistant`. Override with `.tsugite/chat_assistant.md`.
+**Default Agent:** `chat-assistant`. Override with `.tsugite/chat-assistant.md`.
 
 **Flow:**
 1. User input → `ChatManager.run_turn()`
@@ -212,8 +198,7 @@ uv run pytest --cov=tsugite                # Coverage
 **Patterns:**
 ```python
 from tsugite.md_agents import parse_agent_file
-from tsugite.builtin_agents import get_builtin_default_agent, is_builtin_agent
-from tsugite.agent_inheritance import find_agent_file
+from tsugite.agent_inheritance import find_agent_file, get_builtin_agents_path
 from tsugite.chat import ChatManager
 from tsugite.tools import get_tool
 
@@ -221,13 +206,14 @@ from tsugite.tools import get_tool
 agent = parse_agent_file(Path("agent.md"))
 assert agent.config.name == "expected"
 
-# Built-in agents
-assert is_builtin_agent("builtin-default")
-agent = get_builtin_default_agent()
+# Built-in agents location
+builtin_path = get_builtin_agents_path()
+default_agent = builtin_path / "default.md"
+assert default_agent.exists()
 
 # Resolution
-path = find_agent_file("builtin-default", Path.cwd())
-assert str(path) == "<builtin-default>"
+path = find_agent_file("default", Path.cwd())
+assert path == builtin_path / "default.md"
 
 # Chat
 manager = ChatManager(Path("agent.md"), max_history=10)
