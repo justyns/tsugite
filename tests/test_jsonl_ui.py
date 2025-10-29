@@ -2,14 +2,24 @@
 
 import json
 
-from tsugite.ui.base import UIEvent
+from tsugite.events import (
+    CodeExecutionEvent,
+    ErrorEvent,
+    FinalAnswerEvent,
+    LLMMessageEvent,
+    ObservationEvent,
+    StepStartEvent,
+    TaskStartEvent,
+    ToolCallEvent,
+)
 from tsugite.ui.jsonl import JSONLUIHandler
 
 
 def test_jsonl_task_start(capsys):
     """Test TASK_START event emits init JSONL."""
     handler = JSONLUIHandler()
-    handler.handle_event(UIEvent.TASK_START, {"agent": "test_agent", "model": "gpt-4"})
+    event = TaskStartEvent(task="test_agent", model="gpt-4")
+    handler.handle_event(event)
 
     output = capsys.readouterr().out
     lines = output.strip().split("\n")
@@ -24,7 +34,8 @@ def test_jsonl_task_start(capsys):
 def test_jsonl_step_start(capsys):
     """Test STEP_START event emits turn_start JSONL."""
     handler = JSONLUIHandler()
-    handler.handle_event(UIEvent.STEP_START, {"step": 1})
+    event = StepStartEvent(step=1)
+    handler.handle_event(event)
 
     output = capsys.readouterr().out
     lines = output.strip().split("\n")
@@ -38,7 +49,8 @@ def test_jsonl_step_start(capsys):
 def test_jsonl_thought(capsys):
     """Test LLM_MESSAGE event emits thought JSONL."""
     handler = JSONLUIHandler()
-    handler.handle_event(UIEvent.LLM_MESSAGE, {"content": "Thinking about the problem..."})
+    event = LLMMessageEvent(content="Thinking about the problem...")
+    handler.handle_event(event)
 
     output = capsys.readouterr().out
     lines = output.strip().split("\n")
@@ -52,7 +64,8 @@ def test_jsonl_thought(capsys):
 def test_jsonl_code_execution(capsys):
     """Test CODE_EXECUTION event emits code JSONL."""
     handler = JSONLUIHandler()
-    handler.handle_event(UIEvent.CODE_EXECUTION, {"code": "print('hello')"})
+    event = CodeExecutionEvent(code="print('hello')")
+    handler.handle_event(event)
 
     output = capsys.readouterr().out
     lines = output.strip().split("\n")
@@ -66,7 +79,8 @@ def test_jsonl_code_execution(capsys):
 def test_jsonl_tool_call(capsys):
     """Test TOOL_CALL event emits tool_call JSONL."""
     handler = JSONLUIHandler()
-    handler.handle_event(UIEvent.TOOL_CALL, {"tool": "read_file", "args": {"path": "test.txt"}})
+    event = ToolCallEvent(tool="read_file", args={"path": "test.txt"})
+    handler.handle_event(event)
 
     output = capsys.readouterr().out
     lines = output.strip().split("\n")
@@ -81,7 +95,8 @@ def test_jsonl_tool_call(capsys):
 def test_jsonl_observation_success(capsys):
     """Test OBSERVATION event with success emits tool_result JSONL."""
     handler = JSONLUIHandler()
-    handler.handle_event(UIEvent.OBSERVATION, {"tool": "read_file", "observation": "file contents"})
+    event = ObservationEvent(tool="read_file", observation="file contents")
+    handler.handle_event(event)
 
     output = capsys.readouterr().out
     lines = output.strip().split("\n")
@@ -97,7 +112,8 @@ def test_jsonl_observation_success(capsys):
 def test_jsonl_observation_error(capsys):
     """Test OBSERVATION event with error emits tool_result JSONL."""
     handler = JSONLUIHandler()
-    handler.handle_event(UIEvent.OBSERVATION, {"tool": "read_file", "error": "File not found"})
+    event = ObservationEvent(tool="read_file", observation="File not found", success=False)
+    handler.handle_event(event)
 
     output = capsys.readouterr().out
     lines = output.strip().split("\n")
@@ -113,7 +129,8 @@ def test_jsonl_observation_error(capsys):
 def test_jsonl_final_answer(capsys):
     """Test FINAL_ANSWER event emits final_result JSONL."""
     handler = JSONLUIHandler()
-    handler.handle_event(UIEvent.FINAL_ANSWER, {"answer": "The result", "turns": 3, "tokens": 150, "cost": 0.002})
+    event = FinalAnswerEvent(answer="The result", turns=3, tokens=150, cost=0.002)
+    handler.handle_event(event)
 
     output = capsys.readouterr().out
     lines = output.strip().split("\n")
@@ -130,7 +147,8 @@ def test_jsonl_final_answer(capsys):
 def test_jsonl_error(capsys):
     """Test ERROR event emits error JSONL."""
     handler = JSONLUIHandler()
-    handler.handle_event(UIEvent.ERROR, {"error": "Something went wrong", "step": 2})
+    event = ErrorEvent(error="Something went wrong", step=2)
+    handler.handle_event(event)
 
     output = capsys.readouterr().out
     lines = output.strip().split("\n")
@@ -146,11 +164,11 @@ def test_jsonl_multiple_events(capsys):
     """Test multiple events produce multiple JSONL lines."""
     handler = JSONLUIHandler()
 
-    handler.handle_event(UIEvent.TASK_START, {"agent": "test", "model": "gpt-4"})
-    handler.handle_event(UIEvent.STEP_START, {"step": 1})
-    handler.handle_event(UIEvent.LLM_MESSAGE, {"content": "Thinking..."})
-    handler.handle_event(UIEvent.TOOL_CALL, {"tool": "read_file", "args": {}})
-    handler.handle_event(UIEvent.FINAL_ANSWER, {"answer": "Done"})
+    handler.handle_event(TaskStartEvent(task="test", model="gpt-4"))
+    handler.handle_event(StepStartEvent(step=1))
+    handler.handle_event(LLMMessageEvent(content="Thinking..."))
+    handler.handle_event(ToolCallEvent(tool="read_file", args={}))
+    handler.handle_event(FinalAnswerEvent(answer="Done"))
 
     output = capsys.readouterr().out
     lines = output.strip().split("\n")

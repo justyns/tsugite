@@ -84,7 +84,7 @@ def clear_multistep_ui_context(custom_logger: Optional[Any]) -> None:
 def print_step_progress(
     custom_logger: Optional[Any], step_header: str, message: str, debug: bool = False, style: str = "cyan"
 ) -> None:
-    """Print step progress message to appropriate console.
+    """Print step progress message using event system.
 
     Args:
         custom_logger: Custom logger instance (may be None)
@@ -96,9 +96,11 @@ def print_step_progress(
     if debug:
         return
 
-    full_message = f"[{style}]{step_header} {message}[/{style}]"
+    # Emit as StepProgressEvent through event bus
+    ui_handler = get_ui_handler(custom_logger)
+    if ui_handler:
+        from tsugite.events import EventBus, StepProgressEvent
 
-    if custom_logger and hasattr(custom_logger, "console"):
-        custom_logger.console.print(full_message)
-    else:
-        _stderr_console.print(full_message)
+        event_bus = EventBus()
+        event_bus.subscribe(ui_handler.handle_event)
+        event_bus.emit(StepProgressEvent(message=f"{step_header} {message}", style=style))

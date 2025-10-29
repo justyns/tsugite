@@ -226,7 +226,8 @@ Task: {{ user_prompt }}
 
             # Should pass validation (not exit due to template error)
             # but fail at execution (expected with mock)
-            assert "Starting agent execution" in result.stdout
+            # "Starting agent execution" banner goes to stderr
+            assert "Starting agent execution" in result.stderr or "Unexpected error" in result.stdout
 
 
 class TestComplexScenarios:

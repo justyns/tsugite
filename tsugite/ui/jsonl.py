@@ -3,7 +3,18 @@
 import json
 from typing import Any, Dict
 
-from tsugite.ui.base import UIEvent
+from tsugite.events import (
+    BaseEvent,
+    CodeExecutionEvent,
+    ErrorEvent,
+    ExecutionResultEvent,
+    FinalAnswerEvent,
+    LLMMessageEvent,
+    ObservationEvent,
+    StepStartEvent,
+    TaskStartEvent,
+    ToolCallEvent,
+)
 
 
 class JSONLUIHandler:
@@ -11,65 +22,87 @@ class JSONLUIHandler:
 
     This handler converts all UI events to line-delimited JSON objects,
     enabling parent agents to monitor subagent progress in real-time.
+
+    JSONL Protocol Schema:
+    ----------------------
+    Each line is a JSON object with a "type" field and type-specific data.
+
+    Event Type Mappings:
+    - TaskStartEvent      → {"type": "init", "agent": str, "model": str}
+    - StepStartEvent      → {"type": "turn_start", "turn": int}
+    - LLMMessageEvent     → {"type": "thought", "content": str}
+    - CodeExecutionEvent  → {"type": "code", "content": str}
+    - ToolCallEvent       → {"type": "tool_call", "tool": str, "args": dict}
+    - ObservationEvent    → {"type": "tool_result", "tool": str, "success": bool, "output"?: str, "error"?: str}
+    - ExecutionResultEvent→ {"type": "tool_result", "tool": "code_execution", "success": bool, "output"?: str, "error"?: str}
+    - FinalAnswerEvent    → {"type": "final_result", "result": str, "turns": int, "tokens": int, "cost": float}
+    - ErrorEvent          → {"type": "error", "error": str, "step": int}
+
+    Success/Failure Patterns:
+    - Successful tool: {"type": "tool_result", "tool": "read_file", "success": true, "output": "..."}
+    - Failed tool: {"type": "tool_result", "tool": "read_file", "success": false, "error": "..."}
+    - Code execution success: {"type": "tool_result", "tool": "code_execution", "success": true, "output": "logs\\nresult"}
+    - Code execution failure: {"type": "tool_result", "tool": "code_execution", "success": false, "error": "..."}
     """
 
-    def handle_event(self, event: UIEvent, data: Dict[str, Any]) -> None:
+    def handle_event(self, event: BaseEvent) -> None:
         """Convert UI event to JSONL and print to stdout.
 
         Args:
-            event: The UI event type
-            data: Event-specific data dictionary
+            event: The Pydantic event
         """
-        if event == UIEvent.TASK_START:
-            self._emit("init", {"agent": data.get("agent"), "model": data.get("model")})
+        if isinstance(event, TaskStartEvent):
+            self._emit("init", {"agent": event.task, "model": event.model})
 
-        elif event == UIEvent.STEP_START:
-            self._emit("turn_start", {"turn": data.get("step")})
+        elif isinstance(event, StepStartEvent):
+            self._emit("turn_start", {"turn": event.step})
 
-        elif event == UIEvent.LLM_MESSAGE:
-            content = data.get("content", "")
-            if content.strip():
-                self._emit("thought", {"content": content})
+        elif isinstance(event, LLMMessageEvent):
+            if event.content.strip():
+                self._emit("thought", {"content": event.content})
 
-        elif event == UIEvent.CODE_EXECUTION:
-            code = data.get("code", "")
-            if code:
-                self._emit("code", {"content": code})
+        elif isinstance(event, CodeExecutionEvent):
+            if event.code:
+                self._emit("code", {"content": event.code})
 
-        elif event == UIEvent.TOOL_CALL:
-            self._emit("tool_call", {"tool": data.get("tool", "unknown"), "args": data.get("args", {})})
+        elif isinstance(event, ToolCallEvent):
+            self._emit("tool_call", {"tool": event.tool, "args": event.args})
 
-        elif event == UIEvent.OBSERVATION:
-            observation = data.get("observation", "")
-            error = data.get("error")
-
-            if error:
-                self._emit("tool_result", {"tool": data.get("tool", "unknown"), "success": False, "error": error})
+        elif isinstance(event, ObservationEvent):
+            if event.success:
+                self._emit(
+                    "tool_result", {"tool": event.tool or "unknown", "success": True, "output": event.observation}
+                )
             else:
-                self._emit("tool_result", {"tool": data.get("tool", "unknown"), "success": True, "output": observation})
+                self._emit(
+                    "tool_result",
+                    {"tool": event.tool or "unknown", "success": False, "error": event.error or event.observation},
+                )
 
-        elif event == UIEvent.EXECUTION_RESULT:
-            content = data.get("content", "")
-            error = data.get("error")
-
-            if error:
-                self._emit("tool_result", {"tool": "code_execution", "success": False, "error": error})
+        elif isinstance(event, ExecutionResultEvent):
+            if event.success:
+                # Combine logs and output for backward compatibility
+                output = event.output or ""
+                if event.logs:
+                    logs_str = "\n".join(event.logs)
+                    output = f"{logs_str}\n{output}" if output else logs_str
+                self._emit("tool_result", {"tool": "code_execution", "success": True, "output": output})
             else:
-                self._emit("tool_result", {"tool": "code_execution", "success": True, "output": content})
+                self._emit("tool_result", {"tool": "code_execution", "success": False, "error": event.error or ""})
 
-        elif event == UIEvent.FINAL_ANSWER:
+        elif isinstance(event, FinalAnswerEvent):
             self._emit(
                 "final_result",
                 {
-                    "result": data.get("answer", ""),
-                    "turns": data.get("turns"),
-                    "tokens": data.get("tokens"),
-                    "cost": data.get("cost"),
+                    "result": event.answer,
+                    "turns": event.turns,
+                    "tokens": event.tokens,
+                    "cost": event.cost,
                 },
             )
 
-        elif event == UIEvent.ERROR:
-            self._emit("error", {"error": data.get("error", ""), "step": data.get("step")})
+        elif isinstance(event, ErrorEvent):
+            self._emit("error", {"error": event.error, "step": event.step})
 
     def _emit(self, event_type: str, data: Dict[str, Any]) -> None:
         """Print JSONL event to stdout.

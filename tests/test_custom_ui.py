@@ -5,12 +5,19 @@ from unittest.mock import MagicMock, patch
 
 from rich.console import Console
 
+from tsugite.events import (
+    CodeExecutionEvent,
+    ExecutionResultEvent,
+    FinalAnswerEvent,
+    LLMMessageEvent,
+    ObservationEvent,
+    StepStartEvent,
+    TaskStartEvent,
+)
 from tsugite.ui import (
     CustomUIHandler,
     CustomUILogger,
-    UIEvent,
     UIState,
-    create_silent_logger,
     custom_agent_ui,
 )
 
@@ -66,22 +73,38 @@ class TestCustomUIHandler:
         console = Console(file=StringIO())
         handler = CustomUIHandler(console)
 
-        handler.handle_event(UIEvent.TASK_START, {"task": "Test task", "model": "test-model", "title": "Test"})
+        event = TaskStartEvent(task="Test task", model="test-model")
+        handler.handle_event(event)
 
         assert handler.state.task == "Test task"
         assert handler.state.current_step == 0
         assert handler.state.steps_history == []
 
-        # Check output was generated
+        # Task should not be shown unless show_debug_messages=True
+        output = console.file.getvalue()
+        assert "Test task" not in output
+        assert "test-model" in output  # Model should still be shown
+
+    def test_handle_task_start_with_debug(self):
+        """Test handling task start event with debug messages enabled."""
+        console = Console(file=StringIO())
+        handler = CustomUIHandler(console, show_debug_messages=True)
+
+        event = TaskStartEvent(task="Test task", model="test-model")
+        handler.handle_event(event)
+
+        # With show_debug_messages=True, task should be shown
         output = console.file.getvalue()
         assert "Test task" in output
+        assert "test-model" in output
 
     def test_handle_step_start(self):
         """Test handling step start event."""
         console = Console(file=StringIO())
         handler = CustomUIHandler(console)
 
-        handler.handle_event(UIEvent.STEP_START, {"step": 2})
+        event = StepStartEvent(step=2)
+        handler.handle_event(event)
 
         assert handler.state.current_step == 2
         assert len(handler.state.steps_history) == 1
@@ -93,7 +116,8 @@ class TestCustomUIHandler:
         console = Console(file=StringIO())
         handler = CustomUIHandler(console, show_code=True)
 
-        handler.handle_event(UIEvent.CODE_EXECUTION, {"code": 'print("hello")'})
+        event = CodeExecutionEvent(code='print("hello")')
+        handler.handle_event(event)
 
         assert handler.state.code_being_executed == 'print("hello")'
 
@@ -106,7 +130,8 @@ class TestCustomUIHandler:
         console = Console(file=StringIO())
         handler = CustomUIHandler(console, show_code=False)
 
-        handler.handle_event(UIEvent.CODE_EXECUTION, {"code": 'print("hello")'})
+        event = CodeExecutionEvent(code='print("hello")')
+        handler.handle_event(event)
 
         assert handler.state.code_being_executed == 'print("hello")'
 
@@ -120,9 +145,11 @@ class TestCustomUIHandler:
         handler = CustomUIHandler(console, show_observations=True)
 
         # Add a step first
-        handler.handle_event(UIEvent.STEP_START, {"step": 1})
+        event = StepStartEvent(step=1)
+        handler.handle_event(event)
 
-        handler.handle_event(UIEvent.OBSERVATION, {"observation": "Test observation"})
+        event = ObservationEvent(observation="Test observation")
+        handler.handle_event(event)
 
         assert handler.state.steps_history[-1]["status"] == "completed"
 
@@ -135,69 +162,68 @@ class TestCustomUIHandler:
         console = Console(file=StringIO())
         handler = CustomUIHandler(console)
 
-        handler.handle_event(UIEvent.FINAL_ANSWER, {"answer": "42"})
+        event = FinalAnswerEvent(answer="42")
+        handler.handle_event(event)
 
-        # Check output was generated
+        # Check output was generated - panels removed so just check answer is present
         output = console.file.getvalue()
         assert "42" in output
-        assert "Final Answer" in output
 
     def test_handle_llm_message_with_show(self):
         """Test handling LLM message with display enabled."""
         console = Console(file=StringIO())
         handler = CustomUIHandler(console, show_llm_messages=True)
 
-        handler.handle_event(
-            UIEvent.LLM_MESSAGE, {"content": "I need to solve this step by step", "title": "Output message of the LLM:"}
-        )
+        event = LLMMessageEvent(content="I need to solve this step by step", title="Output message of the LLM:")
+        handler.handle_event(event)
 
         output = console.file.getvalue()
+        # Panels removed, so only content is displayed
         assert "I need to solve this step by step" in output
-        assert "Output message of the LLM:" in output
 
     def test_handle_llm_message_without_show(self):
         """Test handling LLM message with display disabled."""
         console = Console(file=StringIO())
         handler = CustomUIHandler(console, show_llm_messages=False)
 
-        handler.handle_event(
-            UIEvent.LLM_MESSAGE, {"content": "I need to solve this step by step", "title": "Output message of the LLM:"}
-        )
+        event = LLMMessageEvent(content="I need to solve this step by step", title="Output message of the LLM:")
+        handler.handle_event(event)
 
         output = console.file.getvalue()
         assert "I need to solve this step by step" not in output
 
     def test_handle_llm_message_shows_step_number(self):
-        """Test that LLM messages show step numbers in their titles."""
+        """Test that LLM messages display content."""
         console = Console(file=StringIO())
         handler = CustomUIHandler(console, show_llm_messages=True)
 
         # Test Step 1
-        handler.handle_event(UIEvent.LLM_MESSAGE, {"content": "First step reasoning", "title": "Step 1 Reasoning"})
+        event = LLMMessageEvent(content="First step reasoning", title="Step 1 Reasoning")
+        handler.handle_event(event)
 
         output = console.file.getvalue()
+        # Panels removed, so only content is displayed
         assert "First step reasoning" in output
-        assert "Step 1" in output
 
         # Clear console for next test
         console = Console(file=StringIO())
         handler = CustomUIHandler(console, show_llm_messages=True)
 
         # Test Step 2
-        handler.handle_event(UIEvent.LLM_MESSAGE, {"content": "Second step reasoning", "title": "Step 2 Reasoning"})
+        event = LLMMessageEvent(content="Second step reasoning", title="Step 2 Reasoning")
+        handler.handle_event(event)
 
         output = console.file.getvalue()
+        # Panels removed, so only content is displayed
         assert "Second step reasoning" in output
-        assert "Step 2" in output
 
     def test_handle_execution_result(self):
         """Test handling execution result event."""
         console = Console(file=StringIO())
         handler = CustomUIHandler(console, show_execution_results=True)
 
-        handler.handle_event(
-            UIEvent.EXECUTION_RESULT, {"content": "Execution logs:\nprint statement output\nOut: Hello World"}
-        )
+        event = ExecutionResultEvent(logs=["print statement output"], output="Hello World", success=True)
+        handler.handle_event(event)
 
         output = console.file.getvalue()
         assert "Hello World" in output or "Output:" in output
@@ -207,7 +233,8 @@ class TestCustomUIHandler:
         console = Console(file=StringIO())
         handler = CustomUIHandler(console, show_execution_results=True)
 
-        handler.handle_event(UIEvent.EXECUTION_RESULT, {"content": "Out: None"})
+        event = ExecutionResultEvent(output="None", success=True)
+        handler.handle_event(event)
 
         output = console.file.getvalue()
         # Should NOT contain "Output: None"
@@ -219,7 +246,8 @@ class TestCustomUIHandler:
         console = Console(file=StringIO())
         handler = CustomUIHandler(console, show_execution_results=True)
 
-        handler.handle_event(UIEvent.EXECUTION_RESULT, {"content": "Out: null"})
+        event = ExecutionResultEvent(output="null", success=True)
+        handler.handle_event(event)
 
         output = console.file.getvalue()
         # Should NOT contain "Output: null"
@@ -276,22 +304,6 @@ class TestCustomAgentUI:
             assert logger.ui_handler.show_observations is False
 
 
-class TestSilentLogger:
-    """Test silent logger creation."""
-
-    def test_create_silent_logger(self):
-        """Test creating a completely silent logger."""
-        logger = create_silent_logger()
-
-        assert isinstance(logger, CustomUILogger)
-        assert logger.ui_handler is not None
-        assert logger.console is not None
-
-        # Test that logger has the required attributes
-        assert hasattr(logger, "ui_handler")
-        assert hasattr(logger, "console")
-
-
 class TestMultiStepContext:
     """Test multi-step context handling."""
 
@@ -341,7 +353,8 @@ class TestMultiStepContext:
         handler.set_multistep_context(1, "research", 4)
 
         # Trigger step start
-        handler.handle_event(UIEvent.STEP_START, {"step": 1, "title": "Step 1"})
+        event = StepStartEvent(step=1, title="Step 1")
+        handler.handle_event(event)
 
         # Should show "Round" instead of "Step"
         assert handler.state.current_step == 1
@@ -355,7 +368,8 @@ class TestMultiStepContext:
         assert handler.state.multistep_context is None
 
         # Trigger step start
-        handler.handle_event(UIEvent.STEP_START, {"step": 1, "title": "Step 1"})
+        event = StepStartEvent(step=1, title="Step 1")
+        handler.handle_event(event)
 
         # Should show "Step"
         assert handler.state.current_step == 1

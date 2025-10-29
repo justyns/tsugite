@@ -62,6 +62,9 @@ instructions: |
 **User:** {{ turn.user_message }}
 
 **Assistant:** {{ turn.agent_response }}
+{% if turn.tool_calls %}
+*Tools used: {{ turn.tool_calls | join(', ') }}*
+{% endif %}
 
 {% endfor %}
 {% endif %}
@@ -134,7 +137,6 @@ When searching the web:
 - Use `fetch_text(url="...")` to get full page content when snippets aren't enough
 {% endif %}
 
-## Current Tasks
 {{ task_summary }}
 
 # Task
@@ -209,6 +211,9 @@ final_answer(result)
 **User:** {{ turn.user_message }}
 
 **Assistant:** {{ turn.agent_response }}
+{% if turn.tool_calls %}
+*Tools used: {{ turn.tool_calls | join(', ') }}*
+{% endif %}
 
 {% endfor %}
 {% endif %}

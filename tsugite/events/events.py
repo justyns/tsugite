@@ -1,0 +1,211 @@
+"""All event classes consolidated in one module.
+
+Error Handling Patterns:
+------------------------
+1. Tool Results (ObservationEvent):
+   - Success: ObservationEvent(success=True, observation="result", tool="tool_name")
+   - Failure: ObservationEvent(success=False, error="error msg", tool="tool_name")
+
+2. Code Execution (ExecutionResultEvent):
+   - Success: ExecutionResultEvent(success=True, logs=[...], output="result")
+   - Failure: ExecutionResultEvent(success=False, error="error msg")
+
+3. General/Fatal Errors (ErrorEvent):
+   - ErrorEvent(error="error msg", error_type="Error Type", step=N)
+   - Used for: Format errors, max turns exceeded, critical failures
+"""
+
+from typing import Any, Dict, Optional
+
+from pydantic import Field
+
+from .base import BaseEvent, EventType
+
+# ============================================================================
+# Execution Events
+# ============================================================================
+
+
+class TaskStartEvent(BaseEvent):
+    """Agent execution starts."""
+
+    event_type: EventType = Field(default=EventType.TASK_START, frozen=True)
+    task: str
+    model: str
+
+
+class StepStartEvent(BaseEvent):
+    """New reasoning turn."""
+
+    event_type: EventType = Field(default=EventType.STEP_START, frozen=True)
+    step: int = Field(ge=1)
+    max_turns: Optional[int] = Field(default=None, ge=1)
+
+
+class CodeExecutionEvent(BaseEvent):
+    """Code being executed."""
+
+    event_type: EventType = Field(default=EventType.CODE_EXECUTION, frozen=True)
+    code: str
+    language: str = "python"
+
+
+class ToolCallEvent(BaseEvent):
+    """Tool invocation."""
+
+    event_type: EventType = Field(default=EventType.TOOL_CALL, frozen=True)
+    tool: str
+    args: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ObservationEvent(BaseEvent):
+    """Observation from tool execution or code execution.
+
+    Usage:
+    - Tool success: ObservationEvent(success=True, observation="result", tool="tool_name")
+    - Tool failure: ObservationEvent(success=False, error="error", tool="tool_name")
+    - Code execution: ObservationEvent(observation="output", tool=None)
+
+    Note: For code execution, tool is None and ExecutionResultEvent may be emitted
+    separately with structured logs/output.
+    """
+
+    event_type: EventType = Field(default=EventType.OBSERVATION, frozen=True)
+    observation: str = ""
+    tool: Optional[str] = None
+    success: bool = True
+    error: Optional[str] = None
+
+
+class FinalAnswerEvent(BaseEvent):
+    """Agent completed."""
+
+    event_type: EventType = Field(default=EventType.FINAL_ANSWER, frozen=True)
+    answer: str
+    turns: Optional[int] = Field(default=None, ge=1)
+    tokens: Optional[int] = Field(default=None, ge=0)
+    cost: Optional[float] = Field(default=None, ge=0)
+
+
+# ============================================================================
+# LLM Events
+# ============================================================================
+
+
+class LLMMessageEvent(BaseEvent):
+    """Reasoning/thought process."""
+
+    event_type: EventType = Field(default=EventType.LLM_MESSAGE, frozen=True)
+    content: str
+    title: Optional[str] = None
+    step: Optional[int] = Field(default=None, ge=1)
+
+
+class ExecutionResultEvent(BaseEvent):
+    """Code execution result with structured logs and output."""
+
+    event_type: EventType = Field(default=EventType.EXECUTION_RESULT, frozen=True)
+    logs: list[str] = Field(default_factory=list)
+    output: Optional[str] = None
+    success: bool = True
+    error: Optional[str] = None
+
+
+class ExecutionLogsEvent(BaseEvent):
+    """Execution logs."""
+
+    event_type: EventType = Field(default=EventType.EXECUTION_LOGS, frozen=True)
+    logs: str
+
+
+class ReasoningContentEvent(BaseEvent):
+    """Model reasoning (Claude, Deepseek)."""
+
+    event_type: EventType = Field(default=EventType.REASONING_CONTENT, frozen=True)
+    content: str
+    step: Optional[int] = Field(default=None, ge=1)
+
+
+class ReasoningTokensEvent(BaseEvent):
+    """Reasoning token count (o1, o3)."""
+
+    event_type: EventType = Field(default=EventType.REASONING_TOKENS, frozen=True)
+    tokens: int = Field(ge=0)
+    step: Optional[int] = Field(default=None, ge=1)
+
+
+# ============================================================================
+# Meta Events
+# ============================================================================
+
+
+class InfoEvent(BaseEvent):
+    """Informational message."""
+
+    event_type: EventType = Field(default=EventType.INFO, frozen=True)
+    message: str
+
+
+class ErrorEvent(BaseEvent):
+    """Execution error."""
+
+    event_type: EventType = Field(default=EventType.ERROR, frozen=True)
+    error: str
+    error_type: Optional[str] = None
+    step: Optional[int] = Field(default=None, ge=1)
+    traceback: Optional[str] = None
+
+
+class CostSummaryEvent(BaseEvent):
+    """Token/cost metrics."""
+
+    event_type: EventType = Field(default=EventType.COST_SUMMARY, frozen=True)
+    tokens: Optional[int] = Field(default=None, ge=0)
+    cost: Optional[float] = Field(default=None, ge=0)
+    model: Optional[str] = None
+    duration_seconds: Optional[float] = Field(default=None, ge=0)
+
+
+class StreamChunkEvent(BaseEvent):
+    """Streaming response chunk."""
+
+    event_type: EventType = Field(default=EventType.STREAM_CHUNK, frozen=True)
+    chunk: str
+
+
+class StreamCompleteEvent(BaseEvent):
+    """Streaming finished."""
+
+    event_type: EventType = Field(default=EventType.STREAM_COMPLETE, frozen=True)
+    complete: bool = True
+
+
+# ============================================================================
+# Progress Events
+# ============================================================================
+
+
+class DebugMessageEvent(BaseEvent):
+    """Debug output."""
+
+    event_type: EventType = Field(default=EventType.DEBUG_MESSAGE, frozen=True)
+    message: str
+    context: Optional[Dict[str, Any]] = None
+
+
+class WarningEvent(BaseEvent):
+    """Warning message."""
+
+    event_type: EventType = Field(default=EventType.WARNING, frozen=True)
+    message: str
+    category: Optional[str] = None
+
+
+class StepProgressEvent(BaseEvent):
+    """Progress update."""
+
+    event_type: EventType = Field(default=EventType.STEP_PROGRESS, frozen=True)
+    message: str
+    step: Optional[int] = Field(default=None, ge=1)
+    total: Optional[int] = Field(default=None, ge=1)
+    percentage: Optional[float] = Field(default=None, ge=0, le=100)

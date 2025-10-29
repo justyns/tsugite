@@ -210,6 +210,37 @@ def format_conversation_for_display(turns: List[Union[ConversationMetadata, Turn
             if turn.tools:
                 lines.append(f"  Tools: {', '.join(turn.tools)}")
 
+            # Display execution steps if available
+            if turn.steps:
+                lines.append("")
+                lines.append("  Execution Steps:")
+                for step in turn.steps:
+                    step_num = step.get("step_number", "?")
+                    thought = step.get("thought", "").strip()
+                    code = step.get("code", "").strip()
+                    output = step.get("output", "").strip()
+                    error = step.get("error")
+                    tools_called = step.get("tools_called", [])
+
+                    lines.append(f"    Step {step_num}:")
+                    if thought:
+                        lines.append(f"      Thought: {thought[:100]}{'...' if len(thought) > 100 else ''}")
+                    if tools_called:
+                        lines.append(f"      Tools: {', '.join(tools_called)}")
+                    if code:
+                        # Show first few lines of code
+                        code_lines = code.split("\n")
+                        if len(code_lines) <= 3:
+                            lines.append(f"      Code: {code}")
+                        else:
+                            lines.append(f"      Code: {code_lines[0]}")
+                            lines.append(f"            ... ({len(code_lines) - 1} more lines)")
+                    if output:
+                        output_preview = output[:150].replace("\n", " ")
+                        lines.append(f"      Output: {output_preview}{'...' if len(output) > 150 else ''}")
+                    if error:
+                        lines.append(f"      Error: {error}")
+
             lines.append(f"  Tokens: {turn.tokens or 0} | Cost: ${turn.cost or 0.0:.4f}")
             lines.append("")
             lines.append("-" * 60)

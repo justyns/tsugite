@@ -28,6 +28,7 @@ from .metrics import StepMetrics, display_step_metrics
 
 if TYPE_CHECKING:
     from tsugite.agent_preparation import PreparedAgent
+    from tsugite.events import EventBus
 
 
 def _get_model_string(model_override: Optional[str], agent_config: AgentConfig) -> str:
@@ -195,7 +196,7 @@ def get_default_instructions(text_mode: bool = False) -> str:
     return base + completion + interactive
 
 
-def execute_prefetch(prefetch_config: List[Dict[str, Any]]) -> Dict[str, Any]:
+def execute_prefetch(prefetch_config: List[Dict[str, Any]], event_bus: Optional["EventBus"] = None) -> Dict[str, Any]:
     context = {}
     for config in prefetch_config:
         tool_name = config.get("tool")
@@ -208,14 +209,17 @@ def execute_prefetch(prefetch_config: List[Dict[str, Any]]) -> Dict[str, Any]:
         try:
             context[assign_name] = call_tool(tool_name, **args)
         except Exception as e:
-            _stderr_console.print(f"[yellow]Warning: Prefetch tool '{tool_name}' failed: {e}[/yellow]")
+            if event_bus:
+                from tsugite.events import WarningEvent
+
+                event_bus.emit(WarningEvent(message=f"Prefetch tool '{tool_name}' failed: {e}"))
             context[assign_name] = None
 
     return context
 
 
 def execute_tool_directives(
-    content: str, existing_context: Optional[Dict[str, Any]] = None
+    content: str, existing_context: Optional[Dict[str, Any]] = None, event_bus: Optional["EventBus"] = None
 ) -> tuple[str, Dict[str, Any]]:
     """Execute tool directives in content and return updated context.
 
@@ -225,6 +229,7 @@ def execute_tool_directives(
     Args:
         content: Markdown content with tool directives
         existing_context: Current template context (for error messages, not used for execution)
+        event_bus: Optional event bus for emitting warnings
 
     Returns:
         Tuple of (modified_content, updated_context)
@@ -247,7 +252,10 @@ def execute_tool_directives(
         directives = extract_tool_directives(content)
     except ValueError as e:
         # If parsing fails, return content unchanged with empty context
-        _stderr_console.print(f"[yellow]Warning: Failed to parse tool directives: {e}[/yellow]")
+        if event_bus:
+            from tsugite.events import WarningEvent
+
+            event_bus.emit(WarningEvent(message=f"Failed to parse tool directives: {e}"))
         return content, {}
 
     if not directives:
@@ -269,7 +277,10 @@ def execute_tool_directives(
             modified_content = modified_content.replace(directive.raw_match, replacement)
 
         except Exception as e:
-            _stderr_console.print(f"[yellow]Warning: Tool directive '{directive.name}' failed: {e}[/yellow]")
+            if event_bus:
+                from tsugite.events import WarningEvent
+
+                event_bus.emit(WarningEvent(message=f"Tool directive '{directive.name}' failed: {e}"))
             new_context[directive.assign_var] = None
 
             # Replace with failure note
@@ -297,20 +308,11 @@ def _extract_reasoning_content(agent: TsugiteAgent, custom_logger: Optional[Any]
             # Check if custom_logger has ui_handler (custom UI mode)
             ui_handler = get_ui_handler(custom_logger)
             if ui_handler:
-                from tsugite.ui import UIEvent
+                from tsugite.events import EventBus, ReasoningContentEvent
 
-                ui_handler.handle_event(UIEvent.REASONING_CONTENT, {"content": reasoning_content, "step": None})
-            # Otherwise try to log directly (fallback)
-            elif hasattr(custom_logger, "console"):
-                from rich.panel import Panel
-
-                custom_logger.console.print(
-                    Panel(
-                        reasoning_content,
-                        title="[bold magenta]🧠 Reasoning[/bold magenta]",
-                        border_style="magenta",
-                    )
-                )
+                event_bus = EventBus()
+                event_bus.subscribe(ui_handler.handle_event)
+                event_bus.emit(ReasoningContentEvent(content=reasoning_content, step=None))
 
 
 async def _execute_agent_with_prompt(
@@ -369,6 +371,16 @@ async def _execute_agent_with_prompt(
             var_docs += f"- {var_name}: {preview}\n"
         combined_instructions = prepared.combined_instructions + var_docs
 
+    # Extract ui_handler and create EventBus early so warnings can use it
+    ui_handler = get_ui_handler(custom_logger)
+
+    # Create EventBus and subscribe ui_handler
+    from tsugite.events import EventBus, InfoEvent, WarningEvent
+
+    event_bus = EventBus()
+    if ui_handler:
+        event_bus.subscribe(ui_handler.handle_event)
+
     # Start with tools from prepared agent
     tools = list(prepared.tools)  # Make a copy
 
@@ -395,7 +407,7 @@ async def _execute_agent_with_prompt(
 
                 tools.append(create_tool_from_tsugite(tool_def.name))
         except Exception as e:
-            _stderr_console.print(f"[yellow]Warning: Failed to register custom tools: {e}[/yellow]")
+            event_bus.emit(WarningEvent(message=f"Failed to register custom tools: {e}"))
 
     # Add delegation tools if provided
     if delegation_agents:
@@ -416,9 +428,7 @@ async def _execute_agent_with_prompt(
             # Load tools from each configured MCP server
             for server_name, allowed_tools in agent_config.mcp_servers.items():
                 if server_name not in global_mcp_config:
-                    _stderr_console.print(
-                        f"[yellow]Warning: MCP server '{server_name}' not found in config. Skipping.[/yellow]"
-                    )
+                    event_bus.emit(WarningEvent(message=f"MCP server '{server_name}' not found in config. Skipping."))
                     continue
 
                 server_config = global_mcp_config[server_name]
@@ -426,16 +436,13 @@ async def _execute_agent_with_prompt(
                     mcp_client, mcp_tools = await load_mcp_tools(server_config, allowed_tools)
                     mcp_clients.append(mcp_client)  # Keep client alive for tools to work
                     tools.extend(mcp_tools)
-                    _stderr_console.print(
-                        f"[green]Loaded {len(mcp_tools)} tools from MCP server '{server_name}'[/green]"
-                    )
+
+                    event_bus.emit(InfoEvent(message=f"Loaded {len(mcp_tools)} tools from MCP server '{server_name}'"))
                 except Exception as e:
-                    _stderr_console.print(
-                        f"[yellow]Warning: Failed to load MCP tools from '{server_name}': {e}[/yellow]"
-                    )
+                    event_bus.emit(WarningEvent(message=f"Failed to load MCP tools from '{server_name}': {e}"))
         except Exception as e:
-            _stderr_console.print(f"[yellow]Warning: Failed to load MCP tools: {e}[/yellow]")
-            _stderr_console.print("[yellow]Continuing without MCP tools.[/yellow]")
+            event_bus.emit(WarningEvent(message=f"Failed to load MCP tools: {e}"))
+            event_bus.emit(WarningEvent(message="Continuing without MCP tools."))
 
     # Get model string
     model_string = _get_model_string(model_override, agent_config)
@@ -456,9 +463,6 @@ async def _execute_agent_with_prompt(
 
     # Create and run agent
     try:
-        # Extract ui_handler from custom_logger if available
-        ui_handler = get_ui_handler(custom_logger)
-
         agent = TsugiteAgent(
             model_string=model_string,
             tools=tools,
@@ -466,7 +470,7 @@ async def _execute_agent_with_prompt(
             max_turns=agent_config.max_turns,
             executor=executor,
             model_kwargs=final_model_kwargs,
-            ui_handler=ui_handler,
+            event_bus=event_bus,
             model_name=model_string,
             text_mode=agent_config.text_mode,
         )
@@ -658,9 +662,15 @@ def run_agent(
 
         # Debug output if requested
         if debug:
-            _stderr_console.rule("[bold cyan]DEBUG: Rendered Prompt[/bold cyan]")
-            _stderr_console.print(prepared.rendered_prompt)
-            _stderr_console.rule("[bold cyan]End Rendered Prompt[/bold cyan]")
+            from tsugite.events import DebugMessageEvent, EventBus
+
+            debug_event_bus = EventBus()
+            debug_ui_handler = get_ui_handler(custom_logger)
+            if debug_ui_handler:
+                debug_event_bus.subscribe(debug_ui_handler.handle_event)
+            debug_event_bus.emit(
+                DebugMessageEvent(message=f"DEBUG: Rendered Prompt\n{prepared.rendered_prompt}\nEnd Rendered Prompt")
+            )
 
         # Execute with the low-level helper (wrapping async call)
         return asyncio.run(
@@ -771,9 +781,15 @@ async def run_agent_async(
 
         # Debug output if requested
         if debug:
-            _stderr_console.rule("[bold cyan]DEBUG: Rendered Prompt[/bold cyan]")
-            _stderr_console.print(prepared.rendered_prompt)
-            _stderr_console.rule("[bold cyan]End Rendered Prompt[/bold cyan]")
+            from tsugite.events import DebugMessageEvent, EventBus
+
+            debug_event_bus = EventBus()
+            debug_ui_handler = get_ui_handler(custom_logger)
+            if debug_ui_handler:
+                debug_event_bus.subscribe(debug_ui_handler.handle_event)
+            debug_event_bus.emit(
+                DebugMessageEvent(message=f"DEBUG: Rendered Prompt\n{prepared.rendered_prompt}\nEnd Rendered Prompt")
+            )
 
         # Execute with the low-level helper (async - no asyncio.run wrapper)
         return await _execute_agent_with_prompt(
@@ -942,6 +958,7 @@ async def _execute_step_with_retries(
     stream: bool,
     debug: bool,
     task_manager: Any,
+    event_bus: Optional["EventBus"] = None,
 ) -> tuple[str, float]:
     """Execute a step with automatic retries on failure.
 
@@ -991,26 +1008,30 @@ async def _execute_step_with_retries(
             else:
                 print_step_progress(custom_logger, step_header, "Starting...", debug, "cyan")
 
-        if debug:
+        if debug and event_bus:
+            from tsugite.events import DebugMessageEvent
+
             if attempt > 0:
-                _stderr_console.rule(
-                    f"[bold cyan]DEBUG: Retrying Step {i}/{total_steps}: {step.name} (Attempt {attempt + 1}/{max_attempts})[/bold cyan]"
+                event_bus.emit(
+                    DebugMessageEvent(
+                        message=f"DEBUG: Retrying Step {i}/{total_steps}: {step.name} (Attempt {attempt + 1}/{max_attempts})"
+                    )
                 )
             else:
-                _stderr_console.rule(f"[bold cyan]DEBUG: Executing Step {i}/{total_steps}: {step.name}[/bold cyan]")
+                event_bus.emit(DebugMessageEvent(message=f"DEBUG: Executing Step {i}/{total_steps}: {step.name}"))
 
         # Execute tool directives in this step's content
-        step_modified_content, step_tool_context = execute_tool_directives(step.content, step_context)
+        step_modified_content, step_tool_context = execute_tool_directives(step.content, step_context, event_bus)
         step_context.update(step_tool_context)
 
         # Render this step's content with current context
         renderer = AgentRenderer()
         try:
             rendered_step_prompt = renderer.render(step_modified_content, step_context)
-            if debug:
-                _stderr_console.print("\n[bold]Rendered Prompt:[/bold]")
-                _stderr_console.print(rendered_step_prompt)
-                _stderr_console.rule()
+            if debug and event_bus:
+                from tsugite.events import DebugMessageEvent
+
+                event_bus.emit(DebugMessageEvent(message="\n[bold]Rendered Prompt:[/bold]\n" + rendered_step_prompt))
         except Exception as e:
             error_msg = f"Template rendering failed: {e}"
             errors.append(error_msg)
@@ -1072,8 +1093,10 @@ async def _execute_step_with_retries(
             # Store result in context if assign variable specified
             if step.assign_var:
                 step_context[step.assign_var] = step_result
-                if debug:
-                    _stderr_console.print(f"[dim]Assigned result to variable: {step.assign_var}[/dim]")
+                if debug and event_bus:
+                    from tsugite.events import DebugMessageEvent
+
+                    event_bus.emit(DebugMessageEvent(message=f"Assigned result to variable: {step.assign_var}"))
 
             # Update task summary and tasks list for next step
             step_context["task_summary"] = task_manager.get_task_summary()
@@ -1099,9 +1122,10 @@ async def _execute_step_with_retries(
         if attempt < max_attempts - 1:
             if step.retry_delay > 0:
                 time.sleep(step.retry_delay)
-            if not debug:
-                console = get_display_console(custom_logger)
-                console.print(f"[yellow]Step '{step.name}' failed: {error_msg}[/yellow]")
+            if not debug and event_bus:
+                from tsugite.events import WarningEvent
+
+                event_bus.emit(WarningEvent(message=f"Step '{step.name}' failed: {error_msg}"))
         else:
             # Last attempt failed
             clear_multistep_ui_context(custom_logger)
@@ -1126,7 +1150,9 @@ async def _execute_step_with_retries(
     raise RuntimeError("Unexpected: Retry loop completed without success or raising")
 
 
-def _should_repeat_step(step: Any, step_context: Dict[str, Any], iteration: int, debug: bool) -> bool:
+def _should_repeat_step(
+    step: Any, step_context: Dict[str, Any], iteration: int, debug: bool, event_bus: Optional["EventBus"] = None
+) -> bool:
     """Determine if a step should repeat based on loop conditions.
 
     Evaluates repeat_while, repeat_until, and max_iterations to decide
@@ -1137,6 +1163,7 @@ def _should_repeat_step(step: Any, step_context: Dict[str, Any], iteration: int,
         step_context: Current step context for condition evaluation
         iteration: Current iteration count (1-indexed)
         debug: Whether debug mode is active
+        event_bus: Optional event bus for emitting debug/warning messages
 
     Returns:
         True if step should repeat, False otherwise
@@ -1147,30 +1174,47 @@ def _should_repeat_step(step: Any, step_context: Dict[str, Any], iteration: int,
     if step.repeat_while:
         try:
             should_repeat = evaluate_loop_condition(step.repeat_while, step_context)
-            if debug:
-                _stderr_console.print(f"[dim]Loop condition (while): {should_repeat}[/dim]")
+            if debug and event_bus:
+                from tsugite.events import DebugMessageEvent
+
+                event_bus.emit(DebugMessageEvent(message=f"Loop condition (while): {should_repeat}"))
         except Exception as e:
-            _stderr_console.print(f"[yellow]Warning: Loop condition evaluation failed: {e}[/yellow]")
+            if event_bus:
+                from tsugite.events import WarningEvent
+
+                event_bus.emit(WarningEvent(message=f"Loop condition evaluation failed: {e}"))
             should_repeat = False
 
     elif step.repeat_until:
         try:
             condition_met = evaluate_loop_condition(step.repeat_until, step_context)
             should_repeat = not condition_met  # Repeat UNTIL condition is true
-            if debug:
-                _stderr_console.print(
-                    f"[dim]Loop condition (until): condition_met={condition_met}, repeat={should_repeat}[/dim]"
+            if debug and event_bus:
+                from tsugite.events import DebugMessageEvent
+
+                event_bus.emit(
+                    DebugMessageEvent(
+                        message=f"Loop condition (until): condition_met={condition_met}, repeat={should_repeat}"
+                    )
                 )
         except Exception as e:
-            _stderr_console.print(f"[yellow]Warning: Loop condition evaluation failed: {e}[/yellow]")
+            if event_bus:
+                from tsugite.events import WarningEvent
+
+                event_bus.emit(WarningEvent(message=f"Loop condition evaluation failed: {e}"))
             should_repeat = False
 
     # Safety check: max iterations
     if should_repeat and iteration >= step.max_iterations:
-        _stderr_console.print(
-            f"[yellow]⚠️  Step '{step.name}' reached max_iterations ({step.max_iterations}). "
-            f'Use max_iterations="N" to increase limit.[/yellow]'
-        )
+        if event_bus:
+            from tsugite.events import WarningEvent
+
+            event_bus.emit(
+                WarningEvent(
+                    message=f"⚠️  Step '{step.name}' reached max_iterations ({step.max_iterations}). "
+                    f'Use max_iterations="N" to increase limit.'
+                )
+            )
         should_repeat = False
 
     return should_repeat
@@ -1255,6 +1299,14 @@ async def _run_multistep_agent_impl(
         # Populate initial tasks from agent config
         _populate_initial_tasks(agent.config)
 
+        # Create event_bus for emitting events throughout multi-step execution
+        from tsugite.events import DebugMessageEvent, EventBus, InfoEvent, WarningEvent
+
+        event_bus = EventBus()
+        ui_handler = get_ui_handler(custom_logger)
+        if ui_handler:
+            event_bus.subscribe(ui_handler.handle_event)
+
         # Check if running in interactive mode
         interactive_mode = is_interactive()
 
@@ -1275,10 +1327,10 @@ async def _run_multistep_agent_impl(
         # Execute prefetch once (before any steps)
         if agent.config.prefetch:
             try:
-                prefetch_context = execute_prefetch(agent.config.prefetch)
+                prefetch_context = execute_prefetch(agent.config.prefetch, event_bus)
                 step_context.update(prefetch_context)
             except Exception as e:
-                _stderr_console.print(f"[yellow]Warning: Prefetch execution failed: {e}[/yellow]")
+                event_bus.emit(WarningEvent(message=f"Prefetch execution failed: {e}"))
 
         # Execute each step sequentially
         final_result = None
@@ -1326,6 +1378,7 @@ async def _run_multistep_agent_impl(
                         stream=stream,
                         debug=debug,
                         task_manager=task_manager,
+                        event_bus=event_bus,
                     )
 
                     # Success - store result and record metrics
@@ -1346,15 +1399,16 @@ async def _run_multistep_agent_impl(
                         clear_multistep_ui_context(custom_logger)
 
                         warning_msg = f"⚠ Step '{step.name}' failed but continuing (continue_on_error=true)"
-                        console = get_display_console(custom_logger)
-                        console.print(f"[yellow]{warning_msg}[/yellow]")
-                        console.print(f"[dim]Error: {str(e)}[/dim]")
+                        event_bus.emit(WarningEvent(message=warning_msg))
+                        event_bus.emit(InfoEvent(message=f"Error: {str(e)}"))
 
                         # Assign None to the variable if specified
                         if step.assign_var:
                             step_context[step.assign_var] = None
                             if debug:
-                                _stderr_console.print(f"[dim]Assigned None to variable: {step.assign_var}[/dim]")
+                                event_bus.emit(
+                                    DebugMessageEvent(message=f"Assigned None to variable: {step.assign_var}")
+                                )
 
                         # Record metrics for skipped step
                         step_duration = time.time() - step_start_time
@@ -1374,12 +1428,12 @@ async def _run_multistep_agent_impl(
                 # End of step execution - now check if we should repeat the step
 
                 # Check if we should repeat this step (loop control)
-                should_repeat = _should_repeat_step(step, step_context, iteration, debug)
+                should_repeat = _should_repeat_step(step, step_context, iteration, debug, event_bus)
 
                 # Exit while loop if we shouldn't repeat
                 if not should_repeat:
                     if step_is_looping and iteration > 1 and not debug:
-                        _stderr_console.print(f"[dim]Step '{step.name}' completed after {iteration} iterations[/dim]")
+                        event_bus.emit(InfoEvent(message=f"Step '{step.name}' completed after {iteration} iterations"))
                     break
 
                 # Update task context for next iteration
@@ -1387,8 +1441,7 @@ async def _run_multistep_agent_impl(
                 step_context["tasks"] = task_manager.get_tasks_for_template()
 
                 if not debug:
-                    console = get_display_console(custom_logger)
-                    console.print(f"[cyan]🔁 Repeating step '{step.name}' (iteration {iteration + 1})[/cyan]")
+                    event_bus.emit(InfoEvent(message=f"🔁 Repeating step '{step.name}' (iteration {iteration + 1})"))
 
             # End of while True loop for step iteration
 
@@ -1521,6 +1574,7 @@ def preview_multistep_agent(
     prompt: str,
     context: Optional[Dict[str, Any]] = None,
     console: Optional[Any] = None,
+    custom_logger: Optional[Any] = None,
 ):
     """Preview multi-step agent execution without running it.
 
@@ -1532,47 +1586,67 @@ def preview_multistep_agent(
         prompt: User prompt/task for the agent
         context: Additional context variables
         console: Rich Console instance (defaults to stderr console)
+        custom_logger: Custom logger with ui_handler for event emission
     """
     import re
 
     from rich.table import Table
 
-    # Use provided console or default to stderr
-    if console is None:
+    from tsugite.events import EventBus, InfoEvent, WarningEvent
+
+    # Check if we should use event system
+    ui_handler = get_ui_handler(custom_logger)
+    event_bus = None
+    if ui_handler:
+        event_bus = EventBus()
+        event_bus.subscribe(ui_handler.handle_event)
+
+    # Use provided console or default to stderr (for non-event output)
+    if console is None and not event_bus:
         console = _stderr_console
+
+    # Helper to output messages (via events or console)
+    def output(msg: str, is_warning: bool = False):
+        if event_bus:
+            if is_warning:
+                event_bus.emit(WarningEvent(message=msg))
+            else:
+                event_bus.emit(InfoEvent(message=msg))
+        elif console:
+            console.print(msg)  # noqa: T201 - Intentional fallback when no event system available
 
     # Parse agent (with inheritance resolution)
     try:
         agent = parse_agent_file(agent_path)
     except Exception as e:
-        console.print(f"[red]Error parsing agent: {e}[/red]")
+        output(f"[red]Error parsing agent: {e}[/red]")
         return
 
     # Extract steps
     from tsugite.md_agents import extract_step_directives, has_step_directives
 
     if not has_step_directives(agent.content):
-        console.print("[yellow]This is a single-step agent (no step directives).[/yellow]")
-        console.print("[dim]Dry-run preview is for multi-step agents only.[/dim]")
+        output("[yellow]This is a single-step agent (no step directives).[/yellow]", is_warning=True)
+        output("[dim]Dry-run preview is for multi-step agents only.[/dim]")
         return
 
     try:
         preamble, steps = extract_step_directives(agent.content)
     except Exception as e:
-        console.print(f"[red]Error extracting steps: {e}[/red]")
+        output(f"[red]Error extracting steps: {e}[/red]")
         return
 
     # Display header
-    console.print()
-    console.print("[bold]Dry-Run Preview: Multi-Step Agent[/bold]")
-    console.print("═" * 60)
-    console.print(f"Agent: {agent.config.name}")
-    console.print(f"File: {agent_path.name}")
-    console.print(f"Prompt: {prompt}")
-    console.print(f"Steps: {len(steps)}")
-    console.print(f"Model: {agent.config.model or 'default'}")
-    console.print(f"Tools: {', '.join(agent.config.tools) if agent.config.tools else 'None'}")
-    console.print()
+    output("")
+    output("[bold]Dry-Run Preview: Multi-Step Agent[/bold]")
+    output("═" * 60)
+    output(f"Agent: {agent.config.name}")
+    output(f"File: {agent_path.name}")
+    output(f"Prompt: {prompt}")
+    output(f"Steps: {len(steps)}")
+    output(f"Model: {agent.config.model or 'default'}")
+    output(f"Tools: {', '.join(agent.config.tools) if agent.config.tools else 'None'}")
+    output("")
 
     # Show steps in table format
     table = Table(title="Execution Plan", show_header=True)
@@ -1618,25 +1692,37 @@ def preview_multistep_agent(
 
         table.add_row(str(i), step.name, attr_str, deps_str)
 
-    console.print(table)
-    console.print()
+    # Output table (via console fallback since tables need special rendering)
+    if event_bus:
+        # For events, render table to string
+        from io import StringIO
+
+        buffer = StringIO()
+        temp_console = get_display_console(custom_logger)
+        temp_console.file = buffer
+        temp_console.print(table)  # noqa: T201 - Rendering to buffer, not user console
+        event_bus.emit(InfoEvent(message=buffer.getvalue()))
+    elif console:
+        console.print(table)  # noqa: T201 - Intentional fallback when no event system available
+
+    output("")
 
     # Warnings
-    warnings = []
+    warning_messages = []
     for step in steps:
         if step.timeout and step.timeout < 30:
-            warnings.append(f"⚠ Step '{step.name}' has short timeout ({step.timeout}s)")
+            warning_messages.append(f"⚠ Step '{step.name}' has short timeout ({step.timeout}s)")
         if step.continue_on_error and not step.assign_var:
-            warnings.append(f"⚠ Step '{step.name}' has continue_on_error but no assign variable")
+            warning_messages.append(f"⚠ Step '{step.name}' has continue_on_error but no assign variable")
 
-    if warnings:
-        console.print("[bold]Warnings:[/bold]")
-        console.print("─" * 60)
-        for warning in warnings:
-            console.print(f"  [yellow]{warning}[/yellow]")
-        console.print()
+    if warning_messages:
+        output("[bold]Warnings:[/bold]")
+        output("─" * 60)
+        for warning in warning_messages:
+            output(f"  [yellow]{warning}[/yellow]", is_warning=True)
+        output("")
 
-    console.print("━" * 60)
-    console.print("[dim]Note: This is a preview only. No tools will be executed.[/dim]")
-    console.print("[dim]Remove --dry-run to execute the agent.[/dim]")
-    console.print()
+    output("━" * 60)
+    output("[dim]Note: This is a preview only. No tools will be executed.[/dim]")
+    output("[dim]Remove --dry-run to execute the agent.[/dim]")
+    output("")

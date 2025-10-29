@@ -5,7 +5,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from tsugite.ui.base import UIEvent
+from tsugite.events import StreamChunkEvent, StreamCompleteEvent, TaskStartEvent, ToolCallEvent
 from tsugite.ui.textual_handler import TextualUIHandler
 from tsugite.ui.widgets import MessageList
 
@@ -36,7 +36,8 @@ class TestTextualUIHandler:
         handler.current_tools = ["tool1", "tool2"]
 
         # Handle task start
-        handler.handle_event(UIEvent.TASK_START, {"task": "Test task"})
+        event = TaskStartEvent(task="Test task", model="test-model")
+        handler.handle_event(event)
 
         # Tools should be reset
         assert handler.current_tools == []
@@ -48,7 +49,8 @@ class TestTextualUIHandler:
         handler = TextualUIHandler(on_tool_call=tool_callback)
 
         # Handle tool call
-        handler.handle_event(UIEvent.TOOL_CALL, {"content": "Tool: read_file"})
+        event = ToolCallEvent(tool="read_file", args={})
+        handler.handle_event(event)
 
         # Tool should be added
         assert "read_file" in handler.current_tools
@@ -58,9 +60,9 @@ class TestTextualUIHandler:
         """Test that multiple tool calls are all tracked."""
         handler = TextualUIHandler()
 
-        handler.handle_event(UIEvent.TOOL_CALL, {"content": "Tool: read_file"})
-        handler.handle_event(UIEvent.TOOL_CALL, {"content": "Tool: write_file"})
-        handler.handle_event(UIEvent.TOOL_CALL, {"content": "Tool: web_search"})
+        handler.handle_event(ToolCallEvent(tool="read_file", args={}))
+        handler.handle_event(ToolCallEvent(tool="write_file", args={}))
+        handler.handle_event(ToolCallEvent(tool="web_search", args={}))
 
         assert handler.current_tools == ["read_file", "write_file", "web_search"]
 
@@ -89,8 +91,8 @@ class TestTextualUIHandler:
         chunk_callback = Mock()
         handler = TextualUIHandler(on_stream_chunk=chunk_callback)
 
-        handler.handle_event(UIEvent.STREAM_CHUNK, {"chunk": "Hello "})
-        handler.handle_event(UIEvent.STREAM_CHUNK, {"chunk": "world"})
+        handler.handle_event(StreamChunkEvent(chunk="Hello "))
+        handler.handle_event(StreamChunkEvent(chunk="world"))
 
         assert handler.streaming_content == "Hello world"
         assert handler.is_streaming is True
@@ -105,7 +107,7 @@ class TestTextualUIHandler:
         handler.streaming_content = "Some content"
         handler.is_streaming = True
 
-        handler.handle_event(UIEvent.STREAM_COMPLETE, {})
+        handler.handle_event(StreamCompleteEvent())
 
         assert handler.streaming_content == ""
         assert handler.is_streaming is False

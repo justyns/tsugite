@@ -2,9 +2,24 @@
 
 import re
 from contextlib import contextmanager
-from typing import Any, Dict, Generator
+from typing import Any, Generator
 
-from tsugite.console import get_stdout_console
+from tsugite.console import get_stderr_console
+from tsugite.events import (
+    CodeExecutionEvent,
+    CostSummaryEvent,
+    ErrorEvent,
+    ExecutionLogsEvent,
+    ExecutionResultEvent,
+    FinalAnswerEvent,
+    LLMMessageEvent,
+    ObservationEvent,
+    ReasoningContentEvent,
+    ReasoningTokensEvent,
+    StepStartEvent,
+    TaskStartEvent,
+    ToolCallEvent,
+)
 from tsugite.ui.base import CustomUIHandler
 from tsugite.ui_context import clear_ui_context, set_ui_context
 
@@ -22,8 +37,9 @@ class PlainUIHandler(CustomUIHandler):
 
     def __init__(self):
         """Initialize plain UI handler with no-color console."""
-        # Create a console with no color support and force terminal for Progress spinners
-        no_color_console = get_stdout_console(no_color=True, force_terminal=True)
+        # Create a console with no color support for stderr output
+        # Note: force_terminal not needed for stderr console
+        no_color_console = get_stderr_console(no_color=True)
 
         # Initialize parent with panels disabled
         super().__init__(
@@ -73,25 +89,24 @@ class PlainUIHandler(CustomUIHandler):
         # Remove Rich color/style tags like [cyan], [/cyan], [bold], etc.
         return re.sub(r"\[/?[a-z\s]+\]", "", text)
 
-    def _handle_task_start(self, data: Dict[str, Any]) -> None:
+    def _handle_task_start(self, event: TaskStartEvent) -> None:
         """Handle task start event with plain text output."""
-        self.state.task = data.get("task")
+        self.state.task = event.task
         self.state.current_step = 0
         self.state.steps_history = []
 
-        # Show plain text header
-        self.console.print()
-        self.console.rule("Starting Agent Execution")
-        self.console.print(f"Task: {self.state.task}")
-        model = data.get("model", "")
+        # Show plain text task details (main banner already shown by CLI)
+        # Only show full prompt with --verbose (via show_debug_messages flag)
+        if self.show_debug_messages:
+            self.console.print(f"Task: {self.state.task}")
+        model = event.model
         if model:
             self.console.print(f"Model: {model}")
-        self.console.rule()
         self.console.print()
 
-    def _handle_step_start(self, data: Dict[str, Any]) -> None:
+    def _handle_step_start(self, event: StepStartEvent) -> None:
         """Handle step start event with plain text output."""
-        self.state.current_step = data.get("step", self.state.current_step + 1)
+        self.state.current_step = event.step
 
         # Show "Turn" for reasoning iterations
         label = f"Turn {self.state.current_step}"
@@ -101,9 +116,9 @@ class PlainUIHandler(CustomUIHandler):
         # Add step to history
         self.state.steps_history.append({"step": self.state.current_step, "status": "in_progress", "actions": []})
 
-    def _handle_code_execution(self, data: Dict[str, Any]) -> None:
+    def _handle_code_execution(self, event: CodeExecutionEvent) -> None:
         """Handle code execution event with plain text output."""
-        self.state.code_being_executed = data.get("code")
+        self.state.code_being_executed = event.code
 
         self.console.print("Executing code...")
 
@@ -114,9 +129,9 @@ class PlainUIHandler(CustomUIHandler):
             self.console.rule(style="dim")
             self.console.print()
 
-    def _handle_tool_call(self, data: Dict[str, Any]) -> None:
+    def _handle_tool_call(self, event: ToolCallEvent) -> None:
         """Handle tool call event with plain text output."""
-        content = data.get("content", "")
+        content = event.tool
 
         self.console.print("Calling tool...")
 
@@ -124,9 +139,9 @@ class PlainUIHandler(CustomUIHandler):
         if self.state.steps_history:
             self.state.steps_history[-1]["actions"].append({"type": "tool_call", "content": content})
 
-    def _handle_observation(self, data: Dict[str, Any]) -> None:
+    def _handle_observation(self, event: ObservationEvent) -> None:
         """Handle observation event with plain text output."""
-        observation = data.get("observation", "")
+        observation = event.observation
 
         self.console.print("Processing results...")
 
@@ -168,9 +183,9 @@ class PlainUIHandler(CustomUIHandler):
             self.state.steps_history[-1]["actions"].append({"type": "observation", "content": observation})
             self.state.steps_history[-1]["status"] = "completed"
 
-    def _handle_final_answer(self, data: Dict[str, Any]) -> None:
+    def _handle_final_answer(self, event: FinalAnswerEvent) -> None:
         """Handle final answer event with plain text output."""
-        answer = data.get("answer", "")
+        answer = str(event.answer)
 
         self.console.print("Finalizing answer...")
 
@@ -180,10 +195,10 @@ class PlainUIHandler(CustomUIHandler):
         self.console.rule()
         self.console.print()
 
-    def _handle_error(self, data: Dict[str, Any]) -> None:
+    def _handle_error(self, event: ErrorEvent) -> None:
         """Handle error event with plain text output."""
-        error = data.get("error", "")
-        error_type = data.get("error_type", "Error")
+        error = event.error
+        error_type = event.error_type or "Error"
 
         self.console.print("Error occurred...")
 
@@ -199,13 +214,13 @@ class PlainUIHandler(CustomUIHandler):
             self.state.steps_history[-1]["actions"].append({"type": "error", "content": error})
             self.state.steps_history[-1]["status"] = "error"
 
-    def _handle_llm_message(self, data: Dict[str, Any]) -> None:
+    def _handle_llm_message(self, event: LLMMessageEvent) -> None:
         """Handle LLM reasoning message event with plain text output."""
         if not self.show_llm_messages:
             return
 
-        content = data.get("content", "")
-        title = data.get("title", "Agent Reasoning")
+        content = event.content
+        title = event.title or "Agent Reasoning"
 
         if content.strip():
             self.console.print()
@@ -214,10 +229,10 @@ class PlainUIHandler(CustomUIHandler):
             self.console.rule(style="dim")
             self.console.print()
 
-    def _handle_reasoning_content(self, data: Dict[str, Any]) -> None:
+    def _handle_reasoning_content(self, event: ReasoningContentEvent) -> None:
         """Handle reasoning content with plain text output."""
-        content = data.get("content", "")
-        step = data.get("step")
+        content = event.content
+        step = event.step
 
         if content and content.strip():
             # Build title with turn number if available
@@ -240,10 +255,10 @@ class PlainUIHandler(CustomUIHandler):
             self.console.rule(style="dim")
             self.console.print()
 
-    def _handle_reasoning_tokens(self, data: Dict[str, Any]) -> None:
+    def _handle_reasoning_tokens(self, event: ReasoningTokensEvent) -> None:
         """Handle reasoning token counts with plain text output."""
-        tokens = data.get("tokens", 0)
-        step = data.get("step")
+        tokens = event.tokens
+        step = event.step
 
         if tokens:
             # Build message with turn number if available
@@ -254,26 +269,29 @@ class PlainUIHandler(CustomUIHandler):
 
             self.console.print(message)
 
-    def _handle_cost_summary(self, data: Dict[str, Any]) -> None:
+    def _handle_cost_summary(self, event: CostSummaryEvent) -> None:
         """Handle cost summary display after final answer."""
-        cost = data.get("cost")
-        total_tokens = data.get("total_tokens")
-        reasoning_tokens = data.get("reasoning_tokens")
+        cost = event.cost
+        tokens = event.tokens
+        duration_seconds = event.duration_seconds
+        # reasoning_tokens is not in CostSummaryEvent, pass None
 
-        summary_text = self._build_cost_summary_text(cost, total_tokens, reasoning_tokens, include_emojis=False)
+        summary_text = self._build_cost_summary_text(
+            cost, tokens, None, include_emojis=False, duration_seconds=duration_seconds
+        )
         if not summary_text:
             return
 
         self.console.print(f"\n{summary_text}\n")
 
-    def _handle_execution_result(self, data: Dict[str, Any]) -> None:
+    def _handle_execution_result(self, event: ExecutionResultEvent) -> None:
         """Handle code execution result event with plain text output."""
         if not self.show_execution_results:
             return
 
         self.console.print("Processing execution results...")
 
-        content = data.get("content", "")
+        content = event.result
 
         if content.strip():
             # Parse execution logs and output using shared helper from parent class
@@ -311,12 +329,12 @@ class PlainUIHandler(CustomUIHandler):
                 elif output_text.strip() and output_text.strip().lower() not in ("none", "null", ""):
                     self.console.print(f"Output: {output_text}")
 
-    def _handle_execution_logs(self, data: Dict[str, Any]) -> None:
+    def _handle_execution_logs(self, event: ExecutionLogsEvent) -> None:
         """Handle execution logs event with plain text output."""
         if not self.show_execution_logs:
             return
 
-        content = data.get("content", "")
+        content = event.logs
 
         if content.strip() and "Execution logs:" in content:
             # Extract just the log content
@@ -324,18 +342,18 @@ class PlainUIHandler(CustomUIHandler):
             if logs:
                 self.console.print(f"Logs: {logs}")
 
-    def _handle_subagent_start(self, data: Dict[str, Any]) -> None:
+    def _handle_subagent_start(self, event: Any) -> None:
         """Handle subagent start event with plain text output."""
-        agent_name = data.get("agent_name", "unknown")
+        agent_name = getattr(event, "agent_name", "unknown")
 
         self.console.print(f"Spawning {agent_name}...")
         self.console.print()
         self.console.rule(f"{agent_name} agent")
         self.console.print()
 
-    def _handle_subagent_end(self, data: Dict[str, Any]) -> None:
+    def _handle_subagent_end(self, event: Any) -> None:
         """Handle subagent end event with plain text output."""
-        agent_name = data.get("agent_name", "unknown")
+        agent_name = getattr(event, "agent_name", "unknown")
 
         self.console.print()
         self.console.rule()

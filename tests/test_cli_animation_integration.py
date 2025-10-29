@@ -90,7 +90,8 @@ class TestAnimationIntegrationScenarios:
 
             assert result.exit_code == 0
 
-    def test_animation_interruption_handling(self, cli_runner, sample_agent_file):
+    @patch("tsugite.utils.should_use_plain_output", return_value=False)
+    def test_animation_interruption_handling(self, mock_plain_output, cli_runner, sample_agent_file):
         """Test animation behavior when agent execution is interrupted."""
 
         with (
@@ -105,7 +106,7 @@ class TestAnimationIntegrationScenarios:
             mock_context = MagicMock()
             mock_custom_ui.return_value = mock_context
 
-            result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--native-ui"])
+            result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt"])
 
             assert result.exit_code == 130  # Standard exit code for KeyboardInterrupt
             # Context manager __exit__ should have been called during cleanup
@@ -159,15 +160,16 @@ class TestAnimationIntegrationScenarios:
 class TestAnimationModeDetection:
     """Test animation mode detection logic."""
 
-    def test_interactive_mode_detection(self, cli_runner, sample_agent_file):
-        """Test detection of interactive vs non-interactive mode with native UI."""
+    @patch("tsugite.utils.should_use_plain_output", return_value=False)
+    def test_interactive_mode_detection(self, mock_plain_output, cli_runner, sample_agent_file):
+        """Test detection of interactive vs non-interactive mode with default UI."""
 
         test_cases = [
             # (args, expected_progress)
-            (["--native-ui"], True),  # Native UI interactive mode
-            (["--native-ui", "--non-interactive"], True),  # Non-interactive doesn't affect progress
-            (["--native-ui", "--no-color"], False),  # No color mode disables progress
-            (["--native-ui", "--non-interactive", "--no-color"], False),  # Both flags - no-color disables progress
+            ([], True),  # Default UI interactive mode
+            (["--non-interactive"], True),  # Non-interactive doesn't affect progress
+            (["--no-color"], False),  # No color mode disables progress
+            (["--non-interactive", "--no-color"], False),  # Both flags - no-color disables progress
         ]
 
         for args, expected_progress in test_cases:
@@ -189,7 +191,8 @@ class TestAnimationModeDetection:
                 call_args = mock_custom_ui.call_args
                 assert call_args.kwargs["show_progress"] == expected_progress
 
-    def test_color_detection_logic(self, cli_runner, sample_agent_file):
+    @patch("tsugite.utils.should_use_plain_output", return_value=False)
+    def test_color_detection_logic(self, mock_plain_output, cli_runner, sample_agent_file):
         """Test color detection affects animation mode."""
 
         with (
@@ -204,9 +207,7 @@ class TestAnimationModeDetection:
                 mock_custom_ui.return_value.__enter__ = MagicMock(return_value=MagicMock())
                 mock_custom_ui.return_value.__exit__ = MagicMock(return_value=None)
 
-                result = cli_runner.invoke(
-                    app, ["run", str(sample_agent_file), "test prompt", "--native-ui", "--no-color"]
-                )
+                result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--no-color"])
 
                 assert result.exit_code == 0
                 call_args = mock_custom_ui.call_args

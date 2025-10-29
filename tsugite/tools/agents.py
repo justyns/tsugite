@@ -75,16 +75,19 @@ def spawn_agent(
     import queue
     import threading
 
-    from ..ui_context import get_console, get_progress, get_ui_handler
+    from ..ui_context import get_progress, get_ui_handler
 
     progress = get_progress()
-    console = get_console()
     ui_handler = get_ui_handler()
     agent_name = agent_file.stem
 
-    # Show initial message
-    if console and not progress:
-        console.print(f"🚀 Spawning subagent: [cyan]{agent_name}[/cyan]...")
+    # Show initial message through event system
+    if ui_handler and not progress:
+        from ..events import EventBus, InfoEvent
+
+        event_bus = EventBus()
+        event_bus.subscribe(ui_handler.handle_event)
+        event_bus.emit(InfoEvent(message=f"🚀 Spawning subagent: [cyan]{agent_name}[/cyan]..."))
 
     try:
         # Spawn subprocess with line buffering
@@ -143,6 +146,11 @@ def spawn_agent(
             # Process JSONL event
             try:
                 event = json.loads(line.strip())
+
+                # Skip non-dict events (e.g., if line is just a number)
+                if not isinstance(event, dict):
+                    continue
+
                 event_type = event.get("type")
 
                 # Update progress spinner for key events only
@@ -203,12 +211,12 @@ def spawn_agent(
 
 def _show_progress(message: str):
     """Show subagent progress in parent UI."""
-    from ..ui.base import UIEvent
+    from ..events import InfoEvent
     from ..ui_context import get_ui_handler
 
     ui = get_ui_handler()
     if ui:
-        ui.handle_event(UIEvent.INFO, {"message": f"[Subagent] {message}"})
+        ui.handle_event(InfoEvent(message=f"[Subagent] {message}"))
 
 
 @tool

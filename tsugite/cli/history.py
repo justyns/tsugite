@@ -112,7 +112,8 @@ def history_show(
             # JSON output - convert Pydantic models to dicts
             turns_as_dicts = [t.model_dump(mode="json") for t in turns]
             output = json.dumps(turns_as_dicts, indent=2, ensure_ascii=False)
-            console.print(output)
+            # Use plain print to avoid Rich wrapping that breaks JSON
+            print(output)
 
         elif format == "markdown":
             # Markdown output
@@ -134,6 +135,30 @@ def history_show(
 
                     if turn.tools:
                         console.print(f"*Tools*: {', '.join(turn.tools)}\n")
+
+                    # Display execution steps if available
+                    if turn.steps:
+                        console.print("### Execution Steps\n")
+                        for step in turn.steps:
+                            step_num = step.get("step_number", "?")
+                            thought = step.get("thought", "").strip()
+                            code = step.get("code", "").strip()
+                            output = step.get("output", "").strip()
+                            error = step.get("error")
+                            tools_called = step.get("tools_called", [])
+
+                            console.print(f"**Step {step_num}**\n")
+                            if thought:
+                                console.print(f"*Thought*: {thought}\n")
+                            if tools_called:
+                                console.print(f"*Tools used*: {', '.join(tools_called)}\n")
+                            if code:
+                                console.print("*Code*:")
+                                console.print(f"```python\n{code}\n```\n")
+                            if output:
+                                console.print(f"*Output*: {output}\n")
+                            if error:
+                                console.print(f"*Error*: {error}\n")
 
                     console.print(f"*Tokens*: {turn.tokens or 0} | *Cost*: ${turn.cost or 0.0:.4f}\n")
                     console.print("---\n")

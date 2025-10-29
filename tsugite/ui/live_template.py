@@ -17,7 +17,7 @@ See CLAUDE.md for full UI system documentation.
 """
 
 from contextlib import contextmanager
-from typing import Any, Dict, Generator, Optional
+from typing import Generator, Optional
 
 from rich.console import Console
 from rich.layout import Layout
@@ -27,6 +27,17 @@ from rich.prompt import Confirm, Prompt
 from rich.table import Table
 from rich.tree import Tree
 
+from tsugite.events import (
+    CodeExecutionEvent,
+    CostSummaryEvent,
+    ErrorEvent,
+    FinalAnswerEvent,
+    ObservationEvent,
+    ReasoningContentEvent,
+    StepStartEvent,
+    TaskStartEvent,
+    ToolCallEvent,
+)
 from tsugite.ui.base import CustomUIHandler
 
 
@@ -46,11 +57,13 @@ class LiveTemplateHandler(CustomUIHandler):
         """Initialize the live template handler.
 
         Args:
-            console: Rich console instance (creates default if None)
+            console: Rich console instance (creates stderr console if None)
             interactive: Whether to enable interactive prompts
         """
         if console is None:
-            console = Console()
+            from tsugite.console import get_stderr_console
+
+            console = get_stderr_console()
 
         # Initialize parent with your preferred flags
         super().__init__(
@@ -240,9 +253,9 @@ class LiveTemplateHandler(CustomUIHandler):
     # Event Handlers - Override these to customize behavior
     # ============================================================================
 
-    def _handle_task_start(self, data: Dict[str, Any]) -> None:
+    def _handle_task_start(self, event: TaskStartEvent) -> None:
         """Handle task start event."""
-        self.state.task = data.get("task")
+        self.state.task = event.task
         self.current_status = "Starting..."
 
         # Create root of execution tree
@@ -255,9 +268,9 @@ class LiveTemplateHandler(CustomUIHandler):
 
         self._update_live_display()
 
-    def _handle_step_start(self, data: Dict[str, Any]) -> None:
+    def _handle_step_start(self, event: StepStartEvent) -> None:
         """Handle step start event."""
-        self.state.current_step = data.get("step", self.state.current_step + 1)
+        self.state.current_step = event.step
         self.step_count = self.state.current_step
         self.current_status = f"Step {self.state.current_step}: Thinking..."
 
@@ -272,9 +285,9 @@ class LiveTemplateHandler(CustomUIHandler):
 
         self._update_live_display()
 
-    def _handle_code_execution(self, data: Dict[str, Any]) -> None:
+    def _handle_code_execution(self, event: CodeExecutionEvent) -> None:
         """Handle code execution event."""
-        self.state.code_being_executed = data.get("code")
+        self.state.code_being_executed = event.code
         self.current_status = f"Step {self.state.current_step}: Executing code..."
 
         # Add code execution to tree
@@ -289,9 +302,9 @@ class LiveTemplateHandler(CustomUIHandler):
 
         self._update_live_display()
 
-    def _handle_tool_call(self, data: Dict[str, Any]) -> None:
+    def _handle_tool_call(self, event: ToolCallEvent) -> None:
         """Handle tool call event."""
-        content = data.get("content", "")
+        content = event.tool
 
         # Extract tool name from content
         if "Calling tool:" in content:
@@ -306,9 +319,9 @@ class LiveTemplateHandler(CustomUIHandler):
 
         self._update_live_display()
 
-    def _handle_observation(self, data: Dict[str, Any]) -> None:
+    def _handle_observation(self, event: ObservationEvent) -> None:
         """Handle observation event."""
-        observation = data.get("observation", "")
+        observation = event.observation
         self.current_status = f"Step {self.state.current_step}: Processing results..."
 
         # Check for errors in observation
@@ -329,9 +342,9 @@ class LiveTemplateHandler(CustomUIHandler):
 
         self._update_live_display()
 
-    def _handle_final_answer(self, data: Dict[str, Any]) -> None:
+    def _handle_final_answer(self, event: FinalAnswerEvent) -> None:
         """Handle final answer event."""
-        answer = data.get("answer", "")
+        answer = str(event.answer)
         self.current_status = "✅ Complete"
 
         # Add final answer to tree
@@ -353,10 +366,10 @@ class LiveTemplateHandler(CustomUIHandler):
             #     # Could trigger retry or refinement
             #     pass
 
-    def _handle_error(self, data: Dict[str, Any]) -> None:
+    def _handle_error(self, event: ErrorEvent) -> None:
         """Handle error event."""
-        error = data.get("error", "")
-        error_type = data.get("error_type", "Error")
+        error = event.error
+        error_type = event.error_type or "Error"
 
         self.errors.append(f"{error_type}: {error[:100]}")
         self.current_status = f"❌ {error_type}"
@@ -367,9 +380,9 @@ class LiveTemplateHandler(CustomUIHandler):
 
         self._update_live_display()
 
-    def _handle_reasoning_content(self, data: Dict[str, Any]) -> None:
+    def _handle_reasoning_content(self, event: ReasoningContentEvent) -> None:
         """Handle reasoning content from models like Claude."""
-        content = data.get("content", "")
+        content = event.content
 
         # Add reasoning to tree
         if self.execution_tree and content:
@@ -378,10 +391,10 @@ class LiveTemplateHandler(CustomUIHandler):
 
         self._update_live_display()
 
-    def _handle_cost_summary(self, data: Dict[str, Any]) -> None:
+    def _handle_cost_summary(self, event: CostSummaryEvent) -> None:
         """Handle cost summary display."""
-        cost = data.get("cost")
-        total_tokens = data.get("total_tokens")
+        cost = event.cost
+        total_tokens = event.total_tokens
 
         # Update footer with cost info
         if cost or total_tokens:
@@ -471,9 +484,9 @@ class LiveTableHandler(LiveTemplateHandler):
             border_style="green",
         )
 
-    def _handle_step_start(self, data: Dict[str, Any]) -> None:
+    def _handle_step_start(self, event: StepStartEvent) -> None:
         """Add step as table row."""
-        step = data.get("step", 1)
+        step = event.step
         self.steps_table.add_row(
             f"Step {step}",
             "[yellow]Running[/yellow]",

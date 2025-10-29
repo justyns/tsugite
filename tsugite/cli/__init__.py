@@ -1,5 +1,6 @@
 """Tsugite CLI application - main entry point."""
 
+import sys
 from pathlib import Path
 from typing import List, Optional
 
@@ -37,6 +38,7 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
+# Global console for CLI messages (version, help, errors) - uses stdout
 console = Console()
 
 
@@ -56,10 +58,9 @@ def _build_docker_command(
     plain: bool,
     show_reasoning: bool,
     no_color: bool,
-    silent: bool,
+    final_only: bool,
     log_json: bool,
     non_interactive: bool,
-    native_ui: bool,
     trust_mcp_code: bool,
     attachment: Optional[List[str]],
     refresh_cache: bool,
@@ -82,10 +83,9 @@ def _build_docker_command(
         plain: Plain output flag
         show_reasoning: Show reasoning flag
         no_color: No color flag
-        silent: Silent flag
+        final_only: Final only flag
         log_json: JSON logging flag
         non_interactive: Non-interactive flag
-        native_ui: Native UI flag
         trust_mcp_code: Trust MCP code flag
         attachment: Attachment list
         refresh_cache: Refresh cache flag
@@ -132,14 +132,12 @@ def _build_docker_command(
         cmd.append("--show-reasoning")
     if no_color:
         cmd.append("--no-color")
-    if silent:
-        cmd.append("--silent")
+    if final_only:
+        cmd.append("--final-only")
     if log_json:
         cmd.append("--log-json")
     if non_interactive:
         cmd.append("--non-interactive")
-    if native_ui:
-        cmd.append("--native-ui")
     if trust_mcp_code:
         cmd.append("--trust-mcp-code")
     if attachment:
@@ -151,21 +149,17 @@ def _build_docker_command(
     return cmd
 
 
-def _resolve_ui_mode(
-    ui: Optional[str], plain: bool, headless: bool, silent: bool, native_ui: bool, console: Console
-) -> tuple[bool, bool, bool, bool, bool]:
+def _resolve_ui_mode(ui: Optional[str], plain: bool, headless: bool, console: Console) -> tuple[bool, bool, bool]:
     """Resolve UI mode flag to individual UI control flags.
 
     Args:
-        ui: UI mode string (rich, plain, minimal, headless, silent, live)
+        ui: UI mode string (plain, headless, live)
         plain: Plain output flag
         headless: Headless mode flag
-        silent: Silent mode flag
-        native_ui: Native UI flag
         console: Console for error output
 
     Returns:
-        Tuple of (plain, headless, silent, native_ui, live_ui) flags
+        Tuple of (plain, headless, live_ui) flags
 
     Raises:
         typer.Exit: If invalid UI mode or conflicting flags
@@ -173,20 +167,17 @@ def _resolve_ui_mode(
     live_ui = False
 
     if not ui:
-        return plain, headless, silent, native_ui, live_ui
+        return plain, headless, live_ui
 
     # Check for conflicts
-    if any([plain, headless, silent, native_ui]):
-        console.print("[red]Error: --ui cannot be used with --plain, --headless, --silent, or --native-ui[/red]")
+    if any([plain, headless]):
+        console.print("[red]Error: --ui cannot be used with --plain or --headless[/red]")
         raise typer.Exit(1)
 
     # Map UI mode to flags
     ui_modes = {
-        "rich": {},  # Default - no changes
         "plain": {"plain": True},
-        "minimal": {"native_ui": True},
         "headless": {"headless": True},
-        "silent": {"silent": True},
         "live": {"live_ui": True},
     }
 
@@ -199,11 +190,9 @@ def _resolve_ui_mode(
     mode_settings = ui_modes[ui_lower]
     plain = mode_settings.get("plain", plain)
     headless = mode_settings.get("headless", headless)
-    silent = mode_settings.get("silent", silent)
-    native_ui = mode_settings.get("native_ui", native_ui)
     live_ui = mode_settings.get("live_ui", live_ui)
 
-    return plain, headless, silent, native_ui, live_ui
+    return plain, headless, live_ui
 
 
 @app.command()
@@ -216,16 +205,15 @@ def run(
         None, "--with-agents", help="Additional agents (comma or space separated)"
     ),
     model: Optional[str] = typer.Option(None, "--model", help="Override agent model"),
-    ui: Optional[str] = typer.Option(
-        None, "--ui", help="UI mode: rich (default), plain, minimal, headless, silent, or live"
-    ),
+    ui: Optional[str] = typer.Option(None, "--ui", help="UI mode: plain, headless, or live (default: minimal)"),
     non_interactive: bool = typer.Option(False, "--non-interactive", help="Run without interactive prompts"),
     history_dir: Optional[str] = typer.Option(None, "--history-dir", help="Directory to store history files"),
     no_color: bool = typer.Option(False, "--no-color", help="Disable ANSI colors"),
     log_json: bool = typer.Option(False, "--log-json", help="Machine-readable output"),
     debug: bool = typer.Option(False, "--debug", help="Show rendered prompt before execution"),
-    native_ui: bool = typer.Option(False, "--native-ui", help="Use minimal output without custom UI panels"),
-    silent: bool = typer.Option(False, "--silent", help="Suppress all agent output"),
+    final_only: bool = typer.Option(
+        False, "--final-only", "--quiet", help="Output only the final answer (suppress progress)"
+    ),
     show_reasoning: bool = typer.Option(
         True, "--show-reasoning/--no-show-reasoning", help="Show LLM reasoning messages (default: enabled)"
     ),
@@ -269,7 +257,7 @@ def run(
     # Lazy imports - only load heavy dependencies when actually running agents
     from tsugite.agent_runner import get_agent_info, run_agent
     from tsugite.md_agents import validate_agent_execution
-    from tsugite.ui import create_live_template_logger, create_plain_logger, create_silent_logger, custom_agent_ui
+    from tsugite.ui import create_live_template_logger, create_plain_logger, custom_agent_ui
     from tsugite.utils import should_use_plain_output
 
     if history_dir:
@@ -279,22 +267,18 @@ def run(
         console.no_color = True
 
     # Resolve UI mode to individual flags
-    plain, headless, silent, native_ui, live_ui = _resolve_ui_mode(ui, plain, headless, silent, native_ui, console)
+    plain, headless, live_ui = _resolve_ui_mode(ui, plain, headless, console)
 
     # Handle subagent mode - override incompatible settings
     if subagent_mode:
         import os
 
         # Validate no conflicting flags
-        if plain or headless or native_ui:
-            console.print(
-                "[red]Error: --subagent-mode cannot be combined with --plain, --headless, or --native-ui[/red]"
-            )
+        if plain or headless or live_ui:
+            console.print("[red]Error: --subagent-mode cannot be combined with --plain, --headless, or --live[/red]")
             raise typer.Exit(1)
 
-        # Force compatible settings
-        ui = "silent"
-        silent = True
+        # Force compatible settings for subprocess communication
         non_interactive = True
         no_history = True
 
@@ -331,10 +315,9 @@ def run(
             plain,
             show_reasoning,
             no_color,
-            silent,
+            final_only,
             log_json,
             non_interactive,
-            native_ui,
             trust_mcp_code,
             attachment,
             refresh_cache,
@@ -416,11 +399,13 @@ def run(
         # Determine if we should use plain output (no panels/boxes)
         # Plain mode is enabled if:
         # 1. User explicitly sets --plain flag, OR
-        # 2. User explicitly sets --ui minimal (native_ui), OR
-        # 3. Output is being piped/redirected (auto-detection), OR
-        # 4. NO_COLOR environment variable is set (auto-detection), OR
-        # 5. User explicitly sets --no-color flag
-        use_plain_output = plain or native_ui or no_color or should_use_plain_output()
+        # 2. Output is being piped/redirected (auto-detection via should_use_plain_output)
+        # Note: --no-color disables colors but still allows custom_agent_ui with animations
+        use_plain_output = plain or should_use_plain_output()
+
+        # Create stderr console for agent execution progress
+        # This ensures all progress messages go to stderr, keeping stdout clean for final answer
+        stderr_console = Console(file=sys.stderr, no_color=no_color)
 
         # Get agent info for display
         agent_info = get_agent_info(agent_file)
@@ -440,8 +425,8 @@ def run(
         if not headless:
             # Display ASCII logo (adaptive based on terminal width) - skip in plain mode
             if not use_plain_output:
-                console.print(get_logo(console), style="cyan")
-                console.print()  # blank line for spacing
+                stderr_console.print(get_logo(stderr_console), style="cyan")
+                stderr_console.print()  # blank line for spacing
 
             # Prepare info items
             info_items = {
@@ -465,19 +450,10 @@ def run(
             if expanded_files:
                 info_items["Expanded Files"] = ", ".join(expanded_files)
 
-            # Display as panel or plain text based on mode
+            # Display info based on mode
             if use_plain_output:
-                print_plain_info(console, "Tsugite Agent Runner", info_items, style="cyan")
-            else:
-                # Build panel content
-                panel_content = "\n".join([f"[cyan]{label}:[/cyan] {value}" for label, value in info_items.items()])
-                console.print(
-                    Panel(
-                        panel_content,
-                        title="Tsugite Agent Runner",
-                        border_style="blue",
-                    )
-                )
+                print_plain_info(stderr_console, "Tsugite Agent Runner", info_items, style="cyan")
+            # In minimal mode (default), skip the panel display entirely for cleaner output
 
         # Validate agent before execution
         is_valid, error_msg = validate_agent_execution(agent_file)
@@ -518,73 +494,32 @@ def run(
         # Determine if we should save to history (enabled by default unless --no-history flag)
         should_save_history = not no_history
 
-        # Skip "Starting agent execution" in headless mode
-        if not headless:
+        # Skip "Starting agent execution" in headless or final_only mode
+        if not headless and not final_only:
             execution_type = "multi-step agent" if is_multistep else "agent"
-            console.print(f"[green]Starting {execution_type} execution...[/green]")
+            stderr_console.print()
+            stderr_console.rule(f"[bold cyan]🚀 Starting {execution_type.title()} Execution[/bold cyan]")
+            stderr_console.print()
 
         try:
             # Choose execution mode based on flags
-            if silent:
-                # Completely silent execution
-                executor_kwargs = {
-                    "agent_path": agent_file,
-                    "prompt": prompt,
-                    "model_override": model,
-                    "debug": debug,
-                    "custom_logger": create_silent_logger(),
-                    "trust_mcp_code": trust_mcp_code,
-                    "delegation_agents": delegation_agents,
-                    "stream": stream,
-                    "continue_conversation_id": continue_conversation_id,
-                }
-                # Only pass return_token_usage if history is enabled and we're using run_agent
-                if should_save_history and executor == run_agent:
-                    executor_kwargs["return_token_usage"] = True
-                result = executor(**executor_kwargs)
-            elif headless:
-                # Headless mode: stderr for progress (if verbose), stdout for result
+            if headless or final_only:
+                # Headless/final-only mode: stderr for progress (if verbose and not final_only), stdout for result
                 stderr_console = get_error_console(True, console)
+
+                # In final_only mode, suppress all progress; in headless, respect verbose flag
+                show_progress_items = verbose and not final_only
 
                 with custom_agent_ui(
                     console=stderr_console,
-                    show_code=verbose,
-                    show_observations=verbose,
-                    show_progress=False,  # No spinners in headless
-                    show_llm_messages=verbose,
-                    show_execution_results=verbose,
-                    show_execution_logs=verbose,
-                    show_panels=False,  # No panels in headless
-                ) as custom_logger:
-                    executor_kwargs = {
-                        "agent_path": agent_file,
-                        "prompt": prompt,
-                        "model_override": model,
-                        "debug": debug,
-                        "custom_logger": custom_logger,
-                        "trust_mcp_code": trust_mcp_code,
-                        "delegation_agents": delegation_agents,
-                        "stream": stream,
-                        "continue_conversation_id": continue_conversation_id,
-                    }
-                    if should_save_history and executor == run_agent:
-                        executor_kwargs["return_token_usage"] = True
-                    result = executor(**executor_kwargs)
-            elif native_ui:
-                # Minimal: colors and animations, but no panel boxes
-                # Force terminal mode for progress rendering
-                import sys
-
-                minimal_console = Console(file=sys.stdout, force_terminal=True, no_color=no_color)
-                with custom_agent_ui(
-                    console=minimal_console,
-                    show_code=not non_interactive,
-                    show_observations=not non_interactive,
-                    show_progress=not no_color,
-                    show_llm_messages=show_reasoning,
-                    show_execution_results=True,
-                    show_execution_logs=verbose,
-                    show_panels=False,  # No panel boxes - just colors and animations
+                    show_code=show_progress_items,
+                    show_observations=show_progress_items,
+                    show_progress=False,  # No spinners in headless/final-only
+                    show_llm_messages=show_progress_items,
+                    show_execution_results=show_progress_items,
+                    show_execution_logs=show_progress_items,
+                    show_panels=False,  # No panels in headless/final-only
+                    show_debug_messages=verbose,  # Only show debug messages with --verbose
                 ) as custom_logger:
                     executor_kwargs = {
                         "agent_path": agent_file,
@@ -640,16 +575,19 @@ def run(
                             executor_kwargs["return_token_usage"] = True
                         result = executor(**executor_kwargs)
                 else:
-                    # Use custom UI with panels and formatting
+                    # Default: minimal UI (colors but no panels/boxes)
+                    # Use stderr for progress to not interfere with stdout (subagent protocol)
+                    default_console = Console(file=sys.stderr, force_terminal=True, no_color=no_color)
                     with custom_agent_ui(
-                        console=console,
+                        console=default_console,
                         show_code=not non_interactive,
                         show_observations=not non_interactive,
                         show_progress=not no_color,
                         show_llm_messages=show_reasoning,
                         show_execution_results=True,
                         show_execution_logs=verbose,
-                        show_panels=not no_color,  # Disable panels when no_color to avoid ANSI codes
+                        show_panels=False,  # No panels by default (minimal mode)
+                        show_debug_messages=verbose,  # Only show debug messages with --verbose
                     ) as custom_logger:
                         executor_kwargs = {
                             "agent_path": agent_file,
@@ -677,8 +615,6 @@ def run(
 
             # Save to history (unless disabled)
             if should_save_history:
-                import sys
-
                 try:
                     from tsugite.agent_runner.history_integration import save_run_to_history
 
@@ -699,17 +635,15 @@ def run(
                     print(f"Warning: Failed to save to history: {e}", file=sys.stderr)
 
             # Display result
-            if headless:
-                # Headless: plain result to stdout
+            if headless or final_only:
+                # Headless/final-only: plain result to stdout
                 get_output_console().print(result_str)
-            elif native_ui:
-                # Minimal: UI handler already showed output during execution
-                pass
-            elif not silent:
-                console.print("\n" + "=" * 50)
-                console.print("[bold green]Agent Execution Complete[/bold green]")
-                console.print("=" * 50)
-                console.print(result_str)
+            else:
+                # Show completion banner to stderr
+                stderr_console.print()
+                stderr_console.rule("[bold green]Agent Execution Complete[/bold green]")
+                # Output final result to stdout (for piping)
+                get_output_console().print(result_str)
 
         except ValueError as e:
             get_error_console(headless, console).print(f"[red]Configuration error: {e}[/red]")

@@ -9,16 +9,14 @@ This module provides a flexible UI system with multiple handlers:
 Use the helper functions to create loggers:
 - custom_agent_ui(): Context manager for rich UI
 - create_plain_logger(): Plain text logger
-- create_silent_logger(): Silent logger (no output)
 - create_live_template_logger(): Live display with tree visualization
 """
 
-from tsugite.ui.base import CustomUIHandler, CustomUILogger, UIEvent, UIState
+from tsugite.ui.base import CustomUIHandler, CustomUILogger, UIState
 from tsugite.ui.chat import ChatManager, ChatTurn
 from tsugite.ui.helpers import (
     create_live_template_logger,
     create_plain_logger,
-    create_silent_logger,
     custom_agent_ui,
 )
 from tsugite.ui.live_template import LiveTemplateHandler
@@ -31,7 +29,6 @@ from tsugite.ui import textual_chat  # noqa: F401  # isort: skip
 
 __all__ = [
     # Core classes
-    "UIEvent",
     "UIState",
     "CustomUILogger",
     # UI Handlers
@@ -44,7 +41,6 @@ __all__ = [
     "ChatTurn",
     # Helper functions
     "custom_agent_ui",
-    "create_silent_logger",
     "create_plain_logger",
     "create_live_template_logger",
 ]

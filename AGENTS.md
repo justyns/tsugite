@@ -15,6 +15,7 @@ Quick reference for building, composing, and running Tsugite agents.
 | Debug prompt | `tsugite run agent.md "task" --debug` |
 | Plain output | `tsugite run +agent "task" --plain` |
 | Headless (CI) | `tsugite run +agent "task" --headless` |
+| Final only | `tsugite run +agent "task" --final-only` (or `--quiet`) |
 | Render prompt | `tsugite render agent.md "task"` |
 | Render raw | `tsugite render agent.md "task" --raw` |
 | Multi-agent | `tsugite run +coordinator +helper1 +helper2 "task"` |
@@ -1162,6 +1163,44 @@ def test_tool():
     tool = get_tool("read_file")
     assert tool is not None
 ```
+
+## Event System
+
+Tsugite uses an event-driven architecture for UI and progress tracking. Events are emitted during agent execution and handled by UI modules (rich console, plain text, JSONL, Textual TUI).
+
+### Event Structure
+
+**Location:** `tsugite/events/`
+- `base.py` - EventType enum, BaseEvent class
+- `events.py` - All 19 event classes (consolidated)
+- `bus.py` - EventBus for dispatching events
+
+**19 Event Types:**
+- Execution: `TASK_START`, `STEP_START`, `CODE_EXECUTION`, `TOOL_CALL`, `OBSERVATION`, `FINAL_ANSWER`
+- LLM: `LLM_MESSAGE`, `EXECUTION_RESULT`, `EXECUTION_LOGS`, `REASONING_CONTENT`, `REASONING_TOKENS`
+- Meta: `COST_SUMMARY`, `STREAM_CHUNK`, `STREAM_COMPLETE`, `INFO`, `ERROR`
+- Progress: `DEBUG_MESSAGE`, `WARNING`, `STEP_PROGRESS`
+
+### Error Handling Patterns
+
+1. **Tool Results** (`ObservationEvent`):
+   - Success: `ObservationEvent(success=True, observation="result", tool="tool_name")`
+   - Failure: `ObservationEvent(success=False, error="error msg", tool="tool_name")`
+
+2. **Code Execution** (`ExecutionResultEvent`):
+   - Success: `ExecutionResultEvent(success=True, logs=[...], output="result")`
+   - Failure: `ExecutionResultEvent(success=False, error="error msg")`
+
+3. **General/Fatal Errors** (`ErrorEvent`):
+   - `ErrorEvent(error="error msg", error_type="Error Type", step=N)`
+   - Used for: Format errors, max turns exceeded, critical failures
+
+### JSONL Protocol
+
+For subprocess-based subagents, events are serialized to JSONL:
+- Tool results: `{"type": "tool_result", "tool": "name", "success": bool, "output"?: str, "error"?: str}`
+- Errors: `{"type": "error", "error": str, "step": int}`
+- Full schema documented in `tsugite/ui/jsonl.py`
 
 ## Additional Resources
 

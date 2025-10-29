@@ -2,7 +2,21 @@
 
 from typing import Any, Callable, Dict, Optional
 
-from tsugite.ui.base import CustomUIHandler, UIEvent
+from tsugite.events import (
+    BaseEvent,
+    CodeExecutionEvent,
+    ErrorEvent,
+    ExecutionResultEvent,
+    FinalAnswerEvent,
+    LLMMessageEvent,
+    ObservationEvent,
+    StepStartEvent,
+    StreamChunkEvent,
+    StreamCompleteEvent,
+    TaskStartEvent,
+    ToolCallEvent,
+)
+from tsugite.ui.base import CustomUIHandler
 
 
 class TextualUIHandler(CustomUIHandler):
@@ -49,26 +63,31 @@ class TextualUIHandler(CustomUIHandler):
         self.current_tools = []
         self._last_status = ""
 
-    def handle_event(self, event: UIEvent, data: Dict[str, Any]) -> None:
+    def handle_event(self, event: BaseEvent) -> None:
         """Handle UI event by calling appropriate callbacks."""
-        handlers = {
-            UIEvent.TASK_START: self._handle_task_start,
-            UIEvent.STEP_START: self._handle_step_start,
-            UIEvent.CODE_EXECUTION: self._handle_code_execution,
-            UIEvent.TOOL_CALL: self._handle_tool_call,
-            UIEvent.OBSERVATION: self._handle_observation,
-            UIEvent.FINAL_ANSWER: self._handle_final_answer,
-            UIEvent.ERROR: self._handle_error,
-            UIEvent.LLM_MESSAGE: self._handle_llm_message,
-            UIEvent.STREAM_CHUNK: self._handle_stream_chunk,
-            UIEvent.STREAM_COMPLETE: self._handle_stream_complete,
-            UIEvent.EXECUTION_RESULT: self._handle_execution_result,
-        }
-
         with self._lock:
-            handler = handlers.get(event)
-            if handler:
-                handler(data)
+            if isinstance(event, TaskStartEvent):
+                self._handle_task_start(event)
+            elif isinstance(event, StepStartEvent):
+                self._handle_step_start(event)
+            elif isinstance(event, CodeExecutionEvent):
+                self._handle_code_execution(event)
+            elif isinstance(event, ToolCallEvent):
+                self._handle_tool_call(event)
+            elif isinstance(event, ObservationEvent):
+                self._handle_observation(event)
+            elif isinstance(event, FinalAnswerEvent):
+                self._handle_final_answer(event)
+            elif isinstance(event, ErrorEvent):
+                self._handle_error(event)
+            elif isinstance(event, LLMMessageEvent):
+                self._handle_llm_message(event)
+            elif isinstance(event, StreamChunkEvent):
+                self._handle_stream_chunk(event)
+            elif isinstance(event, StreamCompleteEvent):
+                self._handle_stream_complete(event)
+            elif isinstance(event, ExecutionResultEvent):
+                self._handle_execution_result(event)
 
     def _update_status(self, new_status: str) -> None:
         """Update status with thread safety.
@@ -81,14 +100,14 @@ class TextualUIHandler(CustomUIHandler):
             if self.on_status_change:
                 self.on_status_change(new_status)
 
-    def _handle_task_start(self, data: Dict[str, Any]) -> None:
+    def _handle_task_start(self, event: TaskStartEvent) -> None:
         """Handle task start - reset tools list."""
         self.current_tools = []
         self._update_status("Starting task...")
 
-    def _handle_step_start(self, data: Dict[str, Any]) -> None:
+    def _handle_step_start(self, event: StepStartEvent) -> None:
         """Handle step start."""
-        step = data.get("step", 1)
+        step = event.step
         status_msg = f"Step {step}: Waiting for LLM response..."
         self._update_status(status_msg)
 
@@ -96,9 +115,9 @@ class TextualUIHandler(CustomUIHandler):
         if self.on_thought_log:
             self.on_thought_log("step", f"Step {step}")
 
-    def _handle_code_execution(self, data: Dict[str, Any]) -> None:
+    def _handle_code_execution(self, event: CodeExecutionEvent) -> None:
         """Handle code execution."""
-        code = data.get("code", "")
+        code = event.code
         # Show preview of code being executed
         preview = code[:50] if code else "code"
         if len(code) > 50:
@@ -109,11 +128,9 @@ class TextualUIHandler(CustomUIHandler):
         if self.on_thought_log:
             self.on_thought_log("code_execution", code)
 
-    def _handle_tool_call(self, data: Dict[str, Any]) -> None:
+    def _handle_tool_call(self, event: ToolCallEvent) -> None:
         """Handle tool call."""
-        content = data.get("content", "")
-        # Extract tool name from content (format: "Tool: tool_name")
-        tool_name = content.split(":")[1].strip() if ":" in content else content
+        tool_name = event.tool
         self.current_tools.append(tool_name)
 
         self._update_status(f"Using tool: {tool_name}")
@@ -124,9 +141,9 @@ class TextualUIHandler(CustomUIHandler):
         if self.on_thought_log:
             self.on_thought_log("tool_call", tool_name)
 
-    def _handle_observation(self, data: Dict[str, Any]) -> None:
+    def _handle_observation(self, event: ObservationEvent) -> None:
         """Handle observation."""
-        observation = data.get("observation", "")
+        observation = event.observation
         self._update_status("Processing results...")
 
         # Log to thought log if meaningful
@@ -137,18 +154,18 @@ class TextualUIHandler(CustomUIHandler):
                 clean_obs = clean_obs[:150] + "..."
             self.on_thought_log("observation", clean_obs)
 
-    def _handle_final_answer(self, data: Dict[str, Any]) -> None:
+    def _handle_final_answer(self, event: FinalAnswerEvent) -> None:
         """Handle final answer."""
         self._update_status("Finalizing answer...")
 
-    def _handle_error(self, data: Dict[str, Any]) -> None:
+    def _handle_error(self, event: ErrorEvent) -> None:
         """Handle error."""
-        error = data.get("error", "Unknown error")
+        error = event.error
         self._update_status(f"Error: {error}")
 
-    def _handle_llm_message(self, data: Dict[str, Any]) -> None:
+    def _handle_llm_message(self, event: LLMMessageEvent) -> None:
         """Handle intermediate LLM message (thoughts from agent)."""
-        content = data.get("content", "")
+        content = event.content
         if content:
             # Route thoughts to thought log instead of chat
             if self.on_thought_log:
@@ -157,9 +174,9 @@ class TextualUIHandler(CustomUIHandler):
                 if clean_content:
                     self.on_thought_log("step", f"💭 {clean_content}")
 
-    def _handle_stream_chunk(self, data: Dict[str, Any]) -> None:
+    def _handle_stream_chunk(self, event: StreamChunkEvent) -> None:
         """Handle streaming chunk."""
-        chunk = data.get("chunk", "")
+        chunk = event.chunk
         self.streaming_content += chunk
         self.is_streaming = True
 
@@ -184,9 +201,9 @@ class TextualUIHandler(CustomUIHandler):
         """Clear tools list for new turn."""
         self.current_tools = []
 
-    def _handle_execution_result(self, data: Dict[str, Any]) -> None:
+    def _handle_execution_result(self, event: ExecutionResultEvent) -> None:
         """Handle execution result."""
-        content = data.get("content", "")
+        content = event.result
 
         if self.on_thought_log and content.strip():
             # Parse execution result content

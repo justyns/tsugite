@@ -201,20 +201,29 @@ No directives here
 
     def test_malformed_directive_logs_warning(self):
         """Test that malformed directives log warnings."""
-        from unittest.mock import patch
+
+        from tsugite.events import EventBus, WarningEvent
 
         content = """
 <!-- tsu:tool name="test" args={malformed} assign="data" -->
 """
-        # Mock the stderr console to capture the warning
-        with patch("tsugite.agent_runner.runner._stderr_console") as mock_console:
-            modified_content, context = execute_tool_directives(content)
+        # Create event bus and track emitted events
+        event_bus = EventBus()
+        events = []
 
-            # Verify warning was printed
-            mock_console.print.assert_called_once()
-            warning_msg = str(mock_console.print.call_args[0][0])
-            assert "Warning" in warning_msg
-            assert "Failed to parse" in warning_msg
+        def track_event(event):
+            events.append(event)
+
+        event_bus.subscribe(track_event)
+
+        # Execute with event bus
+        modified_content, context = execute_tool_directives(content, event_bus=event_bus)
+
+        # Verify warning event was emitted
+        assert len(events) > 0
+        warning_events = [e for e in events if isinstance(e, WarningEvent)]
+        assert len(warning_events) == 1
+        assert "Failed to parse" in warning_events[0].message
 
         # Should return content unchanged with empty context
         assert context == {}

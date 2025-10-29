@@ -20,6 +20,7 @@ def custom_agent_ui(
     show_execution_results: bool = True,
     show_execution_logs: bool = True,
     show_panels: bool = True,
+    show_debug_messages: bool = False,
 ) -> Generator[CustomUILogger, None, None]:
     """Context manager for custom agent UI.
 
@@ -32,6 +33,7 @@ def custom_agent_ui(
         show_execution_results: Whether to show code execution results
         show_execution_logs: Whether to show execution logs
         show_panels: Whether to show Rich panels (borders and decorations)
+        show_debug_messages: Whether to show debug messages (requires --verbose)
 
     Yields:
         CustomUILogger: Logger instance with ui_handler and console
@@ -44,6 +46,7 @@ def custom_agent_ui(
         show_execution_results=show_execution_results,
         show_execution_logs=show_execution_logs,
         show_panels=show_panels,
+        show_debug_messages=show_debug_messages,
     )
     logger = CustomUILogger(ui_handler, console)
 
@@ -58,27 +61,6 @@ def custom_agent_ui(
             yield logger
     finally:
         clear_ui_context()
-
-
-def create_silent_logger() -> CustomUILogger:
-    """Create a minimal logger for silent execution.
-
-    Returns a logger with a console writing to /dev/null, so it produces no output.
-
-    Returns:
-        CustomUILogger with silent console
-    """
-    silent_console = Console(file=open("/dev/null", "w"))
-    silent_handler = CustomUIHandler(
-        silent_console,
-        show_code=False,
-        show_observations=False,
-        show_llm_messages=False,
-        show_execution_results=False,
-        show_execution_logs=False,
-        show_panels=False,
-    )
-    return CustomUILogger(silent_handler, silent_console)
 
 
 def create_plain_logger() -> CustomUILogger:

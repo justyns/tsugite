@@ -267,8 +267,12 @@ def test_setup(model: str, skip_test: bool = False) -> bool:
         return True
 
     try:
+        from io import StringIO
+
+        from rich.console import Console as RichConsole
+
         from tsugite.agent_runner import run_agent
-        from tsugite.ui import create_silent_logger
+        from tsugite.ui import custom_agent_ui
 
         # Find the assistant agent
         config_dir = get_config_path().parent
@@ -280,13 +284,25 @@ def test_setup(model: str, skip_test: bool = False) -> bool:
 
         console.print("[dim]Running: tsugite run +assistant 'say hello'[/dim]")
 
-        result = run_agent(
-            agent_path=agent_path,
-            prompt="Say hello in one sentence",
-            model_override=model,
-            debug=False,
-            custom_logger=create_silent_logger(),
-        )
+        # Create a quiet logger that doesn't output anything
+        quiet_console = RichConsole(file=StringIO())
+        with custom_agent_ui(
+            quiet_console,
+            show_code=False,
+            show_observations=False,
+            show_progress=False,
+            show_llm_messages=False,
+            show_execution_results=False,
+            show_execution_logs=False,
+            show_panels=False,
+        ) as logger:
+            result = run_agent(
+                agent_path=agent_path,
+                prompt="Say hello in one sentence",
+                model_override=model,
+                debug=False,
+                custom_logger=logger,
+            )
 
         console.print("[green]✓[/green] Test successful!")
         console.print(

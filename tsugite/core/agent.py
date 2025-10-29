@@ -4,12 +4,27 @@ A simpler, more direct implementation that gives us full control over
 model parameters and reasoning model support.
 """
 
+import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 import litellm
 
-from tsugite.ui import UIEvent
+from tsugite.events import (
+    CodeExecutionEvent,
+    CostSummaryEvent,
+    ErrorEvent,
+    EventBus,
+    FinalAnswerEvent,
+    LLMMessageEvent,
+    ObservationEvent,
+    ReasoningContentEvent,
+    ReasoningTokensEvent,
+    StepStartEvent,
+    StreamChunkEvent,
+    StreamCompleteEvent,
+    TaskStartEvent,
+)
 
 from .executor import CodeExecutor, LocalExecutor
 from .memory import AgentMemory, StepResult
@@ -83,7 +98,7 @@ class TsugiteAgent:
         max_turns: int = 10,
         executor: CodeExecutor = None,
         model_kwargs: dict = None,
-        ui_handler: Any = None,
+        event_bus: EventBus = None,
         model_name: str = None,
         text_mode: bool = False,
     ):
@@ -96,7 +111,7 @@ class TsugiteAgent:
             max_turns: Maximum number of reasoning turns (think-act cycles) before giving up
             executor: Code executor (microsandbox or local). If None, uses LocalExecutor
             model_kwargs: Extra parameters for LiteLLM (reasoning_effort, response_format, etc.)
-            ui_handler: Optional UI handler for displaying progress
+            event_bus: Optional EventBus for broadcasting events
             model_name: Optional display name for the model (for UI)
             text_mode: Allow text-only responses (code blocks optional)
         """
@@ -108,7 +123,7 @@ class TsugiteAgent:
         self.max_turns = max_turns
         self.executor = executor or LocalExecutor()
         self.memory = AgentMemory()
-        self.ui_handler = ui_handler
+        self.event_bus = event_bus
         self.model_name = model_name or model_string
         self.text_mode = text_mode
 
@@ -259,18 +274,21 @@ class TsugiteAgent:
         Raises:
             RuntimeError: If agent reaches max_turns without finishing
         """
+        # Track execution time
+        start_time = time.time()
+
         # Add task to memory
         self.memory.add_task(task)
 
         # Trigger task start event
-        if self.ui_handler:
-            self.ui_handler.handle_event(UIEvent.TASK_START, {"task": task, "model": self.model_name})
+        if self.event_bus:
+            self.event_bus.emit(TaskStartEvent(task=task, model=self.model_name))
 
         # Main agent loop
         for turn_num in range(self.max_turns):
             # Trigger turn start event
-            if self.ui_handler:
-                self.ui_handler.handle_event(UIEvent.STEP_START, {"step": turn_num + 1})
+            if self.event_bus:
+                self.event_bus.emit(StepStartEvent(step=turn_num + 1, max_turns=self.max_turns))
 
             # Build conversation messages from memory
             messages = self._build_messages()
@@ -297,17 +315,15 @@ class TsugiteAgent:
                             accumulated_content += chunk_text
 
                             # Emit stream chunk event
-                            if self.ui_handler:
-                                self.ui_handler.handle_event(
-                                    UIEvent.STREAM_CHUNK, {"chunk": chunk_text, "step": turn_num + 1}
-                                )
+                            if self.event_bus:
+                                self.event_bus.emit(StreamChunkEvent(chunk=chunk_text))
 
                     # Save the last chunk as response for usage/cost tracking
                     response = chunk
 
                 # Emit stream complete event
-                if self.ui_handler:
-                    self.ui_handler.handle_event(UIEvent.STREAM_COMPLETE, {"step": turn_num + 1})
+                if self.event_bus:
+                    self.event_bus.emit(StreamCompleteEvent())
 
                 # Parse accumulated content
                 thought, code, _ = self._parse_response_from_text(accumulated_content)
@@ -331,51 +347,49 @@ class TsugiteAgent:
             if reasoning_content:
                 self.memory.add_reasoning(reasoning_content)
                 # Trigger reasoning content event
-                if self.ui_handler:
-                    self.ui_handler.handle_event(
-                        UIEvent.REASONING_CONTENT, {"content": reasoning_content, "step": turn_num + 1}
-                    )
+                if self.event_bus:
+                    self.event_bus.emit(ReasoningContentEvent(content=reasoning_content, step=turn_num + 1))
 
             # Check for reasoning tokens (o1/o3 models)
             if response.usage and hasattr(response.usage, "completion_tokens_details"):
                 details = response.usage.completion_tokens_details
                 if hasattr(details, "reasoning_tokens") and details.reasoning_tokens:
-                    if self.ui_handler:
-                        self.ui_handler.handle_event(
-                            UIEvent.REASONING_TOKENS, {"tokens": details.reasoning_tokens, "step": turn_num + 1}
-                        )
+                    if self.event_bus:
+                        self.event_bus.emit(ReasoningTokensEvent(tokens=details.reasoning_tokens, step=turn_num + 1))
 
             # Show LLM's thought/reasoning (always show what the LLM is saying)
             # Skip this if streaming (already shown via STREAM_CHUNK events)
-            if self.ui_handler and not stream:
+            if self.event_bus and not stream:
                 # If we parsed a thought, show it. Otherwise show the raw response
                 # (this helps debug when LLM doesn't follow the expected format)
                 display_content = thought if thought else response.choices[0].message.content
                 if display_content and display_content.strip():
-                    self.ui_handler.handle_event(
-                        UIEvent.LLM_MESSAGE, {"content": display_content, "title": f"Turn {turn_num + 1} Reasoning"}
+                    self.event_bus.emit(
+                        LLMMessageEvent(
+                            content=display_content, title=f"Turn {turn_num + 1} Reasoning", step=turn_num + 1
+                        )
                     )
 
             # Only execute code if the LLM actually generated some
             if code and code.strip():
                 # Trigger code execution event
-                if self.ui_handler:
-                    self.ui_handler.handle_event(UIEvent.CODE_EXECUTION, {"code": code})
+                if self.event_bus:
+                    self.event_bus.emit(CodeExecutionEvent(code=code))
 
                 # Execute the code
                 exec_result = await self.executor.execute(code)
 
                 # Trigger observation event
-                if self.ui_handler:
+                if self.event_bus:
                     observation = exec_result.output
 
                     if exec_result.error:
                         # Trigger error event for execution errors
-                        self.ui_handler.handle_event(
-                            UIEvent.ERROR, {"error": exec_result.error, "error_type": "Execution Error"}
+                        self.event_bus.emit(
+                            ErrorEvent(error=exec_result.error, error_type="Execution Error", step=turn_num + 1)
                         )
                     else:
-                        self.ui_handler.handle_event(UIEvent.OBSERVATION, {"observation": observation})
+                        self.event_bus.emit(ObservationEvent(observation=observation))
             else:
                 # No code to execute - create a dummy result
                 from .executor import ExecutionResult
@@ -390,24 +404,24 @@ class TsugiteAgent:
                         # Don't show error - this is expected behavior in text mode
                     else:
                         # No thought and no code - this is an error even in text mode
-                        if self.ui_handler:
-                            self.ui_handler.handle_event(
-                                UIEvent.ERROR,
-                                {
-                                    "error": "No response generated. Expected at least a Thought.",
-                                    "error_type": "Format Error",
-                                },
+                        if self.event_bus:
+                            self.event_bus.emit(
+                                ErrorEvent(
+                                    error="No response generated. Expected at least a Thought.",
+                                    error_type="Format Error",
+                                    step=turn_num + 1,
+                                )
                             )
                 else:
                     # Standard mode: code is required
                     # Show a warning that the LLM didn't generate code
-                    if self.ui_handler:
-                        self.ui_handler.handle_event(
-                            UIEvent.ERROR,
-                            {
-                                "error": "LLM did not generate code. Expected format:\n\nThought: <explanation>\n```python\n<code>\n```",
-                                "error_type": "Format Error",
-                            },
+                    if self.event_bus:
+                        self.event_bus.emit(
+                            ErrorEvent(
+                                error="LLM did not generate code. Expected format:\n\nThought: <explanation>\n```python\n<code>\n```",
+                                error_type="Format Error",
+                                step=turn_num + 1,
+                            )
                         )
 
                     # Add a correction to memory to guide the LLM
@@ -451,24 +465,26 @@ class TsugiteAgent:
                 self.memory.add_final_answer(exec_result.final_answer)
 
                 # Trigger final answer event
-                if self.ui_handler:
-                    self.ui_handler.handle_event(UIEvent.FINAL_ANSWER, {"answer": str(exec_result.final_answer)})
+                if self.event_bus:
+                    self.event_bus.emit(
+                        FinalAnswerEvent(
+                            answer=str(exec_result.final_answer),
+                            turns=turn_num + 1,
+                            tokens=response.usage.total_tokens if response.usage else None,
+                            cost=self.total_cost if self.total_cost > 0 else None,
+                        )
+                    )
 
                     # Trigger cost summary event
                     total_tokens = response.usage.total_tokens if response.usage else None
-                    reasoning_tokens = None
-                    if response.usage and hasattr(response.usage, "completion_tokens_details"):
-                        details = response.usage.completion_tokens_details
-                        if hasattr(details, "reasoning_tokens"):
-                            reasoning_tokens = details.reasoning_tokens
-
-                    self.ui_handler.handle_event(
-                        UIEvent.COST_SUMMARY,
-                        {
-                            "cost": self.total_cost if self.total_cost > 0 else None,
-                            "total_tokens": total_tokens,
-                            "reasoning_tokens": reasoning_tokens,
-                        },
+                    duration = time.time() - start_time
+                    self.event_bus.emit(
+                        CostSummaryEvent(
+                            tokens=total_tokens,
+                            cost=self.total_cost if self.total_cost > 0 else None,
+                            model=self.model_name,
+                            duration_seconds=duration,
+                        )
                     )
 
                 if return_full_result:
@@ -484,8 +500,8 @@ class TsugiteAgent:
 
         # If we get here, we hit max_turns
         error_msg = f"Agent reached max_turns ({self.max_turns}) without completing task"
-        if self.ui_handler:
-            self.ui_handler.handle_event(UIEvent.ERROR, {"error": error_msg, "error_type": "RuntimeError"})
+        if self.event_bus:
+            self.event_bus.emit(ErrorEvent(error=error_msg, error_type="RuntimeError"))
 
         # For benchmark/testing use cases that need execution trace even on error,
         # return AgentResult with error field set instead of raising

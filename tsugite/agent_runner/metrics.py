@@ -22,9 +22,12 @@ class StepMetrics:
 
 
 def display_step_metrics(metrics: List[StepMetrics], custom_logger: Optional[Any] = None):
-    """Display step execution metrics in a table."""
-    console = get_display_console(custom_logger)
+    """Display step execution metrics in a table using event system."""
+    from tsugite.events import EventBus
 
+    from .helpers import get_ui_handler
+
+    # Build metrics table
     table = Table(title="Multi-Step Execution Metrics", show_header=True)
     table.add_column("Step", style="cyan")
     table.add_column("Duration", justify="right", style="yellow")
@@ -62,10 +65,7 @@ def display_step_metrics(metrics: List[StepMetrics], custom_logger: Optional[Any
         elif m.status == "skipped":
             skipped += 1
 
-    console.print()
-    console.print(table)
-
-    # Summary line
+    # Build summary line
     summary_parts = []
     summary_parts.append(f"Total: {total_duration:.1f}s")
     if successful > 0:
@@ -75,5 +75,26 @@ def display_step_metrics(metrics: List[StepMetrics], custom_logger: Optional[Any
     if failed > 0:
         summary_parts.append(f"[red]Failed: {failed}[/red]")
 
-    console.print(" | ".join(summary_parts))
-    console.print()
+    summary = " | ".join(summary_parts)
+
+    # Emit through event system
+    ui_handler = get_ui_handler(custom_logger)
+    if ui_handler:
+        from io import StringIO
+
+        from tsugite.events import EventBus, InfoEvent
+
+        event_bus = EventBus()
+        event_bus.subscribe(ui_handler.handle_event)
+
+        # Render table to string
+        buffer = StringIO()
+        temp_console = get_display_console(custom_logger)
+        temp_console.file = buffer
+        temp_console.print()  # noqa: T201 - Rendering to buffer
+        temp_console.print(table)  # noqa: T201 - Rendering to buffer
+        temp_console.print()  # noqa: T201 - Rendering to buffer
+        temp_console.print(summary)  # noqa: T201 - Rendering to buffer
+        temp_console.print()  # noqa: T201 - Rendering to buffer
+
+        event_bus.emit(InfoEvent(message=buffer.getvalue()))
