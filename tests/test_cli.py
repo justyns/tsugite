@@ -528,16 +528,16 @@ def test_logo_selection(terminal_width, expected_logo):
 
 
 class TestAutoDiscovery:
-    """Test auto-discovery feature where CLI defaults to builtin-default."""
+    """Test auto-discovery feature where CLI defaults to default."""
 
     def test_run_without_agent_defaults_to_builtin(self, cli_runner, temp_dir):
-        """Test that running without an agent defaults to builtin-default."""
+        """Test that running without an agent defaults to default."""
         from tsugite.cli.helpers import parse_cli_arguments
 
-        # Test that parse_cli_arguments defaults to builtin-default
+        # Test that parse_cli_arguments defaults to default
         agents, prompt = parse_cli_arguments(["test", "task"])
 
-        assert agents == ["+builtin-default"]
+        assert agents == ["+default"]
         assert prompt == "test task"
 
     def test_run_explicit_agent_overrides_default(self, cli_runner, sample_agent_file, mock_agent_execution):
@@ -545,13 +545,13 @@ class TestAutoDiscovery:
         result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt"])
 
         assert result.exit_code == 0
-        # Should use the specified agent, not builtin-default (agent name goes to stderr)
+        # Should use the specified agent, not default (agent name goes to stderr)
         assert "test_agent.md" in result.stderr
 
     @patch("tsugite.agent_runner.run_agent")
     @patch("tsugite.md_agents.validate_agent_execution")
     def test_builtin_default_agent_execution(self, mock_validate, mock_run, cli_runner):
-        """Test that builtin-default agent can be executed."""
+        """Test that default agent can be executed."""
         mock_validate.return_value = (True, "Agent is valid")
         mock_run.return_value = "Task completed"
 
@@ -562,18 +562,6 @@ class TestAutoDiscovery:
         assert "Agent file not found" not in result.stdout
         # May fail on validation or execution, but not on path issues
         # The actual execution depends on whether the API key is set
-
-    def test_builtin_agent_path_validation(self):
-        """Test that builtin agent paths bypass file existence checks."""
-        from pathlib import Path
-
-        builtin_path = Path("<builtin-default>")
-
-        # These checks should recognize it as builtin
-        assert str(builtin_path).startswith("<builtin-")
-
-        # Should not try to check .exists() or .suffix
-        # (This validates the CLI path handling logic)
 
     @patch("tsugite.agent_runner.run_agent")
     @patch("tsugite.md_agents.validate_agent_execution")
@@ -597,7 +585,7 @@ Content
         mock_validate.return_value = (True, "Agent is valid")
         mock_run.return_value = "Task completed"
 
-        # The builtin-default should be able to discover the helper agent
+        # The default should be able to discover the helper agent
         # via its prefetch mechanism
         cli_runner.invoke(app, ["run", "help me with something"])
 

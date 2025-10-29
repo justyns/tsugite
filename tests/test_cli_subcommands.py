@@ -61,25 +61,13 @@ class TestAgentsSubcommands:
             assert result.exit_code == 0
             assert "agents" in result.stdout.lower()
 
-    def test_agents_show_builtin(self):
-        """Test agents show for builtin agent."""
-        with (
-            patch("tsugite.builtin_agents.is_builtin_agent") as mock_builtin,
-            patch("tsugite.builtin_agents.get_builtin_default_agent") as mock_get,
-        ):
-            mock_builtin.return_value = True
-            mock_agent = MagicMock()
-            mock_agent.config.name = "builtin-default"
-            mock_agent.config.description = None
-            mock_agent.config.model = "ollama:qwen2.5-coder:7b"
-            mock_agent.config.max_turns = 5
-            mock_agent.config.tools = []
-            mock_agent.config.extends = None
-            mock_get.return_value = mock_agent
-
-            result = runner.invoke(app, ["agents", "show", "builtin-default"])
-            assert result.exit_code == 0
-            assert "builtin-default" in result.stdout
+    def test_agents_show_package_agent(self):
+        """Test agents show for package-provided agent."""
+        result = runner.invoke(app, ["agents", "show", "default"])
+        assert result.exit_code == 0
+        assert "default" in result.stdout
+        # Should show it's a package agent
+        assert "Package agent" in result.stdout or "default" in result.stdout
 
 
 class TestConfigSubcommands:

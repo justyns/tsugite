@@ -231,7 +231,7 @@ def list_agents() -> str:
         Formatted list of available agents with their descriptions.
         Returns empty string if no agents are found.
     """
-    from ..agent_inheritance import get_global_agents_paths
+    from ..agent_inheritance import get_builtin_agents_path, get_global_agents_paths
     from ..agent_runner import get_current_agent
 
     agents_info: List[Dict[str, str]] = []
@@ -246,6 +246,10 @@ def list_agents() -> str:
         Path.cwd() / "agents",
     ]
 
+    # Add built-in agents directory
+    builtin_path = get_builtin_agents_path()
+    search_paths.append(builtin_path)
+
     # Add global paths
     search_paths.extend(get_global_agents_paths())
 
@@ -254,11 +258,9 @@ def list_agents() -> str:
         if not search_dir.exists() or not search_dir.is_dir():
             continue
 
-        for agent_file in search_dir.glob("*.md"):
-            # Skip builtin agents to avoid confusion
-            if agent_file.stem.startswith("builtin-"):
-                continue
+        is_builtin_dir = search_dir == builtin_path
 
+        for agent_file in search_dir.glob("*.md"):
             # Skip if we've already seen this agent name (higher priority paths win)
             if agent_file.stem in seen_names:
                 continue
@@ -274,16 +276,22 @@ def list_agents() -> str:
                 if current_agent_name and name == current_agent_name:
                     continue
 
-                # Store relative path from cwd if possible, otherwise absolute
-                try:
-                    display_path = str(agent_file.relative_to(Path.cwd()))
-                except ValueError:
-                    display_path = str(agent_file)
+                # Store relative path from cwd if possible, otherwise use name for built-ins
+                if is_builtin_dir:
+                    display_path = name
+                else:
+                    try:
+                        display_path = str(agent_file.relative_to(Path.cwd()))
+                    except ValueError:
+                        display_path = str(agent_file)
+
+                # Add marker for built-in agents
+                description_with_marker = f"{description} (built-in)" if is_builtin_dir else description
 
                 agents_info.append(
                     {
                         "name": name,
-                        "description": description,
+                        "description": description_with_marker,
                         "path": display_path,
                     }
                 )

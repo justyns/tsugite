@@ -74,36 +74,35 @@ def agents_show(
     an agent name to search globally (e.g., 'default', 'builtin-default').
     """
     from tsugite.agent_inheritance import find_agent_file
-    from tsugite.builtin_agents import get_builtin_default_agent, is_builtin_agent
+    from tsugite.builtin_agents import is_builtin_agent_path
     from tsugite.md_agents import parse_agent_file
 
     try:
-        # Check if it's a built-in agent
-        if is_builtin_agent(agent_path):
-            agent = get_builtin_default_agent()
-            config = agent.config
-            console.print("[dim]Built-in agent[/dim]\n")
-        else:
-            agent_file = Path(agent_path)
+        agent_file = Path(agent_path)
 
-            # If path doesn't exist, try to find it as an agent name
-            if not agent_file.exists():
-                found_path = find_agent_file(agent_path, Path.cwd())
-                if found_path:
-                    agent_file = found_path
-                    console.print(f"[dim]Found: {agent_file}[/dim]\n")
+        # If path doesn't exist, try to find it as an agent name
+        if not agent_file.exists():
+            found_path = find_agent_file(agent_path, Path.cwd())
+            if found_path:
+                agent_file = found_path
+
+                # Show if it's a package-provided agent
+                if is_builtin_agent_path(agent_file):
+                    console.print(f"[dim]Package agent: {agent_file.stem}[/dim]\n")
                 else:
-                    console.print(f"[red]Agent not found: {agent_path}[/red]")
-                    console.print("\nSearched in:")
-                    console.print("  • Built-in agents")
-                    console.print("  • Current directory")
-                    console.print("  • .tsugite/")
-                    console.print("  • ./agents/")
-                    console.print("  • Global locations (use 'agents list --global' to see)")
-                    raise typer.Exit(1)
+                    console.print(f"[dim]Found: {agent_file}[/dim]\n")
+            else:
+                console.print(f"[red]Agent not found: {agent_path}[/red]")
+                console.print("\nSearched in:")
+                console.print("  • Package agents")
+                console.print("  • Current directory")
+                console.print("  • .tsugite/")
+                console.print("  • ./agents/")
+                console.print("  • Global locations (use 'agents list --global' to see)")
+                raise typer.Exit(1)
 
-            agent = parse_agent_file(agent_file)
-            config = agent.config
+        agent = parse_agent_file(agent_file)
+        config = agent.config
 
         console.print(f"[cyan]Agent:[/cyan] [bold]{config.name}[/bold]\n")
 

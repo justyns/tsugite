@@ -29,7 +29,7 @@ description: Test agent
 ---
 """)
 
-        # Configure prefetch like builtin-default does
+        # Configure prefetch like default does
         prefetch_config = [{"tool": "list_agents", "args": {}, "assign": "available_agents"}]
 
         # Execute prefetch with mocked global paths
@@ -41,8 +41,8 @@ description: Test agent
             assert isinstance(context["available_agents"], str)
             assert "test" in context["available_agents"]
 
-    def test_prefetch_empty_agents_list(self, tmp_path, monkeypatch):
-        """Test prefetch with no agents available."""
+    def test_prefetch_with_package_agents(self, tmp_path, monkeypatch):
+        """Test prefetch with only package-provided agents available."""
         monkeypatch.chdir(tmp_path)
 
         # Register list_agents tool
@@ -54,9 +54,10 @@ description: Test agent
         with patch("tsugite.agent_inheritance.get_global_agents_paths", return_value=[]):
             context = execute_prefetch(prefetch_config)
 
-            # Should assign empty string
+            # Should include package-provided agents
             assert "available_agents" in context
-            assert context["available_agents"] == ""
+            assert "default" in context["available_agents"]
+            assert "chat-assistant" in context["available_agents"]
 
 
 class TestAutoDiscoveryWorkflow:
@@ -114,7 +115,7 @@ Research the topic.
         """Test that {% if available_agents %} works correctly."""
         from jinja2 import Template
 
-        # Simulate builtin-default's conditional block
+        # Simulate default's conditional block
         template_text = """
 {% if available_agents %}
 ## Available Agents
@@ -142,8 +143,8 @@ You can delegate using spawn_agent()
         assert "Available Agents" not in result_without
         assert "spawn_agent()" not in result_without
 
-    def test_conditional_rendering_no_agents(self, tmp_path, monkeypatch):
-        """Test conditional rendering when no agents are available."""
+    def test_conditional_rendering_with_package_agents(self, tmp_path, monkeypatch):
+        """Test that package-provided agents are always available."""
         from jinja2 import Template
 
         monkeypatch.chdir(tmp_path)
@@ -152,28 +153,31 @@ You can delegate using spawn_agent()
 {% if available_agents %}
 Agents available: {{ available_agents }}
 {% else %}
-No specialized agents found.
+No agents found.
 {% endif %}
 """
 
         template = Template(template_text)
 
-        # Get agents list with mocked global paths
+        # Get agents list with mocked global paths - should still have package-provided agents
         with patch("tsugite.agent_inheritance.get_global_agents_paths", return_value=[]):
-            agents_list = list_agents()  # Empty
+            agents_list = list_agents()
 
         result = template.render(available_agents=agents_list)
 
-        # Empty string is falsy in Jinja2
-        assert "No specialized agents found" in result
+        # Package-provided agents are always available
+        assert "Agents available:" in result
+        assert "default" in result
+        assert "chat-assistant" in result
 
 
 class TestBuiltinDefaultIntegration:
-    """Test builtin-default agent with real prefetch."""
+    """Test default agent with real prefetch."""
 
     def test_builtin_default_prefetch_integration(self, tmp_path, monkeypatch):
-        """Test that builtin-default's prefetch config works."""
-        from tsugite.builtin_agents import get_builtin_default_agent
+        """Test that default's prefetch config works."""
+        from tsugite.agent_inheritance import get_builtin_agents_path
+        from tsugite.md_agents import parse_agent_file
 
         monkeypatch.chdir(tmp_path)
 
@@ -187,8 +191,9 @@ description: Helps with tasks
 ---
 """)
 
-        # Get builtin-default agent
-        agent = get_builtin_default_agent()
+        # Get default agent
+        default_path = get_builtin_agents_path() / "default.md"
+        agent = parse_agent_file(default_path)
 
         # Execute its prefetch
         context = execute_prefetch(agent.config.prefetch)
@@ -203,10 +208,12 @@ description: Helps with tasks
     @patch("tsugite.agent_runner.runner.TsugiteAgent")
     @patch("tsugite.core.tools.create_tool_from_tsugite")
     def test_builtin_default_has_delegation_tools(self, mock_create_tool, mock_agent):
-        """Test that builtin-default provides delegation tools."""
-        from tsugite.builtin_agents import get_builtin_default_agent
+        """Test that default provides delegation tools."""
+        from tsugite.agent_inheritance import get_builtin_agents_path
+        from tsugite.md_agents import parse_agent_file
 
-        agent = get_builtin_default_agent()
+        default_path = get_builtin_agents_path() / "default.md"
+        agent = parse_agent_file(default_path)
 
         # Should have spawn_agent in tools
         assert "spawn_agent" in agent.config.tools

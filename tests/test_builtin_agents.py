@@ -2,43 +2,54 @@
 
 from pathlib import Path
 
-from tsugite.agent_inheritance import find_agent_file
+from tsugite.agent_inheritance import find_agent_file, get_builtin_agents_path
 from tsugite.agent_utils import list_local_agents
-from tsugite.builtin_agents import get_builtin_chat_assistant, get_builtin_default_agent, is_builtin_agent
+from tsugite.builtin_agents import is_builtin_agent_path
+from tsugite.md_agents import parse_agent_file
 from tsugite.renderer import AgentRenderer
 
 
 class TestBuiltinAgents:
     def test_get_builtin_default_agent(self):
         """Test getting the built-in default agent."""
-        agent = get_builtin_default_agent()
+        builtin_path = get_builtin_agents_path() / "default.md"
+        assert builtin_path.exists(), f"Built-in agent file not found: {builtin_path}"
 
-        assert agent.config.name == "builtin-default"
+        agent = parse_agent_file(builtin_path)
+
+        assert agent.config.name == "default"
         assert agent.config.description
         assert "helpful" in agent.config.instructions.lower()
-        assert agent.file_path == Path("<builtin-default>")
+        assert is_builtin_agent_path(agent.file_path)
 
-    def test_is_builtin_agent(self):
-        """Test checking if agent name is built-in."""
-        assert is_builtin_agent("builtin-default") is True
-        assert is_builtin_agent("default") is False
-        assert is_builtin_agent("custom") is False
-        assert is_builtin_agent("") is False
+    def test_is_builtin_agent_path(self):
+        """Test checking if agent path is in built-in directory."""
+        builtin_path = get_builtin_agents_path() / "default.md"
+        assert is_builtin_agent_path(builtin_path) is True
+
+        # Test with a non-builtin path
+        assert is_builtin_agent_path(Path("/tmp/custom.md")) is False
 
     def test_find_builtin_agent(self, tmp_path):
-        """Test that find_agent_file returns special path for built-in."""
-        found = find_agent_file("builtin-default", tmp_path)
+        """Test that find_agent_file finds built-in agents."""
+        found = find_agent_file("default", tmp_path)
 
         assert found is not None
-        assert str(found) == "<builtin-default>"
+        assert found.exists()
+        assert is_builtin_agent_path(found)
 
     def test_list_includes_builtin(self, tmp_path):
         """Test that list_local_agents includes built-in agents."""
         agents = list_local_agents(tmp_path)
 
-        assert "Built-in" in agents
-        assert len(agents["Built-in"]) == 1
-        assert agents["Built-in"][0] == Path("<builtin-default>")
+        # Built-in agents should be in the "Built-in" category or mixed with others
+        # Check that at least one built-in agent is present
+        all_agents = []
+        for category_agents in agents.values():
+            all_agents.extend(category_agents)
+
+        builtin_agents = [a for a in all_agents if is_builtin_agent_path(a)]
+        assert len(builtin_agents) > 0, "No built-in agents found in list"
 
 
 class TestBuiltinInheritance:
@@ -123,25 +134,28 @@ Task: {{ user_prompt }}
 
     def test_builtin_agent_parseable(self):
         """Test that built-in agent can be parsed successfully."""
-        agent = get_builtin_default_agent()
+        builtin_path = get_builtin_agents_path() / "default.md"
+        agent = parse_agent_file(builtin_path)
 
-        assert agent.config.name == "builtin-default"
+        assert agent.config.name == "default"
         assert agent.content
         assert "{{ user_prompt }}" in agent.content
 
 
 class TestBuiltinDefaultAutoDiscovery:
-    """Test builtin-default agent's auto-discovery features."""
+    """Test default agent's auto-discovery features."""
 
     def test_builtin_default_has_spawn_agent_tool(self):
-        """Test that builtin-default includes spawn_agent tool."""
-        agent = get_builtin_default_agent()
+        """Test that default includes spawn_agent tool."""
+        builtin_path = get_builtin_agents_path() / "default.md"
+        agent = parse_agent_file(builtin_path)
 
         assert "spawn_agent" in agent.config.tools
 
     def test_builtin_default_has_prefetch(self):
-        """Test that builtin-default has prefetch configured."""
-        agent = get_builtin_default_agent()
+        """Test that default has prefetch configured."""
+        builtin_path = get_builtin_agents_path() / "default.md"
+        agent = parse_agent_file(builtin_path)
 
         assert agent.config.prefetch is not None
         assert len(agent.config.prefetch) > 0
@@ -152,7 +166,8 @@ class TestBuiltinDefaultAutoDiscovery:
 
     def test_builtin_default_prefetch_assigns_variable(self):
         """Test that prefetch assigns to available_agents variable."""
-        agent = get_builtin_default_agent()
+        builtin_path = get_builtin_agents_path() / "default.md"
+        agent = parse_agent_file(builtin_path)
 
         list_agents_prefetch = next((p for p in agent.config.prefetch if p.get("tool") == "list_agents"), None)
 
@@ -160,8 +175,9 @@ class TestBuiltinDefaultAutoDiscovery:
         assert list_agents_prefetch.get("assign") == "available_agents"
 
     def test_builtin_default_content_structure(self):
-        """Test that builtin-default has delegation instructions."""
-        agent = get_builtin_default_agent()
+        """Test that default has delegation instructions."""
+        builtin_path = get_builtin_agents_path() / "default.md"
+        agent = parse_agent_file(builtin_path)
 
         # Should have conditional block for available agents
         assert "{% if available_agents %}" in agent.content
@@ -175,7 +191,8 @@ class TestBuiltinDefaultAutoDiscovery:
 
     def test_builtin_default_instructions_mention_delegation(self):
         """Test that instructions guide on delegation."""
-        agent = get_builtin_default_agent()
+        builtin_path = get_builtin_agents_path() / "default.md"
+        agent = parse_agent_file(builtin_path)
 
         # Instructions should be set
         assert agent.config.instructions
@@ -186,10 +203,11 @@ class TestBuiltinDefaultAutoDiscovery:
 
     def test_builtin_default_web_search_guidelines_conditional(self):
         """Test that web search guidelines only appear when web_search tool is available."""
-        agent = get_builtin_default_agent()
+        builtin_path = get_builtin_agents_path() / "default.md"
+        agent = parse_agent_file(builtin_path)
         renderer = AgentRenderer()
 
-        # Base context needed for builtin-default template
+        # Base context needed for default template
         base_context = {
             "user_prompt": "test",
             "task_summary": "",
@@ -218,23 +236,26 @@ class TestBuiltinDefaultAutoDiscovery:
 
 
 class TestBuiltinChatAssistant:
-    """Test builtin-chat-assistant agent configuration."""
+    """Test chat-assistant agent configuration."""
 
     def test_chat_assistant_has_web_search_tool(self):
         """Test that chat assistant includes web_search tool."""
-        agent = get_builtin_chat_assistant()
+        builtin_path = get_builtin_agents_path() / "chat-assistant.md"
+        agent = parse_agent_file(builtin_path)
 
         assert "web_search" in agent.config.tools
 
     def test_chat_assistant_has_fetch_text_tool(self):
         """Test that chat assistant includes fetch_text tool."""
-        agent = get_builtin_chat_assistant()
+        builtin_path = get_builtin_agents_path() / "chat-assistant.md"
+        agent = parse_agent_file(builtin_path)
 
         assert "fetch_text" in agent.config.tools
 
     def test_chat_assistant_documents_web_search_format(self):
         """Test that chat assistant explains web_search return format."""
-        agent = get_builtin_chat_assistant()
+        builtin_path = get_builtin_agents_path() / "chat-assistant.md"
+        agent = parse_agent_file(builtin_path)
 
         content = agent.content.lower()
 
@@ -248,7 +269,8 @@ class TestBuiltinChatAssistant:
 
     def test_chat_assistant_warns_against_raw_json(self):
         """Test that chat assistant warns against returning raw JSON."""
-        agent = get_builtin_chat_assistant()
+        builtin_path = get_builtin_agents_path() / "chat-assistant.md"
+        agent = parse_agent_file(builtin_path)
 
         content = agent.content.lower()
 
@@ -257,7 +279,8 @@ class TestBuiltinChatAssistant:
 
     def test_chat_assistant_mentions_fetch_text_usage(self):
         """Test that chat assistant explains when to use fetch_text."""
-        agent = get_builtin_chat_assistant()
+        builtin_path = get_builtin_agents_path() / "chat-assistant.md"
+        agent = parse_agent_file(builtin_path)
 
         content = agent.content.lower()
 

@@ -7,6 +7,15 @@ from typing import Any, Dict, List, Optional, Set
 from tsugite.utils import ensure_file_exists
 
 
+def get_builtin_agents_path() -> Path:
+    """Get the built-in agents directory path.
+
+    Returns:
+        Path to built-in agents directory within the package
+    """
+    return Path(__file__).parent / "builtin_agents"
+
+
 def get_global_agents_paths() -> List[Path]:
     """Get global agent directory paths in precedence order.
 
@@ -43,22 +52,13 @@ def find_agent_file(agent_ref: str, current_agent_dir: Path) -> Optional[Path]:
         Path to agent file if found, None otherwise
 
     Search order:
-    1. Built-in agents (e.g., "builtin-default")
-    2. If path-like (contains / or .md), resolve relative to current agent
-    3. .tsugite/{name}.md (project-local shared)
-    4. ./agents/{name}.md (project convention)
-    5. ./{name}.md (current directory)
+    1. If path-like (contains / or .md), resolve relative to current agent
+    2. .tsugite/{name}.md (project-local shared)
+    3. ./agents/{name}.md (project convention)
+    4. ./{name}.md (current directory)
+    5. Built-in agents directory (tsugite/builtin_agents/)
     6. Global agent directories (XDG order)
     """
-    # Check if it's a built-in agent (normalize format by stripping angle brackets)
-    from .builtin_agents import is_builtin_agent
-
-    # Normalize agent_ref by stripping angle brackets if present
-    normalized_ref = agent_ref.strip("<>")
-
-    if is_builtin_agent(normalized_ref):
-        return Path(f"<{normalized_ref}>")
-
     # If it looks like a path, resolve it relative to current agent
     if "/" in agent_ref or agent_ref.endswith(".md"):
         path = current_agent_dir / agent_ref
@@ -79,6 +79,10 @@ def find_agent_file(agent_ref: str, current_agent_dir: Path) -> Optional[Path]:
         current_agent_dir / "agents" / agent_name,
         current_agent_dir / agent_name,
     ]
+
+    # Add built-in agents directory
+    builtin_path = get_builtin_agents_path() / agent_name
+    search_paths.append(builtin_path)
 
     # Add global locations
     for global_dir in get_global_agents_paths():
@@ -136,18 +140,6 @@ def load_extended_agent(extends_ref: str, current_agent_path: Path, inheritance_
 
     # Load the parent agent WITHOUT resolving its inheritance yet
     # (we'll do that recursively in resolve_agent_inheritance)
-
-    # Handle built-in agents
-    if str(agent_path).startswith("<builtin-"):
-        from .builtin_agents import get_builtin_chat_assistant, get_builtin_default_agent
-
-        if "builtin-default" in str(agent_path):
-            return get_builtin_default_agent()
-        elif "builtin-chat-assistant" in str(agent_path):
-            return get_builtin_chat_assistant()
-        else:
-            raise ValueError(f"Unknown built-in agent: {agent_path}")
-
     ensure_file_exists(agent_path, "Agent file")
 
     content = agent_path.read_text(encoding="utf-8")
@@ -249,17 +241,17 @@ def _get_default_base_agent_name() -> Optional[str]:
     """Get the default base agent name from config.
 
     Returns:
-        Default base agent name, or "builtin-default" as fallback, or None if disabled
+        Default base agent name, or "default" as fallback, or None if disabled
     """
     from .config import load_config
 
     try:
         config = load_config()
         if config.default_base_agent is None:
-            return "builtin-default"
+            return "default"
         return config.default_base_agent
     except Exception:
-        return "builtin-default"
+        return "default"
 
 
 def merge_scalar_fields(parent, child) -> Dict[str, Any]:
@@ -430,22 +422,7 @@ def load_default_base_agent(
     if not default_base_name:
         return None, None
 
-    # Normalize to strip angle brackets
-    normalized_name = default_base_name.strip("<>")
-
-    # If config specifies builtin, use it directly
-    from .builtin_agents import is_builtin_agent
-
-    if is_builtin_agent(normalized_name):
-        from .builtin_agents import get_builtin_default_agent
-
-        try:
-            builtin_agent = get_builtin_default_agent()
-            return builtin_agent.config, builtin_agent.content
-        except Exception:
-            return None, None
-
-    # Try to find the configured default agent
+    # Try to find the configured default agent (including built-ins via find_agent_file)
     default_path = find_agent_file(default_base_name, agent_path.parent)
     if default_path and default_path.resolve() != resolved_path:
         if default_path.resolve() not in inheritance_chain:

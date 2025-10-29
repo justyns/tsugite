@@ -858,10 +858,10 @@ def chat(
             agent_refs = [agent]
             primary_agent_path, _ = parse_agent_references(agent_refs, None, base_dir)
         else:
-            # Use built-in chat assistant by default
+            # Use package-provided chat assistant by default
             # Users can override by creating .tsugite/chat_assistant.md or agents/chat_assistant.md
             base_dir = Path.cwd()
-            agent_refs = ["builtin-chat-assistant"]
+            agent_refs = ["chat-assistant"]
             primary_agent_path, _ = parse_agent_references(agent_refs, None, base_dir)
 
         # Built-in agents have special paths starting with "<builtin-"

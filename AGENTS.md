@@ -166,15 +166,15 @@ Task: {{ user_prompt }}
 
 ## Built-in Agents
 
-### builtin-default
+### default
 
 Minimal base agent with task tracking. Default base for inheritance.
 
 ```bash
-tsugite run builtin-default "task"
+tsugite run default "task"
 ```
 
-### builtin-chat-assistant
+### chat-assistant
 
 Conversational agent for chat mode. Tools: `read_file`, `write_file`, `list_files`, `web_search`, `run`. Text mode enabled.
 
@@ -182,28 +182,32 @@ Conversational agent for chat mode. Tools: `read_file`, `write_file`, `list_file
 tsugite chat  # Uses this by default
 ```
 
-### Overriding Built-ins
+### Overriding Package Agents
 
-Create `.tsugite/chat_assistant.md` or `agents/chat_assistant.md` to override for your project.
+Package-provided agents are stored as `.md` files in the package's `builtin_agents/` directory. You can override them by creating agents with the same name in your project directories. Project agents take precedence over package-provided agents.
+
+Create `.tsugite/default.md` or `agents/default.md` to override for your project.
 
 ## Agent Resolution Order
 
 When referencing by name (e.g., `+myagent`):
 
-1. Built-in agents (if name matches exactly)
-2. `.tsugite/{name}.md`
-3. `agents/{name}.md`
-4. `./{name}.md`
-5. `~/.config/tsugite/agents/{name}.md`
+1. `.tsugite/{name}.md` (project-local shared)
+2. `agents/{name}.md` (project convention)
+3. `./{name}.md` (current directory)
+4. Package agents directory (`tsugite/builtin_agents/`)
+5. Global agent directories (`~/.config/tsugite/agents/`, etc.)
 
 Explicit paths skip resolution: `tsugite run ./path/to/agent.md`
+
+**Note:** Package-provided agents are checked after project agents, allowing you to override them locally.
 
 ## Agent Inheritance
 
 ```yaml
 ---
 name: specialized
-extends: builtin-default  # Inherit from built-in
+extends: default  # Inherit from package-provided default
 model: openai:gpt-4o       # Override model
 tools: [read_file, run]    # Add tools
 ---
@@ -222,7 +226,7 @@ tools: [read_file, run]    # Add tools
 **Configure default base:**
 
 ```bash
-tsugite config set default_base_agent builtin-default
+tsugite config set default_base_agent default
 tsugite config set default_base_agent none  # Disable
 ```
 
@@ -1102,7 +1106,7 @@ uv run black . && uv run ruff check .
 
 - `cli/__init__.py` - Typer CLI (run, chat, render, config, mcp, tools, etc.)
 - `md_agents.py` - Agent parsing, directives
-- `builtin_agents.py` - Built-in agent definitions
+- `builtin_agents.py` - Package agent utilities
 - `agent_inheritance.py` - Resolution + inheritance
 - `agent_runner.py` - Execution orchestration
 - `core/agent.py` - LiteLLM agent loop
@@ -1121,27 +1125,25 @@ uv run black . && uv run ruff check .
 - Errors: `ValueError` for input, `RuntimeError` for execution failures
 - Docstrings: `Args:` / `Returns:` for public functions
 
-### Adding Built-in Agents
+### Adding Package Agents
 
-1. Add to `builtin_agents.py`:
+Package-provided agents are now file-based for consistency:
 
-```python
-BUILTIN_NEW_CONTENT = """---
+1. Create `tsugite/builtin_agents/new_agent.md`:
+
+```markdown
+---
 name: new_agent
+description: Description of new agent
 tools: []
 ---
 {{ user_prompt }}
-"""
-
-def get_builtin_new():
-    from .md_agents import parse_agent
-    return parse_agent(BUILTIN_NEW_CONTENT, Path("<builtin-new>"))
 ```
 
-2. Update `is_builtin_agent()` to include `"builtin-new"`
-3. Handle in `agent_inheritance.py:load_extended_agent()`
-4. Handle in `md_agents.py:parse_agent_file()`
-5. Add tests
+2. The agent will be automatically discovered - no code changes needed
+3. Users can reference it with `+new_agent` or `new_agent`
+4. Add tests to verify the agent works
+5. Ensure `pyproject.toml` includes the builtin_agents directory in package data
 
 ### Testing
 

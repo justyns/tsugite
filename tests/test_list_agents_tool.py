@@ -13,8 +13,12 @@ class TestListAgentsTool:
         # Change to temp directory so no agents are found
         monkeypatch.chdir(tmp_path)
 
-        # Mock global paths to return empty list
-        with patch("tsugite.agent_inheritance.get_global_agents_paths", return_value=[]):
+        # Mock both global paths and builtin path to return empty/non-existent
+        fake_builtin_dir = tmp_path / "fake_builtins"  # Non-existent directory
+        with (
+            patch("tsugite.agent_inheritance.get_global_agents_paths", return_value=[]),
+            patch("tsugite.agent_inheritance.get_builtin_agents_path", return_value=fake_builtin_dir),
+        ):
             result = list_agents()
             assert result == ""
 
@@ -65,18 +69,18 @@ Content
         assert "Internal team agent" in result
         assert ".tsugite/agents/internal_agent.md" in result
 
-    def test_list_agents_skips_builtin(self, tmp_path, monkeypatch):
-        """Test that builtin-* agents are not included in the list."""
+    def test_list_agents_includes_all_agents(self, tmp_path, monkeypatch):
+        """Test that all agents are included in the list, including package-provided ones."""
         monkeypatch.chdir(tmp_path)
 
         agents_dir = tmp_path / "agents"
         agents_dir.mkdir()
 
-        # Create a file that looks like a builtin (should be skipped)
-        builtin_file = agents_dir / "builtin-test.md"
-        builtin_file.write_text("""---
+        # Create a user agent with builtin-like name (should be included)
+        builtin_like_file = agents_dir / "builtin-test.md"
+        builtin_like_file.write_text("""---
 name: builtin-test
-description: Should be skipped
+description: User agent with builtin-like name
 ---
 Content
 """)
@@ -92,8 +96,12 @@ Content
 
         result = list_agents()
 
-        assert "builtin-test" not in result
+        # Both user agents should be included
+        assert "builtin-test" in result
         assert "normal" in result
+        # Package-provided agents should also be included
+        assert "default" in result
+        assert "chat-assistant" in result
 
     def test_list_agents_priority_order(self, tmp_path, monkeypatch):
         """Test that higher priority paths win for duplicate agent names."""
@@ -124,11 +132,13 @@ description: From agents (lower priority)
         with patch("tsugite.agent_inheritance.get_global_agents_paths", return_value=[]):
             result = list_agents()
 
-            # Should only show the higher priority one
-            # Count lines starting with "- **" to avoid counting filename occurrences
-            assert result.count("\n") == 0  # Only one agent, so no newlines
+            # Should show higher priority duplicate + package-provided agents
+            assert result.count("\n") == 2  # 3 agents total: duplicate, default, chat-assistant
             assert "From .tsugite (higher priority)" in result
             assert "From agents (lower priority)" not in result
+            # Package-provided agents should also be listed
+            assert "default" in result
+            assert "chat-assistant" in result
 
     def test_list_agents_format(self, tmp_path, monkeypatch):
         """Test that list_agents returns proper markdown format."""

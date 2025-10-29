@@ -154,10 +154,10 @@ def load_and_validate_agent(agent_path: str, console: Console) -> Tuple[Any, Pat
     """Load and validate an agent from path or builtin name.
 
     Consolidates agent loading logic used across run, render, and chat commands.
-    Handles both builtin agents (e.g., "+builtin-default") and file-based agents.
+    Handles both package-provided agents (e.g., "+default") and file-based agents.
 
     Args:
-        agent_path: Path to agent file or builtin reference (e.g., "+builtin-default", "agent.md")
+        agent_path: Path to agent file or agent reference (e.g., "+default", "agent.md")
         console: Console for error messages
 
     Returns:
@@ -167,15 +167,10 @@ def load_and_validate_agent(agent_path: str, console: Console) -> Tuple[Any, Pat
         typer.Exit: If agent cannot be loaded or validated
 
     Examples:
-        >>> agent, path, name = load_and_validate_agent("+builtin-default", console)
+        >>> agent, path, name = load_and_validate_agent("+default", console)
         >>> agent, path, name = load_and_validate_agent("agents/my_agent.md", console)
     """
     from tsugite.agent_composition import resolve_agent_reference
-    from tsugite.builtin_agents import (
-        get_builtin_chat_assistant,
-        get_builtin_default_agent,
-        is_builtin_agent_path,
-    )
     from tsugite.md_agents import parse_agent_file
 
     # Use resolve_agent_reference to handle +name shorthand and builtin agents
@@ -186,36 +181,19 @@ def load_and_validate_agent(agent_path: str, console: Console) -> Tuple[Any, Pat
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(1)
 
-    # Check if this is a builtin agent path
-    if is_builtin_agent_path(resolved_path):
-        agent_name = str(resolved_path).strip("<>")
+    # All agents are now file-based (including built-ins)
+    agent_file_path = resolved_path
+    if not agent_file_path.exists():
+        console.print(f"[red]Agent file not found: {agent_file_path}[/red]")
+        raise typer.Exit(1)
 
-        # Get the valid builtin agent
-        if agent_name == "builtin-default":
-            agent = get_builtin_default_agent()
-        elif agent_name == "builtin-chat-assistant":
-            agent = get_builtin_chat_assistant()
-        else:
-            # Should never reach here due to resolve_agent_reference validation
-            console.print(f"[red]Unknown builtin agent: {agent_name}[/red]")
-            raise typer.Exit(1)
+    if agent_file_path.suffix != ".md":
+        console.print(f"[red]Agent file must be a .md file: {agent_file_path}[/red]")
+        raise typer.Exit(1)
 
-        agent_display_name = agent_name
-        agent_file_path = resolved_path
-    else:
-        # Regular file-based agent
-        agent_file_path = resolved_path
-        if not agent_file_path.exists():
-            console.print(f"[red]Agent file not found: {agent_file_path}[/red]")
-            raise typer.Exit(1)
-
-        if agent_file_path.suffix != ".md":
-            console.print(f"[red]Agent file must be a .md file: {agent_file_path}[/red]")
-            raise typer.Exit(1)
-
-        # Use parse_agent_file to properly resolve inheritance
-        agent = parse_agent_file(agent_file_path)
-        agent_display_name = agent_file_path.name
+    # Use parse_agent_file to properly resolve inheritance
+    agent = parse_agent_file(agent_file_path)
+    agent_display_name = agent_file_path.name
 
     return agent, agent_file_path, agent_display_name
 
@@ -315,8 +293,8 @@ def parse_cli_arguments(args: List[str], allow_empty_agents: bool = False) -> tu
             agents = []
             prompt = " ".join(args)
         else:
-            # Default to builtin-default for auto-discovery
-            agents = ["+builtin-default"]
+            # Default to default agent for auto-discovery
+            agents = ["+default"]
             # All args become the prompt
             prompt = " ".join(args)
     else:

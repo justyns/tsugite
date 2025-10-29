@@ -60,9 +60,9 @@ class TestParseCliArguments:
             parse_cli_arguments([])
 
     def test_no_agents_defaults_to_builtin(self):
-        """Test that no agents defaults to builtin-default."""
+        """Test that no agents defaults to default."""
         agents, prompt = parse_cli_arguments(["just", "a", "prompt"])
-        assert agents == ["+builtin-default"]
+        assert agents == ["+default"]
         assert prompt == "just a prompt"
 
     def test_single_word_prompt(self):

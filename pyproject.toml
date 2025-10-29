@@ -36,6 +36,12 @@ tsugite-docker-session = "tsugite.docker_cli:session_main"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.build.targets.wheel]
+packages = ["tsugite"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"tsugite/builtin_agents" = "tsugite/builtin_agents"
+
 [tool.ruff]
 target-version = "py311"
 line-length = 120

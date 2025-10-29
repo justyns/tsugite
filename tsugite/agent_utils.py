@@ -8,25 +8,14 @@ def _parse_agent_from_path(path: Path):
     """Parse an agent from a file path.
 
     Args:
-        path: Path to agent file (can be a real path or builtin marker like <builtin-default>)
+        path: Path to agent file
 
     Returns:
         Parsed Agent object
     """
     from tsugite.md_agents import parse_agent
 
-    # Handle built-in agents
-    path_str = str(path)
-    if path_str.startswith("<builtin-"):
-        from tsugite.builtin_agents import get_builtin_chat_assistant, get_builtin_default_agent
-
-        if "builtin-default" in path_str:
-            return get_builtin_default_agent()
-        elif "builtin-chat-assistant" in path_str:
-            return get_builtin_chat_assistant()
-        else:
-            raise ValueError(f"Unknown built-in agent: {path_str}")
-
+    # All agents are now file-based (including built-ins)
     content = path.read_text(encoding="utf-8")
     return parse_agent(content, path)
 
@@ -147,13 +136,19 @@ def list_local_agents(base_path: Path = None) -> dict[str, List[Path]]:
     Returns:
         Dictionary mapping location names to list of agent paths
     """
+    from .agent_inheritance import get_builtin_agents_path
+
     if base_path is None:
         base_path = Path.cwd()
 
     results = {}
 
     # Add built-in agents first
-    results["Built-in"] = [Path("<builtin-default>")]
+    builtin_path = get_builtin_agents_path()
+    if builtin_path.exists() and builtin_path.is_dir():
+        builtin_agents = sorted(builtin_path.glob("*.md"))
+        if builtin_agents:
+            results["Built-in"] = builtin_agents
 
     locations = [
         ("Current directory", base_path),

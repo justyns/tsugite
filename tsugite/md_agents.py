@@ -128,7 +128,7 @@ def parse_agent_file(file_path: Path) -> Agent:
     This function also resolves agent inheritance if configured.
 
     Args:
-        file_path: Path to agent markdown file (can be a built-in agent with path like <builtin-name>)
+        file_path: Path to agent markdown file
 
     Returns:
         Parsed Agent with resolved inheritance
@@ -137,17 +137,6 @@ def parse_agent_file(file_path: Path) -> Agent:
         FileNotFoundError: If agent file doesn't exist
         ValueError: If circular inheritance or missing parent agent
     """
-    # Handle built-in agents (special paths like "<builtin-default>")
-    if str(file_path).startswith("<builtin-"):
-        from .builtin_agents import get_builtin_chat_assistant, get_builtin_default_agent
-
-        if "builtin-default" in str(file_path):
-            return get_builtin_default_agent()
-        elif "builtin-chat-assistant" in str(file_path):
-            return get_builtin_chat_assistant()
-        else:
-            raise ValueError(f"Unknown built-in agent: {file_path}")
-
     if not file_path.exists():
         raise FileNotFoundError(f"Agent file not found: {file_path}")
 
@@ -433,7 +422,7 @@ def validate_agent_execution(agent: Agent | Path) -> tuple[bool, str]:
     """Validate that an agent can be executed.
 
     Args:
-        agent: Parsed agent or path to agent file (including builtin paths like <builtin-default>)
+        agent: Parsed agent or path to agent file
 
     Returns:
         Tuple of (is_valid, error_message)
@@ -441,11 +430,8 @@ def validate_agent_execution(agent: Agent | Path) -> tuple[bool, str]:
     # Handle both Path objects and Agent objects
     if isinstance(agent, Path):
         try:
-            if str(agent).startswith("<builtin-"):
-                agent = parse_agent_file(agent)
-            else:
-                agent_text = agent.read_text()
-                agent = parse_agent(agent_text, agent)
+            agent_text = agent.read_text()
+            agent = parse_agent(agent_text, agent)
         except Exception as e:
             return False, f"Failed to parse agent file: {e}"
 

@@ -323,39 +323,39 @@ class TestBuiltinAgentRendering:
         self.runner = CliRunner()
 
     def test_render_builtin_default_with_plus_prefix(self, file_tools, agents_tools, task_tools):
-        """Test rendering builtin-default with + prefix."""
-        result = self.runner.invoke(app, ["render", "+builtin-default", "test task"])
+        """Test rendering default with + prefix."""
+        result = self.runner.invoke(app, ["render", "+default", "test task"])
 
         assert result.exit_code == 0
         assert "test task" in result.stdout
-        assert "builtin-default" in result.stdout
+        assert "default" in result.stdout
 
     @patch("tsugite.agent_runner.runner.call_tool")
     def test_render_builtin_executes_prefetch(self, mock_call_tool, file_tools, agents_tools, task_tools):
         """Test that builtin agent prefetch tools are executed."""
-        # builtin-default has list_agents in prefetch
+        # default has list_agents in prefetch
         mock_call_tool.return_value = "agents/helper.md\nagents/coder.md"
 
-        result = self.runner.invoke(app, ["render", "+builtin-default", "test"])
+        result = self.runner.invoke(app, ["render", "+default", "test"])
 
         assert result.exit_code == 0
         # Verify prefetch was called
         mock_call_tool.assert_called_once_with("list_agents")
 
-    def test_render_unknown_builtin_agent(self):
-        """Test rendering with unknown builtin agent name."""
-        result = self.runner.invoke(app, ["render", "+builtin-unknown", "test"])
+    def test_render_unknown_agent(self):
+        """Test rendering with unknown agent name."""
+        result = self.runner.invoke(app, ["render", "+unknown-agent", "test"])
 
         assert result.exit_code == 1
-        assert "Unknown builtin agent" in result.stdout
+        assert "not found" in result.stdout.lower()
 
     def test_render_builtin_chat_assistant(self, file_tools, http_tools, shell_tools, task_tools):
-        """Test rendering builtin-chat-assistant with chat_history."""
-        result = self.runner.invoke(app, ["render", "builtin-chat-assistant", "test prompt"])
+        """Test rendering chat-assistant with chat_history."""
+        result = self.runner.invoke(app, ["render", "chat-assistant", "test prompt"])
 
         assert result.exit_code == 0
         assert "test prompt" in result.stdout
-        assert "builtin-chat-assistant" in result.stdout
+        assert "chat-assistant" in result.stdout
         # Should render without error even though chat_history is empty
 
 
