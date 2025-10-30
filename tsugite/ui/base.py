@@ -263,10 +263,8 @@ class CustomUIHandler:
                 # Display errors prominently in red without truncation
                 self._print(f"[red]⚠️  {clean_obs}[/red]")
             elif is_final_answer:
-                # Final answer - don't truncate, render as markdown
-                # Extract answer content after "__FINAL_ANSWER__: "
-                answer_content = clean_obs.split("__FINAL_ANSWER__:", 1)[1].strip()
-                self._print(Markdown(answer_content))
+                # Skip displaying final answer here - it will be displayed by _handle_final_answer event
+                pass
             elif self.show_observations:
                 # Normal observation - show with truncation if needed
                 if len(clean_obs) > 500:
@@ -438,6 +436,9 @@ class CustomUIHandler:
         total_tokens = event.tokens
         reasoning_tokens = None
         duration_seconds = event.duration_seconds
+        cached_tokens = event.cached_tokens
+        cache_creation_tokens = event.cache_creation_input_tokens
+        cache_read_tokens = event.cache_read_input_tokens
 
         summary_text = self._build_cost_summary_text(
             cost, total_tokens, reasoning_tokens, duration_seconds=duration_seconds
@@ -445,10 +446,28 @@ class CustomUIHandler:
         if not summary_text:
             return
 
-        if self.show_panels:
-            self._print(Text(summary_text, style="dim cyan"))
+        # Add cache statistics if available
+        cache_parts = []
+        if cached_tokens and cached_tokens > 0:
+            cache_parts.append(f"💾 Cached: {cached_tokens:,} tokens")
+        if cache_creation_tokens and cache_creation_tokens > 0:
+            cache_parts.append(f"📝 Cache write: {cache_creation_tokens:,} tokens")
+        if cache_read_tokens and cache_read_tokens > 0:
+            cache_parts.append(f"📖 Cache read: {cache_read_tokens:,} tokens")
+
+        if cache_parts:
+            cache_summary = " | ".join(cache_parts)
+            if self.show_panels:
+                self._print(Text(summary_text, style="dim cyan"))
+                self._print(Text(cache_summary, style="dim green"))
+            else:
+                self._print(f"[dim cyan]{summary_text}[/dim cyan]")
+                self._print(f"[dim green]{cache_summary}[/dim green]")
         else:
-            self._print(f"[dim cyan]{summary_text}[/dim cyan]")
+            if self.show_panels:
+                self._print(Text(summary_text, style="dim cyan"))
+            else:
+                self._print(f"[dim cyan]{summary_text}[/dim cyan]")
 
     def _handle_execution_result(self, event: ExecutionResultEvent) -> None:
         """Handle code execution result event."""
@@ -478,12 +497,8 @@ class CustomUIHandler:
                 # Show errors prominently
                 self._print(f"[red]📤 Output (Error): {output_text}[/red]")
             elif is_final_answer:
-                # Extract answer content after "__FINAL_ANSWER__: " and render as markdown
-                answer_content = output_text.split("__FINAL_ANSWER__:", 1)[1].strip()
-                if answer_content:
-                    from rich.markdown import Markdown
-
-                    self._print(Markdown(answer_content))
+                # Skip displaying final answer here - it will be displayed by _handle_final_answer event
+                pass
             elif output_text.strip() and output_text.strip().lower() not in ("none", "null", ""):
                 # Show normal meaningful output
                 self._print(f"[bold cyan]📤 Output:[/bold cyan] {output_text}")

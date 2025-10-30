@@ -59,6 +59,7 @@ class AgentConfig:
     text_mode: bool = False  # Allow text-only responses (code blocks optional)
     initial_tasks: List[Any] = field(default_factory=list)  # Tasks to pre-populate (strings or dicts)
     disable_history: bool = False  # Disable conversation history persistence for this agent
+    auto_context: Optional[bool] = None  # Auto-load context files (None = use config default)
 
     def __post_init__(self):
         if self.tools is None:

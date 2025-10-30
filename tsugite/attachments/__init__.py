@@ -2,6 +2,7 @@
 
 from typing import List
 
+from tsugite.attachments.auto_context import AutoContextHandler
 from tsugite.attachments.base import AttachmentHandler
 from tsugite.attachments.file import FileHandler
 from tsugite.attachments.inline import InlineHandler
@@ -23,6 +24,7 @@ __all__ = [
     "FileHandler",
     "YouTubeHandler",
     "GenericURLHandler",
+    "AutoContextHandler",
     "HANDLERS",
     "get_handler",
     # Storage functions
@@ -37,6 +39,7 @@ __all__ = [
 # Handler registry - order matters! More specific handlers first
 HANDLERS: List[AttachmentHandler] = [
     InlineHandler(),
+    AutoContextHandler(),  # Before FileHandler (might match file paths)
     YouTubeHandler(),  # Before GenericURLHandler
     FileHandler(),
     GenericURLHandler(),  # Catch-all for URLs

@@ -101,6 +101,7 @@ class TsugiteAgent:
         event_bus: EventBus = None,
         model_name: str = None,
         text_mode: bool = False,
+        attachments: List[tuple[str, str]] = None,
     ):
         """Initialize the agent.
 
@@ -114,6 +115,7 @@ class TsugiteAgent:
             event_bus: Optional EventBus for broadcasting events
             model_name: Optional display name for the model (for UI)
             text_mode: Allow text-only responses (code blocks optional)
+            attachments: List of (name, content) tuples for prompt caching
         """
         from tsugite.models import get_model_params
 
@@ -126,6 +128,7 @@ class TsugiteAgent:
         self.event_bus = event_bus
         self.model_name = model_name or model_string
         self.text_mode = text_mode
+        self.attachments = attachments or []
 
         # Track cumulative cost across all steps
         self.total_cost = 0.0
@@ -359,11 +362,17 @@ class TsugiteAgent:
 
             # Show LLM's thought/reasoning (always show what the LLM is saying)
             # Skip this if streaming (already shown via STREAM_CHUNK events)
+            # Skip if text mode with no code (thought will be shown as final answer)
             if self.event_bus and not stream:
                 # If we parsed a thought, show it. Otherwise show the raw response
                 # (this helps debug when LLM doesn't follow the expected format)
                 display_content = thought if thought else response.choices[0].message.content
-                if display_content and display_content.strip():
+
+                # In text mode, if there's a thought but no code, skip showing the thought here
+                # because it will be shown as the final answer (to avoid duplication)
+                skip_llm_message = self.text_mode and thought and not (code and code.strip())
+
+                if display_content and display_content.strip() and not skip_llm_message:
                     self.event_bus.emit(
                         LLMMessageEvent(
                             content=display_content, title=f"Turn {turn_num + 1} Reasoning", step=turn_num + 1
@@ -478,12 +487,25 @@ class TsugiteAgent:
                     # Trigger cost summary event
                     total_tokens = response.usage.total_tokens if response.usage else None
                     duration = time.time() - start_time
+
+                    # Extract cache-related fields (supported by OpenAI, Anthropic, Bedrock, Deepseek)
+                    cached_tokens = None
+                    cache_creation_tokens = None
+                    cache_read_tokens = None
+                    if response.usage:
+                        cached_tokens = getattr(response.usage, "cached_tokens", None)
+                        cache_creation_tokens = getattr(response.usage, "cache_creation_input_tokens", None)
+                        cache_read_tokens = getattr(response.usage, "cache_read_input_tokens", None)
+
                     self.event_bus.emit(
                         CostSummaryEvent(
                             tokens=total_tokens,
                             cost=self.total_cost if self.total_cost > 0 else None,
                             model=self.model_name,
                             duration_seconds=duration,
+                            cached_tokens=cached_tokens,
+                            cache_creation_input_tokens=cache_creation_tokens,
+                            cache_read_input_tokens=cache_read_tokens,
                         )
                     )
 
@@ -517,22 +539,51 @@ class TsugiteAgent:
             # Backward compatibility: raise exception for non-benchmark usage
             raise RuntimeError(error_msg)
 
-    def _build_messages(self) -> List[Dict[str, str]]:
+    def _build_messages(self) -> List[Dict]:
         """Build message list for LLM from memory.
 
-        Format:
+        Uses system blocks with cache control when attachments are present
+        for better prompt caching support.
+
+        Format with attachments (system blocks):
+        [
+            {"role": "system", "content": [
+                {"type": "text", "text": system_prompt},
+                {"type": "text", "text": attachment1, "cache_control": {"type": "ephemeral"}},
+                {"type": "text", "text": attachment2, "cache_control": {"type": "ephemeral"}},
+            ]},
+            {"role": "user", "content": task},
+            ...
+        ]
+
+        Format without attachments (legacy):
         [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": task},
-            {"role": "assistant", "content": thought + code},
-            {"role": "user", "content": observation},
             ...
         ]
         """
         messages = []
 
-        # System prompt (explains how to solve tasks)
-        messages.append({"role": "system", "content": self._build_system_prompt()})
+        # Build system message with or without attachments
+        if self.attachments:
+            # Use system blocks with cache control for better caching
+            system_blocks = [{"type": "text", "text": self._build_system_prompt()}]
+
+            # Add each attachment as a separate cacheable block
+            for name, content in self.attachments:
+                system_blocks.append(
+                    {
+                        "type": "text",
+                        "text": f"<Attachment: {name}>\n{content}\n</Attachment: {name}>",
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                )
+
+            messages.append({"role": "system", "content": system_blocks})
+        else:
+            # Legacy format: simple string
+            messages.append({"role": "system", "content": self._build_system_prompt()})
 
         # Task
         messages.append({"role": "user", "content": self.memory.task})

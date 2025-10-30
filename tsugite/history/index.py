@@ -130,12 +130,16 @@ def rebuild_index() -> int:
                 "agent": first_record.agent if isinstance(first_record, ConversationMetadata) else "unknown",
                 "model": first_record.model if isinstance(first_record, ConversationMetadata) else "unknown",
                 "machine": first_record.machine if isinstance(first_record, ConversationMetadata) else "unknown",
-                "created_at": first_record.timestamp.isoformat()
-                if hasattr(first_record, "timestamp")
-                else datetime.now(timezone.utc).isoformat(),
-                "updated_at": last_record.timestamp.isoformat()
-                if hasattr(last_record, "timestamp")
-                else datetime.now(timezone.utc).isoformat(),
+                "created_at": (
+                    first_record.timestamp.isoformat()
+                    if hasattr(first_record, "timestamp")
+                    else datetime.now(timezone.utc).isoformat()
+                ),
+                "updated_at": (
+                    last_record.timestamp.isoformat()
+                    if hasattr(last_record, "timestamp")
+                    else datetime.now(timezone.utc).isoformat()
+                ),
                 "turn_count": len(turns),
                 "total_tokens": sum(r.tokens or 0 for r in turns),
                 "total_cost": sum(r.cost or 0.0 for r in turns),

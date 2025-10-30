@@ -260,9 +260,11 @@ class LiveTemplateHandler(CustomUIHandler):
 
         # Create root of execution tree
         self.execution_tree = Tree(
-            f"🚀 [bold]{self.state.task[:50]}...[/bold]"
-            if len(self.state.task or "") > 50
-            else f"🚀 [bold]{self.state.task}[/bold]",
+            (
+                f"🚀 [bold]{self.state.task[:50]}...[/bold]"
+                if len(self.state.task or "") > 50
+                else f"🚀 [bold]{self.state.task}[/bold]"
+            ),
             guide_style="dim",
         )
 
@@ -394,12 +396,14 @@ class LiveTemplateHandler(CustomUIHandler):
     def _handle_cost_summary(self, event: CostSummaryEvent) -> None:
         """Handle cost summary display."""
         cost = event.cost
-        total_tokens = event.total_tokens
+        total_tokens = event.tokens
+        cached_tokens = event.cached_tokens
+        # Cache fields available: event.cache_creation_input_tokens, event.cache_read_input_tokens
 
         # Update footer with cost info
-        if cost or total_tokens:
+        if cost or total_tokens or cached_tokens:
             # Could update footer or show in details panel
-            # Example: Add cost/token info to self.current_status or track in instance variable
+            # Example: Add cost/token/cache info to self.current_status or track in instance variable
             pass
 
         self._update_live_display()
@@ -518,6 +522,7 @@ def create_live_template_logger(interactive: bool = True):
         # Use with agent runner
     """
     from tsugite.ui.base import CustomUILogger
+
     # from tsugite.ui.live_template import LiveTemplateHandler  # After renaming
 
     handler = LiveTemplateHandler(interactive=interactive)

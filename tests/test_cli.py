@@ -605,7 +605,8 @@ class TestRunCommandHistory:
             patch("tsugite.agent_runner.history_integration.save_run_to_history") as mock_save_history,
         ):
             # Mock run_agent to return tuple with metadata (simulating return_token_usage=True)
-            mock_run_agent.return_value = ("Test result", 1000, 0.05, 3, [])
+            # Format: (result, tokens, cost, step_count, steps, system_prompt, attachments)
+            mock_run_agent.return_value = ("Test result", 1000, 0.05, 3, [], "System prompt", [])
             mock_validate.return_value = (True, "Valid")
             mock_save_history.return_value = "test_conv_id"
 
@@ -646,7 +647,8 @@ class TestRunCommandHistory:
             patch("tsugite.agent_runner.history_integration.save_run_to_history") as mock_save_history,
         ):
             # Return tuple with metadata
-            mock_run_agent.return_value = ("Result", 2500, 0.12, 5, [])
+            # Format: (result, tokens, cost, step_count, steps, system_prompt, attachments)
+            mock_run_agent.return_value = ("Result", 2500, 0.12, 5, [], "System prompt", [])
             mock_validate.return_value = (True, "Valid")
             mock_save_history.return_value = "conv_123"
 
@@ -673,7 +675,8 @@ class TestRunCommandHistory:
         ):
             from tsugite.history import load_conversation
 
-            mock_run_agent.return_value = ("Result", 100, 0.01, 1, [])
+            # Format: (result, tokens, cost, step_count, steps, system_prompt, attachments)
+            mock_run_agent.return_value = ("Result", 100, 0.01, 1, [], "System prompt", [])
             mock_validate.return_value = (True, "Valid")
             mock_config.return_value = MagicMock(history_enabled=True)
 
@@ -701,7 +704,8 @@ class TestRunCommandHistory:
             patch("tsugite.md_agents.validate_agent_execution") as mock_validate,
             patch("tsugite.agent_runner.history_integration.save_run_to_history") as mock_save_history,
         ):
-            mock_run_agent.return_value = ("Result", 100, 0.01, 1, [])
+            # Format: (result, tokens, cost, step_count, steps, system_prompt, attachments)
+            mock_run_agent.return_value = ("Result", 100, 0.01, 1, [], "System prompt", [])
             mock_validate.return_value = (True, "Valid")
 
             # save_run_to_history raises exception

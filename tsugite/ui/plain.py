@@ -155,28 +155,23 @@ class PlainUIHandler(CustomUIHandler):
             # Check if this looks like an error using shared helper from parent class
             is_error = self._contains_error(clean_obs)
 
-            # Always show final answers and errors, even if show_observations is False
-            if self.show_observations or is_final_answer or is_error:
-                if is_error:
-                    # Display errors prominently
-                    self.console.print()
-                    self.console.rule("ERROR", style="dim")
-                    self.console.print(clean_obs)
-                    self.console.rule(style="dim")
-                    self.console.print()
-                elif is_final_answer:
-                    # Extract answer content after "__FINAL_ANSWER__: " and render as markdown
-                    answer_content = clean_obs.split("__FINAL_ANSWER__:", 1)[1].strip()
-                    if answer_content:
-                        from rich.markdown import Markdown
-
-                        self.console.print()
-                        self.console.print(Markdown(answer_content))
-                else:
-                    # Normal observation - truncate if too long
-                    if len(clean_obs) > 200:
-                        clean_obs = clean_obs[:200] + "..."
-                    self.console.print(f"Result: {clean_obs}")
+            # Always show errors, even if show_observations is False
+            # Skip final answers here - they will be displayed by _handle_final_answer event
+            if is_error:
+                # Display errors prominently
+                self.console.print()
+                self.console.rule("ERROR", style="dim")
+                self.console.print(clean_obs)
+                self.console.rule(style="dim")
+                self.console.print()
+            elif is_final_answer:
+                # Skip displaying final answer here - it will be displayed by _handle_final_answer event
+                pass
+            elif self.show_observations:
+                # Normal observation - truncate if too long
+                if len(clean_obs) > 200:
+                    clean_obs = clean_obs[:200] + "..."
+                self.console.print(f"Result: {clean_obs}")
 
         # Add to current step history
         if self.state.steps_history:
@@ -189,9 +184,12 @@ class PlainUIHandler(CustomUIHandler):
 
         self.console.print("Finalizing answer...")
 
+        # Render final answer as markdown
+        from rich.markdown import Markdown
+
         self.console.print()
         self.console.rule("FINAL ANSWER")
-        self.console.print(answer)
+        self.console.print(Markdown(answer))
         self.console.rule()
         self.console.print()
 
@@ -274,7 +272,9 @@ class PlainUIHandler(CustomUIHandler):
         cost = event.cost
         tokens = event.tokens
         duration_seconds = event.duration_seconds
-        # reasoning_tokens is not in CostSummaryEvent, pass None
+        cached_tokens = event.cached_tokens
+        cache_creation_tokens = event.cache_creation_input_tokens
+        cache_read_tokens = event.cache_read_input_tokens
 
         summary_text = self._build_cost_summary_text(
             cost, tokens, None, include_emojis=False, duration_seconds=duration_seconds
@@ -282,7 +282,21 @@ class PlainUIHandler(CustomUIHandler):
         if not summary_text:
             return
 
-        self.console.print(f"\n{summary_text}\n")
+        # Add cache statistics if available
+        cache_parts = []
+        if cached_tokens and cached_tokens > 0:
+            cache_parts.append(f"Cached: {cached_tokens:,} tokens")
+        if cache_creation_tokens and cache_creation_tokens > 0:
+            cache_parts.append(f"Cache write: {cache_creation_tokens:,} tokens")
+        if cache_read_tokens and cache_read_tokens > 0:
+            cache_parts.append(f"Cache read: {cache_read_tokens:,} tokens")
+
+        if cache_parts:
+            cache_summary = " | ".join(cache_parts)
+            self.console.print(f"\n{summary_text}")
+            self.console.print(f"{cache_summary}\n")
+        else:
+            self.console.print(f"\n{summary_text}\n")
 
     def _handle_execution_result(self, event: ExecutionResultEvent) -> None:
         """Handle code execution result event with plain text output."""
@@ -319,13 +333,8 @@ class PlainUIHandler(CustomUIHandler):
                     self.console.rule(style="dim")
                     self.console.print()
                 elif is_final_answer:
-                    # Extract answer content after "__FINAL_ANSWER__: " and render as markdown
-                    answer_content = output_text.split("__FINAL_ANSWER__:", 1)[1].strip()
-                    if answer_content:
-                        from rich.markdown import Markdown
-
-                        self.console.print()
-                        self.console.print(Markdown(answer_content))
+                    # Skip displaying final answer here - it will be displayed by _handle_final_answer event
+                    pass
                 elif output_text.strip() and output_text.strip().lower() not in ("none", "null", ""):
                     self.console.print(f"Output: {output_text}")
 

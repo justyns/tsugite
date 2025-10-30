@@ -157,13 +157,26 @@ class ErrorEvent(BaseEvent):
 
 
 class CostSummaryEvent(BaseEvent):
-    """Token/cost metrics."""
+    """Token/cost metrics with prompt caching support.
+
+    Prompt caching fields (supported by OpenAI, Anthropic, AWS Bedrock, Deepseek):
+    - cached_tokens: Total cached tokens read (unified across providers)
+    - cache_creation_input_tokens: Tokens used to create cache (Anthropic-specific)
+    - cache_read_input_tokens: Tokens read from cache (Anthropic-specific)
+
+    For Anthropic, both creation and read tokens are also included in cached_tokens.
+    """
 
     event_type: EventType = Field(default=EventType.COST_SUMMARY, frozen=True)
     tokens: Optional[int] = Field(default=None, ge=0)
     cost: Optional[float] = Field(default=None, ge=0)
     model: Optional[str] = None
     duration_seconds: Optional[float] = Field(default=None, ge=0)
+
+    # Prompt caching fields
+    cached_tokens: Optional[int] = Field(default=None, ge=0)
+    cache_creation_input_tokens: Optional[int] = Field(default=None, ge=0)
+    cache_read_input_tokens: Optional[int] = Field(default=None, ge=0)
 
 
 class StreamChunkEvent(BaseEvent):

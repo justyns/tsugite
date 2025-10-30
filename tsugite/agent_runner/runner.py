@@ -473,6 +473,7 @@ async def _execute_agent_with_prompt(
             event_bus=event_bus,
             model_name=model_string,
             text_mode=agent_config.text_mode,
+            attachments=prepared.attachments,
         )
 
         # Run agent
@@ -501,9 +502,17 @@ async def _execute_agent_with_prompt(
                         step_count=step_count,
                     )
 
-                return str(result.output), result.token_usage, result.cost, step_count, steps_list
+                return (
+                    str(result.output),
+                    result.token_usage,
+                    result.cost,
+                    step_count,
+                    steps_list,
+                    prepared.system_message,
+                    prepared.attachments,
+                )
             else:
-                return str(result), None, None, 0, []
+                return str(result), None, None, 0, [], None, []
         else:
             from tsugite.core.agent import AgentResult
 
@@ -563,6 +572,7 @@ def run_agent(
     stream: bool = False,
     force_text_mode: bool = False,
     continue_conversation_id: Optional[str] = None,
+    attachments: Optional[List[tuple[str, str]]] = None,
 ) -> str | tuple[str, Optional[int], Optional[float], int, list]:
     """Run a Tsugite agent.
 
@@ -579,6 +589,7 @@ def run_agent(
         stream: Whether to stream responses in real-time
         force_text_mode: Force text_mode=True regardless of agent config (useful for chat UI)
         continue_conversation_id: Optional conversation ID to continue (makes run mode multi-turn)
+        attachments: Optional list of (name, content) tuples for prompt caching
 
     Returns:
         Agent execution result as string, or tuple of (result, token_count, cost, step_count, execution_steps) if return_token_usage=True
@@ -658,19 +669,44 @@ def run_agent(
             delegation_agents=delegation_agents,
             task_summary=task_manager.get_task_summary(),
             tasks=task_manager.get_tasks_for_template(),
+            attachments=attachments,
         )
 
         # Debug output if requested
         if debug:
-            from tsugite.events import DebugMessageEvent, EventBus
+            import sys
 
-            debug_event_bus = EventBus()
-            debug_ui_handler = get_ui_handler(custom_logger)
-            if debug_ui_handler:
-                debug_event_bus.subscribe(debug_ui_handler.handle_event)
-            debug_event_bus.emit(
-                DebugMessageEvent(message=f"DEBUG: Rendered Prompt\n{prepared.rendered_prompt}\nEnd Rendered Prompt")
-            )
+            # Build complete debug output showing system prompt, attachments, and user prompt
+            debug_parts = ["\nDEBUG: Complete Prompt Context", "=" * 80, ""]
+
+            # Show system prompt
+            debug_parts.append("SYSTEM PROMPT:")
+            debug_parts.append("-" * 80)
+            debug_parts.append(prepared.system_message)
+            debug_parts.append("")
+
+            # Show attachments if any
+            if prepared.attachments:
+                debug_parts.append(f"ATTACHMENTS ({len(prepared.attachments)}):")
+                debug_parts.append("-" * 80)
+                for name, content in prepared.attachments:
+                    preview = content[:200] + "..." if len(content) > 200 else content
+                    debug_parts.append(f"• {name}")
+                    debug_parts.append(f"  {preview}")
+                    debug_parts.append("")
+            else:
+                debug_parts.append("NO ATTACHMENTS")
+                debug_parts.append("")
+
+            # Show user prompt
+            debug_parts.append("USER PROMPT:")
+            debug_parts.append("-" * 80)
+            debug_parts.append(prepared.rendered_prompt)
+            debug_parts.append("")
+            debug_parts.append("=" * 80)
+
+            # Print directly to stderr
+            print("\n".join(debug_parts), file=sys.stderr)
 
         # Execute with the low-level helper (wrapping async call)
         return asyncio.run(
@@ -702,6 +738,7 @@ async def run_agent_async(
     stream: bool = False,
     force_text_mode: bool = False,
     continue_conversation_id: Optional[str] = None,
+    attachments: Optional[List[tuple[str, str]]] = None,
 ) -> str | tuple[str, Optional[int], Optional[float], int, list]:
     """Run a Tsugite agent (async version for tests and async contexts).
 
@@ -719,6 +756,7 @@ async def run_agent_async(
         delegation_agents: List of (name, path) tuples for agents to make available for delegation
         return_token_usage: Whether to return token usage and cost from LiteLLM
         stream: Whether to stream responses in real-time
+        attachments: Optional list of (name, content) tuples for prompt caching
         force_text_mode: Force text_mode=True regardless of agent config (useful for chat UI)
         continue_conversation_id: Optional conversation ID to continue (makes run mode multi-turn)
 
@@ -777,19 +815,44 @@ async def run_agent_async(
             delegation_agents=delegation_agents,
             task_summary=task_manager.get_task_summary(),
             tasks=task_manager.get_tasks_for_template(),
+            attachments=attachments,
         )
 
         # Debug output if requested
         if debug:
-            from tsugite.events import DebugMessageEvent, EventBus
+            import sys
 
-            debug_event_bus = EventBus()
-            debug_ui_handler = get_ui_handler(custom_logger)
-            if debug_ui_handler:
-                debug_event_bus.subscribe(debug_ui_handler.handle_event)
-            debug_event_bus.emit(
-                DebugMessageEvent(message=f"DEBUG: Rendered Prompt\n{prepared.rendered_prompt}\nEnd Rendered Prompt")
-            )
+            # Build complete debug output showing system prompt, attachments, and user prompt
+            debug_parts = ["\nDEBUG: Complete Prompt Context", "=" * 80, ""]
+
+            # Show system prompt
+            debug_parts.append("SYSTEM PROMPT:")
+            debug_parts.append("-" * 80)
+            debug_parts.append(prepared.system_message)
+            debug_parts.append("")
+
+            # Show attachments if any
+            if prepared.attachments:
+                debug_parts.append(f"ATTACHMENTS ({len(prepared.attachments)}):")
+                debug_parts.append("-" * 80)
+                for name, content in prepared.attachments:
+                    preview = content[:200] + "..." if len(content) > 200 else content
+                    debug_parts.append(f"• {name}")
+                    debug_parts.append(f"  {preview}")
+                    debug_parts.append("")
+            else:
+                debug_parts.append("NO ATTACHMENTS")
+                debug_parts.append("")
+
+            # Show user prompt
+            debug_parts.append("USER PROMPT:")
+            debug_parts.append("-" * 80)
+            debug_parts.append(prepared.rendered_prompt)
+            debug_parts.append("")
+            debug_parts.append("=" * 80)
+
+            # Print directly to stderr
+            print("\n".join(debug_parts), file=sys.stderr)
 
         # Execute with the low-level helper (async - no asyncio.run wrapper)
         return await _execute_agent_with_prompt(
@@ -862,6 +925,7 @@ def _build_prepared_agent_for_step(
     rendered_step_prompt: str,
     step_context: Dict[str, Any],
     delegation_agents: Optional[List[tuple[str, Path]]] = None,
+    attachments: Optional[List[tuple[str, str]]] = None,
 ) -> "PreparedAgent":
     """Build a PreparedAgent for step execution.
 
@@ -873,6 +937,7 @@ def _build_prepared_agent_for_step(
         rendered_step_prompt: Already-rendered step prompt
         step_context: Step execution context
         delegation_agents: Optional list of delegation agents
+        attachments: List of (name, content) tuples for prompt caching
 
     Returns:
         PreparedAgent ready for execution
@@ -909,6 +974,7 @@ def _build_prepared_agent_for_step(
         context=step_context,
         combined_instructions=combined_instructions,
         prefetch_results={},  # Already executed in preamble
+        attachments=attachments or [],
     )
 
 

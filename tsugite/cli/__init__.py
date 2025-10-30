@@ -19,7 +19,7 @@ from .helpers import (
     change_to_root_directory,
     get_error_console,
     get_logo,
-    get_output_console,
+    inject_auto_context_if_enabled,
     load_and_validate_agent,
     print_plain_info,
 )
@@ -229,6 +229,11 @@ def run(
         None, "-f", "--attachment", help="Attachment(s) to include (repeatable)"
     ),
     refresh_cache: bool = typer.Option(False, "--refresh-cache", help="Force refresh cached attachment content"),
+    auto_context: Optional[bool] = typer.Option(
+        None,
+        "--auto-context/--no-auto-context",
+        help="Enable/disable auto-context attachments (overrides config/agent)",
+    ),
     docker: bool = typer.Option(False, "--docker", help="Run in Docker container (delegates to tsugite-docker)"),
     keep: bool = typer.Option(False, "--keep", help="Keep Docker container running (use with --docker)"),
     container: Optional[str] = typer.Option(None, "--container", help="Use existing Docker container"),
@@ -404,10 +409,17 @@ def run(
         agent_info = get_agent_info(agent_file)
         instruction_label = "runtime + agent" if agent_info.get("instructions") else "runtime default"
 
-        # Assemble prompt with all attachments and file references
-        prompt, expanded_files = assemble_prompt_with_attachments(
+        # Inject auto-context if enabled
+        agent_attachments = inject_auto_context_if_enabled(
+            agent_info.get("attachments"),
+            agent_info.get("auto_context"),
+            cli_override=auto_context,
+        )
+
+        # Resolve attachments and file references with deduplication
+        prompt, resolved_attachments = assemble_prompt_with_attachments(
             prompt=prompt,
-            agent_attachments=agent_info.get("attachments"),
+            agent_attachments=agent_attachments,
             cli_attachments=attachment,
             base_dir=base_dir,
             refresh_cache=refresh_cache,
@@ -432,16 +444,16 @@ def run(
             }
 
             # Add agent attachments if any
-            if agent_info.get("attachments"):
-                info_items["Agent Attachments"] = ", ".join(agent_info["attachments"])
+            if agent_attachments:
+                info_items["Agent Attachments"] = ", ".join(agent_attachments)
 
             # Add CLI attachments if any
             if attachment:
                 info_items["CLI Attachments"] = ", ".join(attachment)
 
-            # Add expanded files if any
-            if expanded_files:
-                info_items["Expanded Files"] = ", ".join(expanded_files)
+            # Add resolved attachments count (after deduplication)
+            if resolved_attachments:
+                info_items["Attachments"] = f"{len(resolved_attachments)} file(s)"
 
             # Display info based on mode
             if use_plain_output:
@@ -517,6 +529,7 @@ def run(
                         "delegation_agents": delegation_agents,
                         "stream": stream,
                         "continue_conversation_id": continue_conversation_id,
+                        "attachments": resolved_attachments,
                     }
                     if should_save_history and executor == run_agent:
                         executor_kwargs["return_token_usage"] = True
@@ -535,6 +548,7 @@ def run(
                         "delegation_agents": delegation_agents,
                         "stream": stream,
                         "continue_conversation_id": continue_conversation_id,
+                        "attachments": resolved_attachments,
                     }
                     if should_save_history and executor == run_agent:
                         executor_kwargs["return_token_usage"] = True
@@ -556,6 +570,7 @@ def run(
                             "delegation_agents": delegation_agents,
                             "stream": stream,
                             "continue_conversation_id": continue_conversation_id,
+                            "attachments": resolved_attachments,
                         }
                         if should_save_history and executor == run_agent:
                             executor_kwargs["return_token_usage"] = True
@@ -585,6 +600,7 @@ def run(
                             "delegation_agents": delegation_agents,
                             "stream": stream,
                             "continue_conversation_id": continue_conversation_id,
+                            "attachments": resolved_attachments,
                         }
                         if should_save_history and executor == run_agent:
                             executor_kwargs["return_token_usage"] = True
@@ -592,12 +608,14 @@ def run(
 
             # Unpack result if history was enabled (run_agent returns tuple with metadata)
             if should_save_history and executor == run_agent and isinstance(result, tuple):
-                result_str, token_count, cost, step_count, execution_steps = result
+                result_str, token_count, cost, step_count, execution_steps, system_prompt, attachments = result
             else:
                 result_str = result if not isinstance(result, tuple) else result[0]
                 token_count = None
                 cost = None
                 execution_steps = None
+                system_prompt = None
+                attachments = None
 
             # Save to history (unless disabled)
             if should_save_history:
@@ -615,6 +633,8 @@ def run(
                         cost=cost,
                         execution_steps=execution_steps,
                         continue_conversation_id=continue_conversation_id,
+                        system_prompt=system_prompt,
+                        attachments=attachments,
                     )
                 except Exception as e:
                     # Don't fail the run if history save fails
@@ -622,14 +642,22 @@ def run(
 
             # Display result
             if headless or final_only:
-                # Headless/final-only: plain result to stdout
-                get_output_console().print(result_str)
+                # Headless/final-only: render markdown to stdout
+                from rich.markdown import Markdown
+
+                from tsugite.console import get_stdout_console
+
+                get_stdout_console(no_color=no_color, force_terminal=True).print(Markdown(result_str))
             else:
                 # Show completion banner to stderr
                 stderr_console.print()
                 stderr_console.rule("[bold green]Agent Execution Complete[/bold green]")
-                # Output final result to stdout (for piping)
-                get_output_console().print(result_str)
+                # Output final result to stdout (for piping) with markdown rendering
+                from rich.markdown import Markdown
+
+                from tsugite.console import get_stdout_console
+
+                get_stdout_console(no_color=no_color, force_terminal=True).print(Markdown(result_str))
 
         except ValueError as e:
             get_error_console(headless, console).print(f"[red]Configuration error: {e}[/red]")
@@ -656,11 +684,17 @@ def render(
     prompt: Optional[str] = typer.Argument(default="", help="Prompt/task for the agent (optional)"),
     root: Optional[str] = typer.Option(None, "--root", help="Working directory"),
     no_color: bool = typer.Option(False, "--no-color", help="Disable ANSI colors"),
+    verbose: bool = typer.Option(False, "--verbose", help="Show full attachment content (default: truncated)"),
     raw: bool = typer.Option(False, "--raw", help="Show raw Jinja templates in instructions without rendering"),
     attachment: Optional[List[str]] = typer.Option(
         None, "-f", "--attachment", help="Attachment(s) to include (repeatable)"
     ),
     refresh_cache: bool = typer.Option(False, "--refresh-cache", help="Force refresh cached attachment content"),
+    auto_context: Optional[bool] = typer.Option(
+        None,
+        "--auto-context/--no-auto-context",
+        help="Enable/disable auto-context attachments (overrides config/agent)",
+    ),
     continue_conversation: bool = typer.Option(
         False, "--continue", "-c", help="Show prompt for continuing conversation"
     ),
@@ -723,10 +757,17 @@ def render(
 
             base_dir = Path.cwd()
 
+            # Inject auto-context if enabled
+            agent_attachments = inject_auto_context_if_enabled(
+                agent.config.attachments,
+                agent.config.auto_context,
+                cli_override=auto_context,
+            )
+
             # Assemble prompt with all attachments and file references
-            prompt_expanded, _ = assemble_prompt_with_attachments(
+            prompt_updated, resolved_attachments = assemble_prompt_with_attachments(
                 prompt=prompt,
-                agent_attachments=agent.config.attachments,
+                agent_attachments=agent_attachments,
                 cli_attachments=attachment,
                 base_dir=base_dir,
                 refresh_cache=refresh_cache,
@@ -751,9 +792,10 @@ def render(
             preparer = AgentPreparer()
             prepared = preparer.prepare(
                 agent=agent,
-                prompt=prompt_expanded,
+                prompt=prompt_updated,
                 skip_tool_directives=True,  # Render doesn't execute tool directives
                 context=context,
+                attachments=resolved_attachments,  # Pass attachments separately
             )
 
             # Display what will be sent to LLM
@@ -767,15 +809,59 @@ def render(
                 )
             )
 
-            console.print("\n" + "=" * 50)
-            console.print("[bold green]System Message[/bold green] [dim](sent to LLM)[/dim]")
-            console.print("=" * 50)
+            # Show message structure
+            console.print()
+            console.rule(
+                "[bold yellow]MESSAGE STRUCTURE[/bold yellow] [dim](sent to LLM as separate content blocks)[/dim]",
+                style="yellow",
+            )
+
+            # Message 1: System (role: system)
+            console.print()
+            console.rule("[bold cyan]Message 1: System Role[/bold cyan]", style="cyan", align="left")
+
+            # Content Block 1: System Instructions
+            console.print()
+            console.rule("[dim]Content Block 1: System Instructions[/dim]", style="dim", align="left")
             console.print(prepared.system_message)
 
-            console.print("\n" + "=" * 50)
-            console.print("[bold green]User Message[/bold green] [dim](sent to LLM)[/dim]")
-            console.print("=" * 50)
+            # Display attachments if they exist (as additional content blocks in system message)
+            if prepared.attachments:
+                for idx, (name, content) in enumerate(prepared.attachments, start=2):
+                    console.print()
+                    console.rule(
+                        f"[dim]Content Block {idx}: Attachment - {name}[/dim]",
+                        style="dim",
+                        align="left",
+                    )
+                    console.print(f"[yellow]<Attachment: {name}>[/yellow]")
+
+                    # Truncate unless verbose
+                    if verbose:
+                        console.print(content)
+                    else:
+                        # Show first 10 lines and last 5 lines
+                        lines = content.split("\n")
+                        if len(lines) > 20:
+                            preview = "\n".join(lines[:10])
+                            preview += (
+                                f"\n[dim]... ({len(lines) - 15} lines truncated, use --verbose to see all) ...[/dim]\n"
+                            )
+                            preview += "\n".join(lines[-5:])
+                            console.print(preview)
+                        else:
+                            console.print(content)
+
+                    console.print(f"[yellow]</Attachment: {name}>[/yellow]")
+
+            # Message 2: User (role: user)
+            console.print()
+            console.rule("[bold cyan]Message 2: User Role[/bold cyan]", style="cyan", align="left")
+            console.print()
+            console.rule("[dim]Content: User Task/Prompt[/dim]", style="dim", align="left")
             console.print(prepared.user_message)
+            console.print()
+            console.rule(style="dim")
 
         except Exception as e:
             console.print(f"[red]Render error: {e}[/red]")

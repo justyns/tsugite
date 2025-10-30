@@ -153,6 +153,7 @@ Task: {{ user_prompt }}
 | `reasoning_effort` | — | For o1/o3 models: `low`, `medium`, `high` |
 | `text_mode` | `false` | Allow text responses without code blocks |
 | `disable_history` | `false` | Disable conversation history for this agent |
+| `auto_context` | `null` | Auto-load context files (`true`/`false`/`null` = use config) |
 
 ### Template Helpers
 
@@ -385,6 +386,109 @@ attachments:
 ```
 
 **Resolution order:** Agent attachments → CLI `-f` → File refs `@` → Prompt
+
+### Auto-Context
+
+Automatically discover and load context files from your project:
+
+```yaml
+---
+auto_context: true  # Enable for this agent
+---
+```
+
+**Default files searched:**
+- `.tsugite/CONTEXT.md` (project-specific)
+- `AGENTS.md` (project-specific)
+- `CLAUDE.md` (project-specific)
+- `~/.config/tsugite/CONTEXT.md` (global, applies to all projects)
+
+**Search behavior:**
+- Searches from current directory up to git repository root for project files
+- Finds files in order (most specific directory first)
+- Skips duplicates (prefers closer files)
+- Appends global context file at the end (if it exists)
+
+**Global configuration** (`~/.config/tsugite/config.json`):
+
+```json
+{
+  "auto_context_enabled": true,  // Default: enabled
+  "auto_context_files": [
+    ".tsugite/CONTEXT.md",
+    "AGENTS.md",
+    "CLAUDE.md"
+  ],
+  "auto_context_include_global": true  // Default: enabled
+}
+```
+
+**Note:** Auto-context is **enabled by default**. To disable globally, set `"auto_context_enabled": false`.
+
+**Global context file** (`~/.config/tsugite/CONTEXT.md`):
+- Personal preferences that apply across all projects
+- Coding style, conventions, frequently used patterns
+- Loaded after project-specific context
+- Can be disabled with `"auto_context_include_global": false`
+
+**Agent override:**
+
+```yaml
+---
+auto_context: true   # Force enable
+auto_context: false  # Force disable
+auto_context: null   # Use config default (or omit field)
+---
+```
+
+**Manual usage** (without config):
+
+```yaml
+---
+attachments:
+  - auto-context  # Manually trigger discovery
+---
+```
+
+**Priority:** Agent setting > Config default
+
+### Prompt Caching
+
+Tsugite automatically uses prompt caching to reduce costs and improve performance when supported by your LLM provider. Attachments and context files are sent as separate system content blocks with cache markers, allowing providers to cache static content across requests.
+
+**Supported Providers:**
+- **OpenAI** (GPT-4, GPT-4 Turbo, GPT-3.5 Turbo)
+- **Anthropic** (Claude 3.5, Claude 3)
+- **AWS Bedrock** (Anthropic models)
+- **Deepseek**
+
+**How It Works:**
+
+1. Each attachment (including auto-context files) is sent as a separate system content block
+2. Cache markers are automatically added to attachment blocks
+3. Providers cache these blocks across conversations
+4. Subsequent requests reuse cached content (90% cost reduction for cached tokens)
+
+**Cache Statistics:**
+
+Cost summaries now include cache information when available:
+
+```
+⏱️  Duration: 2.3s | 💰 Cost: $0.003456 | 📊 Tokens: 12,450
+💾 Cached: 8,200 tokens | 📝 Cache write: 4,250 tokens
+```
+
+**Cache Fields:**
+- **Cached tokens**: Total tokens read from cache (unified across all providers)
+- **Cache write**: Tokens used to create new cache entries (Anthropic-specific)
+- **Cache read**: Tokens read from existing cache (Anthropic-specific)
+
+**Best Practices:**
+- Use auto-context for project documentation (cached across runs)
+- Keep attachments stable between requests for maximum cache hits
+- Large context files benefit most from caching (minimum 1024 tokens)
+
+**Note:** Caching happens automatically - no configuration needed. Cache statistics appear in cost summaries when providers return cache data.
 
 ### Custom Tools
 

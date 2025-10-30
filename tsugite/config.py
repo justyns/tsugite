@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -25,6 +25,9 @@ class Config(BaseModel):
     history_dir: Optional[Path] = None
     machine_name: Optional[str] = None
     max_history_days: Optional[int] = None
+    auto_context_enabled: bool = True
+    auto_context_files: List[str] = Field(default_factory=lambda: [".tsugite/CONTEXT.md", "AGENTS.md", "CLAUDE.md"])
+    auto_context_include_global: bool = True
 
 
 def get_config_path() -> Path:
@@ -173,6 +176,18 @@ def set_chat_theme(theme: str, path: Optional[Path] = None) -> None:
     """
     config = load_config(path)
     config.chat_theme = theme
+    save_config(config, path)
+
+
+def set_auto_context_enabled(enabled: bool, path: Optional[Path] = None) -> None:
+    """Set whether auto-context is enabled in configuration.
+
+    Args:
+        enabled: True to enable auto-context, False to disable
+        path: Path to config.json file. If None, uses default path
+    """
+    config = load_config(path)
+    config.auto_context_enabled = enabled
     save_config(config, path)
 
 

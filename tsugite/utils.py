@@ -197,10 +197,19 @@ def resolve_attachments(attachment_refs: List[str], refresh_cache: bool = False)
     for ref in attachment_refs:
         # Get attachment from registry
         result = get_attachment(ref)
-        if result is None:
-            raise ValueError(f"Attachment not found: '{ref}'")
 
-        source, content = result
+        # If not in registry, try to find a handler that can handle it directly
+        if result is None:
+            try:
+                handler = get_handler(ref)
+                # Handler found, use ref as source
+                source = ref
+                content = None
+            except ValueError:
+                # No handler found either
+                raise ValueError(f"Attachment not found: '{ref}'")
+        else:
+            source, content = result
 
         # If inline content, use it directly
         if content is not None:
@@ -216,24 +225,40 @@ def resolve_attachments(attachment_refs: List[str], refresh_cache: bool = False)
 
         # Fetch content via handler
         try:
-            handler = get_handler(source)
-            fetched_content = handler.fetch(source)
+            if result is None:
+                # Handler already found above when not in registry
+                pass
+            else:
+                handler = get_handler(source)
 
-            # Save to cache
-            save_to_cache(source, fetched_content)
+            # Check if handler supports multiple attachments (like AutoContextHandler)
+            if hasattr(handler, "fetch_multiple"):
+                # Fetch multiple attachments and add all to resolved list
+                multiple_attachments = handler.fetch_multiple(source)
+                for name, content in multiple_attachments:
+                    # Cache each attachment separately
+                    cache_key = f"{source}:{name}"
+                    save_to_cache(cache_key, content)
+                    resolved.append((name, content))
+            else:
+                # Single attachment - use normal fetch
+                fetched_content = handler.fetch(source)
 
-            resolved.append((ref, fetched_content))
+                # Save to cache
+                save_to_cache(source, fetched_content)
+
+                resolved.append((ref, fetched_content))
         except Exception as e:
             raise ValueError(f"Failed to fetch attachment '{ref}' from {source}: {e}") from e
 
     return resolved
 
 
-def expand_file_references(prompt: str, base_dir: Path) -> Tuple[str, List[str]]:
-    """Expand @filename references in prompt by reading and injecting file contents.
+def expand_file_references(prompt: str, base_dir: Path) -> Tuple[str, List[Tuple[str, str]]]:
+    """Expand @filename references in prompt by reading file contents.
 
     Finds patterns like @filename or @"path with spaces.txt", reads their contents,
-    and prepends them to the prompt. The @filename references in the prompt are
+    and returns them as attachment tuples. The @filename references in the prompt are
     replaced with just the filename (without @).
 
     Args:
@@ -241,22 +266,22 @@ def expand_file_references(prompt: str, base_dir: Path) -> Tuple[str, List[str]]
         base_dir: Base directory to resolve relative paths from
 
     Returns:
-        Tuple of (expanded_prompt, list_of_expanded_files)
+        Tuple of (updated_prompt, list_of_file_attachment_tuples)
+        where each tuple is (relative_path, content)
 
     Raises:
         ValueError: If a referenced file cannot be read
 
     Examples:
         >>> expand_file_references("Analyze @test.py", Path("/tmp"))
-        ("<File: test.py>\\ncode\\n</File: test.py>\\n\\nAnalyze test.py", ["test.py"])
+        ("Analyze test.py", [("test.py", "code content")])
     """
     # Pattern matches @filename or @"quoted filename"
     # Group 1: quoted path, Group 2: unquoted path
     # Unquoted paths must start with valid filename characters (not special symbols like #, $, etc.)
     pattern = r'@(?:"([^"]+)"|([a-zA-Z0-9_./\-][^\s]*))'
 
-    file_contents = []
-    expanded_files = []
+    file_attachments = []
 
     def collect_file_ref(match: re.Match) -> str:
         # Extract filename from either quoted or unquoted group
@@ -283,24 +308,16 @@ def expand_file_references(prompt: str, base_dir: Path) -> Tuple[str, List[str]]
         except Exception as e:
             raise ValueError(f"Failed to read file {filename}: {e}") from e
 
-        # Track expanded files and their contents
-        expanded_files.append(filename)
-        file_contents.append(f"<File: {filename}>\n{content}\n</File: {filename}>")
+        # Store as attachment tuple (relative path, content)
+        file_attachments.append((filename, content))
 
         # Replace @filename with just the filename in the prompt
         return filename
 
-    # Replace all @filename references and collect contents
+    # Replace all @filename references and collect contents as tuples
     updated_prompt = re.sub(pattern, collect_file_ref, prompt)
 
-    # If we found files, prepend their contents to the prompt
-    if file_contents:
-        files_section = "\n\n".join(file_contents)
-        expanded_prompt = f"{files_section}\n\n{updated_prompt}"
-    else:
-        expanded_prompt = updated_prompt
-
-    return expanded_prompt, expanded_files
+    return updated_prompt, file_attachments
 
 
 async def cleanup_pending_tasks() -> None:

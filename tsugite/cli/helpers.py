@@ -1,5 +1,6 @@
 """CLI helper functions."""
 
+import hashlib
 import os
 from contextlib import contextmanager
 from pathlib import Path
@@ -11,6 +12,77 @@ from rich.console import Console
 # Re-export console utilities for backwards compatibility
 from tsugite.console import get_error_console, get_output_console  # noqa: F401
 from tsugite.constants import TSUGITE_LOGO_NARROW, TSUGITE_LOGO_WIDE
+
+
+def deduplicate_attachments(attachments: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
+    """Deduplicate attachments by canonical path and content hash.
+
+    This prevents the same file from being sent multiple times to the LLM when:
+    - Referenced through different paths (symlinks, relative vs absolute)
+    - Specified multiple times across different sources (agent, CLI, file refs)
+    - Identical content with different names (renamed/moved copies)
+
+    Args:
+        attachments: List of (name, content) tuples
+
+    Returns:
+        Deduplicated list of (name, content) tuples where duplicate files are combined
+        with their aliases shown in the name: "file.txt (also: symlink.txt, @other.txt)"
+
+    Examples:
+        >>> deduplicate_attachments([("file.txt", "content"), ("symlink.txt", "content")])
+        [("file.txt (also: symlink.txt)", "content")]
+    """
+    seen_paths = {}  # canonical_path -> {name, content, aliases, order}
+    seen_hashes = {}  # content_hash -> canonical_path
+    order_counter = 0
+
+    for name, content in attachments:
+        # Try to resolve as file path
+        canonical = None
+        try:
+            # Attempt to resolve path (handles symlinks and relative paths)
+            path = Path(name)
+            if path.exists():
+                canonical = str(path.resolve())
+        except (OSError, ValueError):
+            # Not a valid file path or can't resolve - treat as non-path attachment
+            pass
+
+        # If we couldn't resolve to a canonical path, use name as-is for deduplication
+        if canonical is None:
+            canonical = name
+
+        # Check if already seen by path
+        if canonical in seen_paths:
+            # Add this name as an alias
+            seen_paths[canonical]["aliases"].append(name)
+            continue
+
+        # Check by content hash (catches renamed/moved copies)
+        content_hash = hashlib.sha256(content.encode()).hexdigest()
+        if content_hash in seen_hashes:
+            existing_canonical = seen_hashes[content_hash]
+            seen_paths[existing_canonical]["aliases"].append(name)
+            continue
+
+        # New unique attachment - preserve order of first occurrence
+        seen_paths[canonical] = {"name": name, "content": content, "aliases": [], "order": order_counter}
+        seen_hashes[content_hash] = canonical
+        order_counter += 1
+
+    # Build result preserving order of first occurrence
+    result = []
+    for entry in sorted(seen_paths.values(), key=lambda x: x["order"]):
+        if entry["aliases"]:
+            # Combine name with aliases
+            aliases_str = ", ".join(entry["aliases"])
+            combined_name = f"{entry['name']} (also: {aliases_str})"
+        else:
+            combined_name = entry["name"]
+        result.append((combined_name, entry["content"]))
+
+    return result
 
 
 def get_logo(console: Console) -> str:
@@ -91,6 +163,47 @@ def resolve_attachments_with_error_handling(
         raise typer.Exit(1)
 
 
+def inject_auto_context_if_enabled(
+    agent_attachments: Optional[List[str]],
+    agent_auto_context: Optional[bool],
+    cli_override: Optional[bool] = None,
+) -> Optional[List[str]]:
+    """Inject auto-context attachment if enabled in config or agent.
+
+    Args:
+        agent_attachments: Current agent attachments list
+        agent_auto_context: Agent's auto_context setting (None = use config default)
+        cli_override: CLI flag override (None = use precedence, True/False = force)
+
+    Returns:
+        Updated attachments list with auto-context prepended if enabled, or original list
+    """
+    from tsugite.config import load_config
+
+    config = load_config()
+
+    # Determine if auto-context should be enabled
+    # Priority: CLI override > agent setting > config default
+    if cli_override is not None:
+        should_enable = cli_override
+    elif agent_auto_context is not None:
+        should_enable = agent_auto_context
+    else:
+        should_enable = config.auto_context_enabled
+
+    if not should_enable:
+        return agent_attachments
+
+    # Prepend auto-context to attachments list
+    attachments = list(agent_attachments) if agent_attachments else []
+
+    # Only add if not already present
+    if "auto-context" not in attachments:
+        attachments.insert(0, "auto-context")
+
+    return attachments
+
+
 def assemble_prompt_with_attachments(
     prompt: str,
     agent_attachments: Optional[List[str]],
@@ -98,8 +211,8 @@ def assemble_prompt_with_attachments(
     base_dir: Path,
     refresh_cache: bool,
     console: Console,
-) -> Tuple[str, List[str]]:
-    """Resolve all attachments and assemble final prompt with proper ordering.
+) -> Tuple[str, List[Tuple[str, str]]]:
+    """Resolve all attachments and file references, returning combined attachment tuples.
 
     Args:
         prompt: Base prompt text
@@ -110,7 +223,8 @@ def assemble_prompt_with_attachments(
         console: Console for error messages
 
     Returns:
-        Tuple of (assembled_prompt, expanded_file_list)
+        Tuple of (updated_prompt, combined_attachment_tuples)
+        where attachment_tuples is a list of (name, content) tuples
 
     Raises:
         typer.Exit: If attachment or file reference resolution fails
@@ -131,23 +245,20 @@ def assemble_prompt_with_attachments(
         else []
     )
 
-    # Expand @filename references in prompt
+    # Expand @filename references in prompt (returns tuples now)
     try:
-        prompt, expanded_files = expand_file_references(prompt, base_dir)
+        updated_prompt, file_attachment_tuples = expand_file_references(prompt, base_dir)
     except ValueError as e:
         console.print(f"[red]File reference error: {e}[/red]")
         raise typer.Exit(1)
 
-    # Assemble all attachments in proper order: agent -> CLI -> file refs -> prompt
-    all_attachments = agent_attachment_contents + cli_attachment_contents
+    # Combine all attachments in proper order: agent -> CLI -> file refs
+    all_attachments = agent_attachment_contents + cli_attachment_contents + file_attachment_tuples
 
-    if all_attachments:
-        attachment_sections = [
-            f"<Attachment: {name}>\n{content}\n</Attachment: {name}>" for name, content in all_attachments
-        ]
-        prompt = "\n\n".join(attachment_sections) + "\n\n" + prompt
+    # Deduplicate attachments (by path and content hash)
+    deduplicated_attachments = deduplicate_attachments(all_attachments)
 
-    return prompt, expanded_files
+    return updated_prompt, deduplicated_attachments
 
 
 def load_and_validate_agent(agent_path: str, console: Console) -> Tuple[Any, Path, str]:

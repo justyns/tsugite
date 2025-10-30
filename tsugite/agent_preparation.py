@@ -26,6 +26,7 @@ class PreparedAgent:
         context: Full template rendering context
         combined_instructions: Combined default + agent instructions
         prefetch_results: Results from prefetch tool execution
+        attachments: List of (name, content) tuples for prompt caching
     """
 
     agent: Agent
@@ -37,6 +38,7 @@ class PreparedAgent:
     context: Dict[str, Any]
     combined_instructions: str
     prefetch_results: Dict[str, Any]
+    attachments: List[tuple[str, str]]
 
 
 class AgentPreparer:
@@ -98,6 +100,7 @@ class AgentPreparer:
         skip_tool_directives: bool = False,
         task_summary: str = "## Current Tasks\nNo tasks yet.",
         tasks: Optional[List[Dict[str, Any]]] = None,
+        attachments: Optional[List[tuple[str, str]]] = None,
     ) -> PreparedAgent:
         """Prepare agent with all context, tools, and instructions.
 
@@ -109,6 +112,7 @@ class AgentPreparer:
             skip_tool_directives: Skip executing tool directives (for render)
             task_summary: Current task summary (from task manager)
             tasks: List of task dicts for template iteration (from task manager)
+            attachments: List of (name, content) tuples for prompt caching
 
         Returns:
             PreparedAgent ready for execution or display
@@ -181,6 +185,14 @@ class AgentPreparer:
         # Step 5: Build instructions
         base_instructions = get_default_instructions(text_mode=agent_config.text_mode)
         agent_instructions = getattr(agent_config, "instructions", "")
+
+        # Render agent instructions as Jinja2 template (they may contain {% if text_mode %}, etc.)
+        if agent_instructions:
+            try:
+                agent_instructions = renderer.render(agent_instructions, full_context)
+            except Exception as e:
+                raise RuntimeError(f"Failed to render agent instructions: {e}") from e
+
         combined_instructions = _combine_instructions(base_instructions, agent_instructions)
 
         # Step 6: Expand and create tools
@@ -220,4 +232,5 @@ class AgentPreparer:
             context=full_context,
             combined_instructions=combined_instructions,
             prefetch_results=prefetch_context,
+            attachments=attachments or [],
         )

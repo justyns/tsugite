@@ -32,12 +32,14 @@ class TestListAgentsTool:
 
         # Create test agent
         agent_file = agents_dir / "test_agent.md"
-        agent_file.write_text("""---
+        agent_file.write_text(
+            """---
 name: test_agent
 description: A test agent for unit testing
 ---
 Test content
-""")
+"""
+        )
 
         result = list_agents()
 
@@ -56,12 +58,14 @@ Test content
 
         # Create test agent
         agent_file = tsugite_dir / "internal_agent.md"
-        agent_file.write_text("""---
+        agent_file.write_text(
+            """---
 name: internal_agent
 description: Internal team agent
 ---
 Content
-""")
+"""
+        )
 
         result = list_agents()
 
@@ -78,21 +82,25 @@ Content
 
         # Create a user agent with builtin-like name (should be included)
         builtin_like_file = agents_dir / "builtin-test.md"
-        builtin_like_file.write_text("""---
+        builtin_like_file.write_text(
+            """---
 name: builtin-test
 description: User agent with builtin-like name
 ---
 Content
-""")
+"""
+        )
 
         # Create a normal agent
         normal_file = agents_dir / "normal.md"
-        normal_file.write_text("""---
+        normal_file.write_text(
+            """---
 name: normal
 description: Should be included
 ---
 Content
-""")
+"""
+        )
 
         result = list_agents()
 
@@ -115,18 +123,22 @@ Content
 
         # Create same-named agent in both locations
         tsugite_agent = tsugite_dir / "duplicate.md"
-        tsugite_agent.write_text("""---
+        tsugite_agent.write_text(
+            """---
 name: duplicate
 description: From .tsugite (higher priority)
 ---
-""")
+"""
+        )
 
         agents_agent = agents_dir / "duplicate.md"
-        agents_agent.write_text("""---
+        agents_agent.write_text(
+            """---
 name: duplicate
 description: From agents (lower priority)
 ---
-""")
+"""
+        )
 
         # Mock global paths to avoid interference
         with patch("tsugite.agent_inheritance.get_global_agents_paths", return_value=[]):
@@ -148,11 +160,13 @@ description: From agents (lower priority)
         agents_dir.mkdir()
 
         agent_file = agents_dir / "formatter.md"
-        agent_file.write_text("""---
+        agent_file.write_text(
+            """---
 name: formatter
 description: Formats code beautifully
 ---
-""")
+"""
+        )
 
         result = list_agents()
 
@@ -175,11 +189,13 @@ description: Formats code beautifully
 
         # Create valid agent file
         valid_file = agents_dir / "valid.md"
-        valid_file.write_text("""---
+        valid_file.write_text(
+            """---
 name: valid
 description: Valid agent
 ---
-""")
+"""
+        )
 
         # Should not raise an error, just skip invalid file
         result = list_agents()
@@ -195,11 +211,13 @@ description: Valid agent
         agents_dir.mkdir()
 
         agent_file = agents_dir / "nodesc.md"
-        agent_file.write_text("""---
+        agent_file.write_text(
+            """---
 name: nodesc
 ---
 Content
-""")
+"""
+        )
 
         result = list_agents()
 
@@ -216,11 +234,13 @@ Content
         # Create three agents
         for i in range(3):
             agent_file = agents_dir / f"agent{i}.md"
-            agent_file.write_text(f"""---
+            agent_file.write_text(
+                f"""---
 name: agent{i}
 description: Agent number {i}
 ---
-""")
+"""
+            )
 
         result = list_agents()
 

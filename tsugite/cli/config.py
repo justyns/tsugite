@@ -32,6 +32,13 @@ def config_show():
 
     console.print(f"[bold]Chat Theme:[/bold] {config.chat_theme}\n")
 
+    # Auto-context settings
+    status = "[green]enabled[/green]" if config.auto_context_enabled else "[red]disabled[/red]"
+    console.print(f"[bold]Auto-Context:[/bold] {status}")
+    if config.auto_context_files:
+        console.print(f"  Files: {', '.join(config.auto_context_files)}")
+    console.print(f"  Include Global: {config.auto_context_include_global}\n")
+
     if config.model_aliases:
         console.print(f"[bold]Model Aliases ({len(config.model_aliases)}):[/bold]")
         for alias, model in config.model_aliases.items():
@@ -216,3 +223,50 @@ def config_list_themes():
 
     console.print(f"\n[dim]Current theme: {current_theme}[/dim]")
     console.print("[dim]Change with: tsugite config set-theme <theme>[/dim]")
+
+
+@config_app.command("set")
+def config_set(
+    key: str = typer.Argument(help="Configuration key (e.g., 'auto-context-enabled')"),
+    value: str = typer.Argument(help="Configuration value"),
+):
+    """Set a configuration value.
+
+    Supported keys:
+        auto-context-enabled: Enable/disable auto-context (true/false)
+
+    Examples:
+        tsugite config set auto-context-enabled true
+        tsugite config set auto-context-enabled false
+    """
+    from tsugite.config import get_config_path, set_auto_context_enabled
+
+    # Normalize key (convert dashes to underscores)
+    normalized_key = key.replace("-", "_")
+
+    if normalized_key == "auto_context_enabled":
+        # Parse boolean value
+        value_lower = value.lower()
+        if value_lower in ("true", "yes", "1", "on"):
+            bool_value = True
+        elif value_lower in ("false", "no", "0", "off"):
+            bool_value = False
+        else:
+            console.print(f"[red]Invalid boolean value: {value}[/red]")
+            console.print("[yellow]Use: true, false, yes, no, 1, 0, on, or off[/yellow]")
+            raise typer.Exit(1)
+
+        try:
+            set_auto_context_enabled(bool_value)
+            config_path = get_config_path()
+            status = "enabled" if bool_value else "disabled"
+            console.print(f"[green]✓ Auto-context {status}[/green]")
+            console.print(f"[dim]Saved to: {config_path}[/dim]")
+        except Exception as e:
+            console.print(f"[red]Failed to set auto-context-enabled: {e}[/red]")
+            raise typer.Exit(1)
+    else:
+        console.print(f"[red]Unknown configuration key: {key}[/red]")
+        console.print("\n[yellow]Supported keys:[/yellow]")
+        console.print("  • auto-context-enabled")
+        raise typer.Exit(1)

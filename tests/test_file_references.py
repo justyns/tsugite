@@ -17,16 +17,14 @@ class TestExpandFileReferences:
         test_file.write_text("Hello, world!")
 
         prompt = "Analyze @test.txt"
-        expanded, files = expand_file_references(prompt, tmp_path)
+        updated_prompt, file_tuples = expand_file_references(prompt, tmp_path)
 
-        # File contents should be prepended
-        assert expanded.startswith("<File: test.txt>")
-        assert "Hello, world!" in expanded
-        assert "</File: test.txt>" in expanded
         # @test.txt should be replaced with just test.txt in the prompt
-        assert "Analyze test.txt" in expanded
-        assert "@test.txt" not in expanded
-        assert files == ["test.txt"]
+        assert updated_prompt == "Analyze test.txt"
+        assert "@test.txt" not in updated_prompt
+        # File contents returned as tuples
+        assert len(file_tuples) == 1
+        assert file_tuples[0] == ("test.txt", "Hello, world!")
 
     def test_multiple_file_references(self, tmp_path):
         """Test multiple @filename expansions in one prompt."""
@@ -38,18 +36,16 @@ class TestExpandFileReferences:
         file2.write_text("# Documentation")
 
         prompt = "Compare @file1.py and @file2.md"
-        expanded, files = expand_file_references(prompt, tmp_path)
+        updated_prompt, file_tuples = expand_file_references(prompt, tmp_path)
 
-        # Both file contents should be prepended
-        assert "def foo(): pass" in expanded
-        assert "# Documentation" in expanded
-        assert "<File: file1.py>" in expanded
-        assert "<File: file2.md>" in expanded
         # @filenames should be replaced with just filenames
-        assert "Compare file1.py and file2.md" in expanded
-        assert "@file1.py" not in expanded
-        assert "@file2.md" not in expanded
-        assert set(files) == {"file1.py", "file2.md"}
+        assert updated_prompt == "Compare file1.py and file2.md"
+        assert "@file1.py" not in updated_prompt
+        assert "@file2.md" not in updated_prompt
+        # Both file contents returned as tuples
+        assert len(file_tuples) == 2
+        assert file_tuples[0] == ("file1.py", "def foo(): pass")
+        assert file_tuples[1] == ("file2.md", "# Documentation")
 
     def test_quoted_path_with_spaces(self, tmp_path):
         """Test @"filename with spaces.txt" syntax."""
@@ -58,11 +54,11 @@ class TestExpandFileReferences:
         test_file.write_text("Content with spaces")
 
         prompt = 'Review @"my file.txt"'
-        expanded, files = expand_file_references(prompt, tmp_path)
+        updated_prompt, file_tuples = expand_file_references(prompt, tmp_path)
 
-        assert "Content with spaces" in expanded
-        assert "<File: my file.txt>" in expanded
-        assert files == ["my file.txt"]
+        assert updated_prompt == "Review my file.txt"
+        assert len(file_tuples) == 1
+        assert file_tuples[0] == ("my file.txt", "Content with spaces")
 
     def test_relative_path(self, tmp_path):
         """Test relative path resolution."""
@@ -73,11 +69,11 @@ class TestExpandFileReferences:
         test_file.write_text("print('hello')")
 
         prompt = "Analyze @subdir/test.py"
-        expanded, files = expand_file_references(prompt, tmp_path)
+        updated_prompt, file_tuples = expand_file_references(prompt, tmp_path)
 
-        assert "print('hello')" in expanded
-        assert "<File: subdir/test.py>" in expanded
-        assert files == ["subdir/test.py"]
+        assert updated_prompt == "Analyze subdir/test.py"
+        assert len(file_tuples) == 1
+        assert file_tuples[0] == ("subdir/test.py", "print('hello')")
 
     def test_absolute_path(self, tmp_path):
         """Test absolute path resolution."""
@@ -86,10 +82,11 @@ class TestExpandFileReferences:
 
         abs_path = str(test_file)
         prompt = f"Check @{abs_path}"
-        expanded, files = expand_file_references(prompt, Path("/"))
+        updated_prompt, file_tuples = expand_file_references(prompt, Path("/"))
 
-        assert "Absolute content" in expanded
-        assert abs_path in files
+        assert updated_prompt == f"Check {abs_path}"
+        assert len(file_tuples) == 1
+        assert file_tuples[0] == (abs_path, "Absolute content")
 
     def test_file_not_found_error(self, tmp_path):
         """Test error when referenced file doesn't exist."""
@@ -111,10 +108,10 @@ class TestExpandFileReferences:
     def test_no_references_unchanged(self, tmp_path):
         """Test that prompts without @ are unchanged."""
         prompt = "This is a normal prompt without file references"
-        expanded, files = expand_file_references(prompt, tmp_path)
+        updated_prompt, file_tuples = expand_file_references(prompt, tmp_path)
 
-        assert expanded == prompt
-        assert files == []
+        assert updated_prompt == prompt
+        assert file_tuples == []
 
     def test_mixed_content(self, tmp_path):
         """Test prompt with text before and after @filename."""
@@ -122,15 +119,14 @@ class TestExpandFileReferences:
         test_file.write_text("def main(): pass")
 
         prompt = "Please review the code in @code.py and suggest improvements"
-        expanded, files = expand_file_references(prompt, tmp_path)
+        updated_prompt, file_tuples = expand_file_references(prompt, tmp_path)
 
-        # File contents prepended
-        assert expanded.startswith("<File: code.py>")
-        assert "def main(): pass" in expanded
         # Prompt with @code.py replaced by code.py
-        assert "Please review the code in code.py and suggest improvements" in expanded
-        assert "@code.py" not in expanded
-        assert files == ["code.py"]
+        assert updated_prompt == "Please review the code in code.py and suggest improvements"
+        assert "@code.py" not in updated_prompt
+        # File contents returned as tuple
+        assert len(file_tuples) == 1
+        assert file_tuples[0] == ("code.py", "def main(): pass")
 
     def test_unicode_content(self, tmp_path):
         """Test files with unicode content."""
@@ -138,10 +134,11 @@ class TestExpandFileReferences:
         test_file.write_text("Hello 世界 🌍", encoding="utf-8")
 
         prompt = "Translate @unicode.txt"
-        expanded, files = expand_file_references(prompt, tmp_path)
+        updated_prompt, file_tuples = expand_file_references(prompt, tmp_path)
 
-        assert "Hello 世界 🌍" in expanded
-        assert files == ["unicode.txt"]
+        assert updated_prompt == "Translate unicode.txt"
+        assert len(file_tuples) == 1
+        assert file_tuples[0] == ("unicode.txt", "Hello 世界 🌍")
 
     def test_binary_file_error(self, tmp_path):
         """Test error on binary file (non-text)."""
@@ -159,11 +156,13 @@ class TestExpandFileReferences:
         test_file.write_text("Repeated content")
 
         prompt = "Compare @repeated.txt with @repeated.txt"
-        expanded, files = expand_file_references(prompt, tmp_path)
+        updated_prompt, file_tuples = expand_file_references(prompt, tmp_path)
 
         # Should expand both occurrences
-        assert expanded.count("Repeated content") == 2
-        assert files == ["repeated.txt", "repeated.txt"]
+        assert updated_prompt == "Compare repeated.txt with repeated.txt"
+        assert len(file_tuples) == 2
+        assert file_tuples[0] == ("repeated.txt", "Repeated content")
+        assert file_tuples[1] == ("repeated.txt", "Repeated content")
 
     def test_file_at_start_of_prompt(self, tmp_path):
         """Test @filename at the beginning of prompt."""
@@ -171,11 +170,11 @@ class TestExpandFileReferences:
         test_file.write_text("Start content")
 
         prompt = "@start.txt is the file to analyze"
-        expanded, files = expand_file_references(prompt, tmp_path)
+        updated_prompt, file_tuples = expand_file_references(prompt, tmp_path)
 
-        assert expanded.startswith("<File: start.txt>")
-        assert "Start content" in expanded
-        assert files == ["start.txt"]
+        assert updated_prompt == "start.txt is the file to analyze"
+        assert len(file_tuples) == 1
+        assert file_tuples[0] == ("start.txt", "Start content")
 
     def test_file_at_end_of_prompt(self, tmp_path):
         """Test @filename at the end of prompt."""
@@ -183,14 +182,12 @@ class TestExpandFileReferences:
         test_file.write_text("End content")
 
         prompt = "Analyze this file: @end.txt"
-        expanded, files = expand_file_references(prompt, tmp_path)
+        updated_prompt, file_tuples = expand_file_references(prompt, tmp_path)
 
-        # File contents prepended
-        assert expanded.startswith("<File: end.txt>")
-        assert "End content" in expanded
         # Prompt with @end.txt replaced by end.txt
-        assert "Analyze this file: end.txt" in expanded
-        assert files == ["end.txt"]
+        assert updated_prompt == "Analyze this file: end.txt"
+        assert len(file_tuples) == 1
+        assert file_tuples[0] == ("end.txt", "End content")
 
     def test_complex_path_with_dots(self, tmp_path):
         """Test path with dots and special characters."""
@@ -198,10 +195,11 @@ class TestExpandFileReferences:
         test_file.write_text('{"key": "value"}')
 
         prompt = "Parse @my.config.json"
-        expanded, files = expand_file_references(prompt, tmp_path)
+        updated_prompt, file_tuples = expand_file_references(prompt, tmp_path)
 
-        assert '{"key": "value"}' in expanded
-        assert files == ["my.config.json"]
+        assert updated_prompt == "Parse my.config.json"
+        assert len(file_tuples) == 1
+        assert file_tuples[0] == ("my.config.json", '{"key": "value"}')
 
     def test_empty_file(self, tmp_path):
         """Test expansion of empty file."""
@@ -209,11 +207,11 @@ class TestExpandFileReferences:
         test_file.write_text("")
 
         prompt = "Check @empty.txt"
-        expanded, files = expand_file_references(prompt, tmp_path)
+        updated_prompt, file_tuples = expand_file_references(prompt, tmp_path)
 
-        assert "<File: empty.txt>" in expanded
-        assert "</File: empty.txt>" in expanded
-        assert files == ["empty.txt"]
+        assert updated_prompt == "Check empty.txt"
+        assert len(file_tuples) == 1
+        assert file_tuples[0] == ("empty.txt", "")
 
     def test_large_file(self, tmp_path):
         """Test expansion of larger file."""
@@ -222,20 +220,21 @@ class TestExpandFileReferences:
         test_file.write_text(content)
 
         prompt = "@large.txt"
-        expanded, files = expand_file_references(prompt, tmp_path)
+        updated_prompt, file_tuples = expand_file_references(prompt, tmp_path)
 
-        assert content in expanded
-        assert files == ["large.txt"]
+        assert updated_prompt == "large.txt"
+        assert len(file_tuples) == 1
+        assert file_tuples[0] == ("large.txt", content)
 
     def test_at_symbol_with_special_chars_not_expanded(self, tmp_path):
         """Test that @ followed by special characters is not treated as file reference."""
         # Prompts with @ followed by special chars should pass through unchanged
         prompt = "Email me @#$%^&*() for details"
-        expanded, files = expand_file_references(prompt, tmp_path)
+        updated_prompt, file_tuples = expand_file_references(prompt, tmp_path)
 
         # @ followed by special chars should not be expanded
-        assert "@#$%^&*()" in expanded
-        assert files == []
+        assert "@#$%^&*()" in updated_prompt
+        assert file_tuples == []
 
     def test_at_mention_requires_file_to_exist(self, tmp_path):
         """Test that @word attempts file expansion (even if it looks like a mention).

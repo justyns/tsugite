@@ -63,6 +63,8 @@ def save_run_to_history(
     cost: Optional[float] = None,
     execution_steps: Optional[list] = None,
     continue_conversation_id: Optional[str] = None,
+    system_prompt: Optional[str] = None,
+    attachments: Optional[list] = None,
 ) -> Optional[str]:
     """Save a single agent run to history.
 
@@ -76,6 +78,8 @@ def save_run_to_history(
         cost: Cost of execution
         execution_steps: List of execution steps (from agent memory)
         continue_conversation_id: Optional conversation ID to continue (for multi-turn run mode)
+        system_prompt: System prompt sent to LLM
+        attachments: List of (name, content) tuples for attachments
 
     Returns:
         Conversation ID if saved, None if history disabled or failed
@@ -118,7 +122,30 @@ def save_run_to_history(
                 timestamp=timestamp,
             )
 
-        # Save turn to conversation with full execution steps
+        # Build messages list with system prompt and attachments
+        messages = []
+        if system_prompt or attachments:
+            # Build system message with attachments
+            if attachments:
+                # System blocks format (for providers that support prompt caching)
+                system_blocks = [{"type": "text", "text": system_prompt or ""}]
+                for name, content in attachments:
+                    system_blocks.append(
+                        {
+                            "type": "text",
+                            "text": f"<Attachment: {name}>\n{content}\n</Attachment: {name}>",
+                            "cache_control": {"type": "ephemeral"},
+                        }
+                    )
+                messages.append({"role": "system", "content": system_blocks})
+            else:
+                # Simple string format
+                messages.append({"role": "system", "content": system_prompt})
+
+            # User message
+            messages.append({"role": "user", "content": prompt})
+
+        # Save turn to conversation with full execution steps and messages
         save_chat_turn(
             conversation_id=conv_id,
             user_message=prompt,
@@ -128,7 +155,7 @@ def save_run_to_history(
             cost=cost,
             timestamp=timestamp,
             execution_steps=execution_steps,  # Pass full execution steps
-            messages=None,  # Could add LiteLLM messages here in the future
+            messages=messages if messages else None,  # Include system prompt and attachments
         )
 
         return conv_id
