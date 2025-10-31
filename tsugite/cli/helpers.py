@@ -11,7 +11,7 @@ import typer
 from rich.console import Console
 
 # Re-export console utilities for backwards compatibility
-from tsugite.console import get_error_console, get_output_console  # noqa: F401
+from tsugite.console import get_error_console  # noqa: F401
 from tsugite.constants import TSUGITE_LOGO_NARROW, TSUGITE_LOGO_WIDE
 
 MIN_WIDTH_FOR_WIDE_LOGO = 80
@@ -289,16 +289,27 @@ def load_and_validate_agent(agent_path: str, console: Console) -> Tuple[Any, Pat
         >>> agent, path, name = load_and_validate_agent("+default", console)
         >>> agent, path, name = load_and_validate_agent("agents/my_agent.md", console)
     """
-    from tsugite.agent_composition import resolve_agent_reference
+    from tsugite.agent_inheritance import find_agent_file
     from tsugite.md_agents import parse_agent_file
 
-    # Use resolve_agent_reference to handle +name shorthand and builtin agents
-    try:
-        base_dir = Path.cwd()
-        resolved_path = resolve_agent_reference(agent_path, base_dir)
-    except ValueError as e:
-        console.print(f"[red]{e}[/red]")
-        raise typer.Exit(1)
+    # Handle +name shorthand and builtin agents
+    base_dir = Path.cwd()
+    if agent_path.startswith("+"):
+        agent_name = agent_path[1:]
+        resolved_path = find_agent_file(agent_name, base_dir)
+        if not resolved_path:
+            console.print(f"[red]Agent not found: {agent_path}[/red]")
+            raise typer.Exit(1)
+    else:
+        resolved_path = Path(agent_path)
+        if not resolved_path.is_absolute():
+            resolved_path = base_dir / resolved_path
+
+        # If file path doesn't exist, try as agent name (fallback for builtin agents)
+        if not resolved_path.exists():
+            fallback_path = find_agent_file(agent_path, base_dir)
+            if fallback_path:
+                resolved_path = fallback_path
 
     # All agents are now file-based (including built-ins)
     agent_file_path = resolved_path
@@ -344,7 +355,6 @@ def _validate_common_option_placement(args: List[str]) -> None:
         "--trust-mcp-code",
         "--attachment",
         "-f",
-        "--with-agents",
         "--root",
         "--history-dir",
         "--log-json",

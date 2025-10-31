@@ -4,12 +4,11 @@ import json
 
 from tsugite.config import (
     Config,
-    add_model_alias,
     get_model_alias,
     load_config,
     remove_model_alias,
     save_config,
-    set_default_model,
+    update_config,
 )
 
 
@@ -41,7 +40,7 @@ def test_set_default_model(tmp_path):
     """Test setting default model."""
     config_path = tmp_path / "config.json"
 
-    set_default_model("ollama:llama3:8b", config_path)
+    update_config(config_path, lambda cfg: setattr(cfg, "default_model", "ollama:llama3:8b"))
 
     config = load_config(config_path)
     assert config.default_model == "ollama:llama3:8b"
@@ -51,8 +50,8 @@ def test_add_model_alias(tmp_path):
     """Test adding model alias."""
     config_path = tmp_path / "config.json"
 
-    add_model_alias("cheap", "openai:gpt-4o-mini", config_path)
-    add_model_alias("expensive", "openai:o1", config_path)
+    update_config(config_path, lambda cfg: cfg.model_aliases.update({"cheap": "openai:gpt-4o-mini"}))
+    update_config(config_path, lambda cfg: cfg.model_aliases.update({"expensive": "openai:o1"}))
 
     config = load_config(config_path)
     assert config.model_aliases == {"cheap": "openai:gpt-4o-mini", "expensive": "openai:o1"}
@@ -62,7 +61,7 @@ def test_get_model_alias(tmp_path):
     """Test getting model alias."""
     config_path = tmp_path / "config.json"
 
-    add_model_alias("cheap", "openai:gpt-4o-mini", config_path)
+    update_config(config_path, lambda cfg: cfg.model_aliases.update({"cheap": "openai:gpt-4o-mini"}))
 
     alias_value = get_model_alias("cheap", config_path)
     assert alias_value == "openai:gpt-4o-mini"
@@ -75,8 +74,8 @@ def test_remove_model_alias(tmp_path):
     """Test removing model alias."""
     config_path = tmp_path / "config.json"
 
-    add_model_alias("cheap", "openai:gpt-4o-mini", config_path)
-    add_model_alias("expensive", "openai:o1", config_path)
+    update_config(config_path, lambda cfg: cfg.model_aliases.update({"cheap": "openai:gpt-4o-mini"}))
+    update_config(config_path, lambda cfg: cfg.model_aliases.update({"expensive": "openai:o1"}))
 
     removed = remove_model_alias("cheap", config_path)
     assert removed is True
@@ -113,8 +112,8 @@ def test_update_existing_alias(tmp_path):
     """Test updating an existing alias."""
     config_path = tmp_path / "config.json"
 
-    add_model_alias("cheap", "openai:gpt-4o-mini", config_path)
-    add_model_alias("cheap", "openai:gpt-4o", config_path)
+    update_config(config_path, lambda cfg: cfg.model_aliases.update({"cheap": "openai:gpt-4o-mini"}))
+    update_config(config_path, lambda cfg: cfg.model_aliases.update({"cheap": "openai:gpt-4o"}))
 
     alias_value = get_model_alias("cheap", config_path)
     assert alias_value == "openai:gpt-4o"
@@ -124,7 +123,7 @@ def test_config_directory_creation(tmp_path):
     """Test that parent directories are created."""
     config_path = tmp_path / "subdir" / "nested" / "config.json"
 
-    set_default_model("ollama:qwen2.5-coder:7b", config_path)
+    update_config(config_path, lambda cfg: setattr(cfg, "default_model", "ollama:qwen2.5-coder:7b"))
 
     assert config_path.exists()
     assert config_path.parent.exists()

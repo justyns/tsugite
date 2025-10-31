@@ -15,7 +15,7 @@ from rich.prompt import Confirm, Prompt
 
 from ..tools import tool
 from ..ui_context import paused_progress
-from ..utils import is_interactive, validation_error
+from ..utils import is_interactive
 
 # Allow nested event loops (needed for questionary in async contexts)
 nest_asyncio.apply()
@@ -110,20 +110,12 @@ def ask_user(question: str, question_type: str = "text", options: Optional[List[
     # Validate question type
     valid_types = ["text", "yes_no", "choice"]
     if question_type not in valid_types:
-        raise validation_error(
-            "question_type",
-            question_type,
-            f"must be one of {', '.join(valid_types)}",
-        )
+        raise ValueError(f"Invalid question_type '{question_type}': must be one of {', '.join(valid_types)}")
 
     # Validate options for choice type
     if question_type == "choice":
         if not options or len(options) < 2:
-            raise validation_error(
-                "options",
-                str(options),
-                "must provide at least 2 options for choice type questions",
-            )
+            raise ValueError(f"Invalid options {options}: must provide at least 2 options for choice type questions")
 
     try:
         with terminal_context() as console:
@@ -183,11 +175,7 @@ def ask_user_batch(questions: List[dict]) -> dict:
 
     # Validate questions list
     if not questions or not isinstance(questions, list):
-        raise validation_error(
-            "questions",
-            str(questions),
-            "must be a non-empty list of question dictionaries",
-        )
+        raise ValueError(f"Invalid questions {questions}: must be a non-empty list of question dictionaries")
 
     # Validate each question structure and auto-generate IDs if needed
     valid_types = ["text", "yes_no", "choice"]
@@ -354,15 +342,15 @@ def validate_batch_questions(questions: List[dict], valid_types: List[str]) -> N
 
     for i, q in enumerate(questions):
         if not isinstance(q, dict):
-            raise validation_error(f"questions[{i}]", str(q), "must be a dictionary")
+            raise ValueError(f"Invalid questions[{i}] {q}: must be a dictionary")
 
         # Check required fields
         if "question" not in q:
-            raise validation_error(f"questions[{i}]", str(q), "missing required field 'question'")
+            raise ValueError(f"Invalid questions[{i}] {q}: missing required field 'question'")
 
         # Accept both 'type' and 'question_type' for compatibility
         if "type" not in q and "question_type" not in q:
-            raise validation_error(f"questions[{i}]", str(q), "missing required field 'type' or 'question_type'")
+            raise ValueError(f"Invalid questions[{i}] {q}: missing required field 'type' or 'question_type'")
 
         # Normalize to 'type' if 'question_type' was provided
         if "question_type" in q and "type" not in q:
@@ -381,8 +369,8 @@ def validate_batch_questions(questions: List[dict], valid_types: List[str]) -> N
             q_id = q["id"]
             # Check for duplicate explicit IDs
             if q_id in seen_ids:
-                raise validation_error(
-                    f"questions[{i}].id", q_id, "duplicate question ID - all question IDs must be unique"
+                raise ValueError(
+                    f"Invalid questions[{i}].id '{q_id}': duplicate question ID - all question IDs must be unique"
                 )
 
         seen_ids.add(q_id)
@@ -390,15 +378,13 @@ def validate_batch_questions(questions: List[dict], valid_types: List[str]) -> N
         # Validate type
         q_type = q["type"]
         if q_type not in valid_types:
-            raise validation_error(f"questions[{i}].type", q_type, f"must be one of {', '.join(valid_types)}")
+            raise ValueError(f"Invalid questions[{i}].type '{q_type}': must be one of {', '.join(valid_types)}")
 
         # Validate options for choice type
         if q_type == "choice":
             if "options" not in q or not q["options"] or len(q["options"]) < 2:
-                raise validation_error(
-                    f"questions[{i}].options",
-                    str(q.get("options")),
-                    "must provide at least 2 options for choice type questions",
+                raise ValueError(
+                    f"Invalid questions[{i}].options {q.get('options')}: must provide at least 2 options for choice type questions"
                 )
 
 

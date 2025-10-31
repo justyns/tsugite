@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ..tools import tool
-from ..utils import standardize_error_message
 
 
 @tool
@@ -69,7 +68,7 @@ def read_file(path: str, start_line: Optional[int] = None, end_line: Optional[in
     except Exception as e:
         if isinstance(e, (FileNotFoundError, IsADirectoryError, ValueError)):
             raise
-        raise RuntimeError(standardize_error_message("read", f"file {path}", e)) from e
+        raise RuntimeError(f"Failed to read file {path}: {e}") from e
 
 
 @tool
@@ -87,7 +86,7 @@ def write_file(path: str, content: str) -> str:
         file_path.write_text(content, encoding="utf-8")
         return f"Successfully wrote {len(content)} characters to {path}"
     except Exception as e:
-        raise RuntimeError(standardize_error_message("write", f"file {path}", e)) from e
+        raise RuntimeError(f"Failed to write file {path}: {e}") from e
 
 
 @tool
@@ -114,7 +113,7 @@ def list_files(path: str = ".", pattern: str = "*") -> List[str]:
 
         return sorted(files)
     except Exception as e:
-        raise RuntimeError(standardize_error_message("list files in", f"directory {path}", e)) from e
+        raise RuntimeError(f"Failed to list files in directory {path}: {e}") from e
 
 
 @tool
@@ -140,7 +139,7 @@ def create_directory(path: str) -> str:
         dir_path.mkdir(parents=True, exist_ok=True)
         return f"Successfully created directory: {path}"
     except Exception as e:
-        raise RuntimeError(standardize_error_message("create", f"directory {path}", e)) from e
+        raise RuntimeError(f"Failed to create directory {path}: {e}") from e
 
 
 @tool
@@ -191,7 +190,7 @@ def get_file_info(path: str) -> Dict[str, Any]:
         return info
 
     except Exception as e:
-        raise RuntimeError(standardize_error_message("get info for", f"file {path}", e)) from e
+        raise RuntimeError(f"Failed to get info for file {path}: {e}") from e
 
 
 @tool
@@ -326,4 +325,4 @@ def edit_file(
     except Exception as e:
         if isinstance(e, (FileNotFoundError, IsADirectoryError, RuntimeError, ValueError)):
             raise
-        raise RuntimeError(standardize_error_message("edit", f"file {path}", e)) from e
+        raise RuntimeError(f"Failed to edit file {path}: {e}") from e

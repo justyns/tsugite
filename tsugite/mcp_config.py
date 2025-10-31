@@ -6,7 +6,7 @@ from typing import Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
-from .xdg import get_xdg_config_path, get_xdg_write_path
+from .config import get_xdg_config_path, get_xdg_write_path
 
 
 class MCPServerConfig(BaseModel):

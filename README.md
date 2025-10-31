@@ -4,12 +4,24 @@ Tsugite (Japanese: 継ぎ手, the art of joinery in woodworking) is a developer-
 
 Define AI agents as markdown files with YAML frontmatter. Chain multiple steps together, pass data between them, and use any LLM (OpenAI, Anthropic, Ollama, etc).
 
+## Installation
+
+```bash
+# Recommended: Install with uv
+uv tool install tsugite-cli
+
+# Alternative: Install with pipx
+pipx install tsugite-cli
+
+# Or with pip
+pip install tsugite-cli
+```
+
+**Note:** The package name is `tsugite-cli`, but the command is `tsugite` (or `tsu` for short).
+
 ## Quick Start
 
 ```bash
-# Install
-uv sync --dev
-
 # Run an agent
 tsugite run examples/simple_variable_injection.md "test it"
 
@@ -59,6 +71,15 @@ tsugite chat --continue CONV_ID
 # View conversation history
 tsugite history list
 tsugite history show CONV_ID
+```
+
+## Development
+
+```bash
+# Clone and install for development
+git clone https://github.com/justyns/tsugite.git
+cd tsugite
+uv sync --dev
 ```
 
 See `examples/` for working agents and `CLAUDE.md` for AI-generated documentation.

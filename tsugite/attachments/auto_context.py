@@ -11,7 +11,7 @@ class AutoContextHandler(AttachmentHandler):
     """Handler for auto-discovering context files.
 
     Searches from current directory up to git root for specific context files
-    like CONTEXT.md, AGENTS.md, CLAUDE.md and concatenates them.
+    like CONTEXT.md, AGENTS.md, CLAUDE.md.
     """
 
     def __init__(self, context_files: Optional[List[str]] = None):
@@ -191,7 +191,7 @@ class AutoContextHandler(AttachmentHandler):
         Returns:
             Tuple of (file_path, "Global Context") if file exists, None otherwise
         """
-        from tsugite.xdg import get_xdg_config_path
+        from tsugite.config import get_xdg_config_path
 
         global_context_path = get_xdg_config_path("CONTEXT.md")
         if global_context_path.exists() and global_context_path.is_file():

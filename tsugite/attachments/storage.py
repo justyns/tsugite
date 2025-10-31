@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
-from tsugite.xdg import get_xdg_config_path
+from tsugite.config import get_xdg_config_path
 
 
 def get_attachments_path() -> Path:

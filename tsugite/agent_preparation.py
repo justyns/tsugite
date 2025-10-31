@@ -1,7 +1,6 @@
 """Agent preparation pipeline - unified logic for render and execution."""
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from tsugite.core.tools import Tool
@@ -96,7 +95,6 @@ class AgentPreparer:
         agent: Agent,
         prompt: str,
         context: Optional[Dict[str, Any]] = None,
-        delegation_agents: Optional[List[tuple[str, Path]]] = None,
         skip_tool_directives: bool = False,
         task_summary: str = "## Current Tasks\nNo tasks yet.",
         tasks: Optional[List[Dict[str, Any]]] = None,
@@ -108,7 +106,6 @@ class AgentPreparer:
             agent: Parsed agent object
             prompt: User prompt/task
             context: Additional context variables
-            delegation_agents: List of (name, path) tuples for delegation
             skip_tool_directives: Skip executing tool directives (for render)
             task_summary: Current task summary (from task manager)
             tasks: List of task dicts for template iteration (from task manager)
@@ -200,12 +197,9 @@ class AgentPreparer:
             # Expand tool specifications (categories, globs, regular names)
             expanded_tools = expand_tool_specs(agent_config.tools) if agent_config.tools else []
 
-            # Add task management tools
-            task_tools = ["task_add", "task_update", "task_complete", "task_list", "task_get"]
+            # Add task management tools and spawn_agent
+            task_tools = ["task_add", "task_update", "task_complete", "task_list", "task_get", "spawn_agent"]
             all_tool_names = expanded_tools + task_tools
-
-            if delegation_agents:
-                all_tool_names.append("spawn_agent")
 
             # Filter out interactive tools in non-interactive mode
             if not interactive_mode and "ask_user" in all_tool_names:

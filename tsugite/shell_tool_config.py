@@ -5,8 +5,8 @@ from typing import Dict, List, Optional
 
 import yaml
 
+from .config import get_xdg_config_path
 from .tools.shell_tools import ShellToolDefinition, ShellToolParameter
-from .xdg import get_xdg_config_path
 
 
 def get_custom_tools_config_path() -> Path:

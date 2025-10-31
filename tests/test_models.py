@@ -2,7 +2,7 @@
 
 import pytest
 
-from tsugite.config import Config, add_model_alias
+from tsugite.config import Config, update_config
 from tsugite.models import parse_model_string, resolve_model_alias
 
 
@@ -28,7 +28,7 @@ def test_parse_model_string_invalid():
 def test_resolve_model_alias_with_full_string(tmp_path):
     """Test that full model strings pass through unchanged."""
     config_path = tmp_path / "config.json"
-    add_model_alias("cheap", "openai:gpt-4o-mini", config_path)
+    update_config(config_path, lambda cfg: cfg.model_aliases.update({"cheap": "openai:gpt-4o-mini"}))
 
     full_model = "ollama:qwen2.5-coder:7b"
     resolved = resolve_model_alias(full_model)
@@ -40,7 +40,7 @@ def test_resolve_model_alias_with_alias(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
 
     config_path = tmp_path / "tsugite" / "config.json"
-    add_model_alias("cheap", "openai:gpt-4o-mini", config_path)
+    update_config(config_path, lambda cfg: cfg.model_aliases.update({"cheap": "openai:gpt-4o-mini"}))
 
     resolved = resolve_model_alias("cheap")
     assert resolved == "openai:gpt-4o-mini"

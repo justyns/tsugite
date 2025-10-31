@@ -39,10 +39,10 @@ __all__ = [
 # Handler registry - order matters! More specific handlers first
 HANDLERS: List[AttachmentHandler] = [
     InlineHandler(),
-    AutoContextHandler(),  # Before FileHandler (might match file paths)
-    YouTubeHandler(),  # Before GenericURLHandler
+    AutoContextHandler(),
+    YouTubeHandler(),
     FileHandler(),
-    GenericURLHandler(),  # Catch-all for URLs
+    GenericURLHandler(),
 ]
 
 

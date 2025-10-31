@@ -60,7 +60,7 @@ def config_set_default(
         # Direct mode with model string
         tsugite config set-default "ollama:qwen2.5-coder:7b"
     """
-    from tsugite.config import get_config_path, set_default_model
+    from tsugite.config import get_config_path, update_config
 
     # If no model provided, launch interactive selector
     if not model:
@@ -77,7 +77,7 @@ def config_set_default(
             raise typer.Exit(1)
 
     try:
-        set_default_model(model)
+        update_config(None, lambda cfg: setattr(cfg, "default_model", model))
         config_path = get_config_path()
         console.print(f"\n[green]✓ Default model set to:[/green] {model}")
         console.print(f"[dim]Saved to: {config_path}[/dim]")
@@ -92,10 +92,10 @@ def config_alias(
     model: str = typer.Argument(help="Model string (e.g., 'openai:gpt-4o-mini')"),
 ):
     """Create or update a model alias."""
-    from tsugite.config import add_model_alias, get_config_path
+    from tsugite.config import get_config_path, update_config
 
     try:
-        add_model_alias(name, model)
+        update_config(None, lambda cfg: cfg.model_aliases.update({name: model}))
         config_path = get_config_path()
         console.print(f"[green]✓ Alias created:[/green] {name} → {model}")
         console.print(f"[dim]Saved to: {config_path}[/dim]")
@@ -145,13 +145,13 @@ def config_set_default_base(
     base_agent: str = typer.Argument(help="Base agent name (e.g., 'default') or 'none' to disable"),
 ):
     """Set the default base agent for inheritance."""
-    from tsugite.config import get_config_path, set_default_base_agent
+    from tsugite.config import get_config_path, update_config
 
     try:
         # Handle "none" as None
         agent_value = None if base_agent.lower() == "none" else base_agent
 
-        set_default_base_agent(agent_value)
+        update_config(None, lambda cfg: setattr(cfg, "default_base_agent", agent_value))
         config_path = get_config_path()
 
         if agent_value is None:
@@ -178,7 +178,7 @@ def config_set_theme(
     theme: str = typer.Argument(help="Theme name (e.g., 'gruvbox', 'nord', 'tokyo-night')"),
 ):
     """Set the chat UI theme."""
-    from tsugite.config import get_config_path, set_chat_theme
+    from tsugite.config import get_config_path, update_config
 
     # Get available themes from Textual
     available_themes = _get_available_themes()
@@ -193,7 +193,7 @@ def config_set_theme(
         raise typer.Exit(1)
 
     try:
-        set_chat_theme(theme)
+        update_config(None, lambda cfg: setattr(cfg, "chat_theme", theme))
         config_path = get_config_path()
         console.print(f"[green]✓ Chat theme set to:[/green] {theme}")
         console.print(f"[dim]Saved to: {config_path}[/dim]")
@@ -239,7 +239,7 @@ def config_set(
         tsugite config set auto-context-enabled true
         tsugite config set auto-context-enabled false
     """
-    from tsugite.config import get_config_path, set_auto_context_enabled
+    from tsugite.config import get_config_path, update_config
 
     # Normalize key (convert dashes to underscores)
     normalized_key = key.replace("-", "_")
@@ -257,7 +257,7 @@ def config_set(
             raise typer.Exit(1)
 
         try:
-            set_auto_context_enabled(bool_value)
+            update_config(None, lambda cfg: setattr(cfg, "auto_context_enabled", bool_value))
             config_path = get_config_path()
             status = "enabled" if bool_value else "disabled"
             console.print(f"[green]✓ Auto-context {status}[/green]")

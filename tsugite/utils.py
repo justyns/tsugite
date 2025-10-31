@@ -40,18 +40,6 @@ def parse_yaml_frontmatter(content: str, label: str = "content") -> Tuple[Dict[s
     return metadata, markdown_content
 
 
-def standardize_error_message(operation: str, target: str, error: Exception) -> str:
-    return f"Failed to {operation} {target}: {error}"
-
-
-def tool_error(tool_name: str, operation: str, details: str) -> RuntimeError:
-    return RuntimeError(f"Tool '{tool_name}' failed to {operation}: {details}")
-
-
-def validation_error(item_type: str, item_name: str, issue: str) -> ValueError:
-    return ValueError(f"Invalid {item_type} '{item_name}': {issue}")
-
-
 def execute_shell_command(command: str, timeout: int = 30, shell: bool = True) -> str:
     """Execute a shell command and return its output.
 

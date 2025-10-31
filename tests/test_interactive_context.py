@@ -221,7 +221,7 @@ def test_ask_user_tool_not_available_in_headless(monkeypatch, task_tools, file_t
         # Create agent and use AgentPreparer to trigger tool creation
         agent = Agent(content="Test", config=agent_config, file_path=Path("<test>"))
         preparer = AgentPreparer()
-        preparer.prepare(agent=agent, prompt="Test prompt", context={}, delegation_agents=None)
+        preparer.prepare(agent=agent, prompt="Test prompt", context={})
 
     # Verify ask_user was filtered out
     assert len(captured_tools) > 0
@@ -267,7 +267,7 @@ def test_ask_user_tool_available_in_interactive(monkeypatch, task_tools, file_to
         # Create agent and use AgentPreparer to trigger tool creation
         agent = Agent(content="Test", config=agent_config, file_path=Path("<test>"))
         preparer = AgentPreparer()
-        preparer.prepare(agent=agent, prompt="Test prompt", context={}, delegation_agents=None)
+        preparer.prepare(agent=agent, prompt="Test prompt", context={})
 
     # Verify ask_user is still present in interactive mode
     assert len(captured_tools) > 0

@@ -40,7 +40,7 @@ class YouTubeHandler(AttachmentHandler):
         try:
             from youtube_transcript_api import YouTubeTranscriptApi
         except ImportError:
-            raise ValueError("youtube-transcript-api not installed. Install with: uv add youtube-transcript-api")
+            raise ValueError("youtube-transcript-api not installed.")
 
         # Extract video ID
         video_id = self._extract_video_id(source)

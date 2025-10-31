@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, Union
 
-from tsugite.xdg import get_xdg_data_path
+from tsugite.config import get_xdg_data_path
 
 from .models import ConversationMetadata, Turn
 

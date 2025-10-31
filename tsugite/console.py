@@ -30,11 +30,6 @@ def get_stdout_console(no_color: bool = False, force_terminal: bool = False) -> 
     return Console(file=sys.stdout, no_color=no_color, force_terminal=force_terminal)
 
 
-def get_output_console() -> Console:
-    """Get console for standard output (alias for get_stdout_console with no_color=True)."""
-    return get_stdout_console(no_color=True)
-
-
 def get_error_console(headless: bool, console: Console) -> Console:
     """Get console for error output based on mode.
 

@@ -1219,15 +1219,7 @@ tsugite mcp add pubmed --command uvx --args "pubmedmcp@0.1.3"
 
 **Run:** Requires `--trust-mcp-code` for remote code execution.
 
-## Multi-Agent Composition
-
-```bash
-tsugite run +coordinator +helper1 +helper2 "task"
-```
-
-First agent = coordinator. Gets `spawn_{name}()` tools for each helper.
-
-### Subagent Context Awareness
+## Subagent Context Awareness
 
 When an agent spawns another agent using `spawn_agent()`, the spawned agent receives context variables:
 

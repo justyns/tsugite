@@ -4,8 +4,6 @@ import inspect
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List
 
-from ..utils import tool_error, validation_error
-
 
 @dataclass
 class ToolInfo:
@@ -70,7 +68,7 @@ def get_tool(name: str) -> ToolInfo:
 
         error_parts.append("Run 'tsugite tools list' to see all available tools")
 
-        raise validation_error("tool", name, ". ".join(error_parts))
+        raise ValueError(f"Invalid tool '{name}': {'. '.join(error_parts)}")
     return _tools[name]
 
 
@@ -81,12 +79,12 @@ def call_tool(name: str, **kwargs) -> Any:
     # Validate required parameters
     for param_name, param_info in tool_info.parameters.items():
         if param_info["required"] and param_name not in kwargs:
-            raise validation_error("parameter", param_name, f"missing for tool '{name}'")
+            raise ValueError(f"Invalid parameter '{param_name}': missing for tool '{name}'")
 
     try:
         return tool_info.func(**kwargs)
     except Exception as e:
-        raise tool_error(name, "execute", str(e))
+        raise RuntimeError(f"Tool '{name}' failed to execute: {e}")
 
 
 def list_tools() -> List[str]:
@@ -129,21 +127,21 @@ def _expand_single_spec(spec: str, strict: bool = True) -> List[str]:
         category = spec[1:]
         category_tools = get_tools_by_category(category)
         if not category_tools and strict:
-            raise validation_error("tool category", category, "not found or empty")
+            raise ValueError(f"Invalid tool category '{category}': not found or empty")
         return category_tools
     elif "*" in spec or "?" in spec or "[" in spec:
         # Glob pattern
         all_tool_names = list_tools()
         matches = fnmatch.filter(all_tool_names, spec)
         if not matches and strict:
-            raise validation_error("tool pattern", spec, "matched no tools")
+            raise ValueError(f"Invalid tool pattern '{spec}': matched no tools")
         return matches
     else:
         # Regular tool name
         if spec not in _tools:
             if strict:
                 available = ", ".join(list(_tools.keys())) if _tools else "none"
-                raise validation_error("tool", spec, f"not found. Available: {available}")
+                raise ValueError(f"Invalid tool '{spec}': not found. Available: {available}")
             return []
         return [spec]
 

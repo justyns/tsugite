@@ -217,7 +217,7 @@ class TestAutoContextHandler:
         handler = AutoContextHandler()
 
         # Mock get_xdg_config_path to return our test path
-        with patch("tsugite.xdg.get_xdg_config_path", return_value=global_context):
+        with patch("tsugite.config.get_xdg_config_path", return_value=global_context):
             result = handler._get_global_context_file()
 
             assert result is not None
@@ -230,7 +230,7 @@ class TestAutoContextHandler:
 
         handler = AutoContextHandler()
 
-        with patch("tsugite.xdg.get_xdg_config_path", return_value=non_existent):
+        with patch("tsugite.config.get_xdg_config_path", return_value=non_existent):
             result = handler._get_global_context_file()
 
             assert result is None
@@ -253,7 +253,7 @@ class TestAutoContextHandler:
         mock_cfg.auto_context_include_global = True
 
         with patch("tsugite.config.load_config", return_value=mock_cfg):
-            with patch("tsugite.xdg.get_xdg_config_path", return_value=global_context):
+            with patch("tsugite.config.get_xdg_config_path", return_value=global_context):
                 handler = AutoContextHandler(context_files=None)
                 result = handler.fetch_multiple("auto-context")
 
@@ -284,7 +284,7 @@ class TestAutoContextHandler:
         mock_cfg.auto_context_include_global = False
 
         with patch("tsugite.config.load_config", return_value=mock_cfg):
-            with patch("tsugite.xdg.get_xdg_config_path", return_value=global_context):
+            with patch("tsugite.config.get_xdg_config_path", return_value=global_context):
                 handler = AutoContextHandler(context_files=None)
                 result = handler.fetch_multiple("auto-context")
 
@@ -379,7 +379,7 @@ class TestAutoContextHandler:
         mock_cfg.auto_context_include_global = True
 
         with patch("tsugite.config.load_config", return_value=mock_cfg):
-            with patch("tsugite.xdg.get_xdg_config_path", return_value=global_context):
+            with patch("tsugite.config.get_xdg_config_path", return_value=global_context):
                 handler = AutoContextHandler(context_files=None)
                 result = handler.fetch_multiple("auto-context")
 

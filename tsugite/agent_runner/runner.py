@@ -324,7 +324,6 @@ async def _execute_agent_with_prompt(
     model_override: Optional[str] = None,
     custom_logger: Optional[Any] = None,
     trust_mcp_code: bool = False,
-    delegation_agents: Optional[List[tuple[str, Path]]] = None,
     skip_task_reset: bool = False,
     model_kwargs: Optional[Dict[str, Any]] = None,
     injectable_vars: Optional[Dict[str, Any]] = None,
@@ -341,7 +340,6 @@ async def _execute_agent_with_prompt(
         model_override: Override agent's model
         custom_logger: Custom logger
         trust_mcp_code: Trust MCP server code
-        delegation_agents: Delegation agents list
         skip_task_reset: Skip resetting task manager (for multi-step agents)
         model_kwargs: Additional model parameters (response_format, temperature, etc.)
         injectable_vars: Variables to inject into Python execution namespace
@@ -414,13 +412,6 @@ async def _execute_agent_with_prompt(
                 tools.append(create_tool_from_tsugite(tool_def.name))
         except Exception as e:
             event_bus.emit(WarningEvent(message=f"Failed to register custom tools: {e}"))
-
-    # Add delegation tools if provided
-    if delegation_agents:
-        from tsugite.agent_composition import create_delegation_tools
-
-        delegation_tools = create_delegation_tools(delegation_agents)
-        tools.extend(delegation_tools)
 
     # Load MCP tools if configured
     mcp_clients = []  # Track clients for cleanup
@@ -574,7 +565,6 @@ def run_agent(
     debug: bool = False,
     custom_logger: Optional[Any] = None,
     trust_mcp_code: bool = False,
-    delegation_agents: Optional[List[tuple[str, Path]]] = None,
     return_token_usage: bool = False,
     stream: bool = False,
     force_text_mode: bool = False,
@@ -591,7 +581,6 @@ def run_agent(
         debug: Enable debug output (rendered prompt)
         custom_logger: Custom logger for agent output
         trust_mcp_code: Whether to trust remote code from MCP servers
-        delegation_agents: List of (name, path) tuples for agents to make available for delegation
         return_token_usage: Whether to return token usage and cost from LiteLLM
         stream: Whether to stream responses in real-time
         force_text_mode: Force text_mode=True regardless of agent config (useful for chat UI)
@@ -668,7 +657,6 @@ def run_agent(
             agent=agent,
             prompt=prompt,
             context=context,
-            delegation_agents=delegation_agents,
             task_summary=task_manager.get_task_summary(),
             tasks=task_manager.get_tasks_for_template(),
             attachments=attachments,
@@ -721,7 +709,6 @@ def run_agent(
                 model_override=model_override,
                 custom_logger=custom_logger,
                 trust_mcp_code=trust_mcp_code,
-                delegation_agents=delegation_agents,
                 return_token_usage=return_token_usage,
                 stream=stream,
                 previous_messages=previous_messages,
@@ -740,7 +727,6 @@ async def run_agent_async(
     debug: bool = False,
     custom_logger: Optional[Any] = None,
     trust_mcp_code: bool = False,
-    delegation_agents: Optional[List[tuple[str, Path]]] = None,
     return_token_usage: bool = False,
     stream: bool = False,
     force_text_mode: bool = False,
@@ -760,7 +746,6 @@ async def run_agent_async(
         debug: Enable debug output (rendered prompt)
         custom_logger: Custom logger for agent output
         trust_mcp_code: Whether to trust remote code from MCP servers
-        delegation_agents: List of (name, path) tuples for agents to make available for delegation
         return_token_usage: Whether to return token usage and cost from LiteLLM
         stream: Whether to stream responses in real-time
         attachments: Optional list of (name, content) tuples for prompt caching
@@ -814,7 +799,6 @@ async def run_agent_async(
             agent=agent,
             prompt=prompt,
             context=context,
-            delegation_agents=delegation_agents,
             task_summary=task_manager.get_task_summary(),
             tasks=task_manager.get_tasks_for_template(),
             attachments=attachments,
@@ -866,7 +850,6 @@ async def run_agent_async(
             model_override=model_override,
             custom_logger=custom_logger,
             trust_mcp_code=trust_mcp_code,
-            delegation_agents=delegation_agents,
             return_token_usage=return_token_usage,
             stream=stream,
             previous_messages=previous_messages,
@@ -931,7 +914,6 @@ def _build_prepared_agent_for_step(
     agent: Any,
     rendered_step_prompt: str,
     step_context: Dict[str, Any],
-    delegation_agents: Optional[List[tuple[str, Path]]] = None,
     attachments: Optional[List[tuple[str, str]]] = None,
 ) -> "PreparedAgent":
     """Build a PreparedAgent for step execution.
@@ -943,7 +925,6 @@ def _build_prepared_agent_for_step(
         agent: Parsed agent with config
         rendered_step_prompt: Already-rendered step prompt
         step_context: Step execution context
-        delegation_agents: Optional list of delegation agents
         attachments: List of (name, content) tuples for prompt caching
 
     Returns:
@@ -962,9 +943,7 @@ def _build_prepared_agent_for_step(
     # Expand and create tools
     expanded_tools = expand_tool_specs(agent.config.tools) if agent.config.tools else []
     task_tools = ["task_add", "task_update", "task_complete", "task_list", "task_get"]
-    all_tool_names = expanded_tools + task_tools
-    if delegation_agents:
-        all_tool_names.append("spawn_agent")
+    all_tool_names = expanded_tools + task_tools + ["spawn_agent"]
     tools = [create_tool_from_tsugite(name) for name in all_tool_names]
 
     # Build system message
@@ -1125,7 +1104,6 @@ async def _execute_step_with_retries(
     model_override: Optional[str],
     custom_logger: Optional[Any],
     trust_mcp_code: bool,
-    delegation_agents: Optional[List[tuple[str, Path]]],
     stream: bool,
     debug: bool,
     task_manager: Any,
@@ -1147,7 +1125,6 @@ async def _execute_step_with_retries(
         model_override: Optional model override
         custom_logger: Custom logger instance
         trust_mcp_code: Trust MCP code flag
-        delegation_agents: Delegation agents list
         stream: Stream responses flag
         debug: Debug mode flag
         task_manager: Task manager instance
@@ -1216,7 +1193,6 @@ async def _execute_step_with_retries(
             agent=agent,
             rendered_step_prompt=rendered_step_prompt,
             step_context=step_context,
-            delegation_agents=delegation_agents,
         )
 
         # Execute this step as a full agent run
@@ -1228,7 +1204,6 @@ async def _execute_step_with_retries(
                     model_override=model_override,
                     custom_logger=custom_logger,
                     trust_mcp_code=trust_mcp_code,
-                    delegation_agents=delegation_agents,
                     skip_task_reset=True,
                     model_kwargs=step.model_kwargs,
                     injectable_vars=injectable_vars,
@@ -1379,7 +1354,6 @@ async def _run_multistep_agent_impl(
     debug: bool = False,
     custom_logger: Optional[Any] = None,
     trust_mcp_code: bool = False,
-    delegation_agents: Optional[List[tuple[str, Path]]] = None,
     stream: bool = False,
 ) -> str:
     """Async implementation of multi-step agent execution.
@@ -1399,7 +1373,6 @@ async def _run_multistep_agent_impl(
         debug: Enable debug output (rendered prompts for each step)
         custom_logger: Custom logger for agent output
         trust_mcp_code: Whether to trust remote code from MCP servers
-        delegation_agents: List of (name, path) tuples for agents to make available
         stream: Whether to stream responses in real-time
 
     Returns:
@@ -1525,7 +1498,6 @@ async def _run_multistep_agent_impl(
                         model_override=model_override,
                         custom_logger=custom_logger,
                         trust_mcp_code=trust_mcp_code,
-                        delegation_agents=delegation_agents,
                         stream=stream,
                         debug=debug,
                         task_manager=task_manager,
@@ -1626,7 +1598,6 @@ def run_multistep_agent(
     debug: bool = False,
     custom_logger: Optional[Any] = None,
     trust_mcp_code: bool = False,
-    delegation_agents: Optional[List[tuple[str, Path]]] = None,
     stream: bool = False,
 ) -> str:
     """Synchronous wrapper for multi-step agent execution.
@@ -1645,7 +1616,6 @@ def run_multistep_agent(
         debug: Enable debug output (rendered prompts for each step)
         custom_logger: Custom logger for agent output
         trust_mcp_code: Whether to trust remote code from MCP servers
-        delegation_agents: List of (name, path) tuples for agents to make available
         stream: Whether to stream responses in real-time
 
     Returns:
@@ -1664,7 +1634,6 @@ def run_multistep_agent(
             debug=debug,
             custom_logger=custom_logger,
             trust_mcp_code=trust_mcp_code,
-            delegation_agents=delegation_agents,
             stream=stream,
         )
     )
@@ -1678,7 +1647,6 @@ async def run_multistep_agent_async(
     debug: bool = False,
     custom_logger: Optional[Any] = None,
     trust_mcp_code: bool = False,
-    delegation_agents: Optional[List[tuple[str, Path]]] = None,
     stream: bool = False,
 ) -> str:
     """Asynchronous wrapper for multi-step agent execution.
@@ -1697,7 +1665,6 @@ async def run_multistep_agent_async(
         debug: Enable debug output (rendered prompts for each step)
         custom_logger: Custom logger for agent output
         trust_mcp_code: Whether to trust remote code from MCP servers
-        delegation_agents: List of (name, path) tuples for agents to make available
         stream: Whether to stream responses in real-time
 
     Returns:
@@ -1715,7 +1682,6 @@ async def run_multistep_agent_async(
         debug=debug,
         custom_logger=custom_logger,
         trust_mcp_code=trust_mcp_code,
-        delegation_agents=delegation_agents,
         stream=stream,
     )
 

@@ -249,7 +249,8 @@ def task_tools(reset_tool_registry, request):
     """Register task management tools for testing.
 
     Autouse fixture because task tools are automatically added to all agents
-    in runner.py line 1020-1021.
+    in agent_preparation.py. Includes spawn_agent which is always added
+    alongside task tools.
 
     Skips registration for test_tool_registry.py tests that need an empty registry.
     """
@@ -258,6 +259,7 @@ def task_tools(reset_tool_registry, request):
         return
 
     from tsugite.tools import tool
+    from tsugite.tools.agents import spawn_agent
     from tsugite.tools.tasks import (
         task_add,
         task_complete,
@@ -272,6 +274,7 @@ def task_tools(reset_tool_registry, request):
     tool(task_complete)
     tool(task_list)
     tool(task_get)
+    tool(spawn_agent)
 
 
 @pytest.fixture

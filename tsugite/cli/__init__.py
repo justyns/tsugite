@@ -51,7 +51,6 @@ def _build_docker_command(
     keep: bool,
     container: Optional[str],
     model: Optional[str],
-    with_agents: Optional[str],
     root: Optional[str],
     history_dir: Optional[str],
     ui: Optional[str],
@@ -76,7 +75,6 @@ def _build_docker_command(
         keep: Keep container running flag
         container: Existing container name
         model: Model override
-        with_agents: Additional agents
         root: Working directory
         history_dir: History directory
         ui: UI mode
@@ -111,8 +109,6 @@ def _build_docker_command(
 
     if model:
         cmd.extend(["--model", model])
-    if with_agents:
-        cmd.extend(["--with-agents", with_agents])
     if root:
         cmd.extend(["--root", str(root)])
     if history_dir:
@@ -198,7 +194,6 @@ def _build_executor_kwargs(
     debug: bool,
     custom_logger: Any,
     trust_mcp_code: bool,
-    delegation_agents: Any,
     stream: bool,
     continue_conversation_id: Optional[str],
     resolved_attachments: List[Tuple[str, str]],
@@ -214,7 +209,6 @@ def _build_executor_kwargs(
         debug: Debug flag
         custom_logger: Logger instance
         trust_mcp_code: Trust MCP code flag
-        delegation_agents: Delegation agents
         stream: Stream flag
         continue_conversation_id: Continuation conversation ID
         resolved_attachments: Resolved attachments
@@ -233,7 +227,6 @@ def _build_executor_kwargs(
         "debug": debug,
         "custom_logger": custom_logger,
         "trust_mcp_code": trust_mcp_code,
-        "delegation_agents": delegation_agents,
         "stream": stream,
         "continue_conversation_id": continue_conversation_id,
         "attachments": resolved_attachments,
@@ -249,7 +242,6 @@ def _handle_docker_execution(
     keep: bool,
     container: Optional[str],
     model: Optional[str],
-    with_agents: Optional[str],
     root: Optional[str],
     history_dir: Optional[str],
     ui: Optional[str],
@@ -290,7 +282,6 @@ def _handle_docker_execution(
         keep,
         container,
         model,
-        with_agents,
         root,
         history_dir,
         ui,
@@ -345,12 +336,9 @@ def _resolve_conversation_continuation(continue_conversation: bool, conversation
 @app.command()
 def run(
     args: List[str] = typer.Argument(
-        ..., help="Agent(s) and optional prompt (e.g., +assistant 'task' or +a +b +c 'task' or +a create ticket)"
+        ..., help="Agent and optional prompt (e.g., +assistant 'task' or +assistant create ticket)"
     ),
     root: Optional[str] = typer.Option(None, "--root", help="Working directory"),
-    with_agents: Optional[str] = typer.Option(
-        None, "--with-agents", help="Additional agents (comma or space separated)"
-    ),
     model: Optional[str] = typer.Option(None, "--model", help="Override agent model"),
     ui: Optional[str] = typer.Option(None, "--ui", help="UI mode: plain, headless, or live (default: minimal)"),
     non_interactive: bool = typer.Option(False, "--non-interactive", help="Run without interactive prompts"),
@@ -399,9 +387,7 @@ def run(
     Examples:
         tsu run agent.md "prompt"
         tsu run +assistant "prompt"
-        tsu run +assistant +jira +coder "prompt"
         tsu run +assistant create a ticket for bug 123
-        tsu run +assistant --with-agents "jira,coder" "prompt"
         tsu run --continue "prompt"  # Continue latest conversation (auto-detect agent)
         tsu run +assistant --continue "prompt"  # Continue latest with specific agent
         tsu run --continue --conversation-id CONV_ID "prompt"  # Continue specific conversation
@@ -441,7 +427,6 @@ def run(
             keep,
             container,
             model,
-            with_agents,
             root,
             history_dir,
             ui,
@@ -473,8 +458,6 @@ def run(
         console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1)
 
-    from tsugite.agent_composition import parse_agent_references
-
     with change_to_root_directory(root, console):
         try:
             base_dir = Path.cwd()
@@ -491,17 +474,14 @@ def run(
                 console.print(f"[cyan]Auto-detected agent from conversation: {agent_name}[/cyan]")
                 agent_refs = [f"+{agent_name}"]
 
-            primary_agent_path, delegation_agents = parse_agent_references(agent_refs, with_agents, base_dir)
-
-            if not primary_agent_path.exists():
-                console.print(f"[red]Agent file not found: {primary_agent_path}[/red]")
+            # Resolve single agent (multi-agent syntax no longer supported)
+            agent_ref = agent_refs[0] if agent_refs else None
+            if not agent_ref:
+                console.print("[red]Error: No agent specified[/red]")
                 raise typer.Exit(1)
 
-            if primary_agent_path.suffix != ".md":
-                console.print(f"[red]Agent file must be a .md file: {primary_agent_path}[/red]")
-                raise typer.Exit(1)
-
-            agent_file = primary_agent_path.resolve()
+            # Load and validate agent using shared helper
+            _, agent_file, _ = load_and_validate_agent(agent_ref, console)
 
         except ValueError as e:
             console.print(f"[red]Error: {e}[/red]")
@@ -509,7 +489,9 @@ def run(
 
         use_plain_output = plain or should_use_plain_output()
 
-        stderr_console = Console(file=sys.stderr, no_color=no_color)
+        from tsugite.console import get_stderr_console
+
+        stderr_console = get_stderr_console(no_color=no_color)
 
         agent_info = get_agent_info(agent_file)
         instruction_label = "runtime + agent" if agent_info.get("instructions") else "runtime default"
@@ -616,7 +598,6 @@ def run(
                         debug,
                         custom_logger,
                         trust_mcp_code,
-                        delegation_agents,
                         stream,
                         continue_conversation_id,
                         resolved_attachments,
@@ -634,7 +615,6 @@ def run(
                         debug,
                         custom_logger,
                         trust_mcp_code,
-                        delegation_agents,
                         stream,
                         continue_conversation_id,
                         resolved_attachments,
@@ -653,7 +633,6 @@ def run(
                             debug,
                             custom_logger,
                             trust_mcp_code,
-                            delegation_agents,
                             stream,
                             continue_conversation_id,
                             resolved_attachments,
@@ -662,6 +641,7 @@ def run(
                         )
                         result = executor(**executor_kwargs)
                 else:
+                    # Using Console directly here because we need force_terminal=True
                     default_console = Console(file=sys.stderr, force_terminal=True, no_color=no_color)
                     with custom_agent_ui(
                         console=default_console,
@@ -681,7 +661,6 @@ def run(
                             debug,
                             custom_logger,
                             trust_mcp_code,
-                            delegation_agents,
                             stream,
                             continue_conversation_id,
                             resolved_attachments,
@@ -967,7 +946,6 @@ def chat(
     root: Optional[str] = typer.Option(None, "--root", help="Working directory"),
 ):
     """Start an interactive chat session with an agent."""
-    from tsugite.agent_composition import parse_agent_references
     from tsugite.ui.textual_chat import run_textual_chat
 
     with change_to_root_directory(root, console):
@@ -1000,23 +978,10 @@ def chat(
                 console.print(f"[red]Failed to load conversation: {e}[/red]")
                 raise typer.Exit(1)
 
-        # Resolve agent path
-        if agent:
-            # Parse agent reference
-            base_dir = Path.cwd()
-            agent_refs = [agent]
-            primary_agent_path, _ = parse_agent_references(agent_refs, None, base_dir)
-        else:
-            # Use package-provided chat assistant by default
-            # Users can override by creating .tsugite/chat_assistant.md or agents/chat_assistant.md
-            base_dir = Path.cwd()
-            agent_refs = ["chat-assistant"]
-            primary_agent_path, _ = parse_agent_references(agent_refs, None, base_dir)
-
-        # Validate agent file exists
-        if not primary_agent_path.exists():
-            console.print(f"[red]Agent file not found: {primary_agent_path}[/red]")
-            raise typer.Exit(1)
+        # Resolve agent path using shared helper
+        # Default to chat-assistant if no agent specified
+        agent_to_load = agent if agent else "chat-assistant"
+        _, primary_agent_path, _ = load_and_validate_agent(agent_to_load, console)
 
         # Run chat with Textual UI
         run_textual_chat(

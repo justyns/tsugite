@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional
 
-from tsugite.xdg import get_xdg_cache_path
+from tsugite.config import get_xdg_cache_path
 
 
 def get_cache_key(source: str) -> str:
