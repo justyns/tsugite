@@ -28,6 +28,7 @@ from .init import init
 from .mcp import mcp_app
 from .tools import tools_app
 
+# Chat history limit - keeps last N turns to balance context retention vs memory usage
 DEFAULT_MAX_CHAT_HISTORY = 50
 
 # Install rich traceback handler for better error messages
@@ -242,6 +243,105 @@ def _build_executor_kwargs(
     return kwargs
 
 
+def _handle_docker_execution(
+    args: List[str],
+    network: str,
+    keep: bool,
+    container: Optional[str],
+    model: Optional[str],
+    with_agents: Optional[str],
+    root: Optional[str],
+    history_dir: Optional[str],
+    ui: Optional[str],
+    debug: bool,
+    verbose: bool,
+    headless: bool,
+    plain: bool,
+    show_reasoning: bool,
+    no_color: bool,
+    final_only: bool,
+    log_json: bool,
+    non_interactive: bool,
+    trust_mcp_code: bool,
+    attachment: Optional[List[str]],
+    refresh_cache: bool,
+) -> None:
+    """Handle Docker container execution and exit.
+
+    Args:
+        All run() command parameters
+
+    Raises:
+        typer.Exit: Always exits after Docker execution
+    """
+    import shutil
+    import subprocess
+
+    wrapper_path = shutil.which("tsugite-docker")
+    if not wrapper_path:
+        console.print("[red]Error: tsugite-docker wrapper not found in PATH[/red]")
+        console.print("[yellow]Install it by adding tsugite/bin/ to your PATH[/yellow]")
+        console.print("[dim]See bin/README.md for installation instructions[/dim]")
+        raise typer.Exit(1)
+
+    cmd = _build_docker_command(
+        args,
+        network,
+        keep,
+        container,
+        model,
+        with_agents,
+        root,
+        history_dir,
+        ui,
+        debug,
+        verbose,
+        headless,
+        plain,
+        show_reasoning,
+        no_color,
+        final_only,
+        log_json,
+        non_interactive,
+        trust_mcp_code,
+        attachment,
+        refresh_cache,
+    )
+    result = subprocess.run(cmd, check=False)
+    raise typer.Exit(result.returncode)
+
+
+def _resolve_conversation_continuation(continue_conversation: bool, conversation_id: Optional[str]) -> Optional[str]:
+    """Resolve which conversation to continue.
+
+    Args:
+        continue_conversation: Whether to continue a conversation
+        conversation_id: Specific conversation ID or None for latest
+
+    Returns:
+        Conversation ID to continue, or None if not continuing
+
+    Raises:
+        typer.Exit: If no conversations found
+    """
+    if not continue_conversation:
+        return None
+
+    from tsugite.ui.chat_history import get_latest_conversation
+
+    if conversation_id:
+        console.print(f"[cyan]Continuing conversation: {conversation_id}[/cyan]")
+        return conversation_id
+
+    continue_conversation_id = get_latest_conversation()
+    if not continue_conversation_id:
+        console.print("[red]No conversations found to resume[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[cyan]Continuing latest conversation: {continue_conversation_id}[/cyan]")
+    return continue_conversation_id
+
+
 @app.command()
 def run(
     args: List[str] = typer.Argument(
@@ -335,16 +435,7 @@ def run(
         os.environ["TSUGITE_SUBAGENT_MODE"] = "1"
 
     if docker or container:
-        import shutil
-        import subprocess
-
-        wrapper_path = shutil.which("tsugite-docker")
-        if not wrapper_path:
-            console.print("[red]Error: tsugite-docker wrapper not found in PATH[/red]")
-            console.print("[yellow]Install it by adding tsugite/bin/ to your PATH[/yellow]")
-            console.print("[dim]See bin/README.md for installation instructions[/dim]")
-            raise typer.Exit(1)
-        cmd = _build_docker_command(
+        _handle_docker_execution(
             args,
             network,
             keep,
@@ -367,24 +458,9 @@ def run(
             attachment,
             refresh_cache,
         )
-        result = subprocess.run(cmd, check=False)
-        raise typer.Exit(result.returncode)
 
     # Handle conversation continuation - check before parsing args
-    continue_conversation_id = None
-    if continue_conversation:
-        from tsugite.ui.chat_history import get_latest_conversation
-
-        # Determine conversation ID
-        if conversation_id:
-            continue_conversation_id = conversation_id
-            console.print(f"[cyan]Continuing conversation: {continue_conversation_id}[/cyan]")
-        else:
-            continue_conversation_id = get_latest_conversation()
-            if not continue_conversation_id:
-                console.print("[red]No conversations found to resume[/red]")
-                raise typer.Exit(1)
-            console.print(f"[cyan]Continuing latest conversation: {continue_conversation_id}[/cyan]")
+    continue_conversation_id = _resolve_conversation_continuation(continue_conversation, conversation_id)
 
     # Parse CLI arguments into agents and prompt (allow empty agents when continuing)
     try:

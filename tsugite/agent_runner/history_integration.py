@@ -87,6 +87,33 @@ def apply_cache_control_to_messages(messages: list[dict]) -> list[dict]:
     return [{**msg, "cache_control": {"type": "ephemeral"}} for msg in messages]
 
 
+def load_and_apply_history(conversation_id: str) -> list[dict]:
+    """Load conversation history and apply cache control markers.
+
+    Consolidates the common pattern of loading conversation messages
+    and applying cache control for optimal performance.
+
+    Args:
+        conversation_id: Conversation ID to load
+
+    Returns:
+        List of message dicts with cache control applied
+
+    Raises:
+        ValueError: If conversation not found
+        RuntimeError: If loading fails
+    """
+    try:
+        messages = load_conversation_messages(conversation_id)
+        if messages:
+            messages = apply_cache_control_to_messages(messages)
+        return messages
+    except FileNotFoundError:
+        raise ValueError(f"Conversation not found: {conversation_id}")
+    except Exception as e:
+        raise RuntimeError(f"Failed to load conversation history: {e}")
+
+
 def save_run_to_history(
     agent_path: Path,
     agent_name: str,

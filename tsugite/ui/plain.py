@@ -23,22 +23,16 @@ from tsugite.events import (
 from tsugite.ui.base import CustomUIHandler
 from tsugite.ui_context import clear_ui_context, set_ui_context
 
+# Display constants for plain UI output
+MAX_OBSERVATION_PREVIEW_LENGTH = 200  # Truncate long observations in plain output
+MAX_REASONING_DISPLAY_LENGTH = 2000  # Limit reasoning content to keep output manageable
+
 
 class PlainUIHandler(CustomUIHandler):
-    """Plain text UI handler without colors, panels, animations, or emojis.
-
-    This handler provides minimal, copy-paste friendly output by stripping
-    all Rich formatting, emojis, and decorative elements. Ideal for:
-    - Piped output
-    - Copy-paste workflows
-    - Screen readers
-    - Logs and automation
-    """
+    """Plain text UI handler without colors, panels, animations, or emojis."""
 
     def __init__(self):
         """Initialize plain UI handler with no-color console."""
-        # Create a console with no color support for stderr output
-        # Note: force_terminal not needed for stderr console
         no_color_console = get_stderr_console(no_color=True)
 
         # Initialize parent with panels disabled
@@ -88,6 +82,18 @@ class PlainUIHandler(CustomUIHandler):
         """
         # Remove Rich color/style tags like [cyan], [/cyan], [bold], etc.
         return re.sub(r"\[/?[a-z\s]+\]", "", text)
+
+    @staticmethod
+    def _is_final_answer(text: str) -> bool:
+        """Check if text contains a final answer marker.
+
+        Args:
+            text: Text to check
+
+        Returns:
+            True if text contains final answer marker
+        """
+        return "__FINAL_ANSWER__:" in text
 
     def _handle_task_start(self, event: TaskStartEvent) -> None:
         """Handle task start event with plain text output."""
@@ -149,10 +155,8 @@ class PlainUIHandler(CustomUIHandler):
             # Clean up observation for display
             clean_obs = observation.replace("|", "[").strip()
 
-            # Check if this is a final answer
-            is_final_answer = "__FINAL_ANSWER__:" in clean_obs
-
-            # Check if this looks like an error using shared helper from parent class
+            # Check if this is a final answer or error
+            is_final_answer = self._is_final_answer(clean_obs)
             is_error = self._contains_error(clean_obs)
 
             # Always show errors, even if show_observations is False
@@ -169,8 +173,8 @@ class PlainUIHandler(CustomUIHandler):
                 pass
             elif self.show_observations:
                 # Normal observation - truncate if too long
-                if len(clean_obs) > 200:
-                    clean_obs = clean_obs[:200] + "..."
+                if len(clean_obs) > MAX_OBSERVATION_PREVIEW_LENGTH:
+                    clean_obs = clean_obs[:MAX_OBSERVATION_PREVIEW_LENGTH] + "..."
                 self.console.print(f"Result: {clean_obs}")
 
         # Add to current step history
@@ -242,10 +246,9 @@ class PlainUIHandler(CustomUIHandler):
             self.console.print("Processing reasoning content...")
 
             # Truncate very long reasoning content for display
-            max_length = 2000
             display_content = content.strip()
-            if len(display_content) > max_length:
-                display_content = display_content[:max_length] + "\n\n... (truncated)"
+            if len(display_content) > MAX_REASONING_DISPLAY_LENGTH:
+                display_content = display_content[:MAX_REASONING_DISPLAY_LENGTH] + "\n\n... (truncated)"
 
             self.console.print()
             self.console.rule(title, style="dim")
@@ -316,9 +319,7 @@ class PlainUIHandler(CustomUIHandler):
             output_text = event.output
             if output_text.strip():
                 contains_error = self._contains_error(output_text)
-
-                # Check if this is a final answer
-                is_final_answer = "__FINAL_ANSWER__:" in output_text
+                is_final_answer = self._is_final_answer(output_text)
 
                 # Always show errors, filter non-meaningful outputs otherwise
                 if contains_error:

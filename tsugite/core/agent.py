@@ -31,6 +31,9 @@ from .executor import CodeExecutor, LocalExecutor
 from .memory import AgentMemory, StepResult
 from .tools import Tool
 
+# Agent execution constants
+DEFAULT_MAX_TURNS = 10  # Default maximum reasoning iterations before timeout
+
 
 def build_system_prompt(tools: List[Tool], instructions: str = "", text_mode: bool = False) -> str:
     """Build system prompt for LLM with tools and instructions.
@@ -72,11 +75,6 @@ class TsugiteAgent:
     Provides direct access to LiteLLM features including reasoning models,
     custom parameters, and full control over the execution loop.
 
-    How it works:
-    1. Build system prompt from tools + instructions
-    2. Loop: Send messages → Get response → Execute code → Repeat
-    3. Stop when final_answer() is called or max_turns reached
-
     Example:
         agent = TsugiteAgent(
             model_string="openai:gpt-4o-mini",
@@ -94,7 +92,7 @@ class TsugiteAgent:
         model_string: str,
         tools: List[Tool],
         instructions: str = "",
-        max_turns: int = 10,
+        max_turns: int = DEFAULT_MAX_TURNS,
         executor: CodeExecutor = None,
         model_kwargs: dict = None,
         event_bus: EventBus = None,

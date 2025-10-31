@@ -26,8 +26,9 @@ from .helpers import (
 )
 from .metrics import StepMetrics, display_step_metrics
 
-MAX_VARIABLE_PREVIEW_LENGTH = 100
-MAX_CONTENT_PREVIEW_LENGTH = 200
+# Display constants for truncating long output
+MAX_VARIABLE_PREVIEW_LENGTH = 100  # Max characters to show in variable documentation
+MAX_CONTENT_PREVIEW_LENGTH = 200  # Max characters to show in debug attachment previews
 
 if TYPE_CHECKING:
     from tsugite.agent_preparation import PreparedAgent
@@ -633,21 +634,9 @@ def run_agent(
     # Load conversation history if continuing
     previous_messages = []
     if continue_conversation_id:
-        try:
-            from tsugite.agent_runner.history_integration import (
-                apply_cache_control_to_messages,
-                load_conversation_messages,
-            )
+        from tsugite.agent_runner.history_integration import load_and_apply_history
 
-            previous_messages = load_conversation_messages(continue_conversation_id)
-
-            # Apply cache control to all history messages (industry best practice)
-            if previous_messages:
-                previous_messages = apply_cache_control_to_messages(previous_messages)
-        except FileNotFoundError:
-            raise ValueError(f"Conversation not found: {continue_conversation_id}")
-        except Exception as e:
-            raise RuntimeError(f"Failed to load conversation history: {e}")
+        previous_messages = load_and_apply_history(continue_conversation_id)
 
     # Initialize task manager for this agent session
     reset_task_manager()
@@ -791,21 +780,9 @@ async def run_agent_async(
     # Load conversation history if continuing
     previous_messages = []
     if continue_conversation_id:
-        try:
-            from tsugite.agent_runner.history_integration import (
-                apply_cache_control_to_messages,
-                load_conversation_messages,
-            )
+        from tsugite.agent_runner.history_integration import load_and_apply_history
 
-            previous_messages = load_conversation_messages(continue_conversation_id)
-
-            # Apply cache control to all history messages (industry best practice)
-            if previous_messages:
-                previous_messages = apply_cache_control_to_messages(previous_messages)
-        except FileNotFoundError:
-            raise ValueError(f"Conversation not found: {continue_conversation_id}")
-        except Exception as e:
-            raise RuntimeError(f"Failed to load conversation history: {e}")
+        previous_messages = load_and_apply_history(continue_conversation_id)
 
     # Initialize task manager for this agent session
     reset_task_manager()
@@ -1039,6 +1016,104 @@ def evaluate_loop_condition(expression: str, context: Dict[str, Any]) -> bool:
         raise ValueError(f"Error evaluating loop condition '{expression}': {e}") from e
 
 
+def _prepare_retry_context(step_context: Dict[str, Any], step: Any, attempt: int, errors: List[str]) -> None:
+    """Add retry-specific variables to step context.
+
+    Args:
+        step_context: Step context to update
+        step: Step configuration
+        attempt: Current attempt number (0-indexed)
+        errors: List of previous errors
+    """
+    step_context["is_retry"] = attempt > 0
+    step_context["retry_count"] = attempt
+    step_context["max_retries"] = step.max_retries
+    step_context["last_error"] = errors[-1] if errors else ""
+    step_context["all_errors"] = errors
+
+
+def _show_step_progress_message(
+    custom_logger: Any,
+    step_header: str,
+    attempt: int,
+    max_retries: int,
+    i: int,
+    step_name: str,
+    total_steps: int,
+    max_attempts: int,
+    debug: bool,
+    event_bus: Optional["EventBus"],
+) -> None:
+    """Display step progress message in UI.
+
+    Args:
+        custom_logger: Logger for UI updates
+        step_header: Formatted step header
+        attempt: Current attempt number (0-indexed)
+        max_retries: Maximum retries allowed
+        i: Step number (1-indexed)
+        step_name: Name of the step
+        total_steps: Total number of steps
+        max_attempts: Total attempts (retries + 1)
+        debug: Debug mode flag
+        event_bus: Event bus for debug messages
+    """
+    if not debug:
+        set_multistep_ui_context(custom_logger, i, step_name, total_steps)
+        if attempt > 0:
+            print_step_progress(custom_logger, step_header, f"Retry {attempt}/{max_retries}...", debug, "yellow")
+        else:
+            print_step_progress(custom_logger, step_header, "Starting...", debug, "cyan")
+
+    if debug and event_bus:
+        from tsugite.events import DebugMessageEvent
+
+        if attempt > 0:
+            event_bus.emit(
+                DebugMessageEvent(
+                    message=f"DEBUG: Retrying Step {i}/{total_steps}: {step_name} (Attempt {attempt + 1}/{max_attempts})"
+                )
+            )
+        else:
+            event_bus.emit(DebugMessageEvent(message=f"DEBUG: Executing Step {i}/{total_steps}: {step_name}"))
+
+
+def _render_step_template(
+    step: Any,
+    step_context: Dict[str, Any],
+    debug: bool,
+    event_bus: Optional["EventBus"],
+) -> str:
+    """Render step template with current context.
+
+    Args:
+        step: Step configuration
+        step_context: Current step context
+        debug: Debug mode flag
+        event_bus: Event bus for debug output
+
+    Returns:
+        Rendered step prompt
+
+    Raises:
+        Exception: If template rendering fails
+    """
+    # Execute tool directives in this step's content
+    step_modified_content, step_tool_context = execute_tool_directives(step.content, step_context, event_bus)
+    step_context.update(step_tool_context)
+
+    # Render this step's content with current context
+    renderer = AgentRenderer()
+    rendered_step_prompt = renderer.render(step_modified_content, step_context)
+
+    if debug and event_bus:
+        from tsugite.events import DebugMessageEvent
+
+        event_bus.emit(DebugMessageEvent(message="\n[bold]Rendered Prompt:[/bold]\n" + rendered_step_prompt))
+
+    return rendered_step_prompt
+
+
 async def _execute_step_with_retries(
     step: Any,
     step_context: Dict[str, Any],
@@ -1089,45 +1164,25 @@ async def _execute_step_with_retries(
 
     for attempt in range(max_attempts):
         # Add retry context variables
-        step_context["is_retry"] = attempt > 0
-        step_context["retry_count"] = attempt
-        step_context["max_retries"] = step.max_retries
-        step_context["last_error"] = errors[-1] if errors else ""
-        step_context["all_errors"] = errors
+        _prepare_retry_context(step_context, step, attempt, errors)
 
-        if not debug:
-            set_multistep_ui_context(custom_logger, i, step.name, total_steps)
-            if attempt > 0:
-                print_step_progress(
-                    custom_logger, step_header, f"Retry {attempt}/{step.max_retries}...", debug, "yellow"
-                )
-            else:
-                print_step_progress(custom_logger, step_header, "Starting...", debug, "cyan")
+        # Show progress message
+        _show_step_progress_message(
+            custom_logger,
+            step_header,
+            attempt,
+            step.max_retries,
+            i,
+            step.name,
+            total_steps,
+            max_attempts,
+            debug,
+            event_bus,
+        )
 
-        if debug and event_bus:
-            from tsugite.events import DebugMessageEvent
-
-            if attempt > 0:
-                event_bus.emit(
-                    DebugMessageEvent(
-                        message=f"DEBUG: Retrying Step {i}/{total_steps}: {step.name} (Attempt {attempt + 1}/{max_attempts})"
-                    )
-                )
-            else:
-                event_bus.emit(DebugMessageEvent(message=f"DEBUG: Executing Step {i}/{total_steps}: {step.name}"))
-
-        # Execute tool directives in this step's content
-        step_modified_content, step_tool_context = execute_tool_directives(step.content, step_context, event_bus)
-        step_context.update(step_tool_context)
-
-        # Render this step's content with current context
-        renderer = AgentRenderer()
+        # Render step template
         try:
-            rendered_step_prompt = renderer.render(step_modified_content, step_context)
-            if debug and event_bus:
-                from tsugite.events import DebugMessageEvent
-
-                event_bus.emit(DebugMessageEvent(message="\n[bold]Rendered Prompt:[/bold]\n" + rendered_step_prompt))
+            rendered_step_prompt = _render_step_template(step, step_context, debug, event_bus)
         except Exception as e:
             error_msg = f"Template rendering failed: {e}"
             errors.append(error_msg)
