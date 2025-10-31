@@ -1,5 +1,6 @@
 """Test configuration and fixtures."""
 
+import asyncio
 import shutil
 import sys
 import tempfile
@@ -17,6 +18,33 @@ warnings.filterwarnings("ignore", message="coroutine.*was never awaited")
 # Configure Python warnings module to suppress uncaught RuntimeWarnings at module level
 if not sys.warnoptions:
     warnings.simplefilter("ignore", RuntimeWarning)
+
+
+@pytest.fixture(autouse=True)
+def event_loop_policy():
+    """Ensure clean event loop for each test.
+
+    This fixture prevents 'Event loop is closed' errors that can occur when
+    run_multistep_agent() (and other sync wrappers) use asyncio.run() internally.
+    asyncio.run() creates and closes its own event loop, which can interfere with
+    pytest-asyncio's event loop management in strict mode.
+    """
+    # Get current policy or create new one
+    policy = asyncio.get_event_loop_policy()
+
+    yield
+
+    # Clean up: close any lingering loops and reset policy
+    try:
+        loop = policy.get_event_loop()
+        if loop and not loop.is_closed():
+            loop.close()
+    except RuntimeError:
+        # No current event loop, which is fine
+        pass
+
+    # Reset to ensure fresh state for next test
+    asyncio.set_event_loop_policy(asyncio.DefaultEventLoopPolicy())
 
 
 @pytest.fixture
