@@ -24,18 +24,18 @@ class TestAutoContextHandler:
         assert not handler.can_handle("http://example.com")
 
     def test_fetch_with_no_files_found(self, tmp_path, monkeypatch):
-        """Test fetch when no context files are found."""
+        """Test fetch_multiple when no context files are found."""
         # Change to temp directory with no context files
         monkeypatch.chdir(tmp_path)
 
         handler = AutoContextHandler(context_files=["CONTEXT.md", "AGENTS.md"])
-        result = handler.fetch("auto-context")
+        result = handler.fetch_multiple("auto-context")
 
-        # Should return empty string, not raise an error
-        assert result == ""
+        # Should return empty list, not raise an error
+        assert result == []
 
     def test_fetch_discovers_single_file(self, tmp_path, monkeypatch):
-        """Test fetch when one context file exists."""
+        """Test fetch_multiple when one context file exists."""
         # Create a context file
         context_file = tmp_path / "CONTEXT.md"
         context_file.write_text("# Project Context\nThis is context.")
@@ -43,14 +43,16 @@ class TestAutoContextHandler:
         monkeypatch.chdir(tmp_path)
 
         handler = AutoContextHandler(context_files=["CONTEXT.md", "AGENTS.md"])
-        result = handler.fetch("auto-context")
+        result = handler.fetch_multiple("auto-context")
 
-        assert "# Project Context" in result
-        assert "This is context." in result
-        assert "# Auto-Context: CONTEXT.md" in result
+        assert len(result) == 1
+        name, content = result[0]
+        assert name == "CONTEXT.md"
+        assert "# Project Context" in content
+        assert "This is context." in content
 
     def test_fetch_discovers_multiple_files(self, tmp_path, monkeypatch):
-        """Test fetch when multiple context files exist."""
+        """Test fetch_multiple when multiple context files exist."""
         # Create multiple context files
         (tmp_path / "CONTEXT.md").write_text("Context content")
         (tmp_path / "AGENTS.md").write_text("Agents content")
@@ -59,17 +61,21 @@ class TestAutoContextHandler:
         monkeypatch.chdir(tmp_path)
 
         handler = AutoContextHandler(context_files=["CONTEXT.md", "AGENTS.md", "CLAUDE.md"])
-        result = handler.fetch("auto-context")
+        result = handler.fetch_multiple("auto-context")
 
-        assert "Context content" in result
-        assert "Agents content" in result
-        assert "Claude content" in result
-        assert "# Auto-Context: CONTEXT.md" in result
-        assert "# Auto-Context: AGENTS.md" in result
-        assert "# Auto-Context: CLAUDE.md" in result
+        assert len(result) == 3
+        names = [name for name, _ in result]
+        contents = {name: content for name, content in result}
+
+        assert "CONTEXT.md" in names
+        assert "AGENTS.md" in names
+        assert "CLAUDE.md" in names
+        assert "Context content" in contents["CONTEXT.md"]
+        assert "Agents content" in contents["AGENTS.md"]
+        assert "Claude content" in contents["CLAUDE.md"]
 
     def test_fetch_in_tsugite_directory(self, tmp_path, monkeypatch):
-        """Test fetch finds files in .tsugite directory."""
+        """Test fetch_multiple finds files in .tsugite directory."""
         # Create .tsugite directory with context
         tsugite_dir = tmp_path / ".tsugite"
         tsugite_dir.mkdir()
@@ -78,10 +84,12 @@ class TestAutoContextHandler:
         monkeypatch.chdir(tmp_path)
 
         handler = AutoContextHandler(context_files=[".tsugite/CONTEXT.md"])
-        result = handler.fetch("auto-context")
+        result = handler.fetch_multiple("auto-context")
 
-        assert "Tsugite context" in result
-        assert "# Auto-Context: .tsugite/CONTEXT.md" in result
+        assert len(result) == 1
+        name, content = result[0]
+        assert name == ".tsugite/CONTEXT.md"
+        assert "Tsugite context" in content
 
     def test_fetch_prefers_closer_files(self, tmp_path, monkeypatch):
         """Test that files in current dir are preferred over parent dirs."""
@@ -98,11 +106,14 @@ class TestAutoContextHandler:
         monkeypatch.chdir(child_dir)
 
         handler = AutoContextHandler(context_files=["CONTEXT.md"])
-        result = handler.fetch("auto-context")
+        result = handler.fetch_multiple("auto-context")
 
+        assert len(result) == 1
+        name, content = result[0]
+        assert name == "CONTEXT.md"
         # Should find child version, not parent
-        assert "Child context" in result
-        assert "Parent context" not in result
+        assert "Child context" in content
+        assert "Parent context" not in content
 
     @patch("tsugite.attachments.auto_context.subprocess.run")
     def test_find_git_root_success(self, mock_run, tmp_path):
@@ -155,7 +166,7 @@ class TestAutoContextHandler:
         assert len(dirs) >= 4
 
     def test_fetch_handles_unreadable_file(self, tmp_path, monkeypatch):
-        """Test fetch handles files that cannot be read."""
+        """Test fetch_multiple handles files that cannot be read."""
         # Create a file and then mock it to raise an error
         context_file = tmp_path / "CONTEXT.md"
         context_file.write_text("Test")
@@ -166,14 +177,17 @@ class TestAutoContextHandler:
 
         # Mock read_text to raise an exception
         with patch.object(Path, "read_text", side_effect=PermissionError("Access denied")):
-            result = handler.fetch("auto-context")
+            result = handler.fetch_multiple("auto-context")
 
-            # Should include warning but not fail
-            assert "Warning" in result
-            assert "Access denied" in result
+            # Should include error attachment but not fail
+            assert len(result) == 1
+            name, content = result[0]
+            assert name == "CONTEXT.md"
+            assert "Error reading" in content
+            assert "Access denied" in content
 
     def test_fetch_loads_config_when_no_context_files(self, tmp_path, monkeypatch):
-        """Test that fetch loads config when context_files is None."""
+        """Test that fetch_multiple loads config when context_files is None."""
         monkeypatch.chdir(tmp_path)
 
         # Create config files
@@ -187,9 +201,12 @@ class TestAutoContextHandler:
         # Mock load_config at the import location in auto_context module
         with patch("tsugite.config.load_config", return_value=mock_cfg):
             handler = AutoContextHandler(context_files=None)
-            result = handler.fetch("auto-context")
+            result = handler.fetch_multiple("auto-context")
 
-            assert "Config content" in result
+            assert len(result) == 1
+            name, content = result[0]
+            assert name == "CLAUDE.md"
+            assert "Config content" in content
 
     def test_get_global_context_file_exists(self, tmp_path):
         """Test finding global context file when it exists."""
@@ -238,15 +255,19 @@ class TestAutoContextHandler:
         with patch("tsugite.config.load_config", return_value=mock_cfg):
             with patch("tsugite.xdg.get_xdg_config_path", return_value=global_context):
                 handler = AutoContextHandler(context_files=None)
-                result = handler.fetch("auto-context")
+                result = handler.fetch_multiple("auto-context")
 
                 # Should include both project and global context
-                assert "Project agents" in result
-                assert "Global context" in result
-                assert "Global Context" in result
+                assert len(result) == 2
+                names = [name for name, _ in result]
+                contents = {name: content for name, content in result}
+                assert "AGENTS.md" in names
+                assert "Global Context (~/.config/tsugite/CONTEXT.md)" in names
+                assert "Project agents" in contents["AGENTS.md"]
+                assert "Global context" in contents["Global Context (~/.config/tsugite/CONTEXT.md)"]
 
     def test_fetch_excludes_global_context_when_disabled(self, tmp_path, monkeypatch):
-        """Test that fetch excludes global context when disabled."""
+        """Test that fetch_multiple excludes global context when disabled."""
         monkeypatch.chdir(tmp_path)
 
         # Create project context
@@ -265,11 +286,14 @@ class TestAutoContextHandler:
         with patch("tsugite.config.load_config", return_value=mock_cfg):
             with patch("tsugite.xdg.get_xdg_config_path", return_value=global_context):
                 handler = AutoContextHandler(context_files=None)
-                result = handler.fetch("auto-context")
+                result = handler.fetch_multiple("auto-context")
 
                 # Should only include project context
-                assert "Project agents" in result
-                assert "Global context" not in result
+                assert len(result) == 1
+                name, content = result[0]
+                assert name == "AGENTS.md"
+                assert "Project agents" in content
+                assert "Global context" not in content
 
     def test_fetch_multiple_returns_list_of_tuples(self, tmp_path, monkeypatch):
         """Test that fetch_multiple returns list of (name, content) tuples."""

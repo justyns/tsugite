@@ -1,60 +1,8 @@
 """History integration for agent runs."""
 
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
-
-
-@dataclass
-class ChatTurn:
-    """Represents a single conversation turn for context injection."""
-
-    timestamp: datetime
-    user_message: str
-    agent_response: str
-    tool_calls: list = None
-    token_count: Optional[int] = None
-    cost: Optional[float] = None
-    steps: Optional[list] = None
-    messages: Optional[list] = None
-
-
-def load_conversation_context(conversation_id: str) -> list:
-    """Load conversation history as chat context.
-
-    DEPRECATED: Use load_conversation_messages() instead for proper message structure.
-    This function will be removed in version 0.4.0 (target: 2025-12-01).
-
-    Args:
-        conversation_id: Conversation ID to load
-
-    Returns:
-        List of ChatTurn-like dicts for context injection
-
-    Raises:
-        FileNotFoundError: If conversation doesn't exist
-        RuntimeError: If load fails
-    """
-    from tsugite.ui.chat_history import load_conversation_history
-
-    turns = load_conversation_history(conversation_id)
-
-    chat_turns = []
-    for turn in turns:
-        chat_turn = ChatTurn(
-            timestamp=turn.timestamp,
-            user_message=turn.user,
-            agent_response=turn.assistant,
-            tool_calls=turn.tools or [],
-            token_count=turn.tokens,
-            cost=turn.cost,
-            steps=turn.steps,
-            messages=turn.messages,
-        )
-        chat_turns.append(chat_turn)
-
-    return chat_turns
 
 
 def _process_messages_field(turn, messages: list) -> None:

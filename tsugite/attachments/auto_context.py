@@ -35,27 +35,15 @@ class AutoContextHandler(AttachmentHandler):
         return source in ("auto-context", "auto") or source.startswith("auto:")
 
     def fetch(self, source: str) -> str:
-        """Discover and concatenate context files.
-
-        DEPRECATED: This method concatenates all files into one string.
-        Use fetch_multiple() instead for separate attachments.
+        """Not supported. Use fetch_multiple() instead.
 
         Args:
-            source: Auto-context marker
-
-        Returns:
-            Concatenated content from discovered files
+            source: Source string
 
         Raises:
-            ValueError: If discovery fails
+            NotImplementedError: This method is not supported
         """
-        try:
-            files = self._discover_context_files()
-            if not files:
-                return ""
-            return self._concatenate_files(files)
-        except Exception as e:
-            raise ValueError(f"Failed to fetch auto-context: {e}")
+        raise NotImplementedError("AutoContextHandler.fetch() is not supported. Use fetch_multiple() instead.")
 
     def fetch_multiple(self, source: str) -> List[tuple[str, str]]:
         """Discover context files and return as separate attachments.
@@ -209,28 +197,3 @@ class AutoContextHandler(AttachmentHandler):
         if global_context_path.exists() and global_context_path.is_file():
             return (global_context_path, "Global Context (~/.config/tsugite/CONTEXT.md)")
         return None
-
-    def _concatenate_files(self, files: List[tuple[Path, str]]) -> str:
-        """Concatenate multiple files with headers.
-
-        Args:
-            files: List of (file_path, relative_name) tuples
-
-        Returns:
-            Concatenated content with headers
-        """
-        sections = []
-
-        for file_path, relative_name in files:
-            try:
-                content = file_path.read_text(encoding="utf-8")
-                # Add header and content
-                sections.append(f"# Auto-Context: {relative_name}\n")
-                sections.append(f"# Source: {file_path}\n\n")
-                sections.append(content)
-                sections.append("\n")
-            except Exception as e:
-                # Log warning but continue with other files
-                sections.append(f"# Warning: Failed to read {relative_name}: {e}\n\n")
-
-        return "".join(sections)

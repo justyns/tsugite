@@ -273,43 +273,6 @@ class TestChatManagerLoadFromHistory:
 class TestRunModeContinuation:
     """Tests for run mode continuation functionality."""
 
-    def test_load_conversation_context(self, temp_history_dir):
-        """Test loading conversation as context for run mode."""
-        from tsugite.agent_runner.history_integration import load_conversation_context
-
-        # Create conversation
-        conv_id = start_conversation("test_agent", "test:model")
-
-        # Add turns
-        for i in range(2):
-            turn = Turn(
-                timestamp=datetime.now(timezone.utc),
-                user=f"Question {i}",
-                assistant=f"Answer {i}",
-                tools=["tool1"],
-                tokens=100,
-                cost=0.002,
-            )
-            save_turn_to_history(conv_id, turn)
-
-        # Load as context
-        context = load_conversation_context(conv_id)
-
-        # Verify context structure
-        assert len(context) == 2
-        assert context[0].user_message == "Question 0"
-        assert context[0].agent_response == "Answer 0"
-        assert context[0].tool_calls == ["tool1"]
-        assert context[0].token_count == 100
-        assert context[0].cost == 0.002
-
-    def test_load_conversation_context_not_found(self, temp_history_dir):
-        """Test loading non-existent conversation as context."""
-        from tsugite.agent_runner.history_integration import load_conversation_context
-
-        with pytest.raises(FileNotFoundError):
-            load_conversation_context("nonexistent_conv_id")
-
     def test_save_run_to_history_with_continuation(self, temp_history_dir, temp_agent_file):
         """Test saving run to history with continuation ID."""
         from tsugite.agent_runner.history_integration import save_run_to_history

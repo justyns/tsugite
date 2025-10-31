@@ -781,19 +781,14 @@ def render(
                 console=console,
             )
 
-            # Build context and load conversation history if continuing
+            # Build context
+            # Note: Conversation history is no longer loaded here because chat_history
+            # template blocks have been removed from modern agents. History is now
+            # handled via previous_messages in agent execution, not template rendering.
             context = {}
             if continue_conversation_id:
-                from tsugite.agent_runner.history_integration import load_conversation_context
-
-                try:
-                    chat_history = load_conversation_context(continue_conversation_id)
-                    context["chat_history"] = chat_history
-                    # Enable text_mode when continuing (matches run behavior)
-                    agent.config.text_mode = True
-                except FileNotFoundError:
-                    console.print(f"[red]Conversation not found: {continue_conversation_id}[/red]")
-                    raise typer.Exit(1)
+                # Enable text_mode when continuing (matches run behavior)
+                agent.config.text_mode = True
 
             # Prepare agent (all rendering + tool building logic)
             preparer = AgentPreparer()
