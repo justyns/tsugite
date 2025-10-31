@@ -1,6 +1,6 @@
 [project]
 name = "tsugite-cli"
-version = "0.3.1"
+version = "0.3.2"
 description = "Micro-agent runner for task automation using markdown definitions"
 authors = [{ name = "Justyn Shull" }]
 requires-python = ">=3.11"
@@ -73,12 +73,7 @@ norecursedirs = [
 
 [tool.coverage.run]
 source = ["tsugite"]
-omit = [
-  "*/tests/*",
-  "*/test_*.py",
-  "*/__pycache__/*",
-  "*/site-packages/*",
-]
+omit = ["*/tests/*", "*/test_*.py", "*/__pycache__/*", "*/site-packages/*"]
 
 [tool.coverage.report]
 precision = 2

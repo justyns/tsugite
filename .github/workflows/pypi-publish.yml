@@ -31,8 +31,7 @@ jobs:
         run: uv build
 
       - name: Publish to PyPI
+        # Uses trusted publishing (no API token needed)
+        # For API token method, add with: {password: ${{ secrets.PYPI_API_TOKEN }}}
+        # Package name on PyPI: tsugite-cli
         uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          # Uncomment to use API token instead of trusted publishing
-          # password: ${{ secrets.PYPI_API_TOKEN }}
-          # Package name on PyPI: tsugite-cli
