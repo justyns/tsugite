@@ -1,12 +1,30 @@
 """History integration for agent runs."""
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
 
+@dataclass
+class ChatTurn:
+    """Represents a single conversation turn for context injection."""
+
+    timestamp: datetime
+    user_message: str
+    agent_response: str
+    tool_calls: list = None
+    token_count: Optional[int] = None
+    cost: Optional[float] = None
+    steps: Optional[list] = None
+    messages: Optional[list] = None
+
+
 def load_conversation_context(conversation_id: str) -> list:
     """Load conversation history as chat context.
+
+    DEPRECATED: Use load_conversation_messages() instead for proper message structure.
+    This function will be removed in version 0.4.0 (target: 2025-12-01).
 
     Args:
         conversation_id: Conversation ID to load
@@ -22,22 +40,8 @@ def load_conversation_context(conversation_id: str) -> list:
 
     turns = load_conversation_history(conversation_id)
 
-    # Convert Turn objects to ChatTurn-like format for context
     chat_turns = []
     for turn in turns:
-        from dataclasses import dataclass
-
-        @dataclass
-        class ChatTurn:
-            timestamp: datetime
-            user_message: str
-            agent_response: str
-            tool_calls: list = None
-            token_count: Optional[int] = None
-            cost: Optional[float] = None
-            steps: Optional[list] = None
-            messages: Optional[list] = None
-
         chat_turn = ChatTurn(
             timestamp=turn.timestamp,
             user_message=turn.user,
@@ -45,12 +49,94 @@ def load_conversation_context(conversation_id: str) -> list:
             tool_calls=turn.tools or [],
             token_count=turn.tokens,
             cost=turn.cost,
-            steps=turn.steps,  # Include execution steps if available
-            messages=turn.messages,  # Include message history if available
+            steps=turn.steps,
+            messages=turn.messages,
         )
         chat_turns.append(chat_turn)
 
     return chat_turns
+
+
+def _process_messages_field(turn, messages: list) -> None:
+    """Process turn with messages field (full message history)."""
+    for msg in turn.messages:
+        if msg.get("role") != "system":
+            messages.append(msg)
+
+
+def _process_steps_field(turn, messages: list) -> None:
+    """Process turn with steps field (execution steps)."""
+    messages.append({"role": "user", "content": turn.user})
+    for step in turn.steps:
+        thought = step.get("thought", "")
+        code = step.get("code", "")
+        output = step.get("output", "")
+        error = step.get("error")
+
+        messages.append({"role": "assistant", "content": f"Thought: {thought}\n\n```python\n{code}\n```"})
+
+        observation = f"Observation: {output}"
+        if error:
+            observation += f"\nError: {error}"
+        messages.append({"role": "user", "content": observation})
+
+    messages.append({"role": "assistant", "content": turn.assistant})
+
+
+def _process_simple_turn(turn, messages: list) -> None:
+    """Process simple turn (user/assistant only)."""
+    messages.append({"role": "user", "content": turn.user})
+    messages.append({"role": "assistant", "content": turn.assistant})
+
+
+def load_conversation_messages(conversation_id: str) -> list[dict]:
+    """Load conversation history as message list for LLM.
+
+    Loads complete message history including tool calls and intermediate steps.
+    System messages are skipped as they will be reconstructed with current context.
+
+    Args:
+        conversation_id: Conversation ID to load
+
+    Returns:
+        List of message dicts including all tool calls and observations
+
+    Raises:
+        FileNotFoundError: If conversation doesn't exist
+        RuntimeError: If load fails
+    """
+    from tsugite.ui.chat_history import load_conversation_history
+
+    turns = load_conversation_history(conversation_id)
+
+    messages = []
+    for turn in turns:
+        if turn.messages:
+            _process_messages_field(turn, messages)
+        elif turn.steps:
+            _process_steps_field(turn, messages)
+        else:
+            _process_simple_turn(turn, messages)
+
+    return messages
+
+
+def apply_cache_control_to_messages(messages: list[dict]) -> list[dict]:
+    """Apply cache control markers to all conversation messages.
+
+    Following industry best practices from Anthropic and OpenAI, we cache
+    all conversation history.
+
+    Args:
+        messages: List of message dicts (user/assistant pairs)
+
+    Returns:
+        List of message dicts with cache_control added to all messages
+    """
+    if not messages:
+        return messages
+
+    return [{**msg, "cache_control": {"type": "ephemeral"}} for msg in messages]
 
 
 def save_run_to_history(
@@ -94,25 +180,23 @@ def save_run_to_history(
         from tsugite.config import load_config
         from tsugite.ui.chat_history import save_chat_turn, start_conversation
 
-        # Check if history is enabled
         config = load_config()
         if not getattr(config, "history_enabled", True):
             return None
 
-        # Check agent-level disable_history
         try:
             from tsugite.md_agents import parse_agent_file
 
             agent = parse_agent_file(agent_path)
             if getattr(agent.config, "disable_history", False):
                 return None
-        except Exception:
-            # If we can't parse agent, assume history is enabled
-            pass
+        except Exception as e:
+            import sys
+
+            print(f"Warning: Could not check agent history settings: {e}", file=sys.stderr)
 
         timestamp = datetime.now(timezone.utc)
 
-        # Use existing conversation ID or start new one
         if continue_conversation_id:
             conv_id = continue_conversation_id
         else:
@@ -122,12 +206,10 @@ def save_run_to_history(
                 timestamp=timestamp,
             )
 
-        # Build messages list with system prompt and attachments
         messages = []
+
         if system_prompt or attachments:
-            # Build system message with attachments
             if attachments:
-                # System blocks format (for providers that support prompt caching)
                 system_blocks = [{"type": "text", "text": system_prompt or ""}]
                 for name, content in attachments:
                     system_blocks.append(
@@ -139,13 +221,21 @@ def save_run_to_history(
                     )
                 messages.append({"role": "system", "content": system_blocks})
             else:
-                # Simple string format
                 messages.append({"role": "system", "content": system_prompt})
 
-            # User message
-            messages.append({"role": "user", "content": prompt})
+        messages.append({"role": "user", "content": prompt})
 
-        # Save turn to conversation with full execution steps and messages
+        if execution_steps:
+            for step in execution_steps:
+                thought = getattr(step, "thought", "")
+                code = getattr(step, "code", "")
+                output = getattr(step, "output", "")
+
+                messages.append({"role": "assistant", "content": f"Thought: {thought}\n\n```python\n{code}\n```"})
+                messages.append({"role": "user", "content": f"Observation: {output}"})
+
+        messages.append({"role": "assistant", "content": result})
+
         save_chat_turn(
             conversation_id=conv_id,
             user_message=prompt,
@@ -154,14 +244,13 @@ def save_run_to_history(
             token_count=token_count,
             cost=cost,
             timestamp=timestamp,
-            execution_steps=execution_steps,  # Pass full execution steps
-            messages=messages if messages else None,  # Include system prompt and attachments
+            execution_steps=execution_steps,
+            messages=messages,
         )
 
         return conv_id
 
     except Exception as e:
-        # Don't fail the run if history fails
         import sys
 
         print(f"Warning: Failed to save run to history: {e}", file=sys.stderr)

@@ -454,7 +454,7 @@ attachments:
 
 ### Prompt Caching
 
-Tsugite automatically uses prompt caching to reduce costs and improve performance when supported by your LLM provider. Attachments and context files are sent as separate system content blocks with cache markers, allowing providers to cache static content across requests.
+Tsugite automatically uses prompt caching to improve performance when supported by your LLM provider. Attachments and context files are sent as separate system content blocks with cache markers, allowing providers to cache static content across requests.
 
 **Supported Providers:**
 - **OpenAI** (GPT-4, GPT-4 Turbo, GPT-3.5 Turbo)
@@ -467,7 +467,7 @@ Tsugite automatically uses prompt caching to reduce costs and improve performanc
 1. Each attachment (including auto-context files) is sent as a separate system content block
 2. Cache markers are automatically added to attachment blocks
 3. Providers cache these blocks across conversations
-4. Subsequent requests reuse cached content (90% cost reduction for cached tokens)
+4. Subsequent requests reuse cached content
 
 **Cache Statistics:**
 
@@ -483,10 +483,33 @@ Cost summaries now include cache information when available:
 - **Cache write**: Tokens used to create new cache entries (Anthropic-specific)
 - **Cache read**: Tokens read from existing cache (Anthropic-specific)
 
+**Conversation History Caching:**
+
+When continuing conversations (using `--continue` in run mode or chat mode), conversation history is also cached:
+
+- Previous conversation turns are sent as proper user/assistant message pairs
+- The last N turns (default: 5) have cache control markers applied
+- Configuration options:
+  - `cache_conversation_messages: true` (default: enabled)
+  - `cache_conversation_turns: 5` (default: 5 turns)
+
+To disable or adjust conversation caching:
+```bash
+# Disable conversation caching
+tsugite config set cache_conversation_messages false
+
+# Cache fewer turns (reduce cache writes)
+tsugite config set cache_conversation_turns 3
+
+# Cache more turns (better for long conversations)
+tsugite config set cache_conversation_turns 10
+```
+
 **Best Practices:**
 - Use auto-context for project documentation (cached across runs)
 - Keep attachments stable between requests for maximum cache hits
 - Large context files benefit most from caching (minimum 1024 tokens)
+- In long conversations, adjust `cache_conversation_turns` to balance cost vs cache writes
 
 **Note:** Caching happens automatically - no configuration needed. Cache statistics appear in cost summaries when providers return cache data.
 

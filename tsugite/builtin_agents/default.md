@@ -8,6 +8,8 @@ tools:
   - read_file
   - list_files
   - task_*
+  - write_file
+  - edit_file
 prefetch:
   - tool: list_agents
     args: {}
@@ -52,30 +54,22 @@ instructions: |
 {{ subagent_instructions }}
 {% endif %}
 
-{% if chat_history is defined and chat_history %}
-## Previous Conversation
-
-{% for turn in chat_history %}
-**User:** {{ turn.user_message }}
-
-**Assistant:** {{ turn.agent_response }}
-{% if turn.tool_calls %}
-*Tools used: {{ turn.tool_calls | join(', ') }}*
-{% endif %}
-
-{% endfor %}
-{% endif %}
+**Note:** When continuing a conversation, previous messages are automatically included in your context as part of the conversation history. You don't need to reference them explicitly.
 
 {% if step_number is defined %}
+
 ## Multi-Step Execution
+
 You are in step {{ step_number }} of {{ total_steps }} ({{ step_name }}).
 
 **IMPORTANT Step Completion**:
+
 - Complete ONLY the task assigned in this step
 {% if text_mode %}- After completing the task, call final_answer(result) with your result
 {% else %}- After completing the task, write a Python code block with final_answer(result)
 - Example: ```python
 final_answer("step result")
+
 ```
 {% endif %}- Do NOT generate additional conversational text after calling final_answer()
 - The framework will automatically present the next step - you do not need to ask or wait
@@ -104,19 +98,23 @@ final_answer(result)  # STOP HERE - task is done, return the result
 ```
 
 **Example 2: Only process results further if the subagent output needs additional work**
+
 ```python
 # Spawn agent and store result
 review = spawn_agent("agents/code_review.md", "Review app.py")
 print(review)  # IMPORTANT: Print so you can see it in your next turn!
 # DON'T call final_answer() here - let the agent continue thinking
 ```
+
 Then in the next turn, you can:
+
 - Analyze the review results (you'll see them because you printed)
 - Spawn additional agents
 - Combine data from multiple sources
 - Finally call `final_answer()` when truly done
 
 **Key principles:**
+
 - **If the subagent result fully answers the user's request → call final_answer(result) immediately**
 - Only process results further if you genuinely need to combine/transform them
 - Don't waste turns analyzing results that already answer the question
@@ -128,6 +126,7 @@ Then in the next turn, you can:
 ## Web Search Guidelines
 
 When searching the web:
+
 - Use `web_search(query="...", max_results=5)` to get search results
 - Returns: `[{"title": "...", "url": "...", "snippet": "..."}]`
 - **Important:** Format results nicely for the user! Extract and summarize relevant information from snippets

@@ -1,6 +1,7 @@
 """CLI helper functions."""
 
 import hashlib
+import io
 import os
 from contextlib import contextmanager
 from pathlib import Path
@@ -12,6 +13,9 @@ from rich.console import Console
 # Re-export console utilities for backwards compatibility
 from tsugite.console import get_error_console, get_output_console  # noqa: F401
 from tsugite.constants import TSUGITE_LOGO_NARROW, TSUGITE_LOGO_WIDE
+
+MIN_WIDTH_FOR_WIDE_LOGO = 80
+STDIN_ATTACHMENT_NAME = "stdin"
 
 
 def deduplicate_attachments(attachments: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
@@ -87,7 +91,7 @@ def deduplicate_attachments(attachments: List[Tuple[str, str]]) -> List[Tuple[st
 
 def get_logo(console: Console) -> str:
     """Get appropriate logo based on terminal width."""
-    return TSUGITE_LOGO_NARROW if console.width < 80 else TSUGITE_LOGO_WIDE
+    return TSUGITE_LOGO_NARROW if console.width < MIN_WIDTH_FOR_WIDE_LOGO else TSUGITE_LOGO_WIDE
 
 
 def print_plain_section(console: Console, title: str, content: str, style: str = "") -> None:
@@ -211,6 +215,7 @@ def assemble_prompt_with_attachments(
     base_dir: Path,
     refresh_cache: bool,
     console: Console,
+    stdin_attachment: Optional[Tuple[str, str]] = None,
 ) -> Tuple[str, List[Tuple[str, str]]]:
     """Resolve all attachments and file references, returning combined attachment tuples.
 
@@ -221,6 +226,7 @@ def assemble_prompt_with_attachments(
         base_dir: Base directory for resolving paths
         refresh_cache: Whether to refresh cached content
         console: Console for error messages
+        stdin_attachment: Optional stdin content as (name, content) tuple
 
     Returns:
         Tuple of (updated_prompt, combined_attachment_tuples)
@@ -252,10 +258,12 @@ def assemble_prompt_with_attachments(
         console.print(f"[red]File reference error: {e}[/red]")
         raise typer.Exit(1)
 
-    # Combine all attachments in proper order: agent -> CLI -> file refs
+    # Combine all attachments in proper order: agent -> CLI -> file refs -> stdin
     all_attachments = agent_attachment_contents + cli_attachment_contents + file_attachment_tuples
 
-    # Deduplicate attachments (by path and content hash)
+    if stdin_attachment:
+        all_attachments.append(stdin_attachment)
+
     deduplicated_attachments = deduplicate_attachments(all_attachments)
 
     return updated_prompt, deduplicated_attachments
@@ -309,26 +317,15 @@ def load_and_validate_agent(agent_path: str, console: Console) -> Tuple[Any, Pat
     return agent, agent_file_path, agent_display_name
 
 
-def parse_cli_arguments(args: List[str], allow_empty_agents: bool = False) -> tuple[List[str], str]:
-    """Parse CLI arguments into agent references and prompt.
+def _validate_common_option_placement(args: List[str]) -> None:
+    """Check if common CLI options appear in positional args (common user error).
 
     Args:
         args: List of positional arguments from CLI
-        allow_empty_agents: If True, allow returning empty agent list (for continuation mode)
 
-    Returns:
-        Tuple of (agent_refs, prompt)
-
-    Examples:
-        ["+a", "+b", "task"] -> (["+a", "+b"], "task")
-        ["+a", "create", "ticket"] -> (["+a"], "create ticket")
-        ["agent.md", "helper.md", "do", "work"] -> (["agent.md", "helper.md"], "do work")
-        ["task"], allow_empty_agents=True -> ([], "task")
+    Raises:
+        ValueError: If common options are found in positional arguments
     """
-    if not args:
-        raise ValueError("No arguments provided")
-
-    # Check if common CLI options appear in positional args (common user error)
     common_options = [
         "--ui",
         "--model",
@@ -372,46 +369,124 @@ def parse_cli_arguments(args: List[str], allow_empty_agents: bool = False) -> tu
             f'  tsugite run +agent --ui minimal "prompt"'
         )
 
+
+def _parse_agent_refs(args: List[str]) -> tuple[List[str], List[str]]:
+    """Parse agent references from arguments.
+
+    Args:
+        args: List of positional arguments from CLI
+
+    Returns:
+        Tuple of (agent_refs, remaining_prompt_parts)
+    """
     agents = []
     prompt_parts = []
 
-    for i, arg in enumerate(args):
-        # Check if this looks like an agent reference
-        # Exclude arguments containing @ (file references) from being treated as agents
+    for arg in args:
         has_file_reference = "@" in arg
         has_path_separator = "/" in arg
         has_spaces = " " in arg
 
-        # Agent detection logic:
-        # - Starts with + (shorthand like +agent) OR
-        # - Ends with .md (agent file) BUT no spaces (to avoid "text in file.md" prompts) OR
-        # - Has path separator BUT no spaces (file path like path/to/agent.md)
-        # - Must not contain @ (file reference marker)
         is_agent = (
             arg.startswith("+") or (arg.endswith(".md") and not has_spaces) or (has_path_separator and not has_spaces)
         ) and not has_file_reference
 
         if is_agent and not prompt_parts:
-            # Still collecting agents
             agents.append(arg)
         else:
-            # First non-agent arg or after we started collecting prompt
             prompt_parts.append(arg)
+
+    return agents, prompt_parts
+
+
+def _check_stdin_data() -> Optional[tuple[str, str]]:
+    """Check for stdin data and return as attachment if present.
+
+    Returns:
+        (STDIN_ATTACHMENT_NAME, content) if stdin has data, None otherwise
+    """
+    from tsugite.utils import has_stdin_data, read_stdin
+
+    try:
+        if has_stdin_data():
+            stdin_content = read_stdin()
+            if stdin_content.strip():
+                return (STDIN_ATTACHMENT_NAME, stdin_content)
+    except (OSError, io.UnsupportedOperation):
+        # In test environments or special contexts, stdin may not support fileno()
+        pass
+    return None
+
+
+def parse_cli_arguments(
+    args: List[str], allow_empty_agents: bool = False, check_stdin: bool = True
+) -> tuple[List[str], str, Optional[tuple[str, str]]]:
+    """Parse CLI arguments into agent references, prompt, and optional stdin.
+
+    Args:
+        args: List of positional arguments from CLI
+        allow_empty_agents: If True, allow returning empty agent list (for continuation mode)
+        check_stdin: If True, check for stdin data and read it
+
+    Returns:
+        Tuple of (agent_refs, prompt, stdin_attachment)
+        stdin_attachment is None or ("stdin", content)
+
+    Examples:
+        ["+a", "+b", "task"] -> (["+a", "+b"], "task", None)
+        ["+a", "create", "ticket"] -> (["+a"], "create ticket", None)
+        ["agent.md", "helper.md", "do", "work"] -> (["agent.md", "helper.md"], "do work", None)
+        ["task"], allow_empty_agents=True -> ([], "task", None)
+        ["task"] + stdin data -> (["+default"], "task", ("stdin", "data"))
+    """
+    if not args:
+        raise ValueError("No arguments provided")
+
+    _validate_common_option_placement(args)
+
+    agents, prompt_parts = _parse_agent_refs(args)
 
     if not agents:
         if allow_empty_agents:
-            # Return empty list when continuing conversations - agent will be auto-detected
             agents = []
             prompt = " ".join(args)
         else:
-            # Default to default agent for auto-discovery
             agents = ["+default"]
-            # All args become the prompt
             prompt = " ".join(args)
     else:
         prompt = " ".join(prompt_parts)
 
-    return agents, prompt
+    stdin_attachment = None
+    if check_stdin and prompt:
+        stdin_attachment = _check_stdin_data()
+
+    return agents, prompt, stdin_attachment
+
+
+def _validate_and_change_to_root(root: Optional[str], console: Console) -> Optional[str]:
+    """Validate root directory and change to it if provided.
+
+    Args:
+        root: Optional path to root directory
+        console: Console for error messages
+
+    Returns:
+        Original working directory path if changed, None otherwise
+
+    Raises:
+        typer.Exit: If root directory doesn't exist
+    """
+    if not root:
+        return None
+
+    root_path = Path(root)
+    if not root_path.exists():
+        console.print(f"[red]Working directory not found: {root}[/red]")
+        raise typer.Exit(1)
+
+    original_cwd = os.getcwd()
+    os.chdir(str(root_path))
+    return original_cwd
 
 
 @contextmanager
@@ -428,19 +503,10 @@ def change_to_root_directory(root: Optional[str], console: Console):
     Raises:
         typer.Exit: If root directory doesn't exist
     """
-    original_cwd = None
+    original_cwd = _validate_and_change_to_root(root, console)
 
     try:
-        if root:
-            root_path = Path(root)
-            if not root_path.exists():
-                console.print(f"[red]Working directory not found: {root}[/red]")
-                raise typer.Exit(1)
-            original_cwd = os.getcwd()
-            os.chdir(str(root_path))
-
         yield
-
     finally:
         if original_cwd:
             os.chdir(original_cwd)
@@ -449,18 +515,9 @@ def change_to_root_directory(root: Optional[str], console: Console):
 @contextmanager
 def agent_context(agent_path: str, root: Optional[str], console: Console):
     """Validate agent path and optionally change working directory."""
-
-    original_cwd = None
+    original_cwd = _validate_and_change_to_root(root, console)
 
     try:
-        if root:
-            root_path = Path(root)
-            if not root_path.exists():
-                console.print(f"[red]Working directory not found: {root}[/red]")
-                raise typer.Exit(1)
-            original_cwd = os.getcwd()
-            os.chdir(str(root_path))
-
         agent_file = Path(agent_path)
         if not agent_file.exists():
             console.print(f"[red]Agent file not found: {agent_path}[/red]")

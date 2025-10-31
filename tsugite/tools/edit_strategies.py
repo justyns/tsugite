@@ -7,6 +7,8 @@ with progressive fallback from exact matching to more flexible approaches.
 from abc import ABC, abstractmethod
 from typing import Generator, List
 
+MIN_BLOCK_ANCHOR_LINES = 3
+
 
 class ReplacementStrategy(ABC):
     """Base class for text replacement strategies."""
@@ -87,10 +89,9 @@ class BlockAnchorStrategy(ReplacementStrategy):
     """Match blocks using first and last lines as anchors.
 
     Uses Levenshtein distance for fuzzy matching of middle content.
-    Requires at least 3 lines (first anchor, middle content, last anchor).
+    Requires at least MIN_BLOCK_ANCHOR_LINES (first anchor, middle content, last anchor).
     """
 
-    # Similarity thresholds
     SINGLE_CANDIDATE_THRESHOLD = 0.0
     MULTIPLE_CANDIDATES_THRESHOLD = 0.3
 
@@ -101,7 +102,7 @@ class BlockAnchorStrategy(ReplacementStrategy):
         if search_lines and search_lines[-1] == "":
             search_lines.pop()
 
-        if len(search_lines) < 3:
+        if len(search_lines) < MIN_BLOCK_ANCHOR_LINES:
             return
 
         content_lines = content.split("\n")

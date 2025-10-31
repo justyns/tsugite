@@ -170,6 +170,7 @@ def print_test_results_table(
     test_items = list(test_results.items())
 
     # Show all tests if <=20, otherwise show first 15 and last 5
+    num_hidden = 0
     if len(test_items) <= 20:
         display_tests = test_items
         truncated = False

@@ -305,21 +305,16 @@ class PlainUIHandler(CustomUIHandler):
 
         self.console.print("Processing execution results...")
 
-        content = event.result
+        # Display execution logs if present
+        if event.logs:
+            logs_text = "\n".join(event.logs)
+            if logs_text.strip():
+                self.console.print(f"Logs: {logs_text}")
 
-        if content.strip():
-            # Parse execution logs and output using shared helper from parent class
-            execution_logs, output_lines = self._parse_execution_content(content)
-
-            # Display execution logs if present
-            if execution_logs:
-                logs_text = "\n".join(execution_logs)
-                if logs_text.strip():
-                    self.console.print(f"Logs: {logs_text}")
-
-            # Display output if present and meaningful
-            if output_lines:
-                output_text = "\n".join(output_lines)
+        # Display output if present and meaningful
+        if event.output:
+            output_text = event.output
+            if output_text.strip():
                 contains_error = self._contains_error(output_text)
 
                 # Check if this is a final answer

@@ -2,7 +2,7 @@
 
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import typer
 from rich.console import Console
@@ -27,6 +27,8 @@ from .history import history_app
 from .init import init
 from .mcp import mcp_app
 from .tools import tools_app
+
+DEFAULT_MAX_CHAT_HISTORY = 50
 
 # Install rich traceback handler for better error messages
 # This is after imports to satisfy linting, but still early enough to catch runtime errors
@@ -95,7 +97,6 @@ def _build_docker_command(
     """
     cmd = ["tsugite-docker"]
 
-    # Add wrapper-specific flags
     if network != "host":
         cmd.extend(["--network", network])
     if keep:
@@ -103,13 +104,10 @@ def _build_docker_command(
     if container:
         cmd.extend(["--container", container])
 
-    # Add 'run' subcommand
     cmd.append("run")
 
-    # Add all the original args (agent refs and prompt words)
     cmd.extend(args)
 
-    # Add tsugite flags (not wrapper flags)
     if model:
         cmd.extend(["--model", model])
     if with_agents:
@@ -169,12 +167,10 @@ def _resolve_ui_mode(ui: Optional[str], plain: bool, headless: bool, console: Co
     if not ui:
         return plain, headless, live_ui
 
-    # Check for conflicts
     if any([plain, headless]):
         console.print("[red]Error: --ui cannot be used with --plain or --headless[/red]")
         raise typer.Exit(1)
 
-    # Map UI mode to flags
     ui_modes = {
         "plain": {"plain": True},
         "headless": {"headless": True},
@@ -186,13 +182,64 @@ def _resolve_ui_mode(ui: Optional[str], plain: bool, headless: bool, console: Co
         console.print(f"[red]Error: Invalid UI mode '{ui}'. Choose from: {', '.join(ui_modes.keys())}[/red]")
         raise typer.Exit(1)
 
-    # Apply mode settings
     mode_settings = ui_modes[ui_lower]
     plain = mode_settings.get("plain", plain)
     headless = mode_settings.get("headless", headless)
     live_ui = mode_settings.get("live_ui", live_ui)
 
     return plain, headless, live_ui
+
+
+def _build_executor_kwargs(
+    agent_file: Path,
+    prompt: str,
+    model: Optional[str],
+    debug: bool,
+    custom_logger: Any,
+    trust_mcp_code: bool,
+    delegation_agents: Any,
+    stream: bool,
+    continue_conversation_id: Optional[str],
+    resolved_attachments: List[Tuple[str, str]],
+    should_save_history: bool,
+    executor: Any,
+) -> Dict[str, Any]:
+    """Build executor kwargs dict for run_agent/run_multistep_agent.
+
+    Args:
+        agent_file: Path to agent file
+        prompt: User prompt
+        model: Model override
+        debug: Debug flag
+        custom_logger: Logger instance
+        trust_mcp_code: Trust MCP code flag
+        delegation_agents: Delegation agents
+        stream: Stream flag
+        continue_conversation_id: Continuation conversation ID
+        resolved_attachments: Resolved attachments
+        should_save_history: Whether to save history
+        executor: Executor function (run_agent or run_multistep_agent)
+
+    Returns:
+        Dict of executor kwargs
+    """
+    from tsugite.agent_runner import run_agent
+
+    kwargs = {
+        "agent_path": agent_file,
+        "prompt": prompt,
+        "model_override": model,
+        "debug": debug,
+        "custom_logger": custom_logger,
+        "trust_mcp_code": trust_mcp_code,
+        "delegation_agents": delegation_agents,
+        "stream": stream,
+        "continue_conversation_id": continue_conversation_id,
+        "attachments": resolved_attachments,
+    }
+    if should_save_history and executor == run_agent:
+        kwargs["return_token_usage"] = True
+    return kwargs
 
 
 @app.command()
@@ -283,27 +330,20 @@ def run(
             console.print("[red]Error: --subagent-mode cannot be combined with --plain, --headless, or --live[/red]")
             raise typer.Exit(1)
 
-        # Force compatible settings for subprocess communication
         non_interactive = True
         no_history = True
-
-        # Set environment variable for downstream components
         os.environ["TSUGITE_SUBAGENT_MODE"] = "1"
 
-    # Delegate to tsugite-docker wrapper if Docker flags are present
     if docker or container:
         import shutil
         import subprocess
 
-        # Check if tsugite-docker is available
         wrapper_path = shutil.which("tsugite-docker")
         if not wrapper_path:
             console.print("[red]Error: tsugite-docker wrapper not found in PATH[/red]")
             console.print("[yellow]Install it by adding tsugite/bin/ to your PATH[/yellow]")
             console.print("[dim]See bin/README.md for installation instructions[/dim]")
             raise typer.Exit(1)
-
-        # Build and execute Docker wrapper command
         cmd = _build_docker_command(
             args,
             network,
@@ -350,19 +390,19 @@ def run(
     try:
         from tsugite.cli.helpers import parse_cli_arguments
 
-        agent_refs, prompt = parse_cli_arguments(args, allow_empty_agents=continue_conversation)
+        agent_refs, prompt, stdin_attachment = parse_cli_arguments(
+            args, allow_empty_agents=continue_conversation, check_stdin=not continue_conversation
+        )
     except ValueError as e:
         console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1)
 
-    # Parse agent references and resolve paths
     from tsugite.agent_composition import parse_agent_references
 
     with change_to_root_directory(root, console):
         try:
             base_dir = Path.cwd()
 
-            # If no agent specified and we're continuing, auto-detect from conversation
             if not agent_refs and continue_conversation:
                 from tsugite.history import get_conversation_metadata
 
@@ -373,13 +413,10 @@ def run(
 
                 agent_name = metadata.agent
                 console.print(f"[cyan]Auto-detected agent from conversation: {agent_name}[/cyan]")
-
-                # Use agent name as reference (will be resolved below)
                 agent_refs = [f"+{agent_name}"]
 
             primary_agent_path, delegation_agents = parse_agent_references(agent_refs, with_agents, base_dir)
 
-            # Validate primary agent
             if not primary_agent_path.exists():
                 console.print(f"[red]Agent file not found: {primary_agent_path}[/red]")
                 raise typer.Exit(1)
@@ -394,29 +431,19 @@ def run(
             console.print(f"[red]Error: {e}[/red]")
             raise typer.Exit(1)
 
-        # Determine if we should use plain output (no panels/boxes)
-        # Plain mode is enabled if:
-        # 1. User explicitly sets --plain flag, OR
-        # 2. Output is being piped/redirected (auto-detection via should_use_plain_output)
-        # Note: --no-color disables colors but still allows custom_agent_ui with animations
         use_plain_output = plain or should_use_plain_output()
 
-        # Create stderr console for agent execution progress
-        # This ensures all progress messages go to stderr, keeping stdout clean for final answer
         stderr_console = Console(file=sys.stderr, no_color=no_color)
 
-        # Get agent info for display
         agent_info = get_agent_info(agent_file)
         instruction_label = "runtime + agent" if agent_info.get("instructions") else "runtime default"
 
-        # Inject auto-context if enabled
         agent_attachments = inject_auto_context_if_enabled(
             agent_info.get("attachments"),
             agent_info.get("auto_context"),
             cli_override=auto_context,
         )
 
-        # Resolve attachments and file references with deduplication
         prompt, resolved_attachments = assemble_prompt_with_attachments(
             prompt=prompt,
             agent_attachments=agent_attachments,
@@ -424,16 +451,14 @@ def run(
             base_dir=base_dir,
             refresh_cache=refresh_cache,
             console=console,
+            stdin_attachment=stdin_attachment,
         )
 
-        # Skip initial panel in headless mode
         if not headless:
-            # Display ASCII logo (adaptive based on terminal width) - skip in plain mode
             if not use_plain_output:
                 stderr_console.print(get_logo(stderr_console), style="cyan")
-                stderr_console.print()  # blank line for spacing
+                stderr_console.print()
 
-            # Prepare info items
             info_items = {
                 "Agent": agent_file.name,
                 "Task": prompt,
@@ -443,37 +468,29 @@ def run(
                 "Tools": ", ".join(agent_info.get("tools", [])),
             }
 
-            # Add agent attachments if any
             if agent_attachments:
                 info_items["Agent Attachments"] = ", ".join(agent_attachments)
 
-            # Add CLI attachments if any
             if attachment:
                 info_items["CLI Attachments"] = ", ".join(attachment)
 
-            # Add resolved attachments count (after deduplication)
             if resolved_attachments:
                 info_items["Attachments"] = f"{len(resolved_attachments)} file(s)"
 
-            # Display info based on mode
             if use_plain_output:
                 print_plain_info(stderr_console, "Tsugite Agent Runner", info_items, style="cyan")
-            # In minimal mode (default), skip the panel display entirely for cleaner output
 
-        # Validate agent before execution
         is_valid, error_msg = validate_agent_execution(agent_file)
         if not is_valid:
             get_error_console(headless, console).print(f"[red]Agent validation failed: {error_msg}[/red]")
             raise typer.Exit(1)
 
-        # Detect if this is a multi-step agent
         from tsugite.agent_runner import preview_multistep_agent, run_multistep_agent
         from tsugite.md_agents import has_step_directives
 
         agent_text = agent_file.read_text()
         is_multistep = has_step_directives(agent_text)
 
-        # Handle dry-run mode
         if dry_run:
             if is_multistep:
                 preview_multistep_agent(
@@ -486,13 +503,10 @@ def run(
                 console.print("[dim]This is a single-step agent. Use --debug to see the rendered prompt.[/dim]")
             return
 
-        # Choose executor function
         executor = run_multistep_agent if is_multistep else run_agent
 
-        # Determine if we should save to history (enabled by default unless --no-history flag)
         should_save_history = not no_history
 
-        # Skip "Starting agent execution" in headless or final_only mode
         if not headless and not final_only:
             execution_type = "multi-step agent" if is_multistep else "agent"
             stderr_console.print()
@@ -512,72 +526,66 @@ def run(
                     console=stderr_console,
                     show_code=show_progress_items,
                     show_observations=show_progress_items,
-                    show_progress=False,  # No spinners in headless/final-only
+                    show_progress=False,
                     show_llm_messages=show_progress_items,
                     show_execution_results=show_progress_items,
                     show_execution_logs=show_progress_items,
-                    show_panels=False,  # No panels in headless/final-only
-                    show_debug_messages=verbose,  # Only show debug messages with --verbose
+                    show_panels=False,
+                    show_debug_messages=verbose,
                 ) as custom_logger:
-                    executor_kwargs = {
-                        "agent_path": agent_file,
-                        "prompt": prompt,
-                        "model_override": model,
-                        "debug": debug,
-                        "custom_logger": custom_logger,
-                        "trust_mcp_code": trust_mcp_code,
-                        "delegation_agents": delegation_agents,
-                        "stream": stream,
-                        "continue_conversation_id": continue_conversation_id,
-                        "attachments": resolved_attachments,
-                    }
-                    if should_save_history and executor == run_agent:
-                        executor_kwargs["return_token_usage"] = True
+                    executor_kwargs = _build_executor_kwargs(
+                        agent_file,
+                        prompt,
+                        model,
+                        debug,
+                        custom_logger,
+                        trust_mcp_code,
+                        delegation_agents,
+                        stream,
+                        continue_conversation_id,
+                        resolved_attachments,
+                        should_save_history,
+                        executor,
+                    )
                     result = executor(**executor_kwargs)
             elif live_ui:
-                # Live UI: Rich Live Display with Tree visualization and interactive prompts
                 custom_logger = create_live_template_logger(interactive=not non_interactive)
                 with custom_logger.ui_handler.progress_context():
-                    executor_kwargs = {
-                        "agent_path": agent_file,
-                        "prompt": prompt,
-                        "model_override": model,
-                        "debug": debug,
-                        "custom_logger": custom_logger,
-                        "trust_mcp_code": trust_mcp_code,
-                        "delegation_agents": delegation_agents,
-                        "stream": stream,
-                        "continue_conversation_id": continue_conversation_id,
-                        "attachments": resolved_attachments,
-                    }
-                    if should_save_history and executor == run_agent:
-                        executor_kwargs["return_token_usage"] = True
+                    executor_kwargs = _build_executor_kwargs(
+                        agent_file,
+                        prompt,
+                        model,
+                        debug,
+                        custom_logger,
+                        trust_mcp_code,
+                        delegation_agents,
+                        stream,
+                        continue_conversation_id,
+                        resolved_attachments,
+                        should_save_history,
+                        executor,
+                    )
                     result = executor(**executor_kwargs)
             else:
-                # Choose UI handler based on plain mode
                 if use_plain_output:
-                    # Use PlainUIHandler for copy-paste friendly output
                     custom_logger = create_plain_logger()
-                    # Wrap in progress_context to register UI handler for interactive tools
                     with custom_logger.ui_handler.progress_context():
-                        executor_kwargs = {
-                            "agent_path": agent_file,
-                            "prompt": prompt,
-                            "model_override": model,
-                            "debug": debug,
-                            "custom_logger": custom_logger,
-                            "trust_mcp_code": trust_mcp_code,
-                            "delegation_agents": delegation_agents,
-                            "stream": stream,
-                            "continue_conversation_id": continue_conversation_id,
-                            "attachments": resolved_attachments,
-                        }
-                        if should_save_history and executor == run_agent:
-                            executor_kwargs["return_token_usage"] = True
+                        executor_kwargs = _build_executor_kwargs(
+                            agent_file,
+                            prompt,
+                            model,
+                            debug,
+                            custom_logger,
+                            trust_mcp_code,
+                            delegation_agents,
+                            stream,
+                            continue_conversation_id,
+                            resolved_attachments,
+                            should_save_history,
+                            executor,
+                        )
                         result = executor(**executor_kwargs)
                 else:
-                    # Default: minimal UI (colors but no panels/boxes)
-                    # Use stderr for progress to not interfere with stdout (subagent protocol)
                     default_console = Console(file=sys.stderr, force_terminal=True, no_color=no_color)
                     with custom_agent_ui(
                         console=default_console,
@@ -587,23 +595,23 @@ def run(
                         show_llm_messages=show_reasoning,
                         show_execution_results=True,
                         show_execution_logs=verbose,
-                        show_panels=False,  # No panels by default (minimal mode)
-                        show_debug_messages=verbose,  # Only show debug messages with --verbose
+                        show_panels=False,
+                        show_debug_messages=verbose,
                     ) as custom_logger:
-                        executor_kwargs = {
-                            "agent_path": agent_file,
-                            "prompt": prompt,
-                            "model_override": model,
-                            "debug": debug,
-                            "custom_logger": custom_logger,
-                            "trust_mcp_code": trust_mcp_code,
-                            "delegation_agents": delegation_agents,
-                            "stream": stream,
-                            "continue_conversation_id": continue_conversation_id,
-                            "attachments": resolved_attachments,
-                        }
-                        if should_save_history and executor == run_agent:
-                            executor_kwargs["return_token_usage"] = True
+                        executor_kwargs = _build_executor_kwargs(
+                            agent_file,
+                            prompt,
+                            model,
+                            debug,
+                            custom_logger,
+                            trust_mcp_code,
+                            delegation_agents,
+                            stream,
+                            continue_conversation_id,
+                            resolved_attachments,
+                            should_save_history,
+                            executor,
+                        )
                         result = executor(**executor_kwargs)
 
             # Unpack result if history was enabled (run_agent returns tuple with metadata)
@@ -764,7 +772,6 @@ def render(
                 cli_override=auto_context,
             )
 
-            # Assemble prompt with all attachments and file references
             prompt_updated, resolved_attachments = assemble_prompt_with_attachments(
                 prompt=prompt,
                 agent_attachments=agent_attachments,
@@ -880,7 +887,7 @@ def version():
 def chat(
     agent: Optional[str] = typer.Argument(None, help="Agent name or path (optional, uses default if not provided)"),
     model: Optional[str] = typer.Option(None, "--model", help="Override agent model"),
-    max_history: int = typer.Option(50, "--max-history", help="Maximum turns to keep in context"),
+    max_history: int = typer.Option(DEFAULT_MAX_CHAT_HISTORY, "--max-history", help="Maximum turns to keep in context"),
     stream: bool = typer.Option(False, "--stream", help="Stream LLM responses in real-time"),
     no_history: bool = typer.Option(False, "--no-history", help="Disable conversation history persistence"),
     continue_: Optional[str] = typer.Option(

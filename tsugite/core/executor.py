@@ -14,6 +14,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+PPRINT_WIDTH = 100
+
 
 @dataclass
 class ExecutionResult:
@@ -140,7 +142,7 @@ class LocalExecutor(CodeExecutor):
         """
         # For dicts and lists, use pprint for nice formatting
         if isinstance(value, (dict, list, tuple, set)):
-            return pprint.pformat(value, width=100, compact=False)
+            return pprint.pformat(value, width=PPRINT_WIDTH, compact=False)
         else:
             return repr(value)
 

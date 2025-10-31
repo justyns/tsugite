@@ -46,19 +46,7 @@ final_answer(result)
 
 **Important:** When the user asks about files, directories, or anything requiring system information, ALWAYS use the appropriate tool with a code block!
 
-{% if chat_history %}
-## Previous Conversation
-
-{% for turn in chat_history %}
-**User:** {{ turn.user_message }}
-
-**Assistant:** {{ turn.agent_response }}
-{% if turn.tool_calls %}
-*Tools used: {{ turn.tool_calls | join(', ') }}*
-{% endif %}
-
-{% endfor %}
-{% endif %}
+**Note:** When continuing a conversation, previous messages are automatically included in your context. You don't need to reference them explicitly - they're part of the conversation history.
 
 ## Current Request
 

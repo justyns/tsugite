@@ -374,3 +374,174 @@ class TestRunModeContinuation:
         turns = load_conversation_history(result_conv_id)
         assert len(turns) == 1
         assert turns[0].user == "Question"
+
+
+class TestToolCallHistory:
+    """Tests for tool call preservation in conversation history."""
+
+    def test_load_messages_with_steps(self, temp_history_dir):
+        """Test loading messages with execution steps (tool calls)."""
+        from tsugite.agent_runner.history_integration import load_conversation_messages
+
+        conv_id = start_conversation("test_agent", "test:model")
+
+        turn = Turn(
+            timestamp=datetime.now(timezone.utc),
+            user="Read config.json",
+            assistant="The config contains: {...}",
+            tools=["read_file"],
+            tokens=100,
+            cost=0.001,
+            steps=[
+                {
+                    "thought": "I need to read the config file",
+                    "code": "read_file('config.json')",
+                    "output": '{"key": "value"}',
+                },
+            ],
+        )
+        save_turn_to_history(conv_id, turn)
+
+        messages = load_conversation_messages(conv_id)
+
+        assert len(messages) == 4
+        assert messages[0]["role"] == "user"
+        assert messages[0]["content"] == "Read config.json"
+        assert messages[1]["role"] == "assistant"
+        assert "Thought: I need to read the config file" in messages[1]["content"]
+        assert "read_file('config.json')" in messages[1]["content"]
+        assert messages[2]["role"] == "user"
+        assert "Observation:" in messages[2]["content"]
+        assert '{"key": "value"}' in messages[2]["content"]
+        assert messages[3]["role"] == "assistant"
+        assert messages[3]["content"] == "The config contains: {...}"
+
+    def test_load_messages_with_multiple_steps(self, temp_history_dir):
+        """Test loading messages with multiple tool calls."""
+        from tsugite.agent_runner.history_integration import load_conversation_messages
+
+        conv_id = start_conversation("test_agent", "test:model")
+
+        turn = Turn(
+            timestamp=datetime.now(timezone.utc),
+            user="Search and write results",
+            assistant="Results written to file",
+            tools=["web_search", "write_file"],
+            tokens=200,
+            cost=0.002,
+            steps=[
+                {
+                    "thought": "First search the web",
+                    "code": "web_search('python')",
+                    "output": "Found 100 results",
+                },
+                {
+                    "thought": "Now write to file",
+                    "code": "write_file('results.txt', data)",
+                    "output": "File written successfully",
+                },
+            ],
+        )
+        save_turn_to_history(conv_id, turn)
+
+        messages = load_conversation_messages(conv_id)
+
+        assert len(messages) == 6
+        assert messages[0]["role"] == "user"
+        assert messages[1]["role"] == "assistant"
+        assert "web_search" in messages[1]["content"]
+        assert messages[2]["role"] == "user"
+        assert "Found 100 results" in messages[2]["content"]
+        assert messages[3]["role"] == "assistant"
+        assert "write_file" in messages[3]["content"]
+        assert messages[4]["role"] == "user"
+        assert "File written successfully" in messages[4]["content"]
+        assert messages[5]["role"] == "assistant"
+
+    def test_load_messages_with_stored_messages(self, temp_history_dir):
+        """Test loading from pre-saved messages field."""
+        from tsugite.agent_runner.history_integration import load_conversation_messages
+
+        conv_id = start_conversation("test_agent", "test:model")
+
+        turn = Turn(
+            timestamp=datetime.now(timezone.utc),
+            user="Test task",
+            assistant="Done",
+            tools=["read_file"],
+            tokens=50,
+            cost=0.001,
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant"},
+                {"role": "user", "content": "Test task"},
+                {"role": "assistant", "content": "Thought: Reading file\n\n```python\nread_file('test.txt')\n```"},
+                {"role": "user", "content": "Observation: file contents"},
+                {"role": "assistant", "content": "Done"},
+            ],
+        )
+        save_turn_to_history(conv_id, turn)
+
+        messages = load_conversation_messages(conv_id)
+
+        assert len(messages) == 4
+        assert messages[0]["role"] == "user"
+        assert messages[1]["role"] == "assistant"
+        assert "read_file" in messages[1]["content"]
+        assert messages[2]["role"] == "user"
+        assert "Observation:" in messages[2]["content"]
+        assert messages[3]["role"] == "assistant"
+
+    def test_load_messages_backward_compat(self, temp_history_dir):
+        """Test loading old format without steps or messages."""
+        from tsugite.agent_runner.history_integration import load_conversation_messages
+
+        conv_id = start_conversation("test_agent", "test:model")
+
+        turn = Turn(
+            timestamp=datetime.now(timezone.utc),
+            user="Simple question",
+            assistant="Simple answer",
+            tools=[],
+            tokens=25,
+            cost=0.0005,
+        )
+        save_turn_to_history(conv_id, turn)
+
+        messages = load_conversation_messages(conv_id)
+
+        assert len(messages) == 2
+        assert messages[0] == {"role": "user", "content": "Simple question"}
+        assert messages[1] == {"role": "assistant", "content": "Simple answer"}
+
+    def test_cache_control_with_tool_calls(self, temp_history_dir):
+        """Test that cache control is applied to all messages including tool calls."""
+        from tsugite.agent_runner.history_integration import (
+            apply_cache_control_to_messages,
+            load_conversation_messages,
+        )
+
+        conv_id = start_conversation("test_agent", "test:model")
+
+        turn = Turn(
+            timestamp=datetime.now(timezone.utc),
+            user="Task with tools",
+            assistant="Completed",
+            tools=["read_file"],
+            tokens=100,
+            cost=0.001,
+            steps=[
+                {
+                    "thought": "Reading file",
+                    "code": "read_file('test.txt')",
+                    "output": "contents",
+                },
+            ],
+        )
+        save_turn_to_history(conv_id, turn)
+
+        messages = load_conversation_messages(conv_id)
+        cached = apply_cache_control_to_messages(messages)
+
+        assert len(cached) == 4
+        for msg in cached:
+            assert msg["cache_control"] == {"type": "ephemeral"}

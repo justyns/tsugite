@@ -26,6 +26,9 @@ from .helpers import (
 )
 from .metrics import StepMetrics, display_step_metrics
 
+MAX_VARIABLE_PREVIEW_LENGTH = 100
+MAX_CONTENT_PREVIEW_LENGTH = 200
+
 if TYPE_CHECKING:
     from tsugite.agent_preparation import PreparedAgent
     from tsugite.events import EventBus
@@ -326,6 +329,7 @@ async def _execute_agent_with_prompt(
     injectable_vars: Optional[Dict[str, Any]] = None,
     return_token_usage: bool = False,
     stream: bool = False,
+    previous_messages: Optional[List[Dict]] = None,
 ) -> str | tuple[str, Optional[int], Optional[float], int, list]:
     """Execute agent with a prepared agent.
 
@@ -342,6 +346,7 @@ async def _execute_agent_with_prompt(
         injectable_vars: Variables to inject into Python execution namespace
         return_token_usage: Whether to return token usage and cost from LiteLLM
         stream: Whether to stream responses in real-time
+        previous_messages: Previous conversation messages for continuation
 
     Returns:
         Agent execution result as string, or tuple of (result, token_count, cost, steps) if return_token_usage=True
@@ -365,8 +370,8 @@ async def _execute_agent_with_prompt(
     if injectable_vars:
         var_docs = "\n\nAVAILABLE PYTHON VARIABLES:\n"
         for var_name, var_value in injectable_vars.items():
-            preview = str(var_value)[:100]
-            if len(str(var_value)) > 100:
+            preview = str(var_value)[:MAX_VARIABLE_PREVIEW_LENGTH]
+            if len(str(var_value)) > MAX_VARIABLE_PREVIEW_LENGTH:
                 preview += "..."
             var_docs += f"- {var_name}: {preview}\n"
         combined_instructions = prepared.combined_instructions + var_docs
@@ -474,6 +479,7 @@ async def _execute_agent_with_prompt(
             model_name=model_string,
             text_mode=agent_config.text_mode,
             attachments=prepared.attachments,
+            previous_messages=previous_messages,
         )
 
         # Run agent
@@ -625,12 +631,19 @@ def run_agent(
         context = {}
 
     # Load conversation history if continuing
+    previous_messages = []
     if continue_conversation_id:
         try:
-            from tsugite.agent_runner.history_integration import load_conversation_context
+            from tsugite.agent_runner.history_integration import (
+                apply_cache_control_to_messages,
+                load_conversation_messages,
+            )
 
-            chat_history = load_conversation_context(continue_conversation_id)
-            context["chat_history"] = chat_history
+            previous_messages = load_conversation_messages(continue_conversation_id)
+
+            # Apply cache control to all history messages (industry best practice)
+            if previous_messages:
+                previous_messages = apply_cache_control_to_messages(previous_messages)
         except FileNotFoundError:
             raise ValueError(f"Conversation not found: {continue_conversation_id}")
         except Exception as e:
@@ -690,7 +703,11 @@ def run_agent(
                 debug_parts.append(f"ATTACHMENTS ({len(prepared.attachments)}):")
                 debug_parts.append("-" * 80)
                 for name, content in prepared.attachments:
-                    preview = content[:200] + "..." if len(content) > 200 else content
+                    preview = (
+                        content[:MAX_CONTENT_PREVIEW_LENGTH] + "..."
+                        if len(content) > MAX_CONTENT_PREVIEW_LENGTH
+                        else content
+                    )
                     debug_parts.append(f"• {name}")
                     debug_parts.append(f"  {preview}")
                     debug_parts.append("")
@@ -718,6 +735,7 @@ def run_agent(
                 delegation_agents=delegation_agents,
                 return_token_usage=return_token_usage,
                 stream=stream,
+                previous_messages=previous_messages,
             )
         )
     finally:
@@ -771,12 +789,19 @@ async def run_agent_async(
         context = {}
 
     # Load conversation history if continuing
+    previous_messages = []
     if continue_conversation_id:
         try:
-            from tsugite.agent_runner.history_integration import load_conversation_context
+            from tsugite.agent_runner.history_integration import (
+                apply_cache_control_to_messages,
+                load_conversation_messages,
+            )
 
-            chat_history = load_conversation_context(continue_conversation_id)
-            context["chat_history"] = chat_history
+            previous_messages = load_conversation_messages(continue_conversation_id)
+
+            # Apply cache control to all history messages (industry best practice)
+            if previous_messages:
+                previous_messages = apply_cache_control_to_messages(previous_messages)
         except FileNotFoundError:
             raise ValueError(f"Conversation not found: {continue_conversation_id}")
         except Exception as e:
@@ -836,7 +861,11 @@ async def run_agent_async(
                 debug_parts.append(f"ATTACHMENTS ({len(prepared.attachments)}):")
                 debug_parts.append("-" * 80)
                 for name, content in prepared.attachments:
-                    preview = content[:200] + "..." if len(content) > 200 else content
+                    preview = (
+                        content[:MAX_CONTENT_PREVIEW_LENGTH] + "..."
+                        if len(content) > MAX_CONTENT_PREVIEW_LENGTH
+                        else content
+                    )
                     debug_parts.append(f"• {name}")
                     debug_parts.append(f"  {preview}")
                     debug_parts.append("")
@@ -863,6 +892,7 @@ async def run_agent_async(
             delegation_agents=delegation_agents,
             return_token_usage=return_token_usage,
             stream=stream,
+            previous_messages=previous_messages,
         )
     finally:
         # Always clear the current agent context when done

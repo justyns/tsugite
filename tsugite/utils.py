@@ -115,6 +115,30 @@ def is_interactive() -> bool:
     return sys.stdin.isatty()
 
 
+def has_stdin_data() -> bool:
+    """Check if stdin has data available (pipe or redirect).
+
+    Returns:
+        True if stdin has data, False if interactive terminal or no data
+    """
+    import select
+
+    if sys.stdin.isatty():
+        return False
+
+    ready, _, _ = select.select([sys.stdin], [], [], 0.0)
+    return bool(ready)
+
+
+def read_stdin() -> str:
+    """Read all data from stdin.
+
+    Returns:
+        Content from stdin as string
+    """
+    return sys.stdin.read()
+
+
 def should_use_plain_output() -> bool:
     """Detect if plain output mode should be used (no panels/boxes).
 
@@ -125,11 +149,9 @@ def should_use_plain_output() -> bool:
     Returns:
         True if plain output should be used, False otherwise
     """
-    # Check NO_COLOR standard
     if os.environ.get("NO_COLOR"):
         return True
 
-    # Check if output is being piped/redirected
     if not sys.stdout.isatty():
         return True
 
@@ -197,6 +219,7 @@ def resolve_attachments(attachment_refs: List[str], refresh_cache: bool = False)
     for ref in attachment_refs:
         # Get attachment from registry
         result = get_attachment(ref)
+        handler = None
 
         # If not in registry, try to find a handler that can handle it directly
         if result is None:
@@ -225,10 +248,7 @@ def resolve_attachments(attachment_refs: List[str], refresh_cache: bool = False)
 
         # Fetch content via handler
         try:
-            if result is None:
-                # Handler already found above when not in registry
-                pass
-            else:
+            if handler is None:
                 handler = get_handler(source)
 
             # Check if handler supports multiple attachments (like AutoContextHandler)

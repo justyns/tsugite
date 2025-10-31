@@ -4,6 +4,7 @@ A simpler, more direct implementation that gives us full control over
 model parameters and reasoning model support.
 """
 
+import asyncio
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
@@ -45,11 +46,9 @@ def build_system_prompt(tools: List[Tool], instructions: str = "", text_mode: bo
     Returns:
         Complete system prompt string
     """
-    # Build tools section (only if tools exist)
     tools_section = build_tools_section(tools)
     has_tools = bool(tools)
 
-    # Build mode-specific prompt
     if text_mode:
         return build_text_mode_prompt(tools_section, instructions, has_tools)
     else:
@@ -102,6 +101,7 @@ class TsugiteAgent:
         model_name: str = None,
         text_mode: bool = False,
         attachments: List[tuple[str, str]] = None,
+        previous_messages: List[Dict] = None,
     ):
         """Initialize the agent.
 
@@ -116,6 +116,7 @@ class TsugiteAgent:
             model_name: Optional display name for the model (for UI)
             text_mode: Allow text-only responses (code blocks optional)
             attachments: List of (name, content) tuples for prompt caching
+            previous_messages: List of previous conversation messages (user/assistant pairs)
         """
         from tsugite.models import get_model_params
 
@@ -129,18 +130,15 @@ class TsugiteAgent:
         self.model_name = model_name or model_string
         self.text_mode = text_mode
         self.attachments = attachments or []
+        self.previous_messages = previous_messages or []
 
         # Track cumulative cost across all steps
         self.total_cost = 0.0
 
-        # Build tool map for quick lookup
         self.tool_map = {tool.name: tool for tool in tools}
 
-        # Inject tools into executor namespace so they can be called from code
         self._inject_tools_into_executor()
 
-        # Pre-compute LiteLLM params (filters unsupported params for reasoning models)
-        # This is more efficient and correct - we filter once, not on every loop iteration
         self.litellm_params = get_model_params(model_string, **(model_kwargs or {}))
 
     def _inject_tools_into_executor(self):
@@ -149,12 +147,11 @@ class TsugiteAgent:
         Creates wrapper functions for each tool that call the tool's execute() method.
         The LLM sees tools as Python functions and calls them directly in generated code.
         """
-        import asyncio
 
         tool_functions = {}
 
         for tool in self.tools:
-            # Create a wrapper function that calls the tool's execute method
+
             def make_tool_wrapper(tool_obj):
                 """Create a wrapper for this specific tool."""
 
@@ -164,28 +161,22 @@ class TsugiteAgent:
                     Accepts both positional and keyword arguments for flexibility,
                     but tool.execute() expects keyword arguments only.
                     """
-                    # Record that this tool was called
                     if hasattr(self.executor, "_tools_called"):
                         self.executor._tools_called.append(tool_obj.name)
 
-                    # Convert positional args to keyword args if needed
                     if args:
-                        # Map positional arguments to parameter names using function signature
                         import inspect
 
                         try:
                             sig = inspect.signature(tool_obj.function)
                             param_names = list(sig.parameters.keys())
 
-                            # Convert positional args to kwargs
                             for i, arg in enumerate(args):
                                 if i < len(param_names):
                                     param_name = param_names[i]
-                                    # Don't override if already provided as kwarg
                                     if param_name not in kwargs:
                                         kwargs[param_name] = arg
                                 else:
-                                    # Too many positional args
                                     raise TypeError(
                                         f"Tool '{tool_obj.name}' takes at most {len(param_names)} "
                                         f"positional arguments but {len(args)} were given"
@@ -198,14 +189,11 @@ class TsugiteAgent:
                                 f"Example: {tool_obj.name}(param1=value1, param2=value2)"
                             )
 
-                    # Get the running event loop, or create one if needed
                     try:
                         loop = asyncio.get_running_loop()
-                        # Already in async context - use thread to block on async result
                         import concurrent.futures
                         import contextvars
 
-                        # Capture current context to propagate to executor thread
                         ctx = contextvars.copy_context()
 
                         with concurrent.futures.ThreadPoolExecutor() as executor:
@@ -216,8 +204,6 @@ class TsugiteAgent:
                                 try:
                                     return new_loop.run_until_complete(tool_obj.execute(**kwargs))
                                 finally:
-                                    # Clean up any pending tasks before closing the loop
-                                    # to prevent RuntimeWarning about tasks being destroyed
                                     pending = asyncio.all_tasks(new_loop)
                                     for task in pending:
                                         task.cancel()
@@ -225,17 +211,13 @@ class TsugiteAgent:
                                         new_loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
                                     new_loop.close()
 
-                            # Run in copied context to propagate UI context to thread
                             result = executor.submit(ctx.run, run_async).result()
                     except RuntimeError:
-                        # No running event loop - create one and run synchronously
                         loop = asyncio.new_event_loop()
                         asyncio.set_event_loop(loop)
                         try:
                             result = loop.run_until_complete(tool_obj.execute(**kwargs))
                         finally:
-                            # Clean up any pending tasks before closing the loop
-                            # to prevent RuntimeWarning about tasks being destroyed
                             pending = asyncio.all_tasks(loop)
                             for task in pending:
                                 task.cancel()
@@ -245,8 +227,6 @@ class TsugiteAgent:
 
                     return result
 
-                # Copy the tool's function signature and metadata to the wrapper
-                # This ensures the wrapper appears identical to the original function
                 tool_wrapper.__name__ = tool_obj.name
                 tool_wrapper.__doc__ = tool_obj.description
                 if hasattr(tool_obj.function, "__signature__"):
@@ -258,7 +238,6 @@ class TsugiteAgent:
 
             tool_functions[tool.name] = make_tool_wrapper(tool)
 
-        # Inject all tool functions into executor namespace
         if hasattr(self.executor, "namespace"):
             self.executor.namespace.update(tool_functions)
 
@@ -552,6 +531,10 @@ class TsugiteAgent:
                 {"type": "text", "text": attachment1, "cache_control": {"type": "ephemeral"}},
                 {"type": "text", "text": attachment2, "cache_control": {"type": "ephemeral"}},
             ]},
+            {"role": "user", "content": "previous turn 1"},
+            {"role": "assistant", "content": "previous response 1"},
+            {"role": "user", "content": "previous turn 2"},
+            {"role": "assistant", "content": "previous response 2"},
             {"role": "user", "content": task},
             ...
         ]
@@ -559,6 +542,8 @@ class TsugiteAgent:
         Format without attachments (legacy):
         [
             {"role": "system", "content": system_prompt},
+            {"role": "user", "content": "previous turn 1"},
+            {"role": "assistant", "content": "previous response 1"},
             {"role": "user", "content": task},
             ...
         ]
@@ -584,6 +569,10 @@ class TsugiteAgent:
         else:
             # Legacy format: simple string
             messages.append({"role": "system", "content": self._build_system_prompt()})
+
+        # Previous conversation messages (if continuing a conversation)
+        if self.previous_messages:
+            messages.extend(self.previous_messages)
 
         # Task
         messages.append({"role": "user", "content": self.memory.task})

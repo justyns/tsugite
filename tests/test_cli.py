@@ -535,10 +535,11 @@ class TestAutoDiscovery:
         from tsugite.cli.helpers import parse_cli_arguments
 
         # Test that parse_cli_arguments defaults to default
-        agents, prompt = parse_cli_arguments(["test", "task"])
+        agents, prompt, stdin_attachment = parse_cli_arguments(["test", "task"], check_stdin=False)
 
         assert agents == ["+default"]
         assert prompt == "test task"
+        assert stdin_attachment is None
 
     def test_run_explicit_agent_overrides_default(self, cli_runner, sample_agent_file, mock_agent_execution):
         """Test that explicitly specifying an agent still works."""
