@@ -333,6 +333,134 @@ def _resolve_conversation_continuation(continue_conversation: bool, conversation
     return continue_conversation_id
 
 
+def _execute_agent_with_ui(
+    executor,
+    executor_kwargs: Dict[str, Any],
+    headless: bool,
+    final_only: bool,
+    verbose: bool,
+    live_ui: bool,
+    use_plain_output: bool,
+    non_interactive: bool,
+    no_color: bool,
+    show_reasoning: bool,
+):
+    """Execute agent with appropriate UI mode."""
+    from tsugite.ui import create_live_template_logger, create_plain_logger, custom_agent_ui
+
+    if headless or final_only:
+        from .helpers import get_error_console
+
+        stderr_console = get_error_console(True, console)
+        show_progress_items = verbose and not final_only
+
+        with custom_agent_ui(
+            console=stderr_console,
+            show_code=show_progress_items,
+            show_observations=show_progress_items,
+            show_progress=False,
+            show_llm_messages=show_progress_items,
+            show_execution_results=show_progress_items,
+            show_execution_logs=show_progress_items,
+            show_panels=False,
+            show_debug_messages=verbose,
+        ) as custom_logger:
+            executor_kwargs["custom_logger"] = custom_logger
+            return executor(**executor_kwargs)
+
+    if live_ui:
+        custom_logger = create_live_template_logger(interactive=not non_interactive)
+        with custom_logger.ui_handler.progress_context():
+            executor_kwargs["custom_logger"] = custom_logger
+            return executor(**executor_kwargs)
+
+    if use_plain_output:
+        custom_logger = create_plain_logger()
+        with custom_logger.ui_handler.progress_context():
+            executor_kwargs["custom_logger"] = custom_logger
+            return executor(**executor_kwargs)
+
+    default_console = Console(file=sys.stderr, force_terminal=True, no_color=no_color)
+    with custom_agent_ui(
+        console=default_console,
+        show_code=not non_interactive,
+        show_observations=not non_interactive,
+        show_progress=not no_color,
+        show_llm_messages=show_reasoning,
+        show_execution_results=True,
+        show_execution_logs=verbose,
+        show_panels=False,
+        show_debug_messages=verbose,
+    ) as custom_logger:
+        executor_kwargs["custom_logger"] = custom_logger
+        return executor(**executor_kwargs)
+
+
+def _unpack_execution_result(result, should_save_history: bool, executor):
+    """Unpack execution result based on whether history was enabled."""
+    from tsugite.agent_runner import run_agent
+
+    if should_save_history and executor == run_agent and isinstance(result, tuple):
+        result_str, token_count, cost, step_count, execution_steps, system_prompt, attachments = result
+        return result_str, token_count, cost, execution_steps, system_prompt, attachments
+
+    result_str = result if not isinstance(result, tuple) else result[0]
+    return result_str, None, None, None, None, None
+
+
+def _save_to_history(
+    should_save_history: bool,
+    agent_file: Path,
+    prompt: str,
+    result_str: str,
+    model: Optional[str],
+    token_count: Optional[int],
+    cost: Optional[float],
+    execution_steps,
+    continue_conversation_id: Optional[str],
+    system_prompt,
+    attachments,
+):
+    """Save execution to history if enabled."""
+    if not should_save_history:
+        return
+
+    try:
+        from tsugite.agent_runner import get_agent_info
+        from tsugite.agent_runner.history_integration import save_run_to_history
+
+        agent_info = get_agent_info(agent_file)
+        save_run_to_history(
+            agent_path=agent_file,
+            agent_name=agent_info["name"],
+            prompt=prompt,
+            result=result_str,
+            model=model or agent_info.get("model", "default"),
+            token_count=token_count,
+            cost=cost,
+            execution_steps=execution_steps,
+            continue_conversation_id=continue_conversation_id,
+            system_prompt=system_prompt,
+            attachments=attachments,
+        )
+    except Exception as e:
+        print(f"Warning: Failed to save to history: {e}", file=sys.stderr)
+
+
+def _display_result(result_str: str, headless: bool, final_only: bool, no_color: bool, stderr_console: Console):
+    """Display the final result to the user."""
+    from rich.markdown import Markdown
+
+    from tsugite.console import get_stdout_console
+
+    if headless or final_only:
+        get_stdout_console(no_color=no_color, force_terminal=True).print(Markdown(result_str))
+    else:
+        stderr_console.print()
+        stderr_console.rule("[bold green]Agent Execution Complete[/bold green]")
+        get_stdout_console(no_color=no_color, force_terminal=True).print(Markdown(result_str))
+
+
 @app.command()
 def run(
     args: List[str] = typer.Argument(
@@ -395,7 +523,6 @@ def run(
     # Lazy imports - only load heavy dependencies when actually running agents
     from tsugite.agent_runner import get_agent_info, run_agent
     from tsugite.md_agents import validate_agent_execution
-    from tsugite.ui import create_live_template_logger, create_plain_logger, custom_agent_ui
     from tsugite.utils import should_use_plain_output
 
     if history_dir:
@@ -572,155 +699,52 @@ def run(
             stderr_console.print()
 
         try:
-            # Choose execution mode based on flags
-            if headless or final_only:
-                # Headless/final-only mode: stderr for progress (if verbose and not final_only), stdout for result
-                stderr_console = get_error_console(True, console)
+            executor_kwargs = _build_executor_kwargs(
+                agent_file,
+                prompt,
+                model,
+                debug,
+                None,
+                trust_mcp_code,
+                stream,
+                continue_conversation_id,
+                resolved_attachments,
+                should_save_history,
+                executor,
+            )
 
-                # In final_only mode, suppress all progress; in headless, respect verbose flag
-                show_progress_items = verbose and not final_only
+            result = _execute_agent_with_ui(
+                executor,
+                executor_kwargs,
+                headless,
+                final_only,
+                verbose,
+                live_ui,
+                use_plain_output,
+                non_interactive,
+                no_color,
+                show_reasoning,
+            )
 
-                with custom_agent_ui(
-                    console=stderr_console,
-                    show_code=show_progress_items,
-                    show_observations=show_progress_items,
-                    show_progress=False,
-                    show_llm_messages=show_progress_items,
-                    show_execution_results=show_progress_items,
-                    show_execution_logs=show_progress_items,
-                    show_panels=False,
-                    show_debug_messages=verbose,
-                ) as custom_logger:
-                    executor_kwargs = _build_executor_kwargs(
-                        agent_file,
-                        prompt,
-                        model,
-                        debug,
-                        custom_logger,
-                        trust_mcp_code,
-                        stream,
-                        continue_conversation_id,
-                        resolved_attachments,
-                        should_save_history,
-                        executor,
-                    )
-                    result = executor(**executor_kwargs)
-            elif live_ui:
-                custom_logger = create_live_template_logger(interactive=not non_interactive)
-                with custom_logger.ui_handler.progress_context():
-                    executor_kwargs = _build_executor_kwargs(
-                        agent_file,
-                        prompt,
-                        model,
-                        debug,
-                        custom_logger,
-                        trust_mcp_code,
-                        stream,
-                        continue_conversation_id,
-                        resolved_attachments,
-                        should_save_history,
-                        executor,
-                    )
-                    result = executor(**executor_kwargs)
-            else:
-                if use_plain_output:
-                    custom_logger = create_plain_logger()
-                    with custom_logger.ui_handler.progress_context():
-                        executor_kwargs = _build_executor_kwargs(
-                            agent_file,
-                            prompt,
-                            model,
-                            debug,
-                            custom_logger,
-                            trust_mcp_code,
-                            stream,
-                            continue_conversation_id,
-                            resolved_attachments,
-                            should_save_history,
-                            executor,
-                        )
-                        result = executor(**executor_kwargs)
-                else:
-                    # Using Console directly here because we need force_terminal=True
-                    default_console = Console(file=sys.stderr, force_terminal=True, no_color=no_color)
-                    with custom_agent_ui(
-                        console=default_console,
-                        show_code=not non_interactive,
-                        show_observations=not non_interactive,
-                        show_progress=not no_color,
-                        show_llm_messages=show_reasoning,
-                        show_execution_results=True,
-                        show_execution_logs=verbose,
-                        show_panels=False,
-                        show_debug_messages=verbose,
-                    ) as custom_logger:
-                        executor_kwargs = _build_executor_kwargs(
-                            agent_file,
-                            prompt,
-                            model,
-                            debug,
-                            custom_logger,
-                            trust_mcp_code,
-                            stream,
-                            continue_conversation_id,
-                            resolved_attachments,
-                            should_save_history,
-                            executor,
-                        )
-                        result = executor(**executor_kwargs)
+            result_str, token_count, cost, execution_steps, system_prompt, attachments = _unpack_execution_result(
+                result, should_save_history, executor
+            )
 
-            # Unpack result if history was enabled (run_agent returns tuple with metadata)
-            if should_save_history and executor == run_agent and isinstance(result, tuple):
-                result_str, token_count, cost, step_count, execution_steps, system_prompt, attachments = result
-            else:
-                result_str = result if not isinstance(result, tuple) else result[0]
-                token_count = None
-                cost = None
-                execution_steps = None
-                system_prompt = None
-                attachments = None
+            _save_to_history(
+                should_save_history,
+                agent_file,
+                prompt,
+                result_str,
+                model,
+                token_count,
+                cost,
+                execution_steps,
+                continue_conversation_id,
+                system_prompt,
+                attachments,
+            )
 
-            # Save to history (unless disabled)
-            if should_save_history:
-                try:
-                    from tsugite.agent_runner.history_integration import save_run_to_history
-
-                    agent_info = get_agent_info(agent_file)
-                    save_run_to_history(
-                        agent_path=agent_file,
-                        agent_name=agent_info["name"],
-                        prompt=prompt,
-                        result=result_str,
-                        model=model or agent_info.get("model", "default"),
-                        token_count=token_count,
-                        cost=cost,
-                        execution_steps=execution_steps,
-                        continue_conversation_id=continue_conversation_id,
-                        system_prompt=system_prompt,
-                        attachments=attachments,
-                    )
-                except Exception as e:
-                    # Don't fail the run if history save fails
-                    print(f"Warning: Failed to save to history: {e}", file=sys.stderr)
-
-            # Display result
-            if headless or final_only:
-                # Headless/final-only: render markdown to stdout
-                from rich.markdown import Markdown
-
-                from tsugite.console import get_stdout_console
-
-                get_stdout_console(no_color=no_color, force_terminal=True).print(Markdown(result_str))
-            else:
-                # Show completion banner to stderr
-                stderr_console.print()
-                stderr_console.rule("[bold green]Agent Execution Complete[/bold green]")
-                # Output final result to stdout (for piping) with markdown rendering
-                from rich.markdown import Markdown
-
-                from tsugite.console import get_stdout_console
-
-                get_stdout_console(no_color=no_color, force_terminal=True).print(Markdown(result_str))
+            _display_result(result_str, headless, final_only, no_color, stderr_console)
 
         except ValueError as e:
             get_error_console(headless, console).print(f"[red]Configuration error: {e}[/red]")

@@ -112,13 +112,10 @@ class LocalExecutor(CodeExecutor):
             if not isinstance(last_node, ast.Expr):
                 return (code, None)
 
-            # Split: everything except last statement vs last statement
             if len(tree.body) == 1:
-                # Only one statement and it's an expression
                 setup_code = ""
-                last_expr = ast.unparse(last_node.value)  # Unparse the expression itself
+                last_expr = ast.unparse(last_node.value)
             else:
-                # Multiple statements - use ast.unparse to reconstruct
                 setup_tree = ast.Module(body=tree.body[:-1], type_ignores=[])
                 setup_code = ast.unparse(setup_tree)
                 last_expr = ast.unparse(last_node.value)
@@ -126,7 +123,6 @@ class LocalExecutor(CodeExecutor):
             return (setup_code, last_expr)
 
         except SyntaxError:
-            # Code has syntax errors, let exec handle it normally
             return (code, None)
 
     def _format_value(self, value: Any) -> str:
@@ -140,11 +136,9 @@ class LocalExecutor(CodeExecutor):
         Returns:
             Formatted string representation
         """
-        # For dicts and lists, use pprint for nice formatting
         if isinstance(value, (dict, list, tuple, set)):
             return pprint.pformat(value, width=PPRINT_WIDTH, compact=False)
-        else:
-            return repr(value)
+        return repr(value)
 
     def _check_code_safety(self, code: str) -> Optional[str]:
         """Check code for anti-patterns before execution.
@@ -160,22 +154,10 @@ class LocalExecutor(CodeExecutor):
         """
         import re
 
-        # Check for file operations using open() instead of read_file/write_file
-        # Match: word boundary before 'open', then whitespace, then '('
-        # This avoids false positives like 'reopen(' or 'is_open()'
-        # Pattern explanation:
-        #   \b       - word boundary (not preceded by alphanumeric or _)
-        #   open     - literal 'open'
-        #   \s*      - optional whitespace
-        #   \(       - opening parenthesis
         if re.search(r"\bopen\s*\(", code):
-            # Quick check to avoid false positives in strings/comments
-            # Remove strings and comments before checking
-            # This is a simple heuristic - not perfect but good enough
-            code_without_strings = re.sub(r'["\'].*?["\']', "", code)  # Remove string contents
-            code_without_comments = re.sub(r"#.*$", "", code_without_strings, flags=re.MULTILINE)  # Remove comments
+            code_without_strings = re.sub(r'["\'].*?["\']', "", code)
+            code_without_comments = re.sub(r"#.*$", "", code_without_strings, flags=re.MULTILINE)
 
-            # Check again after removing strings/comments
             if re.search(r"\bopen\s*\(", code_without_comments):
                 return """Code Safety Check Failed: Detected use of 'open()' for file operations.
 
@@ -198,7 +180,6 @@ Example:
   # Use:
   write_file('output.txt', data)"""
 
-        # Code passed all safety checks
         return None
 
     async def execute(self, code: str) -> ExecutionResult:
@@ -212,11 +193,9 @@ Example:
         Returns:
             ExecutionResult with output, error, stdout, stderr, final_answer, and tools_called
         """
-        # Reset final answer and tool tracking
         self._final_answer_value = None
         self._tools_called = []
 
-        # Check code safety before execution
         safety_error = self._check_code_safety(code)
         if safety_error:
             return ExecutionResult(
@@ -228,7 +207,6 @@ Example:
                 tools_called=[],
             )
 
-        # Capture stdout/stderr
         stdout_capture = io.StringIO()
         stderr_capture = io.StringIO()
 
@@ -236,30 +214,23 @@ Example:
         old_stderr = sys.stderr
 
         try:
-            # Redirect output
             sys.stdout = stdout_capture
             sys.stderr = stderr_capture
 
-            # Check if we should handle the last expression specially
             setup_code, last_expr = self._split_code_for_last_expr(code)
 
             if last_expr:
-                # Execute setup code first (if any)
                 if setup_code.strip():
                     exec(setup_code, self.namespace)
 
-                # Evaluate the last expression and capture its value
                 result = eval(last_expr, self.namespace)
 
-                # Display the result if it's not None
                 if result is not None:
                     formatted = self._format_value(result)
                     print(formatted)
             else:
-                # No special handling needed, execute normally
                 exec(code, self.namespace)
 
-            # Get output
             output = stdout_capture.getvalue()
             stderr_output = stderr_capture.getvalue()
 
@@ -273,7 +244,6 @@ Example:
             )
 
         except Exception as e:
-            # Code execution failed
             error_msg = f"{type(e).__name__}: {str(e)}"
             return ExecutionResult(
                 output=stdout_capture.getvalue(),
@@ -285,7 +255,6 @@ Example:
             )
 
         finally:
-            # Restore stdout/stderr
             sys.stdout = old_stdout
             sys.stderr = old_stderr
 

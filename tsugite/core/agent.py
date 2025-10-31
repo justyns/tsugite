@@ -139,90 +139,89 @@ class TsugiteAgent:
 
         self.litellm_params = get_model_params(model_string, **(model_kwargs or {}))
 
+    def _run_async_in_sync_context(self, coro):
+        """Run async coroutine in synchronous context, handling event loop properly."""
+        import concurrent.futures
+        import contextvars
+
+        try:
+            asyncio.get_running_loop()
+            ctx = contextvars.copy_context()
+
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+
+                def run_in_new_loop():
+                    new_loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(new_loop)
+                    try:
+                        return new_loop.run_until_complete(coro)
+                    finally:
+                        pending = asyncio.all_tasks(new_loop)
+                        for task in pending:
+                            task.cancel()
+                        if pending:
+                            new_loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                        new_loop.close()
+
+                return executor.submit(ctx.run, run_in_new_loop).result()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                return loop.run_until_complete(coro)
+            finally:
+                pending = asyncio.all_tasks(loop)
+                for task in pending:
+                    task.cancel()
+                if pending:
+                    loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                loop.close()
+
+    def _convert_positional_to_kwargs(self, tool_obj, args, kwargs):
+        """Convert positional arguments to keyword arguments based on function signature."""
+        if not args:
+            return
+
+        import inspect
+
+        try:
+            sig = inspect.signature(tool_obj.function)
+            param_names = list(sig.parameters.keys())
+
+            for i, arg in enumerate(args):
+                if i < len(param_names):
+                    param_name = param_names[i]
+                    if param_name not in kwargs:
+                        kwargs[param_name] = arg
+                else:
+                    raise TypeError(
+                        f"Tool '{tool_obj.name}' takes at most {len(param_names)} "
+                        f"positional arguments but {len(args)} were given"
+                    )
+        except Exception:
+            raise TypeError(
+                f"Tool '{tool_obj.name}' must be called with keyword arguments, "
+                f"not positional arguments. "
+                f"Example: {tool_obj.name}(param1=value1, param2=value2)"
+            )
+
     def _inject_tools_into_executor(self):
         """Inject tools into executor namespace so they can be called from Python code.
 
         Creates wrapper functions for each tool that call the tool's execute() method.
         The LLM sees tools as Python functions and calls them directly in generated code.
         """
-
         tool_functions = {}
 
         for tool in self.tools:
 
             def make_tool_wrapper(tool_obj):
-                """Create a wrapper for this specific tool."""
-
                 def tool_wrapper(*args, **kwargs):
-                    """Synchronous wrapper that calls async tool.execute().
-
-                    Accepts both positional and keyword arguments for flexibility,
-                    but tool.execute() expects keyword arguments only.
-                    """
                     if hasattr(self.executor, "_tools_called"):
                         self.executor._tools_called.append(tool_obj.name)
 
-                    if args:
-                        import inspect
-
-                        try:
-                            sig = inspect.signature(tool_obj.function)
-                            param_names = list(sig.parameters.keys())
-
-                            for i, arg in enumerate(args):
-                                if i < len(param_names):
-                                    param_name = param_names[i]
-                                    if param_name not in kwargs:
-                                        kwargs[param_name] = arg
-                                else:
-                                    raise TypeError(
-                                        f"Tool '{tool_obj.name}' takes at most {len(param_names)} "
-                                        f"positional arguments but {len(args)} were given"
-                                    )
-                        except Exception:
-                            # If signature inspection fails, fall back to error
-                            raise TypeError(
-                                f"Tool '{tool_obj.name}' must be called with keyword arguments, "
-                                f"not positional arguments. "
-                                f"Example: {tool_obj.name}(param1=value1, param2=value2)"
-                            )
-
-                    try:
-                        loop = asyncio.get_running_loop()
-                        import concurrent.futures
-                        import contextvars
-
-                        ctx = contextvars.copy_context()
-
-                        with concurrent.futures.ThreadPoolExecutor() as executor:
-
-                            def run_async():
-                                new_loop = asyncio.new_event_loop()
-                                asyncio.set_event_loop(new_loop)
-                                try:
-                                    return new_loop.run_until_complete(tool_obj.execute(**kwargs))
-                                finally:
-                                    pending = asyncio.all_tasks(new_loop)
-                                    for task in pending:
-                                        task.cancel()
-                                    if pending:
-                                        new_loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-                                    new_loop.close()
-
-                            result = executor.submit(ctx.run, run_async).result()
-                    except RuntimeError:
-                        loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(loop)
-                        try:
-                            result = loop.run_until_complete(tool_obj.execute(**kwargs))
-                        finally:
-                            pending = asyncio.all_tasks(loop)
-                            for task in pending:
-                                task.cancel()
-                            if pending:
-                                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-                            loop.close()
-
+                    self._convert_positional_to_kwargs(tool_obj, args, kwargs)
+                    result = self._run_async_in_sync_context(tool_obj.execute(**kwargs))
                     return result
 
                 tool_wrapper.__name__ = tool_obj.name
