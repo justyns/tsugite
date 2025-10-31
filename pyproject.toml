@@ -1,6 +1,6 @@
 [project]
 name = "tsugite-cli"
-version = "0.3.2"
+version = "0.3.3"
 description = "Micro-agent runner for task automation using markdown definitions"
 authors = [{ name = "Justyn Shull" }]
 requires-python = ">=3.11"
@@ -38,9 +38,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["tsugite"]
-
-[tool.hatch.build.targets.wheel.force-include]
-"tsugite/builtin_agents" = "tsugite/builtin_agents"
 
 [tool.ruff]
 target-version = "py311"
