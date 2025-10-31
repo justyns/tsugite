@@ -1,8 +1,8 @@
-"""Model adapters for Tsugite agents using smolagents."""
+"""Model adapters for Tsugite agents."""
 
+import os
+import re
 from typing import Optional
-
-from smolagents import LiteLLMModel, OpenAIServerModel
 
 
 def resolve_model_alias(model_string: str) -> str:
@@ -52,113 +52,206 @@ def parse_model_string(model_string: str) -> tuple[str, str, Optional[str]]:
     return provider, model_name, variant
 
 
-def get_model(model_string: str, **kwargs):
-    """Create a smolagents model from Tsugite model string.
+def is_reasoning_model_without_stop_support(model_string: str) -> bool:
+    """Check if model is a reasoning model that doesn't support stop sequences.
+
+    OpenAI's o1/o3 reasoning models don't support the stop parameter.
 
     Args:
-        model_string: Model specification like "ollama:qwen2.5-coder:14b" or an alias
-        **kwargs: Additional model configuration options
+        model_string: Full model string like "openai:o1-mini"
 
     Returns:
-        smolagents Model instance
+        True if this is a reasoning model that doesn't support stop sequences
+    """
+    try:
+        provider, model_name, variant = parse_model_string(model_string)
+    except ValueError:
+        return False
+
+    # Only OpenAI reasoning models have this limitation
+    if provider != "openai":
+        return False
+
+    # Check if it's an o1 or o3 model (with optional version suffix)
+    # Matches: o1, o1-mini, o1-preview, o1-2024-12-17, o3, o3-mini, o3-2025-01-31, etc.
+    pattern = r"^(o1|o3)(-mini|-preview)?(-\d{4}-\d{2}-\d{2})?$"
+    return bool(re.match(pattern, model_name))
+
+
+def get_model_params(model_string: str, **kwargs) -> dict:
+    """Get parameters for direct litellm.acompletion() calls.
+
+    Returns a dict with model ID and parameters for direct LiteLLM usage.
+
+    Args:
+        model_string: Model specification like "openai:gpt-4o-mini" or an alias
+        **kwargs: Additional model parameters (reasoning_effort, response_format, temperature, etc.)
+
+    Returns:
+        Dict with "model" key and all parameters ready for litellm.acompletion()
 
     Examples:
-        >>> model = get_model("ollama:qwen2.5-coder:14b")
-        >>> model = get_model("openai:gpt-4", api_key="sk-...")
-        >>> model = get_model("cheap")  # if alias exists
+        >>> params = get_model_params("openai:gpt-4o-mini", temperature=0.7)
+        >>> params["model"]
+        'openai/gpt-4o-mini'
+        >>> params["temperature"]
+        0.7
+
+        >>> # Reasoning models - unsupported params filtered out
+        >>> params = get_model_params("openai:o1", temperature=0.7)
+        >>> "temperature" not in params  # Filtered for o1
+        True
     """
+    # Resolve aliases and parse model string
     resolved_model = resolve_model_alias(model_string)
     provider, model_name, variant = parse_model_string(resolved_model)
 
+    # Build parameters dict
+    params = dict(kwargs)
+
+    # Filter parameters for reasoning models
+    if is_reasoning_model_without_stop_support(resolved_model):
+        params = filter_reasoning_model_params(model_name, params)
+
+    # Build provider-specific parameters
     if provider == "ollama":
-        # Ollama typically runs on localhost:11434 with OpenAI-compatible API
-        full_model_name = f"{model_name}:{variant}" if variant else model_name
-        api_base = kwargs.get("api_base", "http://localhost:11434/v1")
-
-        return OpenAIServerModel(
-            model_id=full_model_name,
-            api_base=api_base,
-            api_key=kwargs.get("api_key", "ollama"),  # Ollama doesn't need real API key
-            **{k: v for k, v in kwargs.items() if k not in ["api_base", "api_key"]},
-        )
-
+        return build_ollama_params(model_name, variant, params)
     elif provider == "openai":
-        # Use LiteLLM for OpenAI (supports many providers)
-        litellm_model = f"openai/{model_name}"
-        return LiteLLMModel(
-            model_id=litellm_model,
-            api_key=kwargs.get("api_key"),
-            **{k: v for k, v in kwargs.items() if k != "api_key"},
-        )
-
+        return build_openai_params(model_name, params)
     elif provider == "anthropic":
-        # Use LiteLLM for Anthropic
-        litellm_model = f"anthropic/{model_name}"
-        return LiteLLMModel(
-            model_id=litellm_model,
-            api_key=kwargs.get("api_key"),
-            **{k: v for k, v in kwargs.items() if k != "api_key"},
-        )
-
+        return build_anthropic_params(model_name, params)
     elif provider == "google":
-        # Use LiteLLM for Google (Gemini)
-        litellm_model = f"gemini/{model_name}"
-        return LiteLLMModel(
-            model_id=litellm_model,
-            api_key=kwargs.get("api_key"),
-            **{k: v for k, v in kwargs.items() if k != "api_key"},
-        )
-
+        return build_google_params(model_name, params)
     elif provider == "github_copilot":
-        # Use LiteLLM for GitHub Copilot (requires paid subscription)
-        # OAuth device flow handled automatically by LiteLLM on first use
-        litellm_model = f"github_copilot/{model_name}"
-
-        # GitHub Copilot requires specific headers
-        extra_headers = kwargs.get("extra_headers", {})
-        if "editor-version" not in extra_headers:
-            extra_headers["editor-version"] = "vscode/1.95.0"
-        if "Copilot-Integration-Id" not in extra_headers:
-            extra_headers["Copilot-Integration-Id"] = "vscode-chat"
-
-        kwargs_with_headers = {**kwargs, "extra_headers": extra_headers}
-        return LiteLLMModel(model_id=litellm_model, **kwargs_with_headers)
-
+        return build_github_copilot_params(model_name, params)
     else:
-        # Fallback: try LiteLLM with the provider prefix
-        # LiteLLM supports 100+ providers
-        litellm_model = f"{provider}/{model_name}"
-        return LiteLLMModel(model_id=litellm_model, **kwargs)
+        return build_fallback_params(provider, model_name, params)
 
 
-def create_ollama_model(model_name: str, api_base: str = "http://localhost:11434/v1", **kwargs):
-    """Convenience function to create Ollama model.
+def filter_reasoning_model_params(model_name: str, params: dict) -> dict:
+    """Filter out unsupported parameters for reasoning models.
 
-    Args:
-        model_name: Name of the Ollama model (e.g., "qwen2.5-coder:14b")
-        api_base: Ollama API base URL
-        **kwargs: Additional model configuration
-
-    Returns:
-        OpenAIServerModel configured for Ollama
-    """
-    return OpenAIServerModel(
-        model_id=model_name,
-        api_base=api_base,
-        api_key="ollama",
-        **kwargs,
-    )
-
-
-def create_openai_model(model_name: str = "gpt-4", api_key: str = None, **kwargs):
-    """Convenience function to create OpenAI model.
+    OpenAI's o1/o3 reasoning models don't support certain parameters.
 
     Args:
-        model_name: OpenAI model name
-        api_key: OpenAI API key
-        **kwargs: Additional model configuration
+        model_name: The model name (e.g., "o1", "o1-mini")
+        params: Dictionary of parameters
 
     Returns:
-        LiteLLMModel configured for OpenAI
+        Filtered parameters dict (modifies in-place and returns)
     """
-    return LiteLLMModel(model_id=f"openai/{model_name}", api_key=api_key, **kwargs)
+    unsupported_params = ["stop", "temperature", "top_p", "presence_penalty", "frequency_penalty"]
+
+    # o1-mini specifically doesn't support reasoning_effort
+    if "o1-mini" in model_name:
+        unsupported_params.append("reasoning_effort")
+
+    # Remove unsupported parameters
+    for param in unsupported_params:
+        params.pop(param, None)
+
+    return params
+
+
+def build_ollama_params(model_name: str, variant: str | None, params: dict) -> dict:
+    """Build parameters for Ollama provider.
+
+    Args:
+        model_name: The model name
+        variant: Optional model variant
+        params: Base parameters dict
+
+    Returns:
+        Updated parameters dict
+    """
+    full_model_name = f"{model_name}:{variant}" if variant else model_name
+    params["model"] = full_model_name
+    params.setdefault("api_base", os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1"))
+    params.setdefault("api_key", "ollama")
+    return params
+
+
+def build_openai_params(model_name: str, params: dict) -> dict:
+    """Build parameters for OpenAI provider.
+
+    Args:
+        model_name: The model name
+        params: Base parameters dict
+
+    Returns:
+        Updated parameters dict
+    """
+    params["model"] = f"openai/{model_name}"
+    if "api_key" not in params:
+        params["api_key"] = os.getenv("OPENAI_API_KEY")
+    return params
+
+
+def build_anthropic_params(model_name: str, params: dict) -> dict:
+    """Build parameters for Anthropic provider.
+
+    Args:
+        model_name: The model name
+        params: Base parameters dict
+
+    Returns:
+        Updated parameters dict
+    """
+    params["model"] = f"anthropic/{model_name}"
+    if "api_key" not in params:
+        params["api_key"] = os.getenv("ANTHROPIC_API_KEY")
+    return params
+
+
+def build_google_params(model_name: str, params: dict) -> dict:
+    """Build parameters for Google provider.
+
+    Args:
+        model_name: The model name
+        params: Base parameters dict
+
+    Returns:
+        Updated parameters dict
+    """
+    params["model"] = f"gemini/{model_name}"
+    if "api_key" not in params:
+        params["api_key"] = os.getenv("GOOGLE_API_KEY")
+    return params
+
+
+def build_github_copilot_params(model_name: str, params: dict) -> dict:
+    """Build parameters for GitHub Copilot provider.
+
+    Args:
+        model_name: The model name
+        params: Base parameters dict
+
+    Returns:
+        Updated parameters dict
+    """
+    params["model"] = f"github_copilot/{model_name}"
+
+    # GitHub Copilot requires specific headers
+    extra_headers = params.get("extra_headers", {})
+    if "editor-version" not in extra_headers:
+        extra_headers["editor-version"] = "vscode/1.95.0"
+    if "Copilot-Integration-Id" not in extra_headers:
+        extra_headers["Copilot-Integration-Id"] = "vscode-chat"
+    params["extra_headers"] = extra_headers
+
+    return params
+
+
+def build_fallback_params(provider: str, model_name: str, params: dict) -> dict:
+    """Build parameters for fallback/unknown providers.
+
+    Args:
+        provider: The provider name
+        model_name: The model name
+        params: Base parameters dict
+
+    Returns:
+        Updated parameters dict
+    """
+    params["model"] = f"{provider}/{model_name}"
+    return params

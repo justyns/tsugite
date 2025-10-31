@@ -2,7 +2,7 @@
 name: system_monitor
 description: Monitor system health and alert on issues
 model: ollama:qwen2.5-coder:7b
-max_steps: 5
+max_turns: 5
 tools: [run, write_file, search_memory]
 prefetch:
   - tool: search_memory

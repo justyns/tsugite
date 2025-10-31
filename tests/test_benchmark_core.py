@@ -1,6 +1,5 @@
 """Tests for the benchmark core functionality."""
 
-import asyncio
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
@@ -11,8 +10,8 @@ from tsugite.benchmark.core import (
     BenchmarkConfig,
     BenchmarkResult,
     BenchmarkRunner,
-    BenchmarkTest,
 )
+from tsugite.benchmark.discovery import BenchmarkTest
 from tsugite.benchmark.metrics import BenchmarkTestResult, ModelPerformance
 
 
@@ -59,8 +58,8 @@ def benchmark_config():
 @pytest.fixture
 def mock_agent_run():
     """Mock the agent runner."""
-    with patch("tsugite.benchmark.core.run_agent") as mock:
-        mock.return_value = "42"
+    with patch("tsugite.benchmark.execution.run_agent") as mock:
+        mock.return_value = ("42", 0, 0.0, 0, [])
         yield mock
 
 
@@ -75,8 +74,6 @@ class TestBenchmarkConfig:
         assert config.categories == ["basic"]
         assert config.timeout == 120
         assert config.parallel is True
-        assert config.temperature == 0.1
-        assert config.max_tokens == 2000
 
     def test_custom_config(self):
         """Test custom configuration."""
@@ -125,7 +122,7 @@ class TestBenchmarkRunner:
 
         assert runner.config == benchmark_config
         assert runner.benchmark_dir == Path("benchmarks")
-        assert runner.test_cache == {}
+        assert runner.discovery.test_cache == {}
 
     def test_discover_tests(self, benchmark_config, temp_benchmark_dir, monkeypatch):
         """Test test discovery functionality."""
@@ -148,7 +145,7 @@ class TestBenchmarkRunner:
         runner = BenchmarkRunner(benchmark_config)
         agent_path = temp_benchmark_dir / "basic" / "test_simple.md"
 
-        test = runner._parse_benchmark_test(agent_path, "basic")
+        test = runner.discovery._parse_benchmark_test(agent_path, "basic")
 
         assert test.name == "test_simple"
         assert test.test_id == "test_001"
@@ -164,39 +161,15 @@ class TestBenchmarkRunner:
 
         runner = BenchmarkRunner(benchmark_config)
         agent_path = temp_benchmark_dir / "basic" / "test_simple.md"
-        test = runner._parse_benchmark_test(agent_path, "basic")
+        test = runner.discovery._parse_benchmark_test(agent_path, "basic")
 
-        result = await runner._run_single_test("test-model:v1", test)
+        result = await runner.executor.run_test("test-model:v1", test)
 
         assert isinstance(result, BenchmarkTestResult)
         assert result.test_id == "test_001"
         assert result.model == "test-model:v1"
         assert result.output == "42"
         assert result.duration > 0
-
-    @pytest.mark.asyncio
-    async def test_evaluate_test_result(self, benchmark_config):
-        """Test result evaluation."""
-        runner = BenchmarkRunner(benchmark_config)
-
-        test = BenchmarkTest(
-            name="test_math",
-            agent_path=Path("test.md"),
-            test_id="test_001",
-            category="basic",
-            expected_output="42",
-            expected_type="number",
-        )
-
-        # Test correct output
-        evaluation = await runner._evaluate_test_result(test, "42", 1.0)
-        assert evaluation["passed"] is True
-        assert evaluation["score"] == 1.0
-
-        # Test incorrect output
-        evaluation = await runner._evaluate_test_result(test, "24", 1.0)
-        assert evaluation["passed"] is False
-        assert evaluation["score"] < 1.0
 
     @pytest.mark.asyncio
     async def test_run_benchmark_integration(self, benchmark_config, temp_benchmark_dir, mock_agent_run, monkeypatch):
@@ -291,7 +264,7 @@ async def test_benchmark_error_handling(benchmark_config, temp_benchmark_dir, mo
     monkeypatch.setattr("tsugite.benchmark.core.BenchmarkRunner.benchmark_dir", temp_benchmark_dir)
 
     # Mock run_agent to raise an exception
-    with patch("tsugite.benchmark.core.run_agent") as mock_run:
+    with patch("tsugite.benchmark.execution.run_agent") as mock_run:
         mock_run.side_effect = Exception("Test error")
 
         runner = BenchmarkRunner(benchmark_config)
@@ -308,19 +281,21 @@ async def test_benchmark_error_handling(benchmark_config, temp_benchmark_dir, mo
         assert test_result.error is not None
 
 
-def test_benchmark_with_no_tests(benchmark_config):
+@pytest.mark.asyncio
+async def test_benchmark_with_no_tests(benchmark_config):
     """Test benchmark behavior with no tests found."""
     runner = BenchmarkRunner(benchmark_config)
 
     # Should raise error when no tests found
     with pytest.raises(ValueError, match="No tests found"):
-        asyncio.run(runner.run_benchmark(models=["test-model:v1"], categories=["nonexistent"]))
+        await runner.run_benchmark(models=["test-model:v1"], categories=["nonexistent"])
 
 
-def test_benchmark_with_no_models(benchmark_config):
+@pytest.mark.asyncio
+async def test_benchmark_with_no_models(benchmark_config):
     """Test benchmark behavior with no models specified."""
     runner = BenchmarkRunner(benchmark_config)
 
     # Should raise error when no models specified
     with pytest.raises(ValueError, match="No models specified"):
-        asyncio.run(runner.run_benchmark(models=[], categories=["basic"]))
+        await runner.run_benchmark(models=[], categories=["basic"])

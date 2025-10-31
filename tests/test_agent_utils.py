@@ -141,10 +141,10 @@ def test_list_local_agents_empty(tmp_path):
     """Test listing agents in empty directory."""
     result = list_local_agents(tmp_path)
 
-    # Should have built-in agent even in empty directory
+    # Should have built-in agents even in empty directory
     assert len(result) == 1
     assert "Built-in" in result
-    assert len(result["Built-in"]) == 1
+    assert len(result["Built-in"]) == 2  # default and chat-assistant
 
 
 def test_list_local_agents_current_dir(tmp_path):

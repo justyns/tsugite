@@ -16,9 +16,11 @@ class BenchmarkTestResult:
     duration: float  # seconds
     output: str
     expected_output: str
+    category: str = "unknown"
     error: Optional[str] = None
     token_usage: Dict[str, int] = field(default_factory=dict)
     cost: float = 0.0
+    steps_taken: int = 0  # Number of reasoning steps/attempts
     metrics: Dict[str, Any] = field(default_factory=dict)
     timestamp: datetime = field(default_factory=datetime.now)
 
@@ -38,6 +40,7 @@ class ModelPerformance:
     scores_by_category: Dict[str, float] = field(default_factory=dict)
     error_rate: float = 0.0
     reliability_score: float = 0.0
+    average_steps: float = 0.0
 
 
 @dataclass

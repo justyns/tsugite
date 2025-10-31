@@ -6,6 +6,13 @@ import re
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional
 
+from .config import (
+    MODEL_COSTS,
+    SIMILARITY_THRESHOLDS,
+    get_cost_tier,
+)
+from .utils import json_similarity, normalize_code
+
 
 class BaseEvaluator(ABC):
     """Base class for all evaluators."""
@@ -55,7 +62,7 @@ class CorrectnessEvaluator(BaseEvaluator):
         similarity = difflib.SequenceMatcher(None, output_clean.lower(), expected_clean.lower()).ratio()
 
         # Consider it passed if exact match or very high similarity
-        passed = exact_match or similarity >= 0.9
+        passed = exact_match or similarity >= SIMILARITY_THRESHOLDS.string_high_similarity
 
         return {
             "passed": passed,
@@ -71,10 +78,10 @@ class CorrectnessEvaluator(BaseEvaluator):
             expected_json = json.loads(expected.strip())
 
             exact_match = output_json == expected_json
-            score = 1.0 if exact_match else self._json_similarity(output_json, expected_json)
+            score = 1.0 if exact_match else json_similarity(output_json, expected_json)
 
             return {
-                "passed": exact_match or score >= 0.8,
+                "passed": exact_match or score >= SIMILARITY_THRESHOLDS.json_similarity,
                 "score": score,
                 "similarity": score,
                 "exact_match": exact_match,
@@ -92,14 +99,14 @@ class CorrectnessEvaluator(BaseEvaluator):
     def _evaluate_code(self, output: str, expected: str) -> Dict[str, Any]:
         """Evaluate code output (simplified)."""
         # Normalize whitespace and remove comments
-        output_normalized = self._normalize_code(output)
-        expected_normalized = self._normalize_code(expected)
+        output_normalized = normalize_code(output)
+        expected_normalized = normalize_code(expected)
 
         exact_match = output_normalized == expected_normalized
         similarity = difflib.SequenceMatcher(None, output_normalized, expected_normalized).ratio()
 
         return {
-            "passed": exact_match or similarity >= 0.85,
+            "passed": exact_match or similarity >= SIMILARITY_THRESHOLDS.code_similarity,
             "score": 1.0 if exact_match else similarity,
             "similarity": similarity,
             "exact_match": exact_match,
@@ -145,55 +152,6 @@ class CorrectnessEvaluator(BaseEvaluator):
                 "error": f"Number evaluation error: {e}",
             }
 
-    def _json_similarity(self, obj1: Any, obj2: Any) -> float:
-        """Calculate similarity between JSON objects."""
-        if type(obj1) is not type(obj2):
-            return 0.0
-
-        if isinstance(obj1, dict):
-            if not obj1 and not obj2:
-                return 1.0
-
-            all_keys = set(obj1.keys()) | set(obj2.keys())
-            if not all_keys:
-                return 1.0
-
-            key_scores = []
-            for key in all_keys:
-                if key in obj1 and key in obj2:
-                    key_scores.append(self._json_similarity(obj1[key], obj2[key]))
-                else:
-                    key_scores.append(0.0)
-
-            return sum(key_scores) / len(key_scores)
-
-        elif isinstance(obj1, list):
-            if len(obj1) != len(obj2):
-                return 0.5 if obj1 == obj2 else 0.0
-
-            if not obj1:
-                return 1.0
-
-            scores = [self._json_similarity(a, b) for a, b in zip(obj1, obj2)]
-            return sum(scores) / len(scores)
-
-        else:
-            return 1.0 if obj1 == obj2 else 0.0
-
-    def _normalize_code(self, code: str) -> str:
-        """Normalize code for comparison."""
-        # Remove comments and normalize whitespace
-        lines = []
-        for line in code.split("\n"):
-            # Remove comments (simplified)
-            line = re.sub(r"#.*$", "", line)
-            line = re.sub(r"//.*$", "", line)
-            line = line.strip()
-            if line:
-                lines.append(line)
-
-        return "\n".join(lines)
-
 
 class PerformanceEvaluator(BaseEvaluator):
     """Evaluates performance metrics like speed and efficiency."""
@@ -224,14 +182,15 @@ class PerformanceEvaluator(BaseEvaluator):
 
         result["speed_score"] = speed_score
 
-        # Efficiency tiers
-        if duration <= timeout * 0.1:
+        # Efficiency tiers (based on performance thresholds)
+        time_ratio = duration / timeout if timeout > 0 else 0
+        if time_ratio <= 0.1:
             tier = "Excellent"
-        elif duration <= timeout * 0.3:
+        elif time_ratio <= 0.3:
             tier = "Good"
-        elif duration <= timeout * 0.6:
+        elif time_ratio <= 0.6:
             tier = "Fair"
-        elif duration <= timeout:
+        elif time_ratio <= 1.0:
             tier = "Poor"
         else:
             tier = "Timeout"
@@ -409,8 +368,7 @@ class CostEvaluator(BaseEvaluator):
 
     def evaluate(self, token_usage: Dict[str, int], model: str, duration: float) -> Dict[str, Any]:
         """Evaluate cost-related metrics."""
-        # Simplified cost calculation (would need real pricing data)
-        cost_per_token = self._get_cost_per_token(model)
+        cost_per_token = MODEL_COSTS.get_cost_for_model(model)
 
         input_tokens = token_usage.get("input", 0)
         output_tokens = token_usage.get("output", 0)
@@ -422,39 +380,8 @@ class CostEvaluator(BaseEvaluator):
             "estimated_cost": estimated_cost,
             "cost_per_token": cost_per_token,
             "tokens_per_second": total_tokens / duration if duration > 0 else 0,
-            "cost_efficiency_tier": self._get_cost_tier(estimated_cost),
+            "cost_efficiency_tier": get_cost_tier(estimated_cost),
         }
-
-    def _get_cost_per_token(self, model: str) -> float:
-        """Get estimated cost per token for different models."""
-        # Simplified pricing (in reality, would fetch from pricing API)
-        cost_map = {
-            "gpt-4": 0.00003,
-            "gpt-3.5-turbo": 0.000002,
-            "claude-3": 0.000015,
-            "ollama": 0.0,  # Local models
-        }
-
-        for model_prefix, cost in cost_map.items():
-            if model_prefix in model.lower():
-                return cost
-
-        return 0.00001  # Default estimate
-
-    def _get_cost_tier(self, cost: float) -> str:
-        """Classify cost into tiers."""
-        if cost == 0:
-            return "Free"
-        elif cost < 0.001:
-            return "Very Low"
-        elif cost < 0.01:
-            return "Low"
-        elif cost < 0.1:
-            return "Medium"
-        elif cost < 1.0:
-            return "High"
-        else:
-            return "Very High"
 
 
 class LLMEvaluator(BaseEvaluator):
@@ -467,6 +394,29 @@ class LLMEvaluator(BaseEvaluator):
             evaluator_model: Model to use for evaluation (format: provider:model_name)
         """
         self.evaluator_model = evaluator_model
+
+    @staticmethod
+    def _normalize_score(score: Any) -> float:
+        """Normalize a score to 0-1 range.
+
+        Args:
+            score: Score value (can be string, int, or float)
+
+        Returns:
+            Normalized score between 0.0 and 1.0
+        """
+        # Convert to numeric if it's a string
+        if isinstance(score, str):
+            try:
+                score = float(score)
+            except ValueError:
+                return 0.5  # Default to middle score for non-numeric
+
+        # Normalize 0-10 range to 0-1
+        if isinstance(score, (int, float)) and score > 1:
+            score = score / 10.0
+
+        return max(0.0, min(1.0, float(score)))
 
     async def evaluate(
         self,
@@ -611,7 +561,7 @@ Provide thorough, constructive feedback that would help improve the agent's perf
         return f"""---
 name: llm_evaluator
 model: {model}
-max_steps: 3
+max_turns: 3
 tools: []
 ---
 
@@ -658,34 +608,13 @@ Analyze the provided output carefully and return a properly formatted JSON respo
             result = json.loads(json_str)
 
             # Normalize score to 0-1 range if it's 0-10
-            score = result.get("score", 0)
-
-            # Convert to numeric if it's a string
-            if isinstance(score, str):
-                try:
-                    score = float(score)
-                except ValueError:
-                    score = 0.5  # Default to middle score for non-numeric
-
-            if isinstance(score, (int, float)) and score > 1:
-                score = score / 10.0
-
-            result["score"] = max(0.0, min(1.0, float(score)))
+            result["score"] = self._normalize_score(result.get("score", 0))
 
             # Normalize criteria breakdown scores
             if "criteria_breakdown" in result:
                 normalized_breakdown = {}
                 for criterion, score in result["criteria_breakdown"].items():
-                    # Convert to numeric if it's a string
-                    if isinstance(score, str):
-                        try:
-                            score = float(score)
-                        except ValueError:
-                            score = 0.5  # Default to middle score for non-numeric
-
-                    if isinstance(score, (int, float)) and score > 1:
-                        score = score / 10.0
-                    normalized_breakdown[criterion] = max(0.0, min(1.0, float(score)))
+                    normalized_breakdown[criterion] = self._normalize_score(score)
                 result["criteria_breakdown"] = normalized_breakdown
 
             return result

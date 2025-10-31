@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [master, development]
   pull_request:
-    branches: [main]
+    branches: [master]
 
 jobs:
   lint:
@@ -26,11 +26,11 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
-      - name: Run ruff
-        run: uv run ruff check .
+      - name: Run ruff check
+        run: uv run ruff check --show-fixes .
 
-      - name: Run black
-        run: uv run black . --check
+      - name: Run ruff format
+        run: uv run ruff format --check
 
   test:
     name: Test (Python ${{ matrix.python-version }})
@@ -58,3 +58,13 @@ jobs:
 
       - name: Run tests
         run: uv run pytest -v
+
+      - name: Upload coverage reports
+        if: matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            coverage.xml
+            htmlcov/
+          retention-days: 30

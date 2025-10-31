@@ -4,7 +4,8 @@ from io import StringIO
 
 from rich.console import Console
 
-from tsugite.custom_ui import CustomUIHandler, UIEvent
+from tsugite.events import ErrorEvent, ObservationEvent
+from tsugite.ui import CustomUIHandler
 
 
 def test_observation_with_error_highlighted():
@@ -14,7 +15,8 @@ def test_observation_with_error_highlighted():
     handler = CustomUIHandler(console, show_observations=True, show_panels=True)
 
     # Send an observation with an error
-    handler.handle_event(UIEvent.OBSERVATION, {"observation": "Error: Tool 'visit_webpage' not found"})
+    event = ObservationEvent(observation="Error: Tool 'visit_webpage' not found")
+    handler.handle_event(event)
 
     # Get output
     result = output.getvalue()
@@ -30,7 +32,8 @@ def test_observation_normal_not_highlighted():
     handler = CustomUIHandler(console, show_observations=True, show_panels=False)
 
     # Send a normal observation
-    handler.handle_event(UIEvent.OBSERVATION, {"observation": "Search completed successfully with 5 results"})
+    event = ObservationEvent(observation="Search completed successfully with 5 results")
+    handler.handle_event(event)
 
     # Get output
     result = output.getvalue()
@@ -46,7 +49,8 @@ def test_error_event_handling():
     handler = CustomUIHandler(console, show_panels=True)
 
     # Send an error event
-    handler.handle_event(UIEvent.ERROR, {"error": "Invalid tool name", "error_type": "ValidationError"})
+    event = ErrorEvent(error="Invalid tool name", error_type="ValidationError")
+    handler.handle_event(event)
 
     # Get output
     result = output.getvalue()
@@ -72,7 +76,8 @@ def test_error_keywords_detection():
     for msg in error_messages:
         output.truncate(0)
         output.seek(0)
-        handler.handle_event(UIEvent.OBSERVATION, {"observation": msg})
+        event = ObservationEvent(observation=msg)
+        handler.handle_event(event)
         result = output.getvalue()
 
         # Each should be detected as an error

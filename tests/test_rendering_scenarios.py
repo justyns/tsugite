@@ -4,7 +4,8 @@ from unittest.mock import patch
 
 import pytest
 
-from tsugite.agent_runner import execute_prefetch, validate_agent_execution
+from tsugite.agent_runner import execute_prefetch
+from tsugite.md_agents import validate_agent_execution
 from tsugite.renderer import AgentRenderer
 
 
@@ -211,7 +212,7 @@ tools: []
 class TestPrefetchExecution:
     """Test prefetch execution functionality."""
 
-    @patch("tsugite.agent_runner.call_tool")
+    @patch("tsugite.agent_runner.runner.call_tool")
     def test_execute_simple_prefetch(self, mock_call_tool):
         """Test executing simple prefetch configuration."""
         mock_call_tool.return_value = "test file content"
@@ -229,7 +230,7 @@ class TestPrefetchExecution:
         assert result == {"file_content": "test file content"}
         mock_call_tool.assert_called_once_with("read_file", path="test.txt")
 
-    @patch("tsugite.agent_runner.call_tool")
+    @patch("tsugite.agent_runner.runner.call_tool")
     def test_execute_multiple_prefetch(self, mock_call_tool):
         """Test executing multiple prefetch tools."""
         mock_call_tool.side_effect = ["config data", "notes data"]
@@ -245,7 +246,7 @@ class TestPrefetchExecution:
         assert result == expected
         assert mock_call_tool.call_count == 2
 
-    @patch("tsugite.agent_runner.call_tool")
+    @patch("tsugite.agent_runner.runner.call_tool")
     def test_prefetch_with_tool_failure(self, mock_call_tool):
         """Test prefetch handles tool failures gracefully."""
         mock_call_tool.side_effect = Exception("Tool failed")

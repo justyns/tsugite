@@ -70,7 +70,7 @@ Task: {{ user_prompt }}
 
         assert tool.name == "spawn_helper"
         assert "helper" in tool.description.lower()
-        assert "prompt" in tool.inputs
+        assert "prompt" in tool.parameters["properties"]
 
     def test_create_multiple_delegation_tools(self, tmp_path):
         """Test creating delegation tools for multiple agents."""

@@ -4,14 +4,20 @@ from io import StringIO
 from unittest.mock import MagicMock, patch
 
 from rich.console import Console
-from smolagents.monitoring import LogLevel
 
-from tsugite.custom_ui import (
+from tsugite.events import (
+    CodeExecutionEvent,
+    ExecutionResultEvent,
+    FinalAnswerEvent,
+    LLMMessageEvent,
+    ObservationEvent,
+    StepStartEvent,
+    TaskStartEvent,
+)
+from tsugite.ui import (
     CustomUIHandler,
     CustomUILogger,
-    UIEvent,
     UIState,
-    create_silent_logger,
     custom_agent_ui,
 )
 
@@ -25,9 +31,7 @@ class TestUIState:
         assert state.task is None
         assert state.current_step == 0
         assert state.total_steps is None
-        assert state.current_action is None
         assert state.code_being_executed is None
-        assert state.last_observation is None
         assert state.steps_history == []
 
     def test_init_with_values(self):
@@ -44,93 +48,11 @@ class TestCustomUILogger:
     def test_init(self):
         """Test logger initialization."""
         ui_handler = MagicMock()
-        logger = CustomUILogger(ui_handler)
+        console = Console(file=StringIO())
+        logger = CustomUILogger(ui_handler, console)
 
         assert logger.ui_handler == ui_handler
-        assert logger.level == LogLevel.OFF
-
-    def test_log_task(self):
-        """Test task logging."""
-        ui_handler = MagicMock()
-        logger = CustomUILogger(ui_handler)
-
-        logger.log_task("Test task", "model-name", "Agent Title")
-
-        ui_handler.handle_event.assert_called_once_with(
-            UIEvent.TASK_START, {"task": "Test task", "model": "model-name", "title": "Agent Title"}
-        )
-
-    def test_log_rule_with_step(self):
-        """Test step logging through log_rule."""
-        ui_handler = MagicMock()
-        logger = CustomUILogger(ui_handler)
-
-        logger.log_rule("Step 3")
-
-        ui_handler.handle_event.assert_called_once_with(UIEvent.STEP_START, {"step": 3, "title": "Step 3"})
-
-    def test_log_code(self):
-        """Test code execution logging."""
-        ui_handler = MagicMock()
-        logger = CustomUILogger(ui_handler)
-
-        logger.log_code("Executing code", "print('hello')")
-
-        ui_handler.handle_event.assert_called_once_with(
-            UIEvent.CODE_EXECUTION, {"title": "Executing code", "code": "print('hello')"}
-        )
-
-    def test_log_tool_call(self):
-        """Test tool call logging."""
-        ui_handler = MagicMock()
-        logger = CustomUILogger(ui_handler)
-
-        logger.log("Calling tool: test_tool with args: {}")
-
-        ui_handler.handle_event.assert_called_once_with(
-            UIEvent.TOOL_CALL, {"content": "Calling tool: test_tool with args: {}"}
-        )
-
-    def test_log_observation(self):
-        """Test observation logging."""
-        ui_handler = MagicMock()
-        logger = CustomUILogger(ui_handler)
-
-        logger.log("Observations: Test observation")
-
-        ui_handler.handle_event.assert_called_once_with(UIEvent.OBSERVATION, {"observation": "Test observation"})
-
-    def test_log_final_answer(self):
-        """Test final answer logging."""
-        ui_handler = MagicMock()
-        logger = CustomUILogger(ui_handler)
-
-        logger.log("Final answer: 42")
-
-        ui_handler.handle_event.assert_called_once_with(UIEvent.FINAL_ANSWER, {"answer": "42"})
-
-    def test_log_markdown_llm_message(self):
-        """Test LLM message logging through log_markdown."""
-        ui_handler = MagicMock()
-        logger = CustomUILogger(ui_handler)
-
-        logger.log_markdown("I need to analyze this task", "Output message of the LLM:", LogLevel.DEBUG)
-
-        ui_handler.handle_event.assert_called_once_with(
-            UIEvent.LLM_MESSAGE,
-            {"content": "I need to analyze this task", "title": "Output message of the LLM:", "level": LogLevel.DEBUG},
-        )
-
-    def test_log_execution_logs(self):
-        """Test execution logs logging."""
-        ui_handler = MagicMock()
-        logger = CustomUILogger(ui_handler)
-
-        logger.log("Execution logs: print('hello world')")
-
-        ui_handler.handle_event.assert_called_once_with(
-            UIEvent.EXECUTION_LOGS, {"content": "Execution logs: print('hello world')", "level": LogLevel.INFO}
-        )
+        assert logger.console == console
 
 
 class TestCustomUIHandler:
@@ -151,22 +73,38 @@ class TestCustomUIHandler:
         console = Console(file=StringIO())
         handler = CustomUIHandler(console)
 
-        handler.handle_event(UIEvent.TASK_START, {"task": "Test task", "model": "test-model", "title": "Test"})
+        event = TaskStartEvent(task="Test task", model="test-model")
+        handler.handle_event(event)
 
         assert handler.state.task == "Test task"
         assert handler.state.current_step == 0
         assert handler.state.steps_history == []
 
-        # Check output was generated
+        # Task should not be shown unless show_debug_messages=True
+        output = console.file.getvalue()
+        assert "Test task" not in output
+        assert "test-model" in output  # Model should still be shown
+
+    def test_handle_task_start_with_debug(self):
+        """Test handling task start event with debug messages enabled."""
+        console = Console(file=StringIO())
+        handler = CustomUIHandler(console, show_debug_messages=True)
+
+        event = TaskStartEvent(task="Test task", model="test-model")
+        handler.handle_event(event)
+
+        # With show_debug_messages=True, task should be shown
         output = console.file.getvalue()
         assert "Test task" in output
+        assert "test-model" in output
 
     def test_handle_step_start(self):
         """Test handling step start event."""
         console = Console(file=StringIO())
         handler = CustomUIHandler(console)
 
-        handler.handle_event(UIEvent.STEP_START, {"step": 2})
+        event = StepStartEvent(step=2)
+        handler.handle_event(event)
 
         assert handler.state.current_step == 2
         assert len(handler.state.steps_history) == 1
@@ -178,10 +116,10 @@ class TestCustomUIHandler:
         console = Console(file=StringIO())
         handler = CustomUIHandler(console, show_code=True)
 
-        handler.handle_event(UIEvent.CODE_EXECUTION, {"code": 'print("hello")'})
+        event = CodeExecutionEvent(code='print("hello")')
+        handler.handle_event(event)
 
         assert handler.state.code_being_executed == 'print("hello")'
-        assert handler.state.current_action == "Executing code..."
 
         # Check output was generated
         output = console.file.getvalue()
@@ -192,10 +130,10 @@ class TestCustomUIHandler:
         console = Console(file=StringIO())
         handler = CustomUIHandler(console, show_code=False)
 
-        handler.handle_event(UIEvent.CODE_EXECUTION, {"code": 'print("hello")'})
+        event = CodeExecutionEvent(code='print("hello")')
+        handler.handle_event(event)
 
         assert handler.state.code_being_executed == 'print("hello")'
-        assert handler.state.current_action == "Executing code..."
 
         # Check no code output was generated
         output = console.file.getvalue()
@@ -207,11 +145,12 @@ class TestCustomUIHandler:
         handler = CustomUIHandler(console, show_observations=True)
 
         # Add a step first
-        handler.handle_event(UIEvent.STEP_START, {"step": 1})
+        event = StepStartEvent(step=1)
+        handler.handle_event(event)
 
-        handler.handle_event(UIEvent.OBSERVATION, {"observation": "Test observation"})
+        event = ObservationEvent(observation="Test observation")
+        handler.handle_event(event)
 
-        assert handler.state.last_observation == "Test observation"
         assert handler.state.steps_history[-1]["status"] == "completed"
 
         # Check output was generated
@@ -223,46 +162,68 @@ class TestCustomUIHandler:
         console = Console(file=StringIO())
         handler = CustomUIHandler(console)
 
-        handler.handle_event(UIEvent.FINAL_ANSWER, {"answer": "42"})
+        event = FinalAnswerEvent(answer="42")
+        handler.handle_event(event)
 
-        # Check output was generated
+        # Check output was generated - panels removed so just check answer is present
         output = console.file.getvalue()
         assert "42" in output
-        assert "Final Answer" in output
 
     def test_handle_llm_message_with_show(self):
         """Test handling LLM message with display enabled."""
         console = Console(file=StringIO())
         handler = CustomUIHandler(console, show_llm_messages=True)
 
-        handler.handle_event(
-            UIEvent.LLM_MESSAGE, {"content": "I need to solve this step by step", "title": "Output message of the LLM:"}
-        )
+        event = LLMMessageEvent(content="I need to solve this step by step", title="Output message of the LLM:")
+        handler.handle_event(event)
 
         output = console.file.getvalue()
+        # Panels removed, so only content is displayed
         assert "I need to solve this step by step" in output
-        assert "Agent Reasoning" in output
 
     def test_handle_llm_message_without_show(self):
         """Test handling LLM message with display disabled."""
         console = Console(file=StringIO())
         handler = CustomUIHandler(console, show_llm_messages=False)
 
-        handler.handle_event(
-            UIEvent.LLM_MESSAGE, {"content": "I need to solve this step by step", "title": "Output message of the LLM:"}
-        )
+        event = LLMMessageEvent(content="I need to solve this step by step", title="Output message of the LLM:")
+        handler.handle_event(event)
 
         output = console.file.getvalue()
         assert "I need to solve this step by step" not in output
+
+    def test_handle_llm_message_shows_step_number(self):
+        """Test that LLM messages display content."""
+        console = Console(file=StringIO())
+        handler = CustomUIHandler(console, show_llm_messages=True)
+
+        # Test Step 1
+        event = LLMMessageEvent(content="First step reasoning", title="Step 1 Reasoning")
+        handler.handle_event(event)
+
+        output = console.file.getvalue()
+        # Panels removed, so only content is displayed
+        assert "First step reasoning" in output
+
+        # Clear console for next test
+        console = Console(file=StringIO())
+        handler = CustomUIHandler(console, show_llm_messages=True)
+
+        # Test Step 2
+        event = LLMMessageEvent(content="Second step reasoning", title="Step 2 Reasoning")
+        handler.handle_event(event)
+
+        output = console.file.getvalue()
+        # Panels removed, so only content is displayed
+        assert "Second step reasoning" in output
 
     def test_handle_execution_result(self):
         """Test handling execution result event."""
         console = Console(file=StringIO())
         handler = CustomUIHandler(console, show_execution_results=True)
 
-        handler.handle_event(
-            UIEvent.EXECUTION_RESULT, {"content": "Execution logs:\nprint statement output\nOut: Hello World"}
-        )
+        event = ExecutionResultEvent(logs=["print statement output"], output="Hello World", success=True)
+        handler.handle_event(event)
 
         output = console.file.getvalue()
         assert "Hello World" in output or "Output:" in output
@@ -272,7 +233,8 @@ class TestCustomUIHandler:
         console = Console(file=StringIO())
         handler = CustomUIHandler(console, show_execution_results=True)
 
-        handler.handle_event(UIEvent.EXECUTION_RESULT, {"content": "Out: None"})
+        event = ExecutionResultEvent(output="None", success=True)
+        handler.handle_event(event)
 
         output = console.file.getvalue()
         # Should NOT contain "Output: None"
@@ -284,7 +246,8 @@ class TestCustomUIHandler:
         console = Console(file=StringIO())
         handler = CustomUIHandler(console, show_execution_results=True)
 
-        handler.handle_event(UIEvent.EXECUTION_RESULT, {"content": "Out: null"})
+        event = ExecutionResultEvent(output="null", success=True)
+        handler.handle_event(event)
 
         output = console.file.getvalue()
         # Should NOT contain "Output: null"
@@ -315,13 +278,14 @@ class TestCustomAgentUI:
 
         with custom_agent_ui(console, show_progress=False) as logger:
             assert isinstance(logger, CustomUILogger)
-            assert logger.level == LogLevel.OFF
+            assert logger.ui_handler is not None
+            assert logger.console == console
 
     def test_custom_agent_ui_with_progress(self):
         """Test custom UI with progress enabled."""
         console = Console(file=StringIO())
 
-        with patch("tsugite.custom_ui.CustomUIHandler.progress_context") as mock_context:
+        with patch("tsugite.ui.CustomUIHandler.progress_context") as mock_context:
             mock_context.return_value.__enter__ = MagicMock()
             mock_context.return_value.__exit__ = MagicMock()
 
@@ -338,24 +302,6 @@ class TestCustomAgentUI:
         with custom_agent_ui(console, show_code=False, show_observations=False, show_progress=False) as logger:
             assert logger.ui_handler.show_code is False
             assert logger.ui_handler.show_observations is False
-
-
-class TestSilentLogger:
-    """Test silent logger creation."""
-
-    def test_create_silent_logger(self):
-        """Test creating a completely silent logger."""
-        from smolagents.monitoring import AgentLogger
-
-        logger = create_silent_logger()
-
-        assert isinstance(logger, AgentLogger)
-        assert logger.level == LogLevel.OFF
-
-        # Test that logger doesn't produce output
-        # Since it writes to /dev/null, we can't capture output
-        # but we can verify it doesn't raise errors
-        logger.log("Test message")  # Should not raise
 
 
 class TestMultiStepContext:
@@ -407,7 +353,8 @@ class TestMultiStepContext:
         handler.set_multistep_context(1, "research", 4)
 
         # Trigger step start
-        handler.handle_event(UIEvent.STEP_START, {"step": 1, "title": "Step 1"})
+        event = StepStartEvent(step=1, title="Step 1")
+        handler.handle_event(event)
 
         # Should show "Round" instead of "Step"
         assert handler.state.current_step == 1
@@ -421,7 +368,8 @@ class TestMultiStepContext:
         assert handler.state.multistep_context is None
 
         # Trigger step start
-        handler.handle_event(UIEvent.STEP_START, {"step": 1, "title": "Step 1"})
+        event = StepStartEvent(step=1, title="Step 1")
+        handler.handle_event(event)
 
         # Should show "Step"
         assert handler.state.current_step == 1

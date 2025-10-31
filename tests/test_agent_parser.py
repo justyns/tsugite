@@ -20,7 +20,7 @@ def test_parse_valid_agent_file(sample_agent_file):
     assert isinstance(agent, Agent)
     assert agent.name == "test_agent"
     assert agent.config.model == "openai:gpt-4o-mini"
-    assert agent.config.max_steps == 5
+    assert agent.config.max_turns == 5
     assert "read_file" in agent.config.tools
     assert "write_file" in agent.config.tools
     assert agent.config.permissions_profile == "test_safe"
@@ -54,7 +54,7 @@ Just a basic agent.
 
     assert agent.name == "minimal_agent"
     assert agent.config.model is None  # Model is optional, will use config default
-    assert agent.config.max_steps == 5  # Default
+    assert agent.config.max_turns == 5  # Default
     assert agent.config.tools == []  # Default
     assert agent.config.prefetch == []  # Default
 
@@ -114,7 +114,7 @@ def test_agent_config_defaults():
 
     assert config.name == "test"
     assert config.model is None  # Model is optional, will use config default
-    assert config.max_steps == 5
+    assert config.max_turns == 5
     assert config.tools == []
     assert config.prefetch == []
     assert config.permissions_profile == "default"
@@ -201,7 +201,9 @@ model: ollama:test
     agent_file.write_text(content)
 
     # This should fail during parsing since name is required
-    with pytest.raises(TypeError):
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
         parse_agent_file(agent_file)
 
 
@@ -237,12 +239,11 @@ tools: [123, "valid_tool", null]
     agent_file = temp_dir / "invalid_tools.md"
     agent_file.write_text(content)
 
-    agent = parse_agent_file(agent_file)
-    errors = validate_agent(agent)
+    # Pydantic now validates tools at parse time - should raise ValidationError
+    from pydantic import ValidationError
 
-    # Should have errors for non-string tools
-    assert len(errors) > 0
-    assert any("Tool name must be string" in error for error in errors)
+    with pytest.raises(ValidationError):
+        parse_agent_file(agent_file)
 
 
 def test_validate_agent_directive_errors(temp_dir):
@@ -279,8 +280,9 @@ def test_complex_frontmatter(temp_dir):
     """Test parsing agent with complex frontmatter structure."""
     content = """---
 name: complex_agent
+extends: none
 model: ollama:qwen2.5-coder:14b
-max_steps: 10
+max_turns: 10
 tools:
   - read_file
   - write_file
@@ -314,7 +316,7 @@ This agent has a complex configuration.
 
     assert agent.name == "complex_agent"
     assert agent.config.model == "ollama:qwen2.5-coder:14b"
-    assert agent.config.max_steps == 10
+    assert agent.config.max_turns == 10
     assert len(agent.config.tools) == 3
     assert len(agent.config.prefetch) == 2
 
@@ -340,3 +342,160 @@ def test_parse_docs_example_agent():
 
     directives = extract_directives(agent.content)
     assert len(directives) >= 1
+
+
+def test_initial_tasks_simple_string_format(temp_dir):
+    """Test parsing agent with initial_tasks as simple strings."""
+    content = """---
+name: task_agent
+extends: none
+initial_tasks:
+  - "Analyze requirements"
+  - "Write code"
+  - "Test implementation"
+---
+
+# Task Agent
+"""
+    agent_file = temp_dir / "task_agent.md"
+    agent_file.write_text(content)
+
+    agent = parse_agent_file(agent_file)
+
+    assert len(agent.config.initial_tasks) == 3
+    # Check normalization to dicts
+    assert agent.config.initial_tasks[0]["title"] == "Analyze requirements"
+    assert agent.config.initial_tasks[0]["status"] == "pending"
+    assert agent.config.initial_tasks[0]["optional"] is False
+    assert agent.config.initial_tasks[1]["title"] == "Write code"
+    assert agent.config.initial_tasks[2]["title"] == "Test implementation"
+
+
+def test_initial_tasks_detailed_dict_format(temp_dir):
+    """Test parsing agent with initial_tasks as detailed dicts."""
+    content = """---
+name: task_agent
+extends: none
+initial_tasks:
+  - title: "Required task"
+    status: pending
+    optional: false
+  - title: "Optional enhancement"
+    status: pending
+    optional: true
+  - title: "Already in progress"
+    status: in_progress
+---
+
+# Task Agent
+"""
+    agent_file = temp_dir / "task_agent.md"
+    agent_file.write_text(content)
+
+    agent = parse_agent_file(agent_file)
+
+    assert len(agent.config.initial_tasks) == 3
+
+    # Check first task
+    assert agent.config.initial_tasks[0]["title"] == "Required task"
+    assert agent.config.initial_tasks[0]["status"] == "pending"
+    assert agent.config.initial_tasks[0]["optional"] is False
+
+    # Check optional task
+    assert agent.config.initial_tasks[1]["title"] == "Optional enhancement"
+    assert agent.config.initial_tasks[1]["optional"] is True
+
+    # Check in-progress task
+    assert agent.config.initial_tasks[2]["title"] == "Already in progress"
+    assert agent.config.initial_tasks[2]["status"] == "in_progress"
+
+
+def test_initial_tasks_mixed_format(temp_dir):
+    """Test parsing agent with mixed string and dict initial_tasks."""
+    content = """---
+name: task_agent
+extends: none
+initial_tasks:
+  - "Simple required task"
+  - title: "Optional detailed task"
+    optional: true
+  - "Another simple task"
+---
+
+# Task Agent
+"""
+    agent_file = temp_dir / "task_agent.md"
+    agent_file.write_text(content)
+
+    agent = parse_agent_file(agent_file)
+
+    assert len(agent.config.initial_tasks) == 3
+
+    # Check string format task
+    assert agent.config.initial_tasks[0]["title"] == "Simple required task"
+    assert agent.config.initial_tasks[0]["optional"] is False
+
+    # Check dict format task
+    assert agent.config.initial_tasks[1]["title"] == "Optional detailed task"
+    assert agent.config.initial_tasks[1]["optional"] is True
+
+    # Check another string format
+    assert agent.config.initial_tasks[2]["title"] == "Another simple task"
+    assert agent.config.initial_tasks[2]["optional"] is False
+
+
+def test_initial_tasks_empty_list(temp_dir):
+    """Test parsing agent with empty initial_tasks list."""
+    content = """---
+name: task_agent
+extends: none
+initial_tasks: []
+---
+
+# Task Agent
+"""
+    agent_file = temp_dir / "task_agent.md"
+    agent_file.write_text(content)
+
+    agent = parse_agent_file(agent_file)
+
+    assert agent.config.initial_tasks == []
+
+
+def test_initial_tasks_defaults_to_empty(temp_dir):
+    """Test that initial_tasks defaults to empty list when not specified."""
+    content = """---
+name: task_agent
+extends: none
+---
+
+# Task Agent
+"""
+    agent_file = temp_dir / "task_agent.md"
+    agent_file.write_text(content)
+
+    agent = parse_agent_file(agent_file)
+
+    assert agent.config.initial_tasks == []
+
+
+def test_initial_tasks_invalid_type(temp_dir):
+    """Test that invalid initial_tasks entries raise an error."""
+    content = """---
+name: task_agent
+extends: none
+initial_tasks:
+  - "Valid string"
+  - 123
+---
+
+# Task Agent
+"""
+    agent_file = temp_dir / "task_agent.md"
+    agent_file.write_text(content)
+
+    # Pydantic now validates initial_tasks at parse time - should raise ValidationError
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        parse_agent_file(agent_file)

@@ -1,32 +1,46 @@
 [project]
 name = "tsugite"
-version = "0.1.0"
+version = "0.3.0"
 description = "Micro-agent runner for task automation using markdown definitions"
-authors = [{name = "Justyn Shull"}]
+authors = [{ name = "Justyn Shull" }]
 requires-python = ">=3.11"
 readme = "README.md"
-license = {file = "LICENSE"}
-keywords = ["agents", "automation", "smolagents", "cli", "jinja2"]
+license = { file = "LICENSE" }
+keywords = ["agents", "automation", "cli", "jinja2", "litellm"]
 dependencies = [
-    "typer>=0.12",
-    "jinja2>=3.1",
-    "pyyaml>=6.0",
-    "smolagents[docker,litellm,mcp,openai,toolkit]>=0.1",
-    "httpx>=0.25",
-    "rich>=13.0",
-    "mcp>=1.0",
-    "ddgs>=9.6.0",
-    "ruff>=0.13.2",
-    "questionary>=2.1.1",
+  "typer>=0.12",
+  "jinja2>=3.1",
+  "pyyaml>=6.0",
+  "httpx>=0.25",
+  "rich>=13.0",
+  "mcp>=1.0",
+  "ddgs>=9.6.0",
+  "ruff>=0.13.2",
+  "questionary>=2.1.1",
+  "youtube-transcript-api>=0.6.0",
+  "html2text>=2020.1.16",
+  "litellm>=1.77.7",
+  "textual>=6.2.1",
+  "textual-autocomplete>=4.0.6",
+  "nest-asyncio>=1.6.0",
+  "pydantic>=2.12.3",
 ]
 
 [project.scripts]
 tsugite = "tsugite.tsugite:app"
 tsu = "tsugite.tsugite:app"
+tsugite-docker = "tsugite.docker_cli:docker_main"
+tsugite-docker-session = "tsugite.docker_cli:session_main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["tsugite"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"tsugite/builtin_agents" = "tsugite/builtin_agents"
 
 [tool.ruff]
 target-version = "py311"
@@ -34,16 +48,69 @@ line-length = 120
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W"]
-ignore = ["E501"]  # Line too long (handled by black)
+ignore = ["E501"]                  # Line too long (handled by black)
 
 [tool.black]
 target-version = ["py311"]
 line-length = 120
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-n auto --dist loadscope --cov=tsugite --cov-report=term-missing --cov-report=html --cov-report=xml"
+asyncio_mode = "strict"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = ["ignore::RuntimeWarning"]
+norecursedirs = [
+  '.*',
+  'build',
+  'dist',
+  'CVS',
+  '_darcs',
+  '{arch}',
+  '*.egg',
+  '_*',
+]
+
+[tool.coverage.run]
+source = ["tsugite"]
+omit = [
+  "*/tests/*",
+  "*/test_*.py",
+  "*/__pycache__/*",
+  "*/site-packages/*",
+]
+
+[tool.coverage.report]
+precision = 2
+show_missing = true
+skip_covered = false
+exclude_lines = [
+  "pragma: no cover",
+  "def __repr__",
+  "raise AssertionError",
+  "raise NotImplementedError",
+  "if __name__ == .__main__.:",
+  "if TYPE_CHECKING:",
+  "@abstractmethod",
+]
+
+[tool.pylint]
+disable = [
+  "line-too-long",
+  "missing-function-docstring",
+  "missing-module-docstring",
+  "invalid-name",
+]
+ignore = [".venv", "docs", "tests"]
+
 [dependency-groups]
 dev = [
-    "black>=25.9.0",
-    "pytest>=8.4.2",
-    "pytest-asyncio>=0.23.0",
-    "ruff>=0.1",
+  "black>=25.9.0",
+  "pylint>=4.0.2",
+  "pytest>=8.4.2",
+  "pytest-asyncio>=0.23.0",
+  "pytest-cov>=6.0.0",
+  "pytest-xdist>=3.5.0",
+  "ruff>=0.1",
+  "vulture>=2.14",
 ]

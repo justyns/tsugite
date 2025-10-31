@@ -31,20 +31,20 @@ def test_merge_agent_configs_scalars():
         name="parent",
         description="Parent agent",
         model="ollama:parent-model",
-        max_steps=3,
+        max_turns=3,
     )
 
     child = AgentConfig(
         name="child",
         model="openai:gpt-4",
-        max_steps=10,
+        max_turns=10,
     )
 
     merged = merge_agent_configs(parent, child)
 
     assert merged.name == "child"
     assert merged.model == "openai:gpt-4"
-    assert merged.max_steps == 10
+    assert merged.max_turns == 10
 
 
 def test_merge_agent_configs_lists():
@@ -125,6 +125,119 @@ def test_merge_agent_configs_empty_instructions():
 
     merged = merge_agent_configs(parent, child)
     assert merged.instructions == "Parent only."
+
+
+def test_merge_agent_configs_attachments():
+    """Test merging attachments list (merge and deduplicate)."""
+    parent = AgentConfig(
+        name="parent",
+        attachments=["standards", "api-docs"],
+    )
+
+    child = AgentConfig(
+        name="child",
+        attachments=["examples", "standards"],  # standards is duplicate
+    )
+
+    merged = merge_agent_configs(parent, child)
+
+    # Attachments should be merged and deduplicated, order preserved
+    assert merged.attachments == ["standards", "api-docs", "examples"]
+
+
+def test_merge_agent_configs_reasoning_effort():
+    """Test merging reasoning_effort scalar (child overwrites parent)."""
+    parent = AgentConfig(
+        name="parent",
+        reasoning_effort="low",
+    )
+
+    child = AgentConfig(
+        name="child",
+        reasoning_effort="high",
+    )
+
+    merged = merge_agent_configs(parent, child)
+    assert merged.reasoning_effort == "high"
+
+    # Test child with None inherits from parent
+    child_none = AgentConfig(
+        name="child2",
+        reasoning_effort=None,
+    )
+
+    merged2 = merge_agent_configs(parent, child_none)
+    assert merged2.reasoning_effort == "low"
+
+
+def test_merge_agent_configs_custom_tools():
+    """Test merging custom_tools (merge and deduplicate by name)."""
+    parent = AgentConfig(
+        name="parent",
+        custom_tools=[
+            {"name": "tool1", "command": "echo parent1"},
+            {"name": "tool2", "command": "echo parent2"},
+        ],
+    )
+
+    child = AgentConfig(
+        name="child",
+        custom_tools=[
+            {"name": "tool2", "command": "echo child2"},  # Overrides parent's tool2
+            {"name": "tool3", "command": "echo child3"},
+        ],
+    )
+
+    merged = merge_agent_configs(parent, child)
+
+    # Should have 3 tools total (tool1 from parent, tool2 from child, tool3 from child)
+    assert len(merged.custom_tools) == 3
+
+    # Build dict by name for easier testing
+    tools_by_name = {tool["name"]: tool for tool in merged.custom_tools}
+    assert tools_by_name["tool1"]["command"] == "echo parent1"
+    assert tools_by_name["tool2"]["command"] == "echo child2"  # Child overrides parent
+    assert tools_by_name["tool3"]["command"] == "echo child3"
+
+
+def test_merge_agent_configs_text_mode():
+    """Test merging text_mode boolean (child overwrites if True).
+
+    Since text_mode defaults to False, we can't distinguish between "not set"
+    and "explicitly set to False". The merge logic treats False as the default,
+    so parent's value is inherited unless child explicitly sets True.
+    """
+    parent = AgentConfig(
+        name="parent",
+        text_mode=True,
+    )
+
+    child = AgentConfig(
+        name="child",
+        text_mode=False,  # Default value, so parent's True is inherited
+    )
+
+    merged = merge_agent_configs(parent, child)
+    # Child has default value (False), so parent's True is inherited
+    assert merged.text_mode
+
+    # When child explicitly sets True, it overrides parent
+    child_true = AgentConfig(
+        name="child2",
+        text_mode=True,
+    )
+
+    merged2 = merge_agent_configs(parent, child_true)
+    assert merged2.text_mode
+
+    # When both are False, result is False
+    parent_false = AgentConfig(
+        name="parent2",
+        text_mode=False,
+    )
+
+    merged3 = merge_agent_configs(parent_false, child)
+    assert not merged3.text_mode
 
 
 def test_detect_circular_inheritance():
@@ -214,6 +327,7 @@ def test_resolve_agent_inheritance_with_parent(tmp_path):
     parent_file.write_text(
         """---
 name: base
+extends: none
 model: ollama:base-model
 tools: [read_file, write_file]
 instructions: Base instructions.
@@ -245,7 +359,10 @@ Child content
     assert set(resolved.config.tools) == {"read_file", "write_file", "web_search"}
     assert "Base instructions." in resolved.config.instructions
     assert "Child instructions." in resolved.config.instructions
-    assert resolved.content.strip() == "Child content"
+    # Content should be merged (parent first, then child)
+    assert "Base content" in resolved.content
+    assert "Child content" in resolved.content
+    assert resolved.content.index("Base content") < resolved.content.index("Child content")
 
 
 def test_resolve_agent_inheritance_chain(tmp_path):
@@ -380,12 +497,71 @@ def test_merge_with_empty_parent():
     assert merged.tools == ["tool1"]
 
 
-def test_default_max_steps_inheritance():
-    """Test that default max_steps value doesn't override parent."""
-    parent = AgentConfig(name="parent", max_steps=10)
-    child = AgentConfig(name="child")  # max_steps defaults to 5
+def test_default_max_turns_inheritance():
+    """Test that default max_turns value doesn't override parent."""
+    parent = AgentConfig(name="parent", max_turns=10)
+    child = AgentConfig(name="child")  # max_turns defaults to 5
 
     merged = merge_agent_configs(parent, child)
 
     # Child's default 5 should not override parent's explicit 10
-    assert merged.max_steps == 10
+    assert merged.max_turns == 10
+
+
+def test_merge_agent_configs_initial_tasks():
+    """Test merging initial_tasks (concatenates parent + child)."""
+    parent = AgentConfig(
+        name="parent",
+        initial_tasks=[
+            {"title": "Parent task 1", "status": "pending", "optional": False},
+            {"title": "Parent task 2", "status": "pending", "optional": True},
+        ],
+    )
+
+    child = AgentConfig(
+        name="child",
+        initial_tasks=[
+            {"title": "Child task 1", "status": "in_progress", "optional": False},
+        ],
+    )
+
+    merged = merge_agent_configs(parent, child)
+
+    # initial_tasks should be concatenated (parent first, then child)
+    assert len(merged.initial_tasks) == 3
+    assert merged.initial_tasks[0]["title"] == "Parent task 1"
+    assert merged.initial_tasks[1]["title"] == "Parent task 2"
+    assert merged.initial_tasks[2]["title"] == "Child task 1"
+
+    # Check that optional status is preserved
+    assert merged.initial_tasks[0]["optional"] is False
+    assert merged.initial_tasks[1]["optional"] is True
+    assert merged.initial_tasks[2]["optional"] is False
+
+
+def test_merge_initial_tasks_with_empty_parent():
+    """Test merging initial_tasks when parent has none."""
+    parent = AgentConfig(name="parent")
+    child = AgentConfig(
+        name="child",
+        initial_tasks=[{"title": "Child task", "status": "pending", "optional": False}],
+    )
+
+    merged = merge_agent_configs(parent, child)
+
+    assert len(merged.initial_tasks) == 1
+    assert merged.initial_tasks[0]["title"] == "Child task"
+
+
+def test_merge_initial_tasks_with_empty_child():
+    """Test merging initial_tasks when child has none."""
+    parent = AgentConfig(
+        name="parent",
+        initial_tasks=[{"title": "Parent task", "status": "pending", "optional": False}],
+    )
+    child = AgentConfig(name="child")
+
+    merged = merge_agent_configs(parent, child)
+
+    assert len(merged.initial_tasks) == 1
+    assert merged.initial_tasks[0]["title"] == "Parent task"

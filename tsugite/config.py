@@ -1,24 +1,33 @@
 """Tsugite configuration management."""
 
 import json
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from .xdg import get_xdg_config_path
 
 
-@dataclass
-class Config:
+class Config(BaseModel):
     """Tsugite configuration."""
 
-    default_model: Optional[str] = None
-    model_aliases: Dict[str, str] = field(default_factory=dict)
-    default_base_agent: Optional[str] = None
+    model_config = ConfigDict(
+        extra="allow",
+        str_strip_whitespace=True,
+    )
 
-    def __post_init__(self):
-        if self.model_aliases is None:
-            self.model_aliases = {}
+    default_model: Optional[str] = None
+    model_aliases: Dict[str, str] = Field(default_factory=dict)
+    default_base_agent: Optional[str] = None
+    chat_theme: str = "gruvbox"
+    history_enabled: bool = True
+    history_dir: Optional[Path] = None
+    machine_name: Optional[str] = None
+    max_history_days: Optional[int] = None
+    auto_context_enabled: bool = True
+    auto_context_files: List[str] = Field(default_factory=lambda: [".tsugite/CONTEXT.md", "AGENTS.md", "CLAUDE.md"])
+    auto_context_include_global: bool = True
 
 
 def get_config_path() -> Path:
@@ -41,14 +50,15 @@ def load_config(path: Optional[Path] = None) -> Config:
         return Config()
 
     try:
-        with open(path, "r") as f:
+        with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
 
-        return Config(
-            default_model=data.get("default_model"),
-            model_aliases=data.get("model_aliases", {}),
-            default_base_agent=data.get("default_base_agent"),
-        )
+        # Convert history_dir string to Path if present
+        if "history_dir" in data and data["history_dir"]:
+            data["history_dir"] = Path(data["history_dir"])
+
+        # Use Pydantic's model_validate for validation and construction
+        return Config.model_validate(data)
 
     except json.JSONDecodeError as e:
         print(f"Warning: Failed to parse config at {path}: {e}")
@@ -73,18 +83,18 @@ def save_config(config: Config, path: Optional[Path] = None) -> None:
 
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    config_data = {}
+    # Use Pydantic's model_dump to serialize, excluding None values for cleaner output
+    config_data = config.model_dump(exclude_none=True, mode="json")
 
-    if config.default_model:
-        config_data["default_model"] = config.default_model
+    # Convert Path to string for JSON serialization
+    if "history_dir" in config_data and config_data["history_dir"]:
+        config_data["history_dir"] = str(config_data["history_dir"])
 
-    if config.model_aliases:
-        config_data["model_aliases"] = config.model_aliases
+    # Remove empty model_aliases dict for cleaner output
+    if "model_aliases" in config_data and not config_data["model_aliases"]:
+        del config_data["model_aliases"]
 
-    if config.default_base_agent is not None:
-        config_data["default_base_agent"] = config.default_base_agent
-
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(config_data, f, indent=2)
 
 
@@ -155,3 +165,40 @@ def set_default_base_agent(base_agent: Optional[str], path: Optional[Path] = Non
     config = load_config(path)
     config.default_base_agent = base_agent
     save_config(config, path)
+
+
+def set_chat_theme(theme: str, path: Optional[Path] = None) -> None:
+    """Set the chat UI theme in configuration.
+
+    Args:
+        theme: Theme name (e.g., "gruvbox", "nord", "tokyo-night")
+        path: Path to config.json file. If None, uses default path
+    """
+    config = load_config(path)
+    config.chat_theme = theme
+    save_config(config, path)
+
+
+def set_auto_context_enabled(enabled: bool, path: Optional[Path] = None) -> None:
+    """Set whether auto-context is enabled in configuration.
+
+    Args:
+        enabled: True to enable auto-context, False to disable
+        path: Path to config.json file. If None, uses default path
+    """
+    config = load_config(path)
+    config.auto_context_enabled = enabled
+    save_config(config, path)
+
+
+def get_chat_theme(path: Optional[Path] = None) -> str:
+    """Get the chat UI theme from configuration.
+
+    Args:
+        path: Path to config.json file. If None, uses default path
+
+    Returns:
+        Theme name (defaults to "gruvbox")
+    """
+    config = load_config(path)
+    return config.chat_theme

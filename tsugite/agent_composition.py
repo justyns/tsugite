@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import List, Tuple
 
-from smolagents import Tool
+from tsugite.core.tools import Tool
 
 
 def resolve_agent_reference(ref: str, base_dir: Path) -> Path:
@@ -59,33 +59,40 @@ def create_delegation_tool(agent_name: str, agent_path: Path) -> Tool:
         Tool that wraps spawn_agent with pre-filled path
     """
 
-    class DelegationTool(Tool):
-        name = f"spawn_{agent_name}"
-        description = f"Delegate a task to the {agent_name} agent and get the result."
-        inputs = {"prompt": {"type": "string", "description": "Task/prompt to give the agent"}}
-        output_type = "string"
+    def delegation_function(prompt: str) -> str:
+        """Execute the delegated agent.
 
-        def __init__(self, agent_path: Path):
-            super().__init__()
-            self.agent_path = agent_path
+        Args:
+            prompt: Task/prompt to give the agent
 
-        def forward(self, prompt: str) -> str:
-            """Execute the delegated agent."""
-            from .agent_runner import run_agent
+        Returns:
+            str: Result from the delegated agent
+        """
+        from .agent_runner import run_agent
 
-            try:
-                result = run_agent(
-                    agent_path=self.agent_path,
-                    prompt=prompt,
-                    context={},
-                    model_override=None,
-                    debug=False,
-                )
-                return str(result)
-            except Exception as e:
-                return f"Error executing {agent_name} agent: {e}"
+        try:
+            result = run_agent(
+                agent_path=agent_path,
+                prompt=prompt,
+                context={},
+                model_override=None,
+                debug=False,
+            )
+            return str(result)
+        except Exception as e:
+            return f"Error executing {agent_name} agent: {e}"
 
-    return DelegationTool(agent_path)
+    # Create Tool instance with proper schema
+    return Tool(
+        name=f"spawn_{agent_name}",
+        description=f"Delegate a task to the {agent_name} agent and get the result.",
+        parameters={
+            "type": "object",
+            "properties": {"prompt": {"type": "string", "description": "Task/prompt to give the agent"}},
+            "required": ["prompt"],
+        },
+        function=delegation_function,
+    )
 
 
 def create_delegation_tools(delegation_agents: List[Tuple[str, Path]]) -> List[Tool]:

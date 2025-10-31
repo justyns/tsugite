@@ -15,6 +15,7 @@ def _parse_agent_from_path(path: Path):
     """
     from tsugite.md_agents import parse_agent
 
+    # All agents are now file-based (including built-ins)
     content = path.read_text(encoding="utf-8")
     return parse_agent(content, path)
 
@@ -58,18 +59,32 @@ def build_inheritance_chain(agent_path: Path) -> List[Tuple[str, Path]]:
         extends_chain = _get_parent_chain(current_agent.config.extends, current_path, visited.copy())
         chain.extend(extends_chain)
     elif current_agent.config.extends != "none":
-        default_base_name = _get_default_base_agent_name()
-        if default_base_name:
-            default_path = find_agent_file(default_base_name, current_path.parent)
-            if default_path and default_path.resolve() != current_path:
-                chain.append((default_base_name, default_path))
-                visited.add(default_path.resolve())
+        # Auto-inherit from default base agent
+        # Priority: 1) Local .tsugite/default.md, 2) Config's default_base_agent
+        user_default_path = current_path.parent / ".tsugite" / "default.md"
+        default_path = None
+        default_name = None
 
-                default_agent = _parse_agent_from_path(default_path)
-                if default_agent.config.extends and default_agent.config.extends != "none":
-                    parent_chain = _get_parent_chain(default_agent.config.extends, default_path, visited.copy())
-                    # Insert at beginning (parents come before children)
-                    chain = parent_chain + chain
+        if user_default_path.exists() and user_default_path.resolve() != current_path:
+            # Use local default.md if it exists
+            default_path = user_default_path
+            default_name = "default"
+        else:
+            # Fall back to config's default_base_agent
+            default_base_name = _get_default_base_agent_name()
+            if default_base_name:
+                default_path = find_agent_file(default_base_name, current_path.parent)
+                default_name = default_base_name
+
+        if default_path and default_path.resolve() != current_path:
+            chain.append((default_name, default_path))
+            visited.add(default_path.resolve())
+
+            default_agent = _parse_agent_from_path(default_path)
+            if default_agent.config.extends and default_agent.config.extends != "none":
+                parent_chain = _get_parent_chain(default_agent.config.extends, default_path, visited.copy())
+                # Insert at beginning (parents come before children)
+                chain = parent_chain + chain
 
     chain.append((current_agent.config.name, current_path))
 
@@ -121,13 +136,19 @@ def list_local_agents(base_path: Path = None) -> dict[str, List[Path]]:
     Returns:
         Dictionary mapping location names to list of agent paths
     """
+    from .agent_inheritance import get_builtin_agents_path
+
     if base_path is None:
         base_path = Path.cwd()
 
     results = {}
 
     # Add built-in agents first
-    results["Built-in"] = [Path("<builtin-default>")]
+    builtin_path = get_builtin_agents_path()
+    if builtin_path.exists() and builtin_path.is_dir():
+        builtin_agents = sorted(builtin_path.glob("*.md"))
+        if builtin_agents:
+            results["Built-in"] = builtin_agents
 
     locations = [
         ("Current directory", base_path),

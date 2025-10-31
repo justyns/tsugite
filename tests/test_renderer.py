@@ -5,7 +5,17 @@ from unittest.mock import patch
 
 import pytest
 
-from tsugite.renderer import AgentRenderer, file_exists, is_dir, is_file, now, read_text, slugify, today
+from tsugite.renderer import (
+    AgentRenderer,
+    file_exists,
+    is_dir,
+    is_file,
+    now,
+    read_text,
+    slugify,
+    strip_ignored_sections,
+    today,
+)
 
 
 def test_helper_functions():
@@ -65,26 +75,6 @@ User: {{ env.USER }}
     assert lines[1] == "Today's date: 2023-12-25"
     assert lines[2] == "Slug: test-file"
     assert lines[3] == "User: testuser"
-
-
-def test_renderer_with_variables():
-    """Test render_with_variables method."""
-    renderer = AgentRenderer()
-
-    content = """
-# Task
-{{ user_prompt }}
-
-# Context
-Weather: {{ weather }}
-Temperature: {{ temperature|default("Unknown") }}
-""".strip()
-
-    result = renderer.render_with_variables(content, user_prompt="Test the system", variables={"weather": "Sunny"})
-
-    assert "Test the system" in result
-    assert "Weather: Sunny" in result
-    assert "Temperature: Unknown" in result
 
 
 def test_renderer_jinja_features():
@@ -253,21 +243,6 @@ Custom: {{ env.get('CUSTOM_VAR', 'not_set') }}
     assert "Custom: not_set" in result
 
 
-def test_render_with_variables_defaults():
-    """Test render_with_variables with default parameters."""
-    renderer = AgentRenderer()
-
-    content = "Prompt: {{ user_prompt|default('No prompt') }}"
-
-    # Test with empty prompt
-    result = renderer.render_with_variables(content)
-    assert "Prompt:" in result  # Empty string, not default
-
-    # Test with None variables
-    result = renderer.render_with_variables(content, variables=None)
-    assert "Prompt:" in result
-
-
 def test_slugify_edge_cases():
     """Test slugify function with edge cases."""
     assert slugify("UPPERCASE") == "uppercase"
@@ -292,42 +267,6 @@ def test_renderer_error_handling():
     content = "{{ 'test' | nonexistent_filter }}"
     with pytest.raises(ValueError, match="Template rendering failed"):
         renderer.render(content)
-
-
-def test_render_with_variables_demo_style(monkeypatch):
-    """Ensure the developer demo scenario renders as expected."""
-    monkeypatch.setenv("USER", "demo_user")
-
-    content = """
-# System
-Current time: {{ now() }}
-Today: {{ today() }}
-
-# Task
-{{ user_prompt }}
-
-# Test Variables
-Weather: {{ weather|default("Unknown") }}
-User: {{ env.USER }}
-""".strip()
-
-    renderer = AgentRenderer()
-
-    with patch("tsugite.renderer.datetime") as mock_dt:
-        mock_dt.now.return_value = datetime(2024, 1, 1, 12, 0, 0)
-        result = renderer.render_with_variables(
-            content,
-            user_prompt="Test task",
-            variables={"weather": "Sunny"},
-        )
-
-    assert "# System" in result
-    assert "Current time: 2024-01-01T12:00:00" in result
-    assert "Today: 2024-01-01" in result
-    assert "# Task" in result
-    assert "Test task" in result
-    assert "Weather: Sunny" in result
-    assert "User: demo_user" in result
 
 
 def test_filesystem_helper_functions(tmp_path):
@@ -423,3 +362,312 @@ Content: {{ read_text("nonexistent.txt", default="<no file>") }}
 
     result = renderer.render(content)
     assert "Content: <no file>" in result
+
+
+class TestIgnoreSyntax:
+    """Tests for the <!-- tsu:ignore --> directive."""
+
+    def test_strip_single_ignore_block(self):
+        """Test stripping a single ignore block."""
+        content = """
+Normal content
+<!-- tsu:ignore -->
+This is ignored
+<!-- /tsu:ignore -->
+More content
+""".strip()
+
+        result = strip_ignored_sections(content)
+
+        assert "Normal content" in result
+        assert "More content" in result
+        assert "This is ignored" not in result
+        assert "tsu:ignore" not in result
+
+    def test_strip_multiple_ignore_blocks(self):
+        """Test stripping multiple ignore blocks."""
+        content = """
+Start
+<!-- tsu:ignore -->
+First ignored block
+<!-- /tsu:ignore -->
+Middle
+<!-- tsu:ignore -->
+Second ignored block
+<!-- /tsu:ignore -->
+End
+""".strip()
+
+        result = strip_ignored_sections(content)
+
+        assert "Start" in result
+        assert "Middle" in result
+        assert "End" in result
+        assert "First ignored block" not in result
+        assert "Second ignored block" not in result
+
+    def test_strip_inline_ignore(self):
+        """Test stripping inline ignore blocks."""
+        content = "Before <!-- tsu:ignore -->ignored content<!-- /tsu:ignore --> after"
+
+        result = strip_ignored_sections(content)
+
+        assert "Before" in result
+        assert "after" in result
+        assert "ignored content" not in result
+
+    def test_strip_empty_ignore_block(self):
+        """Test stripping empty ignore blocks."""
+        content = """
+Normal content
+<!-- tsu:ignore -->
+<!-- /tsu:ignore -->
+More content
+""".strip()
+
+        result = strip_ignored_sections(content)
+
+        assert "Normal content" in result
+        assert "More content" in result
+        assert "tsu:ignore" not in result
+
+    def test_strip_ignore_with_no_spaces(self):
+        """Test stripping ignore blocks without spaces in tags."""
+        content = """
+Normal
+<!--tsu:ignore-->
+Ignored
+<!--/tsu:ignore-->
+After
+""".strip()
+
+        result = strip_ignored_sections(content)
+
+        assert "Normal" in result
+        assert "After" in result
+        assert "Ignored" not in result
+
+    def test_strip_ignore_with_extra_spaces(self):
+        """Test stripping ignore blocks with extra spaces."""
+        content = """
+Normal
+<!--   tsu:ignore   -->
+Ignored
+<!--   /tsu:ignore   -->
+After
+""".strip()
+
+        result = strip_ignored_sections(content)
+
+        assert "Normal" in result
+        assert "After" in result
+        assert "Ignored" not in result
+
+    def test_ignore_block_with_jinja_variables(self):
+        """Test that Jinja variables in ignored blocks are stripped."""
+        content = """
+Normal {{ variable }}
+<!-- tsu:ignore -->
+This has {{ jinja_var }} that should be ignored
+{% if condition %}
+This too
+{% endif %}
+<!-- /tsu:ignore -->
+After
+""".strip()
+
+        result = strip_ignored_sections(content)
+
+        assert "Normal {{ variable }}" in result
+        assert "After" in result
+        assert "jinja_var" not in result
+        assert "condition" not in result
+
+    def test_ignore_block_with_multiline_content(self):
+        """Test stripping ignore blocks with multiple lines."""
+        content = """
+# Agent Documentation
+
+<!-- tsu:ignore -->
+## How to Use This Agent
+
+This agent performs the following steps:
+1. First step
+2. Second step
+3. Third step
+
+Example usage:
+```bash
+tsugite run agent.md "task"
+```
+<!-- /tsu:ignore -->
+
+# Actual Agent Instructions
+
+Do the task: {{ user_prompt }}
+""".strip()
+
+        result = strip_ignored_sections(content)
+
+        assert "# Agent Documentation" in result
+        assert "# Actual Agent Instructions" in result
+        assert "Do the task: {{ user_prompt }}" in result
+        assert "How to Use This Agent" not in result
+        assert "Example usage" not in result
+        assert "tsugite run" not in result
+
+    def test_renderer_with_ignore_blocks(self):
+        """Test that AgentRenderer properly strips ignore blocks during rendering."""
+        renderer = AgentRenderer()
+
+        content = """
+# Agent Task
+
+<!-- tsu:ignore -->
+DOCUMENTATION SECTION:
+This agent is for testing.
+Variables available: {{ user_prompt }}
+<!-- /tsu:ignore -->
+
+Task: {{ user_prompt }}
+
+{% if mode == "verbose" %}
+Verbose mode enabled
+{% endif %}
+""".strip()
+
+        result = renderer.render(content, {"user_prompt": "test task", "mode": "verbose"})
+
+        assert "# Agent Task" in result
+        assert "Task: test task" in result
+        assert "Verbose mode enabled" in result
+        assert "DOCUMENTATION SECTION" not in result
+        assert "This agent is for testing" not in result
+
+    def test_no_ignore_blocks(self):
+        """Test that content without ignore blocks passes through unchanged."""
+        content = """
+Normal content
+With multiple lines
+No ignore blocks here
+""".strip()
+
+        result = strip_ignored_sections(content)
+
+        assert result == content
+
+    def test_ignore_blocks_dont_affect_regular_comments(self):
+        """Test that regular HTML comments are not affected."""
+        content = """
+Normal content
+<!-- Regular HTML comment -->
+<!-- Another comment -->
+Still normal
+""".strip()
+
+        result = strip_ignored_sections(content)
+
+        # Regular HTML comments should remain
+        assert "<!-- Regular HTML comment -->" in result
+        assert "<!-- Another comment -->" in result
+        assert "Normal content" in result
+        assert "Still normal" in result
+
+
+class TestSubagentContextRendering:
+    """Tests for rendering is_subagent and parent_agent context variables."""
+
+    def test_render_toplevel_agent_context(self):
+        """Test rendering top-level agent with is_subagent=False."""
+        renderer = AgentRenderer()
+
+        content = """
+{% if is_subagent %}
+I am a subagent spawned by {{ parent_agent }}.
+{% else %}
+I am a top-level agent.
+{% endif %}
+""".strip()
+
+        result = renderer.render(content, {"is_subagent": False, "parent_agent": None})
+
+        assert "I am a top-level agent." in result
+        assert "I am a subagent" not in result
+
+    def test_render_subagent_context(self):
+        """Test rendering subagent with is_subagent=True."""
+        renderer = AgentRenderer()
+
+        content = """
+{% if is_subagent %}
+I am a subagent spawned by {{ parent_agent }}.
+{% else %}
+I am a top-level agent.
+{% endif %}
+""".strip()
+
+        result = renderer.render(content, {"is_subagent": True, "parent_agent": "coordinator"})
+
+        assert "I am a subagent spawned by coordinator." in result
+        assert "I am a top-level agent." not in result
+
+    def test_render_subagent_with_no_parent(self):
+        """Test rendering subagent without parent_agent set."""
+        renderer = AgentRenderer()
+
+        content = """
+{% if is_subagent %}
+{% if parent_agent %}
+Spawned by {{ parent_agent }}.
+{% else %}
+Spawned by unknown parent.
+{% endif %}
+{% else %}
+Top-level agent.
+{% endif %}
+""".strip()
+
+        result = renderer.render(content, {"is_subagent": True, "parent_agent": None})
+
+        assert "Spawned by unknown parent." in result
+        assert "Top-level agent." not in result
+
+    def test_render_complex_subagent_logic(self):
+        """Test complex conditional logic with subagent context."""
+        renderer = AgentRenderer()
+
+        content = """
+# Agent Instructions
+
+{% if is_subagent %}
+**Mode:** Subagent for {{ parent_agent }}
+**Output:** Return structured data
+**Verbosity:** Low
+{% else %}
+**Mode:** Interactive
+**Output:** Formatted for user
+**Verbosity:** High
+{% endif %}
+
+Task: {{ user_prompt }}
+""".strip()
+
+        # Test as subagent
+        result_sub = renderer.render(
+            content, {"is_subagent": True, "parent_agent": "orchestrator", "user_prompt": "analyze data"}
+        )
+
+        assert "**Mode:** Subagent for orchestrator" in result_sub
+        assert "**Output:** Return structured data" in result_sub
+        assert "**Verbosity:** Low" in result_sub
+        assert "Task: analyze data" in result_sub
+
+        # Test as top-level
+        result_top = renderer.render(
+            content, {"is_subagent": False, "parent_agent": None, "user_prompt": "analyze data"}
+        )
+
+        assert "**Mode:** Interactive" in result_top
+        assert "**Output:** Formatted for user" in result_top
+        assert "**Verbosity:** High" in result_top
+        assert "Task: analyze data" in result_top

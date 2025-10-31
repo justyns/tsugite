@@ -99,7 +99,14 @@ def test_config_with_empty_values(tmp_path):
     with open(config_path) as f:
         data = json.load(f)
 
-    assert data == {}
+    # chat_theme, history_enabled, and auto_context have default values so they will always be saved
+    assert data == {
+        "chat_theme": "gruvbox",
+        "history_enabled": True,
+        "auto_context_enabled": True,
+        "auto_context_files": [".tsugite/CONTEXT.md", "AGENTS.md", "CLAUDE.md"],
+        "auto_context_include_global": True,
+    }
 
 
 def test_update_existing_alias(tmp_path):
