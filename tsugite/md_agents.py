@@ -3,7 +3,9 @@
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Union
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .utils import parse_yaml_frontmatter
 
@@ -38,50 +40,41 @@ def _parse_directive_attribute(
     return value
 
 
-@dataclass
-class AgentConfig:
+class AgentConfig(BaseModel):
     """Agent configuration from YAML frontmatter."""
+
+    model_config = ConfigDict(
+        extra="forbid",  # Reject unknown fields to catch typos in YAML
+        str_strip_whitespace=True,  # Auto-strip whitespace from strings
+    )
 
     name: str
     description: str = ""
     model: Optional[str] = None
     max_turns: int = 5
-    tools: List[str] = field(default_factory=list)
-    prefetch: List[Dict[str, Any]] = field(default_factory=list)
-    attachments: List[str] = field(default_factory=list)
+    tools: List[str] = Field(default_factory=list)
+    prefetch: List[Dict[str, Any]] = Field(default_factory=list)
+    attachments: List[str] = Field(default_factory=list)
     permissions_profile: str = "default"
-    context_budget: Dict[str, Any] = field(default_factory=dict)
+    context_budget: Dict[str, Any] = Field(default_factory=lambda: {"tokens": 8000, "priority": ["system", "task"]})
     instructions: str = ""
-    mcp_servers: Optional[Dict[str, Optional[List[str]]]] = None
+    mcp_servers: Dict[str, Optional[List[str]]] = Field(default_factory=dict)
     extends: Optional[str] = None
     reasoning_effort: Optional[str] = None  # For reasoning models (low, medium, high)
-    custom_tools: List[Dict[str, Any]] = field(default_factory=list)  # Per-agent shell tools
+    custom_tools: List[Dict[str, Any]] = Field(default_factory=list)  # Per-agent shell tools
     text_mode: bool = False  # Allow text-only responses (code blocks optional)
-    initial_tasks: List[Any] = field(default_factory=list)  # Tasks to pre-populate (strings or dicts)
+    initial_tasks: List[Union[str, Dict[str, Any]]] = Field(
+        default_factory=list
+    )  # Tasks to pre-populate (strings or dicts)
     disable_history: bool = False  # Disable conversation history persistence for this agent
     auto_context: Optional[bool] = None  # Auto-load context files (None = use config default)
 
-    def __post_init__(self):
-        if self.tools is None:
-            self.tools = []
-        if self.prefetch is None:
-            self.prefetch = []
-        if self.attachments is None:
-            self.attachments = []
-        if not self.context_budget:
-            self.context_budget = {"tokens": 8000, "priority": ["system", "task"]}
-        if self.instructions is None:
-            self.instructions = ""
-        if self.mcp_servers is None:
-            self.mcp_servers = {}
-        if self.custom_tools is None:
-            self.custom_tools = []
-        if self.initial_tasks is None:
-            self.initial_tasks = []
-
-        # Normalize initial_tasks: convert strings to dicts
+    @field_validator("initial_tasks", mode="after")
+    @classmethod
+    def normalize_initial_tasks(cls, v: List[Union[str, Dict[str, Any]]]) -> List[Dict[str, Any]]:
+        """Normalize initial_tasks: convert strings to dicts with defaults."""
         normalized_tasks = []
-        for task in self.initial_tasks:
+        for task in v:
             if isinstance(task, str):
                 # Simple string format: convert to dict with defaults
                 normalized_tasks.append({"title": task, "status": "pending", "optional": False})
@@ -96,7 +89,7 @@ class AgentConfig:
             else:
                 raise ValueError(f"Invalid initial_tasks entry: {task}. Must be string or dict.")
 
-        self.initial_tasks = normalized_tasks
+        return normalized_tasks
 
 
 @dataclass

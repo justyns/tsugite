@@ -201,7 +201,9 @@ model: ollama:test
     agent_file.write_text(content)
 
     # This should fail during parsing since name is required
-    with pytest.raises(TypeError):
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
         parse_agent_file(agent_file)
 
 
@@ -237,12 +239,11 @@ tools: [123, "valid_tool", null]
     agent_file = temp_dir / "invalid_tools.md"
     agent_file.write_text(content)
 
-    agent = parse_agent_file(agent_file)
-    errors = validate_agent(agent)
+    # Pydantic now validates tools at parse time - should raise ValidationError
+    from pydantic import ValidationError
 
-    # Should have errors for non-string tools
-    assert len(errors) > 0
-    assert any("Tool name must be string" in error for error in errors)
+    with pytest.raises(ValidationError):
+        parse_agent_file(agent_file)
 
 
 def test_validate_agent_directive_errors(temp_dir):
@@ -493,5 +494,8 @@ initial_tasks:
     agent_file = temp_dir / "task_agent.md"
     agent_file.write_text(content)
 
-    with pytest.raises(ValueError, match="Invalid initial_tasks entry.*Must be string or dict"):
+    # Pydantic now validates initial_tasks at parse time - should raise ValidationError
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
         parse_agent_file(agent_file)

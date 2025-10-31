@@ -1,16 +1,21 @@
 """MCP server configuration loading and management."""
 
 import json
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
+
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from .xdg import get_xdg_config_path, get_xdg_write_path
 
 
-@dataclass
-class MCPServerConfig:
+class MCPServerConfig(BaseModel):
     """Configuration for a single MCP server."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+    )
 
     name: str
     command: Optional[str] = None
@@ -19,7 +24,9 @@ class MCPServerConfig:
     url: Optional[str] = None
     type: Optional[str] = None
 
-    def __post_init__(self):
+    @model_validator(mode="after")
+    def validate_server_config(self) -> "MCPServerConfig":
+        """Validate server configuration and auto-detect type."""
         if self.type is None:
             if self.command:
                 self.type = "stdio"
@@ -33,6 +40,8 @@ class MCPServerConfig:
 
         if self.type == "http" and not self.url:
             raise ValueError(f"HTTP server '{self.name}' must have 'url' specified")
+
+        return self
 
     def is_stdio(self) -> bool:
         return self.type == "stdio"
@@ -118,17 +127,12 @@ def save_mcp_config(servers: Dict[str, MCPServerConfig], path: Optional[Path] = 
     config_data = {"mcpServers": {}}
 
     for name, server in servers.items():
-        server_dict = {}
+        # Use Pydantic's model_dump to serialize, excluding None values and the name field
+        server_dict = server.model_dump(exclude_none=True, exclude={"name"})
 
-        if server.is_stdio():
-            server_dict["command"] = server.command
-            if server.args:
-                server_dict["args"] = server.args
-            if server.env:
-                server_dict["env"] = server.env
-        else:  # HTTP
-            server_dict["type"] = "http"
-            server_dict["url"] = server.url
+        # For stdio servers, don't include 'type' field (it's implicit)
+        if server.is_stdio() and "type" in server_dict:
+            del server_dict["type"]
 
         config_data["mcpServers"][name] = server_dict
 

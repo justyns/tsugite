@@ -4,16 +4,20 @@ This module provides a lightweight system for defining tools that wrap shell com
 allowing users to create custom tools without writing Python code.
 """
 
-from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from tsugite.tools import tool
 from tsugite.utils import execute_shell_command
 
 
-@dataclass
-class ShellToolParameter:
+class ShellToolParameter(BaseModel):
     """Definition of a parameter for a shell tool."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
 
     name: str
     type: str  # "str", "int", "bool", "float"
@@ -52,14 +56,17 @@ class ShellToolParameter:
             raise ValueError(f"Unknown parameter type: {self.type}")
 
 
-@dataclass
-class ShellToolDefinition:
+class ShellToolDefinition(BaseModel):
     """Definition of a shell-based tool."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
 
     name: str
     description: str
     command: str  # Template string with {param} placeholders
-    parameters: Dict[str, ShellToolParameter] = field(default_factory=dict)
+    parameters: Dict[str, ShellToolParameter] = Field(default_factory=dict)
     timeout: int = 30
     safe_mode: bool = True  # Use run_safe vs run
     shell: bool = True  # Execute via shell

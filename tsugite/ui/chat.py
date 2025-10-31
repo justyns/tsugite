@@ -1,49 +1,30 @@
 """Chat session management for interactive conversations with agents."""
 
 import json
-from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from tsugite.config import load_config
 from tsugite.md_agents import parse_agent_file
 from tsugite.ui import CustomUILogger
 
 
-@dataclass
-class ChatTurn:
+class ChatTurn(BaseModel):
     """Represents one turn in a conversation."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
 
     timestamp: datetime
     user_message: str
     agent_response: str
-    tool_calls: List[str] = field(default_factory=list)
+    tool_calls: List[str] = Field(default_factory=list)
     token_count: Optional[int] = None
     cost: Optional[float] = None
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for serialization."""
-        return {
-            "timestamp": self.timestamp.isoformat(),
-            "user_message": self.user_message,
-            "agent_response": self.agent_response,
-            "tool_calls": self.tool_calls,
-            "token_count": self.token_count,
-            "cost": self.cost,
-        }
-
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "ChatTurn":
-        """Create from dictionary."""
-        return cls(
-            timestamp=datetime.fromisoformat(data["timestamp"]),
-            user_message=data["user_message"],
-            agent_response=data["agent_response"],
-            tool_calls=data.get("tool_calls", []),
-            token_count=data.get("token_count"),
-            cost=data.get("cost"),
-        )
 
 
 class ChatManager:
@@ -247,7 +228,7 @@ class ChatManager:
             "agent": agent.config.name or str(self.agent_path),
             "model": self.model_override or agent.config.model,
             "created_at": self.session_start.isoformat(),
-            "turns": [turn.to_dict() for turn in self.conversation_history],
+            "turns": [turn.model_dump(mode="json") for turn in self.conversation_history],
             "metadata": {
                 "total_turns": len(self.conversation_history),
                 "agent_path": str(self.agent_path),
@@ -263,7 +244,7 @@ class ChatManager:
         self.conversation_history = []
 
         for turn_data in data.get("turns", []):
-            turn = ChatTurn.from_dict(turn_data)
+            turn = ChatTurn.model_validate(turn_data)
             self.conversation_history.append(turn)
 
         if "created_at" in data:

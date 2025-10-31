@@ -1,9 +1,10 @@
 """Task tracking tools for agents to manage work across execution steps."""
 
-from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from . import tool
 
@@ -18,17 +19,20 @@ class TaskStatus(Enum):
     CANCELLED = "cancelled"
 
 
-@dataclass
-class Task:
+class Task(BaseModel):
     """Individual task with metadata."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
 
     id: int
     title: str
     status: TaskStatus
     parent_id: Optional[int] = None
     optional: bool = False
-    created_at: datetime = field(default_factory=datetime.now)
-    updated_at: datetime = field(default_factory=datetime.now)
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
     completed_at: Optional[datetime] = None
 
 

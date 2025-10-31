@@ -349,7 +349,7 @@ def merge_dict_fields(parent, child) -> Dict[str, Any]:
     merged_context = {**parent_context, **child_context}
 
     return {
-        "mcp_servers": merged_mcp if merged_mcp else None,
+        "mcp_servers": merged_mcp,
         "context_budget": merged_context,
     }
 
