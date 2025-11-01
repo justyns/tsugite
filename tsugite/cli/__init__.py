@@ -428,7 +428,7 @@ def run(
         ..., help="Agent and optional prompt (e.g., +assistant 'task' or +assistant create ticket)"
     ),
     root: Optional[str] = typer.Option(None, "--root", help="Working directory"),
-    model: Optional[str] = typer.Option(None, "--model", help="Override agent model"),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="Override agent model"),
     ui: Optional[str] = typer.Option(None, "--ui", help="UI mode: plain, headless, or live (default: minimal)"),
     non_interactive: bool = typer.Option(False, "--non-interactive", help="Run without interactive prompts"),
     history_dir: Optional[str] = typer.Option(None, "--history-dir", help="Directory to store history files"),
@@ -928,7 +928,7 @@ def version():
 @app.command()
 def chat(
     agent: Optional[str] = typer.Argument(None, help="Agent name or path (optional, uses default if not provided)"),
-    model: Optional[str] = typer.Option(None, "--model", help="Override agent model"),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="Override agent model"),
     max_history: int = typer.Option(DEFAULT_MAX_CHAT_HISTORY, "--max-history", help="Maximum turns to keep in context"),
     stream: bool = typer.Option(False, "--stream", help="Stream LLM responses in real-time"),
     no_history: bool = typer.Option(False, "--no-history", help="Disable conversation history persistence"),
