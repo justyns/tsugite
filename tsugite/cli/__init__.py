@@ -408,45 +408,6 @@ def _unpack_execution_result(result, should_save_history: bool, executor):
     return result_str, None, None, None, None, None
 
 
-def _save_to_history(
-    should_save_history: bool,
-    agent_file: Path,
-    prompt: str,
-    result_str: str,
-    model: Optional[str],
-    token_count: Optional[int],
-    cost: Optional[float],
-    execution_steps,
-    continue_conversation_id: Optional[str],
-    system_prompt,
-    attachments,
-):
-    """Save execution to history if enabled."""
-    if not should_save_history:
-        return
-
-    try:
-        from tsugite.agent_runner import get_agent_info
-        from tsugite.agent_runner.history_integration import save_run_to_history
-
-        agent_info = get_agent_info(agent_file)
-        save_run_to_history(
-            agent_path=agent_file,
-            agent_name=agent_info["name"],
-            prompt=prompt,
-            result=result_str,
-            model=model or agent_info.get("model", "default"),
-            token_count=token_count,
-            cost=cost,
-            execution_steps=execution_steps,
-            continue_conversation_id=continue_conversation_id,
-            system_prompt=system_prompt,
-            attachments=attachments,
-        )
-    except Exception as e:
-        print(f"Warning: Failed to save to history: {e}", file=sys.stderr)
-
-
 def _display_result(result_str: str, headless: bool, final_only: bool, no_color: bool, stderr_console: Console):
     """Display the final result to the user."""
     from rich.markdown import Markdown
@@ -730,19 +691,26 @@ def run(
                 result, should_save_history, executor
             )
 
-            _save_to_history(
-                should_save_history,
-                agent_file,
-                prompt,
-                result_str,
-                model,
-                token_count,
-                cost,
-                execution_steps,
-                continue_conversation_id,
-                system_prompt,
-                attachments,
-            )
+            if should_save_history:
+                try:
+                    from tsugite.agent_runner.history_integration import save_run_to_history
+
+                    agent_info = get_agent_info(agent_file)
+                    save_run_to_history(
+                        agent_path=agent_file,
+                        agent_name=agent_info["name"],
+                        prompt=prompt,
+                        result=result_str,
+                        model=model or agent_info.get("model", "default"),
+                        token_count=token_count,
+                        cost=cost,
+                        execution_steps=execution_steps,
+                        continue_conversation_id=continue_conversation_id,
+                        system_prompt=system_prompt,
+                        attachments=attachments,
+                    )
+                except Exception:
+                    pass
 
             _display_result(result_str, headless, final_only, no_color, stderr_console)
 
