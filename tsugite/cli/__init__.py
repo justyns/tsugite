@@ -27,6 +27,7 @@ from .history import history_app
 from .init import init
 from .mcp import mcp_app
 from .tools import tools_app
+from .validate import validate_command
 
 # Chat history limit - keeps last N turns to balance context retention vs memory usage
 DEFAULT_MAX_CHAT_HISTORY = 50
@@ -1015,3 +1016,4 @@ app.add_typer(tools_app, name="tools")
 app.add_typer(history_app, name="history")
 app.command("benchmark")(benchmark_command)
 app.command("init")(init)
+app.command("validate")(validate_command)

@@ -157,6 +157,60 @@ Task: {{ user_prompt }}
 | `visibility` | `public` | Agent visibility: `public`, `private`, `internal` |
 | `spawnable` | `true` | Whether agent can be spawned by other agents |
 
+### Frontmatter Validation
+
+Tsugite provides JSON Schema support for validating agent frontmatter in VSCode and other editors.
+
+**Schema Location:**
+- Package: `tsugite/schemas/agent.schema.json`
+- GitHub: `https://raw.githubusercontent.com/anthropics/tsugite/main/tsugite/schemas/agent.schema.json`
+
+**VSCode Setup:**
+
+Add to your user settings (⌘+, or Ctrl+,) or workspace `.vscode/settings.json`:
+
+```json
+{
+  "yaml.schemas": {
+    "https://raw.githubusercontent.com/anthropics/tsugite/main/tsugite/schemas/agent.schema.json": ["**/*.md"]
+  }
+}
+```
+
+**Note:** The VSCode YAML extension has limited support for YAML frontmatter in markdown files. For reliable validation, use the CLI command below.
+
+**CLI Validation:**
+
+```bash
+# Validate single agent
+tsugite validate agents/my_agent.md
+
+# Validate multiple agents with glob
+tsugite validate agents/*.md
+
+# Show detailed information
+tsugite validate agents/*.md --verbose
+```
+
+**Exit codes:**
+- `0`: All agents valid
+- `1`: One or more validation failures (useful for CI/CD)
+
+**What's validated:**
+- Field names (catches typos like `max_turn` instead of `max_turns`)
+- Field types (e.g., `max_turns` must be integer, not string)
+- Required fields (e.g., `name` is required)
+- Enum values (e.g., `visibility` must be `public`, `private`, or `internal`)
+- Extra fields (unknown fields are rejected)
+
+**Regenerating the schema:**
+
+The schema is auto-generated from the `AgentConfig` Pydantic model. To regenerate after modifying `AgentConfig`:
+
+```bash
+uv run python scripts/regenerate_schema.py
+```
+
 ### Template Helpers
 
 | Helper | Example |

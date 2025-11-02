@@ -1,0 +1,235 @@
+{
+  "additionalProperties": false,
+  "description": "YAML frontmatter configuration for Tsugite markdown agents. See https://github.com/anthropics/tsugite for full documentation.",
+  "properties": {
+    "name": {
+      "title": "Name",
+      "type": "string",
+      "description": "Agent identifier. Used for referencing with +name syntax. Example: 'researcher', 'code-reviewer'",
+      "examples": [
+        "researcher",
+        "code-reviewer",
+        "my_agent"
+      ]
+    },
+    "description": {
+      "default": "",
+      "title": "Description",
+      "type": "string"
+    },
+    "model": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Model",
+      "description": "LLM model in format provider:model[:variant]. Examples: 'ollama:qwen2.5-coder:7b', 'openai:gpt-4o', 'anthropic:claude-3-5-sonnet'",
+      "examples": [
+        "ollama:qwen2.5-coder:7b",
+        "openai:gpt-4o",
+        "anthropic:claude-3-5-sonnet"
+      ]
+    },
+    "max_turns": {
+      "default": 5,
+      "title": "Max Turns",
+      "type": "integer"
+    },
+    "tools": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Tools",
+      "type": "array",
+      "description": "List of tool names, globs (*_search), categories (@fs), or exclusions (-delete_file). Examples: ['read_file', 'write_file'], ['@fs', 'web_search']",
+      "examples": [
+        [
+          "read_file",
+          "write_file"
+        ],
+        [
+          "@fs",
+          "web_search"
+        ],
+        [
+          "*_search",
+          "-delete_file"
+        ]
+      ]
+    },
+    "prefetch": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Prefetch",
+      "type": "array"
+    },
+    "attachments": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Attachments",
+      "type": "array"
+    },
+    "permissions_profile": {
+      "default": "default",
+      "title": "Permissions Profile",
+      "type": "string"
+    },
+    "context_budget": {
+      "additionalProperties": true,
+      "title": "Context Budget",
+      "type": "object"
+    },
+    "instructions": {
+      "default": "",
+      "title": "Instructions",
+      "type": "string"
+    },
+    "mcp_servers": {
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "title": "Mcp Servers",
+      "type": "object"
+    },
+    "extends": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Extends",
+      "description": "Parent agent to inherit from. Use 'none' to opt out of default inheritance. Examples: 'default', 'chat-assistant', 'none'",
+      "examples": [
+        "default",
+        "chat-assistant",
+        "none"
+      ]
+    },
+    "reasoning_effort": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reasoning Effort",
+      "description": "Reasoning effort for o1/o3 models. Options: 'low', 'medium', 'high'. Only applicable to OpenAI reasoning models.",
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    "custom_tools": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Custom Tools",
+      "type": "array"
+    },
+    "text_mode": {
+      "default": false,
+      "title": "Text Mode",
+      "type": "boolean"
+    },
+    "initial_tasks": {
+      "items": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "additionalProperties": true,
+            "type": "object"
+          }
+        ]
+      },
+      "title": "Initial Tasks",
+      "type": "array",
+      "description": "Tasks to pre-populate when agent starts. Can be strings (default to pending/required) or objects with title, status, and optional fields.",
+      "examples": [
+        [
+          "Read and analyze code",
+          "Check for security issues"
+        ],
+        [
+          {
+            "title": "Core feature",
+            "status": "pending",
+            "optional": false
+          },
+          {
+            "title": "Nice formatting",
+            "optional": true
+          }
+        ]
+      ]
+    },
+    "disable_history": {
+      "default": false,
+      "title": "Disable History",
+      "type": "boolean"
+    },
+    "auto_context": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Auto Context"
+    },
+    "visibility": {
+      "default": "public",
+      "title": "Visibility",
+      "type": "string",
+      "description": "Agent visibility level. 'public': can be spawned by any agent, 'private': cannot be spawned unless explicitly allowed, 'internal': implementation detail not meant to be spawned",
+      "enum": [
+        "public",
+        "private",
+        "internal"
+      ]
+    },
+    "spawnable": {
+      "default": true,
+      "title": "Spawnable",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "title": "Tsugite Agent Configuration",
+  "type": "object",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/anthropics/tsugite/main/tsugite/schemas/agent.schema.json"
+}
