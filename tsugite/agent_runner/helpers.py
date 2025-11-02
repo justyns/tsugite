@@ -1,7 +1,7 @@
 """Shared helper functions for agent execution."""
 
 import threading
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 from rich.console import Console
 
@@ -12,6 +12,10 @@ _stderr_console = get_stderr_console()
 
 # Thread-local storage for tracking currently executing agent
 _current_agent_context = threading.local()
+
+# Module-level storage for allowed agents (single-threaded CLI execution)
+# Subagents run in separate processes, so this doesn't need to be thread-local
+_allowed_agents: Optional[List[str]] = None
 
 
 def set_current_agent(name: str) -> None:
@@ -28,6 +32,31 @@ def clear_current_agent() -> None:
     """Clear the currently executing agent from thread-local storage."""
     if hasattr(_current_agent_context, "name"):
         delattr(_current_agent_context, "name")
+
+
+def set_allowed_agents(agents: Optional[List[str]]) -> None:
+    """Set list of allowed agents for spawning in multi-agent mode.
+
+    Args:
+        agents: List of agent names allowed to spawn, or None for unrestricted
+    """
+    global _allowed_agents
+    _allowed_agents = agents
+
+
+def get_allowed_agents() -> Optional[List[str]]:
+    """Get list of allowed agents for spawning.
+
+    Returns:
+        List of allowed agent names, or None if unrestricted
+    """
+    return _allowed_agents
+
+
+def clear_allowed_agents() -> None:
+    """Clear the allowed agents list from module-level storage."""
+    global _allowed_agents
+    _allowed_agents = None
 
 
 def get_display_console(custom_logger: Optional[Any]) -> Console:

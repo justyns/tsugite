@@ -18,7 +18,7 @@ Quick reference for building, composing, and running Tsugite agents.
 | Final only | `tsugite run +agent "task" --final-only` (or `--quiet`) |
 | Render prompt | `tsugite render agent.md "task"` |
 | Render raw | `tsugite render agent.md "task" --raw` |
-| Multi-agent | `tsugite run +coordinator +helper1 +helper2 "task"` |
+| Multi-agent mode | `tsugite run +primary +helper1 +helper2 "task"` |
 | MCP register | `tsugite mcp add name --url http://host/mcp` |
 | MCP test | `tsugite mcp test name --trust-code` |
 | Custom tool | `tsugite tools add name -c "cmd {arg}" -p arg:required` |
@@ -154,6 +154,8 @@ Task: {{ user_prompt }}
 | `text_mode` | `false` | Allow text responses without code blocks |
 | `disable_history` | `false` | Disable conversation history for this agent |
 | `auto_context` | `null` | Auto-load context files (`true`/`false`/`null` = use config) |
+| `visibility` | `public` | Agent visibility: `public`, `private`, `internal` |
+| `spawnable` | `true` | Whether agent can be spawned by other agents |
 
 ### Template Helpers
 
@@ -1218,6 +1220,128 @@ tsugite mcp add pubmed --command uvx --args "pubmedmcp@0.1.3"
 ```
 
 **Run:** Requires `--trust-mcp-code` for remote code execution.
+
+## Multi-Agent Mode
+
+When you specify multiple agents on the command line, the first agent runs as the primary agent, and the remaining agents become the **allowed agents** that the primary can spawn.
+
+**Syntax:**
+
+```bash
+tsugite run +primary +helper1 +helper2 "task"
+```
+
+**Behavior:**
+
+- First agent (`+primary`) is the main agent that executes
+- Remaining agents (`+helper1`, `+helper2`) are validated at startup
+- Primary agent can **only** spawn agents in the allowed list
+- Attempting to spawn a non-allowed agent will raise a clear error
+- If only one agent specified, spawning is unrestricted (current behavior)
+
+**Example:**
+
+```bash
+# Coordinator can spawn researcher and writer
+tsugite run +coordinator +researcher +writer "Write a report on AI"
+
+# Error: coordinator tries to spawn +editor (not in allowed list)
+# Error message: "Agent 'editor' not in allowed agents list. Allowed: researcher, writer"
+```
+
+**Benefits:**
+
+- ✅ Fail-fast validation: All agents checked at startup
+- ✅ Self-documenting: CLI shows exactly which agents are used
+- ✅ Clear errors: Helpful messages when spawning disallowed agents
+
+**Agent configuration:**
+
+The primary agent needs the `spawn_agent` tool:
+
+```yaml
+---
+name: coordinator
+tools: [spawn_agent, write_file]
+---
+
+Research: {{ spawn_agent("agents/researcher.md", "research AI trends") }}
+Article: {{ spawn_agent("agents/writer.md", "write article") }}
+```
+
+## Agent Visibility & Access Control
+
+Control which agents can be spawned using `visibility` and `spawnable` fields in frontmatter.
+
+### Visibility Levels
+
+**`visibility: public`** (default) - Can be spawned by any agent:
+
+```yaml
+---
+name: researcher
+visibility: public
+---
+```
+
+**`visibility: private`** - Cannot be spawned unless explicitly allowed:
+
+```yaml
+---
+name: company_analyzer
+visibility: private  # Only spawnable via multi-agent mode
+---
+```
+
+**`visibility: internal`** - Implementation detail, not meant to be spawned:
+
+```yaml
+---
+name: _parse_citations
+visibility: internal  # Helper function, not a public agent
+---
+```
+
+### Spawnable Flag
+
+**`spawnable: false`** - Hard block, cannot be spawned even with multi-agent mode:
+
+```yaml
+---
+name: dangerous_operation
+spawnable: false  # Cannot be spawned by other agents
+---
+```
+
+### Behavior Rules
+
+1. **`spawnable: false`** - Hard block, cannot be overridden
+2. **`visibility: private/internal`** - Blocked by default, **overridden by multi-agent mode**
+3. **`visibility: public`** - Always allowed (unless `spawnable: false`)
+4. **Multi-agent mode** - Explicit allow list overrides visibility restrictions
+
+**Examples:**
+
+```bash
+# Error: private agent without explicit permission
+tsugite run +coordinator "task"
+# coordinator tries spawn_agent("company_analyzer.md") → Error
+
+# Success: explicitly allowed via multi-agent mode
+tsugite run +coordinator +company_analyzer "task"
+# coordinator can now spawn company_analyzer
+
+# Error: spawnable: false is a hard block
+tsugite run +coordinator +dangerous_operation "task"
+# coordinator tries spawn_agent("dangerous_operation.md") → Error (cannot override)
+```
+
+**Use cases:**
+
+- 📁 **Organization** - Mark internal helpers with `visibility: internal`
+- 🔒 **Safety** - Mark dangerous agents with `spawnable: false`
+- 🏢 **Privacy** - Mark company-specific agents with `visibility: private`
+- 📚 **Documentation** - `public` agents are the "public API" of your agent library
 
 ## Subagent Context Awareness
 

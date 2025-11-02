@@ -562,14 +562,32 @@ def run(
                 console.print(f"[cyan]Auto-detected agent from conversation: {agent_name}[/cyan]")
                 agent_refs = [f"+{agent_name}"]
 
-            # Resolve single agent (multi-agent syntax no longer supported)
-            agent_ref = agent_refs[0] if agent_refs else None
-            if not agent_ref:
+            # Handle multi-agent mode: first agent is primary, rest are allowed to spawn
+            if not agent_refs:
                 console.print("[red]Error: No agent specified[/red]")
                 raise typer.Exit(1)
 
-            # Load and validate agent using shared helper
-            _, agent_file, _ = load_and_validate_agent(agent_ref, console)
+            from tsugite.agent_runner.helpers import set_allowed_agents
+            from tsugite.md_agents import parse_agent_file
+
+            primary_agent_ref = agent_refs[0]
+
+            if len(agent_refs) > 1:
+                # Multi-agent mode: validate all agents and extract names
+                allowed_agent_names = []
+                for allowed_ref in agent_refs[1:]:
+                    _, allowed_file, _ = load_and_validate_agent(allowed_ref, console)
+                    allowed_agent = parse_agent_file(allowed_file)
+                    allowed_agent_names.append(allowed_agent.config.name)
+
+                set_allowed_agents(allowed_agent_names)
+                console.print(f"[cyan]Allowed agents to spawn: {', '.join(allowed_agent_names)}[/cyan]")
+            else:
+                # Single agent mode: unrestricted spawning
+                set_allowed_agents(None)
+
+            # Load and validate primary agent using shared helper
+            _, agent_file, _ = load_and_validate_agent(primary_agent_ref, console)
 
         except ValueError as e:
             console.print(f"[red]Error: {e}[/red]")

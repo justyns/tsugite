@@ -16,6 +16,7 @@ from tsugite.utils import is_interactive
 
 from .helpers import (
     _stderr_console,
+    clear_allowed_agents,
     clear_current_agent,
     clear_multistep_ui_context,
     get_display_console,
@@ -717,6 +718,7 @@ def run_agent(
     finally:
         # Always clear the current agent context when done
         clear_current_agent()
+        clear_allowed_agents()
 
 
 async def run_agent_async(
@@ -857,6 +859,7 @@ async def run_agent_async(
     finally:
         # Always clear the current agent context when done
         clear_current_agent()
+        clear_allowed_agents()
 
 
 # Predefined loop condition helpers
@@ -1576,6 +1579,7 @@ async def _run_multistep_agent_impl(
     finally:
         # Always clear the current agent context when done
         clear_current_agent()
+        clear_allowed_agents()
 
         # Clean up any pending asyncio tasks (e.g., LiteLLM logging tasks)
         # to prevent RuntimeWarning about tasks being destroyed while pending

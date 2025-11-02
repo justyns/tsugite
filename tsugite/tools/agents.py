@@ -34,7 +34,7 @@ def spawn_agent(
     import json
     import subprocess
 
-    from ..agent_runner import get_current_agent
+    from ..agent_runner import get_allowed_agents, get_current_agent
 
     # Validate agent path
     agent_file = Path(agent_path)
@@ -42,6 +42,44 @@ def spawn_agent(
         agent_file = Path.cwd() / agent_file
     if not agent_file.exists():
         raise ValueError(f"Agent not found: {agent_path}")
+
+    # Parse agent config to check visibility and spawnable
+    content = agent_file.read_text()
+    frontmatter, _ = parse_yaml_frontmatter(content, str(agent_file))
+    agent_name = frontmatter.get("name", agent_file.stem)
+    visibility = frontmatter.get("visibility", "public")
+    spawnable = frontmatter.get("spawnable", True)
+
+    # Check spawnable flag (hard block - cannot be overridden)
+    if not spawnable:
+        raise ValueError(
+            f"Agent '{agent_name}' is marked as non-spawnable (spawnable: false). "
+            f"This agent cannot be spawned by other agents."
+        )
+
+    # Check allowed agents list and visibility
+    allowed_agents = get_allowed_agents()
+    is_explicitly_allowed = allowed_agents is not None and agent_name in allowed_agents
+
+    # If allowed list exists and agent is not in it
+    if allowed_agents is not None and not is_explicitly_allowed:
+        raise ValueError(
+            f"Agent '{agent_name}' is not in the allowed agents list. "
+            f"Allowed: {', '.join(allowed_agents)}. "
+            f"To spawn this agent, add it to the run command: "
+            f'tsugite run +{get_current_agent() or "primary"} +{agent_name} "task"'
+        )
+
+    # Check visibility (only if not explicitly allowed via multi-agent mode)
+    if not is_explicitly_allowed and visibility in ["private", "internal"]:
+        # No allowed list means unrestricted, but respect visibility
+        if allowed_agents is None:
+            raise ValueError(
+                f"Agent '{agent_name}' has visibility '{visibility}' and cannot be spawned. "
+                f"Only 'public' agents can be spawned without explicit permission. "
+                f"To spawn this agent, use multi-agent mode: "
+                f'tsugite run +{get_current_agent() or "primary"} +{agent_name} "task"'
+            )
 
     # Prepare context
     context_data = {

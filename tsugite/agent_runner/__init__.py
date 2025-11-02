@@ -2,10 +2,13 @@
 
 # Re-export public functions for backwards compatibility
 from tsugite.agent_runner.helpers import (  # noqa: F401
+    clear_allowed_agents,
     clear_current_agent,
+    get_allowed_agents,
     get_current_agent,
     get_display_console,
     get_ui_handler,
+    set_allowed_agents,
     set_current_agent,
 )
 from tsugite.agent_runner.metrics import StepMetrics, display_step_metrics  # noqa: F401
@@ -40,6 +43,9 @@ __all__ = [
     "get_current_agent",
     "set_current_agent",
     "clear_current_agent",
+    "get_allowed_agents",
+    "set_allowed_agents",
+    "clear_allowed_agents",
     "get_display_console",
     "get_ui_handler",
 ]

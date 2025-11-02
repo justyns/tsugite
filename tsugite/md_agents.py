@@ -68,6 +68,17 @@ class AgentConfig(BaseModel):
     )  # Tasks to pre-populate (strings or dicts)
     disable_history: bool = False  # Disable conversation history persistence for this agent
     auto_context: Optional[bool] = None  # Auto-load context files (None = use config default)
+    visibility: str = "public"  # Agent visibility: public, private, internal
+    spawnable: bool = True  # Whether this agent can be spawned by other agents
+
+    @field_validator("visibility", mode="after")
+    @classmethod
+    def validate_visibility(cls, v: str) -> str:
+        """Validate visibility is one of the allowed values."""
+        allowed = ["public", "private", "internal"]
+        if v not in allowed:
+            raise ValueError(f"visibility must be one of {allowed}, got: {v}")
+        return v
 
     @field_validator("initial_tasks", mode="after")
     @classmethod
