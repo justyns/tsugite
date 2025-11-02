@@ -192,6 +192,51 @@ Conversational agent for chat mode. Tools: `read_file`, `write_file`, `list_file
 tsugite chat  # Uses this by default
 ```
 
+### code_searcher
+
+AST-based structural code search using ast-grep for precise pattern matching. Provides language-aware code search without false positives.
+
+**Features:**
+- Structural code search (finds patterns by syntax, not just text)
+- Avoids false positives from comments/strings
+- Multi-language support (Python, JS/TS, Rust, Go, Java, C/C++, and more)
+- Metavariable patterns like `function $NAME($ARGS) { $$$ }`
+- Fast Rust-based implementation
+- JSON output support for programmatic use
+
+**When to use:**
+- Finding function/method definitions by structure
+- Locating API usage patterns
+- Security auditing (SQL injection, hardcoded secrets, unsafe eval)
+- Code quality checks (TODO comments in code, empty catch blocks)
+- Avoiding text-search false positives
+
+**When to use file_searcher instead:**
+- Simple text/string searches
+- Documentation or comment searches
+- Maximum speed on large codebases
+
+```bash
+tsugite run +code_searcher "Find all Python function definitions"
+tsugite run +code_searcher "Find console.log usage in TypeScript"
+tsugite run +code_searcher "Security audit: find SQL concatenation"
+```
+
+**Installation (if ast-grep not available):**
+```bash
+# npm (recommended - works everywhere)
+npm install --global @ast-grep/cli
+
+# pip (Python users)
+pip install ast-grep-cli
+
+# homebrew (macOS/Linux)
+brew install ast-grep
+
+# cargo (Rust users)
+cargo install ast-grep --locked
+```
+
 ### Overriding Package Agents
 
 Package-provided agents are stored as `.md` files in the package's `builtin_agents/` directory. You can override them by creating agents with the same name in your project directories. Project agents take precedence over package-provided agents.

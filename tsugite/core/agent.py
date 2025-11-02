@@ -686,11 +686,15 @@ def build_text_mode_prompt(tools_section: str, instructions: str, has_tools: boo
     Returns:
         Complete system prompt for text mode
     """
+    import os
+
     tool_rule = (
         "4. When using code, call tools with keyword arguments: result = tool_name(arg1=value1, arg2=value2)"
         if has_tools
         else "4. Use Python when you need to perform actions"
     )
+
+    cwd = os.getcwd()
 
     return f"""You are an expert assistant who helps with tasks.
 
@@ -709,6 +713,10 @@ Thought: [What you'll do and why]
 # Your code here
 final_answer(result)
 ```
+
+## Current Working Directory
+
+{cwd}
 {tools_section}
 ## Rules:
 
@@ -735,11 +743,15 @@ def build_standard_mode_prompt(tools_section: str, instructions: str, has_tools:
     Returns:
         Complete system prompt for standard mode
     """
+    import os
+
     tool_rule = (
         "3. Call tools with keyword arguments: result = tool_name(arg1=value1, arg2=value2)"
         if has_tools
         else "3. Use standard Python to solve the task"
     )
+
+    cwd = os.getcwd()
 
     return f"""You are an expert assistant who solves tasks using Python code.
 
@@ -750,6 +762,10 @@ To solve a task, you proceed in steps using this pattern:
 3. **Observation:** You'll see the code execution result
 
 You repeat this Thought → Code → Observation cycle until you have the final answer.
+
+## Current Working Directory
+
+{cwd}
 
 ## How to write code:
 
