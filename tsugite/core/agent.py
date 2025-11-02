@@ -25,6 +25,7 @@ from tsugite.events import (
     StreamChunkEvent,
     StreamCompleteEvent,
     TaskStartEvent,
+    WarningEvent,
 )
 
 from .executor import CodeExecutor, LocalExecutor
@@ -132,6 +133,9 @@ class TsugiteAgent:
 
         # Track cumulative cost across all steps
         self.total_cost = 0.0
+
+        # Track if previous turn had error (for recovery UX)
+        self._previous_turn_had_error = False
 
         self.tool_map = {tool.name: tool for tool in tools}
 
@@ -267,7 +271,13 @@ class TsugiteAgent:
         for turn_num in range(self.max_turns):
             # Trigger turn start event
             if self.event_bus:
-                self.event_bus.emit(StepStartEvent(step=turn_num + 1, max_turns=self.max_turns))
+                self.event_bus.emit(
+                    StepStartEvent(
+                        step=turn_num + 1,
+                        max_turns=self.max_turns,
+                        recovering_from_error=self._previous_turn_had_error,
+                    )
+                )
 
             # Build conversation messages from memory
             messages = self._build_messages()
@@ -369,11 +379,22 @@ class TsugiteAgent:
                     observation = exec_result.output
 
                     if exec_result.error:
-                        # Trigger error event for execution errors
+                        # Mark that this turn had an error (for recovery UX)
+                        self._previous_turn_had_error = True
+
+                        # Emit warning instead of error - less alarming and signals retry
+                        error_preview = (
+                            exec_result.error[:100] + "..." if len(exec_result.error) > 100 else exec_result.error
+                        )
                         self.event_bus.emit(
-                            ErrorEvent(error=exec_result.error, error_type="Execution Error", step=turn_num + 1)
+                            WarningEvent(
+                                message=f"Tool failed, will retry: {error_preview}",
+                                step=turn_num + 1,
+                            )
                         )
                     else:
+                        # Success - reset error flag
+                        self._previous_turn_had_error = False
                         self.event_bus.emit(ObservationEvent(observation=observation))
             else:
                 # No code to execute - create a dummy result

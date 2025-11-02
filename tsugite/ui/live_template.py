@@ -274,7 +274,12 @@ class LiveTemplateHandler(CustomUIHandler):
         """Handle step start event."""
         self.state.current_step = event.step
         self.step_count = self.state.current_step
-        self.current_status = f"Step {self.state.current_step}: Thinking..."
+
+        # Show recovery context if recovering from error
+        if event.recovering_from_error:
+            self.current_status = f"Step {self.state.current_step}: Recovering from error..."
+        else:
+            self.current_status = f"Step {self.state.current_step}: Thinking..."
 
         # Add step to tree
         if self.execution_tree:
@@ -283,7 +288,10 @@ class LiveTemplateHandler(CustomUIHandler):
                 if self.state.multistep_context
                 else f"Step {self.state.current_step}"
             )
-            self.execution_tree.add(f"🤔 {step_label}", style="cyan")
+            # Use warning icon if recovering
+            icon = "⚠️ " if event.recovering_from_error else "🤔 "
+            style = "yellow" if event.recovering_from_error else "cyan"
+            self.execution_tree.add(f"{icon}{step_label}", style=style)
 
         self._update_live_display()
 
@@ -370,6 +378,10 @@ class LiveTemplateHandler(CustomUIHandler):
 
     def _handle_error(self, event: ErrorEvent) -> None:
         """Handle error event."""
+        # Skip suppressible errors unless debug/verbose is enabled
+        if event.suppress_from_ui and not self.show_debug_messages:
+            return
+
         error = event.error
         error_type = event.error_type or "Error"
 
@@ -491,10 +503,18 @@ class LiveTableHandler(LiveTemplateHandler):
     def _handle_step_start(self, event: StepStartEvent) -> None:
         """Add step as table row."""
         step = event.step
+        # Show recovery context if recovering from error
+        if event.recovering_from_error:
+            action = "Recovering from error..."
+            status = "[yellow]Recovering[/yellow]"
+        else:
+            action = "Waiting for LLM..."
+            status = "[yellow]Running[/yellow]"
+
         self.steps_table.add_row(
             f"Step {step}",
-            "[yellow]Running[/yellow]",
-            "Waiting for LLM...",
+            status,
+            action,
         )
         self._update_live_display()
 

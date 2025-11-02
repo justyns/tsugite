@@ -35,11 +35,18 @@ class TaskStartEvent(BaseEvent):
 
 
 class StepStartEvent(BaseEvent):
-    """New reasoning turn."""
+    """New reasoning turn.
+
+    Args:
+        step: Current step number
+        max_turns: Maximum turns allowed
+        recovering_from_error: True if previous turn had an error and LLM is attempting recovery
+    """
 
     event_type: EventType = Field(default=EventType.STEP_START, frozen=True)
     step: int = Field(ge=1)
     max_turns: Optional[int] = Field(default=None, ge=1)
+    recovering_from_error: bool = False
 
 
 class CodeExecutionEvent(BaseEvent):
@@ -147,13 +154,24 @@ class InfoEvent(BaseEvent):
 
 
 class ErrorEvent(BaseEvent):
-    """Execution error."""
+    """Execution error.
+
+    Args:
+        error: Error message
+        error_type: Type of error (e.g., "Execution Error", "Format Error")
+        step: Turn/step number where error occurred
+        traceback: Optional traceback information
+        suppress_from_ui: If True, hide from UI unless verbose/debug is enabled.
+            Used for recoverable errors (tool failures) that the LLM will self-correct.
+            Fatal errors (max turns, format errors) should set this to False.
+    """
 
     event_type: EventType = Field(default=EventType.ERROR, frozen=True)
     error: str
     error_type: Optional[str] = None
     step: Optional[int] = Field(default=None, ge=1)
     traceback: Optional[str] = None
+    suppress_from_ui: bool = False
 
 
 class CostSummaryEvent(BaseEvent):

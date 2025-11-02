@@ -117,7 +117,11 @@ class PlainUIHandler(CustomUIHandler):
         # Show "Turn" for reasoning iterations
         label = f"Turn {self.state.current_step}"
 
-        self.console.print(f"{label}: Waiting for LLM response...")
+        # Show recovery context if recovering from error
+        if event.recovering_from_error:
+            self.console.print(f"{label}: Recovering from previous error...")
+        else:
+            self.console.print(f"{label}: Waiting for LLM response...")
 
         # Add step to history
         self.state.steps_history.append({"step": self.state.current_step, "status": "in_progress", "actions": []})
@@ -199,6 +203,10 @@ class PlainUIHandler(CustomUIHandler):
 
     def _handle_error(self, event: ErrorEvent) -> None:
         """Handle error event with plain text output."""
+        # Skip suppressible errors unless debug/verbose is enabled
+        if event.suppress_from_ui and not self.show_debug_messages:
+            return
+
         error = event.error
         error_type = event.error_type or "Error"
 

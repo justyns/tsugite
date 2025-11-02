@@ -108,12 +108,21 @@ class TextualUIHandler(CustomUIHandler):
     def _handle_step_start(self, event: StepStartEvent) -> None:
         """Handle step start."""
         step = event.step
-        status_msg = f"Step {step}: Waiting for LLM response..."
+
+        # Show recovery context if recovering from error
+        if event.recovering_from_error:
+            status_msg = f"Step {step}: Recovering from error..."
+        else:
+            status_msg = f"Step {step}: Waiting for LLM response..."
+
         self._update_status(status_msg)
 
         # Log to thought log
         if self.on_thought_log:
-            self.on_thought_log("step", f"Step {step}")
+            if event.recovering_from_error:
+                self.on_thought_log("step", f"⚠️ Step {step} (recovering)")
+            else:
+                self.on_thought_log("step", f"Step {step}")
 
     def _handle_code_execution(self, event: CodeExecutionEvent) -> None:
         """Handle code execution."""
@@ -160,6 +169,10 @@ class TextualUIHandler(CustomUIHandler):
 
     def _handle_error(self, event: ErrorEvent) -> None:
         """Handle error."""
+        # Skip suppressible errors unless debug/verbose is enabled
+        if event.suppress_from_ui and not self.show_debug_messages:
+            return
+
         error = event.error
         self._update_status(f"Error: {error}")
 

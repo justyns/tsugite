@@ -199,8 +199,11 @@ class CustomUIHandler:
         # (workflow steps are shown separately in multistep_context)
         label = f"Turn {self.state.current_step}"
 
-        # Update progress
-        self.update_progress(f"{prefix}🤔 {label}: Waiting for LLM response...")
+        # Update progress - show recovery context if recovering from error
+        if event.recovering_from_error:
+            self.update_progress(f"{prefix}⚠️  {label}: Recovering from previous error...")
+        else:
+            self.update_progress(f"{prefix}🤔 {label}: Waiting for LLM response...")
 
         # Add step to history
         self.state.steps_history.append({"step": self.state.current_step, "status": "in_progress", "actions": []})
@@ -291,6 +294,10 @@ class CustomUIHandler:
 
     def _handle_error(self, event: ErrorEvent) -> None:
         """Handle error event."""
+        # Skip suppressible errors unless debug/verbose is enabled
+        if event.suppress_from_ui and not self.show_debug_messages:
+            return
+
         error = event.error
         error_type = event.error_type or "Error"
 
