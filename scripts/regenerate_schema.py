@@ -16,7 +16,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from tsugite.schemas import generate_agent_schema, save_schema
+from tsugite.schemas import generate_agent_schema, save_schema  # noqa: E402
 
 if __name__ == "__main__":
     schema_path = project_root / "tsugite" / "schemas" / "agent.schema.json"

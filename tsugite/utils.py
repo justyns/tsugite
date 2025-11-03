@@ -338,6 +338,15 @@ async def cleanup_pending_tasks() -> None:
     """
     import asyncio
 
+    # First, close LiteLLM's async HTTP clients properly
+    try:
+        from litellm import close_litellm_async_clients
+
+        await close_litellm_async_clients()
+    except Exception:
+        # Best effort - don't fail cleanup if litellm cleanup fails
+        pass
+
     # Get all tasks except the current one
     current_task = asyncio.current_task()
     all_tasks = asyncio.all_tasks()

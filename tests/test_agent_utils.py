@@ -144,7 +144,7 @@ def test_list_local_agents_empty(tmp_path):
     # Should have built-in agents even in empty directory
     assert len(result) == 1
     assert "Built-in" in result
-    assert len(result["Built-in"]) == 2  # default and chat-assistant
+    assert len(result["Built-in"]) == 4  # default, chat-assistant, file_searcher, code_searcher
 
 
 def test_list_local_agents_current_dir(tmp_path):

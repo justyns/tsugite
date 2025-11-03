@@ -954,11 +954,10 @@ def chat(
     continue_: Optional[str] = typer.Option(
         None, "--continue", "-c", help="Resume conversation by ID, or latest if no ID given"
     ),
+    ui: str = typer.Option("repl", "--ui", help="UI mode: 'repl' (default) or 'tui'"),
     root: Optional[str] = typer.Option(None, "--root", help="Working directory"),
 ):
     """Start an interactive chat session with an agent."""
-    from tsugite.ui.textual_chat import run_textual_chat
-
     with change_to_root_directory(root, console):
         # Handle conversation resume
         resume_conversation_id = None
@@ -994,16 +993,37 @@ def chat(
         agent_to_load = agent if agent else "chat-assistant"
         _, primary_agent_path, _ = load_and_validate_agent(agent_to_load, console)
 
-        # Run chat with Textual UI
-        run_textual_chat(
-            agent_path=primary_agent_path,
-            model_override=model,
-            max_history=max_history,
-            stream=stream,
-            disable_history=no_history,
-            resume_conversation_id=resume_conversation_id,
-            resume_turns=resume_turns,
-        )
+        # Run chat with selected UI
+        if ui.lower() == "tui":
+            from tsugite.ui.textual_chat import run_textual_chat
+
+            run_textual_chat(
+                agent_path=primary_agent_path,
+                model_override=model,
+                max_history=max_history,
+                stream=stream,
+                disable_history=no_history,
+                resume_conversation_id=resume_conversation_id,
+                resume_turns=resume_turns,
+            )
+        elif ui.lower() == "repl":
+            from tsugite.ui.repl_chat import run_repl_chat
+
+            # REPL defaults to streaming for better UX
+            stream_mode = stream or True
+
+            run_repl_chat(
+                agent_path=primary_agent_path,
+                model_override=model,
+                max_history=max_history,
+                stream=stream_mode,
+                disable_history=no_history,
+                resume_conversation_id=resume_conversation_id,
+                resume_turns=resume_turns,
+            )
+        else:
+            console.print(f"[red]Unknown UI mode: {ui}. Use 'repl' or 'tui'.[/red]")
+            raise typer.Exit(1)
 
 
 # Register subcommands from separate modules

@@ -115,7 +115,9 @@ class ChatManager:
 
             # Update session_start to first turn's timestamp if available
             if self.conversation_history:
-                self.session_start = self.conversation_history[0].timestamp
+                # Strip timezone to match datetime.now() (which is naive)
+                timestamp = self.conversation_history[0].timestamp
+                self.session_start = timestamp.replace(tzinfo=None) if timestamp.tzinfo else timestamp
 
             # Prune if history exceeds max_history
             if len(self.conversation_history) > self.max_history:
@@ -191,6 +193,7 @@ class ChatManager:
                 return_token_usage=True,
                 stream=self.stream,
                 force_text_mode=True,  # Enable text mode for chat UI
+                continue_conversation_id=self.conversation_id if self.conversation_history else None,
             )
 
             # Handle tuple return (response, token_count, cost) or (response, token_count) or string return
@@ -248,7 +251,8 @@ class ChatManager:
             self.conversation_history.append(turn)
 
         if "created_at" in data:
-            self.session_start = datetime.fromisoformat(data["created_at"])
+            # Parse datetime and strip timezone to match datetime.now() (which is naive)
+            self.session_start = datetime.fromisoformat(data["created_at"]).replace(tzinfo=None)
 
     def get_stats(self) -> Dict[str, Any]:
         """Get session statistics."""

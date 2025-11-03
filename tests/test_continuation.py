@@ -210,8 +210,8 @@ class TestChatManagerLoadFromHistory:
         assert manager.conversation_history[0].token_count == 100
         assert manager.conversation_history[0].cost == 0.002
 
-        # Check session start was updated to first turn's timestamp
-        assert manager.session_start == timestamps[0]
+        # Check session start was updated to first turn's timestamp (timezone stripped to naive)
+        assert manager.session_start == timestamps[0].replace(tzinfo=None)
 
     def test_load_from_history_respects_max_history(self, temp_history_dir, temp_agent_file):
         """Test that load_from_history respects max_history limit."""

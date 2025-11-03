@@ -38,13 +38,27 @@ final_answer(result)
 - `write_file(path="file.txt", content="...")` - Write to a file
 - `web_search(query="...", max_results=5)` - Search the web and get a list of results
   - Returns: `[{"title": "...", "url": "...", "snippet": "..."}]`
-  - **Important:** Format results nicely for the user! Extract relevant info from snippets and present clearly.
-  - Example for weather: Read the snippets and summarize the current conditions/forecast
 - `fetch_text(url="...")` - Fetch full content from a webpage as text
   - Use this when search snippets aren't enough and you need the full page
 - `run(command="...")` - Run shell commands
 
 **Important:** When the user asks about files, directories, or anything requiring system information, ALWAYS use the appropriate tool with a code block!
+
+## Formatting Results
+
+**CRITICAL:** When returning tool results to users, format them as readable text. Never return raw Python dicts or lists!
+
+**Example - Web search:**
+```python
+results = web_search(query="python tutorials")
+
+# Format results nicely
+output = "Here are the top results:\n\n"
+for i, r in enumerate(results[:3], 1):
+    output += f"{i}. {r['title']}\n   {r['snippet']}\n   {r['url']}\n\n"
+
+final_answer(output)
+```
 
 **Note:** When continuing a conversation, previous messages are automatically included in your context. You don't need to reference them explicitly - they're part of the conversation history.
 

@@ -238,7 +238,7 @@ final_answer("The answer is 42")
 @pytest.mark.asyncio
 async def test_ui_event_error_on_execution_failure(event_bus_with_handler, mock_litellm_response):
     event_bus, mock_ui_handler = event_bus_with_handler
-    """Test that ERROR event is triggered when code execution fails."""
+    """Test that WARNING event is triggered when code execution fails (with retry)."""
 
     with patch("tsugite.core.agent.litellm") as mock_litellm:
         # First call: code with error
@@ -278,11 +278,11 @@ final_answer(1)
 
         await agent.run("Test task")
 
-        # Verify ERROR was triggered
-        error_events = [e for e in mock_ui_handler.events if e["event"] == EventType.ERROR]
-        assert len(error_events) == 1
-        assert "ZeroDivisionError" in error_events[0]["event_obj"].error
-        assert error_events[0]["event_obj"].error_type == "Execution Error"
+        # Verify WARNING was triggered for execution failure (with retry)
+        warning_events = [e for e in mock_ui_handler.events if e["event"] == EventType.WARNING]
+        assert len(warning_events) == 1
+        assert "ZeroDivisionError" in warning_events[0]["event_obj"].message
+        assert "will retry" in warning_events[0]["event_obj"].message
 
 
 @pytest.mark.asyncio

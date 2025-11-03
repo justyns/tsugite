@@ -145,7 +145,9 @@ description: From agents (lower priority)
             result = list_agents()
 
             # Should show higher priority duplicate + package-provided agents
-            assert result.count("\n") == 2  # 3 agents total: duplicate, default, chat-assistant
+            assert (
+                result.count("\n") == 4
+            )  # 5 agents total: duplicate, default, chat-assistant, file_searcher, code_searcher
             assert "From .tsugite (higher priority)" in result
             assert "From agents (lower priority)" not in result
             # Package-provided agents should also be listed
