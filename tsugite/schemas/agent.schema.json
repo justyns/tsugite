@@ -77,6 +77,13 @@
       "title": "Attachments",
       "type": "array"
     },
+    "auto_load_skills": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Auto Load Skills",
+      "type": "array"
+    },
     "permissions_profile": {
       "default": "default",
       "title": "Permissions Profile",

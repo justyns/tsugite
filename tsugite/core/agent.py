@@ -100,6 +100,7 @@ class TsugiteAgent:
         model_name: str = None,
         text_mode: bool = False,
         attachments: List[tuple[str, str]] = None,
+        skills: List[tuple[str, str]] = None,
         previous_messages: List[Dict] = None,
     ):
         """Initialize the agent.
@@ -115,6 +116,7 @@ class TsugiteAgent:
             model_name: Optional display name for the model (for UI)
             text_mode: Allow text-only responses (code blocks optional)
             attachments: List of (name, content) tuples for prompt caching
+            skills: List of (name, content) tuples for loaded skills
             previous_messages: List of previous conversation messages (user/assistant pairs)
         """
         from tsugite.models import get_model_params
@@ -129,6 +131,7 @@ class TsugiteAgent:
         self.model_name = model_name or model_string
         self.text_mode = text_mode
         self.attachments = attachments or []
+        self.skills = skills or []
         self.previous_messages = previous_messages or []
 
         # Track cumulative cost across all steps
@@ -539,10 +542,10 @@ class TsugiteAgent:
     def _build_messages(self) -> List[Dict]:
         """Build message list for LLM from memory.
 
-        Uses system blocks with cache control when attachments are present
+        Uses system blocks with cache control when attachments or skills are present
         for better prompt caching support.
 
-        Format with attachments (system blocks):
+        Format with attachments/skills (system blocks):
         [
             {"role": "system", "content": [
                 {"type": "text", "text": system_prompt},
@@ -557,7 +560,7 @@ class TsugiteAgent:
             ...
         ]
 
-        Format without attachments (legacy):
+        Format without attachments/skills (legacy):
         [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": "previous turn 1"},
@@ -568,8 +571,8 @@ class TsugiteAgent:
         """
         messages = []
 
-        # Build system message with or without attachments
-        if self.attachments:
+        # Build system message with or without attachments/skills
+        if self.attachments or self.skills:
             # Use system blocks with cache control for better caching
             system_blocks = [{"type": "text", "text": self._build_system_prompt()}]
 
@@ -579,6 +582,16 @@ class TsugiteAgent:
                     {
                         "type": "text",
                         "text": f"<Attachment: {name}>\n{content}\n</Attachment: {name}>",
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                )
+
+            # Add each skill as a separate cacheable block
+            for name, content in self.skills:
+                system_blocks.append(
+                    {
+                        "type": "text",
+                        "text": f"<Skill: {name}>\n{content}\n</Skill: {name}>",
                         "cache_control": {"type": "ephemeral"},
                     }
                 )

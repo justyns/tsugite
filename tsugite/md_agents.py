@@ -55,6 +55,7 @@ class AgentConfig(BaseModel):
     tools: List[str] = Field(default_factory=list)
     prefetch: List[Dict[str, Any]] = Field(default_factory=list)
     attachments: List[str] = Field(default_factory=list)
+    auto_load_skills: List[str] = Field(default_factory=list)
     permissions_profile: str = "default"
     context_budget: Dict[str, Any] = Field(default_factory=lambda: {"tokens": 8000, "priority": ["system", "task"]})
     instructions: str = ""

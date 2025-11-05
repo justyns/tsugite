@@ -15,6 +15,8 @@ from .events import (
     ObservationEvent,
     ReasoningContentEvent,
     ReasoningTokensEvent,
+    SkillLoadedEvent,
+    SkillUnloadedEvent,
     StepProgressEvent,
     StepStartEvent,
     StreamChunkEvent,
