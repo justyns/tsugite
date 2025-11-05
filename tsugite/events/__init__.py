@@ -54,4 +54,7 @@ __all__ = [
     "DebugMessageEvent",
     "WarningEvent",
     "StepProgressEvent",
+    # Skills
+    "SkillLoadedEvent",
+    "SkillUnloadedEvent",
 ]

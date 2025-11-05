@@ -1,7 +1,6 @@
 """Skill loading tools for Tsugite agents."""
 
 import os
-from pathlib import Path
 from typing import Dict, Optional
 
 from tsugite import renderer

@@ -1,7 +1,5 @@
 """Tests for agent skills integration."""
 
-from pathlib import Path
-
 import pytest
 
 from tsugite.agent_preparation import AgentPreparer
@@ -128,9 +126,7 @@ tools: []
         )
         return agent_file
 
-    def test_prepare_agent_loads_skills(
-        self, agent_with_skills, skill_files, monkeypatch
-    ):
+    def test_prepare_agent_loads_skills(self, agent_with_skills, skill_files, monkeypatch):
         """Test that AgentPreparer loads skills from auto_load_skills."""
         monkeypatch.chdir(agent_with_skills.parent)
 
@@ -152,9 +148,7 @@ tools: []
         assert "skill1" in skill_names
         assert "skill2" in skill_names
 
-    def test_prepare_agent_renders_skill_content(
-        self, agent_with_skills, skill_files, monkeypatch
-    ):
+    def test_prepare_agent_renders_skill_content(self, agent_with_skills, skill_files, monkeypatch):
         """Test that skill content is rendered with Jinja2."""
         monkeypatch.chdir(agent_with_skills.parent)
 
@@ -319,11 +313,7 @@ class TestSystemPromptWithSkills:
         assert len(content_blocks) >= 3  # base + 2 skills
 
         # Find skill blocks
-        skill_blocks = [
-            b
-            for b in content_blocks
-            if isinstance(b, dict) and "<Skill:" in b.get("text", "")
-        ]
+        skill_blocks = [b for b in content_blocks if isinstance(b, dict) and "<Skill:" in b.get("text", "")]
 
         assert len(skill_blocks) == 2
 
@@ -358,22 +348,12 @@ class TestSystemPromptWithSkills:
         content_blocks = messages[0]["content"]
 
         # Find attachment and skill blocks
-        attachment_blocks = [
-            b
-            for b in content_blocks
-            if isinstance(b, dict) and "<Attachment:" in b.get("text", "")
-        ]
-        skill_blocks = [
-            b
-            for b in content_blocks
-            if isinstance(b, dict) and "<Skill:" in b.get("text", "")
-        ]
+        attachment_blocks = [b for b in content_blocks if isinstance(b, dict) and "<Attachment:" in b.get("text", "")]
+        skill_blocks = [b for b in content_blocks if isinstance(b, dict) and "<Skill:" in b.get("text", "")]
 
         # Both should exist
         assert len(attachment_blocks) == 1
         assert len(skill_blocks) == 1
 
         # Both should have same cache control structure
-        assert attachment_blocks[0].get("cache_control") == skill_blocks[0].get(
-            "cache_control"
-        )
+        assert attachment_blocks[0].get("cache_control") == skill_blocks[0].get("cache_control")

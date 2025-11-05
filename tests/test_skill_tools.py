@@ -1,11 +1,9 @@
 """Tests for skill loading tools."""
 
-from pathlib import Path
-
 import pytest
 
 from tsugite.tools import call_tool
-from tsugite.tools.skills import SkillManager, get_skill_manager, set_skill_manager
+from tsugite.tools.skills import SkillManager, set_skill_manager
 
 
 class TestLoadSkillTool:
@@ -263,11 +261,7 @@ class TestListLoadedSkillsTool:
 
         result = call_tool("list_loaded_skills")
 
-        assert (
-            "no skill" in result.lower()
-            or "empty" in result.lower()
-            or "none" in result.lower()
-        )
+        assert "no skill" in result.lower() or "empty" in result.lower() or "none" in result.lower()
 
 
 class TestSkillManagerEvents:
@@ -310,7 +304,7 @@ Content
         manager._registry_initialized = True
 
         # Load skill
-        result = manager.load_skill("test_skill")
+        manager.load_skill("test_skill")
 
         # Should emit SkillLoadedEvent
         assert len(emitted_events) == 1
@@ -336,7 +330,7 @@ Content
         manager._loaded_skills = {"test_skill": "content"}
 
         # Unload skill
-        result = manager.unload_skill("test_skill")
+        manager.unload_skill("test_skill")
 
         # Should emit SkillUnloadedEvent
         assert len(emitted_events) == 1
