@@ -1,6 +1,6 @@
 """Agent preparation pipeline - unified logic for render and execution."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from tsugite.core.tools import Tool
@@ -39,12 +39,7 @@ class PreparedAgent:
     combined_instructions: str
     prefetch_results: Dict[str, Any]
     attachments: List[tuple[str, str]]
-    skills: List[tuple[str, str]] = None
-
-    def __post_init__(self):
-        """Set default for skills if None."""
-        if self.skills is None:
-            self.skills = []
+    skills: List[tuple[str, str]] = field(default_factory=list)
 
 
 class AgentPreparer:
@@ -227,7 +222,9 @@ class AgentPreparer:
             skill_manager = SkillManager(event_bus=event_bus)
             for skill_name in agent_config.auto_load_skills:
                 # Attempt to load skill (returns message string for agents/tools)
-                # Failures are handled gracefully - skill just won't be in loaded_skills
+                # NOTE: Failures are silently ignored - users receive no feedback if a skill fails to load.
+                # Skills that fail to load simply won't appear in loaded_skills.
+                # Consider using event_bus to emit error events for better debuggability.
                 skill_manager.load_skill(skill_name)
 
             # Get all successfully loaded skills as (name, content) tuples
