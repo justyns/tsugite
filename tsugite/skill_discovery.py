@@ -82,6 +82,7 @@ def scan_skills() -> List[SkillMeta]:
                 seen_names.add(skill_name)
 
             except Exception:
+                # Skip files with invalid YAML or missing required fields
                 continue
 
     return skills

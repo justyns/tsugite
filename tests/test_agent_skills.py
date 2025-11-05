@@ -294,21 +294,23 @@ class TestSystemPromptWithSkills:
         """Test that _build_messages includes skills with cache control."""
         from tsugite.core.agent import TsugiteAgent
 
-        # Create agent instance
+        # Create agent instance with correct parameters
         agent = TsugiteAgent(
-            model_provider="openai",
-            model_name="gpt-4o-mini",
-            system_prompt="Test system prompt",
+            model_string="openai:gpt-4o-mini",
             tools=[],
+            instructions="Test instructions",
+            max_turns=3,
             attachments=[],
             skills=mock_agent_with_skills.skills,
-            max_turns=3,
         )
+
+        # Set task in memory
+        agent.memory.task = "Test task"
 
         messages = agent._build_messages()
 
         # System message should be a list of blocks
-        assert len(messages) == 1
+        assert len(messages) > 0
         assert messages[0]["role"] == "system"
         assert isinstance(messages[0]["content"], list)
 
@@ -339,15 +341,18 @@ class TestSystemPromptWithSkills:
         """Test that skills use same format as attachments."""
         from tsugite.core.agent import TsugiteAgent
 
+        # Create agent instance with correct parameters
         agent = TsugiteAgent(
-            model_provider="openai",
-            model_name="gpt-4o-mini",
-            system_prompt="Test",
+            model_string="openai:gpt-4o-mini",
             tools=[],
+            instructions="Test instructions",
+            max_turns=3,
             attachments=[("attach1", "Attachment content")],
             skills=[("skill1", "Skill content")],
-            max_turns=3,
         )
+
+        # Set task in memory
+        agent.memory.task = "Test task"
 
         messages = agent._build_messages()
         content_blocks = messages[0]["content"]

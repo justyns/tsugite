@@ -226,13 +226,11 @@ class AgentPreparer:
 
             skill_manager = SkillManager(event_bus=event_bus)
             for skill_name in agent_config.auto_load_skills:
-                result = skill_manager.load_skill(skill_name)
-                # Check if load was successful (contains "success" or "loaded")
-                if "success" in result.lower() or "loaded" in result.lower():
-                    # Skill was loaded successfully
-                    pass
-                # If skill already loaded or failed, the manager handles it gracefully
-            # Get all loaded skills as (name, content) tuples
+                # Attempt to load skill (returns message string for agents/tools)
+                # Failures are handled gracefully - skill just won't be in loaded_skills
+                skill_manager.load_skill(skill_name)
+
+            # Get all successfully loaded skills as (name, content) tuples
             loaded_skills_dict = skill_manager.get_loaded_skills()
             skills = [(name, content) for name, content in loaded_skills_dict.items()]
 
