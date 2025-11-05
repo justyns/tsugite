@@ -11,6 +11,8 @@ from tsugite.events import (
     FinalAnswerEvent,
     LLMMessageEvent,
     ObservationEvent,
+    SkillLoadedEvent,
+    SkillUnloadedEvent,
     StepStartEvent,
     TaskStartEvent,
     ToolCallEvent,
@@ -37,6 +39,8 @@ class JSONLUIHandler:
     - ExecutionResultEvent→ {"type": "tool_result", "tool": "code_execution", "success": bool, "output"?: str, "error"?: str}
     - FinalAnswerEvent    → {"type": "final_result", "result": str, "turns": int, "tokens": int, "cost": float}
     - ErrorEvent          → {"type": "error", "error": str, "step": int}
+    - SkillLoadedEvent    → {"type": "info", "message": "Loaded skill: {name} ({description})"}
+    - SkillUnloadedEvent  → {"type": "info", "message": "Unloaded skill: {name}"}
 
     Success/Failure Patterns:
     - Successful tool: {"type": "tool_result", "tool": "read_file", "success": true, "output": "..."}
@@ -103,6 +107,15 @@ class JSONLUIHandler:
 
         elif isinstance(event, ErrorEvent):
             self._emit("error", {"error": event.error, "step": event.step})
+
+        elif isinstance(event, SkillLoadedEvent):
+            info_msg = f"Loaded skill: {event.skill_name}"
+            if event.description:
+                info_msg += f" ({event.description})"
+            self._emit("info", {"message": info_msg})
+
+        elif isinstance(event, SkillUnloadedEvent):
+            self._emit("info", {"message": f"Unloaded skill: {event.skill_name}"})
 
     def _emit(self, event_type: str, data: Dict[str, Any]) -> None:
         """Print JSONL event to stdout.

@@ -15,6 +15,8 @@ from .events import (
     ObservationEvent,
     ReasoningContentEvent,
     ReasoningTokensEvent,
+    SkillLoadedEvent,
+    SkillUnloadedEvent,
     StepProgressEvent,
     StepStartEvent,
     StreamChunkEvent,
@@ -52,4 +54,7 @@ __all__ = [
     "DebugMessageEvent",
     "WarningEvent",
     "StepProgressEvent",
+    # Skills
+    "SkillLoadedEvent",
+    "SkillUnloadedEvent",
 ]

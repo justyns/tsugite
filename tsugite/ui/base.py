@@ -25,6 +25,8 @@ from tsugite.events import (
     ObservationEvent,
     ReasoningContentEvent,
     ReasoningTokensEvent,
+    SkillLoadedEvent,
+    SkillUnloadedEvent,
     StepProgressEvent,
     StepStartEvent,
     StreamChunkEvent,
@@ -148,6 +150,10 @@ class CustomUIHandler:
                 self._handle_stream_complete(event)
             elif isinstance(event, InfoEvent):
                 self._handle_info(event)
+            elif isinstance(event, SkillLoadedEvent):
+                self._handle_skill_loaded(event)
+            elif isinstance(event, SkillUnloadedEvent):
+                self._handle_skill_unloaded(event)
             elif isinstance(event, DebugMessageEvent):
                 self._handle_debug_message(event)
             elif isinstance(event, WarningEvent):
@@ -555,6 +561,20 @@ class CustomUIHandler:
         message = event.message
         if message:
             self._print(f"[dim]{message}[/dim]")
+
+    def _handle_skill_loaded(self, event: SkillLoadedEvent) -> None:
+        """Handle skill loaded event."""
+        skill_name = event.skill_name
+        description = event.description
+        if description:
+            self._print(f"[dim]📚 Loaded skill: {skill_name} ({description})[/dim]")
+        else:
+            self._print(f"[dim]📚 Loaded skill: {skill_name}[/dim]")
+
+    def _handle_skill_unloaded(self, event: SkillUnloadedEvent) -> None:
+        """Handle skill unloaded event."""
+        skill_name = event.skill_name
+        self._print(f"[dim]📚 Unloaded skill: {skill_name}[/dim]")
 
     def _handle_debug_message(self, event: DebugMessageEvent) -> None:
         """Handle debug message event."""

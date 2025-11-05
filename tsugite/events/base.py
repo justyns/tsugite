@@ -15,6 +15,8 @@ class EventType(IntEnum):
     CODE_EXECUTION = 3
     TOOL_CALL = 4
     OBSERVATION = 5
+    SKILL_LOADED = 6
+    SKILL_UNLOADED = 7
     ERROR = 8
     FINAL_ANSWER = 9
 

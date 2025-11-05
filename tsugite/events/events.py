@@ -84,6 +84,21 @@ class ObservationEvent(BaseEvent):
     error: Optional[str] = None
 
 
+class SkillLoadedEvent(BaseEvent):
+    """Skill loaded into agent context."""
+
+    event_type: EventType = Field(default=EventType.SKILL_LOADED, frozen=True)
+    skill_name: str
+    description: Optional[str] = None
+
+
+class SkillUnloadedEvent(BaseEvent):
+    """Skill unloaded from agent context."""
+
+    event_type: EventType = Field(default=EventType.SKILL_UNLOADED, frozen=True)
+    skill_name: str
+
+
 class FinalAnswerEvent(BaseEvent):
     """Agent completed."""
 

@@ -245,6 +245,26 @@ def file_tools(reset_tool_registry):
 
 
 @pytest.fixture(autouse=True)
+def reset_skill_manager():
+    """Reset the skill manager before each test."""
+    from tsugite.tools.skills import SkillManager, set_skill_manager
+
+    original_manager = None
+    try:
+        from tsugite.tools.skills import _default_skill_manager
+
+        original_manager = _default_skill_manager
+    except (ImportError, AttributeError):
+        pass
+
+    # Create a fresh manager for each test
+    set_skill_manager(SkillManager())
+    yield
+    # Reset to original or None
+    set_skill_manager(original_manager)
+
+
+@pytest.fixture(autouse=True)
 def task_tools(reset_tool_registry, request):
     """Register task management tools for testing.
 

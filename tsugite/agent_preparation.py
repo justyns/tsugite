@@ -1,6 +1,6 @@
 """Agent preparation pipeline - unified logic for render and execution."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from tsugite.core.tools import Tool
@@ -26,6 +26,7 @@ class PreparedAgent:
         combined_instructions: Combined default + agent instructions
         prefetch_results: Results from prefetch tool execution
         attachments: List of (name, content) tuples for prompt caching
+        skills: List of (name, content) tuples for loaded skills
     """
 
     agent: Agent
@@ -38,6 +39,7 @@ class PreparedAgent:
     combined_instructions: str
     prefetch_results: Dict[str, Any]
     attachments: List[tuple[str, str]]
+    skills: List[tuple[str, str]] = field(default_factory=list)
 
 
 class AgentPreparer:
@@ -99,6 +101,7 @@ class AgentPreparer:
         task_summary: str = "## Current Tasks\nNo tasks yet.",
         tasks: Optional[List[Dict[str, Any]]] = None,
         attachments: Optional[List[tuple[str, str]]] = None,
+        event_bus: Optional[Any] = None,
     ) -> PreparedAgent:
         """Prepare agent with all context, tools, and instructions.
 
@@ -110,6 +113,7 @@ class AgentPreparer:
             task_summary: Current task summary (from task manager)
             tasks: List of task dicts for template iteration (from task manager)
             attachments: List of (name, content) tuples for prompt caching
+            event_bus: Optional event bus for emitting skill load events
 
         Returns:
             PreparedAgent ready for execution or display
@@ -210,7 +214,24 @@ class AgentPreparer:
         except Exception as e:
             raise RuntimeError(f"Failed to create tools: {e}") from e
 
-        # Step 7: Build system message (what LLM actually sees)
+        # Step 7: Load auto_load_skills
+        skills = []
+        if agent_config.auto_load_skills:
+            from tsugite.tools.skills import SkillManager
+
+            skill_manager = SkillManager(event_bus=event_bus)
+            for skill_name in agent_config.auto_load_skills:
+                # Attempt to load skill (returns message string for agents/tools)
+                # NOTE: Failures are silently ignored - users receive no feedback if a skill fails to load.
+                # Skills that fail to load simply won't appear in loaded_skills.
+                # Consider using event_bus to emit error events for better debuggability.
+                skill_manager.load_skill(skill_name)
+
+            # Get all successfully loaded skills as (name, content) tuples
+            loaded_skills_dict = skill_manager.get_loaded_skills()
+            skills = [(name, content) for name, content in loaded_skills_dict.items()]
+
+        # Step 8: Build system message (what LLM actually sees)
         system_message = build_system_prompt(tools, combined_instructions, agent_config.text_mode)
 
         # User message is the rendered prompt
@@ -227,4 +248,5 @@ class AgentPreparer:
             combined_instructions=combined_instructions,
             prefetch_results=prefetch_context,
             attachments=attachments or [],
+            skills=skills,
         )

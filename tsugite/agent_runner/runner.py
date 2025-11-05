@@ -472,6 +472,7 @@ async def _execute_agent_with_prompt(
             model_name=model_string,
             text_mode=agent_config.text_mode,
             attachments=prepared.attachments,
+            skills=prepared.skills,
             previous_messages=previous_messages,
         )
 
