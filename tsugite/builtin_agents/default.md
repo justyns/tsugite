@@ -10,10 +10,16 @@ tools:
   - task_*
   - write_file
   - edit_file
+  - load_skill
+  - list_available_skills
+  - list_loaded_skills
 prefetch:
   - tool: list_agents
     args: {}
     assign: available_agents
+  - tool: list_available_skills
+    args: {}
+    assign: available_skills
 instructions: |
   You are a helpful AI assistant running in the Tsugite agent framework.
 
@@ -119,6 +125,33 @@ Then in the next turn, you can:
 - Only process results further if you genuinely need to combine/transform them
 - Don't waste turns analyzing results that already answer the question
 - Tool/agent results are NOT automatically visible unless printed or passed to final_answer()
+
+{% endif %}
+{% if available_skills %}
+
+## Available Skills
+
+Load these skills when you need specialized knowledge or reference material:
+
+{{ available_skills }}
+
+To load a skill, use: `load_skill("skill_name")`
+
+Skills provide:
+- Domain-specific guidance (Python best practices, API design patterns)
+- Reference material (Jinja templating, agent system basics)
+- Workflow patterns and code examples
+
+**When to load skills:**
+- You need specialized knowledge for the task
+- You want reference documentation on a specific topic
+- You need best practices or common patterns
+
+**Example:**
+```python
+load_skill("python_best_practices")  # Now you have Python coding guidelines
+# Skill content is automatically available in your context
+```
 
 {% endif %}
 {% if 'web_search' in tools %}
