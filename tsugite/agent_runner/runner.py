@@ -175,10 +175,11 @@ def get_default_instructions(text_mode: bool = False) -> str:
         Mode-appropriate default instructions
     """
     base = (
-        "You are operating inside the Tsugite micro-agent runtime. Follow the rendered task faithfully, use the available "
-        "tools when they meaningfully advance the work, and maintain a living plan via the task_* tools. Create or update "
-        "tasks whenever you define new sub-work, mark progress as you go, and rely on the task summary to decide the next "
-        "action. Provide a clear, actionable final response without unnecessary filler.\n\n"
+        "You are operating inside the Tsugite micro-agent runtime. Follow the rendered task faithfully, "
+        "use the available tools when they meaningfully advance the work, and maintain a living plan via "
+        "the task_* tools. Create or update tasks whenever you define new sub-work, mark progress as you go, "
+        "and rely on the task summary to decide the next action. Provide a clear, actionable final response "
+        "without unnecessary filler.\n\n"
     )
 
     if text_mode:
@@ -189,7 +190,8 @@ def get_default_instructions(text_mode: bool = False) -> str:
     else:
         completion = (
             "Task Completion: Write Python code to accomplish your task. "
-            "When you have completed your task, call final_answer(result) to signal completion and return the result.\n\n"
+            "When you have completed your task, call final_answer(result) to signal completion and return "
+            "the result.\n\n"
         )
 
     interactive = (
@@ -592,7 +594,8 @@ def run_agent(
         attachments: Optional list of (name, content) tuples for prompt caching
 
     Returns:
-        Agent execution result as string, or tuple of (result, token_count, cost, step_count, execution_steps) if return_token_usage=True
+        Agent execution result as string, or tuple of (result, token_count, cost, step_count, execution_steps)
+        if return_token_usage=True
 
     Raises:
         ValueError: If agent file is invalid
@@ -758,7 +761,8 @@ async def run_agent_async(
         continue_conversation_id: Optional conversation ID to continue (makes run mode multi-turn)
 
     Returns:
-        Agent execution result as string, or tuple of (result, token_count, cost, step_count, execution_steps) if return_token_usage=True
+        Agent execution result as string, or tuple of (result, token_count, cost, step_count, execution_steps)
+        if return_token_usage=True
 
     Raises:
         ValueError: If agent file is invalid
@@ -1056,7 +1060,8 @@ def _show_step_progress_message(
         if attempt > 0:
             event_bus.emit(
                 DebugMessageEvent(
-                    message=f"DEBUG: Retrying Step {i}/{total_steps}: {step_name} (Attempt {attempt + 1}/{max_attempts})"
+                    message=f"DEBUG: Retrying Step {i}/{total_steps}: {step_name} "
+                    f"(Attempt {attempt + 1}/{max_attempts})"
                 )
             )
         else:

@@ -16,6 +16,7 @@ from .events import (
     ReasoningContentEvent,
     ReasoningTokensEvent,
     SkillLoadedEvent,
+    SkillLoadFailedEvent,
     SkillUnloadedEvent,
     StepProgressEvent,
     StepStartEvent,
@@ -56,5 +57,6 @@ __all__ = [
     "StepProgressEvent",
     # Skills
     "SkillLoadedEvent",
+    "SkillLoadFailedEvent",
     "SkillUnloadedEvent",
 ]

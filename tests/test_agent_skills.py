@@ -3,6 +3,7 @@
 import pytest
 
 from tsugite.agent_preparation import AgentPreparer
+from tsugite.events import EventBus, SkillLoadFailedEvent
 from tsugite.md_agents import parse_agent_file
 
 
@@ -357,3 +358,239 @@ class TestSystemPromptWithSkills:
 
         # Both should have same cache control structure
         assert attachment_blocks[0].get("cache_control") == skill_blocks[0].get("cache_control")
+
+
+class TestSkillLoadErrorHandling:
+    """Test skill load error handling and event emission."""
+
+    def test_skill_not_found_emits_error_event(self, tmp_path, monkeypatch):
+        """Test that SkillLoadFailedEvent is emitted when skill not found."""
+        monkeypatch.chdir(tmp_path)
+
+        agent_file = tmp_path / "agent.md"
+        agent_file.write_text(
+            """---
+name: test_agent
+extends: none
+auto_load_skills:
+  - nonexistent_skill
+tools: []
+---
+
+# Test Agent
+{{ user_prompt }}
+"""
+        )
+
+        agent = parse_agent_file(agent_file)
+
+        # Create event bus and capture events
+        event_bus = EventBus()
+        captured_events = []
+
+        def capture_event(event):
+            captured_events.append(event)
+
+        event_bus.subscribe(capture_event)
+
+        preparer = AgentPreparer()
+        prepared = preparer.prepare(
+            agent=agent,
+            prompt="Test task",
+            context={},
+            event_bus=event_bus,
+        )
+
+        # Should have emitted SkillLoadFailedEvent
+        error_events = [e for e in captured_events if isinstance(e, SkillLoadFailedEvent)]
+        assert len(error_events) == 1
+        assert error_events[0].skill_name == "nonexistent_skill"
+        assert "not found" in error_events[0].error_message.lower()
+
+        # Skill should not be loaded
+        skill_names = [name for name, _ in prepared.skills]
+        assert "nonexistent_skill" not in skill_names
+
+    def test_multiple_missing_skills_emit_multiple_events(self, tmp_path, monkeypatch):
+        """Test that each missing skill emits its own error event."""
+        monkeypatch.chdir(tmp_path)
+
+        agent_file = tmp_path / "agent.md"
+        agent_file.write_text(
+            """---
+name: test_agent
+extends: none
+auto_load_skills:
+  - missing_skill1
+  - missing_skill2
+  - missing_skill3
+tools: []
+---
+
+# Test Agent
+{{ user_prompt }}
+"""
+        )
+
+        agent = parse_agent_file(agent_file)
+
+        event_bus = EventBus()
+        captured_events = []
+
+        def capture_event(event):
+            captured_events.append(event)
+
+        event_bus.subscribe(capture_event)
+
+        preparer = AgentPreparer()
+        preparer.prepare(
+            agent=agent,
+            prompt="Test task",
+            context={},
+            event_bus=event_bus,
+        )
+
+        # Should have emitted 3 error events
+        error_events = [e for e in captured_events if isinstance(e, SkillLoadFailedEvent)]
+        assert len(error_events) == 3
+
+        # Check all skill names are present
+        error_skill_names = [e.skill_name for e in error_events]
+        assert "missing_skill1" in error_skill_names
+        assert "missing_skill2" in error_skill_names
+        assert "missing_skill3" in error_skill_names
+
+    def test_partial_skill_load_emits_events_for_failures_only(self, tmp_path, monkeypatch):
+        """Test that only failing skills emit error events."""
+        monkeypatch.chdir(tmp_path)
+
+        # Create one valid skill
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+
+        valid_skill = skills_dir / "valid_skill.md"
+        valid_skill.write_text(
+            """---
+name: valid_skill
+description: Valid skill
+---
+
+# Valid Skill
+This skill loads successfully.
+"""
+        )
+
+        agent_file = tmp_path / "agent.md"
+        agent_file.write_text(
+            """---
+name: test_agent
+extends: none
+auto_load_skills:
+  - valid_skill
+  - invalid_skill
+tools: []
+---
+
+# Test Agent
+{{ user_prompt }}
+"""
+        )
+
+        agent = parse_agent_file(agent_file)
+
+        event_bus = EventBus()
+        captured_events = []
+
+        def capture_event(event):
+            captured_events.append(event)
+
+        event_bus.subscribe(capture_event)
+
+        preparer = AgentPreparer()
+        prepared = preparer.prepare(
+            agent=agent,
+            prompt="Test task",
+            context={},
+            event_bus=event_bus,
+        )
+
+        # Should have emitted 1 error event (only for invalid_skill)
+        error_events = [e for e in captured_events if isinstance(e, SkillLoadFailedEvent)]
+        assert len(error_events) == 1
+        assert error_events[0].skill_name == "invalid_skill"
+
+        # valid_skill should be loaded
+        skill_names = [name for name, _ in prepared.skills]
+        assert "valid_skill" in skill_names
+        assert "invalid_skill" not in skill_names
+
+    def test_skill_load_continues_on_error(self, tmp_path, monkeypatch):
+        """Test that agent preparation continues even when skills fail to load."""
+        monkeypatch.chdir(tmp_path)
+
+        agent_file = tmp_path / "agent.md"
+        agent_file.write_text(
+            """---
+name: test_agent
+extends: none
+auto_load_skills:
+  - nonexistent_skill
+tools: []
+---
+
+# Test Agent
+This agent should still work despite skill load failure.
+{{ user_prompt }}
+"""
+        )
+
+        agent = parse_agent_file(agent_file)
+
+        event_bus = EventBus()
+        preparer = AgentPreparer()
+
+        # Should not raise exception
+        prepared = preparer.prepare(
+            agent=agent,
+            prompt="Test task",
+            context={},
+            event_bus=event_bus,
+        )
+
+        # Agent should be prepared successfully
+        assert prepared is not None
+        assert prepared.agent_config.name == "test_agent"
+        assert prepared.rendered_prompt is not None
+
+    def test_no_event_bus_skill_load_failures_silent(self, tmp_path, monkeypatch):
+        """Test that skill load failures work without event bus (backward compat)."""
+        monkeypatch.chdir(tmp_path)
+
+        agent_file = tmp_path / "agent.md"
+        agent_file.write_text(
+            """---
+name: test_agent
+extends: none
+auto_load_skills:
+  - nonexistent_skill
+tools: []
+---
+
+# Test Agent
+{{ user_prompt }}
+"""
+        )
+
+        agent = parse_agent_file(agent_file)
+        preparer = AgentPreparer()
+
+        # Should not raise even without event_bus
+        prepared = preparer.prepare(
+            agent=agent,
+            prompt="Test task",
+            context={},
+            event_bus=None,  # No event bus
+        )
+
+        assert prepared is not None
+        assert len(prepared.skills) == 0

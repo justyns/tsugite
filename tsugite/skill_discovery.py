@@ -4,11 +4,14 @@ Scans directories for skill files (markdown with YAML frontmatter)
 and builds an index for efficient discovery.
 """
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List
 
 from tsugite.utils import parse_yaml_frontmatter
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -65,12 +68,18 @@ def scan_skills() -> List[SkillMeta]:
                 frontmatter, _ = parse_yaml_frontmatter(skill_file.read_text())
 
                 if "name" not in frontmatter:
+                    logger.debug(f"Skipping skill file {skill_file}: missing 'name' in frontmatter")
                     continue
 
                 skill_name = frontmatter["name"]
 
                 if skill_name in seen_names:
+                    logger.debug(f"Skipping skill '{skill_name}' in {skill_file}: duplicate name")
                     continue
+
+                # Warn if description is missing (not required, but recommended)
+                if "description" not in frontmatter:
+                    logger.warning(f"Skill '{skill_name}' in {skill_file} missing 'description' field")
 
                 skill = SkillMeta(
                     name=skill_name,
@@ -81,8 +90,9 @@ def scan_skills() -> List[SkillMeta]:
                 skills.append(skill)
                 seen_names.add(skill_name)
 
-            except Exception:
-                # Skip files with invalid YAML or missing required fields
+            except Exception as e:
+                # Log parse failures for debugging
+                logger.warning(f"Failed to parse skill file {skill_file}: {e}")
                 continue
 
     return skills

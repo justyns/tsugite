@@ -289,7 +289,8 @@ class TestExecutor:
 
         planning_instruction = """
 
-PLANNING REQUIREMENT: Before executing this task, you must first create a detailed plan. Your response should be structured as follows:
+PLANNING REQUIREMENT: Before executing this task, you must first create a detailed plan. Your response
+should be structured as follows:
 
 1. **PLAN SECTION**: Start with a clear, step-by-step plan that outlines how you will approach this task
 2. **EXECUTION SECTION**: Then proceed with executing the plan

@@ -12,6 +12,7 @@ from tsugite.events import (
     LLMMessageEvent,
     ObservationEvent,
     SkillLoadedEvent,
+    SkillLoadFailedEvent,
     SkillUnloadedEvent,
     StepStartEvent,
     TaskStartEvent,
@@ -40,6 +41,7 @@ class JSONLUIHandler:
     - FinalAnswerEvent    → {"type": "final_result", "result": str, "turns": int, "tokens": int, "cost": float}
     - ErrorEvent          → {"type": "error", "error": str, "step": int}
     - SkillLoadedEvent    → {"type": "info", "message": "Loaded skill: {name} ({description})"}
+    - SkillLoadFailedEvent→ {"type": "warning", "message": "Failed to load skill '{name}': {error}"}
     - SkillUnloadedEvent  → {"type": "info", "message": "Unloaded skill: {name}"}
 
     Success/Failure Patterns:
@@ -113,6 +115,10 @@ class JSONLUIHandler:
             if event.description:
                 info_msg += f" ({event.description})"
             self._emit("info", {"message": info_msg})
+
+        elif isinstance(event, SkillLoadFailedEvent):
+            warning_msg = f"Failed to load skill '{event.skill_name}': {event.error_message}"
+            self._emit("warning", {"message": warning_msg})
 
         elif isinstance(event, SkillUnloadedEvent):
             self._emit("info", {"message": f"Unloaded skill: {event.skill_name}"})

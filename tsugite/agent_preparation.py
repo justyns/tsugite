@@ -217,15 +217,18 @@ class AgentPreparer:
         # Step 7: Load auto_load_skills
         skills = []
         if agent_config.auto_load_skills:
+            from tsugite.events.events import SkillLoadFailedEvent
             from tsugite.tools.skills import SkillManager
 
             skill_manager = SkillManager(event_bus=event_bus)
             for skill_name in agent_config.auto_load_skills:
                 # Attempt to load skill (returns message string for agents/tools)
-                # NOTE: Failures are silently ignored - users receive no feedback if a skill fails to load.
-                # Skills that fail to load simply won't appear in loaded_skills.
-                # Consider using event_bus to emit error events for better debuggability.
-                skill_manager.load_skill(skill_name)
+                result = skill_manager.load_skill(skill_name)
+
+                # Emit error event if skill loading failed
+                if result.startswith("Failed") or result.startswith("Skill '"):
+                    if event_bus:
+                        event_bus.emit(SkillLoadFailedEvent(skill_name=skill_name, error_message=result))
 
             # Get all successfully loaded skills as (name, content) tuples
             loaded_skills_dict = skill_manager.get_loaded_skills()

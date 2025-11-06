@@ -1,5 +1,6 @@
 """Skill loading tools for Tsugite agents."""
 
+import logging
 import os
 from typing import Dict, Optional
 
@@ -9,6 +10,8 @@ from tsugite.renderer import AgentRenderer
 from tsugite.skill_discovery import SkillMeta, build_skill_index, scan_skills
 from tsugite.tools import tool
 from tsugite.utils import parse_yaml_frontmatter
+
+logger = logging.getLogger(__name__)
 
 
 class SkillManager:
@@ -65,6 +68,13 @@ class SkillManager:
             skill_text = skill.path.read_text()
             frontmatter, content = parse_yaml_frontmatter(skill_text)
 
+            # Validate frontmatter fields
+            if "name" not in frontmatter:
+                return f"Failed to load skill '{skill_name}': missing 'name' in frontmatter"
+
+            if "description" not in frontmatter or not frontmatter["description"]:
+                logger.warning(f"Skill '{skill_name}' missing 'description' field (recommended)")
+
             agent_renderer = AgentRenderer()
             context = {
                 "user_prompt": "",  # Empty for skills
@@ -87,6 +97,7 @@ class SkillManager:
             return f"✓ Successfully loaded skill: {skill_name}"
 
         except Exception as e:
+            logger.error(f"Failed to load skill '{skill_name}': {e}", exc_info=True)
             return f"Failed to load skill '{skill_name}': {str(e)}"
 
     def unload_skill(self, skill_name: str) -> str:

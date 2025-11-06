@@ -99,6 +99,14 @@ class SkillUnloadedEvent(BaseEvent):
     skill_name: str
 
 
+class SkillLoadFailedEvent(BaseEvent):
+    """Skill failed to load."""
+
+    event_type: EventType = Field(default=EventType.SKILL_LOAD_FAILED, frozen=True)
+    skill_name: str
+    error_message: str
+
+
 class FinalAnswerEvent(BaseEvent):
     """Agent completed."""
 
