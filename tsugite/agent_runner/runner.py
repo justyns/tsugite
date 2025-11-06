@@ -10,7 +10,6 @@ from tsugite.core.executor import LocalExecutor
 from tsugite.exceptions import AgentExecutionError
 from tsugite.md_agents import AgentConfig, parse_agent_file
 from tsugite.renderer import AgentRenderer
-from tsugite.tools import call_tool
 from tsugite.tools.tasks import TaskStatus, get_task_manager, reset_task_manager
 from tsugite.utils import is_interactive
 
@@ -202,6 +201,8 @@ def get_default_instructions(text_mode: bool = False) -> str:
 
 
 def execute_prefetch(prefetch_config: List[Dict[str, Any]], event_bus: Optional["EventBus"] = None) -> Dict[str, Any]:
+    from tsugite.tools import call_tool
+
     context = {}
     for config in prefetch_config:
         tool_name = config.get("tool")
@@ -248,6 +249,7 @@ def execute_tool_directives(
         True
     """
     from tsugite.md_agents import extract_tool_directives
+    from tsugite.tools import call_tool
 
     if existing_context is None:
         existing_context = {}

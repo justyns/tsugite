@@ -2,20 +2,14 @@
 
 import json
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 import typer
 from rich.console import Console
 from rich.table import Table
 
-from tsugite.history import (
-    ConversationMetadata,
-    Turn,
-    get_history_dir,
-    load_conversation,
-    query_index,
-    rebuild_index,
-)
-from tsugite.ui.chat_history import format_conversation_for_display
+if TYPE_CHECKING:
+    pass
 
 console = Console()
 
@@ -35,6 +29,8 @@ def history_list(
         tsugite history list --machine laptop
         tsugite history list --agent chat_assistant --limit 10
     """
+    from tsugite.history import get_history_dir, query_index
+
     try:
         conversations = query_index(machine=machine, agent=agent, limit=limit)
 
@@ -101,6 +97,9 @@ def history_show(
         tsugite history show 20251024_103000_chat_abc123 --format json
         tsugite history show 20251024_103000_chat_abc123 --format markdown
     """
+    from tsugite.history import ConversationMetadata, Turn, load_conversation
+    from tsugite.ui.chat_history import format_conversation_for_display
+
     try:
         turns = load_conversation(conversation_id)
 
@@ -183,6 +182,8 @@ def history_rebuild_index():
     Scans all conversation files and rebuilds the index.
     Useful after manual file changes or index corruption.
     """
+    from tsugite.history import rebuild_index
+
     try:
         console.print("Rebuilding conversation index...")
         count = rebuild_index()

@@ -47,6 +47,7 @@ def tool(func: Callable) -> Callable:
 
 def get_tool(name: str) -> ToolInfo:
     """Get a registered tool by name."""
+    _ensure_tools_loaded()
     if name not in _tools:
         # Provide helpful error message
         from ..shell_tool_config import get_custom_tools_config_path
@@ -89,6 +90,7 @@ def call_tool(name: str, **kwargs) -> Any:
 
 def list_tools() -> List[str]:
     """List all registered tool names."""
+    _ensure_tools_loaded()
     return list(_tools.keys())
 
 
@@ -101,6 +103,7 @@ def get_tools_by_category(category: str) -> List[str]:
     Returns:
         List of tool names in the category
     """
+    _ensure_tools_loaded()
     category_tools = []
     for tool_name, tool_info in _tools.items():
         module = tool_info.func.__module__.split(".")[-1]
@@ -138,6 +141,7 @@ def _expand_single_spec(spec: str, strict: bool = True) -> List[str]:
         return matches
     else:
         # Regular tool name
+        _ensure_tools_loaded()
         if spec not in _tools:
             if strict:
                 available = ", ".join(list(_tools.keys())) if _tools else "none"
@@ -250,15 +254,26 @@ def load_custom_shell_tools() -> None:
         print("  Use 'tsugite tools validate' to check your config", file=sys.stderr)
 
 
-# Import tool modules at the end to avoid circular imports
-# (they need to import 'tool' decorator from this module)
-from . import agents as agents  # noqa: E402
-from . import fs as fs  # noqa: E402
-from . import http as http  # noqa: E402
-from . import interactive as interactive  # noqa: E402
-from . import shell as shell  # noqa: E402
-from . import skills as skills  # noqa: E402
-from . import tasks as tasks  # noqa: E402
+# Lazy loading flag to defer tool module imports until first use
+_tools_loaded = False
 
-# Load custom shell tools after built-in tools
-load_custom_shell_tools()
+
+def _ensure_tools_loaded():
+    """Lazy load tool modules on first use to speed up CLI startup."""
+    global _tools_loaded
+    if _tools_loaded:
+        return
+
+    # Import tool modules (they need to import 'tool' decorator from this module)
+    from . import agents as agents  # noqa: E402, F401
+    from . import fs as fs  # noqa: E402, F401
+    from . import http as http  # noqa: E402, F401
+    from . import interactive as interactive  # noqa: E402, F401
+    from . import shell as shell  # noqa: E402, F401
+    from . import skills as skills  # noqa: E402, F401
+    from . import tasks as tasks  # noqa: E402, F401
+
+    # Load custom shell tools after built-in tools
+    load_custom_shell_tools()
+
+    _tools_loaded = True

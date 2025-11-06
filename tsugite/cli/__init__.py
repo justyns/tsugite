@@ -9,11 +9,6 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.traceback import install
 
-from .agents import agents_app
-from .attachments import attachments_app
-from .benchmark import benchmark_command
-from .cache import cache_app
-from .config import config_app
 from .helpers import (
     assemble_prompt_with_attachments,
     change_to_root_directory,
@@ -23,11 +18,6 @@ from .helpers import (
     load_and_validate_agent,
     print_plain_info,
 )
-from .history import history_app
-from .init import init
-from .mcp import mcp_app
-from .tools import tools_app
-from .validate import validate_command
 
 # Chat history limit - keeps last N turns to balance context retention vs memory usage
 DEFAULT_MAX_CHAT_HISTORY = 50
@@ -1027,6 +1017,18 @@ def chat(
 
 
 # Register subcommands from separate modules
+# These imports are fast now because each module uses lazy loading internally
+from .agents import agents_app  # noqa: E402
+from .attachments import attachments_app  # noqa: E402
+from .benchmark import benchmark_command  # noqa: E402
+from .cache import cache_app  # noqa: E402
+from .config import config_app  # noqa: E402
+from .history import history_app  # noqa: E402
+from .init import init  # noqa: E402
+from .mcp import mcp_app  # noqa: E402
+from .tools import tools_app  # noqa: E402
+from .validate import validate_command  # noqa: E402
+
 app.add_typer(mcp_app, name="mcp")
 app.add_typer(agents_app, name="agents")
 app.add_typer(config_app, name="config")

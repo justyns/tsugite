@@ -7,9 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import List, Optional
 
-import questionary
 import typer
-from prompt_toolkit.styles import Style
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Confirm
@@ -18,25 +16,33 @@ from tsugite.config import get_config_path, load_config, save_config
 
 console = Console()
 
-# Custom questionary style for better readability
-# Uses dark background for popup with light text for good contrast
-questionary_style = Style(
-    [
-        ("qmark", "fg:ansicyan bold"),  # Question mark
-        ("question", "bold"),  # Question text
-        ("answer", "fg:ansicyan bold"),  # Selected answer
-        ("pointer", "fg:ansicyan bold"),  # Pointer arrow
-        ("highlighted", "fg:ansiwhite bg:ansiblue"),  # Highlighted choice - white on blue
-        ("selected", "fg:ansicyan"),  # Selected text
-        ("separator", "fg:ansiblack"),  # Separator
-        ("instruction", ""),  # Instructions
-        ("text", ""),  # Default text
-        # Autocomplete-specific styles
-        ("completion-menu", "bg:ansiblack fg:ansiwhite"),  # Popup background
-        ("completion-menu.completion", "fg:ansiwhite bg:ansiblack"),  # Individual items
-        ("completion-menu.completion.current", "fg:ansiblack bg:ansicyan bold"),  # Current selection - black on cyan
-    ]
-)
+
+def _get_questionary_style():
+    """Lazy load questionary style."""
+    from prompt_toolkit.styles import Style
+
+    # Custom questionary style for better readability
+    # Uses dark background for popup with light text for good contrast
+    return Style(
+        [
+            ("qmark", "fg:ansicyan bold"),  # Question mark
+            ("question", "bold"),  # Question text
+            ("answer", "fg:ansicyan bold"),  # Selected answer
+            ("pointer", "fg:ansicyan bold"),  # Pointer arrow
+            ("highlighted", "fg:ansiwhite bg:ansiblue"),  # Highlighted choice - white on blue
+            ("selected", "fg:ansicyan"),  # Selected text
+            ("separator", "fg:ansiblack"),  # Separator
+            ("instruction", ""),  # Instructions
+            ("text", ""),  # Default text
+            # Autocomplete-specific styles
+            ("completion-menu", "bg:ansiblack fg:ansiwhite"),  # Popup background
+            ("completion-menu.completion", "fg:ansiwhite bg:ansiblack"),  # Individual items
+            (
+                "completion-menu.completion.current",
+                "fg:ansiblack bg:ansicyan bold",
+            ),  # Current selection - black on cyan
+        ]
+    )
 
 
 @contextmanager
@@ -143,9 +149,12 @@ def prompt_for_model(providers: dict[str, int], skip_prompt: bool = False, defau
     Returns:
         Model string in Tsugite format (e.g., "ollama:qwen2.5-coder:7b")
     """
+    import questionary
+
     if default_model:
         return default_model
 
+    questionary_style = _get_questionary_style()
     console.print("\n[bold cyan]Model Selection[/bold cyan]")
 
     # Filter available providers

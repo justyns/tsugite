@@ -7,9 +7,10 @@ model parameters and reasoning model support.
 import asyncio
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-import litellm
+if TYPE_CHECKING:
+    pass
 
 from tsugite.events import (
     CodeExecutionEvent,
@@ -260,6 +261,9 @@ class TsugiteAgent:
         Raises:
             RuntimeError: If agent reaches max_turns without finishing
         """
+        # Lazy load litellm only when actually running an agent
+        import litellm
+
         # Track execution time
         start_time = time.time()
 
