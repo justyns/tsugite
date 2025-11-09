@@ -36,7 +36,11 @@ def event_loop_policy():
 
     # Clean up: close any lingering loops and reset policy
     try:
-        loop = policy.get_event_loop()
+        # Suppress deprecation warning for get_event_loop() in cleanup context
+        # This is safe here because we're only closing existing loops, not creating new ones
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            loop = policy.get_event_loop()
         if loop and not loop.is_closed():
             loop.close()
     except RuntimeError:
