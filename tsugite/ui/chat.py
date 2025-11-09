@@ -59,6 +59,10 @@ class ChatManager:
         self.conversation_history: List[ChatTurn] = []
         self.session_start = datetime.now()
 
+        # Cumulative metrics tracking
+        self.cumulative_tokens = 0
+        self.cumulative_cost = 0.0
+
         # History support
         self.conversation_id: Optional[str] = resume_conversation_id
         config = load_config()
@@ -119,6 +123,10 @@ class ChatManager:
                 timestamp = self.conversation_history[0].timestamp
                 self.session_start = timestamp.replace(tzinfo=None) if timestamp.tzinfo else timestamp
 
+            # Restore cumulative metrics from loaded history
+            self.cumulative_tokens = sum(turn.token_count for turn in self.conversation_history if turn.token_count)
+            self.cumulative_cost = sum(turn.cost for turn in self.conversation_history if turn.cost)
+
             # Prune if history exceeds max_history
             if len(self.conversation_history) > self.max_history:
                 self.conversation_history = self.conversation_history[-self.max_history :]
@@ -146,6 +154,12 @@ class ChatManager:
             cost=cost,
         )
         self.conversation_history.append(turn)
+
+        # Update cumulative metrics
+        if token_count is not None:
+            self.cumulative_tokens += token_count
+        if cost is not None:
+            self.cumulative_cost += cost
 
         # Save to persistent history if enabled
         if self.conversation_id:
@@ -196,22 +210,47 @@ class ChatManager:
                 continue_conversation_id=self.conversation_id if self.conversation_history else None,
             )
 
-            # Handle tuple return (response, token_count, cost) or (response, token_count) or string return
-            response = None
-            token_count = None
-            cost = None
+            # Handle result - either string or AgentExecutionResult model
+            from tsugite.agent_runner.models import AgentExecutionResult
 
-            if isinstance(result, tuple):
-                if len(result) == 3:
-                    response, token_count, cost = result
-                elif len(result) == 2:
-                    response, token_count = result
-                else:
-                    response = result[0]
-            else:
+            if isinstance(result, AgentExecutionResult):
+                # New model-based return
+                response = result.response
+                token_count = result.token_count
+                cost = result.cost
+            elif isinstance(result, str):
+                # Simple string return (shouldn't happen with return_token_usage=True)
                 response = result
+                token_count = None
+                cost = None
+            else:
+                # Unexpected type, try to convert to string
+                response = str(result)
+                token_count = None
+                cost = None
 
             self.add_turn(user_input, response, token_count=token_count, cost=cost)
+
+            # Emit cumulative metrics event if we have a custom logger
+            if self.custom_logger and self.custom_logger.ui_handler:
+                from tsugite.events import CostSummaryEvent, EventBus
+
+                # Get model name for context limit warnings
+                model_name = self.model_override
+                if not model_name:
+                    agent = parse_agent_file(self.agent_path)
+                    model_name = agent.config.model
+
+                EventBus().emit(
+                    CostSummaryEvent(
+                        tokens=token_count,
+                        cost=cost,
+                        model=model_name,
+                        cumulative_tokens=self.cumulative_tokens,
+                        cumulative_cost=self.cumulative_cost,
+                    )
+                )
+
             return response
 
         except Exception as e:

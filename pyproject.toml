@@ -25,6 +25,7 @@ dependencies = [
   "nest-asyncio>=1.6.0",
   "pydantic>=2.12.3",
   "prompt-toolkit>=3.0.43",
+  "portalocker>=2.8.0",
   "grep-ast",
 ]
 

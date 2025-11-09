@@ -340,6 +340,24 @@ def shell_tools(reset_tool_registry):
 
 
 @pytest.fixture
+def skill_tools(reset_tool_registry):
+    """Register skill management tools for testing."""
+    from tsugite.tools import tool
+    from tsugite.tools.skills import (
+        get_skills_for_template,
+        list_available_skills,
+        list_loaded_skills,
+        load_skill,
+    )
+
+    # Re-register the tools after registry reset
+    tool(load_skill)
+    tool(list_available_skills)
+    tool(list_loaded_skills)
+    tool(get_skills_for_template)
+
+
+@pytest.fixture
 def cli_runner():
     """Create a CLI test runner."""
     from typer.testing import CliRunner
@@ -419,3 +437,91 @@ def mcp_config_factory():
             raise ValueError(f"Unknown server type: {server_type}")
 
     return _create_config
+
+
+@pytest.fixture
+def mock_litellm_response():
+    """Create a mock LiteLLM response for agent tests.
+
+    This fixture provides a factory function that creates mock LLM responses
+    with customizable content and reasoning. Consolidates duplicate fixtures
+    from test_agent.py and test_agent_ui_events.py.
+
+    Returns:
+        Factory function that creates mock response objects
+    """
+    from unittest.mock import MagicMock
+
+    def _create_response(content: str, reasoning_content: str = None):
+        """Factory to create mock responses with different content."""
+        response = MagicMock()
+        response.choices = [MagicMock()]
+        response.choices[0].message = MagicMock(spec=[])
+        response.choices[0].message.content = content
+
+        # Add reasoning content if provided
+        if reasoning_content:
+            response.choices[0].message.reasoning_content = reasoning_content
+
+        # Add token usage with spec to prevent auto-creation of attributes
+        # This prevents MagicMock from auto-creating completion_tokens_details
+        # which would trigger REASONING_TOKENS events in tests
+        response.usage = MagicMock(spec=["total_tokens"])
+        response.usage.total_tokens = 100
+
+        return response
+
+    return _create_response
+
+
+def mock_agent_execution_result(
+    response: str = "Test response",
+    token_count: int = 100,
+    cost: float = 0.005,
+    step_count: int = 1,
+    execution_steps: list = None,
+    system_message: str = None,
+    attachments: list = None,
+):
+    """Helper to create AgentExecutionResult for tests.
+
+    Args:
+        response: Agent's final response
+        token_count: Total tokens used
+        cost: Total cost in dollars
+        step_count: Number of execution steps
+        execution_steps: List of execution step details
+        system_message: System prompt used
+        attachments: List of (name, content) tuples
+
+    Returns:
+        AgentExecutionResult instance
+    """
+    from tsugite.agent_runner.models import AgentExecutionResult
+
+    return AgentExecutionResult(
+        response=response,
+        token_count=token_count,
+        cost=cost,
+        step_count=step_count,
+        execution_steps=execution_steps or [],
+        system_message=system_message,
+        attachments=attachments or [],
+    )
+
+
+@pytest.fixture
+def mock_default_agent_prefetch():
+    """Mock prefetch results for default builtin agent.
+
+    The default agent has two prefetch tools:
+    - list_agents: Returns available agent list
+    - get_skills_for_template: Returns available skills
+
+    Returns:
+        List suitable for mock.side_effect
+    """
+    return [
+        "agents/example.md",  # list_agents
+        [],  # get_skills_for_template
+    ]

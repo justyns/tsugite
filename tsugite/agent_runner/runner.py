@@ -25,6 +25,7 @@ from .helpers import (
     set_multistep_ui_context,
 )
 from .metrics import StepMetrics, display_step_metrics
+from .models import AgentExecutionResult
 
 # Display constants for truncating long output
 MAX_VARIABLE_PREVIEW_LENGTH = 100  # Max characters to show in variable documentation
@@ -335,7 +336,7 @@ async def _execute_agent_with_prompt(
     return_token_usage: bool = False,
     stream: bool = False,
     previous_messages: Optional[List[Dict]] = None,
-) -> str | tuple[str, Optional[int], Optional[float], int, list]:
+) -> str | AgentExecutionResult:
     """Execute agent with a prepared agent.
 
     Low-level execution function used by both run_agent and run_multistep_agent.
@@ -348,12 +349,13 @@ async def _execute_agent_with_prompt(
         skip_task_reset: Skip resetting task manager (for multi-step agents)
         model_kwargs: Additional model parameters (response_format, temperature, etc.)
         injectable_vars: Variables to inject into Python execution namespace
-        return_token_usage: Whether to return token usage and cost from LiteLLM
+        return_token_usage: Whether to return AgentExecutionResult with metrics
         stream: Whether to stream responses in real-time
         previous_messages: Previous conversation messages for continuation
 
     Returns:
-        Agent execution result as string, or tuple of (result, token_count, cost, steps) if return_token_usage=True
+        Agent execution result as string (when return_token_usage=False) or
+        AgentExecutionResult model with metrics (when return_token_usage=True)
 
     Raises:
         RuntimeError: If execution fails
@@ -506,17 +508,25 @@ async def _execute_agent_with_prompt(
                         step_count=step_count,
                     )
 
-                return (
-                    str(result.output),
-                    result.token_usage,
-                    result.cost,
-                    step_count,
-                    steps_list,
-                    prepared.system_message,
-                    prepared.attachments,
+                return AgentExecutionResult(
+                    response=str(result.output),
+                    token_count=result.token_usage,
+                    cost=result.cost,
+                    step_count=step_count,
+                    execution_steps=steps_list,
+                    system_message=prepared.system_message,
+                    attachments=prepared.attachments,
                 )
             else:
-                return str(result), None, None, 0, [], None, []
+                return AgentExecutionResult(
+                    response=str(result),
+                    token_count=None,
+                    cost=None,
+                    step_count=0,
+                    execution_steps=[],
+                    system_message=None,
+                    attachments=[],
+                )
         else:
             from tsugite.core.agent import AgentResult
 
@@ -550,17 +560,24 @@ async def _execute_agent_with_prompt(
             except Exception:
                 pass  # Best effort cleanup
 
-        # Clean up any pending asyncio tasks (e.g., LiteLLM logging tasks)
-        # to prevent RuntimeWarning about tasks being destroyed while pending
+        # Clean up pending tasks (but not LiteLLM clients - that's handled by run_async_with_cleanup wrapper)
         # ONLY run cleanup for top-level agents, not spawned agents
-        # Spawned agents run in ThreadPoolExecutor threads and their event loops
-        # are cleaned up automatically by asyncio.run()
+        import asyncio
         import threading
 
-        from tsugite.utils import cleanup_pending_tasks
-
         if threading.current_thread() == threading.main_thread():
-            await cleanup_pending_tasks()
+            # Get all tasks except the current one
+            current_task = asyncio.current_task()
+            all_tasks = asyncio.all_tasks()
+            pending_tasks = [task for task in all_tasks if task is not current_task and not task.done()]
+
+            # Cancel all pending tasks
+            for task in pending_tasks:
+                task.cancel()
+
+            # Wait for all tasks to be cancelled
+            if pending_tasks:
+                await asyncio.gather(*pending_tasks, return_exceptions=True)
 
 
 def run_agent(
@@ -576,7 +593,7 @@ def run_agent(
     force_text_mode: bool = False,
     continue_conversation_id: Optional[str] = None,
     attachments: Optional[List[tuple[str, str]]] = None,
-) -> str | tuple[str, Optional[int], Optional[float], int, list]:
+) -> str | AgentExecutionResult:
     """Run a Tsugite agent.
 
     Args:
@@ -587,15 +604,15 @@ def run_agent(
         debug: Enable debug output (rendered prompt)
         custom_logger: Custom logger for agent output
         trust_mcp_code: Whether to trust remote code from MCP servers
-        return_token_usage: Whether to return token usage and cost from LiteLLM
+        return_token_usage: Whether to return AgentExecutionResult with metrics
         stream: Whether to stream responses in real-time
         force_text_mode: Force text_mode=True regardless of agent config (useful for chat UI)
         continue_conversation_id: Optional conversation ID to continue (makes run mode multi-turn)
         attachments: Optional list of (name, content) tuples for prompt caching
 
     Returns:
-        Agent execution result as string, or tuple of (result, token_count, cost, step_count, execution_steps)
-        if return_token_usage=True
+        Agent execution result as string (when return_token_usage=False) or
+        AgentExecutionResult model with metrics (when return_token_usage=True)
 
     Raises:
         ValueError: If agent file is invalid
@@ -710,6 +727,8 @@ def run_agent(
             print("\n".join(debug_parts), file=sys.stderr)
 
         # Execute with the low-level helper (wrapping async call)
+        import asyncio
+
         return asyncio.run(
             _execute_agent_with_prompt(
                 prepared=prepared,
@@ -740,7 +759,7 @@ async def run_agent_async(
     force_text_mode: bool = False,
     continue_conversation_id: Optional[str] = None,
     attachments: Optional[List[tuple[str, str]]] = None,
-) -> str | tuple[str, Optional[int], Optional[float], int, list]:
+) -> str | AgentExecutionResult:
     """Run a Tsugite agent (async version for tests and async contexts).
 
     This is the async version of run_agent() that can be awaited directly.
@@ -754,15 +773,15 @@ async def run_agent_async(
         debug: Enable debug output (rendered prompt)
         custom_logger: Custom logger for agent output
         trust_mcp_code: Whether to trust remote code from MCP servers
-        return_token_usage: Whether to return token usage and cost from LiteLLM
+        return_token_usage: Whether to return AgentExecutionResult with metrics
         stream: Whether to stream responses in real-time
         attachments: Optional list of (name, content) tuples for prompt caching
         force_text_mode: Force text_mode=True regardless of agent config (useful for chat UI)
         continue_conversation_id: Optional conversation ID to continue (makes run mode multi-turn)
 
     Returns:
-        Agent execution result as string, or tuple of (result, token_count, cost, step_count, execution_steps)
-        if return_token_usage=True
+        Agent execution result as string (when return_token_usage=False) or
+        AgentExecutionResult model with metrics (when return_token_usage=True)
 
     Raises:
         ValueError: If agent file is invalid
@@ -1589,17 +1608,24 @@ async def _run_multistep_agent_impl(
         clear_current_agent()
         clear_allowed_agents()
 
-        # Clean up any pending asyncio tasks (e.g., LiteLLM logging tasks)
-        # to prevent RuntimeWarning about tasks being destroyed while pending
+        # Clean up pending tasks (but not LiteLLM clients - that's handled by run_async_with_cleanup wrapper)
         # ONLY run cleanup for top-level agents, not spawned agents
-        # Spawned agents run in ThreadPoolExecutor threads and their event loops
-        # are cleaned up automatically by asyncio.run()
+        import asyncio
         import threading
 
-        from tsugite.utils import cleanup_pending_tasks
-
         if threading.current_thread() == threading.main_thread():
-            await cleanup_pending_tasks()
+            # Get all tasks except the current one
+            current_task = asyncio.current_task()
+            all_tasks = asyncio.all_tasks()
+            pending_tasks = [task for task in all_tasks if task is not current_task and not task.done()]
+
+            # Cancel all pending tasks
+            for task in pending_tasks:
+                task.cancel()
+
+            # Wait for all tasks to be cancelled
+            if pending_tasks:
+                await asyncio.gather(*pending_tasks, return_exceptions=True)
 
 
 def run_multistep_agent(
@@ -1637,6 +1663,8 @@ def run_multistep_agent(
         ValueError: If agent file is invalid or step parsing fails
         RuntimeError: If any step execution fails
     """
+    import asyncio
+
     return asyncio.run(
         _run_multistep_agent_impl(
             agent_path=agent_path,

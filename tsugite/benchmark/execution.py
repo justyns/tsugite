@@ -242,7 +242,7 @@ class TestExecutor:
             final_prompt = self._prepare_prompt(test_case)
 
             # Run the agent with token usage tracking to get step count
-            result_tuple = run_agent(
+            result = run_agent(
                 agent_path=temp_agent_path,
                 prompt=final_prompt,
                 model_override=model_name,
@@ -250,8 +250,13 @@ class TestExecutor:
                 return_token_usage=True,
             )
 
-            # Unpack result: (output, token_count, cost, step_count, execution_steps)
-            result, token_count, cost, steps, execution_steps = result_tuple
+            # Extract fields from AgentExecutionResult model
+            response = result.response
+            token_count = result.token_count
+            cost = result.cost
+            steps = result.step_count
+            execution_steps = result.execution_steps
+
             total_steps += steps
             total_tokens += token_count or 0
             total_cost += cost or 0.0
@@ -259,12 +264,12 @@ class TestExecutor:
             case_duration = time.time() - case_start
 
             # Evaluate this test case
-            case_evaluation = await self._evaluate_test_case(test_case, result, case_duration, execution_steps, test)
+            case_evaluation = await self._evaluate_test_case(test_case, response, case_duration, execution_steps, test)
 
             case_results.append(case_evaluation)
-            raw_outputs.append(str(result))
+            raw_outputs.append(response)
             aggregated_output_parts.append(
-                f"Test Case: {test_case.name}\nPrompt: {test_case.prompt}\nOutput: {result}\n---\n"
+                f"Test Case: {test_case.name}\nPrompt: {test_case.prompt}\nOutput: {response}\n---\n"
             )
 
         # Create aggregated output

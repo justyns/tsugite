@@ -78,7 +78,7 @@ tools: []
         assert "Slug: hello-world" in result.stdout
         assert "test task" in result.stdout
 
-    @patch("tsugite.agent_runner.runner.call_tool")
+    @patch("tsugite.tools.call_tool")
     def test_render_with_prefetch(self, mock_call_tool, temp_dir, file_tools, task_tools):
         """Test rendering agent with prefetch tools."""
         mock_call_tool.return_value = "mock file content"
@@ -237,7 +237,7 @@ class TestComplexScenarios:
         """Set up test runner."""
         self.runner = CliRunner()
 
-    @patch("tsugite.agent_runner.runner.call_tool")
+    @patch("tsugite.tools.call_tool")
     def test_multi_prefetch_rendering(self, mock_call_tool, temp_dir, file_tools, task_tools):
         """Test rendering with multiple prefetch tools."""
         mock_call_tool.side_effect = [
@@ -322,25 +322,39 @@ class TestBuiltinAgentRendering:
         """Set up test runner."""
         self.runner = CliRunner()
 
-    def test_render_builtin_default_with_plus_prefix(self, file_tools, agents_tools, task_tools):
+    @patch("tsugite.tools.call_tool")
+    def test_render_builtin_default_with_plus_prefix(
+        self, mock_call_tool, file_tools, agents_tools, task_tools, skill_tools, mock_default_agent_prefetch
+    ):
         """Test rendering default with + prefix."""
+        # Mock prefetch tools (list_agents and get_skills_for_template)
+        mock_call_tool.side_effect = mock_default_agent_prefetch
+
         result = self.runner.invoke(app, ["render", "+default", "test task"])
 
-        assert result.exit_code == 0
+        if result.exit_code != 0:
+            print(f"\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}\n")
+        assert result.exit_code == 0, f"Command failed with stdout: {result.stdout}"
         assert "test task" in result.stdout
         assert "default" in result.stdout
 
-    @patch("tsugite.agent_runner.runner.call_tool")
-    def test_render_builtin_executes_prefetch(self, mock_call_tool, file_tools, agents_tools, task_tools):
+    @patch("tsugite.tools.call_tool")
+    def test_render_builtin_executes_prefetch(
+        self, mock_call_tool, file_tools, agents_tools, task_tools, skill_tools, mock_default_agent_prefetch
+    ):
         """Test that builtin agent prefetch tools are executed."""
-        # default has list_agents in prefetch
-        mock_call_tool.return_value = "agents/helper.md\nagents/coder.md"
+        # default has list_agents and get_skills_for_template in prefetch
+        # Use custom side_effect with different agent list
+        mock_call_tool.side_effect = [
+            "agents/helper.md\nagents/coder.md",  # list_agents (custom)
+            [],  # get_skills_for_template
+        ]
 
         result = self.runner.invoke(app, ["render", "+default", "test"])
 
         assert result.exit_code == 0
-        # Verify prefetch was called
-        mock_call_tool.assert_called_once_with("list_agents")
+        # Verify prefetch was called (both tools)
+        assert mock_call_tool.call_count == 2
 
     def test_render_unknown_agent(self):
         """Test rendering with unknown agent name."""

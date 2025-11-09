@@ -124,7 +124,7 @@ class TestToolDirectiveExecution:
 <!-- tsu:tool name="test_tool" args={"param": "value"} assign="result" -->
 """
         # Mock the call_tool function
-        with patch("tsugite.agent_runner.runner.call_tool") as mock_call_tool:
+        with patch("tsugite.tools.call_tool") as mock_call_tool:
             mock_call_tool.return_value = "Tool executed successfully"
 
             modified_content, context = execute_tool_directives(content)
@@ -147,7 +147,7 @@ class TestToolDirectiveExecution:
 <!-- tsu:tool name="tool2" args={"key": "value2"} assign="data2" -->
 """
         # Mock the call_tool function to return different results
-        with patch("tsugite.agent_runner.runner.call_tool") as mock_call_tool:
+        with patch("tsugite.tools.call_tool") as mock_call_tool:
             mock_call_tool.side_effect = ["Result 1", "Result 2"]
 
             modified_content, context = execute_tool_directives(content)
@@ -179,7 +179,7 @@ class TestToolDirectiveExecution:
 """
         existing_context = {"existing_var": "existing_value"}
 
-        with patch("tsugite.agent_runner.runner.call_tool") as mock_call_tool:
+        with patch("tsugite.tools.call_tool") as mock_call_tool:
             mock_call_tool.return_value = "New result"
 
             modified_content, tool_context = execute_tool_directives(content, existing_context)
@@ -389,7 +389,7 @@ Result: {{ data }}
 The file contains: {{ file_data }}
 """
         # Execute tool directives with mock
-        with patch("tsugite.agent_runner.runner.call_tool") as mock_call_tool:
+        with patch("tsugite.tools.call_tool") as mock_call_tool:
             mock_call_tool.return_value = "Tool result content"
 
             modified_content, context = execute_tool_directives(content)
@@ -415,7 +415,7 @@ The tool directive below will execute.
 Result: {{ data }}
 """
         # Execute tool directives first with mock
-        with patch("tsugite.agent_runner.runner.call_tool") as mock_call_tool:
+        with patch("tsugite.tools.call_tool") as mock_call_tool:
             mock_call_tool.return_value = "Data from file"
 
             modified_content, context = execute_tool_directives(content)

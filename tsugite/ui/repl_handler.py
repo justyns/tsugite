@@ -3,6 +3,7 @@
 import threading
 from typing import Optional
 
+import litellm
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
@@ -72,6 +73,9 @@ class ReplUIHandler:
         self.streaming_content = ""
         self.is_streaming = False
         self.current_step = 0
+
+        # Tool execution tracking (for progress indicators)
+        self.active_tools: dict[str, float] = {}  # tool_name -> start_time
 
     def handle_event(self, event: BaseEvent) -> None:
         """Handle a UI event and update the display."""
@@ -152,13 +156,30 @@ class ReplUIHandler:
             pass  # Spinner already shows activity
 
     def _handle_tool_call(self, event: ToolCallEvent) -> None:
-        """Handle tool call - show compact tool name."""
+        """Handle tool call - show compact tool name with running indicator."""
         if self.compact:
+            import time
+
             tool_name = event.tool.replace("Tool: ", "").strip() if event.tool else "unknown"
-            self.console.print(f"[dim cyan]🔧 {tool_name}[/dim cyan]")
+            # Track start time for this tool
+            self.active_tools[tool_name] = time.time()
+            # Show tool is running
+            self.console.print(f"[dim cyan]🔧 {tool_name} (running...)[/dim cyan]")
 
     def _handle_observation(self, event: ObservationEvent) -> None:
-        """Handle observation - show if enabled."""
+        """Handle observation - show if enabled and update tool progress."""
+        # If this observation is for a tracked tool, show completion
+        if event.tool and event.tool in self.active_tools:
+            import time
+
+            start_time = self.active_tools.pop(event.tool)
+            elapsed = time.time() - start_time
+            if event.success:
+                self.console.print(f"[dim green]  ✓ {event.tool} ({elapsed:.1f}s)[/dim green]")
+            else:
+                self.console.print(f"[dim red]  ✗ {event.tool} failed ({elapsed:.1f}s)[/dim red]")
+
+        # Show observation details if enabled
         if not self.show_observations or not event.observation:
             return
 
@@ -187,7 +208,13 @@ class ReplUIHandler:
             self.current_status.stop()
             self.current_status = None
 
-        # Render the answer beautifully
+        # If we already streamed the response, skip final render
+        # (streaming already displayed the content in real-time)
+        if self.streaming_content:
+            # Streaming was active, content already shown
+            return
+
+        # Render the answer beautifully (non-streaming path)
         self.console.print()
         self.console.print(Markdown(str(event.answer)))
         self.console.print()
@@ -303,28 +330,73 @@ class ReplUIHandler:
 
     def _handle_cost_summary(self, event: CostSummaryEvent) -> None:
         """Handle cost summary - show compact stats."""
-        parts = []
+        # Per-turn stats
+        turn_parts = []
 
         # Duration
         if event.duration_seconds is not None:
             if event.duration_seconds < 60:
-                parts.append(f"⏱️  {event.duration_seconds:.1f}s")
+                turn_parts.append(f"⏱️  {event.duration_seconds:.1f}s")
             else:
                 minutes = int(event.duration_seconds // 60)
                 seconds = event.duration_seconds % 60
-                parts.append(f"⏱️  {minutes}m {seconds:.1f}s")
+                turn_parts.append(f"⏱️  {minutes}m {seconds:.1f}s")
 
         # Cost
         if event.cost is not None and event.cost > 0:
-            parts.append(f"💰 ${event.cost:.6f}")
+            turn_parts.append(f"💰 ${event.cost:.6f}")
 
         # Tokens
         if event.tokens is not None:
-            parts.append(f"📊 {event.tokens:,} tokens")
+            turn_parts.append(f"📊 {event.tokens:,} tokens")
 
-        if parts:
-            summary = " | ".join(parts)
+        if turn_parts:
+            summary = " | ".join(turn_parts)
+
+            # DEBUG: Log cumulative values
+            print(f"[DEBUG] cumulative_tokens={event.cumulative_tokens}, cumulative_cost={event.cumulative_cost}")
+
+            # Add session totals to the same line if available
+            if event.cumulative_tokens is not None or event.cumulative_cost is not None:
+                print("[DEBUG] At least one cumulative value is not None")
+                total_parts = []
+                if event.cumulative_cost is not None and event.cumulative_cost > 0:
+                    print(f"[DEBUG] Adding cost to total_parts: ${event.cumulative_cost:.6f}")
+                    total_parts.append(f"💰 ${event.cumulative_cost:.6f}")
+                if event.cumulative_tokens is not None:
+                    print(f"[DEBUG] Adding tokens to total_parts: {event.cumulative_tokens:,}")
+                    total_parts.append(f"📊 {event.cumulative_tokens:,} tokens")
+
+                print(f"[DEBUG] total_parts={total_parts}")
+                if total_parts:
+                    summary += " | Session: " + " | ".join(total_parts)
+                    print(f"[DEBUG] Updated summary: {summary}")
+
             self.console.print(f"[dim cyan]{summary}[/dim cyan]")
+
+            # Token limit warnings (if we have model and cumulative token info)
+            if event.model and event.cumulative_tokens:
+                context_limit = self._get_model_context_limit(event.model)
+                if context_limit:
+                    usage_pct = (event.cumulative_tokens / context_limit) * 100
+
+                    if usage_pct >= 90:
+                        from rich.panel import Panel
+
+                        warning = (
+                            f"[red bold]🚨 Context limit approaching: {usage_pct:.0f}% "
+                            f"({event.cumulative_tokens:,}/{context_limit:,} tokens)[/red bold]\n"
+                            "[dim]Consider starting a new conversation to avoid context limit issues.[/dim]"
+                        )
+                        self.console.print(Panel(warning, border_style="red", padding=(0, 1)))
+                    elif usage_pct >= 75:
+                        from rich.panel import Panel
+
+                        warning = (
+                            f"[yellow]⚠️  Context usage: {usage_pct:.0f}% "
+                            f"({event.cumulative_tokens:,}/{context_limit:,} tokens)[/yellow]"
+                        )
+                        self.console.print(Panel(warning, border_style="yellow", padding=(0, 1)))
 
         # Cache stats
         cache_parts = []
@@ -338,21 +410,29 @@ class ReplUIHandler:
             self.console.print(f"[dim green]{cache_summary}[/dim green]")
 
     def _handle_stream_chunk(self, event: StreamChunkEvent) -> None:
-        """Handle streaming chunk - accumulate but don't print.
+        """Handle streaming chunk - display in real-time.
 
-        In REPL mode, we don't want to show the raw LLM response streaming
-        (which includes Thought/Code formatting). Instead, we let structured
-        events (FinalAnswerEvent, ToolCallEvent, etc.) handle the display.
+        In chat mode with streaming enabled, we display chunks as they arrive
+        for better UX. The chunks are raw LLM output, but we show them anyway.
         """
-        self.streaming_content += event.chunk
-        self.is_streaming = True
+        # On first chunk, stop spinner and start streaming
+        if not self.is_streaming:
+            if self.current_status:
+                self.current_status.stop()
+                self.current_status = None
+            self.console.print()  # Newline after spinner
+            self.is_streaming = True
 
-        # Don't print chunks - let structured events handle display
+        # Print chunk without newline (stay on same "line")
+        # Note: This shows raw LLM output including "Thought:" prefixes
+        self.console.print(event.chunk, end="")
+        self.streaming_content += event.chunk
 
     def _handle_stream_complete(self, event: StreamCompleteEvent) -> None:
         """Handle streaming complete."""
+        if self.is_streaming:
+            self.console.print()  # Final newline after streaming
         self.is_streaming = False
-        self.console.print()  # Newline after streaming
         self.streaming_content = ""
 
     def _handle_info(self, event: InfoEvent) -> None:
@@ -380,6 +460,25 @@ class ReplUIHandler:
         """Check if text contains error keywords."""
         error_keywords = ["error", "failed", "exception", "not found", "invalid", "traceback"]
         return any(keyword in text.lower() for keyword in error_keywords)
+
+    def _get_model_context_limit(self, model: str) -> Optional[int]:
+        """Get context limit for a model from LiteLLM's database.
+
+        Args:
+            model: Model identifier (e.g., "gpt-4", "claude-3-5-sonnet-20241022")
+
+        Returns:
+            Context limit in tokens, or None if unknown
+        """
+        # Strip provider prefix (e.g., "openai:gpt-4" -> "gpt-4")
+        model_name = model.split(":")[-1] if ":" in model else model
+
+        # Exact match in LiteLLM's model database
+        model_info = litellm.model_cost.get(model_name)
+        if model_info and "max_input_tokens" in model_info:
+            return model_info["max_input_tokens"]
+
+        return None
 
     def stop(self) -> None:
         """Stop any active status display."""

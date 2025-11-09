@@ -605,9 +605,15 @@ class TestRunCommandHistory:
             patch("tsugite.md_agents.validate_agent_execution") as mock_validate,
             patch("tsugite.agent_runner.history_integration.save_run_to_history") as mock_save_history,
         ):
-            # Mock run_agent to return tuple with metadata (simulating return_token_usage=True)
-            # Format: (result, tokens, cost, step_count, steps, system_prompt, attachments)
-            mock_run_agent.return_value = ("Test result", 1000, 0.05, 3, [], "System prompt", [])
+            # Mock run_agent to return AgentExecutionResult model
+            from tests.conftest import mock_agent_execution_result
+
+            mock_run_agent.return_value = mock_agent_execution_result(
+                response="Test result",
+                token_count=1000,
+                cost=0.05,
+                step_count=3,
+            )
             mock_validate.return_value = (True, "Valid")
             mock_save_history.return_value = "test_conv_id"
 
@@ -759,3 +765,67 @@ Step 2
             # Token count and cost should be None for multi-step
             assert call_kwargs["token_count"] is None
             assert call_kwargs["cost"] is None
+
+
+class TestUnpackExecutionResult:
+    """Tests for _unpack_execution_result function."""
+
+    def test_unpack_agent_execution_result(self):
+        """Test unpacking AgentExecutionResult object."""
+        from tests.conftest import mock_agent_execution_result
+        from tsugite.agent_runner import run_agent
+        from tsugite.cli import _unpack_execution_result
+
+        # Create an AgentExecutionResult
+        result = mock_agent_execution_result(
+            response="Test response",
+            token_count=100,
+            cost=0.005,
+            step_count=3,
+            execution_steps=[{"step": 1}],
+            system_message="System prompt",
+            attachments=[("file.txt", "content")],
+        )
+
+        # Unpack it
+        unpacked = _unpack_execution_result(result, should_save_history=True, executor=run_agent)
+
+        # Verify all fields are extracted correctly
+        assert unpacked[0] == "Test response"
+        assert unpacked[1] == 100
+        assert unpacked[2] == 0.005
+        assert unpacked[3] == [{"step": 1}]
+        assert unpacked[4] == "System prompt"
+        assert unpacked[5] == [("file.txt", "content")]
+
+    def test_unpack_plain_string(self):
+        """Test unpacking plain string result."""
+        from tsugite.agent_runner import run_agent
+        from tsugite.cli import _unpack_execution_result
+
+        result = "Simple string response"
+        unpacked = _unpack_execution_result(result, should_save_history=False, executor=run_agent)
+
+        # Should return string + None for all other fields
+        assert unpacked[0] == "Simple string response"
+        assert unpacked[1] is None
+        assert unpacked[2] is None
+        assert unpacked[3] is None
+        assert unpacked[4] is None
+        assert unpacked[5] is None
+
+    def test_unpack_tuple_result_old_format(self):
+        """Test unpacking old tuple format (for backward compatibility)."""
+        from tsugite.agent_runner import run_agent
+        from tsugite.cli import _unpack_execution_result
+
+        # Old format: (result_str, token_count, cost, step_count, execution_steps, system_prompt, attachments)
+        result = ("Response", 100, 0.01, 5, [{"step": 1}], "System", [("f", "c")])
+        unpacked = _unpack_execution_result(result, should_save_history=True, executor=run_agent)
+
+        assert unpacked[0] == "Response"
+        assert unpacked[1] == 100
+        assert unpacked[2] == 0.01
+        assert unpacked[3] == [{"step": 1}]
+        assert unpacked[4] == "System"
+        assert unpacked[5] == [("f", "c")]

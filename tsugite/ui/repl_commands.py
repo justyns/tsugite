@@ -360,16 +360,49 @@ def handle_verbose(console: Console, value: Optional[str], ui_handler) -> None:
         console.print("[dim]Hiding raw tool output (cleaner view)[/dim]")
 
 
-def parse_command(user_input: str) -> tuple[str, list[str]]:
-    """Parse slash command and arguments.
+def parse_command(user_input: str) -> tuple[str, list[str], Optional[str]]:
+    """Parse slash command and arguments with validation.
 
     Args:
         user_input: User input string
 
     Returns:
-        Tuple of (command, args_list)
+        Tuple of (command, args_list, error_message)
+        error_message is None if command is valid
     """
+    # Valid commands
+    valid_commands = {
+        "/help",
+        "/exit",
+        "/quit",
+        "/clear",
+        "/model",
+        "/agent",
+        "/attach",
+        "/detach",
+        "/list-attachments",
+        "/continue",
+        "/history",
+        "/save",
+        "/stats",
+        "/tools",
+        "/stream",
+        "/verbose",
+        "/multiline",
+    }
+
     parts = user_input.split(maxsplit=1)
     command = parts[0]
     args = parts[1].split() if len(parts) > 1 else []
-    return command, args
+
+    # Validate command
+    if command not in valid_commands:
+        # Try to suggest similar command (simple string matching)
+        suggestions = [cmd for cmd in valid_commands if cmd.startswith(command[:3])]
+        if suggestions:
+            error = f"Unknown command: {command}\n  Did you mean: {', '.join(suggestions)}?"
+        else:
+            error = f"Unknown command: {command}\n  Type /help for available commands."
+        return command, args, error
+
+    return command, args, None

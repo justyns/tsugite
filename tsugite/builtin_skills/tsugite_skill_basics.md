@@ -231,6 +231,57 @@ tsugite render test_skill.md "test task" --debug
 - ✅ Good: `python_async_patterns`, `rest_api_design`
 - ❌ Bad: `patterns`, `api_stuff`, `helper_1`
 
+### 7. Respect Turn-Based Execution in Code Examples
+
+**Critical:** Tsugite agents execute in a **turn-based model** - each code block runs independently and you don't see results until the next turn.
+
+When writing code examples in skills, show realistic single-purpose code blocks:
+
+✅ **Good - One tool call per block:**
+```python
+# Step 1: Search for files
+file_search(pattern="class.*Base", path="src")
+```
+
+Then in next turn:
+```python
+# Step 2: Read the file found in previous search
+read_file("src/base.py")
+```
+
+❌ **Bad - Multiple operations assuming intermediate results:**
+```python
+# Don't show this - won't work!
+results = file_search(pattern="class", path="src")
+read_file(results[0])  # Can't use results - not visible until next turn
+```
+
+**How to structure multi-step workflows in skills:**
+- Use numbered lists with separate code blocks
+- Add "Then:" or "Next turn:" between steps
+- Show text descriptions of what to do with results
+- Emphasize that each code block is independent
+
+**Example pattern:**
+```markdown
+1. First, search for authentication code:
+```python
+file_search(pattern="(?i)auth|login", path="src")
+```
+
+2. Based on search results, read the main auth file:
+```python
+read_file("src/auth/authenticate.py")
+```
+
+3. Then trace dependencies found in that file:
+```python
+file_search(pattern="verify_token", path="src")
+```
+```
+
+This teaches agents the correct execution model and prevents unrealistic code examples.
+
 ## Common Issues & Debugging
 
 ### Skill Not Found

@@ -164,7 +164,7 @@ def test_stop():
 
 
 def test_handle_stream_chunk():
-    """Test stream chunk event - should not print directly."""
+    """Test stream chunk event - prints chunks in real-time."""
     console = Console()
     handler = ReplUIHandler(console)
 
@@ -172,8 +172,10 @@ def test_handle_stream_chunk():
 
     with patch.object(console, "print") as mock_print:
         handler.handle_event(event)
-        # Should NOT print chunks directly (to avoid garbled output)
-        assert not mock_print.called
+        # Should print chunks in real-time for better UX
+        assert mock_print.called
+        # First call should be newline (after stopping spinner), second should be the chunk
+        assert mock_print.call_count == 2
         # Should accumulate chunks
         assert handler.streaming_content == "Hello "
         assert handler.is_streaming is True

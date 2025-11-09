@@ -164,7 +164,8 @@ class TsugiteAgent:
                     try:
                         return new_loop.run_until_complete(coro)
                     finally:
-                        pending = asyncio.all_tasks(new_loop)
+                        # Clean up only pending (not completed) tasks to avoid reusing coroutines
+                        pending = [task for task in asyncio.all_tasks(new_loop) if not task.done()]
                         for task in pending:
                             task.cancel()
                         if pending:
@@ -178,7 +179,8 @@ class TsugiteAgent:
             try:
                 return loop.run_until_complete(coro)
             finally:
-                pending = asyncio.all_tasks(loop)
+                # Clean up only pending (not completed) tasks to avoid reusing coroutines
+                pending = [task for task in asyncio.all_tasks(loop) if not task.done()]
                 for task in pending:
                     task.cancel()
                 if pending:
@@ -335,8 +337,10 @@ class TsugiteAgent:
             step_cost = 0.0
             if hasattr(response, "_hidden_params") and "response_cost" in response._hidden_params:
                 step_cost = response._hidden_params["response_cost"]
-                if step_cost is not None:
-                    self.total_cost += step_cost
+
+            # Add to total if we got a cost
+            if step_cost is not None:
+                self.total_cost += step_cost
 
             # Extract reasoning content if present (for o1/o3/Claude thinking)
             reasoning_content = self._extract_reasoning_content(response)

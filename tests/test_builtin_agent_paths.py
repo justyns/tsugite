@@ -44,7 +44,7 @@ class TestBuiltinAgentPathHandling:
         assert info["description"]
         assert info["valid"] is True
         assert "spawn_agent" in info["tools"]
-        assert info["prefetch_count"] == 1
+        assert info["prefetch_count"] == 2  # list_agents + get_skills_for_template
 
     @patch("tsugite.agent_runner.runner.TsugiteAgent")
     @patch("tsugite.core.tools.create_tool_from_tsugite")

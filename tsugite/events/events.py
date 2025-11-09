@@ -206,6 +206,10 @@ class CostSummaryEvent(BaseEvent):
     - cache_read_input_tokens: Tokens read from cache (Anthropic-specific)
 
     For Anthropic, both creation and read tokens are also included in cached_tokens.
+
+    Cumulative fields (for chat mode):
+    - cumulative_tokens: Total tokens across all turns in this conversation
+    - cumulative_cost: Total cost across all turns in this conversation
     """
 
     event_type: EventType = Field(default=EventType.COST_SUMMARY, frozen=True)
@@ -218,6 +222,10 @@ class CostSummaryEvent(BaseEvent):
     cached_tokens: Optional[int] = Field(default=None, ge=0)
     cache_creation_input_tokens: Optional[int] = Field(default=None, ge=0)
     cache_read_input_tokens: Optional[int] = Field(default=None, ge=0)
+
+    # Cumulative tracking (for chat mode)
+    cumulative_tokens: Optional[int] = Field(default=None, ge=0)
+    cumulative_cost: Optional[float] = Field(default=None, ge=0)
 
 
 class StreamChunkEvent(BaseEvent):

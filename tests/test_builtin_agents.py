@@ -221,6 +221,7 @@ class TestBuiltinDefaultAutoDiscovery:
             "text_mode": False,
             "is_interactive": False,
             "available_agents": "",  # From prefetch
+            "available_skills": "",  # From prefetch
         }
 
         # Test WITH web_search tool
@@ -281,8 +282,11 @@ class TestBuiltinChatAssistant:
 
         content = agent.content.lower()
 
-        # Should instruct to format results nicely
-        assert "format" in content and "nicely" in content or "extract" in content
+        # Should instruct to format results as readable text and warn against raw dicts/lists
+        assert "format" in content, "Chat assistant should mention formatting output"
+        assert "readable text" in content or "raw python" in content, (
+            "Chat assistant should warn about raw Python objects"
+        )
 
     def test_chat_assistant_mentions_fetch_text_usage(self):
         """Test that chat assistant explains when to use fetch_text."""

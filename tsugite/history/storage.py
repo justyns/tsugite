@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, Union
 
+import portalocker
+
 from tsugite.config import get_xdg_data_path
 
 from .models import ConversationMetadata, Turn
@@ -68,14 +70,14 @@ def save_turn_to_history(conversation_id: str, turn_data: Union[Turn, Conversati
     """Append a turn to conversation history.
 
     Creates the history directory and file if they don't exist.
-    Appends turn as JSONL line.
+    Appends turn as JSONL line with file locking to prevent corruption.
 
     Args:
         conversation_id: Conversation ID
         turn_data: Turn or ConversationMetadata model to append
 
     Raises:
-        RuntimeError: If write fails
+        RuntimeError: If write fails or lock timeout
     """
     conversation_path = _get_conversation_path(conversation_id)
 
@@ -83,9 +85,18 @@ def save_turn_to_history(conversation_id: str, turn_data: Union[Turn, Conversati
     conversation_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
+        # Use file locking to prevent concurrent write corruption
         with open(conversation_path, "a", encoding="utf-8") as f:
-            f.write(turn_data.model_dump_json(exclude_none=True))
-            f.write("\n")
+            # Acquire exclusive lock
+            portalocker.lock(f, portalocker.LOCK_EX)
+            try:
+                f.write(turn_data.model_dump_json(exclude_none=True))
+                f.write("\n")
+                f.flush()  # Ensure data is written
+            finally:
+                portalocker.unlock(f)
+    except portalocker.exceptions.LockException:
+        raise RuntimeError(f"Failed to acquire lock on {conversation_path} (timeout after 5s)")
     except IOError as e:
         raise RuntimeError(f"Failed to save turn to {conversation_path}: {e}")
 

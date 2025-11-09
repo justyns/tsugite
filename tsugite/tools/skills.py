@@ -2,7 +2,7 @@
 
 import logging
 import os
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from tsugite import renderer
 from tsugite.events import EventBus, SkillLoadedEvent, SkillUnloadedEvent
@@ -220,6 +220,16 @@ def list_available_skills() -> str:
 
 
 @tool
+def get_skills_for_template() -> List[Dict[str, str]]:
+    """Get skills as a list of dicts for template rendering.
+
+    Returns:
+        List of dicts with 'name' and 'description' keys
+    """
+    return get_available_skills_list()
+
+
+@tool
 def list_loaded_skills() -> str:
     """Show which skills are currently loaded in this session.
 
@@ -228,6 +238,25 @@ def list_loaded_skills() -> str:
     """
     manager = get_skill_manager()
     return manager.list_loaded_skills()
+
+
+def get_available_skills_list() -> List[Dict[str, str]]:
+    """Get list of all available skills as dicts (for template rendering).
+
+    This is a non-@tool function used internally by prefetch to provide
+    skill data to templates in a format Jinja2 can iterate over.
+
+    Returns:
+        List of dicts with 'name' and 'description' keys
+    """
+    manager = get_skill_manager()
+    manager._ensure_registry_initialized()
+
+    if not manager._skill_registry:
+        return []
+
+    # Convert SkillMeta objects to dicts for template use
+    return [{"name": skill.name, "description": skill.description} for skill in manager._skill_registry.values()]
 
 
 def get_loaded_skills() -> Dict[str, str]:

@@ -12,6 +12,7 @@ from tsugite.agent_runner.helpers import (  # noqa: F401
     set_current_agent,
 )
 from tsugite.agent_runner.metrics import StepMetrics, display_step_metrics  # noqa: F401
+from tsugite.agent_runner.models import AgentExecutionResult  # noqa: F401
 from tsugite.agent_runner.runner import (  # noqa: F401
     _combine_instructions,
     _execute_agent_with_prompt,
@@ -36,6 +37,7 @@ __all__ = [
     "execute_prefetch",
     "execute_tool_directives",
     "get_default_instructions",
+    "AgentExecutionResult",
     "StepMetrics",
     "display_step_metrics",
     "validate_agent_file",

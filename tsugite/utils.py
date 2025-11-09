@@ -326,39 +326,3 @@ def expand_file_references(prompt: str, base_dir: Path) -> Tuple[str, List[Tuple
     updated_prompt = re.sub(pattern, collect_file_ref, prompt)
 
     return updated_prompt, file_attachments
-
-
-async def cleanup_pending_tasks() -> None:
-    """Clean up any pending asyncio tasks.
-
-    This is used to properly clean up background tasks (like LiteLLM's logging tasks)
-    before the event loop shuts down, preventing RuntimeWarning about pending tasks.
-
-    Should be called in finally blocks of async functions that use asyncio.run().
-    """
-    import asyncio
-
-    # First, close LiteLLM's async HTTP clients properly
-    try:
-        from litellm import close_litellm_async_clients
-
-        await close_litellm_async_clients()
-    except Exception:
-        # Best effort - don't fail cleanup if litellm cleanup fails
-        pass
-
-    # Get all tasks except the current one
-    current_task = asyncio.current_task()
-    all_tasks = asyncio.all_tasks()
-    pending_tasks = [task for task in all_tasks if task is not current_task and not task.done()]
-
-    if not pending_tasks:
-        return
-
-    # Cancel all pending tasks
-    for task in pending_tasks:
-        task.cancel()
-
-    # Wait for all tasks to be cancelled
-    # Use return_exceptions=True to suppress CancelledError
-    await asyncio.gather(*pending_tasks, return_exceptions=True)

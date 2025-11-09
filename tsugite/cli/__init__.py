@@ -390,11 +390,25 @@ def _execute_agent_with_ui(
 def _unpack_execution_result(result, should_save_history: bool, executor):
     """Unpack execution result based on whether history was enabled."""
     from tsugite.agent_runner import run_agent
+    from tsugite.agent_runner.models import AgentExecutionResult
 
+    # Handle AgentExecutionResult object (new format when return_token_usage=True)
+    if isinstance(result, AgentExecutionResult):
+        return (
+            result.response,
+            result.token_count,
+            result.cost,
+            result.execution_steps,
+            result.system_message,
+            result.attachments,
+        )
+
+    # Handle old tuple format (for backward compatibility)
     if should_save_history and executor == run_agent and isinstance(result, tuple):
         result_str, token_count, cost, step_count, execution_steps, system_prompt, attachments = result
         return result_str, token_count, cost, execution_steps, system_prompt, attachments
 
+    # Handle plain string result
     result_str = result if not isinstance(result, tuple) else result[0]
     return result_str, None, None, None, None, None
 

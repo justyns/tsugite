@@ -9,31 +9,6 @@ from tsugite.core.executor import LocalExecutor
 from tsugite.core.tools import create_tool_from_function
 
 
-@pytest.fixture
-def mock_litellm_response():
-    """Create a mock LiteLLM response."""
-
-    def _create_response(content: str, reasoning_content: str = None):
-        """Factory to create mock responses with different content."""
-        response = MagicMock()
-        response.choices = [MagicMock()]
-        response.choices[0].message = MagicMock(spec=[])  # Start with empty spec
-        response.choices[0].message.content = content
-
-        # Add reasoning content if provided
-        if reasoning_content:
-            # Add reasoning_content attribute
-            response.choices[0].message.reasoning_content = reasoning_content
-
-        # Add token usage
-        response.usage = MagicMock()
-        response.usage.total_tokens = 100
-
-        return response
-
-    return _create_response
-
-
 @pytest.mark.asyncio
 async def test_agent_creation():
     """Test creating a TsugiteAgent."""
@@ -64,16 +39,14 @@ async def test_agent_simple_calculation(mock_litellm_response):
     """Test agent can do basic calculation and return final_answer."""
 
     # Mock litellm.acompletion to return a response with final_answer
-    with patch("tsugite.core.agent.litellm") as mock_litellm:
-        mock_litellm.acompletion = AsyncMock(
-            return_value=mock_litellm_response(
-                """Thought: I'll calculate 5 + 3 using Python.
+    with patch("litellm.acompletion", new_callable=AsyncMock) as mock_acompletion:
+        mock_acompletion.return_value = mock_litellm_response(
+            """Thought: I'll calculate 5 + 3 using Python.
 
 ```python
 result = 5 + 3
 final_answer(result)
 ```"""
-            )
         )
 
         agent = TsugiteAgent(
@@ -89,7 +62,7 @@ final_answer(result)
         assert result == 8
 
         # Verify litellm was called
-        mock_litellm.acompletion.assert_called_once()
+        mock_acompletion.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -123,9 +96,7 @@ final_answer(result)
 ```"""
             )
 
-    with patch("tsugite.core.agent.litellm") as mock_litellm:
-        mock_litellm.acompletion = mock_acompletion
-
+    with patch("litellm.acompletion", new=mock_acompletion):
         agent = TsugiteAgent(
             model_string="openai:gpt-4o-mini",
             tools=[],
@@ -159,16 +130,14 @@ async def test_agent_with_tools(mock_litellm_response):
 
     tool = create_tool_from_function(multiply)
 
-    with patch("tsugite.core.agent.litellm") as mock_litellm:
-        mock_litellm.acompletion = AsyncMock(
-            return_value=mock_litellm_response(
-                """Thought: I'll use the multiply tool.
+    with patch("litellm.acompletion", new_callable=AsyncMock) as mock_acompletion:
+        mock_acompletion.return_value = mock_litellm_response(
+            """Thought: I'll use the multiply tool.
 
 ```python
 result = multiply(5, 3)
 final_answer(result)
 ```"""
-            )
         )
 
         agent = TsugiteAgent(
@@ -191,17 +160,15 @@ final_answer(result)
 async def test_agent_max_turns_reached(mock_litellm_response):
     """Test agent raises error when max_turns is reached."""
 
-    with patch("tsugite.core.agent.litellm") as mock_litellm:
+    with patch("litellm.acompletion", new_callable=AsyncMock) as mock_acompletion:
         # Always return code without final_answer
-        mock_litellm.acompletion = AsyncMock(
-            return_value=mock_litellm_response(
-                """Thought: Still working...
+        mock_acompletion.return_value = mock_litellm_response(
+            """Thought: Still working...
 
 ```python
 x = 1
 print(x)
 ```"""
-            )
         )
 
         agent = TsugiteAgent(
@@ -223,15 +190,13 @@ print(x)
 async def test_agent_return_full_result(mock_litellm_response):
     """Test agent can return full result with metadata."""
 
-    with patch("tsugite.core.agent.litellm") as mock_litellm:
-        mock_litellm.acompletion = AsyncMock(
-            return_value=mock_litellm_response(
-                """Thought: Calculate the answer.
+    with patch("litellm.acompletion", new_callable=AsyncMock) as mock_acompletion:
+        mock_acompletion.return_value = mock_litellm_response(
+            """Thought: Calculate the answer.
 
 ```python
 final_answer(42)
 ```"""
-            )
         )
 
         agent = TsugiteAgent(
@@ -254,16 +219,14 @@ final_answer(42)
 async def test_agent_reasoning_model_support(mock_litellm_response):
     """Test agent supports reasoning models with reasoning_effort."""
 
-    with patch("tsugite.core.agent.litellm") as mock_litellm:
-        mock_litellm.acompletion = AsyncMock(
-            return_value=mock_litellm_response(
-                """Thought: Using reasoning to solve this.
+    with patch("litellm.acompletion", new_callable=AsyncMock) as mock_acompletion:
+        mock_acompletion.return_value = mock_litellm_response(
+            """Thought: Using reasoning to solve this.
 
 ```python
 final_answer(100)
 ```""",
-                reasoning_content="[Hidden reasoning process...]",
-            )
+            reasoning_content="[Hidden reasoning process...]",
         )
 
         agent = TsugiteAgent(
@@ -281,7 +244,7 @@ final_answer(100)
         assert "[Hidden reasoning process...]" in agent.memory.reasoning_history[0]
 
         # Should have called litellm with reasoning_effort
-        call_kwargs = mock_litellm.acompletion.call_args[1]
+        call_kwargs = mock_acompletion.call_args[1]
         assert "reasoning_effort" in call_kwargs
         assert call_kwargs["reasoning_effort"] == "high"
 
@@ -290,15 +253,13 @@ final_answer(100)
 async def test_agent_model_kwargs_passed_to_litellm(mock_litellm_response):
     """Test that model_kwargs are passed to litellm.acompletion."""
 
-    with patch("tsugite.core.agent.litellm") as mock_litellm:
-        mock_litellm.acompletion = AsyncMock(
-            return_value=mock_litellm_response(
-                """Thought: Done.
+    with patch("litellm.acompletion", new_callable=AsyncMock) as mock_acompletion:
+        mock_acompletion.return_value = mock_litellm_response(
+            """Thought: Done.
 
 ```python
 final_answer("test")
 ```"""
-            )
         )
 
         agent = TsugiteAgent(
@@ -316,7 +277,7 @@ final_answer("test")
         await agent.run("Task")
 
         # Verify kwargs were passed
-        call_kwargs = mock_litellm.acompletion.call_args[1]
+        call_kwargs = mock_acompletion.call_args[1]
         assert call_kwargs["temperature"] == 0.7
         assert call_kwargs["max_tokens"] == 1000
         assert call_kwargs["response_format"] == {"type": "json_object"}
@@ -353,9 +314,7 @@ final_answer(result)
 ```"""
             )
 
-    with patch("tsugite.core.agent.litellm") as mock_litellm:
-        mock_litellm.acompletion = mock_acompletion
-
+    with patch("litellm.acompletion", new=mock_acompletion):
         agent = TsugiteAgent(
             model_string="openai:gpt-4o-mini",
             tools=[],
@@ -561,22 +520,20 @@ async def test_agent_custom_executor():
     mock_executor.execute = AsyncMock(return_value=MagicMock(output="custom output", error=None, final_answer=42))
     mock_executor.namespace = {}
 
-    with patch("tsugite.core.agent.litellm") as mock_litellm:
-        mock_litellm.acompletion = AsyncMock(
-            return_value=MagicMock(
-                choices=[
-                    MagicMock(
-                        message=MagicMock(
-                            content="""Thought: Test.
+    with patch("litellm.acompletion", new_callable=AsyncMock) as mock_acompletion:
+        mock_acompletion.return_value = MagicMock(
+            choices=[
+                MagicMock(
+                    message=MagicMock(
+                        content="""Thought: Test.
 
 ```python
 final_answer(42)
 ```"""
-                        )
                     )
-                ],
-                usage=MagicMock(total_tokens=50),
-            )
+                )
+            ],
+            usage=MagicMock(total_tokens=50),
         )
 
         agent = TsugiteAgent(

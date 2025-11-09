@@ -23,23 +23,26 @@ from tsugite.ui.repl_commands import (
 
 def test_parse_command_simple():
     """Test parsing simple command."""
-    command, args = parse_command("/help")
+    command, args, error = parse_command("/help")
     assert command == "/help"
     assert args == []
+    assert error is None
 
 
 def test_parse_command_with_args():
     """Test parsing command with arguments."""
-    command, args = parse_command("/attach test.txt")
+    command, args, error = parse_command("/attach test.txt")
     assert command == "/attach"
     assert args == ["test.txt"]
+    assert error is None
 
 
 def test_parse_command_multiple_args():
     """Test parsing command with multiple arguments."""
-    command, args = parse_command("/history 20")
+    command, args, error = parse_command("/history 20")
     assert command == "/history"
     assert args == ["20"]
+    assert error is None
 
 
 def test_handle_help():

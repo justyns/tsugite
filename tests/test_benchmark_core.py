@@ -58,8 +58,15 @@ def benchmark_config():
 @pytest.fixture
 def mock_agent_run():
     """Mock the agent runner."""
+    from tests.conftest import mock_agent_execution_result
+
     with patch("tsugite.benchmark.execution.run_agent") as mock:
-        mock.return_value = ("42", 0, 0.0, 0, [])
+        mock.return_value = mock_agent_execution_result(
+            response="42",
+            token_count=0,
+            cost=0.0,
+            step_count=0,
+        )
         yield mock
 
 

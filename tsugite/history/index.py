@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
+import portalocker
+
 from .models import ConversationMetadata, IndexEntry, Turn
 from .storage import get_history_dir, list_conversation_files, load_conversation
 
@@ -49,7 +51,7 @@ def save_index(index: Dict[str, IndexEntry]) -> None:
         index: Index data to save (IndexEntry models)
 
     Raises:
-        RuntimeError: If save fails
+        RuntimeError: If save fails or lock timeout
     """
     index_path = _get_index_path()
 
@@ -61,8 +63,17 @@ def save_index(index: Dict[str, IndexEntry]) -> None:
             conv_id: entry.model_dump(mode="json", exclude_none=True) for conv_id, entry in index.items()
         }
 
+        # Use file locking to prevent concurrent write corruption
         with open(index_path, "w", encoding="utf-8") as f:
-            json.dump(serializable_index, f, indent=2, ensure_ascii=False)
+            # Acquire exclusive lock
+            portalocker.lock(f, portalocker.LOCK_EX)
+            try:
+                json.dump(serializable_index, f, indent=2, ensure_ascii=False)
+                f.flush()  # Ensure data is written
+            finally:
+                portalocker.unlock(f)
+    except portalocker.exceptions.LockException:
+        raise RuntimeError(f"Failed to acquire lock on {index_path} (timeout after 5s)")
     except IOError as e:
         raise RuntimeError(f"Failed to save index to {index_path}: {e}")
 

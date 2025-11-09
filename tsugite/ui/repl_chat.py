@@ -175,7 +175,14 @@ def run_repl_chat(
 
                 # Handle slash commands
                 if user_input.startswith("/"):
-                    command, args = parse_command(user_input)
+                    command, args, error = parse_command(user_input)
+
+                    # Show error if command is invalid
+                    if error:
+                        from rich.panel import Panel
+
+                        console.print(Panel(f"[yellow]{error}[/yellow]", border_style="yellow", padding=(0, 1)))
+                        continue
 
                     if command in ("/exit", "/quit"):
                         console.print("\n[dim]Goodbye![/dim]")
@@ -256,10 +263,6 @@ def run_repl_chat(
                     elif command == "/agent":
                         console.print("[yellow]Cannot switch agents in active session.[/yellow]")
                         console.print("[dim]Exit and start a new chat with a different agent.[/dim]")
-
-                    else:
-                        console.print(f"[red]Unknown command: {command}[/red]")
-                        console.print("[dim]Type /help for available commands[/dim]")
 
                     continue
 
