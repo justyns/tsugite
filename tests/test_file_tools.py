@@ -634,3 +634,177 @@ def test_edit_file_missing_parameters(temp_dir, file_tools):
     # old_string without new_string
     with pytest.raises(RuntimeError, match="new_string is required"):
         call_tool("edit_file", path=str(test_file), old_string="Hello")
+
+
+# Tests for gitignore support
+
+
+def test_list_files_respects_gitignore_by_default(temp_dir, file_tools):
+    """Test that list_files respects .gitignore by default."""
+    # Create a .gitignore file
+    gitignore = temp_dir / ".gitignore"
+    gitignore.write_text("*.log\ntemp/\n")
+
+    # Create test files
+    (temp_dir / "file1.txt").write_text("content1")
+    (temp_dir / "file2.log").write_text("log content")
+    (temp_dir / "file3.txt").write_text("content3")
+
+    files = call_tool("list_files", path=str(temp_dir))
+
+    assert isinstance(files, list)
+    assert "file1.txt" in files
+    assert "file3.txt" in files
+    assert "file2.log" not in files  # Should be excluded by .gitignore
+    assert ".gitignore" in files  # .gitignore itself should be listed
+
+
+def test_list_files_excludes_git_directory(temp_dir, file_tools):
+    """Test that list_files always excludes .git/ directory."""
+    # Create a .git directory
+    git_dir = temp_dir / ".git"
+    git_dir.mkdir()
+    (git_dir / "config").write_text("git config")
+
+    # Create regular files
+    (temp_dir / "file1.txt").write_text("content1")
+
+    files = call_tool("list_files", path=str(temp_dir))
+
+    assert "file1.txt" in files
+    assert ".git" not in files  # .git directory should be excluded
+
+
+def test_list_files_disable_gitignore(temp_dir, file_tools):
+    """Test that gitignore can be disabled with respect_gitignore=False."""
+    # Create a .gitignore file
+    gitignore = temp_dir / ".gitignore"
+    gitignore.write_text("*.log\n")
+
+    # Create test files
+    (temp_dir / "file1.txt").write_text("content1")
+    (temp_dir / "file2.log").write_text("log content")
+
+    files = call_tool("list_files", path=str(temp_dir), respect_gitignore=False)
+
+    assert isinstance(files, list)
+    assert "file1.txt" in files
+    assert "file2.log" in files  # Should be included when gitignore is disabled
+    assert ".gitignore" in files
+
+
+def test_list_files_nested_gitignore(temp_dir, file_tools):
+    """Test that list_files handles nested .gitignore files."""
+    # Create root .gitignore
+    root_gitignore = temp_dir / ".gitignore"
+    root_gitignore.write_text("*.log\n")
+
+    # Create subdirectory with its own .gitignore
+    subdir = temp_dir / "subdir"
+    subdir.mkdir()
+    sub_gitignore = subdir / ".gitignore"
+    sub_gitignore.write_text("*.tmp\n")
+
+    # Create test files in subdirectory
+    (subdir / "file1.txt").write_text("content1")
+    (subdir / "file2.log").write_text("log content")
+    (subdir / "file3.tmp").write_text("temp content")
+
+    files = call_tool("list_files", path=str(subdir))
+
+    assert isinstance(files, list)
+    assert "file1.txt" in files
+    assert "file2.log" not in files  # Excluded by parent .gitignore
+    assert "file3.tmp" not in files  # Excluded by local .gitignore
+    assert ".gitignore" in files  # Local .gitignore should be listed
+
+
+def test_list_files_no_gitignore(temp_dir, file_tools):
+    """Test that list_files works normally when no .gitignore exists."""
+    # Create test files without .gitignore
+    (temp_dir / "file1.txt").write_text("content1")
+    (temp_dir / "file2.log").write_text("log content")
+
+    files = call_tool("list_files", path=str(temp_dir))
+
+    assert isinstance(files, list)
+    assert "file1.txt" in files
+    assert "file2.log" in files  # Should be included when no .gitignore
+
+
+def test_list_files_empty_gitignore(temp_dir, file_tools):
+    """Test that list_files handles empty .gitignore files."""
+    # Create empty .gitignore
+    gitignore = temp_dir / ".gitignore"
+    gitignore.write_text("")
+
+    # Create test files
+    (temp_dir / "file1.txt").write_text("content1")
+    (temp_dir / "file2.log").write_text("log content")
+
+    files = call_tool("list_files", path=str(temp_dir))
+
+    assert isinstance(files, list)
+    assert "file1.txt" in files
+    assert "file2.log" in files  # Should be included (no patterns in .gitignore)
+    assert ".gitignore" in files
+
+
+def test_list_files_gitignore_with_comments(temp_dir, file_tools):
+    """Test that list_files correctly handles comments in .gitignore."""
+    # Create .gitignore with comments
+    gitignore = temp_dir / ".gitignore"
+    gitignore.write_text("# This is a comment\n*.log\n# Another comment\n")
+
+    # Create test files
+    (temp_dir / "file1.txt").write_text("content1")
+    (temp_dir / "file2.log").write_text("log content")
+
+    files = call_tool("list_files", path=str(temp_dir))
+
+    assert "file1.txt" in files
+    assert "file2.log" not in files  # Should be excluded despite comments
+
+
+def test_list_files_gitignore_directory_pattern(temp_dir, file_tools):
+    """Test that list_files handles directory patterns in .gitignore."""
+    # Create .gitignore with directory pattern
+    gitignore = temp_dir / ".gitignore"
+    gitignore.write_text("temp/\n")
+
+    # Create temp directory with files
+    temp_subdir = temp_dir / "temp"
+    temp_subdir.mkdir()
+    (temp_subdir / "file.txt").write_text("temp file")
+
+    # Create regular file
+    (temp_dir / "regular.txt").write_text("regular file")
+
+    files = call_tool("list_files", path=str(temp_dir))
+
+    assert "regular.txt" in files
+    assert ".gitignore" in files
+
+    # When explicitly listing the temp directory, files should still be shown
+    # (similar to how `ls temp/` or `rg pattern temp/` explicitly searches that directory)
+    # The gitignore only prevents traversal from parent directories
+    temp_files = call_tool("list_files", path=str(temp_subdir))
+    assert "file.txt" in temp_files  # Files should be listed when explicitly asked
+
+
+def test_list_files_gitignore_with_pattern(temp_dir, file_tools):
+    """Test that list_files works with both pattern and gitignore."""
+    # Create .gitignore
+    gitignore = temp_dir / ".gitignore"
+    gitignore.write_text("*.log\n")
+
+    # Create test files
+    (temp_dir / "test1.txt").write_text("content1")
+    (temp_dir / "test2.py").write_text("content2")
+    (temp_dir / "test3.log").write_text("log content")
+
+    # List only .txt files (should also respect .gitignore)
+    txt_files = call_tool("list_files", path=str(temp_dir), pattern="*.txt")
+    assert "test1.txt" in txt_files
+    assert "test2.py" not in txt_files  # Excluded by pattern
+    assert "test3.log" not in txt_files  # Would be excluded by .gitignore anyway

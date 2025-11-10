@@ -3,6 +3,8 @@
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import pathspec
+
 from ..tools import tool
 
 
@@ -89,13 +91,59 @@ def write_file(path: str, content: str) -> str:
         raise RuntimeError(f"Failed to write file {path}: {e}") from e
 
 
+def _build_gitignore_matcher(base_path: Path) -> Optional[pathspec.PathSpec]:
+    """Build a pathspec matcher from .gitignore files.
+
+    Walks up the directory tree from base_path to find .gitignore files
+    and combines their patterns into a single matcher.
+
+    Args:
+        base_path: Starting directory path
+
+    Returns:
+        PathSpec matcher or None if no .gitignore files found
+    """
+    patterns = []
+    current = base_path.resolve()
+
+    # Walk up the directory tree to find .gitignore files
+    while True:
+        gitignore_path = current / ".gitignore"
+        if gitignore_path.exists() and gitignore_path.is_file():
+            try:
+                with gitignore_path.open("r", encoding="utf-8") as f:
+                    # Parse gitignore patterns (skip empty lines and comments)
+                    for line in f:
+                        line = line.rstrip("\n\r")
+                        if line and not line.startswith("#"):
+                            patterns.append(line)
+            except Exception:
+                pass
+
+        # Stop at git root (if .git exists) or filesystem root
+        if (current / ".git").exists() or current.parent == current:
+            break
+
+        current = current.parent
+
+    # Always exclude .git/ directory
+    patterns.append(".git/")
+
+    if not patterns:
+        return None
+
+    return pathspec.PathSpec.from_lines(pathspec.patterns.GitWildMatchPattern, patterns)
+
+
 @tool
-def list_files(path: str = ".", pattern: str = "*") -> List[str]:
+def list_files(path: str = ".", pattern: str = "*", respect_gitignore: bool = True) -> List[str]:
     """List files in a directory with optional pattern matching.
 
     Args:
         path: Directory path to list files from
         pattern: Glob pattern to match files
+        respect_gitignore: If True (default), respects .gitignore files and excludes .git/ directory.
+                          Follows the behavior of modern tools like ripgrep and fd.
     """
     dir_path = Path(path)
 
@@ -106,10 +154,21 @@ def list_files(path: str = ".", pattern: str = "*") -> List[str]:
         raise NotADirectoryError(f"Path is not a directory: {path}")
 
     try:
+        # Build gitignore matcher if requested
+        gitignore_spec = None
+        if respect_gitignore:
+            gitignore_spec = _build_gitignore_matcher(dir_path)
+
         files = []
         for item in dir_path.glob(pattern):
             if item.is_file():
-                files.append(str(item.relative_to(dir_path)))
+                rel_path = str(item.relative_to(dir_path))
+
+                # Filter through gitignore if enabled
+                if gitignore_spec and gitignore_spec.match_file(rel_path):
+                    continue
+
+                files.append(rel_path)
 
         return sorted(files)
     except Exception as e:
