@@ -271,6 +271,7 @@ class TestSkillManagerEvents:
         """Test that loading a skill emits a SkillLoadedEvent."""
         from tsugite.events import EventBus, SkillLoadedEvent
         from tsugite.skill_discovery import SkillMeta
+        from tsugite import ui_context
 
         # Create a test skill file
         skill_file = tmp_path / "test_skill.md"
@@ -292,29 +293,37 @@ Content
 
         event_bus.subscribe(capture_event)
 
-        # Create skill manager with event bus
-        manager = SkillManager(event_bus=event_bus)
-        manager._skill_registry = {
-            "test_skill": SkillMeta(
-                name="test_skill",
-                description="A test skill",
-                path=skill_file,
-            )
-        }
-        manager._registry_initialized = True
+        # Set event bus in ui_context so helpers can find it
+        ui_context._event_bus_var.set(event_bus)
 
-        # Load skill
-        manager.load_skill("test_skill")
+        try:
+            # Create skill manager (no event_bus parameter needed)
+            manager = SkillManager()
+            manager._skill_registry = {
+                "test_skill": SkillMeta(
+                    name="test_skill",
+                    description="A test skill",
+                    path=skill_file,
+                )
+            }
+            manager._registry_initialized = True
 
-        # Should emit SkillLoadedEvent
-        assert len(emitted_events) == 1
-        assert isinstance(emitted_events[0], SkillLoadedEvent)
-        assert emitted_events[0].skill_name == "test_skill"
-        assert emitted_events[0].description == "A test skill"
+            # Load skill
+            manager.load_skill("test_skill")
+
+            # Should emit SkillLoadedEvent
+            assert len(emitted_events) == 1
+            assert isinstance(emitted_events[0], SkillLoadedEvent)
+            assert emitted_events[0].skill_name == "test_skill"
+            assert emitted_events[0].description == "A test skill"
+        finally:
+            # Clean up
+            ui_context._event_bus_var.set(None)
 
     def test_unload_skill_emits_event(self):
         """Test that unloading a skill emits a SkillUnloadedEvent."""
         from tsugite.events import EventBus, SkillUnloadedEvent
+        from tsugite import ui_context
 
         # Create event bus and track emitted events
         event_bus = EventBus()
@@ -325,21 +334,29 @@ Content
 
         event_bus.subscribe(capture_event)
 
-        # Create skill manager with event bus
-        manager = SkillManager(event_bus=event_bus)
-        manager._loaded_skills = {"test_skill": "content"}
+        # Set event bus in ui_context so helpers can find it
+        ui_context._event_bus_var.set(event_bus)
 
-        # Unload skill
-        manager.unload_skill("test_skill")
+        try:
+            # Create skill manager (no event_bus parameter needed)
+            manager = SkillManager()
+            manager._loaded_skills = {"test_skill": "content"}
 
-        # Should emit SkillUnloadedEvent
-        assert len(emitted_events) == 1
-        assert isinstance(emitted_events[0], SkillUnloadedEvent)
-        assert emitted_events[0].skill_name == "test_skill"
+            # Unload skill
+            manager.unload_skill("test_skill")
+
+            # Should emit SkillUnloadedEvent
+            assert len(emitted_events) == 1
+            assert isinstance(emitted_events[0], SkillUnloadedEvent)
+            assert emitted_events[0].skill_name == "test_skill"
+        finally:
+            # Clean up
+            ui_context._event_bus_var.set(None)
 
     def test_load_skill_no_event_without_bus(self, tmp_path):
         """Test that loading a skill without event bus doesn't crash."""
         from tsugite.skill_discovery import SkillMeta
+        from tsugite import ui_context
 
         # Create a test skill file
         skill_file = tmp_path / "test_skill.md"
@@ -352,17 +369,24 @@ Content
 """
         )
 
-        # Create skill manager WITHOUT event bus
-        manager = SkillManager(event_bus=None)
-        manager._skill_registry = {
-            "test_skill": SkillMeta(
-                name="test_skill",
-                description="A test skill",
-                path=skill_file,
-            )
-        }
-        manager._registry_initialized = True
+        # Ensure no event bus is set in ui_context
+        ui_context._event_bus_var.set(None)
 
-        # Load skill - should work without crashing
-        result = manager.load_skill("test_skill")
-        assert "success" in result.lower() or "loaded" in result.lower()
+        try:
+            # Create skill manager (helper will handle missing event bus gracefully)
+            manager = SkillManager()
+            manager._skill_registry = {
+                "test_skill": SkillMeta(
+                    name="test_skill",
+                    description="A test skill",
+                    path=skill_file,
+                )
+            }
+            manager._registry_initialized = True
+
+            # Load skill - should work without crashing
+            result = manager.load_skill("test_skill")
+            assert "success" in result.lower() or "loaded" in result.lower()
+        finally:
+            # Clean up (though already None)
+            ui_context._event_bus_var.set(None)

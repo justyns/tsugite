@@ -166,6 +166,18 @@ def _combine_instructions(*segments: str) -> str:
     return "\n\n".join(parts)
 
 
+def _setup_event_context(event_bus: Optional["EventBus"]) -> None:
+    """Set event bus in UI context for tool access.
+
+    Args:
+        event_bus: Event bus to set in context, or None to skip
+    """
+    if event_bus:
+        from tsugite.ui_context import set_ui_context
+
+        set_ui_context(event_bus=event_bus)
+
+
 def get_default_instructions(text_mode: bool = False) -> str:
     """Get default instructions based on agent mode.
 
@@ -205,6 +217,9 @@ def get_default_instructions(text_mode: bool = False) -> str:
 
 def execute_prefetch(prefetch_config: List[Dict[str, Any]], event_bus: Optional["EventBus"] = None) -> Dict[str, Any]:
     from tsugite.tools import call_tool
+
+    # Set event_bus in context so tools can access it
+    _setup_event_context(event_bus)
 
     context = {}
     for config in prefetch_config:
@@ -256,6 +271,9 @@ def execute_tool_directives(
 
     if existing_context is None:
         existing_context = {}
+
+    # Set event_bus in context so tools can access it
+    _setup_event_context(event_bus)
 
     # Extract tool directives
     try:
@@ -481,6 +499,9 @@ async def _execute_agent_with_prompt(
             skills=prepared.skills,
             previous_messages=previous_messages,
         )
+
+        # Set event_bus in context so tools can access it during execution
+        _setup_event_context(event_bus)
 
         # Run agent
         result = await agent.run(prepared.rendered_prompt, return_full_result=return_token_usage, stream=stream)

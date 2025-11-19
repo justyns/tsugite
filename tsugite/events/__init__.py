@@ -9,6 +9,7 @@ from .events import (
     ErrorEvent,
     ExecutionLogsEvent,
     ExecutionResultEvent,
+    FileReadEvent,
     FinalAnswerEvent,
     InfoEvent,
     LLMMessageEvent,
@@ -55,6 +56,7 @@ __all__ = [
     "DebugMessageEvent",
     "WarningEvent",
     "StepProgressEvent",
+    "FileReadEvent",
     # Skills
     "SkillLoadedEvent",
     "SkillLoadFailedEvent",

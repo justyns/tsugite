@@ -46,6 +46,12 @@ class FileHandler(AttachmentHandler):
         """
         try:
             path = Path(source).expanduser()
-            return path.read_text(encoding="utf-8")
+            content = path.read_text(encoding="utf-8")
+
+            from tsugite.events.helpers import emit_file_read_event
+
+            emit_file_read_event(str(path), content, "attachment")
+
+            return content
         except Exception as e:
             raise ValueError(f"Failed to read file '{source}': {e}")

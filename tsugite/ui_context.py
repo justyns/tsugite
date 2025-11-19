@@ -11,12 +11,14 @@ from rich.progress import Progress
 _console_var: contextvars.ContextVar[Optional[Console]] = contextvars.ContextVar("console", default=None)
 _progress_var: contextvars.ContextVar[Optional[Progress]] = contextvars.ContextVar("progress", default=None)
 _ui_handler_var: contextvars.ContextVar[Optional[Any]] = contextvars.ContextVar("ui_handler", default=None)
+_event_bus_var: contextvars.ContextVar[Optional[Any]] = contextvars.ContextVar("event_bus", default=None)
 
 
 def set_ui_context(
     console: Optional[Console] = None,
     progress: Optional[Progress] = None,
     ui_handler: Optional[Any] = None,
+    event_bus: Optional[Any] = None,
 ) -> None:
     """Store UI context in context variables.
 
@@ -24,10 +26,12 @@ def set_ui_context(
         console: Rich console instance
         progress: Rich progress instance (spinner)
         ui_handler: UI handler instance (e.g., TextualUIHandler or CustomUIHandler)
+        event_bus: Event bus instance for emitting events
     """
     _console_var.set(console)
     _progress_var.set(progress)
     _ui_handler_var.set(ui_handler)
+    _event_bus_var.set(event_bus)
 
 
 def get_console() -> Optional[Console]:
@@ -49,11 +53,21 @@ def get_ui_handler() -> Optional[Any]:
     return _ui_handler_var.get()
 
 
+def get_event_bus() -> Optional[Any]:
+    """Get the event bus from context variables.
+
+    Returns:
+        EventBus instance if available, None otherwise
+    """
+    return _event_bus_var.get()
+
+
 def clear_ui_context() -> None:
     """Clear UI context from context variables."""
     _console_var.set(None)
     _progress_var.set(None)
     _ui_handler_var.set(None)
+    _event_bus_var.set(None)
 
 
 @contextmanager

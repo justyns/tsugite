@@ -5,7 +5,6 @@ import os
 from typing import Dict, List, Optional
 
 from tsugite import renderer
-from tsugite.events import EventBus, SkillLoadedEvent, SkillUnloadedEvent
 from tsugite.renderer import AgentRenderer
 from tsugite.skill_discovery import SkillMeta, build_skill_index, scan_skills
 from tsugite.tools import tool
@@ -21,13 +20,8 @@ class SkillManager:
     An instance should be created per agent/session and passed to tools.
     """
 
-    def __init__(self, event_bus: Optional[EventBus] = None):
-        """Initialize skill manager.
-
-        Args:
-            event_bus: Optional event bus for emitting skill lifecycle events
-        """
-        self.event_bus = event_bus
+    def __init__(self):
+        """Initialize skill manager."""
         self._skill_registry: Dict[str, SkillMeta] = {}
         self._loaded_skills: Dict[str, str] = {}
         self._registry_initialized = False
@@ -86,13 +80,9 @@ class SkillManager:
 
             self._loaded_skills[skill_name] = rendered_content
 
-            if self.event_bus:
-                self.event_bus.emit(
-                    SkillLoadedEvent(
-                        skill_name=skill_name,
-                        description=skill.description,
-                    )
-                )
+            from tsugite.events.helpers import emit_skill_loaded_event
+
+            emit_skill_loaded_event(skill_name=skill_name, description=skill.description)
 
             return f"✓ Successfully loaded skill: {skill_name}"
 
@@ -114,8 +104,9 @@ class SkillManager:
 
         del self._loaded_skills[skill_name]
 
-        if self.event_bus:
-            self.event_bus.emit(SkillUnloadedEvent(skill_name=skill_name))
+        from tsugite.events.helpers import emit_skill_unloaded_event
+
+        emit_skill_unloaded_event(skill_name=skill_name)
 
         return f"✓ Successfully unloaded skill: {skill_name}"
 

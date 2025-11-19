@@ -271,3 +271,13 @@ class StepProgressEvent(BaseEvent):
     step: Optional[int] = Field(default=None, ge=1)
     total: Optional[int] = Field(default=None, ge=1)
     percentage: Optional[float] = Field(default=None, ge=0, le=100)
+
+
+class FileReadEvent(BaseEvent):
+    """File read notification with metadata."""
+
+    event_type: EventType = Field(default=EventType.FILE_READ, frozen=True)
+    path: str
+    line_count: int = Field(ge=0)
+    byte_count: int = Field(ge=0)
+    operation: str  # "prefetch", "attachment", "tool_call", "auto_context"

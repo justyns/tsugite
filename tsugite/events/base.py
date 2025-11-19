@@ -38,6 +38,7 @@ class EventType(IntEnum):
     DEBUG_MESSAGE = 21
     WARNING = 22
     STEP_PROGRESS = 23
+    FILE_READ = 24
 
 
 class BaseEvent(BaseModel):

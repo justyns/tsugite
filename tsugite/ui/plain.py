@@ -11,6 +11,7 @@ from tsugite.events import (
     ErrorEvent,
     ExecutionLogsEvent,
     ExecutionResultEvent,
+    FileReadEvent,
     FinalAnswerEvent,
     LLMMessageEvent,
     ObservationEvent,
@@ -109,6 +110,14 @@ class PlainUIHandler(CustomUIHandler):
         if model:
             self.console.print(f"Model: {model}")
         self.console.print()
+
+        # Flush buffered file read events (inherited from base class)
+        if self.buffer_active and self.file_read_buffer:
+            for file_read_event in self.file_read_buffer:
+                self._handle_file_read(file_read_event)
+            self.console.print()
+            self.file_read_buffer = []
+            self.buffer_active = False
 
     def _handle_step_start(self, event: StepStartEvent) -> None:
         """Handle step start event with plain text output."""
@@ -354,6 +363,18 @@ class PlainUIHandler(CustomUIHandler):
             logs = content.replace("Execution logs:", "").strip()
             if logs:
                 self.console.print(f"Logs: {logs}")
+
+    def _handle_file_read(self, event: FileReadEvent) -> None:
+        """Handle file read event with plain text output."""
+        byte_count = event.byte_count
+        if byte_count < 1024:
+            size_str = f"{byte_count} bytes"
+        elif byte_count < 1024 * 1024:
+            size_str = f"{byte_count / 1024:.1f} KB"
+        else:
+            size_str = f"{byte_count / (1024 * 1024):.1f} MB"
+
+        self.console.print(f"Read {event.path} ({event.line_count} lines, {size_str})")
 
     def _handle_subagent_start(self, event: Any) -> None:
         """Handle subagent start event with plain text output."""

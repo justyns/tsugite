@@ -30,21 +30,27 @@ def read_file(path: str, start_line: Optional[int] = None, end_line: Optional[in
         raise IsADirectoryError(f"Path is a directory: {path}")
 
     try:
-        # If no line range specified, read entire file (backward compatible)
+        if start_line is not None:
+            # Accept 0-based indexing (treat 0 as 1 for convenience)
+            if start_line < 0:
+                raise ValueError("start_line must be >= 0")
+            if start_line == 0:
+                start_line = 1
+
+            if end_line is not None and end_line < start_line:
+                raise ValueError(f"end_line ({end_line}) must be >= start_line ({start_line})")
+
+        content = file_path.read_text(encoding="utf-8")
+
+        from tsugite.events.helpers import emit_file_read_event
+
+        emit_file_read_event(str(file_path), content, "tool_call")
+
+        # If no line range specified, return entire file (backward compatible)
         if start_line is None:
-            return file_path.read_text(encoding="utf-8")
+            return content
 
-        # Line range mode - return numbered lines
-        # Accept 0-based indexing (treat 0 as 1 for convenience)
-        if start_line < 0:
-            raise ValueError("start_line must be >= 0")
-        if start_line == 0:
-            start_line = 1
-
-        if end_line is not None and end_line < start_line:
-            raise ValueError(f"end_line ({end_line}) must be >= start_line ({start_line})")
-
-        lines = file_path.read_text(encoding="utf-8").splitlines()
+        lines = content.splitlines()
         total_lines = len(lines)
 
         # Adjust end_line if not specified or beyond file length

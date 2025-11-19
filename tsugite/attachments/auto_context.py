@@ -64,6 +64,11 @@ class AutoContextHandler(AttachmentHandler):
             for file_path, relative_name in found_files:
                 try:
                     content = file_path.read_text(encoding="utf-8")
+
+                    from tsugite.events.helpers import emit_file_read_event
+
+                    emit_file_read_event(str(file_path), content, "auto_context")
+
                     # Use the relative name as the attachment name
                     result.append((relative_name, content))
                 except Exception as e:
@@ -161,6 +166,9 @@ class AutoContextHandler(AttachmentHandler):
     def _discover_files(self, search_dirs: List[Path], context_files: List[str]) -> List[tuple[Path, str]]:
         """Discover context files in search directories.
 
+        Deduplicates by filename to prefer closer files, but tracks canonical paths
+        to handle symlinks (e.g., CLAUDE.md -> AGENTS.md).
+
         Args:
             search_dirs: Directories to search
             context_files: List of filenames to search for
@@ -169,19 +177,26 @@ class AutoContextHandler(AttachmentHandler):
             List of (file_path, relative_name) tuples for found files
         """
         found = []
-        seen_names = set()
+        seen_files = {}  # filename -> canonical_path
 
         # Search in order (most specific directory first)
         for directory in search_dirs:
             for filename in context_files:
                 # Skip if we've already found a file with this name
-                if filename in seen_names:
+                if filename in seen_files:
                     continue
 
                 file_path = directory / filename
                 if file_path.exists() and file_path.is_file():
+                    # Resolve symlinks to get canonical path
+                    try:
+                        canonical = file_path.resolve()
+                    except (OSError, RuntimeError):
+                        # If resolution fails, use the path as-is
+                        canonical = file_path
+
                     found.append((file_path, filename))
-                    seen_names.add(filename)
+                    seen_files[filename] = canonical
 
         return found
 

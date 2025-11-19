@@ -291,6 +291,11 @@ class TsugiteAgent:
             # Build conversation messages from memory
             messages = self._build_messages()
 
+            # Set sniffio context explicitly to avoid detection issues with anyio
+            # This prevents "unknown async library" errors when litellm uses run_in_executor
+            import sniffio
+            sniffio.current_async_library_cvar.set("asyncio")
+
             # Call LiteLLM directly with pre-computed params
             # Parameters are filtered for reasoning models (o1/o3/Claude)
             if stream:

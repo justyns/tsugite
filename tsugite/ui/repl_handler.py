@@ -353,24 +353,16 @@ class ReplUIHandler:
         if turn_parts:
             summary = " | ".join(turn_parts)
 
-            # DEBUG: Log cumulative values
-            print(f"[DEBUG] cumulative_tokens={event.cumulative_tokens}, cumulative_cost={event.cumulative_cost}")
-
             # Add session totals to the same line if available
             if event.cumulative_tokens is not None or event.cumulative_cost is not None:
-                print("[DEBUG] At least one cumulative value is not None")
                 total_parts = []
                 if event.cumulative_cost is not None and event.cumulative_cost > 0:
-                    print(f"[DEBUG] Adding cost to total_parts: ${event.cumulative_cost:.6f}")
                     total_parts.append(f"💰 ${event.cumulative_cost:.6f}")
                 if event.cumulative_tokens is not None:
-                    print(f"[DEBUG] Adding tokens to total_parts: {event.cumulative_tokens:,}")
                     total_parts.append(f"📊 {event.cumulative_tokens:,} tokens")
 
-                print(f"[DEBUG] total_parts={total_parts}")
                 if total_parts:
                     summary += " | Session: " + " | ".join(total_parts)
-                    print(f"[DEBUG] Updated summary: {summary}")
 
             self.console.print(f"[dim cyan]{summary}[/dim cyan]")
 

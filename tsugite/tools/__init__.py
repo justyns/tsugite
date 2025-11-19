@@ -267,6 +267,7 @@ def _ensure_tools_loaded():
     # Import tool modules (they need to import 'tool' decorator from this module)
     from . import agents as agents  # noqa: E402, F401
     from . import fs as fs  # noqa: E402, F401
+    from . import history as history  # noqa: E402, F401
     from . import http as http  # noqa: E402, F401
     from . import interactive as interactive  # noqa: E402, F401
     from . import shell as shell  # noqa: E402, F401

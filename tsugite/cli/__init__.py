@@ -604,6 +604,13 @@ def run(
 
         stderr_console = get_stderr_console(no_color=no_color)
 
+        # Set up event bus in context for attachment loading
+        from tsugite.events import EventBus
+        from tsugite.ui_context import set_ui_context
+
+        event_bus = EventBus()
+        set_ui_context(event_bus=event_bus)
+
         agent_info = get_agent_info(agent_file)
         instruction_label = "runtime + agent" if agent_info.get("instructions") else "runtime default"
 

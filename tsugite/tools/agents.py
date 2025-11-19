@@ -121,11 +121,9 @@ def spawn_agent(
 
     # Show initial message through event system
     if ui_handler and not progress:
-        from ..events import EventBus, InfoEvent
+        from ..events.helpers import emit_info_event
 
-        event_bus = EventBus()
-        event_bus.subscribe(ui_handler.handle_event)
-        event_bus.emit(InfoEvent(message=f"🚀 Spawning subagent: [cyan]{agent_name}[/cyan]..."))
+        emit_info_event(f"🚀 Spawning subagent: [cyan]{agent_name}[/cyan]...")
 
     try:
         # Spawn subprocess with line buffering
@@ -249,12 +247,9 @@ def spawn_agent(
 
 def _show_progress(message: str):
     """Show subagent progress in parent UI."""
-    from ..events import InfoEvent
-    from ..ui_context import get_ui_handler
+    from ..events.helpers import emit_info_event
 
-    ui = get_ui_handler()
-    if ui:
-        ui.handle_event(InfoEvent(message=f"[Subagent] {message}"))
+    emit_info_event(f"[Subagent] {message}")
 
 
 @tool

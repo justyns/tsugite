@@ -19,6 +19,7 @@ from tsugite.events import (
     ErrorEvent,
     ExecutionLogsEvent,
     ExecutionResultEvent,
+    FileReadEvent,
     FinalAnswerEvent,
     InfoEvent,
     LLMMessageEvent,
@@ -105,6 +106,10 @@ class CustomUIHandler:
         self.streaming_content = ""
         self.is_streaming = False
 
+        # File read event buffering (buffer until task starts)
+        self.file_read_buffer = []
+        self.buffer_active = True
+
     def _print(self, *args, **kwargs) -> None:
         """Print helper that uses progress.console when progress is active.
 
@@ -163,6 +168,8 @@ class CustomUIHandler:
                 self._handle_warning(event)
             elif isinstance(event, StepProgressEvent):
                 self._handle_step_progress(event)
+            elif isinstance(event, FileReadEvent):
+                self._handle_file_read(event)
 
             self._update_display()
 
@@ -197,6 +204,14 @@ class CustomUIHandler:
             self._print(f"[bold]Task:[/bold] {self.state.task}")
         self._print(f"[dim]Model: {event.model}[/dim]")
         self._print("")
+
+        # Flush buffered file read events after Model line
+        if self.buffer_active and self.file_read_buffer:
+            for file_read_event in self.file_read_buffer:
+                self._handle_file_read(file_read_event)
+            self._print("")
+            self.file_read_buffer = []
+            self.buffer_active = False
 
     def _handle_step_start(self, event: StepStartEvent) -> None:
         """Handle step start event."""
@@ -605,6 +620,22 @@ class CustomUIHandler:
         if message:
             prefix = self._get_display_prefix()
             self._print(f"[cyan]{prefix}{message}[/cyan]")
+
+    def _handle_file_read(self, event: FileReadEvent) -> None:
+        """Handle file read event."""
+        if self.buffer_active:
+            self.file_read_buffer.append(event)
+            return
+
+        byte_count = event.byte_count
+        if byte_count < 1024:
+            size_str = f"{byte_count} bytes"
+        elif byte_count < 1024 * 1024:
+            size_str = f"{byte_count / 1024:.1f} KB"
+        else:
+            size_str = f"{byte_count / (1024 * 1024):.1f} MB"
+
+        self._print(f"[dim]Read {event.path} ({event.line_count} lines, {size_str})[/dim]")
 
     def _update_display(self) -> None:
         """Update the live display with current state."""
