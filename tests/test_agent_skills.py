@@ -3,8 +3,10 @@
 import pytest
 
 from tsugite.agent_preparation import AgentPreparer
+from tsugite.attachments.base import Attachment, AttachmentContentType
 from tsugite.events import EventBus, SkillLoadFailedEvent
 from tsugite.md_agents import parse_agent_file
+from tsugite.skill_discovery import Skill
 
 
 class TestAgentConfigSkillsField:
@@ -145,7 +147,7 @@ tools: []
         assert isinstance(prepared.skills, list)
 
         # Should have loaded skill1 and skill2
-        skill_names = [name for name, _ in prepared.skills]
+        skill_names = [s.name for s in prepared.skills]
         assert "skill1" in skill_names
         assert "skill2" in skill_names
 
@@ -193,9 +195,9 @@ tools: []
 
         # Find template_skill in loaded skills
         template_content = None
-        for name, content in prepared.skills:
-            if name == "template_skill":
-                template_content = content
+        for skill in prepared.skills:
+            if skill.name == "template_skill":
+                template_content = skill.content
                 break
 
         assert template_content is not None
@@ -261,7 +263,7 @@ tools: []
         )
 
         # Skills list should be empty (skill not found)
-        skill_names = [name for name, _ in prepared.skills]
+        skill_names = [s.name for s in prepared.skills]
         assert "nonexistent_skill" not in skill_names
 
 
@@ -272,16 +274,16 @@ class TestSystemPromptWithSkills:
     def mock_agent_with_skills(self, tmp_path):
         """Create a mock agent with prepared skills."""
         from dataclasses import dataclass
-        from typing import List, Tuple
+        from typing import List
 
         @dataclass
         class MockPreparedAgent:
-            skills: List[Tuple[str, str]]
+            skills: List[Skill]
 
         return MockPreparedAgent(
             skills=[
-                ("skill1", "# Skill 1\nContent for skill 1"),
-                ("skill2", "# Skill 2\nContent for skill 2"),
+                Skill(name="skill1", content="# Skill 1\nContent for skill 1"),
+                Skill(name="skill2", content="# Skill 2\nContent for skill 2"),
             ]
         )
 
@@ -338,8 +340,15 @@ class TestSystemPromptWithSkills:
             tools=[],
             instructions="Test instructions",
             max_turns=3,
-            attachments=[("attach1", "Attachment content")],
-            skills=[("skill1", "Skill content")],
+            attachments=[
+                Attachment(
+                    name="attach1",
+                    content="Attachment content",
+                    content_type=AttachmentContentType.TEXT,
+                    mime_type="text/plain",
+                )
+            ],
+            skills=[Skill(name="skill1", content="Skill content")],
         )
 
         # Set task in memory
@@ -408,7 +417,7 @@ tools: []
         assert "not found" in error_events[0].error_message.lower()
 
         # Skill should not be loaded
-        skill_names = [name for name, _ in prepared.skills]
+        skill_names = [s.name for s in prepared.skills]
         assert "nonexistent_skill" not in skill_names
 
     def test_multiple_missing_skills_emit_multiple_events(self, tmp_path, monkeypatch):
@@ -520,7 +529,7 @@ tools: []
         assert error_events[0].skill_name == "invalid_skill"
 
         # valid_skill should be loaded
-        skill_names = [name for name, _ in prepared.skills]
+        skill_names = [s.name for s in prepared.skills]
         assert "valid_skill" in skill_names
         assert "invalid_skill" not in skill_names
 

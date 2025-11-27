@@ -613,7 +613,7 @@ def run_agent(
     stream: bool = False,
     force_text_mode: bool = False,
     continue_conversation_id: Optional[str] = None,
-    attachments: Optional[List[tuple[str, str]]] = None,
+    attachments: Optional[List[Any]] = None,
 ) -> str | AgentExecutionResult:
     """Run a Tsugite agent.
 
@@ -629,7 +629,7 @@ def run_agent(
         stream: Whether to stream responses in real-time
         force_text_mode: Force text_mode=True regardless of agent config (useful for chat UI)
         continue_conversation_id: Optional conversation ID to continue (makes run mode multi-turn)
-        attachments: Optional list of (name, content) tuples for prompt caching
+        attachments: Optional list of Attachment objects for prompt caching
 
     Returns:
         Agent execution result as string (when return_token_usage=False) or
@@ -722,16 +722,25 @@ def run_agent(
 
             # Show attachments if any
             if prepared.attachments:
+                from tsugite.attachments.base import AttachmentContentType
+
                 debug_parts.append(f"ATTACHMENTS ({len(prepared.attachments)}):")
                 debug_parts.append("-" * 80)
-                for name, content in prepared.attachments:
-                    preview = (
-                        content[:MAX_CONTENT_PREVIEW_LENGTH] + "..."
-                        if len(content) > MAX_CONTENT_PREVIEW_LENGTH
-                        else content
-                    )
-                    debug_parts.append(f"• {name}")
-                    debug_parts.append(f"  {preview}")
+                for attachment in prepared.attachments:
+                    if attachment.content_type == AttachmentContentType.TEXT:
+                        preview = (
+                            attachment.content[:MAX_CONTENT_PREVIEW_LENGTH] + "..."
+                            if len(attachment.content) > MAX_CONTENT_PREVIEW_LENGTH
+                            else attachment.content
+                        )
+                        debug_parts.append(f"• {attachment.name}")
+                        debug_parts.append(f"  {preview}")
+                    elif attachment.source_url:
+                        debug_parts.append(f"• {attachment.name}")
+                        debug_parts.append(f"  [{attachment.content_type.value}: {attachment.source_url}]")
+                    else:
+                        debug_parts.append(f"• {attachment.name}")
+                        debug_parts.append(f"  [{attachment.content_type.value} file: {attachment.mime_type}]")
                     debug_parts.append("")
             else:
                 debug_parts.append("NO ATTACHMENTS")
@@ -779,7 +788,7 @@ async def run_agent_async(
     stream: bool = False,
     force_text_mode: bool = False,
     continue_conversation_id: Optional[str] = None,
-    attachments: Optional[List[tuple[str, str]]] = None,
+    attachments: Optional[List[Any]] = None,
 ) -> str | AgentExecutionResult:
     """Run a Tsugite agent (async version for tests and async contexts).
 
@@ -796,7 +805,7 @@ async def run_agent_async(
         trust_mcp_code: Whether to trust remote code from MCP servers
         return_token_usage: Whether to return AgentExecutionResult with metrics
         stream: Whether to stream responses in real-time
-        attachments: Optional list of (name, content) tuples for prompt caching
+        attachments: Optional list of Attachment objects for prompt caching
         force_text_mode: Force text_mode=True regardless of agent config (useful for chat UI)
         continue_conversation_id: Optional conversation ID to continue (makes run mode multi-turn)
 
@@ -868,16 +877,25 @@ async def run_agent_async(
 
             # Show attachments if any
             if prepared.attachments:
+                from tsugite.attachments.base import AttachmentContentType
+
                 debug_parts.append(f"ATTACHMENTS ({len(prepared.attachments)}):")
                 debug_parts.append("-" * 80)
-                for name, content in prepared.attachments:
-                    preview = (
-                        content[:MAX_CONTENT_PREVIEW_LENGTH] + "..."
-                        if len(content) > MAX_CONTENT_PREVIEW_LENGTH
-                        else content
-                    )
-                    debug_parts.append(f"• {name}")
-                    debug_parts.append(f"  {preview}")
+                for attachment in prepared.attachments:
+                    if attachment.content_type == AttachmentContentType.TEXT:
+                        preview = (
+                            attachment.content[:MAX_CONTENT_PREVIEW_LENGTH] + "..."
+                            if len(attachment.content) > MAX_CONTENT_PREVIEW_LENGTH
+                            else attachment.content
+                        )
+                        debug_parts.append(f"• {attachment.name}")
+                        debug_parts.append(f"  {preview}")
+                    elif attachment.source_url:
+                        debug_parts.append(f"• {attachment.name}")
+                        debug_parts.append(f"  [{attachment.content_type.value}: {attachment.source_url}]")
+                    else:
+                        debug_parts.append(f"• {attachment.name}")
+                        debug_parts.append(f"  [{attachment.content_type.value} file: {attachment.mime_type}]")
                     debug_parts.append("")
             else:
                 debug_parts.append("NO ATTACHMENTS")
@@ -964,7 +982,7 @@ def _build_prepared_agent_for_step(
     agent: Any,
     rendered_step_prompt: str,
     step_context: Dict[str, Any],
-    attachments: Optional[List[tuple[str, str]]] = None,
+    attachments: Optional[List[Any]] = None,
 ) -> "PreparedAgent":
     """Build a PreparedAgent for step execution.
 
@@ -975,7 +993,7 @@ def _build_prepared_agent_for_step(
         agent: Parsed agent with config
         rendered_step_prompt: Already-rendered step prompt
         step_context: Step execution context
-        attachments: List of (name, content) tuples for prompt caching
+        attachments: List of Attachment objects for prompt caching
 
     Returns:
         PreparedAgent ready for execution

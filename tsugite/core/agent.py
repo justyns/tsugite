@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 if TYPE_CHECKING:
     pass
 
+from tsugite.attachments.base import Attachment, AttachmentContentType
+from tsugite.skill_discovery import Skill
 from tsugite.events import (
     CodeExecutionEvent,
     CostSummaryEvent,
@@ -100,8 +102,8 @@ class TsugiteAgent:
         event_bus: EventBus = None,
         model_name: str = None,
         text_mode: bool = False,
-        attachments: List[tuple[str, str]] = None,
-        skills: List[tuple[str, str]] = None,
+        attachments: List[Attachment] = None,
+        skills: List[Skill] = None,
         previous_messages: List[Dict] = None,
     ):
         """Initialize the agent.
@@ -116,8 +118,8 @@ class TsugiteAgent:
             event_bus: Optional EventBus for broadcasting events
             model_name: Optional display name for the model (for UI)
             text_mode: Allow text-only responses (code blocks optional)
-            attachments: List of (name, content) tuples for prompt caching
-            skills: List of (name, content) tuples for loaded skills
+            attachments: List of Attachment objects for multi-modal inputs
+            skills: List of Skill objects for loaded skills
             previous_messages: List of previous conversation messages (user/assistant pairs)
         """
         from tsugite.models import get_model_params
@@ -552,6 +554,87 @@ class TsugiteAgent:
             # Backward compatibility: raise exception for non-benchmark usage
             raise RuntimeError(error_msg)
 
+    def _format_attachment(self, attachment: Attachment) -> Optional[Dict]:
+        """Format an attachment for LiteLLM based on its content type.
+
+        Args:
+            attachment: Attachment object to format
+
+        Returns:
+            Formatted content block for LiteLLM, or None if invalid
+        """
+        if attachment.content_type == AttachmentContentType.TEXT:
+            # Text attachment - wrap in XML tags
+            return {
+                "type": "text",
+                "text": f"<Attachment: {attachment.name}>\n{attachment.content}\n</Attachment: {attachment.name}>",
+            }
+
+        elif attachment.content_type == AttachmentContentType.IMAGE:
+            # Image attachment
+            if attachment.source_url:
+                # URL reference - let LiteLLM fetch it
+                return {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": attachment.source_url,
+                        "format": attachment.mime_type,
+                    },
+                }
+            elif attachment.content:
+                # Base64 encoded image
+                return {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:{attachment.mime_type};base64,{attachment.content}",
+                    },
+                }
+
+        elif attachment.content_type == AttachmentContentType.AUDIO:
+            # Audio attachment
+            if attachment.source_url:
+                # URL reference - let LiteLLM fetch it
+                # Note: Some models may not support audio URLs directly
+                return {
+                    "type": "input_audio",
+                    "input_audio": {
+                        "data": attachment.source_url,
+                        "format": attachment.mime_type.split("/")[-1] if "/" in attachment.mime_type else "wav",
+                    },
+                }
+            elif attachment.content:
+                # Base64 encoded audio
+                audio_format = attachment.mime_type.split("/")[-1] if "/" in attachment.mime_type else "wav"
+                return {
+                    "type": "input_audio",
+                    "input_audio": {
+                        "data": attachment.content,
+                        "format": audio_format,
+                    },
+                }
+
+        elif attachment.content_type == AttachmentContentType.DOCUMENT:
+            # Document attachment (PDF, etc.)
+            if attachment.source_url:
+                # URL reference - let LiteLLM fetch it
+                return {
+                    "type": "file",
+                    "file": {
+                        "file_id": attachment.source_url,
+                        "format": attachment.mime_type,
+                    },
+                }
+            elif attachment.content:
+                # Base64 encoded document
+                return {
+                    "type": "file",
+                    "file": {
+                        "file_data": f"data:{attachment.mime_type};base64,{attachment.content}",
+                    },
+                }
+
+        return None
+
     def _build_messages(self) -> List[Dict]:
         """Build message list for LLM from memory.
 
@@ -590,21 +673,18 @@ class TsugiteAgent:
             system_blocks = [{"type": "text", "text": self._build_system_prompt()}]
 
             # Add each attachment as a separate cacheable block
-            for name, content in self.attachments:
-                system_blocks.append(
-                    {
-                        "type": "text",
-                        "text": f"<Attachment: {name}>\n{content}\n</Attachment: {name}>",
-                        "cache_control": {"type": "ephemeral"},
-                    }
-                )
+            for attachment in self.attachments:
+                attachment_block = self._format_attachment(attachment)
+                if attachment_block:
+                    attachment_block["cache_control"] = {"type": "ephemeral"}
+                    system_blocks.append(attachment_block)
 
             # Add each skill as a separate cacheable block
-            for name, content in self.skills:
+            for skill in self.skills:
                 system_blocks.append(
                     {
                         "type": "text",
-                        "text": f"<Skill: {name}>\n{content}\n</Skill: {name}>",
+                        "text": f"<Skill: {skill.name}>\n{skill.content}\n</Skill: {skill.name}>",
                         "cache_control": {"type": "ephemeral"},
                     }
                 )

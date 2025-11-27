@@ -3,8 +3,10 @@
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from tsugite.attachments.base import Attachment
 from tsugite.core.tools import Tool
 from tsugite.md_agents import Agent, AgentConfig
+from tsugite.skill_discovery import Skill
 
 
 @dataclass
@@ -25,8 +27,8 @@ class PreparedAgent:
         context: Full template rendering context
         combined_instructions: Combined default + agent instructions
         prefetch_results: Results from prefetch tool execution
-        attachments: List of (name, content) tuples for prompt caching
-        skills: List of (name, content) tuples for loaded skills
+        attachments: List of Attachment objects for multi-modal inputs
+        skills: List of Skill objects for loaded skills
     """
 
     agent: Agent
@@ -38,8 +40,8 @@ class PreparedAgent:
     context: Dict[str, Any]
     combined_instructions: str
     prefetch_results: Dict[str, Any]
-    attachments: List[tuple[str, str]]
-    skills: List[tuple[str, str]] = field(default_factory=list)
+    attachments: List[Attachment]
+    skills: List[Skill] = field(default_factory=list)
 
 
 class AgentPreparer:
@@ -100,7 +102,7 @@ class AgentPreparer:
         skip_tool_directives: bool = False,
         task_summary: str = "## Current Tasks\nNo tasks yet.",
         tasks: Optional[List[Dict[str, Any]]] = None,
-        attachments: Optional[List[tuple[str, str]]] = None,
+        attachments: Optional[List[Attachment]] = None,
         event_bus: Optional[Any] = None,
     ) -> PreparedAgent:
         """Prepare agent with all context, tools, and instructions.
@@ -112,7 +114,7 @@ class AgentPreparer:
             skip_tool_directives: Skip executing tool directives (for render)
             task_summary: Current task summary (from task manager)
             tasks: List of task dicts for template iteration (from task manager)
-            attachments: List of (name, content) tuples for prompt caching
+            attachments: List of Attachment objects for multi-modal inputs
             event_bus: Optional event bus for emitting skill load events
 
         Returns:
@@ -220,7 +222,7 @@ class AgentPreparer:
             from tsugite.events.events import SkillLoadFailedEvent
             from tsugite.tools.skills import SkillManager
 
-            skill_manager = SkillManager(event_bus=event_bus)
+            skill_manager = SkillManager()
             for skill_name in agent_config.auto_load_skills:
                 # Attempt to load skill (returns message string for agents/tools)
                 result = skill_manager.load_skill(skill_name)
@@ -230,9 +232,9 @@ class AgentPreparer:
                     if event_bus:
                         event_bus.emit(SkillLoadFailedEvent(skill_name=skill_name, error_message=result))
 
-            # Get all successfully loaded skills as (name, content) tuples
+            # Get all successfully loaded skills as Skill objects
             loaded_skills_dict = skill_manager.get_loaded_skills()
-            skills = [(name, content) for name, content in loaded_skills_dict.items()]
+            skills = [Skill(name=name, content=content) for name, content in loaded_skills_dict.items()]
 
         # Step 8: Build system message (what LLM actually sees)
         system_message = build_system_prompt(tools, combined_instructions, agent_config.text_mode)

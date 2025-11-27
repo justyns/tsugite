@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from tsugite.attachments.auto_context import AutoContextHandler
+from tsugite.attachments.base import Attachment, AttachmentContentType
 
 
 class TestAutoContextHandler:
@@ -46,10 +47,11 @@ class TestAutoContextHandler:
         result = handler.fetch_multiple("auto-context")
 
         assert len(result) == 1
-        name, content = result[0]
-        assert name == "CONTEXT.md"
-        assert "# Project Context" in content
-        assert "This is context." in content
+        assert isinstance(result[0], Attachment)
+        assert result[0].name == "CONTEXT.md"
+        assert "# Project Context" in result[0].content
+        assert "This is context." in result[0].content
+        assert result[0].content_type == AttachmentContentType.TEXT
 
     def test_fetch_discovers_multiple_files(self, tmp_path, monkeypatch):
         """Test fetch_multiple when multiple context files exist."""
@@ -64,8 +66,8 @@ class TestAutoContextHandler:
         result = handler.fetch_multiple("auto-context")
 
         assert len(result) == 3
-        names = [name for name, _ in result]
-        contents = {name: content for name, content in result}
+        names = [a.name for a in result]
+        contents = {a.name: a.content for a in result}
 
         assert "CONTEXT.md" in names
         assert "AGENTS.md" in names
@@ -87,9 +89,8 @@ class TestAutoContextHandler:
         result = handler.fetch_multiple("auto-context")
 
         assert len(result) == 1
-        name, content = result[0]
-        assert name == ".tsugite/CONTEXT.md"
-        assert "Tsugite context" in content
+        assert result[0].name == ".tsugite/CONTEXT.md"
+        assert "Tsugite context" in result[0].content
 
     def test_fetch_prefers_closer_files(self, tmp_path, monkeypatch):
         """Test that files in current dir are preferred over parent dirs."""
@@ -109,11 +110,10 @@ class TestAutoContextHandler:
         result = handler.fetch_multiple("auto-context")
 
         assert len(result) == 1
-        name, content = result[0]
-        assert name == "CONTEXT.md"
+        assert result[0].name == "CONTEXT.md"
         # Should find child version, not parent
-        assert "Child context" in content
-        assert "Parent context" not in content
+        assert "Child context" in result[0].content
+        assert "Parent context" not in result[0].content
 
     @patch("tsugite.attachments.auto_context.subprocess.run")
     def test_find_git_root_success(self, mock_run, tmp_path):
@@ -181,10 +181,9 @@ class TestAutoContextHandler:
 
             # Should include error attachment but not fail
             assert len(result) == 1
-            name, content = result[0]
-            assert name == "CONTEXT.md"
-            assert "Error reading" in content
-            assert "Access denied" in content
+            assert result[0].name == "CONTEXT.md"
+            assert "Error reading" in result[0].content
+            assert "Access denied" in result[0].content
 
     def test_fetch_loads_config_when_no_context_files(self, tmp_path, monkeypatch):
         """Test that fetch_multiple loads config when context_files is None."""
@@ -204,9 +203,8 @@ class TestAutoContextHandler:
             result = handler.fetch_multiple("auto-context")
 
             assert len(result) == 1
-            name, content = result[0]
-            assert name == "CLAUDE.md"
-            assert "Config content" in content
+            assert result[0].name == "CLAUDE.md"
+            assert "Config content" in result[0].content
 
     def test_get_global_context_file_exists(self, tmp_path):
         """Test finding global context file when it exists."""
@@ -259,8 +257,8 @@ class TestAutoContextHandler:
 
                 # Should include both project and global context
                 assert len(result) == 2
-                names = [name for name, _ in result]
-                contents = {name: content for name, content in result}
+                names = [a.name for a in result]
+                contents = {a.name: a.content for a in result}
                 assert "AGENTS.md" in names
                 assert "Global Context (~/.config/tsugite/CONTEXT.md)" in names
                 assert "Project agents" in contents["AGENTS.md"]
@@ -290,13 +288,12 @@ class TestAutoContextHandler:
 
                 # Should only include project context
                 assert len(result) == 1
-                name, content = result[0]
-                assert name == "AGENTS.md"
-                assert "Project agents" in content
-                assert "Global context" not in content
+                assert result[0].name == "AGENTS.md"
+                assert "Project agents" in result[0].content
+                assert "Global context" not in result[0].content
 
-    def test_fetch_multiple_returns_list_of_tuples(self, tmp_path, monkeypatch):
-        """Test that fetch_multiple returns list of (name, content) tuples."""
+    def test_fetch_multiple_returns_list_of_attachments(self, tmp_path, monkeypatch):
+        """Test that fetch_multiple returns list of Attachment objects."""
         # Create multiple context files
         (tmp_path / "CONTEXT.md").write_text("Context content")
         (tmp_path / "AGENTS.md").write_text("Agents content")
@@ -306,16 +303,17 @@ class TestAutoContextHandler:
         handler = AutoContextHandler(context_files=["CONTEXT.md", "AGENTS.md"])
         result = handler.fetch_multiple("auto-context")
 
-        # Should return list of tuples
+        # Should return list of Attachment objects
         assert isinstance(result, list)
         assert len(result) == 2
 
         # Check structure
-        assert all(isinstance(item, tuple) and len(item) == 2 for item in result)
+        assert all(isinstance(item, Attachment) for item in result)
+        assert all(item.content_type == AttachmentContentType.TEXT for item in result)
 
         # Check names and contents
-        names = [item[0] for item in result]
-        contents = [item[1] for item in result]
+        names = [a.name for a in result]
+        contents = [a.content for a in result]
 
         assert "CONTEXT.md" in names
         assert "AGENTS.md" in names
@@ -332,7 +330,8 @@ class TestAutoContextHandler:
         result = handler.fetch_multiple("auto-context")
 
         assert len(result) == 1
-        assert result[0] == ("CONTEXT.md", "Single file")
+        assert result[0].name == "CONTEXT.md"
+        assert result[0].content == "Single file"
 
     def test_fetch_multiple_with_no_files(self, tmp_path, monkeypatch):
         """Test fetch_multiple when no files are found."""
@@ -357,7 +356,7 @@ class TestAutoContextHandler:
         handler = AutoContextHandler(context_files=[".tsugite/CONTEXT.md", "AGENTS.md"])
         result = handler.fetch_multiple("auto-context")
 
-        names = [item[0] for item in result]
+        names = [a.name for a in result]
         assert ".tsugite/CONTEXT.md" in names
         assert "AGENTS.md" in names
 
@@ -386,8 +385,8 @@ class TestAutoContextHandler:
                 # Should have two attachments
                 assert len(result) == 2
 
-                names = [item[0] for item in result]
-                contents = [item[1] for item in result]
+                names = [a.name for a in result]
+                contents = [a.content for a in result]
 
                 assert "AGENTS.md" in names
                 assert "Global Context (~/.config/tsugite/CONTEXT.md)" in names
@@ -409,10 +408,9 @@ class TestAutoContextHandler:
 
             # Should still return the file with error content
             assert len(result) == 1
-            name, content = result[0]
-            assert name == "CONTEXT.md"
-            assert "Error reading CONTEXT.md" in content
-            assert "Access denied" in content
+            assert result[0].name == "CONTEXT.md"
+            assert "Error reading CONTEXT.md" in result[0].content
+            assert "Access denied" in result[0].content
 
     def test_fetch_multiple_orders_files_correctly(self, tmp_path, monkeypatch):
         """Test that fetch_multiple returns files in discovery order."""
@@ -427,5 +425,5 @@ class TestAutoContextHandler:
         result = handler.fetch_multiple("auto-context")
 
         # Check order matches config order
-        names = [item[0] for item in result]
+        names = [a.name for a in result]
         assert names == ["CONTEXT.md", "AGENTS.md", "CLAUDE.md"]

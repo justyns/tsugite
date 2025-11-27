@@ -140,7 +140,7 @@ def save_run_to_history(
         execution_steps: List of execution steps (from agent memory)
         continue_conversation_id: Optional conversation ID to continue (for multi-turn run mode)
         system_prompt: System prompt sent to LLM
-        attachments: List of (name, content) tuples for attachments
+        attachments: List of Attachment objects for attachments
 
     Returns:
         Conversation ID if saved, None if history disabled or failed
@@ -185,15 +185,38 @@ def save_run_to_history(
 
         if system_prompt or attachments:
             if attachments:
+                from tsugite.attachments.base import Attachment, AttachmentContentType
+
                 system_blocks = [{"type": "text", "text": system_prompt or ""}]
-                for name, content in attachments:
-                    system_blocks.append(
-                        {
-                            "type": "text",
-                            "text": f"<Attachment: {name}>\n{content}\n</Attachment: {name}>",
-                            "cache_control": {"type": "ephemeral"},
-                        }
-                    )
+                for attachment in attachments:
+                    # For history, we only store text attachments fully
+                    # Binary attachments are stored as references
+                    if attachment.content_type == AttachmentContentType.TEXT:
+                        system_blocks.append(
+                            {
+                                "type": "text",
+                                "text": f"<Attachment: {attachment.name}>\n{attachment.content}\n</Attachment: {attachment.name}>",
+                                "cache_control": {"type": "ephemeral"},
+                            }
+                        )
+                    elif attachment.source_url:
+                        # URL-based attachment (image/document)
+                        system_blocks.append(
+                            {
+                                "type": "text",
+                                "text": f"<Attachment: {attachment.name}>\n[{attachment.content_type.value}: {attachment.source_url}]\n</Attachment: {attachment.name}>",
+                                "cache_control": {"type": "ephemeral"},
+                            }
+                        )
+                    else:
+                        # Base64 encoded binary - just store a placeholder
+                        system_blocks.append(
+                            {
+                                "type": "text",
+                                "text": f"<Attachment: {attachment.name}>\n[{attachment.content_type.value} file: {attachment.mime_type}]\n</Attachment: {attachment.name}>",
+                                "cache_control": {"type": "ephemeral"},
+                            }
+                        )
                 messages.append({"role": "system", "content": system_blocks})
             else:
                 messages.append({"role": "system", "content": system_prompt})

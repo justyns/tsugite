@@ -18,7 +18,7 @@ MIN_WIDTH_FOR_WIDE_LOGO = 80
 STDIN_ATTACHMENT_NAME = "stdin"
 
 
-def deduplicate_attachments(attachments: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
+def deduplicate_attachments(attachments: List["Attachment"]) -> List["Attachment"]:
     """Deduplicate attachments by canonical path and content hash.
 
     This prevents the same file from being sent multiple times to the LLM when:
@@ -27,26 +27,28 @@ def deduplicate_attachments(attachments: List[Tuple[str, str]]) -> List[Tuple[st
     - Identical content with different names (renamed/moved copies)
 
     Args:
-        attachments: List of (name, content) tuples
+        attachments: List of Attachment objects
 
     Returns:
-        Deduplicated list of (name, content) tuples where duplicate files are combined
+        Deduplicated list of Attachment objects where duplicate files are combined
         with their aliases shown in the name: "file.txt (also: symlink.txt, @other.txt)"
 
     Examples:
-        >>> deduplicate_attachments([("file.txt", "content"), ("symlink.txt", "content")])
-        [("file.txt (also: symlink.txt)", "content")]
+        >>> deduplicate_attachments([Attachment("file.txt", "content", ...), Attachment("symlink.txt", "content", ...)])
+        [Attachment("file.txt (also: symlink.txt)", "content", ...)]
     """
-    seen_paths = {}  # canonical_path -> {name, content, aliases, order}
+    from tsugite.attachments.base import Attachment
+
+    seen_paths = {}  # canonical_path -> {attachment, aliases, order}
     seen_hashes = {}  # content_hash -> canonical_path
     order_counter = 0
 
-    for name, content in attachments:
+    for attachment in attachments:
         # Try to resolve as file path
         canonical = None
         try:
             # Attempt to resolve path (handles symlinks and relative paths)
-            path = Path(name)
+            path = Path(attachment.name)
             if path.exists():
                 canonical = str(path.resolve())
         except (OSError, ValueError):
@@ -55,36 +57,53 @@ def deduplicate_attachments(attachments: List[Tuple[str, str]]) -> List[Tuple[st
 
         # If we couldn't resolve to a canonical path, use name as-is for deduplication
         if canonical is None:
-            canonical = name
+            canonical = attachment.name
 
         # Check if already seen by path
         if canonical in seen_paths:
             # Add this name as an alias
-            seen_paths[canonical]["aliases"].append(name)
+            seen_paths[canonical]["aliases"].append(attachment.name)
             continue
 
         # Check by content hash (catches renamed/moved copies)
-        content_hash = hashlib.sha256(content.encode()).hexdigest()
+        # Only hash if we have content (URL-only attachments use source_url for deduplication)
+        if attachment.content:
+            content_bytes = attachment.content.encode() if isinstance(attachment.content, str) else attachment.content
+            content_hash = hashlib.sha256(content_bytes).hexdigest()
+        elif attachment.source_url:
+            # Use URL for deduplication of URL-only attachments
+            content_hash = hashlib.sha256(attachment.source_url.encode()).hexdigest()
+        else:
+            # No content or URL - use name
+            content_hash = hashlib.sha256(attachment.name.encode()).hexdigest()
+
         if content_hash in seen_hashes:
             existing_canonical = seen_hashes[content_hash]
-            seen_paths[existing_canonical]["aliases"].append(name)
+            seen_paths[existing_canonical]["aliases"].append(attachment.name)
             continue
 
         # New unique attachment - preserve order of first occurrence
-        seen_paths[canonical] = {"name": name, "content": content, "aliases": [], "order": order_counter}
+        seen_paths[canonical] = {"attachment": attachment, "aliases": [], "order": order_counter}
         seen_hashes[content_hash] = canonical
         order_counter += 1
 
     # Build result preserving order of first occurrence
     result = []
     for entry in sorted(seen_paths.values(), key=lambda x: x["order"]):
+        attachment = entry["attachment"]
         if entry["aliases"]:
             # Combine name with aliases
             aliases_str = ", ".join(entry["aliases"])
-            combined_name = f"{entry['name']} (also: {aliases_str})"
-        else:
-            combined_name = entry["name"]
-        result.append((combined_name, entry["content"]))
+            combined_name = f"{attachment.name} (also: {aliases_str})"
+            # Create new Attachment with combined name
+            attachment = Attachment(
+                name=combined_name,
+                content=attachment.content,
+                content_type=attachment.content_type,
+                mime_type=attachment.mime_type,
+                source_url=attachment.source_url,
+            )
+        result.append(attachment)
 
     return result
 
@@ -142,7 +161,7 @@ def resolve_attachments_with_error_handling(
     refresh_cache: bool,
     console: Console,
     error_context: str = "Attachment",
-) -> List[Tuple[str, str]]:
+) -> List["Attachment"]:
     """Resolve attachments with error handling.
 
     Args:
@@ -153,7 +172,7 @@ def resolve_attachments_with_error_handling(
         error_context: Context for error message (e.g., "Agent attachment" or "Attachment")
 
     Returns:
-        List of (name, content) tuples
+        List of Attachment objects
 
     Raises:
         typer.Exit: If attachment resolution fails
@@ -215,9 +234,9 @@ def assemble_prompt_with_attachments(
     base_dir: Path,
     refresh_cache: bool,
     console: Console,
-    stdin_attachment: Optional[Tuple[str, str]] = None,
-) -> Tuple[str, List[Tuple[str, str]]]:
-    """Resolve all attachments and file references, returning combined attachment tuples.
+    stdin_attachment: Optional["Attachment"] = None,
+) -> Tuple[str, List["Attachment"]]:
+    """Resolve all attachments and file references, returning combined Attachment list.
 
     Args:
         prompt: Base prompt text
@@ -226,11 +245,10 @@ def assemble_prompt_with_attachments(
         base_dir: Base directory for resolving paths
         refresh_cache: Whether to refresh cached content
         console: Console for error messages
-        stdin_attachment: Optional stdin content as (name, content) tuple
+        stdin_attachment: Optional stdin content as Attachment object
 
     Returns:
-        Tuple of (updated_prompt, combined_attachment_tuples)
-        where attachment_tuples is a list of (name, content) tuples
+        Tuple of (updated_prompt, combined_attachments)
 
     Raises:
         typer.Exit: If attachment or file reference resolution fails
@@ -251,15 +269,15 @@ def assemble_prompt_with_attachments(
         else []
     )
 
-    # Expand @filename references in prompt (returns tuples now)
+    # Expand @filename references in prompt
     try:
-        updated_prompt, file_attachment_tuples = expand_file_references(prompt, base_dir)
+        updated_prompt, file_attachments = expand_file_references(prompt, base_dir)
     except ValueError as e:
         console.print(f"[red]File reference error: {e}[/red]")
         raise typer.Exit(1)
 
     # Combine all attachments in proper order: agent -> CLI -> file refs -> stdin
-    all_attachments = agent_attachment_contents + cli_attachment_contents + file_attachment_tuples
+    all_attachments = agent_attachment_contents + cli_attachment_contents + file_attachments
 
     if stdin_attachment:
         all_attachments.append(stdin_attachment)
@@ -409,19 +427,25 @@ def _parse_agent_refs(args: List[str]) -> tuple[List[str], List[str]]:
     return agents, prompt_parts
 
 
-def _check_stdin_data() -> Optional[tuple[str, str]]:
+def _check_stdin_data() -> Optional["Attachment"]:
     """Check for stdin data and return as attachment if present.
 
     Returns:
-        (STDIN_ATTACHMENT_NAME, content) if stdin has data, None otherwise
+        Attachment object if stdin has data, None otherwise
     """
+    from tsugite.attachments.base import Attachment, AttachmentContentType
     from tsugite.utils import has_stdin_data, read_stdin
 
     try:
         if has_stdin_data():
             stdin_content = read_stdin()
             if stdin_content.strip():
-                return (STDIN_ATTACHMENT_NAME, stdin_content)
+                return Attachment(
+                    name=STDIN_ATTACHMENT_NAME,
+                    content=stdin_content,
+                    content_type=AttachmentContentType.TEXT,
+                    mime_type="text/plain",
+                )
     except (OSError, io.UnsupportedOperation):
         # In test environments or special contexts, stdin may not support fileno()
         pass
@@ -430,7 +454,7 @@ def _check_stdin_data() -> Optional[tuple[str, str]]:
 
 def parse_cli_arguments(
     args: List[str], allow_empty_agents: bool = False, check_stdin: bool = True
-) -> tuple[List[str], str, Optional[tuple[str, str]]]:
+) -> tuple[List[str], str, Optional["Attachment"]]:
     """Parse CLI arguments into agent references, prompt, and optional stdin.
 
     Args:
@@ -440,7 +464,7 @@ def parse_cli_arguments(
 
     Returns:
         Tuple of (agent_refs, prompt, stdin_attachment)
-        stdin_attachment is None or ("stdin", content)
+        stdin_attachment is an Attachment object or None
 
     Examples:
         ["+a", "+b", "task"] -> (["+a", "+b"], "task", None)

@@ -3,7 +3,7 @@
 import re
 from typing import Optional
 
-from tsugite.attachments.base import AttachmentHandler
+from tsugite.attachments.base import Attachment, AttachmentContentType, AttachmentHandler
 
 
 class YouTubeHandler(AttachmentHandler):
@@ -25,14 +25,14 @@ class YouTubeHandler(AttachmentHandler):
         ]
         return any(re.search(pattern, source) for pattern in patterns)
 
-    def fetch(self, source: str) -> str:
+    def fetch(self, source: str) -> Attachment:
         """Fetch YouTube transcript.
 
         Args:
             source: YouTube URL or youtube:VIDEO_ID
 
         Returns:
-            Transcript as formatted text
+            Attachment with transcript content
 
         Raises:
             ValueError: If transcript cannot be fetched
@@ -58,7 +58,14 @@ class YouTubeHandler(AttachmentHandler):
                 text = entry["text"]
                 lines.append(f"[{timestamp}] {text}")
 
-            return "\n".join(lines)
+            content = "\n".join(lines)
+            return Attachment(
+                name=f"youtube:{video_id}",
+                content=content,
+                content_type=AttachmentContentType.TEXT,
+                mime_type="text/plain",
+                source_url=source,
+            )
         except Exception as e:
             raise ValueError(f"Failed to fetch YouTube transcript for {video_id}: {e}")
 

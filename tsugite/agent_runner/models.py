@@ -1,6 +1,6 @@
 """Data models for agent execution results."""
 
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -19,7 +19,7 @@ class AgentExecutionResult(BaseModel):
         step_count: Number of execution steps (think-code-observe cycles)
         execution_steps: List of execution step details (for debugging)
         system_message: The system prompt used (for debugging)
-        attachments: List of (name, content) tuples for cached context
+        attachments: List of Attachment objects for cached context
     """
 
     response: str
@@ -28,7 +28,7 @@ class AgentExecutionResult(BaseModel):
     step_count: int = 0
     execution_steps: List[Any] = Field(default_factory=list)
     system_message: Optional[str] = None
-    attachments: List[Tuple[str, str]] = Field(default_factory=list)
+    attachments: List[Any] = Field(default_factory=list)  # List of Attachment objects (using Any for Pydantic compatibility)
 
     def __str__(self) -> str:
         """Allow result to be used as string for backward compatibility.

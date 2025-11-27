@@ -122,6 +122,5 @@ Task: {{ user_prompt }}
         resolved = resolve_attachments(agent.config.attachments)
 
         assert len(resolved) == 1
-        name, content = resolved[0]
-        assert name == "style-guide"
-        assert content == "Use tabs for indentation"
+        assert resolved[0].name == "style-guide"
+        assert resolved[0].content == "Use tabs for indentation"

@@ -906,32 +906,40 @@ def render(
 
             # Display attachments if they exist (as additional content blocks in system message)
             if prepared.attachments:
-                for idx, (name, content) in enumerate(prepared.attachments, start=2):
+                from tsugite.attachments.base import AttachmentContentType
+
+                for idx, attachment in enumerate(prepared.attachments, start=2):
                     console.print()
                     console.rule(
-                        f"[dim]Content Block {idx}: Attachment - {name}[/dim]",
+                        f"[dim]Content Block {idx}: Attachment - {attachment.name}[/dim]",
                         style="dim",
                         align="left",
                     )
-                    console.print(f"[yellow]<Attachment: {name}>[/yellow]")
+                    console.print(f"[yellow]<Attachment: {attachment.name}>[/yellow]")
 
-                    # Truncate unless verbose
-                    if verbose:
-                        console.print(content)
-                    else:
-                        # Show first 10 lines and last 5 lines
-                        lines = content.split("\n")
-                        if len(lines) > 20:
-                            preview = "\n".join(lines[:10])
-                            preview += (
-                                f"\n[dim]... ({len(lines) - 15} lines truncated, use --verbose to see all) ...[/dim]\n"
-                            )
-                            preview += "\n".join(lines[-5:])
-                            console.print(preview)
+                    # Handle different content types
+                    if attachment.content_type == AttachmentContentType.TEXT and attachment.content:
+                        # Truncate text unless verbose
+                        if verbose:
+                            console.print(attachment.content)
                         else:
-                            console.print(content)
+                            # Show first 10 lines and last 5 lines
+                            lines = attachment.content.split("\n")
+                            if len(lines) > 20:
+                                preview = "\n".join(lines[:10])
+                                preview += (
+                                    f"\n[dim]... ({len(lines) - 15} lines truncated, use --verbose to see all) ...[/dim]\n"
+                                )
+                                preview += "\n".join(lines[-5:])
+                                console.print(preview)
+                            else:
+                                console.print(attachment.content)
+                    elif attachment.source_url:
+                        console.print(f"[dim][{attachment.content_type.value}: {attachment.source_url}][/dim]")
+                    else:
+                        console.print(f"[dim][{attachment.content_type.value} file: {attachment.mime_type}][/dim]")
 
-                    console.print(f"[yellow]</Attachment: {name}>[/yellow]")
+                    console.print(f"[yellow]</Attachment: {attachment.name}>[/yellow]")
 
             # Message 2: User (role: user)
             console.print()

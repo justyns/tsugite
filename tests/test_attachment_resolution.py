@@ -5,6 +5,7 @@ from unittest.mock import patch
 import pytest
 
 from tsugite.attachments import add_attachment
+from tsugite.attachments.base import AttachmentContentType
 from tsugite.utils import resolve_attachments
 
 
@@ -21,9 +22,8 @@ class TestAttachmentResolution:
         # Resolve it
         results = resolve_attachments(["mycode"])
         assert len(results) == 1
-        name, content = results[0]
-        assert name == "mycode"
-        assert content == "def hello(): pass"
+        assert results[0].name == "mycode"
+        assert results[0].content == "def hello(): pass"
 
     def test_resolve_file_attachment(self, tmp_path, monkeypatch):
         """Test resolving a file attachment."""
@@ -39,9 +39,9 @@ class TestAttachmentResolution:
         # Resolve it
         results = resolve_attachments(["myfile"])
         assert len(results) == 1
-        name, content = results[0]
-        assert name == "myfile"
-        assert content == "File content"
+        # Name comes from the file handler, which uses the actual filename
+        assert results[0].name == "test.txt"
+        assert results[0].content == "File content"
 
     def test_resolve_url_attachment(self, tmp_path, monkeypatch):
         """Test resolving a URL attachment."""
@@ -60,15 +60,15 @@ class TestAttachmentResolution:
 
             results = resolve_attachments(["myurl"])
             assert len(results) == 1
-            name, content = results[0]
-            assert name == "myurl"
-            assert content == mock_content
+            # Name comes from URL handler, which extracts filename from URL
+            assert results[0].name == "doc.md"
+            assert results[0].content == mock_content
 
     def test_resolve_multiple_attachments(self, tmp_path, monkeypatch):
         """Test resolving multiple attachments."""
         monkeypatch.setenv("HOME", str(tmp_path))
 
-        # Add inline attachment
+        # Add inline attachment (inline keeps the alias name)
         add_attachment("alias1", source="inline", content="Alias content")
 
         # Create and register file
@@ -88,9 +88,15 @@ class TestAttachmentResolution:
             results = resolve_attachments(["alias1", "file1", "url1"])
 
             assert len(results) == 3
-            assert results[0] == ("alias1", "Alias content")
-            assert results[1] == ("file1", "File content")
-            assert results[2] == ("url1", "URL content")
+            # Inline content keeps the alias name
+            assert results[0].name == "alias1"
+            assert results[0].content == "Alias content"
+            # File handler uses the actual filename
+            assert results[1].name == "file.txt"
+            assert results[1].content == "File content"
+            # URL handler extracts name from URL path
+            assert results[2].name == "doc.md"
+            assert results[2].content == "URL content"
 
     def test_resolve_nonexistent_attachment_error(self, tmp_path, monkeypatch):
         """Test error when attachment doesn't exist."""
@@ -118,18 +124,18 @@ class TestAttachmentResolution:
         # Register and resolve
         add_attachment("myfile", source=str(test_file))
         results1 = resolve_attachments(["myfile"])
-        assert results1[0][1] == "Original content"
+        assert results1[0].content == "Original content"
 
         # Modify file
         test_file.write_text("Modified content")
 
         # Resolve again - should get cached version
         results2 = resolve_attachments(["myfile"])
-        assert results2[0][1] == "Original content"  # Still cached
+        assert results2[0].content == "Original content"  # Still cached
 
         # Resolve with refresh_cache - should get new version
         results3 = resolve_attachments(["myfile"], refresh_cache=True)
-        assert results3[0][1] == "Modified content"
+        assert results3[0].content == "Modified content"
 
     def test_youtube_handler_integration(self, tmp_path, monkeypatch):
         """Test YouTube handler integration."""
@@ -149,10 +155,10 @@ class TestAttachmentResolution:
 
             results = resolve_attachments(["tutorial"])
             assert len(results) == 1
-            name, content = results[0]
-            assert name == "tutorial"
-            assert "[00:00] Hello world" in content
-            assert "[00:05] This is a test" in content
+            # YouTube handler uses youtube:VIDEO_ID format
+            assert results[0].name == "youtube:test123"
+            assert "[00:00] Hello world" in results[0].content
+            assert "[00:05] This is a test" in results[0].content
 
     def test_cache_metadata_structure(self, tmp_path, monkeypatch):
         """Test that cache metadata has expected structure for show command."""

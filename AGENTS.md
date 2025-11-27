@@ -228,6 +228,62 @@ Automatic caching for supported providers (OpenAI, Anthropic, Bedrock, Deepseek)
 - Conversation history cached (last N turns, default 5)
 - Config: `cache_conversation_messages`, `cache_conversation_turns`
 
+### Multi-Modal Attachments
+
+Tsugite supports vision (images), audio, and document understanding through the attachment system.
+
+**Supported Content Types:**
+- **Images**: JPEG, PNG, GIF, WebP, SVG, BMP, TIFF
+- **Audio**: MP3, WAV, OGG, M4A, FLAC (base64 encoded)
+- **Documents**: PDF, Word (DOCX/DOC), Excel (XLSX/XLS), PowerPoint (PPTX/PPT)
+- **Text**: Plain text, HTML (converted to markdown), JSON, XML, etc.
+
+**How It Works:**
+
+1. **URL Attachments** (Images/Documents):
+   - LiteLLM fetches the URL directly (no download overhead)
+   - Example: `tsu run -f https://example.com/chart.png "Describe this chart"`
+   - Automatically detected via HTTP HEAD request
+
+2. **Local File Attachments**:
+   - Images: Read as bytes, base64 encoded
+   - Documents: Read as bytes, base64 encoded
+   - Text: Read as UTF-8
+   - Example: `tsu run -f image.jpg "What's in this image?"`
+
+3. **LLM Integration**:
+   - Images: Sent as `image_url` content blocks (URL or data URI)
+   - Audio: Sent as `input_audio` content blocks (base64)
+   - Documents: Sent as `file` content blocks (URL or data URI)
+   - Text: Sent as `text` content blocks (wrapped in XML tags)
+
+**Examples:**
+
+```bash
+# Analyze an image from URL
+tsu run -f https://example.com/chart.png "Describe this chart"
+
+# Analyze a local image
+tsu run -f screenshot.png "What error is shown?"
+
+# Analyze a PDF
+tsu run -f report.pdf "Summarize this report"
+
+# Multiple attachments
+tsu run -f image1.jpg -f image2.jpg "Compare these images"
+```
+
+**Model Support:**
+- Vision: Claude 3.5 Sonnet, GPT-4o, GPT-4 Turbo, Gemini Pro Vision, etc.
+- Audio: GPT-4o Audio Preview
+- Documents: Claude (Bedrock/API), GPT-4o, Gemini, Bedrock Anthropic models
+
+**Implementation Details:**
+- `Attachment` dataclass: `tsugite/attachments/base.py`
+- URL handler: `tsugite/attachments/url.py` (detects content type via HEAD request)
+- File handler: `tsugite/attachments/file.py` (detects type by extension)
+- LLM formatting: `tsugite/core/agent.py:_format_attachment()`
+
 ## Development Patterns
 
 ### Adding a New Built-in Agent

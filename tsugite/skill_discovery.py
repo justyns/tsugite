@@ -23,6 +23,21 @@ class SkillMeta:
     path: Path
 
 
+@dataclass
+class Skill:
+    """A loaded skill with its full content.
+
+    Attributes:
+        name: Skill name/identifier
+        content: Full rendered content of the skill
+        source_path: Optional path where the skill was loaded from
+    """
+
+    name: str
+    content: str
+    source_path: str | None = None
+
+
 def get_builtin_skills_path() -> Path:
     """Get the built-in skills directory path.
 

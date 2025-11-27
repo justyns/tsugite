@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
+from tsugite.attachments.base import Attachment, AttachmentContentType
 from tsugite.cli.helpers import STDIN_ATTACHMENT_NAME, parse_cli_arguments
 from tsugite.utils import has_stdin_data, read_stdin
 
@@ -61,7 +62,9 @@ class TestParseCliArgumentsWithStdin:
 
         assert agents == ["+default"]
         assert prompt == "analyze this"
-        assert stdin_attachment == (STDIN_ATTACHMENT_NAME, "stdin content")
+        assert isinstance(stdin_attachment, Attachment)
+        assert stdin_attachment.name == STDIN_ATTACHMENT_NAME
+        assert stdin_attachment.content == "stdin content"
 
     @patch("sys.stdin.isatty")
     def test_no_stdin_interactive(self, mock_isatty):
@@ -100,7 +103,9 @@ class TestParseCliArgumentsWithStdin:
 
         assert agents == ["+debugger"]
         assert prompt == "analyze error"
-        assert stdin_attachment == (STDIN_ATTACHMENT_NAME, "error log data")
+        assert isinstance(stdin_attachment, Attachment)
+        assert stdin_attachment.name == STDIN_ATTACHMENT_NAME
+        assert stdin_attachment.content == "error log data"
 
     def test_stdin_disabled_when_check_stdin_false(self):
         """Test stdin is not checked when check_stdin=False."""
@@ -120,7 +125,9 @@ class TestParseCliArgumentsWithStdin:
 
         agents, prompt, stdin_attachment = parse_cli_arguments(["process this"])
 
-        assert stdin_attachment == (STDIN_ATTACHMENT_NAME, multiline)
+        assert isinstance(stdin_attachment, Attachment)
+        assert stdin_attachment.name == STDIN_ATTACHMENT_NAME
+        assert stdin_attachment.content == multiline
 
 
 class TestStdinIntegration:
@@ -144,7 +151,12 @@ class TestStdinIntegration:
         mock_select.return_value = ([True], [], [])
         mock_read.return_value = "stdin data"
 
-        stdin_attachment = (STDIN_ATTACHMENT_NAME, "stdin data")
+        stdin_attachment = Attachment(
+            name=STDIN_ATTACHMENT_NAME,
+            content="stdin data",
+            content_type=AttachmentContentType.TEXT,
+            mime_type="text/plain",
+        )
         console = Console()
 
         prompt, attachments = assemble_prompt_with_attachments(
@@ -158,7 +170,8 @@ class TestStdinIntegration:
         )
 
         assert len(attachments) == 1
-        assert attachments[0] == (STDIN_ATTACHMENT_NAME, "stdin data")
+        assert attachments[0].name == STDIN_ATTACHMENT_NAME
+        assert attachments[0].content == "stdin data"
 
     @patch("sys.stdin.isatty")
     @patch("select.select")
@@ -177,7 +190,12 @@ class TestStdinIntegration:
         test_file = temp_dir / "test.txt"
         test_file.write_text("file content")
 
-        stdin_attachment = (STDIN_ATTACHMENT_NAME, "stdin content")
+        stdin_attachment = Attachment(
+            name=STDIN_ATTACHMENT_NAME,
+            content="stdin content",
+            content_type=AttachmentContentType.TEXT,
+            mime_type="text/plain",
+        )
         console = Console()
 
         prompt, attachments = assemble_prompt_with_attachments(
@@ -191,8 +209,10 @@ class TestStdinIntegration:
         )
 
         assert len(attachments) == 2
-        assert attachments[0][0] == str(test_file)
-        assert attachments[1] == (STDIN_ATTACHMENT_NAME, "stdin content")
+        # File refs use the path from @filename reference
+        assert attachments[0].name == str(test_file)
+        assert attachments[1].name == STDIN_ATTACHMENT_NAME
+        assert attachments[1].content == "stdin content"
 
 
 class TestStdinUseCases:
@@ -211,8 +231,8 @@ class TestStdinUseCases:
 
         assert agents == ["+debugger"]
         assert prompt == "analyze error"
-        assert stdin_attachment[0] == STDIN_ATTACHMENT_NAME
-        assert "Connection refused" in stdin_attachment[1]
+        assert stdin_attachment.name == STDIN_ATTACHMENT_NAME
+        assert "Connection refused" in stdin_attachment.content
 
     @patch("sys.stdin.isatty")
     @patch("select.select")
@@ -225,8 +245,8 @@ class TestStdinUseCases:
 
         agents, prompt, stdin_attachment = parse_cli_arguments(["explain what's running"])
 
-        assert stdin_attachment[0] == STDIN_ATTACHMENT_NAME
-        assert "nginx" in stdin_attachment[1]
+        assert stdin_attachment.name == STDIN_ATTACHMENT_NAME
+        assert "nginx" in stdin_attachment.content
 
     @patch("sys.stdin.isatty")
     @patch("select.select")
@@ -239,5 +259,5 @@ class TestStdinUseCases:
 
         agents, prompt, stdin_attachment = parse_cli_arguments(["+reviewer", "review changes"])
 
-        assert stdin_attachment[0] == STDIN_ATTACHMENT_NAME
-        assert "diff --git" in stdin_attachment[1]
+        assert stdin_attachment.name == STDIN_ATTACHMENT_NAME
+        assert "diff --git" in stdin_attachment.content

@@ -186,7 +186,7 @@ def ensure_dir_exists(path: Path, context: str = "Directory") -> Path:
     return path.resolve()
 
 
-def resolve_attachments(attachment_refs: List[str], refresh_cache: bool = False) -> List[Tuple[str, str]]:
+def resolve_attachments(attachment_refs: List[str], refresh_cache: bool = False) -> List["Attachment"]:
     """Resolve attachment references to their content using handler system.
 
     Args:
@@ -194,12 +194,13 @@ def resolve_attachments(attachment_refs: List[str], refresh_cache: bool = False)
         refresh_cache: If True, bypass cache and re-fetch content
 
     Returns:
-        List of (alias, content) tuples
+        List of Attachment objects
 
     Raises:
         ValueError: If an attachment cannot be resolved
     """
     from tsugite.attachments import get_attachment, get_handler
+    from tsugite.attachments.base import Attachment, AttachmentContentType
     from tsugite.cache import get_cached_content, save_to_cache
 
     resolved = []
@@ -222,16 +223,33 @@ def resolve_attachments(attachment_refs: List[str], refresh_cache: bool = False)
         else:
             source, content = result
 
-        # If inline content, use it directly
+        # If inline content, use it directly as text attachment
         if content is not None:
-            resolved.append((ref, content))
+            resolved.append(
+                Attachment(
+                    name=ref,
+                    content=content,
+                    content_type=AttachmentContentType.TEXT,
+                    mime_type="text/plain",
+                    source_url=None,
+                )
+            )
             continue
 
-        # For file/URL references, check cache first
+        # For file/URL references, check cache first (for text attachments only)
         if not refresh_cache:
             cached = get_cached_content(source)
             if cached:
-                resolved.append((ref, cached))
+                # Cached content is text
+                resolved.append(
+                    Attachment(
+                        name=ref,
+                        content=cached,
+                        content_type=AttachmentContentType.TEXT,
+                        mime_type="text/plain",
+                        source_url=None,
+                    )
+                )
                 continue
 
         # Fetch content via handler
@@ -243,30 +261,32 @@ def resolve_attachments(attachment_refs: List[str], refresh_cache: bool = False)
             if hasattr(handler, "fetch_multiple"):
                 # Fetch multiple attachments and add all to resolved list
                 multiple_attachments = handler.fetch_multiple(source)
-                for name, content in multiple_attachments:
-                    # Cache each attachment separately
-                    cache_key = f"{source}:{name}"
-                    save_to_cache(cache_key, content)
-                    resolved.append((name, content))
+                for attachment in multiple_attachments:
+                    # Cache text content
+                    if attachment.content_type == AttachmentContentType.TEXT and attachment.content:
+                        cache_key = f"{source}:{attachment.name}"
+                        save_to_cache(cache_key, attachment.content)
+                    resolved.append(attachment)
             else:
-                # Single attachment - use normal fetch
-                fetched_content = handler.fetch(source)
+                # Single attachment - use normal fetch (returns Attachment object)
+                fetched_attachment = handler.fetch(source)
 
-                # Save to cache
-                save_to_cache(source, fetched_content)
+                # Cache text content only (binary attachments with URLs don't need caching)
+                if fetched_attachment.content_type == AttachmentContentType.TEXT and fetched_attachment.content:
+                    save_to_cache(source, fetched_attachment.content)
 
-                resolved.append((ref, fetched_content))
+                resolved.append(fetched_attachment)
         except Exception as e:
             raise ValueError(f"Failed to fetch attachment '{ref}' from {source}: {e}") from e
 
     return resolved
 
 
-def expand_file_references(prompt: str, base_dir: Path) -> Tuple[str, List[Tuple[str, str]]]:
+def expand_file_references(prompt: str, base_dir: Path) -> Tuple[str, List["Attachment"]]:
     """Expand @filename references in prompt by reading file contents.
 
     Finds patterns like @filename or @"path with spaces.txt", reads their contents,
-    and returns them as attachment tuples. The @filename references in the prompt are
+    and returns them as Attachment objects. The @filename references in the prompt are
     replaced with just the filename (without @).
 
     Args:
@@ -274,16 +294,17 @@ def expand_file_references(prompt: str, base_dir: Path) -> Tuple[str, List[Tuple
         base_dir: Base directory to resolve relative paths from
 
     Returns:
-        Tuple of (updated_prompt, list_of_file_attachment_tuples)
-        where each tuple is (relative_path, content)
+        Tuple of (updated_prompt, list_of_file_attachments)
 
     Raises:
         ValueError: If a referenced file cannot be read
 
     Examples:
         >>> expand_file_references("Analyze @test.py", Path("/tmp"))
-        ("Analyze test.py", [("test.py", "code content")])
+        ("Analyze test.py", [Attachment(...)])
     """
+    from tsugite.attachments.base import Attachment, AttachmentContentType
+
     # Pattern matches @filename or @"quoted filename"
     # Group 1: quoted path, Group 2: unquoted path
     # Unquoted paths must start with valid filename characters (not special symbols like #, $, etc.)
@@ -316,13 +337,20 @@ def expand_file_references(prompt: str, base_dir: Path) -> Tuple[str, List[Tuple
         except Exception as e:
             raise ValueError(f"Failed to read file {filename}: {e}") from e
 
-        # Store as attachment tuple (relative path, content)
-        file_attachments.append((filename, content))
+        # Store as Attachment object
+        file_attachments.append(
+            Attachment(
+                name=filename,
+                content=content,
+                content_type=AttachmentContentType.TEXT,
+                mime_type="text/plain",
+            )
+        )
 
         # Replace @filename with just the filename in the prompt
         return filename
 
-    # Replace all @filename references and collect contents as tuples
+    # Replace all @filename references and collect contents as Attachments
     updated_prompt = re.sub(pattern, collect_file_ref, prompt)
 
     return updated_prompt, file_attachments

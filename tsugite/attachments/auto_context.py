@@ -4,7 +4,7 @@ import subprocess
 from pathlib import Path
 from typing import List, Optional
 
-from tsugite.attachments.base import AttachmentHandler
+from tsugite.attachments.base import Attachment, AttachmentContentType, AttachmentHandler
 
 
 class AutoContextHandler(AttachmentHandler):
@@ -34,7 +34,7 @@ class AutoContextHandler(AttachmentHandler):
         """
         return source in ("auto-context", "auto") or source.startswith("auto:")
 
-    def fetch(self, source: str) -> str:
+    def fetch(self, source: str) -> Attachment:
         """Not supported. Use fetch_multiple() instead.
 
         Args:
@@ -45,14 +45,14 @@ class AutoContextHandler(AttachmentHandler):
         """
         raise NotImplementedError("AutoContextHandler.fetch() is not supported. Use fetch_multiple() instead.")
 
-    def fetch_multiple(self, source: str) -> List[tuple[str, str]]:
+    def fetch_multiple(self, source: str) -> List[Attachment]:
         """Discover context files and return as separate attachments.
 
         Args:
             source: Auto-context marker
 
         Returns:
-            List of (attachment_name, content) tuples, one per discovered file
+            List of Attachment objects, one per discovered file
 
         Raises:
             ValueError: If discovery fails
@@ -69,12 +69,27 @@ class AutoContextHandler(AttachmentHandler):
 
                     emit_file_read_event(str(file_path), content, "auto_context")
 
-                    # Use the relative name as the attachment name
-                    result.append((relative_name, content))
+                    result.append(
+                        Attachment(
+                            name=relative_name,
+                            content=content,
+                            content_type=AttachmentContentType.TEXT,
+                            mime_type="text/plain",
+                            source_url=None,
+                        )
+                    )
                 except Exception as e:
                     # Add error as attachment content for visibility
                     error_content = f"# Error reading {relative_name}\n\n{str(e)}"
-                    result.append((relative_name, error_content))
+                    result.append(
+                        Attachment(
+                            name=relative_name,
+                            content=error_content,
+                            content_type=AttachmentContentType.TEXT,
+                            mime_type="text/plain",
+                            source_url=None,
+                        )
+                    )
 
             return result
         except Exception as e:
