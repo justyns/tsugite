@@ -31,9 +31,76 @@ from .models import AgentExecutionResult
 MAX_VARIABLE_PREVIEW_LENGTH = 100  # Max characters to show in variable documentation
 MAX_CONTENT_PREVIEW_LENGTH = 200  # Max characters to show in debug attachment previews
 
+
+class ExecutionContext:
+    """Namespace for tsugite-provided execution context.
+
+    Provides access to runtime metadata via attribute access (ctx.user_prompt, ctx.tasks, etc.)
+    while keeping user-assigned step variables as top-level names in the execution namespace.
+    """
+
+    def __init__(self, **kwargs):
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+
+    def __repr__(self):
+        attrs = ", ".join(f"{k}={v!r}" for k, v in self.__dict__.items())
+        return f"ExecutionContext({attrs})"
+
+
 if TYPE_CHECKING:
     from tsugite.agent_preparation import PreparedAgent
     from tsugite.events import EventBus
+
+
+def _format_debug_output(prepared: "PreparedAgent") -> str:
+    """Format debug output showing system prompt, attachments, and user prompt.
+
+    Args:
+        prepared: Prepared agent with rendered prompts and attachments
+
+    Returns:
+        Formatted debug string for printing to stderr
+    """
+    from tsugite.attachments.base import AttachmentContentType
+
+    parts = ["\nDEBUG: Complete Prompt Context", "=" * 80, ""]
+
+    parts.append("SYSTEM PROMPT:")
+    parts.append("-" * 80)
+    parts.append(prepared.system_message)
+    parts.append("")
+
+    if prepared.attachments:
+        parts.append(f"ATTACHMENTS ({len(prepared.attachments)}):")
+        parts.append("-" * 80)
+        for attachment in prepared.attachments:
+            if attachment.content_type == AttachmentContentType.TEXT:
+                preview = (
+                    attachment.content[:MAX_CONTENT_PREVIEW_LENGTH] + "..."
+                    if len(attachment.content) > MAX_CONTENT_PREVIEW_LENGTH
+                    else attachment.content
+                )
+                parts.append(f"• {attachment.name}")
+                parts.append(f"  {preview}")
+            elif attachment.source_url:
+                parts.append(f"• {attachment.name}")
+                parts.append(f"  [{attachment.content_type.value}: {attachment.source_url}]")
+            else:
+                parts.append(f"• {attachment.name}")
+                parts.append(f"  [{attachment.content_type.value} file: {attachment.mime_type}]")
+            parts.append("")
+    else:
+        parts.append("NO ATTACHMENTS")
+        parts.append("")
+
+    parts.append("USER PROMPT:")
+    parts.append("-" * 80)
+    parts.append(prepared.rendered_prompt)
+    parts.append("")
+    parts.append("=" * 80)
+
+    return "\n".join(parts)
 
 
 def _get_model_string(model_override: Optional[str], agent_config: AgentConfig) -> str:
@@ -195,6 +262,20 @@ def get_default_instructions(text_mode: bool = False) -> str:
         "without unnecessary filler.\n\n"
     )
 
+    context_info = (
+        "Execution Context: The `ctx` object provides access to runtime metadata:\n"
+        "- `ctx.user_prompt` - The original user prompt\n"
+        "- `ctx.tasks` - List of tracked tasks\n"
+        "- `ctx.task_summary` - Formatted task summary\n"
+        "- `ctx.step_name`, `ctx.step_number`, `ctx.total_steps` - Multi-step info\n"
+        "- `ctx.is_interactive` - Whether running in interactive terminal\n"
+        "- `ctx.is_subagent`, `ctx.parent_agent` - Subagent context\n"
+        "- `ctx.iteration`, `ctx.max_iterations`, `ctx.is_looping_step` - Loop context\n"
+        "User-assigned variables from previous steps are available as top-level variables.\n\n"
+        "Interactive Mode: The `ctx.is_interactive` flag indicates whether you're running in an interactive terminal. "
+        "Interactive-only tools (like ask_user) are automatically available only when is_interactive is True.\n\n"
+    )
+
     if text_mode:
         completion = (
             "Task Completion: For conversational responses, use the format 'Thought: [your response]'. "
@@ -207,12 +288,7 @@ def get_default_instructions(text_mode: bool = False) -> str:
             "the result.\n\n"
         )
 
-    interactive = (
-        "Interactive Mode: The `is_interactive` variable indicates whether you're running in an interactive terminal. "
-        "Interactive-only tools (like ask_user) are automatically available only when is_interactive is True."
-    )
-
-    return base + completion + interactive
+    return base + context_info + completion
 
 
 def execute_prefetch(prefetch_config: List[Dict[str, Any]], event_bus: Optional["EventBus"] = None) -> Dict[str, Any]:
@@ -615,7 +691,7 @@ def run_agent(
     continue_conversation_id: Optional[str] = None,
     attachments: Optional[List[Any]] = None,
 ) -> str | AgentExecutionResult:
-    """Run a Tsugite agent.
+    """Run a Tsugite agent (sync wrapper around run_agent_async).
 
     Args:
         agent_path: Path to agent markdown file
@@ -639,15 +715,13 @@ def run_agent(
         ValueError: If agent file is invalid
         RuntimeError: If agent execution fails
     """
-    # Check if running in subagent mode (subprocess-based execution)
     import json
     import os
     import sys
 
+    # Handle subagent mode (subprocess-based execution) - unique to sync entry point
     subagent_mode = os.environ.get("TSUGITE_SUBAGENT_MODE") == "1"
-
     if subagent_mode:
-        # Read context from stdin
         try:
             stdin_data = json.loads(sys.stdin.read())
             prompt = stdin_data["prompt"]
@@ -657,123 +731,26 @@ def run_agent(
             print(json.dumps(error_event), flush=True)
             sys.exit(1)
 
-        # Set up JSONL UI handler
         from tsugite.ui.jsonl import JSONLUIHandler
 
         custom_logger = type("CustomLogger", (), {"ui_handler": JSONLUIHandler()})()
 
-    if context is None:
-        context = {}
-
-    # Load conversation history if continuing
-    previous_messages = []
-    if continue_conversation_id:
-        from tsugite.agent_runner.history_integration import load_and_apply_history
-
-        previous_messages = load_and_apply_history(continue_conversation_id)
-
-    # Initialize task manager for this agent session
-    reset_task_manager()
-    task_manager = get_task_manager()
-
-    # Parse agent configuration (with inheritance resolution)
-    try:
-        agent = parse_agent_file(agent_path)
-        agent_config = agent.config
-    except Exception as e:
-        raise ValueError(f"Failed to parse agent file: {e}")
-
-    # Populate initial tasks from agent config
-    _populate_initial_tasks(agent_config)
-
-    # Set current agent in thread-local storage for spawn_agent tracking
-    set_current_agent(agent_config.name)
-
-    try:
-        # Override text_mode if force_text_mode is True (for chat UI) or continuing conversation
-        if force_text_mode or continue_conversation_id:
-            agent_config.text_mode = True
-
-        # Prepare agent using unified preparation pipeline
-        from tsugite.agent_preparation import AgentPreparer
-
-        preparer = AgentPreparer()
-        prepared = preparer.prepare(
-            agent=agent,
+    return asyncio.run(
+        run_agent_async(
+            agent_path=agent_path,
             prompt=prompt,
             context=context,
-            task_summary=task_manager.get_task_summary(),
-            tasks=task_manager.get_tasks_for_template(),
+            model_override=model_override,
+            debug=debug,
+            custom_logger=custom_logger,
+            trust_mcp_code=trust_mcp_code,
+            return_token_usage=return_token_usage,
+            stream=stream,
+            force_text_mode=force_text_mode,
+            continue_conversation_id=continue_conversation_id,
             attachments=attachments,
         )
-
-        # Debug output if requested
-        if debug:
-            import sys
-
-            # Build complete debug output showing system prompt, attachments, and user prompt
-            debug_parts = ["\nDEBUG: Complete Prompt Context", "=" * 80, ""]
-
-            # Show system prompt
-            debug_parts.append("SYSTEM PROMPT:")
-            debug_parts.append("-" * 80)
-            debug_parts.append(prepared.system_message)
-            debug_parts.append("")
-
-            # Show attachments if any
-            if prepared.attachments:
-                from tsugite.attachments.base import AttachmentContentType
-
-                debug_parts.append(f"ATTACHMENTS ({len(prepared.attachments)}):")
-                debug_parts.append("-" * 80)
-                for attachment in prepared.attachments:
-                    if attachment.content_type == AttachmentContentType.TEXT:
-                        preview = (
-                            attachment.content[:MAX_CONTENT_PREVIEW_LENGTH] + "..."
-                            if len(attachment.content) > MAX_CONTENT_PREVIEW_LENGTH
-                            else attachment.content
-                        )
-                        debug_parts.append(f"• {attachment.name}")
-                        debug_parts.append(f"  {preview}")
-                    elif attachment.source_url:
-                        debug_parts.append(f"• {attachment.name}")
-                        debug_parts.append(f"  [{attachment.content_type.value}: {attachment.source_url}]")
-                    else:
-                        debug_parts.append(f"• {attachment.name}")
-                        debug_parts.append(f"  [{attachment.content_type.value} file: {attachment.mime_type}]")
-                    debug_parts.append("")
-            else:
-                debug_parts.append("NO ATTACHMENTS")
-                debug_parts.append("")
-
-            # Show user prompt
-            debug_parts.append("USER PROMPT:")
-            debug_parts.append("-" * 80)
-            debug_parts.append(prepared.rendered_prompt)
-            debug_parts.append("")
-            debug_parts.append("=" * 80)
-
-            # Print directly to stderr
-            print("\n".join(debug_parts), file=sys.stderr)
-
-        # Execute with the low-level helper (wrapping async call)
-        import asyncio
-
-        return asyncio.run(
-            _execute_agent_with_prompt(
-                prepared=prepared,
-                model_override=model_override,
-                custom_logger=custom_logger,
-                trust_mcp_code=trust_mcp_code,
-                return_token_usage=return_token_usage,
-                stream=stream,
-                previous_messages=previous_messages,
-            )
-        )
-    finally:
-        # Always clear the current agent context when done
-        clear_current_agent()
-        clear_allowed_agents()
+    )
 
 
 async def run_agent_async(
@@ -866,50 +843,7 @@ async def run_agent_async(
         if debug:
             import sys
 
-            # Build complete debug output showing system prompt, attachments, and user prompt
-            debug_parts = ["\nDEBUG: Complete Prompt Context", "=" * 80, ""]
-
-            # Show system prompt
-            debug_parts.append("SYSTEM PROMPT:")
-            debug_parts.append("-" * 80)
-            debug_parts.append(prepared.system_message)
-            debug_parts.append("")
-
-            # Show attachments if any
-            if prepared.attachments:
-                from tsugite.attachments.base import AttachmentContentType
-
-                debug_parts.append(f"ATTACHMENTS ({len(prepared.attachments)}):")
-                debug_parts.append("-" * 80)
-                for attachment in prepared.attachments:
-                    if attachment.content_type == AttachmentContentType.TEXT:
-                        preview = (
-                            attachment.content[:MAX_CONTENT_PREVIEW_LENGTH] + "..."
-                            if len(attachment.content) > MAX_CONTENT_PREVIEW_LENGTH
-                            else attachment.content
-                        )
-                        debug_parts.append(f"• {attachment.name}")
-                        debug_parts.append(f"  {preview}")
-                    elif attachment.source_url:
-                        debug_parts.append(f"• {attachment.name}")
-                        debug_parts.append(f"  [{attachment.content_type.value}: {attachment.source_url}]")
-                    else:
-                        debug_parts.append(f"• {attachment.name}")
-                        debug_parts.append(f"  [{attachment.content_type.value} file: {attachment.mime_type}]")
-                    debug_parts.append("")
-            else:
-                debug_parts.append("NO ATTACHMENTS")
-                debug_parts.append("")
-
-            # Show user prompt
-            debug_parts.append("USER PROMPT:")
-            debug_parts.append("-" * 80)
-            debug_parts.append(prepared.rendered_prompt)
-            debug_parts.append("")
-            debug_parts.append("=" * 80)
-
-            # Print directly to stderr
-            print("\n".join(debug_parts), file=sys.stderr)
+            print(_format_debug_output(prepared), file=sys.stderr)
 
         # Execute with the low-level helper (async - no asyncio.run wrapper)
         return await _execute_agent_with_prompt(
@@ -942,40 +876,29 @@ LOOP_HELPERS = {
 }
 
 
-def _filter_injectable_vars(step_context: Dict[str, Any]) -> Dict[str, Any]:
-    """Filter step context to only include variables suitable for Python injection.
+def _build_injectable_vars(step_context: Dict[str, Any], assigned_vars: Optional[set] = None) -> Dict[str, Any]:
+    """Build variables for injection into Python execution namespace.
 
-    Removes metadata variables that are used for template rendering but shouldn't
-    be injected into the Python execution namespace.
+    Creates a `ctx` object containing everything. Only user-assigned step variables
+    (from `assign="varname"`) are exposed at top-level to avoid namespace pollution.
 
     Args:
         step_context: Full step context dictionary
+        assigned_vars: Set of variable names assigned by user via step.assign_var.
+                       If None, no variables are exposed at top-level.
 
     Returns:
-        Filtered dictionary containing only injectable variables
+        Dictionary with 'ctx' ExecutionContext and user-assigned variables at top-level
     """
-    metadata_vars = {
-        "user_prompt",
-        "task_summary",
-        "step_number",
-        "step_name",
-        "total_steps",
-        "is_retry",
-        "retry_count",
-        "max_retries",
-        "last_error",
-        "all_errors",
-        "tasks",
-        "is_interactive",
-        "text_mode",
-        "tools",
-        "is_subagent",
-        "parent_agent",
-        "iteration",
-        "max_iterations",
-        "is_looping_step",
-    }
-    return {k: v for k, v in step_context.items() if k not in metadata_vars}
+    ctx = ExecutionContext(**step_context)
+
+    # Only user-assigned step variables at top-level (not tsugite metadata)
+    if assigned_vars:
+        top_level = {k: v for k, v in step_context.items() if k in assigned_vars}
+    else:
+        top_level = {}
+
+    return {"ctx": ctx, **top_level}
 
 
 def _build_prepared_agent_for_step(
@@ -1177,6 +1100,7 @@ async def _execute_step_with_retries(
     debug: bool,
     task_manager: Any,
     event_bus: Optional["EventBus"] = None,
+    assigned_vars: Optional[set] = None,
 ) -> tuple[str, float]:
     """Execute a step with automatic retries on failure.
 
@@ -1197,6 +1121,8 @@ async def _execute_step_with_retries(
         stream: Stream responses flag
         debug: Debug mode flag
         task_manager: Task manager instance
+        event_bus: Optional event bus for emitting events
+        assigned_vars: Set of user-assigned variable names (mutated on success)
 
     Returns:
         Tuple of (step_result, step_duration)
@@ -1257,7 +1183,7 @@ async def _execute_step_with_retries(
             continue
 
         # Prepare variables and build PreparedAgent
-        injectable_vars = _filter_injectable_vars(step_context)
+        injectable_vars = _build_injectable_vars(step_context, assigned_vars)
         prepared = _build_prepared_agent_for_step(
             agent=agent,
             rendered_step_prompt=rendered_step_prompt,
@@ -1288,6 +1214,8 @@ async def _execute_step_with_retries(
             # Store result in context if assign variable specified
             if step.assign_var:
                 step_context[step.assign_var] = step_result
+                if assigned_vars is not None:
+                    assigned_vars.add(step.assign_var)
                 if debug and event_bus:
                     from tsugite.events import DebugMessageEvent
 
@@ -1330,7 +1258,7 @@ async def _execute_step_with_retries(
                 step_number=i,
                 total_steps=total_steps,
                 errors=errors,
-                available_vars=list(_filter_injectable_vars(step_context).keys()),
+                available_vars=list(_build_injectable_vars(step_context, assigned_vars).keys()),
                 previous_step=steps[i - 2].name if i > 1 else "None",
                 max_attempts=max_attempts,
                 debug_tips=[
@@ -1511,8 +1439,7 @@ async def _run_multistep_agent_impl(
             "tasks": task_manager.get_tasks_for_template(),
             "is_interactive": interactive_mode,
             "text_mode": agent.config.text_mode,
-            "tools": agent.config.tools,  # Make tools list available to templates
-            # Subagent context (set by spawn_agent if this is a spawned agent)
+            "tools": agent.config.tools,
             "is_subagent": context.get("is_subagent", False),
             "parent_agent": context.get("parent_agent", None),
         }
@@ -1528,6 +1455,7 @@ async def _run_multistep_agent_impl(
         # Execute each step sequentially
         final_result = None
         step_metrics: List[StepMetrics] = []
+        assigned_vars: set = set()  # Track user-assigned variables for namespace isolation
 
         for i, step in enumerate(steps, 1):
             # Add step information to context for this step
@@ -1571,6 +1499,7 @@ async def _run_multistep_agent_impl(
                         debug=debug,
                         task_manager=task_manager,
                         event_bus=event_bus,
+                        assigned_vars=assigned_vars,
                     )
 
                     # Success - store result and record metrics
@@ -1597,6 +1526,7 @@ async def _run_multistep_agent_impl(
                         # Assign None to the variable if specified
                         if step.assign_var:
                             step_context[step.assign_var] = None
+                            assigned_vars.add(step.assign_var)
                             if debug:
                                 event_bus.emit(
                                     DebugMessageEvent(message=f"Assigned None to variable: {step.assign_var}")
@@ -1869,20 +1799,14 @@ def preview_multistep_agent(
 
         # Find dependencies (variables referenced in step content)
         variables_used = set(re.findall(r"\{\{\s*(\w+)", step.content))
-        # Filter out template helpers and metadata
-        metadata_vars = {
-            "user_prompt",
-            "task_summary",
-            "step_number",
-            "step_name",
-            "total_steps",
-            "now",
-            "today",
-            "is_interactive",
-            "is_retry",
-            "retry_count",
+        # Filter out template helpers and metadata (these are always available, not real deps)
+        builtin_vars = {
+            "user_prompt", "task_summary", "step_number", "step_name", "total_steps",
+            "is_retry", "retry_count", "max_retries", "last_error", "all_errors",
+            "tasks", "is_interactive", "text_mode", "tools", "is_subagent",
+            "parent_agent", "iteration", "max_iterations", "is_looping_step", "now", "today",
         }
-        real_deps = variables_used - metadata_vars
+        real_deps = variables_used - builtin_vars
 
         deps_str = ", ".join(sorted(real_deps)) if real_deps else "—"
 

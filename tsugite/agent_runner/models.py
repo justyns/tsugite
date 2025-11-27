@@ -28,7 +28,9 @@ class AgentExecutionResult(BaseModel):
     step_count: int = 0
     execution_steps: List[Any] = Field(default_factory=list)
     system_message: Optional[str] = None
-    attachments: List[Any] = Field(default_factory=list)  # List of Attachment objects (using Any for Pydantic compatibility)
+    attachments: List[Any] = Field(
+        default_factory=list
+    )  # List of Attachment objects (using Any for Pydantic compatibility)
 
     def __str__(self) -> str:
         """Allow result to be used as string for backward compatibility.

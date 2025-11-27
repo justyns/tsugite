@@ -185,7 +185,7 @@ def save_run_to_history(
 
         if system_prompt or attachments:
             if attachments:
-                from tsugite.attachments.base import Attachment, AttachmentContentType
+                from tsugite.attachments.base import AttachmentContentType
 
                 system_blocks = [{"type": "text", "text": system_prompt or ""}]
                 for attachment in attachments:

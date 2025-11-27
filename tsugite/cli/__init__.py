@@ -927,9 +927,7 @@ def render(
                             lines = attachment.content.split("\n")
                             if len(lines) > 20:
                                 preview = "\n".join(lines[:10])
-                                preview += (
-                                    f"\n[dim]... ({len(lines) - 15} lines truncated, use --verbose to see all) ...[/dim]\n"
-                                )
+                                preview += f"\n[dim]... ({len(lines) - 15} lines truncated, use --verbose to see all) ...[/dim]\n"
                                 preview += "\n".join(lines[-5:])
                                 console.print(preview)
                             else:

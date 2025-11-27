@@ -13,7 +13,6 @@ if TYPE_CHECKING:
     pass
 
 from tsugite.attachments.base import Attachment, AttachmentContentType
-from tsugite.skill_discovery import Skill
 from tsugite.events import (
     CodeExecutionEvent,
     CostSummaryEvent,
@@ -30,6 +29,7 @@ from tsugite.events import (
     TaskStartEvent,
     WarningEvent,
 )
+from tsugite.skill_discovery import Skill
 
 from .executor import CodeExecutor, LocalExecutor
 from .memory import AgentMemory, StepResult
@@ -296,6 +296,7 @@ class TsugiteAgent:
             # Set sniffio context explicitly to avoid detection issues with anyio
             # This prevents "unknown async library" errors when litellm uses run_in_executor
             import sniffio
+
             sniffio.current_async_library_cvar.set("asyncio")
 
             # Call LiteLLM directly with pre-computed params

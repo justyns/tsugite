@@ -5,7 +5,6 @@ from unittest.mock import patch
 import pytest
 
 from tsugite.attachments import add_attachment
-from tsugite.attachments.base import AttachmentContentType
 from tsugite.utils import resolve_attachments
 
 

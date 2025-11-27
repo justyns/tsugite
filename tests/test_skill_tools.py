@@ -269,9 +269,9 @@ class TestSkillManagerEvents:
 
     def test_load_skill_emits_event(self, tmp_path):
         """Test that loading a skill emits a SkillLoadedEvent."""
+        from tsugite import ui_context
         from tsugite.events import EventBus, SkillLoadedEvent
         from tsugite.skill_discovery import SkillMeta
-        from tsugite import ui_context
 
         # Create a test skill file
         skill_file = tmp_path / "test_skill.md"
@@ -322,8 +322,8 @@ Content
 
     def test_unload_skill_emits_event(self):
         """Test that unloading a skill emits a SkillUnloadedEvent."""
-        from tsugite.events import EventBus, SkillUnloadedEvent
         from tsugite import ui_context
+        from tsugite.events import EventBus, SkillUnloadedEvent
 
         # Create event bus and track emitted events
         event_bus = EventBus()
@@ -355,8 +355,8 @@ Content
 
     def test_load_skill_no_event_without_bus(self, tmp_path):
         """Test that loading a skill without event bus doesn't crash."""
-        from tsugite.skill_discovery import SkillMeta
         from tsugite import ui_context
+        from tsugite.skill_discovery import SkillMeta
 
         # Create a test skill file
         skill_file = tmp_path / "test_skill.md"

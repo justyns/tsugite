@@ -48,7 +48,10 @@ line-length = 120
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W"]
-ignore = ["E501"]                  # Line too long (handled by black)
+ignore = [
+    "E501",  # Line too long (handled by black)
+    "F821",  # Undefined name in string type annotations (forward refs)
+]
 
 [tool.black]
 target-version = ["py311"]

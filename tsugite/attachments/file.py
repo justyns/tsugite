@@ -1,10 +1,13 @@
 """File handler for local file attachments."""
 
 import base64
+import logging
 import mimetypes
 from pathlib import Path
 
 from tsugite.attachments.base import Attachment, AttachmentContentType, AttachmentHandler
+
+logger = logging.getLogger(__name__)
 
 
 class FileHandler(AttachmentHandler):
@@ -31,11 +34,17 @@ class FileHandler(AttachmentHandler):
         # Documents
         ".pdf": ("application/pdf", AttachmentContentType.DOCUMENT),
         ".doc": ("application/msword", AttachmentContentType.DOCUMENT),
-        ".docx": ("application/vnd.openxmlformats-officedocument.wordprocessingml.document", AttachmentContentType.DOCUMENT),
+        ".docx": (
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            AttachmentContentType.DOCUMENT,
+        ),
         ".xls": ("application/vnd.ms-excel", AttachmentContentType.DOCUMENT),
         ".xlsx": ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", AttachmentContentType.DOCUMENT),
         ".ppt": ("application/vnd.ms-powerpoint", AttachmentContentType.DOCUMENT),
-        ".pptx": ("application/vnd.openxmlformats-officedocument.presentationml.presentation", AttachmentContentType.DOCUMENT),
+        ".pptx": (
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            AttachmentContentType.DOCUMENT,
+        ),
     }
 
     def can_handle(self, source: str) -> bool:
@@ -110,6 +119,7 @@ class FileHandler(AttachmentHandler):
                 content = path.read_text(encoding="utf-8")
 
                 from tsugite.events.helpers import emit_file_read_event
+
                 emit_file_read_event(str(path), content, "attachment")
 
                 return Attachment(
@@ -125,6 +135,7 @@ class FileHandler(AttachmentHandler):
                 encoded_content = base64.b64encode(binary_content).decode("utf-8")
 
                 from tsugite.events.helpers import emit_file_read_event
+
                 emit_file_read_event(str(path), f"[Binary file: {len(binary_content)} bytes]", "attachment")
 
                 return Attachment(
@@ -136,4 +147,5 @@ class FileHandler(AttachmentHandler):
                 )
 
         except Exception as e:
-            raise ValueError(f"Failed to read file '{source}': {e}")
+            logger.warning("Failed to read file '%s': %s", source, e)
+            raise ValueError(f"Failed to read file '{source}': {e}") from e

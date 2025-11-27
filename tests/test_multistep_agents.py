@@ -754,29 +754,37 @@ class TestVariableInjection:
     """Tests for variable injection into Python namespace."""
 
     def test_injectable_vars_filtering(self):
-        """Test that metadata variables are filtered from injectable vars."""
+        """Test that only user-assigned variables are exposed at top-level, not metadata."""
+        from tsugite.agent_runner.runner import _build_injectable_vars
 
-        # We'll test the filtering logic by checking what would be injected
+        # Simulate step_context with metadata and user-assigned variables
         step_context = {
             "user_prompt": "test task",
             "task_summary": "## Tasks\nNone",
             "step_number": 2,
             "step_name": "process",
             "total_steps": 3,
-            "data": '{"result": "value"}',  # This should be injected
-            "analysis": "some analysis",  # This should be injected
+            "data": '{"result": "value"}',  # User-assigned via step.assign_var
+            "analysis": "some analysis",  # User-assigned via step.assign_var
         }
 
-        metadata_vars = {"user_prompt", "task_summary", "step_number", "step_name", "total_steps"}
-        injectable_vars = {k: v for k, v in step_context.items() if k not in metadata_vars}
+        # Only 'data' and 'analysis' are user-assigned variables
+        assigned_vars = {"data", "analysis"}
+        injectable_vars = _build_injectable_vars(step_context, assigned_vars)
 
+        # User-assigned vars should be at top-level
         assert "data" in injectable_vars
         assert "analysis" in injectable_vars
+        # Metadata should NOT be at top-level
         assert "user_prompt" not in injectable_vars
         assert "task_summary" not in injectable_vars
         assert "step_number" not in injectable_vars
         assert "step_name" not in injectable_vars
         assert "total_steps" not in injectable_vars
+        # But everything should be accessible via ctx
+        assert "ctx" in injectable_vars
+        assert injectable_vars["ctx"].user_prompt == "test task"
+        assert injectable_vars["ctx"].data == '{"result": "value"}'
 
     def test_multistep_with_variable_injection_structure(self, tmp_path):
         """Test that multi-step agent structure supports variable injection."""

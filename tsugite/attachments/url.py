@@ -1,9 +1,12 @@
 """Generic URL handler for HTTP/HTTPS attachments."""
 
+import logging
 import urllib.request
 from urllib.parse import urlparse
 
 from tsugite.attachments.base import Attachment, AttachmentContentType, AttachmentHandler
+
+logger = logging.getLogger(__name__)
 
 
 class GenericURLHandler(AttachmentHandler):
@@ -33,12 +36,14 @@ class GenericURLHandler(AttachmentHandler):
             request = urllib.request.Request(source, method="HEAD")
             with urllib.request.urlopen(request, timeout=10) as response:
                 return response.headers.get("Content-Type", "").lower()
-        except Exception:
+        except Exception as e:
+            logger.debug("HEAD request failed for %s: %s, trying GET", source, e)
             # If HEAD fails, fall back to GET and check headers
             try:
                 with urllib.request.urlopen(source, timeout=10) as response:
                     return response.headers.get("Content-Type", "").lower()
-            except Exception:
+            except Exception as e2:
+                logger.warning("Failed to detect content-type for %s: %s", source, e2)
                 return ""
 
     def _get_name_from_url(self, url: str) -> str:
@@ -93,7 +98,13 @@ class GenericURLHandler(AttachmentHandler):
                     source_url=source,
                 )
 
-            elif content_type in ("application/pdf", "application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"):
+            elif content_type in (
+                "application/pdf",
+                "application/vnd.ms-excel",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "application/msword",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ):
                 # Document - let LiteLLM fetch it
                 mime_type = content_type.split(";")[0].strip()
                 return Attachment(
