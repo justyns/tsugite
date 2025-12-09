@@ -609,34 +609,21 @@ class ChatApp(App):
 
 def run_textual_chat(
     agent_path: Path,
-    model_override: Optional[str] = None,
-    max_history: int = 50,
-    stream: bool = False,
+    exec_options: "ExecutionOptions",
+    history_options: "HistoryOptions",
     show_execution_details: bool = True,
-    disable_history: bool = False,
-    resume_conversation_id: Optional[str] = None,
     resume_turns: Optional[list] = None,
 ) -> None:
-    """Run the Textual chat interface.
+    """Run the Textual chat interface."""
 
-    Args:
-        agent_path: Path to agent markdown file
-        model_override: Optional model override
-        max_history: Maximum conversation history turns
-        stream: Whether to stream responses
-        show_execution_details: Whether to show tool calls and code execution
-        disable_history: Disable conversation history persistence
-        resume_conversation_id: Optional conversation ID to resume
-        resume_turns: Optional list of Turn objects from history to resume
-    """
     app = ChatApp(
         agent_path=agent_path,
-        model_override=model_override,
-        max_history=max_history,
-        stream=stream,
+        model_override=exec_options.model_override,
+        max_history=history_options.max_turns,
+        stream=exec_options.stream,
         show_execution_details=show_execution_details,
-        disable_history=disable_history,
-        resume_conversation_id=resume_conversation_id,
+        disable_history=not history_options.enabled,
+        resume_conversation_id=history_options.continue_id,
         resume_turns=resume_turns,
     )
     app.run()

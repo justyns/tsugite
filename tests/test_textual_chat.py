@@ -411,17 +411,19 @@ Test agent for runner.
 
     def test_run_textual_chat_creates_app(self, test_agent):
         """Test that run_textual_chat creates ChatApp correctly."""
+        from tsugite.options import ExecutionOptions, HistoryOptions
         from tsugite.ui.textual_chat import ChatApp
 
         # We can't actually run the app (it would block), but we can create it
         with patch.object(ChatApp, "run") as mock_run:
             from tsugite.ui.textual_chat import run_textual_chat
 
+            exec_opts = ExecutionOptions(model_override="custom-model", stream=True)
+            history_opts = HistoryOptions(max_turns=25)
             run_textual_chat(
                 agent_path=test_agent,
-                model_override="custom-model",
-                max_history=25,
-                stream=True,
+                exec_options=exec_opts,
+                history_options=history_opts,
             )
 
             # Verify run was called

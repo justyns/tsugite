@@ -9,6 +9,14 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.traceback import install
 
+from tsugite.options import (
+    AttachmentOptions,
+    DockerOptions,
+    ExecutionOptions,
+    HistoryOptions,
+    UIOptions,
+)
+
 from .helpers import (
     assemble_prompt_with_attachments,
     change_to_root_directory,
@@ -38,225 +46,145 @@ console = Console()
 
 def _build_docker_command(
     args: List[str],
-    network: str,
-    keep: bool,
-    container: Optional[str],
-    model: Optional[str],
+    docker_opts: DockerOptions,
+    exec_opts: ExecutionOptions,
+    ui_opts: UIOptions,
+    attach_opts: AttachmentOptions,
+    history_opts: HistoryOptions,
     root: Optional[str],
-    history_dir: Optional[str],
-    ui: Optional[str],
-    debug: bool,
-    verbose: bool,
-    headless: bool,
-    plain: bool,
-    show_reasoning: bool,
-    no_color: bool,
-    final_only: bool,
-    log_json: bool,
-    non_interactive: bool,
-    trust_mcp_code: bool,
-    attachment: Optional[List[str]],
-    refresh_cache: bool,
+    ui_mode: Optional[str],
 ) -> List[str]:
-    """Build Docker wrapper command with all flags.
-
-    Args:
-        args: Agent references and prompt
-        network: Docker network mode
-        keep: Keep container running flag
-        container: Existing container name
-        model: Model override
-        root: Working directory
-        history_dir: History directory
-        ui: UI mode
-        debug: Debug flag
-        verbose: Verbose flag
-        headless: Headless flag
-        plain: Plain output flag
-        show_reasoning: Show reasoning flag
-        no_color: No color flag
-        final_only: Final only flag
-        log_json: JSON logging flag
-        non_interactive: Non-interactive flag
-        trust_mcp_code: Trust MCP code flag
-        attachment: Attachment list
-        refresh_cache: Refresh cache flag
-
-    Returns:
-        Complete command list for subprocess execution
-    """
+    """Build Docker wrapper command with all flags."""
     cmd = ["tsugite-docker"]
 
-    if network != "host":
-        cmd.extend(["--network", network])
-    if keep:
+    if docker_opts.network != "host":
+        cmd.extend(["--network", docker_opts.network])
+    if docker_opts.keep:
         cmd.append("--keep")
-    if container:
-        cmd.extend(["--container", container])
+    if docker_opts.container:
+        cmd.extend(["--container", docker_opts.container])
 
     cmd.append("run")
-
     cmd.extend(args)
 
-    if model:
-        cmd.extend(["--model", model])
+    if exec_opts.model_override:
+        cmd.extend(["--model", exec_opts.model_override])
     if root:
         cmd.extend(["--root", str(root)])
-    if history_dir:
-        cmd.extend(["--history-dir", str(history_dir)])
-    if ui:
-        cmd.extend(["--ui", ui])
-    if debug:
+    if history_opts.storage_dir:
+        cmd.extend(["--history-dir", str(history_opts.storage_dir)])
+    if ui_mode:
+        cmd.extend(["--ui", ui_mode])
+    if exec_opts.debug:
         cmd.append("--debug")
-    if verbose:
+    if ui_opts.verbose:
         cmd.append("--verbose")
-    if headless:
+    if ui_opts.headless:
         cmd.append("--headless")
-    if plain:
+    if ui_opts.plain:
         cmd.append("--plain")
-    if show_reasoning:
+    if ui_opts.show_reasoning:
         cmd.append("--show-reasoning")
-    if no_color:
+    if ui_opts.no_color:
         cmd.append("--no-color")
-    if final_only:
+    if ui_opts.final_only:
         cmd.append("--final-only")
-    if log_json:
+    if ui_opts.log_json:
         cmd.append("--log-json")
-    if non_interactive:
+    if ui_opts.non_interactive:
         cmd.append("--non-interactive")
-    if trust_mcp_code:
+    if exec_opts.trust_mcp_code:
         cmd.append("--trust-mcp-code")
-    if attachment:
-        for att in attachment:
+    if attach_opts.sources:
+        for att in attach_opts.sources:
             cmd.extend(["--attachment", att])
-    if refresh_cache:
+    if attach_opts.refresh_cache:
         cmd.append("--refresh-cache")
 
     return cmd
 
 
-def _resolve_ui_mode(ui: Optional[str], plain: bool, headless: bool, console: Console) -> tuple[bool, bool, bool]:
-    """Resolve UI mode flag to individual UI control flags.
+def _resolve_ui_mode(ui_mode: Optional[str], ui_opts: UIOptions, console: Console) -> tuple[UIOptions, bool]:
+    """Resolve UI mode flag and return updated UIOptions with live_ui flag.
 
     Args:
-        ui: UI mode string (plain, headless, live)
-        plain: Plain output flag
-        headless: Headless mode flag
+        ui_mode: UI mode string (plain, headless, live)
+        ui_opts: Current UI options
         console: Console for error output
 
     Returns:
-        Tuple of (plain, headless, live_ui) flags
+        Tuple of (updated UIOptions, live_ui flag)
 
     Raises:
         typer.Exit: If invalid UI mode or conflicting flags
     """
     live_ui = False
 
-    if not ui:
-        return plain, headless, live_ui
+    if not ui_mode:
+        return ui_opts, live_ui
 
-    if any([plain, headless]):
+    if ui_opts.plain or ui_opts.headless:
         console.print("[red]Error: --ui cannot be used with --plain or --headless[/red]")
         raise typer.Exit(1)
 
-    ui_modes = {
-        "plain": {"plain": True},
-        "headless": {"headless": True},
-        "live": {"live_ui": True},
-    }
-
-    ui_lower = ui.lower()
+    ui_modes = {"plain", "headless", "live"}
+    ui_lower = ui_mode.lower()
     if ui_lower not in ui_modes:
-        console.print(f"[red]Error: Invalid UI mode '{ui}'. Choose from: {', '.join(ui_modes.keys())}[/red]")
+        console.print(f"[red]Error: Invalid UI mode '{ui_mode}'. Choose from: {', '.join(ui_modes)}[/red]")
         raise typer.Exit(1)
 
-    mode_settings = ui_modes[ui_lower]
-    plain = mode_settings.get("plain", plain)
-    headless = mode_settings.get("headless", headless)
-    live_ui = mode_settings.get("live_ui", live_ui)
+    if ui_lower == "plain":
+        ui_opts.plain = True
+    elif ui_lower == "headless":
+        ui_opts.headless = True
+    elif ui_lower == "live":
+        live_ui = True
 
-    return plain, headless, live_ui
+    return ui_opts, live_ui
 
 
 def _build_executor_kwargs(
     agent_file: Path,
     prompt: str,
-    model: Optional[str],
-    debug: bool,
-    custom_logger: Any,
-    trust_mcp_code: bool,
-    stream: bool,
-    continue_conversation_id: Optional[str],
+    exec_opts: ExecutionOptions,
+    history_opts: HistoryOptions,
     resolved_attachments: List[Tuple[str, str]],
-    should_save_history: bool,
     executor: Any,
 ) -> Dict[str, Any]:
-    """Build executor kwargs dict for run_agent/run_multistep_agent.
-
-    Args:
-        agent_file: Path to agent file
-        prompt: User prompt
-        model: Model override
-        debug: Debug flag
-        custom_logger: Logger instance
-        trust_mcp_code: Trust MCP code flag
-        stream: Stream flag
-        continue_conversation_id: Continuation conversation ID
-        resolved_attachments: Resolved attachments
-        should_save_history: Whether to save history
-        executor: Executor function (run_agent or run_multistep_agent)
-
-    Returns:
-        Dict of executor kwargs
-    """
+    """Build executor kwargs dict for run_agent/run_multistep_agent."""
     from tsugite.agent_runner import run_agent
 
     kwargs = {
         "agent_path": agent_file,
         "prompt": prompt,
-        "model_override": model,
-        "debug": debug,
-        "custom_logger": custom_logger,
-        "trust_mcp_code": trust_mcp_code,
-        "stream": stream,
-        "continue_conversation_id": continue_conversation_id,
+        "exec_options": exec_opts,
+        "continue_conversation_id": history_opts.continue_id,
         "attachments": resolved_attachments,
     }
-    if should_save_history and executor == run_agent:
-        kwargs["return_token_usage"] = True
+    if history_opts.enabled and executor == run_agent:
+        kwargs["exec_options"] = ExecutionOptions(
+            model_override=exec_opts.model_override,
+            debug=exec_opts.debug,
+            stream=exec_opts.stream,
+            trust_mcp_code=exec_opts.trust_mcp_code,
+            dry_run=exec_opts.dry_run,
+            force_text_mode=exec_opts.force_text_mode,
+            return_token_usage=True,
+        )
     return kwargs
 
 
 def _handle_docker_execution(
     args: List[str],
-    network: str,
-    keep: bool,
-    container: Optional[str],
-    model: Optional[str],
+    docker_opts: DockerOptions,
+    exec_opts: ExecutionOptions,
+    ui_opts: UIOptions,
+    attach_opts: AttachmentOptions,
+    history_opts: HistoryOptions,
     root: Optional[str],
-    history_dir: Optional[str],
-    ui: Optional[str],
-    debug: bool,
-    verbose: bool,
-    headless: bool,
-    plain: bool,
-    show_reasoning: bool,
-    no_color: bool,
-    final_only: bool,
-    log_json: bool,
-    non_interactive: bool,
-    trust_mcp_code: bool,
-    attachment: Optional[List[str]],
-    refresh_cache: bool,
+    ui_mode: Optional[str],
 ) -> None:
-    """Handle Docker container execution and exit.
-
-    Args:
-        All run() command parameters
-
-    Raises:
-        typer.Exit: Always exits after Docker execution
-    """
+    """Handle Docker container execution and exit."""
     import shutil
     import subprocess
 
@@ -267,28 +195,7 @@ def _handle_docker_execution(
         console.print("[dim]See bin/README.md for installation instructions[/dim]")
         raise typer.Exit(1)
 
-    cmd = _build_docker_command(
-        args,
-        network,
-        keep,
-        container,
-        model,
-        root,
-        history_dir,
-        ui,
-        debug,
-        verbose,
-        headless,
-        plain,
-        show_reasoning,
-        no_color,
-        final_only,
-        log_json,
-        non_interactive,
-        trust_mcp_code,
-        attachment,
-        refresh_cache,
-    )
+    cmd = _build_docker_command(args, docker_opts, exec_opts, ui_opts, attach_opts, history_opts, root, ui_mode)
     result = subprocess.run(cmd, check=False)
     raise typer.Exit(result.returncode)
 
@@ -327,23 +234,18 @@ def _resolve_conversation_continuation(continue_conversation: bool, conversation
 def _execute_agent_with_ui(
     executor,
     executor_kwargs: Dict[str, Any],
-    headless: bool,
-    final_only: bool,
-    verbose: bool,
+    ui_opts: UIOptions,
     live_ui: bool,
     use_plain_output: bool,
-    non_interactive: bool,
-    no_color: bool,
-    show_reasoning: bool,
 ):
     """Execute agent with appropriate UI mode."""
     from tsugite.ui import create_live_template_logger, create_plain_logger, custom_agent_ui
 
-    if headless or final_only:
+    if ui_opts.headless or ui_opts.final_only:
         from .helpers import get_error_console
 
         stderr_console = get_error_console(True, console)
-        show_progress_items = verbose and not final_only
+        show_progress_items = ui_opts.verbose and not ui_opts.final_only
 
         with custom_agent_ui(
             console=stderr_console,
@@ -354,13 +256,13 @@ def _execute_agent_with_ui(
             show_execution_results=show_progress_items,
             show_execution_logs=show_progress_items,
             show_panels=False,
-            show_debug_messages=verbose,
+            show_debug_messages=ui_opts.verbose,
         ) as custom_logger:
             executor_kwargs["custom_logger"] = custom_logger
             return executor(**executor_kwargs)
 
     if live_ui:
-        custom_logger = create_live_template_logger(interactive=not non_interactive)
+        custom_logger = create_live_template_logger(interactive=not ui_opts.non_interactive)
         with custom_logger.ui_handler.progress_context():
             executor_kwargs["custom_logger"] = custom_logger
             return executor(**executor_kwargs)
@@ -371,17 +273,17 @@ def _execute_agent_with_ui(
             executor_kwargs["custom_logger"] = custom_logger
             return executor(**executor_kwargs)
 
-    default_console = Console(file=sys.stderr, force_terminal=True, no_color=no_color)
+    default_console = Console(file=sys.stderr, force_terminal=True, no_color=ui_opts.no_color)
     with custom_agent_ui(
         console=default_console,
-        show_code=not non_interactive,
-        show_observations=not non_interactive,
-        show_progress=not no_color,
-        show_llm_messages=show_reasoning,
+        show_code=not ui_opts.non_interactive,
+        show_observations=not ui_opts.non_interactive,
+        show_progress=not ui_opts.no_color,
+        show_llm_messages=ui_opts.show_reasoning,
         show_execution_results=True,
-        show_execution_logs=verbose,
+        show_execution_logs=ui_opts.verbose,
         show_panels=False,
-        show_debug_messages=verbose,
+        show_debug_messages=ui_opts.verbose,
     ) as custom_logger:
         executor_kwargs["custom_logger"] = custom_logger
         return executor(**executor_kwargs)
@@ -413,18 +315,18 @@ def _unpack_execution_result(result, should_save_history: bool, executor):
     return result_str, None, None, None, None, None
 
 
-def _display_result(result_str: str, headless: bool, final_only: bool, no_color: bool, stderr_console: Console):
+def _display_result(result_str: str, ui_opts: UIOptions, stderr_console: Console):
     """Display the final result to the user."""
     from rich.markdown import Markdown
 
     from tsugite.console import get_stdout_console
 
-    if headless or final_only:
-        get_stdout_console(no_color=no_color, force_terminal=True).print(Markdown(result_str))
+    if ui_opts.headless or ui_opts.final_only:
+        get_stdout_console(no_color=ui_opts.no_color, force_terminal=True).print(Markdown(result_str))
     else:
         stderr_console.print()
         stderr_console.rule("[bold green]Agent Execution Complete[/bold green]")
-        get_stdout_console(no_color=no_color, force_terminal=True).print(Markdown(result_str))
+        get_stdout_console(no_color=ui_opts.no_color, force_terminal=True).print(Markdown(result_str))
 
 
 @app.command()
@@ -475,6 +377,9 @@ def run(
     subagent_mode: bool = typer.Option(
         False, "--subagent-mode", help="Run as subagent: read JSON from stdin, emit JSONL to stdout"
     ),
+    memory: Optional[bool] = typer.Option(
+        None, "--memory/--no-memory", help="Enable/disable memory system (overrides agent/config default)"
+    ),
 ):
     """Run an agent with the given prompt.
 
@@ -491,54 +396,73 @@ def run(
     from tsugite.md_agents import validate_agent_execution
     from tsugite.utils import should_use_plain_output
 
-    if history_dir:
-        Path(history_dir).mkdir(parents=True, exist_ok=True)
+    # Build option dataclasses from CLI params
+    ui_opts = UIOptions(
+        plain=plain,
+        headless=headless,
+        no_color=no_color,
+        final_only=final_only,
+        verbose=verbose,
+        show_reasoning=show_reasoning,
+        non_interactive=non_interactive,
+        log_json=log_json,
+    )
+    exec_opts = ExecutionOptions(
+        model_override=model,
+        debug=debug,
+        stream=stream,
+        trust_mcp_code=trust_mcp_code,
+        dry_run=dry_run,
+        memory_enabled=memory,
+    )
+    history_opts = HistoryOptions(
+        enabled=not no_history,
+        continue_id=conversation_id if continue_conversation else None,
+        storage_dir=Path(history_dir) if history_dir else None,
+    )
+    attach_opts = AttachmentOptions(
+        sources=list(attachment) if attachment else [],
+        refresh_cache=refresh_cache,
+        auto_context=auto_context,
+    )
+    docker_opts = DockerOptions(
+        enabled=docker,
+        keep=keep,
+        container=container,
+        network=network,
+    )
 
-    if no_color:
+    if history_opts.storage_dir:
+        history_opts.storage_dir.mkdir(parents=True, exist_ok=True)
+
+    if ui_opts.no_color:
         console.no_color = True
 
-    # Resolve UI mode to individual flags
-    plain, headless, live_ui = _resolve_ui_mode(ui, plain, headless, console)
+    # Resolve UI mode to update ui_opts
+    ui_opts, live_ui = _resolve_ui_mode(ui, ui_opts, console)
 
     # Handle subagent mode - override incompatible settings
     if subagent_mode:
         import os
 
-        # Validate no conflicting flags
-        if plain or headless or live_ui:
+        if ui_opts.plain or ui_opts.headless or live_ui:
             console.print("[red]Error: --subagent-mode cannot be combined with --plain, --headless, or --live[/red]")
             raise typer.Exit(1)
 
-        non_interactive = True
-        no_history = True
+        ui_opts.non_interactive = True
+        history_opts.enabled = False
         os.environ["TSUGITE_SUBAGENT_MODE"] = "1"
 
-    if docker or container:
-        _handle_docker_execution(
-            args,
-            network,
-            keep,
-            container,
-            model,
-            root,
-            history_dir,
-            ui,
-            debug,
-            verbose,
-            headless,
-            plain,
-            show_reasoning,
-            no_color,
-            final_only,
-            log_json,
-            non_interactive,
-            trust_mcp_code,
-            attachment,
-            refresh_cache,
-        )
+    if docker_opts.enabled or docker_opts.container:
+        _handle_docker_execution(args, docker_opts, exec_opts, ui_opts, attach_opts, history_opts, root, ui)
 
     # Handle conversation continuation - check before parsing args
-    continue_conversation_id = _resolve_conversation_continuation(continue_conversation, conversation_id)
+    if continue_conversation and not history_opts.continue_id:
+        # User passed --continue without --conversation-id, resolve to latest
+        history_opts.continue_id = _resolve_conversation_continuation(True, None)
+    elif history_opts.continue_id:
+        # User passed explicit conversation ID
+        console.print(f"[cyan]Continuing conversation: {history_opts.continue_id}[/cyan]")
 
     # Parse CLI arguments into agents and prompt (allow empty agents when continuing)
     try:
@@ -558,9 +482,9 @@ def run(
             if not agent_refs and continue_conversation:
                 from tsugite.history import get_conversation_metadata
 
-                metadata = get_conversation_metadata(continue_conversation_id)
+                metadata = get_conversation_metadata(history_opts.continue_id)
                 if not metadata:
-                    console.print(f"[red]Could not load metadata for conversation: {continue_conversation_id}[/red]")
+                    console.print(f"[red]Could not load metadata for conversation: {history_opts.continue_id}[/red]")
                     raise typer.Exit(1)
 
                 agent_name = metadata.agent
@@ -598,11 +522,11 @@ def run(
             console.print(f"[red]Error: {e}[/red]")
             raise typer.Exit(1)
 
-        use_plain_output = plain or should_use_plain_output()
+        use_plain_output = ui_opts.plain or should_use_plain_output()
 
         from tsugite.console import get_stderr_console
 
-        stderr_console = get_stderr_console(no_color=no_color)
+        stderr_console = get_stderr_console(no_color=ui_opts.no_color)
 
         # Set up event bus in context for attachment loading
         from tsugite.events import EventBus
@@ -617,20 +541,20 @@ def run(
         agent_attachments = inject_auto_context_if_enabled(
             agent_info.get("attachments"),
             agent_info.get("auto_context"),
-            cli_override=auto_context,
+            cli_override=attach_opts.auto_context,
         )
 
         prompt, resolved_attachments = assemble_prompt_with_attachments(
             prompt=prompt,
             agent_attachments=agent_attachments,
-            cli_attachments=attachment,
+            cli_attachments=attach_opts.sources,
             base_dir=base_dir,
-            refresh_cache=refresh_cache,
+            refresh_cache=attach_opts.refresh_cache,
             console=console,
             stdin_attachment=stdin_attachment,
         )
 
-        if not headless:
+        if not ui_opts.headless:
             if not use_plain_output:
                 stderr_console.print(get_logo(stderr_console), style="cyan")
                 stderr_console.print()
@@ -639,7 +563,7 @@ def run(
                 "Agent": agent_file.name,
                 "Task": prompt,
                 "Directory": str(Path.cwd()),
-                "Model": model or agent_info.get("model", "unknown"),
+                "Model": exec_opts.model_override or agent_info.get("model", "unknown"),
                 "Instructions": instruction_label,
                 "Tools": ", ".join(agent_info.get("tools", [])),
             }
@@ -647,8 +571,8 @@ def run(
             if agent_attachments:
                 info_items["Agent Attachments"] = ", ".join(agent_attachments)
 
-            if attachment:
-                info_items["CLI Attachments"] = ", ".join(attachment)
+            if attach_opts.sources:
+                info_items["CLI Attachments"] = ", ".join(attach_opts.sources)
 
             if resolved_attachments:
                 info_items["Attachments"] = f"{len(resolved_attachments)} file(s)"
@@ -658,7 +582,7 @@ def run(
 
         is_valid, error_msg = validate_agent_execution(agent_file)
         if not is_valid:
-            get_error_console(headless, console).print(f"[red]Agent validation failed: {error_msg}[/red]")
+            get_error_console(ui_opts.headless, console).print(f"[red]Agent validation failed: {error_msg}[/red]")
             raise typer.Exit(1)
 
         from tsugite.agent_runner import preview_multistep_agent, run_multistep_agent
@@ -667,7 +591,7 @@ def run(
         agent_text = agent_file.read_text()
         is_multistep = has_step_directives(agent_text)
 
-        if dry_run:
+        if exec_opts.dry_run:
             if is_multistep:
                 preview_multistep_agent(
                     agent_path=agent_file,
@@ -681,9 +605,7 @@ def run(
 
         executor = run_multistep_agent if is_multistep else run_agent
 
-        should_save_history = not no_history
-
-        if not headless and not final_only:
+        if not ui_opts.headless and not ui_opts.final_only:
             execution_type = "multi-step agent" if is_multistep else "agent"
             stderr_console.print()
             stderr_console.rule(f"[bold cyan]🚀 Starting {execution_type.title()} Execution[/bold cyan]")
@@ -693,35 +615,25 @@ def run(
             executor_kwargs = _build_executor_kwargs(
                 agent_file,
                 prompt,
-                model,
-                debug,
-                None,
-                trust_mcp_code,
-                stream,
-                continue_conversation_id,
+                exec_opts,
+                history_opts,
                 resolved_attachments,
-                should_save_history,
                 executor,
             )
 
             result = _execute_agent_with_ui(
                 executor,
                 executor_kwargs,
-                headless,
-                final_only,
-                verbose,
+                ui_opts,
                 live_ui,
                 use_plain_output,
-                non_interactive,
-                no_color,
-                show_reasoning,
             )
 
             result_str, token_count, cost, execution_steps, system_prompt, attachments = _unpack_execution_result(
-                result, should_save_history, executor
+                result, history_opts.enabled, executor
             )
 
-            if should_save_history:
+            if history_opts.enabled:
                 try:
                     from tsugite.agent_runner.history_integration import save_run_to_history
 
@@ -731,32 +643,32 @@ def run(
                         agent_name=agent_info["name"],
                         prompt=prompt,
                         result=result_str,
-                        model=model or agent_info.get("model", "default"),
+                        model=exec_opts.model_override or agent_info.get("model", "default"),
                         token_count=token_count,
                         cost=cost,
                         execution_steps=execution_steps,
-                        continue_conversation_id=continue_conversation_id,
+                        continue_conversation_id=history_opts.continue_id,
                         system_prompt=system_prompt,
                         attachments=attachments,
                     )
                 except Exception:
                     pass
 
-            _display_result(result_str, headless, final_only, no_color, stderr_console)
+            _display_result(result_str, ui_opts, stderr_console)
 
         except ValueError as e:
-            get_error_console(headless, console).print(f"[red]Configuration error: {e}[/red]")
+            get_error_console(ui_opts.headless, console).print(f"[red]Configuration error: {e}[/red]")
             raise typer.Exit(1)
         except RuntimeError as e:
-            get_error_console(headless, console).print(f"[red]Execution error: {e}[/red]")
+            get_error_console(ui_opts.headless, console).print(f"[red]Execution error: {e}[/red]")
             raise typer.Exit(1)
         except KeyboardInterrupt:
-            get_error_console(headless, console).print("\n[yellow]Agent execution interrupted by user[/yellow]")
+            get_error_console(ui_opts.headless, console).print("\n[yellow]Agent execution interrupted by user[/yellow]")
             raise typer.Exit(130)
         except Exception as e:
-            err_console = get_error_console(headless, console)
+            err_console = get_error_console(ui_opts.headless, console)
             err_console.print(f"[red]Unexpected error: {e}[/red]")
-            if not log_json:
+            if not ui_opts.log_json:
                 err_console.print("\n[dim]Use --log-json for machine-readable output[/dim]")
             raise typer.Exit(1)
 
@@ -939,6 +851,33 @@ def render(
 
                     console.print(f"[yellow]</Attachment: {attachment.name}>[/yellow]")
 
+            # Display loaded skills (as additional content blocks in system message)
+            if prepared.skills:
+                next_idx = len(prepared.attachments) + 2 if prepared.attachments else 2
+                for idx, skill in enumerate(prepared.skills, start=next_idx):
+                    console.print()
+                    console.rule(
+                        f"[dim]Content Block {idx}: Skill - {skill.name}[/dim]",
+                        style="dim",
+                        align="left",
+                    )
+                    console.print(f"[magenta]<Skill: {skill.name}>[/magenta]")
+                    # Truncate skill unless verbose
+                    if verbose:
+                        console.print(skill.content)
+                    else:
+                        lines = skill.content.split("\n")
+                        if len(lines) > 20:
+                            preview = "\n".join(lines[:10])
+                            preview += (
+                                f"\n[dim]... ({len(lines) - 15} lines truncated, use --verbose to see all) ...[/dim]\n"
+                            )
+                            preview += "\n".join(lines[-5:])
+                            console.print(preview)
+                        else:
+                            console.print(skill.content)
+                    console.print(f"[magenta]</Skill: {skill.name}>[/magenta]")
+
             # Message 2: User (role: user)
             console.print()
             console.rule("[bold cyan]Message 2: User Role[/bold cyan]", style="cyan", align="left")
@@ -975,67 +914,59 @@ def chat(
     root: Optional[str] = typer.Option(None, "--root", help="Working directory"),
 ):
     """Start an interactive chat session with an agent."""
+    # Build option dataclasses
+    exec_opts = ExecutionOptions(model_override=model, stream=stream)
+    history_opts = HistoryOptions(enabled=not no_history, max_turns=max_history)
+
     with change_to_root_directory(root, console):
         # Handle conversation resume
-        resume_conversation_id = None
         resume_turns = None
 
         if continue_ is not None:
             from tsugite.ui.chat_history import get_latest_conversation, load_conversation_history
 
-            # Determine conversation ID to resume
             if continue_ == "" or continue_.lower() == "latest":
-                resume_conversation_id = get_latest_conversation()
-                if not resume_conversation_id:
+                history_opts.continue_id = get_latest_conversation()
+                if not history_opts.continue_id:
                     console.print("[red]No conversations found to resume[/red]")
                     raise typer.Exit(1)
-                console.print(f"[cyan]Resuming latest conversation: {resume_conversation_id}[/cyan]")
+                console.print(f"[cyan]Resuming latest conversation: {history_opts.continue_id}[/cyan]")
             else:
-                resume_conversation_id = continue_
-                console.print(f"[cyan]Resuming conversation: {resume_conversation_id}[/cyan]")
+                history_opts.continue_id = continue_
+                console.print(f"[cyan]Resuming conversation: {history_opts.continue_id}[/cyan]")
 
-            # Load conversation history
             try:
-                resume_turns = load_conversation_history(resume_conversation_id)
+                resume_turns = load_conversation_history(history_opts.continue_id)
                 console.print(f"[cyan]Loaded {len(resume_turns)} previous turns[/cyan]")
             except FileNotFoundError:
-                console.print(f"[red]Conversation not found: {resume_conversation_id}[/red]")
+                console.print(f"[red]Conversation not found: {history_opts.continue_id}[/red]")
                 raise typer.Exit(1)
             except Exception as e:
                 console.print(f"[red]Failed to load conversation: {e}[/red]")
                 raise typer.Exit(1)
 
-        # Resolve agent path using shared helper
-        # Default to chat-assistant if no agent specified
         agent_to_load = agent if agent else "chat-assistant"
         _, primary_agent_path, _ = load_and_validate_agent(agent_to_load, console)
 
-        # Run chat with selected UI
         if ui.lower() == "tui":
             from tsugite.ui.textual_chat import run_textual_chat
 
             run_textual_chat(
                 agent_path=primary_agent_path,
-                model_override=model,
-                max_history=max_history,
-                stream=stream,
-                disable_history=no_history,
-                resume_conversation_id=resume_conversation_id,
+                exec_options=exec_opts,
+                history_options=history_opts,
                 resume_turns=resume_turns,
             )
         elif ui.lower() == "repl":
             from tsugite.ui.repl_chat import run_repl_chat
 
             # REPL defaults to streaming for better UX
-            stream_mode = stream or True
+            exec_opts.stream = exec_opts.stream or True
 
             run_repl_chat(
                 agent_path=primary_agent_path,
-                model_override=model,
-                max_history=max_history,
-                stream=stream_mode,
-                disable_history=no_history,
-                resume_conversation_id=resume_conversation_id,
+                exec_options=exec_opts,
+                history_options=history_opts,
                 resume_turns=resume_turns,
             )
         else:

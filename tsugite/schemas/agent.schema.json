@@ -230,6 +230,18 @@
       "default": true,
       "title": "Spawnable",
       "type": "boolean"
+    },
+    "memory_enabled": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Memory Enabled"
     }
   },
   "required": [

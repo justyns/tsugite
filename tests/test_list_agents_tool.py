@@ -146,8 +146,8 @@ description: From agents (lower priority)
 
             # Should show higher priority duplicate + package-provided agents
             assert (
-                result.count("\n") == 5
-            )  # 6 agents total: duplicate, default, chat-assistant, file_searcher, code_searcher, conversation_analyzer
+                result.count("\n") == 6
+            )  # 7 agents total: duplicate, default, chat-assistant, file_searcher, code_searcher, conversation_analyzer, memory
             assert "From .tsugite (higher priority)" in result
             assert "From agents (lower priority)" not in result
             # Package-provided agents should also be listed

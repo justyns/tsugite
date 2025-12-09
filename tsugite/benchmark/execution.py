@@ -242,12 +242,15 @@ class TestExecutor:
             final_prompt = self._prepare_prompt(test_case)
 
             # Run the agent with token usage tracking to get step count
+            from tsugite.options import ExecutionOptions
+
             result = run_agent(
                 agent_path=temp_agent_path,
                 prompt=final_prompt,
-                model_override=model_name,
-                debug=False,
-                return_token_usage=True,
+                exec_options=ExecutionOptions(
+                    model_override=model_name,
+                    return_token_usage=True,
+                ),
             )
 
             # Extract fields from AgentExecutionResult model

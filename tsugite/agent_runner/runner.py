@@ -9,6 +9,7 @@ from tsugite.core.agent import TsugiteAgent
 from tsugite.core.executor import LocalExecutor
 from tsugite.exceptions import AgentExecutionError
 from tsugite.md_agents import AgentConfig, parse_agent_file
+from tsugite.options import ExecutionOptions
 from tsugite.renderer import AgentRenderer
 from tsugite.tools.tasks import TaskStatus, get_task_manager, reset_task_manager
 from tsugite.utils import is_interactive
@@ -421,39 +422,19 @@ def _extract_reasoning_content(agent: TsugiteAgent, custom_logger: Optional[Any]
 
 async def _execute_agent_with_prompt(
     prepared: "PreparedAgent",
-    model_override: Optional[str] = None,
+    exec_options: Optional[ExecutionOptions] = None,
     custom_logger: Optional[Any] = None,
-    trust_mcp_code: bool = False,
     skip_task_reset: bool = False,
     model_kwargs: Optional[Dict[str, Any]] = None,
     injectable_vars: Optional[Dict[str, Any]] = None,
-    return_token_usage: bool = False,
-    stream: bool = False,
     previous_messages: Optional[List[Dict]] = None,
 ) -> str | AgentExecutionResult:
     """Execute agent with a prepared agent.
 
     Low-level execution function used by both run_agent and run_multistep_agent.
-
-    Args:
-        prepared: Prepared agent with all context, tools, and instructions
-        model_override: Override agent's model
-        custom_logger: Custom logger
-        trust_mcp_code: Trust MCP server code
-        skip_task_reset: Skip resetting task manager (for multi-step agents)
-        model_kwargs: Additional model parameters (response_format, temperature, etc.)
-        injectable_vars: Variables to inject into Python execution namespace
-        return_token_usage: Whether to return AgentExecutionResult with metrics
-        stream: Whether to stream responses in real-time
-        previous_messages: Previous conversation messages for continuation
-
-    Returns:
-        Agent execution result as string (when return_token_usage=False) or
-        AgentExecutionResult model with metrics (when return_token_usage=True)
-
-    Raises:
-        RuntimeError: If execution fails
     """
+    if exec_options is None:
+        exec_options = ExecutionOptions()
 
     # Initialize task manager for this execution (unless skipped for multi-step)
     if not skip_task_reset:
@@ -543,7 +524,7 @@ async def _execute_agent_with_prompt(
             event_bus.emit(WarningEvent(message="Continuing without MCP tools."))
 
     # Get model string
-    model_string = _get_model_string(model_override, agent_config)
+    model_string = _get_model_string(exec_options.model_override, agent_config)
 
     # Merge reasoning_effort from agent config into model_kwargs
     final_model_kwargs = dict(model_kwargs or {})
@@ -580,13 +561,17 @@ async def _execute_agent_with_prompt(
         _setup_event_context(event_bus)
 
         # Run agent
-        result = await agent.run(prepared.rendered_prompt, return_full_result=return_token_usage, stream=stream)
+        result = await agent.run(
+            prepared.rendered_prompt,
+            return_full_result=exec_options.return_token_usage,
+            stream=exec_options.stream,
+        )
 
         # Extract and display reasoning content if present
         _extract_reasoning_content(agent, custom_logger)
 
         # Return appropriate format
-        if return_token_usage:
+        if exec_options.return_token_usage:
             from tsugite.core.agent import AgentResult
 
             if isinstance(result, AgentResult):
@@ -680,14 +665,9 @@ async def _execute_agent_with_prompt(
 def run_agent(
     agent_path: Path,
     prompt: str,
+    exec_options: Optional[ExecutionOptions] = None,
     context: Optional[Dict[str, Any]] = None,
-    model_override: Optional[str] = None,
-    debug: bool = False,
     custom_logger: Optional[Any] = None,
-    trust_mcp_code: bool = False,
-    return_token_usage: bool = False,
-    stream: bool = False,
-    force_text_mode: bool = False,
     continue_conversation_id: Optional[str] = None,
     attachments: Optional[List[Any]] = None,
 ) -> str | AgentExecutionResult:
@@ -696,30 +676,23 @@ def run_agent(
     Args:
         agent_path: Path to agent markdown file
         prompt: User prompt/task for the agent
+        exec_options: Execution options (model, debug, stream, etc.)
         context: Additional context variables
-        model_override: Override agent's default model
-        debug: Enable debug output (rendered prompt)
         custom_logger: Custom logger for agent output
-        trust_mcp_code: Whether to trust remote code from MCP servers
-        return_token_usage: Whether to return AgentExecutionResult with metrics
-        stream: Whether to stream responses in real-time
-        force_text_mode: Force text_mode=True regardless of agent config (useful for chat UI)
-        continue_conversation_id: Optional conversation ID to continue (makes run mode multi-turn)
-        attachments: Optional list of Attachment objects for prompt caching
+        continue_conversation_id: Optional conversation ID to continue
+        attachments: Optional list of Attachment objects
 
     Returns:
-        Agent execution result as string (when return_token_usage=False) or
-        AgentExecutionResult model with metrics (when return_token_usage=True)
-
-    Raises:
-        ValueError: If agent file is invalid
-        RuntimeError: If agent execution fails
+        Agent execution result as string or AgentExecutionResult with metrics
     """
     import json
     import os
     import sys
 
-    # Handle subagent mode (subprocess-based execution) - unique to sync entry point
+    if exec_options is None:
+        exec_options = ExecutionOptions()
+
+    # Handle subagent mode (subprocess-based execution)
     subagent_mode = os.environ.get("TSUGITE_SUBAGENT_MODE") == "1"
     if subagent_mode:
         try:
@@ -739,14 +712,9 @@ def run_agent(
         run_agent_async(
             agent_path=agent_path,
             prompt=prompt,
+            exec_options=exec_options,
             context=context,
-            model_override=model_override,
-            debug=debug,
             custom_logger=custom_logger,
-            trust_mcp_code=trust_mcp_code,
-            return_token_usage=return_token_usage,
-            stream=stream,
-            force_text_mode=force_text_mode,
             continue_conversation_id=continue_conversation_id,
             attachments=attachments,
         )
@@ -756,44 +724,29 @@ def run_agent(
 async def run_agent_async(
     agent_path: Path,
     prompt: str,
+    exec_options: Optional[ExecutionOptions] = None,
     context: Optional[Dict[str, Any]] = None,
-    model_override: Optional[str] = None,
-    debug: bool = False,
     custom_logger: Optional[Any] = None,
-    trust_mcp_code: bool = False,
-    return_token_usage: bool = False,
-    stream: bool = False,
-    force_text_mode: bool = False,
     continue_conversation_id: Optional[str] = None,
     attachments: Optional[List[Any]] = None,
 ) -> str | AgentExecutionResult:
     """Run a Tsugite agent (async version for tests and async contexts).
 
-    This is the async version of run_agent() that can be awaited directly.
-    Use this in async contexts (like pytest-asyncio tests) to avoid event loop conflicts.
-
     Args:
         agent_path: Path to agent markdown file
         prompt: User prompt/task for the agent
+        exec_options: Execution options (model, debug, stream, etc.)
         context: Additional context variables
-        model_override: Override agent's default model
-        debug: Enable debug output (rendered prompt)
         custom_logger: Custom logger for agent output
-        trust_mcp_code: Whether to trust remote code from MCP servers
-        return_token_usage: Whether to return AgentExecutionResult with metrics
-        stream: Whether to stream responses in real-time
-        attachments: Optional list of Attachment objects for prompt caching
-        force_text_mode: Force text_mode=True regardless of agent config (useful for chat UI)
-        continue_conversation_id: Optional conversation ID to continue (makes run mode multi-turn)
+        continue_conversation_id: Optional conversation ID to continue
+        attachments: Optional list of Attachment objects
 
     Returns:
-        Agent execution result as string (when return_token_usage=False) or
-        AgentExecutionResult model with metrics (when return_token_usage=True)
-
-    Raises:
-        ValueError: If agent file is invalid
-        RuntimeError: If agent execution fails
+        Agent execution result as string or AgentExecutionResult with metrics
     """
+    if exec_options is None:
+        exec_options = ExecutionOptions()
+
     if context is None:
         context = {}
 
@@ -823,7 +776,7 @@ async def run_agent_async(
 
     try:
         # Override text_mode if force_text_mode is True (for chat UI) or continuing conversation
-        if force_text_mode or continue_conversation_id:
+        if exec_options.force_text_mode or continue_conversation_id:
             agent_config.text_mode = True
 
         # Prepare agent using unified preparation pipeline
@@ -840,7 +793,7 @@ async def run_agent_async(
         )
 
         # Debug output if requested
-        if debug:
+        if exec_options.debug:
             import sys
 
             print(_format_debug_output(prepared), file=sys.stderr)
@@ -848,11 +801,8 @@ async def run_agent_async(
         # Execute with the low-level helper (async - no asyncio.run wrapper)
         return await _execute_agent_with_prompt(
             prepared=prepared,
-            model_override=model_override,
+            exec_options=exec_options,
             custom_logger=custom_logger,
-            trust_mcp_code=trust_mcp_code,
-            return_token_usage=return_token_usage,
-            stream=stream,
             previous_messages=previous_messages,
         )
     finally:
@@ -1093,11 +1043,8 @@ async def _execute_step_with_retries(
     total_steps: int,
     steps: List[Any],
     step_header: str,
-    model_override: Optional[str],
+    exec_options: ExecutionOptions,
     custom_logger: Optional[Any],
-    trust_mcp_code: bool,
-    stream: bool,
-    debug: bool,
     task_manager: Any,
     event_bus: Optional["EventBus"] = None,
     assigned_vars: Optional[set] = None,
@@ -1106,30 +1053,8 @@ async def _execute_step_with_retries(
 
     Handles template rendering, step execution, error handling, and metrics recording.
     Retries up to max_retries times before failing.
-
-    Args:
-        step: Step configuration
-        step_context: Current step context with variables
-        agent: Parsed agent configuration
-        i: Current step number (1-indexed)
-        total_steps: Total number of steps
-        steps: List of all steps (for error messages)
-        step_header: Formatted step header for UI
-        model_override: Optional model override
-        custom_logger: Custom logger instance
-        trust_mcp_code: Trust MCP code flag
-        stream: Stream responses flag
-        debug: Debug mode flag
-        task_manager: Task manager instance
-        event_bus: Optional event bus for emitting events
-        assigned_vars: Set of user-assigned variable names (mutated on success)
-
-    Returns:
-        Tuple of (step_result, step_duration)
-
-    Raises:
-        RuntimeError: If all retry attempts fail
     """
+    debug = exec_options.debug
     max_attempts = step.max_retries + 1
     errors = []
     step_start_time = time.time()
@@ -1196,13 +1121,11 @@ async def _execute_step_with_retries(
             async def execute_step():
                 coro = _execute_agent_with_prompt(
                     prepared=prepared,
-                    model_override=model_override,
+                    exec_options=exec_options,
                     custom_logger=custom_logger,
-                    trust_mcp_code=trust_mcp_code,
                     skip_task_reset=True,
                     model_kwargs=step.model_kwargs,
                     injectable_vars=injectable_vars,
-                    stream=stream,
                 )
                 if step.timeout:
                     return await asyncio.wait_for(coro, timeout=step.timeout)
@@ -1346,39 +1269,13 @@ def _should_repeat_step(
 async def _run_multistep_agent_impl(
     agent_path: Path,
     prompt: str,
+    exec_options: Optional[ExecutionOptions] = None,
     context: Optional[Dict[str, Any]] = None,
-    model_override: Optional[str] = None,
-    debug: bool = False,
     custom_logger: Optional[Any] = None,
-    trust_mcp_code: bool = False,
-    stream: bool = False,
 ) -> str:
-    """Async implementation of multi-step agent execution.
-
-    Core logic extracted from run_multistep_agent() and run_multistep_agent_async().
-    This is the single source of truth for multi-step execution.
-
-    Multi-step agents use <!-- tsu:step --> directives to execute sequentially,
-    with each step being a full agent run. Results from earlier steps can be
-    assigned to variables and used in later steps.
-
-    Args:
-        agent_path: Path to agent markdown file
-        prompt: User prompt/task for the agent
-        context: Additional context variables
-        model_override: Override agent's default model
-        debug: Enable debug output (rendered prompts for each step)
-        custom_logger: Custom logger for agent output
-        trust_mcp_code: Whether to trust remote code from MCP servers
-        stream: Whether to stream responses in real-time
-
-    Returns:
-        Result from the final step
-
-    Raises:
-        ValueError: If agent file is invalid or step parsing fails
-        RuntimeError: If any step execution fails
-    """
+    """Async implementation of multi-step agent execution."""
+    if exec_options is None:
+        exec_options = ExecutionOptions()
     from tsugite.md_agents import extract_step_directives, has_step_directives
 
     if context is None:
@@ -1492,11 +1389,8 @@ async def _run_multistep_agent_impl(
                         total_steps=len(steps),
                         steps=steps,
                         step_header=step_header,
-                        model_override=model_override,
+                        exec_options=exec_options,
                         custom_logger=custom_logger,
-                        trust_mcp_code=trust_mcp_code,
-                        stream=stream,
-                        debug=debug,
                         task_manager=task_manager,
                         event_bus=event_bus,
                         assigned_vars=assigned_vars,
@@ -1527,7 +1421,7 @@ async def _run_multistep_agent_impl(
                         if step.assign_var:
                             step_context[step.assign_var] = None
                             assigned_vars.add(step.assign_var)
-                            if debug:
+                            if exec_options.debug:
                                 event_bus.emit(
                                     DebugMessageEvent(message=f"Assigned None to variable: {step.assign_var}")
                                 )
@@ -1550,11 +1444,11 @@ async def _run_multistep_agent_impl(
                 # End of step execution - now check if we should repeat the step
 
                 # Check if we should repeat this step (loop control)
-                should_repeat = _should_repeat_step(step, step_context, iteration, debug, event_bus)
+                should_repeat = _should_repeat_step(step, step_context, iteration, exec_options.debug, event_bus)
 
                 # Exit while loop if we shouldn't repeat
                 if not should_repeat:
-                    if step_is_looping and iteration > 1 and not debug:
+                    if step_is_looping and iteration > 1 and not exec_options.debug:
                         event_bus.emit(InfoEvent(message=f"Step '{step.name}' completed after {iteration} iterations"))
                     break
 
@@ -1562,7 +1456,7 @@ async def _run_multistep_agent_impl(
                 step_context["task_summary"] = task_manager.get_task_summary()
                 step_context["tasks"] = task_manager.get_tasks_for_template()
 
-                if not debug:
+                if not exec_options.debug:
                     event_bus.emit(InfoEvent(message=f"🔁 Repeating step '{step.name}' (iteration {iteration + 1})"))
 
             # End of while True loop for step iteration
@@ -1600,50 +1494,34 @@ async def _run_multistep_agent_impl(
 def run_multistep_agent(
     agent_path: Path,
     prompt: str,
+    exec_options: Optional[ExecutionOptions] = None,
     context: Optional[Dict[str, Any]] = None,
-    model_override: Optional[str] = None,
-    debug: bool = False,
     custom_logger: Optional[Any] = None,
-    trust_mcp_code: bool = False,
-    stream: bool = False,
 ) -> str:
     """Synchronous wrapper for multi-step agent execution.
-
-    See _run_multistep_agent_impl() for actual implementation.
-
-    Multi-step agents use <!-- tsu:step --> directives to execute sequentially,
-    with each step being a full agent run. Results from earlier steps can be
-    assigned to variables and used in later steps.
 
     Args:
         agent_path: Path to agent markdown file
         prompt: User prompt/task for the agent
+        exec_options: Execution options (model, debug, stream, etc.)
         context: Additional context variables
-        model_override: Override agent's default model
-        debug: Enable debug output (rendered prompts for each step)
         custom_logger: Custom logger for agent output
-        trust_mcp_code: Whether to trust remote code from MCP servers
-        stream: Whether to stream responses in real-time
 
     Returns:
         Result from the final step
-
-    Raises:
-        ValueError: If agent file is invalid or step parsing fails
-        RuntimeError: If any step execution fails
     """
     import asyncio
+
+    if exec_options is None:
+        exec_options = ExecutionOptions()
 
     return asyncio.run(
         _run_multistep_agent_impl(
             agent_path=agent_path,
             prompt=prompt,
+            exec_options=exec_options,
             context=context,
-            model_override=model_override,
-            debug=debug,
             custom_logger=custom_logger,
-            trust_mcp_code=trust_mcp_code,
-            stream=stream,
         )
     )
 
@@ -1651,47 +1529,20 @@ def run_multistep_agent(
 async def run_multistep_agent_async(
     agent_path: Path,
     prompt: str,
+    exec_options: Optional[ExecutionOptions] = None,
     context: Optional[Dict[str, Any]] = None,
-    model_override: Optional[str] = None,
-    debug: bool = False,
     custom_logger: Optional[Any] = None,
-    trust_mcp_code: bool = False,
-    stream: bool = False,
 ) -> str:
-    """Asynchronous wrapper for multi-step agent execution.
+    """Asynchronous wrapper for multi-step agent execution."""
+    if exec_options is None:
+        exec_options = ExecutionOptions()
 
-    See _run_multistep_agent_impl() for actual implementation.
-
-    Multi-step agents use <!-- tsu:step --> directives to execute sequentially,
-    with each step being a full agent run. Results from earlier steps can be
-    assigned to variables and used in later steps.
-
-    Args:
-        agent_path: Path to agent markdown file
-        prompt: User prompt/task for the agent
-        context: Additional context variables
-        model_override: Override agent's default model
-        debug: Enable debug output (rendered prompts for each step)
-        custom_logger: Custom logger for agent output
-        trust_mcp_code: Whether to trust remote code from MCP servers
-        stream: Whether to stream responses in real-time
-
-    Returns:
-        Result from the final step
-
-    Raises:
-        ValueError: If agent file is invalid or step parsing fails
-        RuntimeError: If any step execution fails
-    """
     return await _run_multistep_agent_impl(
         agent_path=agent_path,
         prompt=prompt,
+        exec_options=exec_options,
         context=context,
-        model_override=model_override,
-        debug=debug,
         custom_logger=custom_logger,
-        trust_mcp_code=trust_mcp_code,
-        stream=stream,
     )
 
 
@@ -1801,10 +1652,27 @@ def preview_multistep_agent(
         variables_used = set(re.findall(r"\{\{\s*(\w+)", step.content))
         # Filter out template helpers and metadata (these are always available, not real deps)
         builtin_vars = {
-            "user_prompt", "task_summary", "step_number", "step_name", "total_steps",
-            "is_retry", "retry_count", "max_retries", "last_error", "all_errors",
-            "tasks", "is_interactive", "text_mode", "tools", "is_subagent",
-            "parent_agent", "iteration", "max_iterations", "is_looping_step", "now", "today",
+            "user_prompt",
+            "task_summary",
+            "step_number",
+            "step_name",
+            "total_steps",
+            "is_retry",
+            "retry_count",
+            "max_retries",
+            "last_error",
+            "all_errors",
+            "tasks",
+            "is_interactive",
+            "text_mode",
+            "tools",
+            "is_subagent",
+            "parent_agent",
+            "iteration",
+            "max_iterations",
+            "is_looping_step",
+            "now",
+            "today",
         }
         real_deps = variables_used - builtin_vars
 

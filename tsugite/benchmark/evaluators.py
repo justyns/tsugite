@@ -458,14 +458,14 @@ class LLMEvaluator(BaseEvaluator):
             try:
                 # Import here to avoid circular imports
                 from ..agent_runner import run_agent
+                from ..options import ExecutionOptions
 
                 # Run the evaluator agent
                 evaluation_result = run_agent(
                     agent_path=Path(temp_agent_path),
                     prompt=evaluation_prompt,
                     context={},
-                    model_override=None,
-                    debug=False,
+                    exec_options=ExecutionOptions(),
                 )
 
                 # Parse the evaluation result

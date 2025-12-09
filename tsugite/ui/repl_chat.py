@@ -79,38 +79,24 @@ Type your message or `/help` for commands.
 
 def run_repl_chat(
     agent_path: Path,
-    model_override: Optional[str] = None,
-    max_history: int = 50,
-    stream: bool = True,
-    disable_history: bool = False,
-    resume_conversation_id: Optional[str] = None,
+    exec_options: "ExecutionOptions",
+    history_options: "HistoryOptions",
     resume_turns: Optional[list] = None,
 ) -> None:
-    """Run REPL-style chat session.
+    """Run REPL-style chat session."""
 
-    Args:
-        agent_path: Path to agent markdown file
-        model_override: Optional model override
-        max_history: Maximum conversation history turns
-        stream: Whether to stream responses (default: True for REPL)
-        disable_history: Disable conversation history persistence
-        resume_conversation_id: Optional conversation ID to resume
-        resume_turns: Optional list of Turn objects from history to resume
-    """
     # Initialize console
     console = Console()
 
     # Parse agent info
     agent = parse_agent_file(agent_path)
     agent_name = agent.config.name or agent_path.stem
-    model = model_override or agent.config.model or "default"
+    model = exec_options.model_override or agent.config.model or "default"
 
     # Show welcome banner
-    show_welcome_banner(console, agent_name, model, resume_conversation_id)
+    show_welcome_banner(console, agent_name, model, history_options.continue_id)
 
     # Initialize REPL UI handler and custom logger
-    # In chat mode, hide observations (raw tool output) for cleaner UX
-    # Users can still see tool calls via the compact tool indicators
     ui_handler = ReplUIHandler(console, compact=True, show_observations=False)
     custom_logger = CustomUILogger(ui_handler, console)
 
@@ -118,17 +104,17 @@ def run_repl_chat(
         # Initialize chat manager with custom logger
         manager = ChatManager(
             agent_path=agent_path,
-            model_override=model_override,
-            max_history=max_history,
+            model_override=exec_options.model_override,
+            max_history=history_options.max_turns,
             custom_logger=custom_logger,
-            stream=stream,
-            disable_history=disable_history,
-            resume_conversation_id=resume_conversation_id,
+            stream=exec_options.stream,
+            disable_history=not history_options.enabled,
+            resume_conversation_id=history_options.continue_id,
         )
 
         # Load history if resuming
         if resume_turns:
-            manager.load_from_history(resume_conversation_id, resume_turns)
+            manager.load_from_history(history_options.continue_id, resume_turns)
             console.print(f"[cyan]Loaded {len(resume_turns)} previous turns[/cyan]")
             console.print()
 

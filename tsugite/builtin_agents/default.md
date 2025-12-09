@@ -150,7 +150,9 @@ Then in the next turn, you can:
 
 Load these skills when you need specialized knowledge or reference material:
 
-{{ available_skills }}
+{% for skill in available_skills %}
+- **{{ skill.name }}** - {{ skill.description }}
+{% endfor %}
 
 To load a skill, use: `load_skill("skill_name")`
 

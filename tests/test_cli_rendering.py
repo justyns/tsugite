@@ -196,10 +196,10 @@ Debug test: {{ user_prompt }}
             result = self.runner.invoke(app, ["run", str(agent_file), "test task", "--debug"])
 
             assert result.exit_code == 0
-            # Verify debug flag was passed
+            # Verify debug flag was passed via exec_options
             mock_run.assert_called_once()
             call_args = mock_run.call_args[1]
-            assert call_args["debug"] is True
+            assert call_args["exec_options"].debug is True
 
     def test_run_validation_with_prefetch(self, temp_dir):
         """Test run command validation with prefetch variables."""
@@ -363,7 +363,7 @@ class TestBuiltinAgentRendering:
         assert result.exit_code == 1
         assert "not found" in result.stdout.lower()
 
-    def test_render_builtin_chat_assistant(self, file_tools, http_tools, shell_tools, task_tools):
+    def test_render_builtin_chat_assistant(self, file_tools, http_tools, shell_tools, task_tools, memory_tools):
         """Test rendering chat-assistant with chat_history."""
         result = self.runner.invoke(app, ["render", "chat-assistant", "test prompt"])
 

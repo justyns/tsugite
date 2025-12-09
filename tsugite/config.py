@@ -130,6 +130,12 @@ class Config(BaseModel):
     auto_context_files: List[str] = Field(default_factory=lambda: [".tsugite/CONTEXT.md", "AGENTS.md", "CLAUDE.md"])
     auto_context_include_global: bool = True
 
+    # Memory configuration
+    memory_enabled: bool = False  # Disabled by default
+    memory_db_path: Optional[Path] = None  # Defaults to XDG data path
+    memory_embedding_model: str = "BAAI/bge-small-en-v1.5"
+    memory_embedding_dimension: int = 384
+
 
 def get_config_path() -> Path:
     return get_xdg_config_path("config.json")

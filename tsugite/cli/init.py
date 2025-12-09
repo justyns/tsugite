@@ -305,11 +305,12 @@ def test_setup(model: str, skip_test: bool = False) -> bool:
             show_execution_logs=False,
             show_panels=False,
         ) as logger:
+            from tsugite.options import ExecutionOptions
+
             result = run_agent(
                 agent_path=agent_path,
                 prompt="Say hello in one sentence",
-                model_override=model,
-                debug=False,
+                exec_options=ExecutionOptions(model_override=model),
                 custom_logger=logger,
             )
 

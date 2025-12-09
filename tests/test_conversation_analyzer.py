@@ -9,6 +9,16 @@ from tsugite.md_agents import parse_agent_file
 
 
 @pytest.fixture
+def history_tools(reset_tool_registry):
+    """Register history tools for testing."""
+    from tsugite.tools import tool
+    from tsugite.tools.history import list_conversations, read_conversation
+
+    tool(read_conversation)
+    tool(list_conversations)
+
+
+@pytest.fixture
 def conversation_analyzer_path():
     """Get path to conversation analyzer agent."""
     return Path(__file__).parent.parent / "tsugite" / "builtin_agents" / "conversation_analyzer.md"
@@ -39,7 +49,7 @@ def test_conversation_analyzer_parses(conversation_analyzer_path):
     assert "analysis" in agent.content.lower()
 
 
-def test_conversation_analyzer_prepares(conversation_analyzer_path):
+def test_conversation_analyzer_prepares(conversation_analyzer_path, history_tools):
     """Test that conversation analyzer agent can be prepared for execution."""
     agent = parse_agent_file(conversation_analyzer_path)
 

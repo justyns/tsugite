@@ -63,6 +63,21 @@ class ChatManager:
         self.cumulative_tokens = 0
         self.cumulative_cost = 0.0
 
+        # Load agent and tools for /tools command
+        self.available_tools: List[Any] = []
+        try:
+            agent = parse_agent_file(agent_path)
+            self._agent_config = agent.config
+            if agent.config.tools:
+                from tsugite.core.tools import create_tool_from_tsugite
+                from tsugite.tools import expand_tool_specs
+
+                expanded = expand_tool_specs(agent.config.tools)
+                self.available_tools = [create_tool_from_tsugite(name) for name in expanded]
+        except Exception:
+            # Don't fail if tools can't be loaded
+            pass
+
         # History support
         self.conversation_id: Optional[str] = resume_conversation_id
         config = load_config()
@@ -198,15 +213,19 @@ class ChatManager:
         from tsugite.agent_runner import run_agent
 
         try:
+            from tsugite.options import ExecutionOptions
+
             result = run_agent(
                 agent_path=self.agent_path,
                 prompt=user_input,
-                model_override=self.model_override,
+                exec_options=ExecutionOptions(
+                    model_override=self.model_override,
+                    return_token_usage=True,
+                    stream=self.stream,
+                    force_text_mode=True,  # Enable text mode for chat UI
+                ),
                 custom_logger=self.custom_logger,
                 context={"chat_history": self.conversation_history},
-                return_token_usage=True,
-                stream=self.stream,
-                force_text_mode=True,  # Enable text mode for chat UI
                 continue_conversation_id=self.conversation_id if self.conversation_history else None,
             )
 

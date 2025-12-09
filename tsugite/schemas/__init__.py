@@ -29,9 +29,9 @@ def generate_agent_schema() -> Dict[str, Any]:
     properties = schema.get("properties", {})
 
     if "name" in properties:
-        properties["name"][
-            "description"
-        ] = "Agent identifier. Used for referencing with +name syntax. Example: 'researcher', 'code-reviewer'"
+        properties["name"]["description"] = (
+            "Agent identifier. Used for referencing with +name syntax. Example: 'researcher', 'code-reviewer'"
+        )
         properties["name"]["examples"] = ["researcher", "code-reviewer", "my_agent"]
 
     if "model" in properties:

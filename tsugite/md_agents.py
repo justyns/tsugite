@@ -71,6 +71,7 @@ class AgentConfig(BaseModel):
     auto_context: Optional[bool] = None  # Auto-load context files (None = use config default)
     visibility: str = "public"  # Agent visibility: public, private, internal
     spawnable: bool = True  # Whether this agent can be spawned by other agents
+    memory_enabled: Optional[bool] = None  # Enable memory system (None = use config default)
 
     @field_validator("visibility", mode="after")
     @classmethod
@@ -673,12 +674,21 @@ def build_validation_test_context(agent, include_prefetch: bool = True) -> dict[
         "chat_history": [],
     }
 
-    # Add mock prefetch variables
+    # Add mock prefetch variables with appropriate shapes
     if include_prefetch and agent.config.prefetch:
         for item in agent.config.prefetch:
             assign_name = item.get("assign")
             if assign_name:
-                test_context[assign_name] = "mock_prefetch_data"
+                # Provide mock data with correct shape for known prefetch variables
+                if assign_name == "available_skills":
+                    # Skills are rendered as {{ skill.name }} and {{ skill.description }}
+                    test_context[assign_name] = [{"name": "mock_skill", "description": "Mock skill for validation"}]
+                elif assign_name == "available_agents":
+                    # Agents are rendered as a formatted string
+                    test_context[assign_name] = "- **mock_agent**: Mock agent for validation"
+                else:
+                    # Default: use string placeholder
+                    test_context[assign_name] = "mock_prefetch_data"
 
     return test_context
 

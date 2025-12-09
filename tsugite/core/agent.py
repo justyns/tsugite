@@ -150,44 +150,38 @@ class TsugiteAgent:
         self.litellm_params = get_model_params(model_string, **(model_kwargs or {}))
 
     def _run_async_in_sync_context(self, coro):
-        """Run async coroutine in synchronous context, handling event loop properly."""
+        """Run async coroutine in synchronous context, handling event loop properly.
+
+        This handles the case where we're already inside an async context (the agent's
+        run method) but need to run tool coroutines synchronously from user code.
+        """
         import concurrent.futures
-        import contextvars
 
         try:
-            asyncio.get_running_loop()
-            ctx = contextvars.copy_context()
+            # Check if there's an existing running loop
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
 
-            with concurrent.futures.ThreadPoolExecutor() as executor:
+        if loop is not None:
+            # We're inside an async context - run in a thread with its own event loop
+            # to avoid issues with nest_asyncio and coroutine reuse
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
 
-                def run_in_new_loop():
+                def run_coro():
+                    # Create a fresh event loop for this thread
                     new_loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(new_loop)
                     try:
                         return new_loop.run_until_complete(coro)
                     finally:
-                        # Clean up only pending (not completed) tasks to avoid reusing coroutines
-                        pending = [task for task in asyncio.all_tasks(new_loop) if not task.done()]
-                        for task in pending:
-                            task.cancel()
-                        if pending:
-                            new_loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
                         new_loop.close()
 
-                return executor.submit(ctx.run, run_in_new_loop).result()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                return loop.run_until_complete(coro)
-            finally:
-                # Clean up only pending (not completed) tasks to avoid reusing coroutines
-                pending = [task for task in asyncio.all_tasks(loop) if not task.done()]
-                for task in pending:
-                    task.cancel()
-                if pending:
-                    loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-                loop.close()
+                future = executor.submit(run_coro)
+                return future.result()
+        else:
+            # No running loop - we can use asyncio.run directly
+            return asyncio.run(coro)
 
     def _convert_positional_to_kwargs(self, tool_obj, args, kwargs):
         """Convert positional arguments to keyword arguments based on function signature."""

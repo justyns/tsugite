@@ -362,6 +362,30 @@ def skill_tools(reset_tool_registry):
 
 
 @pytest.fixture
+def memory_tools(reset_tool_registry):
+    """Register memory tools for testing."""
+    from tsugite.tools import tool
+    from tsugite.tools.memory import (
+        memory_count,
+        memory_delete,
+        memory_get,
+        memory_list,
+        memory_search,
+        memory_store,
+        memory_update,
+    )
+
+    # Re-register the tools after registry reset
+    tool(memory_store)
+    tool(memory_search)
+    tool(memory_list)
+    tool(memory_get)
+    tool(memory_update)
+    tool(memory_delete)
+    tool(memory_count)
+
+
+@pytest.fixture
 def cli_runner():
     """Create a CLI test runner."""
     from typer.testing import CliRunner

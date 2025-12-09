@@ -276,6 +276,7 @@ def merge_scalar_fields(parent, child) -> Dict[str, Any]:
         ),
         "reasoning_effort": child.reasoning_effort if child.reasoning_effort else parent.reasoning_effort,
         "text_mode": child.text_mode if child.text_mode else parent.text_mode,
+        "memory_enabled": child.memory_enabled if child.memory_enabled is not None else parent.memory_enabled,
     }
 
 
@@ -303,6 +304,10 @@ def merge_list_fields(parent, child) -> Dict[str, List]:
     child_attachments = child.attachments if child.attachments else []
     merged_attachments = list(dict.fromkeys(parent_attachments + child_attachments))
 
+    parent_skills = parent.auto_load_skills if parent.auto_load_skills else []
+    child_skills = child.auto_load_skills if child.auto_load_skills else []
+    merged_skills = list(dict.fromkeys(parent_skills + child_skills))
+
     # Lists that concatenate without deduplication
     parent_prefetch = parent.prefetch if parent.prefetch else []
     child_prefetch = child.prefetch if child.prefetch else []
@@ -323,6 +328,7 @@ def merge_list_fields(parent, child) -> Dict[str, List]:
         "prefetch": parent_prefetch + child_prefetch,
         "initial_tasks": parent_initial_tasks + child_initial_tasks,
         "custom_tools": list(custom_tool_dict.values()),
+        "auto_load_skills": merged_skills,
     }
 
 

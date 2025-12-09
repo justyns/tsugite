@@ -98,13 +98,16 @@ def test_config_with_empty_values(tmp_path):
     with open(config_path) as f:
         data = json.load(f)
 
-    # chat_theme, history_enabled, and auto_context have default values so they will always be saved
+    # Fields with default values will always be saved
     assert data == {
         "chat_theme": "gruvbox",
         "history_enabled": True,
         "auto_context_enabled": True,
         "auto_context_files": [".tsugite/CONTEXT.md", "AGENTS.md", "CLAUDE.md"],
         "auto_context_include_global": True,
+        "memory_enabled": False,
+        "memory_embedding_model": "BAAI/bge-small-en-v1.5",
+        "memory_embedding_dimension": 384,
     }
 
 

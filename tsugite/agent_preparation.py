@@ -217,13 +217,22 @@ class AgentPreparer:
             raise RuntimeError(f"Failed to create tools: {e}") from e
 
         # Step 7: Load auto_load_skills
+        # Auto-add memory_best_practices skill for memory-enabled agents
+        auto_load_skills = list(agent_config.auto_load_skills or [])
+        if getattr(agent_config, "memory_enabled", False):
+            has_memory_tools = any(
+                tool.startswith("memory_") or tool == "@memory" for tool in (agent_config.tools or [])
+            )
+            if has_memory_tools and "memory_best_practices" not in auto_load_skills:
+                auto_load_skills.append("memory_best_practices")
+
         skills = []
-        if agent_config.auto_load_skills:
+        if auto_load_skills:
             from tsugite.events.events import SkillLoadFailedEvent
             from tsugite.tools.skills import SkillManager
 
             skill_manager = SkillManager()
-            for skill_name in agent_config.auto_load_skills:
+            for skill_name in auto_load_skills:
                 # Attempt to load skill (returns message string for agents/tools)
                 result = skill_manager.load_skill(skill_name)
 

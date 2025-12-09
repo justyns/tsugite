@@ -270,6 +270,9 @@ def _ensure_tools_loaded():
     from . import history as history  # noqa: E402, F401
     from . import http as http  # noqa: E402, F401
     from . import interactive as interactive  # noqa: E402, F401
+
+    # Load memory tools (always registered, but will fail gracefully if deps missing)
+    from . import memory as memory  # noqa: E402, F401
     from . import shell as shell  # noqa: E402, F401
     from . import skills as skills  # noqa: E402, F401
     from . import tasks as tasks  # noqa: E402, F401
