@@ -23,7 +23,6 @@ from tsugite.ui.repl_commands import (
     handle_help,
     handle_history,
     handle_list_attachments,
-    handle_multiline,
     handle_save,
     handle_stats,
     handle_stream,
@@ -225,10 +224,6 @@ def run_repl_chat(
                     elif command == "/stream":
                         value = args[0] if args else None
                         handle_stream(console, value, manager)
-
-                    elif command == "/multiline":
-                        value = args[0] if args else None
-                        handle_multiline(console, value)
 
                     elif command == "/verbose":
                         value = args[0] if args else None

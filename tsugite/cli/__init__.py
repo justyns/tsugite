@@ -984,10 +984,12 @@ from .config import config_app  # noqa: E402
 from .history import history_app  # noqa: E402
 from .init import init  # noqa: E402
 from .mcp import mcp_app  # noqa: E402
+from .serve import serve_app  # noqa: E402
 from .tools import tools_app  # noqa: E402
 from .validate import validate_command  # noqa: E402
 
 app.add_typer(mcp_app, name="mcp")
+app.add_typer(serve_app, name="serve")
 app.add_typer(agents_app, name="agents")
 app.add_typer(config_app, name="config")
 app.add_typer(attachments_app, name="attachments")

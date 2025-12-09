@@ -39,7 +39,6 @@ class TsugiteCompleter(Completer):
         "/cost": "Show cumulative session cost",
         "/stream": "Toggle streaming mode on/off",
         "/verbose": "Toggle verbose mode (show raw tool output)",
-        "/multiline": "Toggle multiline input mode",
     }
 
     def __init__(self, current_agent_name: str = ""):
@@ -120,17 +119,6 @@ class TsugiteCompleter(Completer):
                                 option,
                                 start_position=-len(prefix),
                             )
-            elif command == "/multiline":
-                # Complete on/off
-                if len(parts) > 1:
-                    prefix = parts[1].lower()
-                    for option in ["on", "off"]:
-                        if option.startswith(prefix):
-                            yield Completion(
-                                option,
-                                start_position=-len(prefix),
-                            )
-
         # No completion for free text (user prompts)
         # This keeps the REPL simple and doesn't interfere with natural language
 

@@ -11,7 +11,6 @@ from tsugite.ui.repl_commands import (
     handle_help,
     handle_history,
     handle_list_attachments,
-    handle_multiline,
     handle_save,
     handle_stats,
     handle_stream,
@@ -236,17 +235,6 @@ def test_handle_stream_toggle():
     with patch.object(console, "print") as mock_print:
         handle_stream(console, None, manager)
         assert manager.stream_enabled is True
-        assert mock_print.called
-
-
-def test_handle_multiline():
-    """Test multiline command."""
-    console = Console()
-
-    with patch.object(console, "print") as mock_print:
-        result = handle_multiline(console, "on")
-        # Currently returns True/False based on value
-        assert isinstance(result, bool)
         assert mock_print.called
 
 

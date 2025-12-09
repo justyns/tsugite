@@ -40,7 +40,6 @@ def handle_help(console: Console) -> None:
         ("/tools", "Show available tools"),
         ("/stream on|off", "Toggle streaming mode"),
         ("/verbose on|off", "Toggle verbose mode (show raw tool output)"),
-        ("/multiline on|off", "Toggle multiline input mode"),
     ]
 
     for cmd, desc in commands:
@@ -308,31 +307,6 @@ def handle_stream(console: Console, value: Optional[str], manager: "ChatManager"
     console.print(f"[green]Streaming {status}[/green]")
 
 
-def handle_multiline(console: Console, value: Optional[str]) -> bool:
-    """Toggle multiline input mode.
-
-    Args:
-        console: Rich console for output
-        value: "on" or "off" (if None, returns current state)
-
-    Returns:
-        New multiline state
-    """
-    # This is handled by the REPL session, so we just show a message
-    if value is None:
-        console.print("[yellow]Multiline mode toggle not yet implemented.[/yellow]")
-        return False
-    elif value.lower() == "on":
-        console.print("[green]Multiline mode enabled (not yet implemented)[/green]")
-        return True
-    elif value.lower() == "off":
-        console.print("[green]Multiline mode disabled[/green]")
-        return False
-    else:
-        console.print("[red]Invalid value. Use 'on' or 'off'.[/red]")
-        return False
-
-
 def handle_verbose(console: Console, value: Optional[str], ui_handler) -> None:
     """Toggle verbose mode (show raw tool output).
 
@@ -388,7 +362,6 @@ def parse_command(user_input: str) -> tuple[str, list[str], Optional[str]]:
         "/tools",
         "/stream",
         "/verbose",
-        "/multiline",
     }
 
     parts = user_input.split(maxsplit=1)
