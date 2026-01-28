@@ -221,6 +221,7 @@ class TestBuiltinDefaultAutoDiscovery:
             "text_mode": False,
             "is_interactive": False,
             "available_agents": "",  # From prefetch
+            "available_skills": "",  # From prefetch
         }
 
         # Test WITH web_search tool

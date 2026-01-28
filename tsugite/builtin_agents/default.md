@@ -135,23 +135,44 @@ Load these skills when you need specialized knowledge or reference material:
 
 {{ available_skills }}
 
-To load a skill, use: `load_skill("skill_name")`
+### How to Load Skills
 
-Skills provide:
-- Domain-specific guidance (Python best practices, API design patterns)
-- Reference material (Jinja templating, agent system basics)
-- Workflow patterns and code examples
+Call `load_skill("skill_name")` and **stop**. The skill content will appear in your next turn.
 
-**When to load skills:**
-- You need specialized knowledge for the task
-- You want reference documentation on a specific topic
-- You need best practices or common patterns
-
-**Example:**
 ```python
-load_skill("python_best_practices")  # Now you have Python coding guidelines
-# Skill content is automatically available in your context
+# Turn 1: Load the skill, then STOP
+load_skill("kubernetes")
 ```
+
+After the Observation, you'll see the skill content as `<Skill: kubernetes>...</Skill: kubernetes>` in the system message. **Then** use what you learned in your next code block.
+
+❌ **Wrong** - Don't act in the same turn:
+```python
+load_skill("kubernetes")
+output = shell.run("kubectl get pods")  # You haven't seen the skill yet!
+```
+
+✅ **Right** - Load, wait, then act:
+```python
+# Turn 1
+load_skill("kubernetes")
+```
+```python
+# Turn 2 (after seeing skill content)
+output = shell.run("kubectl get pods -o json")
+import json
+pods = json.loads(output)
+```
+
+### When to Load Skills
+- You need guidance you don't already have
+- You want reference docs for an unfamiliar tool
+- **Skip loading** if you already know how to do the task
+
+### Skill Examples May Show Bash
+Skills may show bash commands. Translate to Python:
+- Skill shows: `kubectl get pods`
+- You write: `shell.run("kubectl get pods")`
 
 {% endif %}
 {% if 'web_search' in tools %}
