@@ -167,3 +167,13 @@ cython_debug/
 benchmark_results/
 test_output/
 .claude/settings.local.json
+
+
+# TODO: temp - I need to clean up the docs
+docs/
+examples/
+agents/
+.claude/
+.tsugite/
+benchmarks/
+#### TODO ^^^

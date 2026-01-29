@@ -47,27 +47,41 @@ def get_builtin_skills_path() -> Path:
     return Path(__file__).parent / "builtin_skills"
 
 
-def scan_skills() -> List[SkillMeta]:
-    """Scan all skill directories and extract frontmatter.
+def scan_skills(workspace=None) -> List[SkillMeta]:
+    """Scan all skill directories and extract frontmatter with workspace priority.
 
     Only reads YAML frontmatter, not full file content.
     This is the key to token efficiency.
 
     Search order (highest to lowest priority):
+    0. workspace/skills/    - Workspace-specific (if workspace provided)
     1. .tsugite/skills/     - Project-local
     2. skills/              - Project convention
     3. builtin_skills/      - Built-in (package)
     4. ~/.config/tsugite/skills/  - Global user
 
+    Args:
+        workspace: Optional workspace to check for workspace-specific skills
+
     Returns:
         List of SkillMeta objects for discovered skills
     """
-    skill_paths = [
-        Path(".tsugite/skills"),  # 1. Project-local
-        Path("skills"),  # 2. Project convention
-        get_builtin_skills_path(),  # 3. Built-in (package)
-        Path.home() / ".config" / "tsugite" / "skills",  # 4. Global user
-    ]
+    skill_paths = []
+
+    # Workspace skills (highest priority)
+    if workspace and hasattr(workspace, "skills_dir"):
+        if workspace.skills_dir.exists():
+            skill_paths.append(workspace.skills_dir)
+
+    # Project and system paths
+    skill_paths.extend(
+        [
+            Path(".tsugite/skills"),
+            Path("skills"),
+            get_builtin_skills_path(),
+            Path.home() / ".config" / "tsugite" / "skills",
+        ]
+    )
 
     skills = []
     seen_names = set()

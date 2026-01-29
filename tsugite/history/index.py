@@ -137,6 +137,10 @@ def rebuild_index() -> int:
 
             # Build metadata from records
             turns = [r for r in records if isinstance(r, Turn)]
+
+            # Check if any turn marks this as daemon-managed
+            is_daemon_managed = any(turn.metadata and turn.metadata.get("is_daemon_managed", False) for turn in turns)
+
             metadata_dict = {
                 "agent": first_record.agent if isinstance(first_record, ConversationMetadata) else "unknown",
                 "model": first_record.model if isinstance(first_record, ConversationMetadata) else "unknown",
@@ -154,6 +158,7 @@ def rebuild_index() -> int:
                 "turn_count": len(turns),
                 "total_tokens": sum(r.tokens or 0 for r in turns),
                 "total_cost": sum(r.cost or 0.0 for r in turns),
+                "is_daemon_managed": is_daemon_managed,
             }
 
             new_index[conversation_id] = IndexEntry.model_validate(metadata_dict)
@@ -219,3 +224,60 @@ def get_conversation_metadata(conversation_id: str) -> Optional[IndexEntry]:
     """
     index = load_index()
     return index.get(conversation_id)
+
+
+def find_latest_session(agent_name: str, user_id: Optional[str] = None, daemon_only: bool = False) -> Optional[str]:
+    """Find the most recent conversation ID for an agent.
+
+    If user_id is provided, attempts to find conversations involving that user
+    by checking turn metadata. Falls back to latest conversation by timestamp.
+
+    Args:
+        agent_name: Agent name to search for
+        user_id: Optional user identifier (searches metadata)
+        daemon_only: If True, only return daemon-managed sessions
+
+    Returns:
+        Latest conversation ID or None if not found
+    """
+    index = load_index()
+
+    # Filter by agent
+    matching = [(conv_id, meta) for conv_id, meta in index.items() if meta.agent == agent_name]
+
+    if not matching:
+        return None
+
+    # and then daemon_only
+    if daemon_only:
+        matching = [(conv_id, meta) for conv_id, meta in matching if meta.is_daemon_managed]
+
+    if not matching:
+        return None
+
+    # And finally by user_id if needed.  This one requires reading the actual jsonl files
+    if user_id:
+        filtered_conversations = []
+        for conv_id, meta in matching:
+            try:
+                turns = load_conversation(conv_id)
+
+                has_user = any(
+                    isinstance(turn, Turn) and turn.metadata and turn.metadata.get("user_id") == user_id
+                    for turn in turns
+                )
+                if has_user:
+                    filtered_conversations.append((conv_id, meta))
+
+            except Exception:
+                # Skip conversations that can't be loaded
+                continue
+
+        matching = filtered_conversations
+
+    if not matching:
+        return None
+
+    sorted_convs = sorted(matching, key=lambda x: x[1].updated_at, reverse=True)
+
+    return sorted_convs[0][0] if sorted_convs else None

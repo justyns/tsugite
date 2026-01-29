@@ -20,16 +20,21 @@ class SkillManager:
     An instance should be created per agent/session and passed to tools.
     """
 
-    def __init__(self):
-        """Initialize skill manager."""
+    def __init__(self, workspace=None):
+        """Initialize skill manager.
+
+        Args:
+            workspace: Optional workspace to check for workspace-specific skills
+        """
         self._skill_registry: Dict[str, SkillMeta] = {}
         self._loaded_skills: Dict[str, str] = {}
         self._registry_initialized = False
+        self._workspace = workspace
 
     def _ensure_registry_initialized(self):
         """Initialize skill registry if not already initialized."""
         if not self._registry_initialized:
-            skills = scan_skills()
+            skills = scan_skills(workspace=self._workspace)
             self._skill_registry = {skill.name: skill for skill in skills}
             self._registry_initialized = True
 

@@ -213,6 +213,55 @@ class TestTurn:
         turn = Turn.model_validate(data)
         assert turn.user == "Hello"
 
+    def test_turn_with_channel_metadata(self):
+        """Test turn with channel routing metadata."""
+        now = datetime.now(timezone.utc)
+        metadata = {
+            "source": "discord",
+            "channel_id": "123456789",
+            "user_id": "user123",
+            "reply_to": "discord:123456789",
+            "author_name": "TestUser",
+        }
+
+        turn = Turn(
+            timestamp=now,
+            user="Hello from Discord",
+            assistant="Hi there!",
+            metadata=metadata,
+        )
+
+        assert turn.metadata is not None
+        assert turn.metadata["source"] == "discord"
+        assert turn.metadata["channel_id"] == "123456789"
+        assert turn.metadata["user_id"] == "user123"
+        assert turn.metadata["reply_to"] == "discord:123456789"
+
+    def test_turn_metadata_serialization(self):
+        """Test metadata field serialization."""
+        now = datetime.now(timezone.utc)
+        metadata = {
+            "source": "cli",
+            "user_id": "cli-user",
+            "reply_to": "cli",
+        }
+
+        turn = Turn(
+            timestamp=now,
+            user="Hello",
+            assistant="Hi",
+            metadata=metadata,
+        )
+
+        # Serialize
+        data = turn.model_dump(mode="json")
+        assert "metadata" in data
+        assert data["metadata"]["source"] == "cli"
+
+        # Deserialize
+        turn2 = Turn.model_validate(data)
+        assert turn2.metadata == metadata
+
 
 class TestIndexEntry:
     """Tests for IndexEntry model."""

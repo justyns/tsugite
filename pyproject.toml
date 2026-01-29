@@ -1,6 +1,6 @@
 [project]
 name = "tsugite-cli"
-version = "0.3.3"
+version = "0.4.0"
 description = "Micro-agent runner for task automation using markdown definitions"
 authors = [{ name = "Justyn Shull" }]
 requires-python = ">=3.11"
@@ -35,6 +35,10 @@ dependencies = [
 memory = [
   "duckdb>=1.0.0",
   "fastembed>=0.4.0",
+]
+daemon = [
+  "discord.py>=2.3.2",
+  "APScheduler>=3.10.4",
 ]
 
 [project.scripts]

@@ -2,7 +2,7 @@
 
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict
 
 from jinja2 import DictLoader, Environment, StrictUndefined
@@ -14,6 +14,14 @@ def now() -> str:
 
 def today() -> str:
     return datetime.now().strftime("%Y-%m-%d")
+
+
+def yesterday() -> str:
+    return (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+
+
+def tomorrow() -> str:
+    return (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
 
 
 def slugify(text: str) -> str:
@@ -108,6 +116,10 @@ class AgentRenderer:
             {
                 "now": now,
                 "today": today,
+                "yesterday": yesterday,
+                "tomorrow": tomorrow,
+                "timedelta": timedelta,
+                "datetime": datetime,
                 "slugify": slugify,
                 "file_exists": file_exists,
                 "is_file": is_file,

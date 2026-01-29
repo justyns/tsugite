@@ -2,6 +2,7 @@
 
 import json
 import os
+from datetime import datetime
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
@@ -121,6 +122,7 @@ class Config(BaseModel):
     default_model: Optional[str] = None
     model_aliases: Dict[str, str] = Field(default_factory=dict)
     default_base_agent: Optional[str] = None
+    default_workspace: Optional[str] = None
     chat_theme: str = "gruvbox"
     history_enabled: bool = True
     history_dir: Optional[Path] = None
@@ -273,3 +275,20 @@ def get_chat_theme(path: Optional[Path] = None) -> str:
     """
     config = load_config(path)
     return config.chat_theme
+
+
+def get_daily_memory_path(workspace_dir: Path, date: Optional[datetime] = None) -> Path:
+    """Get path to daily memory file: {workspace}/memory/YYYY-MM-DD.md
+
+    Args:
+        workspace_dir: Root workspace directory
+        date: Date for memory file (defaults to today)
+
+    Returns:
+        Path to memory file
+    """
+    if date is None:
+        date = datetime.now()
+
+    memory_dir = workspace_dir / "memory"
+    return memory_dir / f"{date.strftime('%Y-%m-%d')}.md"

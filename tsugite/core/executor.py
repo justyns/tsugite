@@ -8,10 +8,12 @@ Maintains state (variables persist between runs).
 
 import ast
 import io
+import os
 import pprint
 import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 PPRINT_WIDTH = 100
@@ -77,11 +79,16 @@ class LocalExecutor(CodeExecutor):
         result = await executor.execute("print(x + 3)")  # Prints: 8
     """
 
-    def __init__(self):
-        """Initialize executor with empty namespace."""
+    def __init__(self, workspace_dir: Optional[Path] = None):
+        """Initialize executor with empty namespace.
+
+        Args:
+            workspace_dir: Optional workspace directory to use as working directory
+        """
         self.namespace = {}
         self._final_answer_value = None
         self._tools_called = []
+        self.workspace_dir = workspace_dir
 
         # Inject final_answer function into namespace
         def final_answer(value):
@@ -186,6 +193,7 @@ Example:
         """Execute code using exec().
 
         Automatically displays the value of the last expression (REPL-like behavior).
+        If workspace_dir is set, changes to that directory before execution.
 
         Args:
             code: Python code to execute
@@ -212,8 +220,14 @@ Example:
 
         old_stdout = sys.stdout
         old_stderr = sys.stderr
+        old_cwd = None
 
         try:
+            # Change to workspace directory if specified
+            if self.workspace_dir:
+                old_cwd = os.getcwd()
+                os.chdir(self.workspace_dir)
+
             sys.stdout = stdout_capture
             sys.stderr = stderr_capture
 
@@ -257,6 +271,8 @@ Example:
         finally:
             sys.stdout = old_stdout
             sys.stderr = old_stderr
+            if old_cwd:
+                os.chdir(old_cwd)
 
     async def send_variables(self, variables: Dict[str, Any]):
         """Inject variables into namespace.

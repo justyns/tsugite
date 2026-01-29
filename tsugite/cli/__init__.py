@@ -1,10 +1,10 @@
 """Tsugite CLI application - main entry point."""
 
+import os
 import sys
+import typer
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-
-import typer
 from rich.console import Console
 from rich.panel import Panel
 from rich.traceback import install
@@ -42,6 +42,61 @@ app = typer.Typer(
 
 # Global console for CLI messages (version, help, errors) - uses stdout
 console = Console()
+
+
+def _resolve_workspace(workspace_ref: Optional[str]) -> Optional[Any]:
+    """Resolve workspace from name or path.
+
+    Args:
+        workspace_ref: Workspace name or path
+
+    Returns:
+        Workspace object or None
+    """
+    if not workspace_ref:
+        return None
+
+    from tsugite.workspace import Workspace, WorkspaceManager, WorkspaceNotFoundError
+
+    # Check if it's a path (contains "/" or starts with ".")
+    if "/" in workspace_ref or workspace_ref.startswith(".") or workspace_ref.startswith("~"):
+        workspace_path = Path(workspace_ref).expanduser().resolve()
+        try:
+            return Workspace.load(workspace_path)
+        except WorkspaceNotFoundError:
+            return None
+
+    # Lookup by name
+    manager = WorkspaceManager()
+    try:
+        return manager.load_workspace(workspace_ref)
+    except WorkspaceNotFoundError:
+        return None
+
+
+def _build_workspace_attachments(workspace) -> List[str]:
+    """Build list of workspace attachment paths (convention-based).
+
+    Args:
+        workspace: Workspace object or legacy Path
+
+    Returns:
+        List of attachment file paths that exist
+    """
+    # Handle legacy Path for backward compatibility
+    if isinstance(workspace, Path):
+        attachments = []
+        for filename in ["SOUL.md", "USER.md", "MEMORY.md"]:
+            file_path = workspace / filename
+            if file_path.exists():
+                attachments.append(str(file_path))
+        return attachments
+
+    # New convention-based approach
+    from tsugite.workspace.context import build_workspace_attachments
+
+    attachment_objects = build_workspace_attachments(workspace)
+    return [str(att.source) for att in attachment_objects]
 
 
 def _build_docker_command(
@@ -380,6 +435,14 @@ def run(
     memory: Optional[bool] = typer.Option(
         None, "--memory/--no-memory", help="Enable/disable memory system (overrides agent/config default)"
     ),
+    workspace: Optional[str] = typer.Option(
+        None, "--workspace", "-w", help="Workspace directory (auto-loads SOUL.md, USER.md, MEMORY.md)"
+    ),
+    no_workspace: bool = typer.Option(False, "--no-workspace", help="Disable workspace (ignore default workspace)"),
+    new_session: bool = typer.Option(False, "--new-session", help="Start fresh session (ignore workspace session)"),
+    daemon_agent: Optional[str] = typer.Option(
+        None, "--daemon", "-d", help="Join active daemon session for specified agent"
+    ),
 ):
     """Run an agent with the given prompt.
 
@@ -390,13 +453,23 @@ def run(
         tsu run --continue "prompt"  # Continue latest conversation (auto-detect agent)
         tsu run +assistant --continue "prompt"  # Continue latest with specific agent
         tsu run --continue --conversation-id CONV_ID "prompt"  # Continue specific conversation
+        tsu run --daemon odyn "follow up message"  # Join daemon session for agent 'odyn'
     """
     # Lazy imports - only load heavy dependencies when actually running agents
     from tsugite.agent_runner import get_agent_info, run_agent
     from tsugite.md_agents import validate_agent_execution
     from tsugite.utils import should_use_plain_output
 
-    # Build option dataclasses from CLI params
+    # Validate flag combinations
+    if new_session and continue_conversation:
+        console.print("[red]Error: Cannot use --new-session with --continue[/red]")
+        raise typer.Exit(1)
+
+    if workspace and no_workspace:
+        console.print("[red]Error: Cannot use --workspace with --no-workspace[/red]")
+        raise typer.Exit(1)
+
+    # Build UI options first (needed for status messages)
     ui_opts = UIOptions(
         plain=plain,
         headless=headless,
@@ -407,6 +480,19 @@ def run(
         non_interactive=non_interactive,
         log_json=log_json,
     )
+
+    # Load config to check for default workspace
+    from tsugite.config import load_config
+
+    config = load_config()
+
+    # Determine which workspace to use: explicit > no-workspace > default from config
+    workspace_to_use = workspace
+    if not workspace and not no_workspace and config.default_workspace:
+        workspace_to_use = config.default_workspace
+
+    if new_session and not workspace_to_use:
+        console.print("[yellow]Warning: --new-session has no effect without a workspace[/yellow]")
     exec_opts = ExecutionOptions(
         model_override=model,
         debug=debug,
@@ -420,8 +506,33 @@ def run(
         continue_id=conversation_id if continue_conversation else None,
         storage_dir=Path(history_dir) if history_dir else None,
     )
+    # Resolve workspace (name or path)
+    resolved_workspace = _resolve_workspace(workspace_to_use)
+    if workspace_to_use and not resolved_workspace:
+        console.print(f"[yellow]Warning: Workspace '{workspace_to_use}' not found[/yellow]")
+
+    # Auto-continue workspace session unless explicitly overridden
+    workspace_session_continued = False
+    if resolved_workspace and not continue_conversation and not new_session:
+        from tsugite.workspace import WorkspaceSession
+
+        session = WorkspaceSession(resolved_workspace)
+        session_id = session.get_conversation_id()
+
+        if session_id:
+            history_opts.continue_id = session_id
+            workspace_session_continued = True
+
+    # Add workspace files to attachment list
+    workspace_attachments = []
+    if resolved_workspace:
+        workspace_attachments = _build_workspace_attachments(resolved_workspace)
+
+    # Combine workspace attachments with CLI attachments
+    all_attachments = workspace_attachments + (list(attachment) if attachment else [])
+
     attach_opts = AttachmentOptions(
-        sources=list(attachment) if attachment else [],
+        sources=all_attachments,
         refresh_cache=refresh_cache,
         auto_context=auto_context,
     )
@@ -455,6 +566,64 @@ def run(
 
     if docker_opts.enabled or docker_opts.container:
         _handle_docker_execution(args, docker_opts, exec_opts, ui_opts, attach_opts, history_opts, root, ui)
+
+    # Handle daemon mode
+    daemon_metadata = None
+    if daemon_agent:
+        from tsugite.history.index import find_latest_session
+
+        try:
+            from tsugite.daemon.config import load_daemon_config
+
+            daemon_config = load_daemon_config()
+            if daemon_agent not in daemon_config.agents:
+                console.print(f"[red]Agent '{daemon_agent}' not found in daemon config[/red]")
+                raise typer.Exit(1)
+
+            agent_config = daemon_config.agents[daemon_agent]
+
+        except ValueError as e:
+            console.print(f"[red]Daemon config not found: {e}[/red]")
+            console.print("[dim]Run 'tsugite daemon' to start daemon first[/dim]")
+            raise typer.Exit(1)
+
+        # Find latest session for this agent
+        user_id = os.environ.get("USER", "cli-user")
+
+        latest_conv_id = find_latest_session(daemon_agent, user_id, daemon_only=True)
+
+        if latest_conv_id:
+            console.print(f"[cyan]Joining daemon session: {latest_conv_id}[/cyan]")
+            history_opts.continue_id = latest_conv_id
+        else:
+            console.print(f"[yellow]No active daemon session found for '{daemon_agent}'[/yellow]")
+            console.print("[dim]Creating new daemon-managed session...[/dim]")
+
+        # Override agent with daemon agent
+        args = [f"+{daemon_agent}"] + args
+
+        # Build CLI metadata for history
+        from datetime import datetime, timezone
+
+        daemon_metadata = {
+            "source": "cli",
+            "channel_id": None,
+            "user_id": user_id,
+            "reply_to": "cli",
+            "is_daemon_managed": True,
+            "daemon_agent": daemon_agent,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+        # Load workspace attachments from daemon config
+        daemon_workspace = _resolve_workspace(str(agent_config.workspace_dir)) or agent_config.workspace_dir
+        workspace_attachments = _build_workspace_attachments(daemon_workspace)
+        all_attachments = workspace_attachments + (list(attachment) if attachment else [])
+        attach_opts = AttachmentOptions(
+            sources=all_attachments,
+            refresh_cache=refresh_cache,
+            auto_context=auto_context,
+        )
 
     # Handle conversation continuation - check before parsing args
     if continue_conversation and not history_opts.continue_id:
@@ -527,6 +696,13 @@ def run(
         from tsugite.console import get_stderr_console
 
         stderr_console = get_stderr_console(no_color=ui_opts.no_color)
+
+        # Print deferred workspace status messages
+        if not ui_opts.headless and not ui_opts.final_only:
+            if workspace_to_use and config.default_workspace == workspace_to_use and not workspace:
+                stderr_console.print(f"[dim]Using default workspace: {workspace_to_use}[/dim]")
+            if workspace_session_continued:
+                stderr_console.print(f"[dim]Continuing workspace session: {history_opts.continue_id[:8]}...[/dim]")
 
         # Set up event bus in context for attachment loading
         from tsugite.events import EventBus
@@ -650,6 +826,7 @@ def run(
                         continue_conversation_id=history_opts.continue_id,
                         system_prompt=system_prompt,
                         attachments=attachments,
+                        channel_metadata=daemon_metadata,
                     )
                 except Exception:
                     pass
@@ -901,6 +1078,23 @@ def version():
 
 
 @app.command()
+def daemon(
+    config: Optional[Path] = typer.Option(
+        None, "--config", "-c", help="Path to daemon config (default: ~/.config/tsugite/daemon.yaml)"
+    ),
+):
+    """Start tsugite daemon for Discord/Telegram bots."""
+    import asyncio
+
+    from tsugite.daemon.gateway import run_daemon
+
+    try:
+        asyncio.run(run_daemon(config))
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Daemon stopped[/yellow]")
+
+
+@app.command()
 def chat(
     agent: Optional[str] = typer.Argument(None, help="Agent name or path (optional, uses default if not provided)"),
     model: Optional[str] = typer.Option(None, "--model", "-m", help="Override agent model"),
@@ -987,6 +1181,7 @@ from .mcp import mcp_app  # noqa: E402
 from .serve import serve_app  # noqa: E402
 from .tools import tools_app  # noqa: E402
 from .validate import validate_command  # noqa: E402
+from .workspace import workspace_app  # noqa: E402
 
 app.add_typer(mcp_app, name="mcp")
 app.add_typer(serve_app, name="serve")
@@ -996,6 +1191,7 @@ app.add_typer(attachments_app, name="attachments")
 app.add_typer(cache_app, name="cache")
 app.add_typer(tools_app, name="tools")
 app.add_typer(history_app, name="history")
+app.add_typer(workspace_app, name="workspace")
 app.command("benchmark")(benchmark_command)
 app.command("init")(init)
 app.command("validate")(validate_command)

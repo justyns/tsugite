@@ -41,30 +41,35 @@ def get_global_agents_paths() -> List[Path]:
     return paths
 
 
-def find_agent_file(agent_ref: str, current_agent_dir: Path) -> Optional[Path]:
-    """Find an agent file by reference.
+def find_agent_file(
+    agent_ref: str,
+    current_agent_dir: Path,
+    workspace: Optional[Any] = None,
+) -> Optional[Path]:
+    """Find an agent file by reference with workspace priority.
 
     Args:
         agent_ref: Agent reference (name or path)
         current_agent_dir: Directory of the agent doing the extending
+        workspace: Optional workspace to check for workspace-specific agents
 
     Returns:
         Path to agent file if found, None otherwise
 
     Search order:
     1. If path-like (contains / or .md), resolve relative to current agent
-    2. .tsugite/{name}.md (project-local shared)
-    3. ./agents/{name}.md (project convention)
-    4. ./{name}.md (current directory)
-    5. Built-in agents directory (tsugite/builtin_agents/)
-    6. Global agent directories (XDG order)
+    2. Workspace agents directory (if workspace provided)
+    3. .tsugite/{name}.md (project-local shared)
+    4. ./agents/{name}.md (project convention)
+    5. ./{name}.md (current directory)
+    6. Built-in agents directory (tsugite/builtin_agents/)
+    7. Global agent directories (XDG order)
     """
     # If it looks like a path, resolve it relative to current agent
     if "/" in agent_ref or agent_ref.endswith(".md"):
         path = current_agent_dir / agent_ref
         if path.exists():
             return path.resolve()
-        # Also try as absolute path
         abs_path = Path(agent_ref).expanduser()
         if abs_path.exists():
             return abs_path.resolve()
@@ -73,18 +78,28 @@ def find_agent_file(agent_ref: str, current_agent_dir: Path) -> Optional[Path]:
     # Ensure .md extension for name-based lookup
     agent_name = agent_ref if agent_ref.endswith(".md") else f"{agent_ref}.md"
 
-    # Search project-local locations
-    search_paths = [
-        current_agent_dir / ".tsugite" / agent_name,
-        current_agent_dir / "agents" / agent_name,
-        current_agent_dir / agent_name,
-    ]
+    search_paths = []
 
-    # Add built-in agents directory
+    # Workspace agents directory (highest priority)
+    if workspace and hasattr(workspace, "agents_dir"):
+        workspace_agents = workspace.agents_dir
+        if workspace_agents.exists():
+            search_paths.append(workspace_agents / agent_name)
+
+    # Project-local locations
+    search_paths.extend(
+        [
+            current_agent_dir / ".tsugite" / agent_name,
+            current_agent_dir / "agents" / agent_name,
+            current_agent_dir / agent_name,
+        ]
+    )
+
+    # Built-in agents directory
     builtin_path = get_builtin_agents_path() / agent_name
     search_paths.append(builtin_path)
 
-    # Add global locations
+    # Global locations
     for global_dir in get_global_agents_paths():
         search_paths.append(global_dir / agent_name)
 

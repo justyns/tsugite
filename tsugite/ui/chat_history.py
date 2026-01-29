@@ -102,6 +102,7 @@ def save_chat_turn(
     timestamp: Optional[datetime] = None,
     execution_steps: Optional[list] = None,
     messages: Optional[list] = None,
+    metadata: Optional[dict] = None,
 ) -> None:
     """Save a chat turn to history.
 
@@ -117,6 +118,7 @@ def save_chat_turn(
         timestamp: Optional timestamp (defaults to now)
         execution_steps: Optional list of execution step objects (StepResult)
         messages: Optional full LiteLLM message history
+        metadata: Optional channel routing metadata
 
     Raises:
         RuntimeError: If save fails
@@ -153,6 +155,7 @@ def save_chat_turn(
         cost=cost,
         steps=steps_dicts,
         messages=messages,
+        metadata=metadata,
     )
 
     save_turn_to_history(conversation_id, turn)
@@ -160,19 +163,25 @@ def save_chat_turn(
     # Update index with cumulative stats
     from tsugite.history import get_conversation_metadata
 
-    metadata = get_conversation_metadata(conversation_id)
+    index_metadata = get_conversation_metadata(conversation_id)
 
-    if metadata:
-        # metadata is always IndexEntry
+    if index_metadata:
+        # index_metadata is always IndexEntry
+        # Check if this turn marks the conversation as daemon-managed
+        is_daemon = metadata and metadata.get("is_daemon_managed", False) if metadata else False
+        # Once a conversation is daemon-managed, it stays that way
+        daemon_managed = index_metadata.is_daemon_managed or is_daemon
+
         updated_metadata = IndexEntry(
-            agent=metadata.agent,
-            model=metadata.model,
-            machine=metadata.machine,
-            created_at=metadata.created_at,
+            agent=index_metadata.agent,
+            model=index_metadata.model,
+            machine=index_metadata.machine,
+            created_at=index_metadata.created_at,
             updated_at=timestamp,
-            turn_count=metadata.turn_count + 1,
-            total_tokens=(metadata.total_tokens or 0) + (token_count or 0),
-            total_cost=(metadata.total_cost or 0.0) + (cost or 0.0),
+            turn_count=index_metadata.turn_count + 1,
+            total_tokens=(index_metadata.total_tokens or 0) + (token_count or 0),
+            total_cost=(index_metadata.total_cost or 0.0) + (cost or 0.0),
+            is_daemon_managed=daemon_managed,
         )
         update_index(conversation_id, updated_metadata)
 

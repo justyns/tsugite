@@ -126,6 +126,7 @@ def save_run_to_history(
     continue_conversation_id: Optional[str] = None,
     system_prompt: Optional[str] = None,
     attachments: Optional[list] = None,
+    channel_metadata: Optional[dict] = None,
 ) -> Optional[str]:
     """Save a single agent run to history.
 
@@ -141,6 +142,7 @@ def save_run_to_history(
         continue_conversation_id: Optional conversation ID to continue (for multi-turn run mode)
         system_prompt: System prompt sent to LLM
         attachments: List of Attachment objects for attachments
+        channel_metadata: Optional channel routing metadata (source, channel_id, user_id, reply_to)
 
     Returns:
         Conversation ID if saved, None if history disabled or failed
@@ -244,6 +246,7 @@ def save_run_to_history(
             timestamp=timestamp,
             execution_steps=execution_steps,
             messages=messages,
+            metadata=channel_metadata,
         )
 
         return conv_id

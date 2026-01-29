@@ -1,7 +1,7 @@
 """Pydantic models for history and conversation data structures."""
 
 from datetime import datetime
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -66,6 +66,9 @@ class Turn(BaseModel):
     cost: Optional[float] = Field(default=None, description="Estimated cost for this turn")
     steps: Optional[list[dict]] = Field(default=None, description="Detailed execution steps (thought/code/output)")
     messages: Optional[list[dict]] = Field(default=None, description="Full LiteLLM message history for this turn")
+    metadata: Optional[Dict[str, Any]] = Field(
+        default=None, description="Channel routing metadata (source, channel_id, user_id, reply_to)"
+    )
 
     @field_validator("timestamp", mode="before")
     @classmethod
@@ -96,6 +99,7 @@ class IndexEntry(BaseModel):
     turn_count: int = Field(default=0, description="Total number of turns in conversation")
     total_tokens: Optional[int] = Field(default=None, description="Cumulative token count")
     total_cost: Optional[float] = Field(default=None, description="Cumulative cost")
+    is_daemon_managed: bool = Field(default=False, description="Whether conversation is daemon-managed")
 
     @field_validator("created_at", "updated_at", mode="before")
     @classmethod

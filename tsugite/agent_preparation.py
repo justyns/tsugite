@@ -1,12 +1,16 @@
 """Agent preparation pipeline - unified logic for render and execution."""
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from tsugite.attachments.base import Attachment
 from tsugite.core.tools import Tool
 from tsugite.md_agents import Agent, AgentConfig
 from tsugite.skill_discovery import Skill
+
+if TYPE_CHECKING:
+    from tsugite.workspace import Workspace
 
 
 @dataclass
@@ -99,6 +103,7 @@ class AgentPreparer:
         agent: Agent,
         prompt: str,
         context: Optional[Dict[str, Any]] = None,
+        workspace: Optional["Workspace"] = None,
         skip_tool_directives: bool = False,
         task_summary: str = "## Current Tasks\nNo tasks yet.",
         tasks: Optional[List[Dict[str, Any]]] = None,
@@ -111,6 +116,7 @@ class AgentPreparer:
             agent: Parsed agent object
             prompt: User prompt/task
             context: Additional context variables
+            workspace: Optional workspace for context files and persistent sessions
             skip_tool_directives: Skip executing tool directives (for render)
             task_summary: Current task summary (from task manager)
             tasks: List of task dicts for template iteration (from task manager)
@@ -139,6 +145,16 @@ class AgentPreparer:
             context = {}
 
         agent_config = agent.config
+
+        # Step 0: Resolve workspace files using convention-based discovery
+        workspace_attachments: List[Attachment] = []
+        if workspace:
+            from tsugite.workspace.context import build_workspace_attachments
+
+            workspace_attachments = build_workspace_attachments(workspace)
+
+        # Merge workspace attachments with explicit attachments (explicit first)
+        all_attachments = (attachments or []) + workspace_attachments
 
         # Step 1: Execute prefetch tools
         prefetch_context = {}
@@ -261,6 +277,6 @@ class AgentPreparer:
             context=full_context,
             combined_instructions=combined_instructions,
             prefetch_results=prefetch_context,
-            attachments=attachments or [],
+            attachments=all_attachments,
             skills=skills,
         )

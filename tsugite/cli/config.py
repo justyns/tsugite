@@ -30,6 +30,11 @@ def config_show():
     else:
         console.print("[bold]Default Base Agent:[/bold] default (fallback)\n")
 
+    if config.default_workspace:
+        console.print(f"[bold]Default Workspace:[/bold] {config.default_workspace}\n")
+    else:
+        console.print("[yellow]No default workspace set[/yellow]\n")
+
     console.print(f"[bold]Chat Theme:[/bold] {config.chat_theme}\n")
 
     # Auto-context settings
@@ -162,6 +167,37 @@ def config_set_default_base(
         console.print(f"[dim]Saved to: {config_path}[/dim]")
     except Exception as e:
         console.print(f"[red]Failed to set default base agent: {e}[/red]")
+        raise typer.Exit(1)
+
+
+@config_app.command("set-default-workspace")
+def config_set_default_workspace(
+    workspace: str = typer.Argument(help="Workspace name or 'none' to disable"),
+):
+    """Set the default workspace (auto-loaded unless --no-workspace is used).
+
+    Examples:
+        tsu config set-default-workspace justyn
+        tsu config set-default-workspace none  # Disable default workspace
+    """
+    from tsugite.config import get_config_path, update_config
+
+    try:
+        workspace_value = None if workspace.lower() == "none" else workspace
+
+        update_config(None, lambda cfg: setattr(cfg, "default_workspace", workspace_value))
+        config_path = get_config_path()
+
+        if workspace_value is None:
+            console.print("[green]✓ Default workspace disabled[/green]")
+        else:
+            console.print(f"[green]✓ Default workspace set to:[/green] {workspace}")
+            console.print("\n[dim]The workspace will be auto-loaded on every run.[/dim]")
+            console.print("[dim]Use --no-workspace to disable for a specific run.[/dim]")
+
+        console.print(f"\n[dim]Saved to: {config_path}[/dim]")
+    except Exception as e:
+        console.print(f"[red]Failed to set default workspace: {e}[/red]")
         raise typer.Exit(1)
 
 

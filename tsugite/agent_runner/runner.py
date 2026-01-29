@@ -3,6 +3,7 @@
 import asyncio
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from tsugite.core.agent import TsugiteAgent
@@ -423,6 +424,7 @@ def _extract_reasoning_content(agent: TsugiteAgent, custom_logger: Optional[Any]
 async def _execute_agent_with_prompt(
     prepared: "PreparedAgent",
     exec_options: Optional[ExecutionOptions] = None,
+    workspace: Optional[Any] = None,
     custom_logger: Optional[Any] = None,
     skip_task_reset: bool = False,
     model_kwargs: Optional[Dict[str, Any]] = None,
@@ -533,8 +535,9 @@ async def _execute_agent_with_prompt(
         if "reasoning_effort" not in final_model_kwargs:
             final_model_kwargs["reasoning_effort"] = agent_config.reasoning_effort
 
-    # Create executor
-    executor = LocalExecutor()
+    # Create executor with workspace directory if available
+    workspace_dir = workspace.path if workspace else None
+    executor = LocalExecutor(workspace_dir=workspace_dir)
 
     # Inject variables into executor (for multi-step agents)
     if injectable_vars:
@@ -706,7 +709,7 @@ def run_agent(
 
         from tsugite.ui.jsonl import JSONLUIHandler
 
-        custom_logger = type("CustomLogger", (), {"ui_handler": JSONLUIHandler()})()
+        custom_logger = SimpleNamespace(ui_handler=JSONLUIHandler())
 
     return asyncio.run(
         run_agent_async(
@@ -726,9 +729,11 @@ async def run_agent_async(
     prompt: str,
     exec_options: Optional[ExecutionOptions] = None,
     context: Optional[Dict[str, Any]] = None,
+    workspace: Optional[Any] = None,
     custom_logger: Optional[Any] = None,
     continue_conversation_id: Optional[str] = None,
     attachments: Optional[List[Any]] = None,
+    channel_metadata: Optional[Dict[str, Any]] = None,
 ) -> str | AgentExecutionResult:
     """Run a Tsugite agent (async version for tests and async contexts).
 
@@ -737,9 +742,11 @@ async def run_agent_async(
         prompt: User prompt/task for the agent
         exec_options: Execution options (model, debug, stream, etc.)
         context: Additional context variables
+        workspace: Optional Workspace for persistent context and working directory
         custom_logger: Custom logger for agent output
         continue_conversation_id: Optional conversation ID to continue
         attachments: Optional list of Attachment objects
+        channel_metadata: Optional channel routing metadata (source, channel_id, user_id, reply_to)
 
     Returns:
         Agent execution result as string or AgentExecutionResult with metrics
@@ -787,6 +794,7 @@ async def run_agent_async(
             agent=agent,
             prompt=prompt,
             context=context,
+            workspace=workspace,
             task_summary=task_manager.get_task_summary(),
             tasks=task_manager.get_tasks_for_template(),
             attachments=attachments,
@@ -802,6 +810,7 @@ async def run_agent_async(
         return await _execute_agent_with_prompt(
             prepared=prepared,
             exec_options=exec_options,
+            workspace=workspace,
             custom_logger=custom_logger,
             previous_messages=previous_messages,
         )
