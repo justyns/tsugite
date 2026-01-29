@@ -219,9 +219,9 @@ class AgentPreparer:
             # Expand tool specifications (categories, globs, regular names)
             expanded_tools = expand_tool_specs(agent_config.tools) if agent_config.tools else []
 
-            # Add task management tools and spawn_agent
-            task_tools = ["task_add", "task_update", "task_complete", "task_list", "task_get", "spawn_agent"]
-            all_tool_names = expanded_tools + task_tools
+            # Add task management tools and spawn_agent (only if not already present)
+            task_tools = {"task_add", "task_update", "task_complete", "task_list", "task_get", "spawn_agent"}
+            all_tool_names = expanded_tools + [t for t in task_tools if t not in expanded_tools]
 
             # Filter out interactive tools in non-interactive mode
             if not interactive_mode and "ask_user" in all_tool_names:
