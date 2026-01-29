@@ -73,7 +73,7 @@ class WorkspaceManager:
         self,
         name: str,
         path: Optional[Path] = None,
-        soul_template: Optional[str] = None,
+        persona_template: Optional[str] = None,
         user_name: Optional[str] = None,
         init_git: bool = False,
     ) -> Workspace:
@@ -82,7 +82,7 @@ class WorkspaceManager:
         Args:
             name: Workspace name
             path: Optional custom path (defaults to ~/.tsugite/workspaces/{name})
-            soul_template: Optional soul template name
+            persona_template: Optional persona template name
             user_name: Optional user name for template rendering
             init_git: Whether to initialize git repository
 
@@ -98,7 +98,7 @@ class WorkspaceManager:
         if path.exists():
             raise ValueError(f"Workspace already exists: {path}")
 
-        return Workspace.create(path, soul_template=soul_template, user_name=user_name, init_git=init_git)
+        return Workspace.create(path, persona_template=persona_template, user_name=user_name, init_git=init_git)
 
 
 __all__ = ["WorkspaceManager"]

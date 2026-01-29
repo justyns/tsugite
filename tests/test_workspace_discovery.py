@@ -48,14 +48,14 @@ def test_workspace_get_workspace_files_some_exist(tmp_path):
     workspace_path = tmp_path / "workspace"
     workspace_path.mkdir()
 
-    (workspace_path / "SOUL.md").write_text("# Soul")
+    (workspace_path / "PERSONA.md").write_text("# Persona")
     (workspace_path / "USER.md").write_text("# User")
 
     workspace = Workspace.load(workspace_path)
     files = workspace.get_workspace_files()
 
     assert len(files) == 2
-    assert any(f.name == "SOUL.md" for f in files)
+    assert any(f.name == "PERSONA.md" for f in files)
     assert any(f.name == "USER.md" for f in files)
 
 
@@ -64,13 +64,13 @@ def test_workspace_get_workspace_files_all_exist(tmp_path):
     workspace_path = tmp_path / "workspace"
     workspace_path.mkdir()
 
-    for filename in ["SOUL.md", "USER.md", "MEMORY.md", "IDENTITY.md", "AGENTS.md"]:
+    for filename in ["PERSONA.md", "SOUL.md", "USER.md", "MEMORY.md", "IDENTITY.md", "AGENTS.md"]:
         (workspace_path / filename).write_text(f"# {filename}")
 
     workspace = Workspace.load(workspace_path)
     files = workspace.get_workspace_files()
 
-    assert len(files) == 5
+    assert len(files) == 6
 
 
 def test_workspace_get_memory_files_none_exist(tmp_path):
@@ -139,24 +139,23 @@ def test_workspace_create(tmp_path):
 
 
 def test_workspace_create_with_template(tmp_path):
-    """Test creating workspace with soul template."""
+    """Test creating workspace with persona template."""
     workspace_path = tmp_path / "templated-workspace"
 
     workspace = Workspace.create(
         workspace_path,
-        soul_template="minimal",
+        persona_template="minimal",
         user_name="Test User"
     )
 
-    soul_file = workspace.path / "SOUL.md"
+    persona_file = workspace.path / "PERSONA.md"
     user_file = workspace.path / "USER.md"
 
-    assert soul_file.exists()
+    assert persona_file.exists()
     assert user_file.exists()
 
-    soul_content = soul_file.read_text()
-    assert "Minimal Assistant" in soul_content
-    assert "Test User" in soul_content
+    persona_content = persona_file.read_text()
+    assert "Persona: Minimal" in persona_content
 
     user_content = user_file.read_text()
     assert "Test User" in user_content

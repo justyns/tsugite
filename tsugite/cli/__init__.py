@@ -418,7 +418,7 @@ def run(
         None, "--memory/--no-memory", help="Enable/disable memory system (overrides agent/config default)"
     ),
     workspace: Optional[str] = typer.Option(
-        None, "--workspace", "-w", help="Workspace directory (auto-loads SOUL.md, USER.md, MEMORY.md)"
+        None, "--workspace", "-w", help="Workspace directory (auto-loads PERSONA.md, USER.md, MEMORY.md)"
     ),
     no_workspace: bool = typer.Option(False, "--no-workspace", help="Disable workspace (ignore default workspace)"),
     new_session: bool = typer.Option(False, "--new-session", help="Start fresh session (ignore workspace session)"),

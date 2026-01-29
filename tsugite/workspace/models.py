@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Optional
 
-WORKSPACE_FILES = ["SOUL.md", "USER.md", "MEMORY.md", "IDENTITY.md", "AGENTS.md"]
+WORKSPACE_FILES = ["PERSONA.md", "SOUL.md", "USER.md", "MEMORY.md", "IDENTITY.md", "AGENTS.md"]
 DEFAULT_MEMORY_INJECT_DAYS = 3
 DEFAULT_COMPACTION_THRESHOLD = 0.8
 
@@ -52,7 +52,7 @@ class Workspace:
         return self.path / "agents"
 
     def get_workspace_files(self) -> List[Path]:
-        """Auto-discover workspace identity files (SOUL.md, USER.md, etc.).
+        """Auto-discover workspace identity files (PERSONA.md, SOUL.md, USER.md, etc.).
 
         Returns:
             List of existing workspace files in conventional order
@@ -113,15 +113,15 @@ class Workspace:
     def create(
         cls,
         path: Path,
-        soul_template: Optional[str] = None,
+        persona_template: Optional[str] = None,
         user_name: Optional[str] = None,
         init_git: bool = False,
     ) -> "Workspace":
-        """Create new workspace with optional soul template.
+        """Create new workspace with optional persona template.
 
         Args:
             path: Path to create workspace at
-            soul_template: Optional soul template name
+            persona_template: Optional persona template name
             user_name: Optional user name for template rendering
             init_git: Whether to initialize git repository
 
@@ -171,11 +171,11 @@ Thumbs.db
 """
         (path / ".gitignore").write_text(gitignore_content)
 
-        if soul_template:
-            from .templates import load_soul_template
+        if persona_template:
+            from .templates import load_persona_template
 
-            soul_content = load_soul_template(soul_template, user_name=user_name)
-            (path / "SOUL.md").write_text(soul_content)
+            persona_content = load_persona_template(persona_template, user_name=user_name)
+            (path / "PERSONA.md").write_text(persona_content)
 
         if user_name:
             (path / "USER.md").write_text(f"# {user_name}\n\n")

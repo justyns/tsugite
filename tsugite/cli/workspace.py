@@ -8,7 +8,7 @@ from rich.console import Console
 from rich.table import Table
 
 from tsugite.workspace import Workspace, WorkspaceManager, WorkspaceNotFoundError, WorkspaceSession
-from tsugite.workspace.templates import list_soul_templates
+from tsugite.workspace.templates import list_persona_templates
 
 workspace_app = typer.Typer(help="Manage workspaces")
 console = Console()
@@ -59,19 +59,19 @@ def list_workspaces():
 @workspace_app.command("init")
 def init_workspace(
     name: str = typer.Argument(..., help="Workspace name"),
-    soul: Optional[str] = typer.Option(None, "--soul", "-s", help="Soul template name"),
+    persona: Optional[str] = typer.Option(None, "--persona", "-p", help="Persona template name"),
     user: Optional[str] = typer.Option(None, "--user", "-u", help="Your name"),
-    path: Optional[str] = typer.Option(None, "--path", "-p", help="Custom workspace path"),
+    path: Optional[str] = typer.Option(None, "--path", help="Custom workspace path"),
     git: Optional[bool] = typer.Option(None, "--git/--no-git", help="Initialize git repository"),
 ):
     """Create a new workspace."""
     manager = WorkspaceManager()
 
-    # Validate soul template if provided
-    if soul:
-        available_templates = list_soul_templates()
-        if soul not in available_templates:
-            console.print(f"[red]Soul template '{soul}' not found.[/red]")
+    # Validate persona template if provided
+    if persona:
+        available_templates = list_persona_templates()
+        if persona not in available_templates:
+            console.print(f"[red]Persona template '{persona}' not found.[/red]")
             console.print(f"Available templates: {', '.join(available_templates)}")
             raise typer.Exit(1)
 
@@ -86,15 +86,15 @@ def init_workspace(
         workspace = manager.create_workspace(
             name=name,
             path=workspace_path,
-            soul_template=soul,
+            persona_template=persona,
             user_name=user,
             init_git=init_git,
         )
         console.print(f"[green]✓[/green] Created workspace: {workspace.name}")
         console.print(f"  Path: {workspace.path}")
 
-        if soul:
-            console.print(f"  Soul: {soul}")
+        if persona:
+            console.print(f"  Persona: {persona}")
         if user:
             console.print(f"  User: {user}")
         if init_git:
@@ -224,18 +224,18 @@ def manage_session(
 
 @workspace_app.command("templates")
 def list_templates():
-    """List available soul templates."""
-    templates = list_soul_templates()
+    """List available persona templates."""
+    templates = list_persona_templates()
 
     if not templates:
-        console.print("[yellow]No soul templates found.[/yellow]")
+        console.print("[yellow]No persona templates found.[/yellow]")
         return
 
-    console.print("[bold]Available Soul Templates:[/bold]\n")
+    console.print("[bold]Available Persona Templates:[/bold]\n")
     for template in templates:
         console.print(f"  • {template}")
 
-    console.print(f"\nUse with: tsu workspace init <name> --soul <template>")
+    console.print(f"\nUse with: tsu workspace init <name> --persona <template>")
 
 
 __all__ = ["workspace_app"]

@@ -1,7 +1,7 @@
 """Workspace system for tsugite.
 
 Workspaces represent persistent conversation contexts with:
-- Personality/identity (SOUL.md)
+- Personality/identity (PERSONA.md, SOUL.md)
 - User context (USER.md)
 - Memory (MEMORY.md, memory/*.md)
 - Session persistence (auto-continue conversations)
