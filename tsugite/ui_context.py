@@ -2,7 +2,7 @@
 
 import contextvars
 from contextlib import contextmanager
-from typing import Any, Generator, Optional
+from typing import Any, Callable, Generator, Optional
 
 from rich.console import Console
 from rich.progress import Progress
@@ -12,6 +12,9 @@ _console_var: contextvars.ContextVar[Optional[Console]] = contextvars.ContextVar
 _progress_var: contextvars.ContextVar[Optional[Progress]] = contextvars.ContextVar("progress", default=None)
 _ui_handler_var: contextvars.ContextVar[Optional[Any]] = contextvars.ContextVar("ui_handler", default=None)
 _event_bus_var: contextvars.ContextVar[Optional[Any]] = contextvars.ContextVar("event_bus", default=None)
+_final_answer_callback_var: contextvars.ContextVar[Optional[Callable]] = contextvars.ContextVar(
+    "final_answer_callback", default=None
+)
 
 
 def set_ui_context(
@@ -62,12 +65,31 @@ def get_event_bus() -> Optional[Any]:
     return _event_bus_var.get()
 
 
+def set_final_answer_callback(callback: Optional[Callable]) -> None:
+    """Set the final answer callback for tool access.
+
+    Args:
+        callback: Function to call with the final answer value
+    """
+    _final_answer_callback_var.set(callback)
+
+
+def get_final_answer_callback() -> Optional[Callable]:
+    """Get the final answer callback from context variables.
+
+    Returns:
+        Callback function if available, None otherwise
+    """
+    return _final_answer_callback_var.get()
+
+
 def clear_ui_context() -> None:
     """Clear UI context from context variables."""
     _console_var.set(None)
     _progress_var.set(None)
     _ui_handler_var.set(None)
     _event_bus_var.set(None)
+    _final_answer_callback_var.set(None)
 
 
 @contextmanager

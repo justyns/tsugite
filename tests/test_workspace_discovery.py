@@ -1,7 +1,8 @@
 """Tests for convention-based workspace discovery."""
 
-import pytest
 from pathlib import Path
+
+import pytest
 
 from tsugite.workspace import Workspace, WorkspaceNotFoundError
 
@@ -142,11 +143,7 @@ def test_workspace_create_with_template(tmp_path):
     """Test creating workspace with persona template."""
     workspace_path = tmp_path / "templated-workspace"
 
-    workspace = Workspace.create(
-        workspace_path,
-        persona_template="minimal",
-        user_name="Test User"
-    )
+    workspace = Workspace.create(workspace_path, persona_template="minimal", user_name="Test User")
 
     persona_file = workspace.path / "PERSONA.md"
     user_file = workspace.path / "USER.md"

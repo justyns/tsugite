@@ -30,7 +30,12 @@ def test_agent_config():
 def test_discord_bot_config():
     """Test DiscordBotConfig model."""
     config = DiscordBotConfig(
-        name="test-bot", token="test-token", agent="test-agent", command_prefix="!", dm_policy="allowlist", allow_from=["123"]
+        name="test-bot",
+        token="test-token",
+        agent="test-agent",
+        command_prefix="!",
+        dm_policy="allowlist",
+        allow_from=["123"],
     )
     assert config.name == "test-bot"
     assert config.token == "test-token"
@@ -47,7 +52,10 @@ def test_daemon_config():
         log_level="info",
         agents={
             "test": AgentConfig(
-                workspace_dir=Path("/tmp/workspace"), agent_file="assistant.md", memory_enabled=True, memory_inject_days=2
+                workspace_dir=Path("/tmp/workspace"),
+                agent_file="assistant.md",
+                memory_enabled=True,
+                memory_inject_days=2,
             )
         },
         discord_bots=[DiscordBotConfig(name="bot", token="token", agent="test")],

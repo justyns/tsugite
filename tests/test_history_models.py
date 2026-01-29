@@ -299,6 +299,7 @@ class TestIndexEntry:
         assert isinstance(data["created_at"], str)
         assert "total_tokens" not in data  # Excluded because None
 
+
 class TestDatetimeHandling:
     """Tests for datetime parsing across all models."""
 

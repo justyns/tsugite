@@ -1,7 +1,5 @@
 """Tests for ensuring no duplicate tools in agent prompts."""
 
-import pytest
-
 
 class TestNoDuplicateToolsInPrompt:
     """Test that agent preparation doesn't create duplicate tools."""

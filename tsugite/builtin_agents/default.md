@@ -13,6 +13,10 @@ tools:
   - load_skill
   - list_available_skills
   - list_loaded_skills
+  - final_answer
+  - send_message
+auto_load_skills:
+  - response_patterns
 prefetch:
   - tool: list_agents
     args: {}

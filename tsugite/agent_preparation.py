@@ -1,7 +1,6 @@
 """Agent preparation pipeline - unified logic for render and execution."""
 
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from tsugite.attachments.base import Attachment

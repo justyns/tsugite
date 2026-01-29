@@ -10,6 +10,7 @@ from tsugite.events import (
     ExecutionResultEvent,
     FileReadEvent,
     FinalAnswerEvent,
+    InfoEvent,
     LLMMessageEvent,
     ObservationEvent,
     SkillLoadedEvent,
@@ -135,6 +136,9 @@ class JSONLUIHandler:
                     "operation": event.operation,
                 },
             )
+
+        elif isinstance(event, InfoEvent):
+            self._emit("info", {"message": event.message})
 
     def _emit(self, event_type: str, data: Dict[str, Any]) -> None:
         """Print JSONL event to stdout.

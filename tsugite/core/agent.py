@@ -216,10 +216,19 @@ class TsugiteAgent:
 
         Creates wrapper functions for each tool that call the tool's execute() method.
         The LLM sees tools as Python functions and calls them directly in generated code.
+
+        Note: final_answer is registered as a tool for documentation purposes but is NOT
+        injected here - the executor has its own built-in final_answer that properly
+        signals completion. We skip it to avoid overriding the executor's version.
         """
         tool_functions = {}
 
         for tool in self.tools:
+            # Skip built-in functions - executor has its own versions
+            # final_answer: handles completion signaling
+            # send_message: needs event_bus access for progress updates
+            if tool.name in ("final_answer", "send_message"):
+                continue
 
             def make_tool_wrapper(tool_obj):
                 def tool_wrapper(*args, **kwargs):

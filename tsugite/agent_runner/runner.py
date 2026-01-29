@@ -248,7 +248,7 @@ def _setup_event_context(event_bus: Optional["EventBus"]) -> None:
 
 
 def get_default_instructions(text_mode: bool = False) -> str:
-    """Get default instructions based on agent mode.
+    """Get minimal default instructions. Detailed guidance comes from skills.
 
     Args:
         text_mode: Whether agent is in text mode
@@ -256,41 +256,31 @@ def get_default_instructions(text_mode: bool = False) -> str:
     Returns:
         Mode-appropriate default instructions
     """
-    base = (
-        "You are operating inside the Tsugite micro-agent runtime. Follow the rendered task faithfully, "
-        "use the available tools when they meaningfully advance the work, and maintain a living plan via "
-        "the task_* tools. Create or update tasks whenever you define new sub-work, mark progress as you go, "
-        "and rely on the task summary to decide the next action. Provide a clear, actionable final response "
-        "without unnecessary filler.\n\n"
-    )
+    base = "You accomplish tasks by writing Python code.\n\n"
 
-    context_info = (
-        "Execution Context: The `ctx` object provides access to runtime metadata:\n"
-        "- `ctx.user_prompt` - The original user prompt\n"
-        "- `ctx.tasks` - List of tracked tasks\n"
-        "- `ctx.task_summary` - Formatted task summary\n"
-        "- `ctx.step_name`, `ctx.step_number`, `ctx.total_steps` - Multi-step info\n"
-        "- `ctx.is_interactive` - Whether running in interactive terminal\n"
-        "- `ctx.is_subagent`, `ctx.parent_agent` - Subagent context\n"
-        "- `ctx.iteration`, `ctx.max_iterations`, `ctx.is_looping_step` - Loop context\n"
-        "User-assigned variables from previous steps are available as top-level variables.\n\n"
-        "Interactive Mode: The `ctx.is_interactive` flag indicates whether you're running in an interactive terminal. "
-        "Interactive-only tools (like ask_user) are automatically available only when is_interactive is True.\n\n"
+    output = (
+        "## Output\n\n"
+        "- `print(x)` - See in next turn (internal)\n"
+        "- `send_message(msg)` - Show user progress\n"
+        "- `final_answer(msg)` - Final response (stops execution)\n\n"
     )
 
     if text_mode:
-        completion = (
-            "Task Completion: For conversational responses, use the format 'Thought: [your response]'. "
-            "When using tools or code, write Python code blocks and call final_answer(result) when complete.\n\n"
+        rules = (
+            "## Rules\n\n"
+            "1. Simple responses: just answer directly\n"
+            "2. Using tools: write Python code, call `final_answer()` when done\n"
+            "3. Variables persist between turns\n"
         )
     else:
-        completion = (
-            "Task Completion: Write Python code to accomplish your task. "
-            "When you have completed your task, call final_answer(result) to signal completion and return "
-            "the result.\n\n"
+        rules = (
+            "## Rules\n\n"
+            "1. Always respond with Python code blocks\n"
+            "2. Call `final_answer()` when done\n"
+            "3. Variables persist between turns\n"
         )
 
-    return base + context_info + completion
+    return base + output + rules
 
 
 def execute_prefetch(prefetch_config: List[Dict[str, Any]], event_bus: Optional["EventBus"] = None) -> Dict[str, Any]:
@@ -535,9 +525,9 @@ async def _execute_agent_with_prompt(
         if "reasoning_effort" not in final_model_kwargs:
             final_model_kwargs["reasoning_effort"] = agent_config.reasoning_effort
 
-    # Create executor with workspace directory if available
+    # Create executor with workspace directory and event bus
     workspace_dir = workspace.path if workspace else None
-    executor = LocalExecutor(workspace_dir=workspace_dir)
+    executor = LocalExecutor(workspace_dir=workspace_dir, event_bus=event_bus)
 
     # Inject variables into executor (for multi-step agents)
     if injectable_vars:
@@ -890,10 +880,10 @@ def _build_prepared_agent_for_step(
     agent_instructions = getattr(agent.config, "instructions", "")
     combined_instructions = _combine_instructions(base_instructions, agent_instructions)
 
-    # Expand and create tools
+    # Expand and create tools (avoid duplicates from @tasks category)
     expanded_tools = expand_tool_specs(agent.config.tools) if agent.config.tools else []
-    task_tools = ["task_add", "task_update", "task_complete", "task_list", "task_get"]
-    all_tool_names = expanded_tools + task_tools + ["spawn_agent"]
+    task_tools = {"task_add", "task_update", "task_complete", "task_list", "task_get", "spawn_agent"}
+    all_tool_names = expanded_tools + [t for t in task_tools if t not in expanded_tools]
     tools = [create_tool_from_tsugite(name) for name in all_tool_names]
 
     # Build system message

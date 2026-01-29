@@ -1,6 +1,5 @@
 """Workspace context attachment builder."""
 
-from pathlib import Path
 from typing import List
 
 from tsugite.attachments.base import Attachment

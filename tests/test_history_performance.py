@@ -56,9 +56,7 @@ class TestFindLatestSessionPerformance:
                 hours = 10 + (i // 3600)
                 minutes = (i // 60) % 60
                 seconds = i % 60
-                timestamp = datetime(
-                    2026, 1, 27 + (hours // 24), hours % 24, minutes, seconds, tzinfo=timezone.utc
-                )
+                timestamp = datetime(2026, 1, 27 + (hours // 24), hours % 24, minutes, seconds, tzinfo=timezone.utc)
 
                 turn = Turn(
                     timestamp=timestamp,
@@ -94,7 +92,7 @@ class TestFindLatestSessionPerformance:
         elapsed = time.perf_counter() - start
 
         assert result is not None
-        print(f"\n[Baseline] 100 conversations, no filters: {elapsed*1000:.2f}ms")
+        print(f"\n[Baseline] 100 conversations, no filters: {elapsed * 1000:.2f}ms")
 
     def test_daemon_only_filter_small(self, tmp_path, monkeypatch, create_conversations):
         """Daemon filter with 10 conversations."""
@@ -105,7 +103,7 @@ class TestFindLatestSessionPerformance:
         elapsed = time.perf_counter() - start
 
         assert result is not None
-        print(f"\n[Small] 10 conversations, daemon_only=True: {elapsed*1000:.2f}ms")
+        print(f"\n[Small] 10 conversations, daemon_only=True: {elapsed * 1000:.2f}ms")
 
     def test_daemon_only_filter_medium(self, tmp_path, monkeypatch, create_conversations):
         """Daemon filter with 100 conversations."""
@@ -116,7 +114,7 @@ class TestFindLatestSessionPerformance:
         elapsed = time.perf_counter() - start
 
         assert result is not None
-        print(f"\n[Medium] 100 conversations, daemon_only=True: {elapsed*1000:.2f}ms")
+        print(f"\n[Medium] 100 conversations, daemon_only=True: {elapsed * 1000:.2f}ms")
 
     def test_daemon_only_filter_large(self, tmp_path, monkeypatch, create_conversations):
         """Daemon filter with 1000 conversations."""
@@ -127,7 +125,7 @@ class TestFindLatestSessionPerformance:
         elapsed = time.perf_counter() - start
 
         assert result is not None
-        print(f"\n[Large] 1000 conversations, daemon_only=True: {elapsed*1000:.2f}ms")
+        print(f"\n[Large] 1000 conversations, daemon_only=True: {elapsed * 1000:.2f}ms")
 
     def test_user_id_filter_medium(self, tmp_path, monkeypatch, create_conversations):
         """User ID filter with 100 conversations across 5 users."""
@@ -140,7 +138,7 @@ class TestFindLatestSessionPerformance:
         elapsed = time.perf_counter() - start
 
         assert result is not None
-        print(f"\n[Medium] 100 conversations, user_id filter: {elapsed*1000:.2f}ms")
+        print(f"\n[Medium] 100 conversations, user_id filter: {elapsed * 1000:.2f}ms")
 
     def test_combined_filters_medium(self, tmp_path, monkeypatch, create_conversations):
         """Combined daemon_only + user_id filter with 100 conversations."""
@@ -153,7 +151,7 @@ class TestFindLatestSessionPerformance:
         elapsed = time.perf_counter() - start
 
         assert result is not None
-        print(f"\n[Medium] 100 conversations, daemon_only + user_id: {elapsed*1000:.2f}ms")
+        print(f"\n[Medium] 100 conversations, daemon_only + user_id: {elapsed * 1000:.2f}ms")
 
     def test_worst_case_no_match(self, tmp_path, monkeypatch, create_conversations):
         """Worst case: filter that requires reading all files but finds nothing."""
@@ -165,7 +163,7 @@ class TestFindLatestSessionPerformance:
         elapsed = time.perf_counter() - start
 
         assert result is None
-        print(f"\n[Worst case] 100 conversations, no matches: {elapsed*1000:.2f}ms")
+        print(f"\n[Worst case] 100 conversations, no matches: {elapsed * 1000:.2f}ms")
 
     def test_index_load_overhead(self, tmp_path, monkeypatch, create_conversations):
         """Measure index loading overhead."""
@@ -176,7 +174,7 @@ class TestFindLatestSessionPerformance:
         index = load_index()
         elapsed = time.perf_counter() - start
 
-        print(f"\n[Index] Load 100-entry index: {elapsed*1000:.2f}ms")
+        print(f"\n[Index] Load 100-entry index: {elapsed * 1000:.2f}ms")
         print(f"[Index] Index size: {len(index)} entries")
 
     def test_file_read_overhead(self, tmp_path, monkeypatch, create_conversations):
@@ -191,7 +189,7 @@ class TestFindLatestSessionPerformance:
         turns = load_conversation(conv_id)
         elapsed = time.perf_counter() - start
 
-        print(f"\n[File I/O] Load single conversation: {elapsed*1000:.2f}ms")
+        print(f"\n[File I/O] Load single conversation: {elapsed * 1000:.2f}ms")
         print(f"[File I/O] Turns in conversation: {len(turns)}")
 
     def test_multiple_agents(self, tmp_path, monkeypatch, create_conversations):
@@ -206,7 +204,7 @@ class TestFindLatestSessionPerformance:
         elapsed = time.perf_counter() - start
 
         assert result is not None
-        print(f"\n[Multi-agent] 1000 total conversations (10 agents x 100): {elapsed*1000:.2f}ms")
+        print(f"\n[Multi-agent] 1000 total conversations (10 agents x 100): {elapsed * 1000:.2f}ms")
 
     def test_early_exit_optimization(self, tmp_path, monkeypatch, create_conversations):
         """Test early exit when match found immediately."""
@@ -220,7 +218,7 @@ class TestFindLatestSessionPerformance:
         elapsed = time.perf_counter() - start
 
         assert result is not None
-        print(f"\n[Early exit] Found match in newest conversations: {elapsed*1000:.2f}ms")
+        print(f"\n[Early exit] Found match in newest conversations: {elapsed * 1000:.2f}ms")
 
 
 class TestIndexScalability:
@@ -228,7 +226,6 @@ class TestIndexScalability:
 
     def test_index_size_memory(self, tmp_path, monkeypatch):
         """Measure memory/size characteristics of index."""
-        import json
         import sys
 
         monkeypatch.setattr("tsugite.history.storage.get_history_dir", lambda: tmp_path)
@@ -256,7 +253,7 @@ class TestIndexScalability:
         # Measure in-memory size (approximate)
         memory_size = sys.getsizeof(index)
 
-        print(f"\n[Scalability] 1000 entries:")
+        print("\n[Scalability] 1000 entries:")
         print(f"  File size: {file_size / 1024:.2f} KB")
         print(f"  Memory size (approx): {memory_size / 1024:.2f} KB")
         print(f"  Avg bytes per entry: {file_size / 1000:.2f}")

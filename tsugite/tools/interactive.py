@@ -80,6 +80,51 @@ def _generate_id_from_question(question: str) -> str:
 
 
 @tool
+def final_answer(result: str) -> None:
+    """Return the final result to the user and stop execution.
+
+    Call this when you have completed the task and want to return the result.
+    Execution stops after calling this - no further code will run.
+
+    Args:
+        result: The final result to return to the user
+
+    Example:
+        final_answer("The answer is 42")
+        # Execution stops here
+    """
+    # This tool exists for documentation purposes only.
+    # The executor has a built-in final_answer that actually handles completion.
+    # See agent.py _inject_tools_into_executor() for why this isn't injected.
+    pass
+
+
+@tool
+def send_message(message: str) -> str:
+    """Send a progress message to the user without stopping execution.
+
+    Use this to provide status updates during long-running operations.
+    Unlike final_answer(), execution continues after calling this.
+
+    Args:
+        message: The message to send to the user
+
+    Returns:
+        Confirmation that message was sent
+
+    Example:
+        send_message("Starting file analysis...")
+        files = list_files("/path")
+        send_message(f"Found {len(files)} files, processing...")
+        final_answer("Analysis complete")
+    """
+    # This tool exists for documentation purposes only.
+    # The executor has a built-in send_message that has access to the event_bus.
+    # See agent.py _inject_tools_into_executor() for why this isn't injected.
+    return f"Message sent: {message}"
+
+
+@tool
 def ask_user(question: str, question_type: str = "text", options: Optional[List[str]] = None) -> str:
     """Ask the user a question interactively.
 

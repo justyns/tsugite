@@ -2,8 +2,6 @@
 
 from datetime import datetime, timezone
 
-import pytest
-
 from tsugite.daemon.adapters.base import ChannelContext
 from tsugite.history import (
     IndexEntry,
@@ -21,9 +19,7 @@ class TestChannelContextDaemonFlag:
 
     def test_channel_context_includes_daemon_flag(self):
         """Test that to_dict() includes is_daemon_managed=True."""
-        context = ChannelContext(
-            source="discord", channel_id="123", user_id="user1", reply_to="discord:123"
-        )
+        context = ChannelContext(source="discord", channel_id="123", user_id="user1", reply_to="discord:123")
         metadata = context.to_dict()
 
         assert metadata["is_daemon_managed"] is True

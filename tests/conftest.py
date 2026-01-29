@@ -305,10 +305,12 @@ def task_tools(reset_tool_registry, request):
 def interactive_tools(reset_tool_registry):
     """Register interactive tools for testing."""
     from tsugite.tools import tool
-    from tsugite.tools.interactive import ask_user
+    from tsugite.tools.interactive import ask_user, final_answer, send_message
 
     # Re-register the tools after registry reset
     tool(ask_user)
+    tool(final_answer)
+    tool(send_message)
 
 
 @pytest.fixture

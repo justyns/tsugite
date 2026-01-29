@@ -1,8 +1,7 @@
 """Tests for workspace session auto-continuation."""
 
 import pytest
-from pathlib import Path
-from unittest.mock import Mock, patch
+
 from tsugite.workspace import WorkspaceSession
 from tsugite.workspace.models import Workspace
 

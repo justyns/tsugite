@@ -42,7 +42,7 @@ def list_workspaces():
 
     if not workspaces:
         console.print("[yellow]No workspaces found.[/yellow]")
-        console.print(f"\nCreate one with: tsu workspace init <name>")
+        console.print("\nCreate one with: tsu workspace init <name>")
         return
 
     table = Table(title="Available Workspaces")
@@ -98,7 +98,7 @@ def init_workspace(
         if user:
             console.print(f"  User: {user}")
         if init_git:
-            console.print(f"  Git: initialized")
+            console.print("  Git: initialized")
 
         console.print(f'\nRun with: tsu run <agent> --workspace {name} "<prompt>"')
 
@@ -235,7 +235,7 @@ def list_templates():
     for template in templates:
         console.print(f"  • {template}")
 
-    console.print(f"\nUse with: tsu workspace init <name> --persona <template>")
+    console.print("\nUse with: tsu workspace init <name> --persona <template>")
 
 
 __all__ = ["workspace_app"]

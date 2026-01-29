@@ -2,13 +2,15 @@
 
 import os
 import sys
-import typer
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+import typer
 from rich.console import Console
 from rich.panel import Panel
 from rich.traceback import install
 
+from tsugite.console import get_error_console
 from tsugite.options import (
     AttachmentOptions,
     DockerOptions,
@@ -16,8 +18,6 @@ from tsugite.options import (
     HistoryOptions,
     UIOptions,
 )
-
-from tsugite.console import get_error_console
 
 from .helpers import (
     assemble_prompt_with_attachments,

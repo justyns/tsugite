@@ -324,7 +324,14 @@ class TestBuiltinAgentRendering:
 
     @patch("tsugite.tools.call_tool")
     def test_render_builtin_default_with_plus_prefix(
-        self, mock_call_tool, file_tools, agents_tools, task_tools, skill_tools, mock_default_agent_prefetch
+        self,
+        mock_call_tool,
+        file_tools,
+        agents_tools,
+        task_tools,
+        skill_tools,
+        interactive_tools,
+        mock_default_agent_prefetch,
     ):
         """Test rendering default with + prefix."""
         # Mock prefetch tools (list_agents and get_skills_for_template)
@@ -340,7 +347,14 @@ class TestBuiltinAgentRendering:
 
     @patch("tsugite.tools.call_tool")
     def test_render_builtin_executes_prefetch(
-        self, mock_call_tool, file_tools, agents_tools, task_tools, skill_tools, mock_default_agent_prefetch
+        self,
+        mock_call_tool,
+        file_tools,
+        agents_tools,
+        task_tools,
+        skill_tools,
+        interactive_tools,
+        mock_default_agent_prefetch,
     ):
         """Test that builtin agent prefetch tools are executed."""
         # default has list_agents and get_skills_for_template in prefetch

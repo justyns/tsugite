@@ -79,23 +79,45 @@ class LocalExecutor(CodeExecutor):
         result = await executor.execute("print(x + 3)")  # Prints: 8
     """
 
-    def __init__(self, workspace_dir: Optional[Path] = None):
+    def __init__(self, workspace_dir: Optional[Path] = None, event_bus: Optional[Any] = None):
         """Initialize executor with empty namespace.
 
         Args:
             workspace_dir: Optional workspace directory to use as working directory
+            event_bus: Optional event bus for emitting events (used by send_message)
         """
         self.namespace = {}
         self._final_answer_value = None
         self._tools_called = []
         self.workspace_dir = workspace_dir
+        self.event_bus = event_bus
 
         # Inject final_answer function into namespace
-        def final_answer(value):
-            self._final_answer_value = value
-            # Don't print here - the UI handler will display it properly via FINAL_ANSWER event
+        # Accept any arg name (value, result, etc.) since LLMs may vary
+        def final_answer(*args, **kwargs):
+            if args:
+                self._final_answer_value = args[0]
+            elif kwargs:
+                self._final_answer_value = next(iter(kwargs.values()))
 
         self.namespace["final_answer"] = final_answer
+
+        # Inject send_message function for progress updates
+        def send_message(*args, **kwargs):
+            if args:
+                msg = args[0]
+            elif kwargs:
+                msg = kwargs.get("message") or next(iter(kwargs.values()))
+            else:
+                msg = ""
+
+            if self.event_bus:
+                from tsugite.events import InfoEvent
+
+                self.event_bus.emit(InfoEvent(message=str(msg)))
+            return f"Message sent: {msg}"
+
+        self.namespace["send_message"] = send_message
 
     def _split_code_for_last_expr(self, code: str) -> tuple[str, Optional[str]]:
         """Split code into setup and last expression if applicable.
