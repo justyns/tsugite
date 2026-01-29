@@ -154,65 +154,44 @@ Load these skills when you need specialized knowledge or reference material:
 - **{{ skill.name }}** - {{ skill.description }}
 {% endfor %}
 
-To load a skill, use: `load_skill("skill_name")`
+### How to Load Skills
 
-Skills provide:
-- Domain-specific guidance (Python best practices, API design patterns)
-- Reference material (Jinja templating, agent system basics)
-- Workflow patterns and code examples
+Call `load_skill("skill_name")` and **stop**. The skill content will appear in your next turn.
 
-**When to load skills:**
-- You need specialized knowledge for the task
-- You want reference documentation on a specific topic
-- You need best practices or common patterns
-
-**Example:**
 ```python
-# Turn 1: Load the skill
-load_skill("python_best_practices")
-# Skill will be available in the NEXT turn, not immediately
+# Turn 1: Load the skill, then STOP
+load_skill("kubernetes")
 ```
 
-**IMPORTANT:** Skills loaded in one turn become available in the **next** turn. You cannot load and use a skill in the same turn.
+After the Observation, you'll see the skill content as `<Skill: kubernetes>...</Skill: kubernetes>` in the system message. **Then** use what you learned in your next code block.
 
-**Managing loaded skills:**
-
-Check what's currently loaded:
+❌ **Wrong** - Don't act in the same turn:
 ```python
-list_loaded_skills()  # Shows all currently loaded skills in this session
+load_skill("kubernetes")
+output = shell.run("kubectl get pods")  # You haven't seen the skill yet!
 ```
 
-Unload skills when you're done with them to reduce context size:
+✅ **Right** - Load, wait, then act:
 ```python
-unload_skill("python_best_practices")  # Remove skill from context
-# Skill removed immediately, won't be in next turn's context
+# Turn 1
+load_skill("kubernetes")
+```
+```python
+# Turn 2 (after seeing skill content)
+output = shell.run("kubectl get pods -o json")
+import json
+pods = json.loads(output)
 ```
 
-**Best practices:**
-- Load skills at the end of a turn when you'll need them next
-- Skills persist for the entire session unless explicitly unloaded
-- Unload skills after completing the relevant part of your work to reduce context
-- Auto-loaded skills (from agent frontmatter) can also be unloaded if not needed
-- Don't try to use a skill in the same turn you load it - wait for the next turn
+### When to Load Skills
+- You need guidance you don't already have
+- You want reference docs for an unfamiliar tool
+- **Skip loading** if you already know how to do the task
 
-**Example workflow across multiple turns:**
-```python
-# Turn 1: Prepare for Python work
-load_skill("python_best_practices")
-# Don't call final_answer() yet - skill not available until next turn
-
-# Turn 2: Now the skill is loaded and available
-# ... use python_best_practices guidance for code review ...
-# When done with Python work:
-unload_skill("python_best_practices")
-load_skill("api_design_basics")
-# Again, don't use api_design_basics yet - it's not available until next turn
-
-# Turn 3: Now api_design_basics is available
-# ... work on API design using the skill ...
-unload_skill("api_design_basics")
-final_answer("work complete")
-```
+### Skill Examples May Show Bash
+Skills may show bash commands. Translate to Python:
+- Skill shows: `kubectl get pods`
+- You write: `shell.run("kubectl get pods")`
 
 {% endif %}
 {% if 'web_search' in tools %}
