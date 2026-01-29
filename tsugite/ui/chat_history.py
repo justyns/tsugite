@@ -71,7 +71,6 @@ def start_conversation(
         model=model,
         machine=machine,
         created_at=timestamp,
-        timestamp=timestamp,
     )
 
     save_turn_to_history(conversation_id, metadata)

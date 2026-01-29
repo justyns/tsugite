@@ -76,6 +76,7 @@ class TestFindLatestSessionPerformance:
                         machine="test",
                         created_at=timestamp,
                         updated_at=timestamp,
+                        is_daemon_managed=is_daemon,
                     ),
                 )
                 conversations.append((conv_id, is_daemon, user_id))

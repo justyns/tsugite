@@ -561,27 +561,6 @@ class TestExecutionSteps:
         assert loaded_turn.messages[0]["role"] == "system"
         assert loaded_turn.messages[1]["content"] == "Calculate 5 + 3"
 
-    def test_backward_compatibility_old_format(self, tmp_path, monkeypatch):
-        """Test loading old conversation format without steps/messages fields."""
-        monkeypatch.setattr("tsugite.history.storage.get_history_dir", lambda: tmp_path)
-
-        conv_id = "old_format_conv"
-        conv_file = tmp_path / f"{conv_id}.jsonl"
-
-        # Write old format (without steps/messages fields)
-        old_turn = '{"type": "turn", "timestamp": "2025-10-24T10:30:00+00:00", "user": "Hello", "assistant": "Hi!", "tools": ["web_search"], "tokens": 25, "cost": 0.0005}\n'
-        conv_file.write_text(old_turn)
-
-        # Should load successfully with None for new fields
-        turns = load_conversation(conv_id)
-        assert len(turns) == 1
-        turn = turns[0]
-        assert turn.user == "Hello"
-        assert turn.assistant == "Hi!"
-        assert turn.tools == ["web_search"]
-        assert turn.steps is None  # Old format doesn't have this
-        assert turn.messages is None  # Old format doesn't have this
-
     def test_save_chat_turn_with_execution_steps(self, tmp_path, monkeypatch):
         """Test save_chat_turn function with execution steps."""
         monkeypatch.setattr("tsugite.history.storage.get_history_dir", lambda: tmp_path)

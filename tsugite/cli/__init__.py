@@ -17,10 +17,11 @@ from tsugite.options import (
     UIOptions,
 )
 
+from tsugite.console import get_error_console
+
 from .helpers import (
     assemble_prompt_with_attachments,
     change_to_root_directory,
-    get_error_console,
     get_logo,
     inject_auto_context_if_enabled,
     load_and_validate_agent,
@@ -78,21 +79,11 @@ def _build_workspace_attachments(workspace) -> List[str]:
     """Build list of workspace attachment paths (convention-based).
 
     Args:
-        workspace: Workspace object or legacy Path
+        workspace: Workspace object
 
     Returns:
         List of attachment file paths that exist
     """
-    # Handle legacy Path for backward compatibility
-    if isinstance(workspace, Path):
-        attachments = []
-        for filename in ["SOUL.md", "USER.md", "MEMORY.md"]:
-            file_path = workspace / filename
-            if file_path.exists():
-                attachments.append(str(file_path))
-        return attachments
-
-    # New convention-based approach
     from tsugite.workspace.context import build_workspace_attachments
 
     attachment_objects = build_workspace_attachments(workspace)
@@ -297,8 +288,6 @@ def _execute_agent_with_ui(
     from tsugite.ui import create_live_template_logger, create_plain_logger, custom_agent_ui
 
     if ui_opts.headless or ui_opts.final_only:
-        from .helpers import get_error_console
-
         stderr_console = get_error_console(True, console)
         show_progress_items = ui_opts.verbose and not ui_opts.final_only
 
@@ -346,10 +335,9 @@ def _execute_agent_with_ui(
 
 def _unpack_execution_result(result, should_save_history: bool, executor):
     """Unpack execution result based on whether history was enabled."""
-    from tsugite.agent_runner import run_agent
     from tsugite.agent_runner.models import AgentExecutionResult
 
-    # Handle AgentExecutionResult object (new format when return_token_usage=True)
+    # Handle AgentExecutionResult object (when return_token_usage=True)
     if isinstance(result, AgentExecutionResult):
         return (
             result.response,
@@ -360,14 +348,8 @@ def _unpack_execution_result(result, should_save_history: bool, executor):
             result.attachments,
         )
 
-    # Handle old tuple format (for backward compatibility)
-    if should_save_history and executor == run_agent and isinstance(result, tuple):
-        result_str, token_count, cost, step_count, execution_steps, system_prompt, attachments = result
-        return result_str, token_count, cost, execution_steps, system_prompt, attachments
-
     # Handle plain string result
-    result_str = result if not isinstance(result, tuple) else result[0]
-    return result_str, None, None, None, None, None
+    return result, None, None, None, None, None
 
 
 def _display_result(result_str: str, ui_opts: UIOptions, stderr_console: Console):

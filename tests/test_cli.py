@@ -648,14 +648,21 @@ class TestRunCommandHistory:
 
     def test_run_command_history_with_metadata(self, cli_runner, sample_agent_file):
         """Test that token count and cost are passed to history."""
+        from tests.conftest import mock_agent_execution_result
+
         with (
             patch("tsugite.agent_runner.run_agent") as mock_run_agent,
             patch("tsugite.md_agents.validate_agent_execution") as mock_validate,
             patch("tsugite.agent_runner.history_integration.save_run_to_history") as mock_save_history,
         ):
-            # Return tuple with metadata
-            # Format: (result, tokens, cost, step_count, steps, system_prompt, attachments)
-            mock_run_agent.return_value = ("Result", 2500, 0.12, 5, [], "System prompt", [])
+            mock_run_agent.return_value = mock_agent_execution_result(
+                response="Result",
+                token_count=2500,
+                cost=0.12,
+                execution_steps=[],
+                system_message="System prompt",
+                attachments=[],
+            )
             mock_validate.return_value = (True, "Valid")
             mock_save_history.return_value = "conv_123"
 
@@ -671,6 +678,8 @@ class TestRunCommandHistory:
 
     def test_run_command_history_conversation_created(self, cli_runner, sample_agent_file, tmp_path):
         """Test that conversation file is created after run."""
+        from tests.conftest import mock_agent_execution_result
+
         with (
             patch("tsugite.history.storage.get_history_dir", return_value=tmp_path),
             patch("tsugite.history.index.get_history_dir", return_value=tmp_path),
@@ -682,8 +691,14 @@ class TestRunCommandHistory:
         ):
             from tsugite.history import load_conversation
 
-            # Format: (result, tokens, cost, step_count, steps, system_prompt, attachments)
-            mock_run_agent.return_value = ("Result", 100, 0.01, 1, [], "System prompt", [])
+            mock_run_agent.return_value = mock_agent_execution_result(
+                response="Result",
+                token_count=100,
+                cost=0.01,
+                execution_steps=[],
+                system_message="System prompt",
+                attachments=[],
+            )
             mock_validate.return_value = (True, "Valid")
             mock_config.return_value = MagicMock(history_enabled=True)
 
@@ -706,13 +721,21 @@ class TestRunCommandHistory:
 
     def test_run_command_history_error_handling(self, cli_runner, sample_agent_file, capsys):
         """Test that history errors don't crash the run."""
+        from tests.conftest import mock_agent_execution_result
+
         with (
             patch("tsugite.agent_runner.run_agent") as mock_run_agent,
             patch("tsugite.md_agents.validate_agent_execution") as mock_validate,
             patch("tsugite.agent_runner.history_integration.save_run_to_history") as mock_save_history,
         ):
-            # Format: (result, tokens, cost, step_count, steps, system_prompt, attachments)
-            mock_run_agent.return_value = ("Result", 100, 0.01, 1, [], "System prompt", [])
+            mock_run_agent.return_value = mock_agent_execution_result(
+                response="Result",
+                token_count=100,
+                cost=0.01,
+                execution_steps=[],
+                system_message="System prompt",
+                attachments=[],
+            )
             mock_validate.return_value = (True, "Valid")
 
             # save_run_to_history raises exception
@@ -814,18 +837,3 @@ class TestUnpackExecutionResult:
         assert unpacked[4] is None
         assert unpacked[5] is None
 
-    def test_unpack_tuple_result_old_format(self):
-        """Test unpacking old tuple format (for backward compatibility)."""
-        from tsugite.agent_runner import run_agent
-        from tsugite.cli import _unpack_execution_result
-
-        # Old format: (result_str, token_count, cost, step_count, execution_steps, system_prompt, attachments)
-        result = ("Response", 100, 0.01, 5, [{"step": 1}], "System", [("f", "c")])
-        unpacked = _unpack_execution_result(result, should_save_history=True, executor=run_agent)
-
-        assert unpacked[0] == "Response"
-        assert unpacked[1] == 100
-        assert unpacked[2] == 0.01
-        assert unpacked[3] == [{"step": 1}]
-        assert unpacked[4] == "System"
-        assert unpacked[5] == [("f", "c")]

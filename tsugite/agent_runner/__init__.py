@@ -1,6 +1,5 @@
 """Agent execution engine - public API."""
 
-# Re-export public functions for backwards compatibility
 from tsugite.agent_runner.helpers import (  # noqa: F401
     clear_allowed_agents,
     clear_current_agent,
@@ -26,7 +25,6 @@ from tsugite.agent_runner.runner import (  # noqa: F401
     run_multistep_agent_async,
 )
 from tsugite.agent_runner.validation import get_agent_info, validate_agent_file  # noqa: F401
-from tsugite.tools import call_tool  # noqa: F401 - Re-export for test compatibility
 
 __all__ = [
     "run_agent",

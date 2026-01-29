@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ConversationMetadata(BaseModel):
@@ -14,8 +14,8 @@ class ConversationMetadata(BaseModel):
     """
 
     model_config = ConfigDict(
-        extra="allow",  # Allow extra fields for backward/forward compatibility
-        str_strip_whitespace=True,  # Auto-strip whitespace from strings
+        extra="forbid",
+        str_strip_whitespace=True,
     )
 
     type: str = Field(default="metadata", description="Record type identifier")
@@ -24,9 +24,8 @@ class ConversationMetadata(BaseModel):
     model: str = Field(..., description="Model identifier (provider:model format)")
     machine: str = Field(..., description="Hostname/machine name where conversation occurred")
     created_at: datetime = Field(..., description="Conversation creation timestamp")
-    timestamp: Optional[datetime] = Field(default=None, description="Alias for created_at (for backward compatibility)")
 
-    @field_validator("created_at", "timestamp", mode="before")
+    @field_validator("created_at", mode="before")
     @classmethod
     def parse_datetime(cls, v):
         """Parse ISO format strings to datetime objects."""
@@ -35,13 +34,6 @@ class ConversationMetadata(BaseModel):
         if isinstance(v, str):
             return datetime.fromisoformat(v.replace("Z", "+00:00"))
         return v
-
-    @model_validator(mode="after")
-    def set_timestamp_default(self):
-        """Set timestamp to created_at if not provided."""
-        if self.timestamp is None:
-            self.timestamp = self.created_at
-        return self
 
 
 class Turn(BaseModel):
@@ -53,7 +45,7 @@ class Turn(BaseModel):
     """
 
     model_config = ConfigDict(
-        extra="allow",  # Allow extra fields for future extensions
+        extra="forbid",
         str_strip_whitespace=True,
     )
 
@@ -87,7 +79,7 @@ class IndexEntry(BaseModel):
     """
 
     model_config = ConfigDict(
-        extra="allow",  # Allow extra fields
+        extra="forbid",
         str_strip_whitespace=True,
     )
 

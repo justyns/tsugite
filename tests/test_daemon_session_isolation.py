@@ -187,34 +187,6 @@ class TestFindLatestSessionDaemonOnly:
         result = find_latest_session("odyn", user_id="user2", daemon_only=True)
         assert result == daemon2_conv
 
-    def test_find_latest_session_backward_compatible(self, tmp_path, monkeypatch):
-        """Test that daemon_only defaults to False for backward compatibility."""
-        monkeypatch.setattr("tsugite.history.storage.get_history_dir", lambda: tmp_path)
-        monkeypatch.setattr("tsugite.history.index.get_history_dir", lambda: tmp_path)
-
-        # Create conversation
-        conv = generate_conversation_id("odyn")
-        turn = Turn(
-            timestamp=datetime.now(timezone.utc),
-            user="Message",
-            assistant="Response",
-        )
-        save_turn_to_history(conv, turn)
-        update_index(
-            conv,
-            IndexEntry(
-                agent="odyn",
-                model="test",
-                machine="test",
-                created_at=datetime.now(timezone.utc),
-                updated_at=datetime.now(timezone.utc),
-            ),
-        )
-
-        # Default behavior (daemon_only not specified)
-        result = find_latest_session("odyn")
-        assert result == conv
-
     def test_find_latest_session_daemon_only_no_index(self, tmp_path, monkeypatch):
         """Test daemon_only=True when index file doesn't exist."""
         monkeypatch.setattr("tsugite.history.storage.get_history_dir", lambda: tmp_path)

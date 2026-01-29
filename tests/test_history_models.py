@@ -18,7 +18,6 @@ class TestConversationMetadata:
             model="openai:gpt-4o",
             machine="laptop",
             created_at=now,
-            timestamp=now,
         )
 
         assert metadata.id == "20251024_103000_chat_abc123"
@@ -26,7 +25,6 @@ class TestConversationMetadata:
         assert metadata.model == "openai:gpt-4o"
         assert metadata.machine == "laptop"
         assert metadata.created_at == now
-        assert metadata.timestamp == now
 
     def test_metadata_from_dict(self):
         """Test creating metadata from dict (model_validate)."""
@@ -37,14 +35,12 @@ class TestConversationMetadata:
             "model": "test:model",
             "machine": "test_machine",
             "created_at": now.isoformat(),
-            "timestamp": now.isoformat(),
         }
 
         metadata = ConversationMetadata.model_validate(data)
         assert metadata.id == "test_id"
         assert metadata.agent == "test_agent"
         assert isinstance(metadata.created_at, datetime)
-        assert isinstance(metadata.timestamp, datetime)
 
     def test_metadata_to_dict(self):
         """Test serializing metadata to dict."""
@@ -55,14 +51,12 @@ class TestConversationMetadata:
             model="test:model",
             machine="test_machine",
             created_at=now,
-            timestamp=now,
         )
 
         data = metadata.model_dump(mode="json")
         assert data["id"] == "test_id"
         assert data["agent"] == "test_agent"
         assert isinstance(data["created_at"], str)  # ISO format string
-        assert isinstance(data["timestamp"], str)
 
     def test_metadata_json_round_trip(self):
         """Test JSON serialization round-trip."""
@@ -73,7 +67,6 @@ class TestConversationMetadata:
             model="test:model",
             machine="test_machine",
             created_at=now,
-            timestamp=now,
         )
 
         # Serialize to JSON
@@ -87,23 +80,6 @@ class TestConversationMetadata:
         assert restored.agent == original.agent
         assert restored.model == original.model
 
-    def test_metadata_extra_fields_allowed(self):
-        """Test that extra fields are allowed (permissive mode)."""
-        data = {
-            "id": "test_id",
-            "agent": "test_agent",
-            "model": "test:model",
-            "machine": "test_machine",
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "extra_field": "extra_value",
-            "another_extra": 123,
-        }
-
-        # Should not raise ValidationError
-        metadata = ConversationMetadata.model_validate(data)
-        assert metadata.id == "test_id"
-
     def test_metadata_whitespace_stripping(self):
         """Test that whitespace is stripped from strings."""
         data = {
@@ -112,7 +88,6 @@ class TestConversationMetadata:
             "model": "  test:model  ",
             "machine": "  test_machine  ",
             "created_at": datetime.now(timezone.utc).isoformat(),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
         metadata = ConversationMetadata.model_validate(data)
@@ -199,19 +174,6 @@ class TestTurn:
         json_str = turn.model_dump_json(exclude_none=True)
         assert "Hello" in json_str
         assert "timestamp" in json_str
-
-    def test_turn_extra_fields_allowed(self):
-        """Test extra fields are allowed."""
-        now = datetime.now(timezone.utc)
-        data = {
-            "timestamp": now.isoformat(),
-            "user": "Hello",
-            "assistant": "Hi",
-            "custom_metadata": {"key": "value"},
-        }
-
-        turn = Turn.model_validate(data)
-        assert turn.user == "Hello"
 
     def test_turn_with_channel_metadata(self):
         """Test turn with channel routing metadata."""
@@ -337,22 +299,6 @@ class TestIndexEntry:
         assert isinstance(data["created_at"], str)
         assert "total_tokens" not in data  # Excluded because None
 
-    def test_index_entry_extra_fields(self):
-        """Test extra fields allowed."""
-        now = datetime.now(timezone.utc)
-        data = {
-            "agent": "test_agent",
-            "model": "test:model",
-            "machine": "test_machine",
-            "created_at": now.isoformat(),
-            "updated_at": now.isoformat(),
-            "custom_field": "custom_value",
-        }
-
-        entry = IndexEntry.model_validate(data)
-        assert entry.agent == "test_agent"
-
-
 class TestDatetimeHandling:
     """Tests for datetime parsing across all models."""
 
@@ -364,7 +310,6 @@ class TestDatetimeHandling:
             "model": "test",
             "machine": "test",
             "created_at": "2025-10-24T10:30:00Z",
-            "timestamp": "2025-10-24T10:30:00Z",
         }
 
         metadata = ConversationMetadata.model_validate(data)

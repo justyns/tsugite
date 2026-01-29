@@ -54,7 +54,7 @@ def load_daemon_config(path: Optional[Path] = None) -> DaemonConfig:
     if path is None:
         from tsugite.config import get_xdg_config_path
 
-        path = get_xdg_config_path("daemon.yaml", legacy_dir=False)
+        path = get_xdg_config_path("daemon.yaml")
 
     if not path.exists():
         raise ValueError(f"Daemon config not found: {path}")

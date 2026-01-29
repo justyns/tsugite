@@ -29,7 +29,6 @@ def mock_conversation():
         model="anthropic:claude-sonnet-4.5",
         machine="test-machine",
         created_at=datetime(2025, 11, 10, 12, 0, 0),
-        timestamp=datetime(2025, 11, 10, 12, 0, 0),
     )
 
     turn1 = Turn(
@@ -210,7 +209,6 @@ def test_read_conversation_with_missing_optional_fields(history_tools):
         model="openai:gpt-4o-mini",
         machine="test-machine",
         created_at=datetime(2025, 11, 10, 12, 0, 0),
-        timestamp=datetime(2025, 11, 10, 12, 0, 0),
     )
 
     turn = Turn(

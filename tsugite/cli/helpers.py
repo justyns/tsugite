@@ -10,8 +10,6 @@ from typing import Any, List, Optional, Tuple
 import typer
 from rich.console import Console
 
-# Re-export console utilities for backwards compatibility
-from tsugite.console import get_error_console  # noqa: F401
 from tsugite.constants import TSUGITE_LOGO_NARROW, TSUGITE_LOGO_WIDE
 
 MIN_WIDTH_FOR_WIDE_LOGO = 80

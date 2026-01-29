@@ -454,28 +454,6 @@ class TestToolCallHistory:
         assert "Observation:" in messages[2]["content"]
         assert messages[3]["role"] == "assistant"
 
-    def test_load_messages_backward_compat(self, temp_history_dir):
-        """Test loading old format without steps or messages."""
-        from tsugite.agent_runner.history_integration import load_conversation_messages
-
-        conv_id = start_conversation("test_agent", "test:model")
-
-        turn = Turn(
-            timestamp=datetime.now(timezone.utc),
-            user="Simple question",
-            assistant="Simple answer",
-            tools=[],
-            tokens=25,
-            cost=0.0005,
-        )
-        save_turn_to_history(conv_id, turn)
-
-        messages = load_conversation_messages(conv_id)
-
-        assert len(messages) == 2
-        assert messages[0] == {"role": "user", "content": "Simple question"}
-        assert messages[1] == {"role": "assistant", "content": "Simple answer"}
-
     def test_cache_control_with_tool_calls(self, temp_history_dir):
         """Test that cache control is applied to all messages including tool calls."""
         from tsugite.agent_runner.history_integration import (
