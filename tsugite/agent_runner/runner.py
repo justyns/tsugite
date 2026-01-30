@@ -758,7 +758,11 @@ async def run_agent_async(
     if continue_conversation_id:
         from tsugite.agent_runner.history_integration import load_and_apply_history
 
-        previous_messages = load_and_apply_history(continue_conversation_id)
+        try:
+            previous_messages = load_and_apply_history(continue_conversation_id)
+        except ValueError:
+            # New conversation (e.g., fresh workspace session) - start with empty history
+            pass
 
     # Initialize task manager for this agent session
     reset_task_manager()

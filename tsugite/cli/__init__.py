@@ -504,9 +504,11 @@ def run(
         session = WorkspaceSession(resolved_workspace)
         session_id = session.get_conversation_id()
 
-        if session_id:
-            history_opts.continue_id = session_id
-            workspace_session_continued = True
+        if not session_id:
+            session_id = session.start_new()
+
+        history_opts.continue_id = session_id
+        workspace_session_continued = True
 
     # Add workspace files to attachment list
     workspace_attachments = []

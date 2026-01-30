@@ -758,12 +758,8 @@ class TsugiteAgent:
         # 2. Context turn (attachments + auto-loaded skills)
         context = self._build_context_turn()
         if context:
-            messages.append(
-                {"role": "user", "content": context, "cache_control": {"type": "ephemeral"}}
-            )
-            messages.append(
-                {"role": "assistant", "content": "Context loaded.", "cache_control": {"type": "ephemeral"}}
-            )
+            messages.append({"role": "user", "content": context, "cache_control": {"type": "ephemeral"}})
+            messages.append({"role": "assistant", "content": "Context loaded.", "cache_control": {"type": "ephemeral"}})
 
         # 3. Previous conversation messages (if continuing a conversation)
         if self.previous_messages:
