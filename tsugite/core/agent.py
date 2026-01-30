@@ -509,6 +509,7 @@ class TsugiteAgent:
                 output=step_output,
                 error=exec_result.error,
                 tools_called=exec_result.tools_called,
+                loaded_skills=exec_result.loaded_skills,
                 xml_observation=xml_observation,
             )
 
@@ -664,80 +665,121 @@ class TsugiteAgent:
 
         return None
 
+    def _build_context_turn(self) -> list | None:
+        """Build context turn content with attachments and auto-loaded skills.
+
+        Context is injected as a user/assistant pair for prompt cache stability.
+        System message stays constant, context turn gets cached after first call.
+
+        Returns:
+            List of content blocks, or None if no context
+        """
+        if not self.attachments and not self.skills:
+            return None
+
+        blocks = []
+        text_parts = ["<context>"]
+
+        # Text attachments wrapped in XML
+        for att in self.attachments:
+            if att.content_type == AttachmentContentType.TEXT:
+                text_parts.append(f'<attachment name="{att.name}">')
+                text_parts.append(att.content)
+                text_parts.append("</attachment>")
+            else:
+                # Native multi-modal block (image_url, file, etc.)
+                block = self._format_attachment(att)
+                if block:
+                    blocks.append(block)
+
+        # Auto-loaded skills wrapped in XML
+        for skill in self.skills:
+            text_parts.append(f'<skill name="{skill.name}">')
+            text_parts.append(skill.content)
+            text_parts.append("</skill>")
+
+        text_parts.append("</context>")
+
+        return [{"type": "text", "text": "\n".join(text_parts)}] + blocks
+
+    def _build_observation(self, step) -> str:
+        """Build observation with dynamically-loaded skills embedded.
+
+        Skills loaded mid-conversation via load_skill() are embedded in the
+        observation of the turn where they were loaded, keeping them visible
+        to the LLM without modifying system messages.
+
+        Args:
+            step: StepResult with execution output and loaded_skills
+
+        Returns:
+            Observation string with embedded skills
+        """
+        parts = []
+
+        # Embed skills loaded during this step
+        if step.loaded_skills:
+            for name, content in step.loaded_skills.items():
+                parts.append(f'<loaded_skill name="{name}">')
+                parts.append(content)
+                parts.append("</loaded_skill>")
+
+        # Regular XML observation
+        parts.append(step.xml_observation)
+
+        return "\n".join(parts)
+
     def _build_messages(self) -> List[Dict]:
         """Build message list for LLM from memory.
 
-        Uses system blocks with cache control when attachments or skills are present
-        for better prompt caching support.
+        Uses a context turn pattern for better prompt cache stability:
+        - System message is stable (no attachments/skills)
+        - Attachments and auto-loaded skills go in a context turn
+        - Dynamically-loaded skills are embedded in observations
 
-        Format with attachments/skills (system blocks):
+        Format:
         [
-            {"role": "system", "content": [
-                {"type": "text", "text": system_prompt},
-                {"type": "text", "text": attachment1, "cache_control": {"type": "ephemeral"}},
-                {"type": "text", "text": attachment2, "cache_control": {"type": "ephemeral"}},
-            ]},
-            {"role": "user", "content": "previous turn 1"},
-            {"role": "assistant", "content": "previous response 1"},
-            {"role": "user", "content": "previous turn 2"},
-            {"role": "assistant", "content": "previous response 2"},
-            {"role": "user", "content": task},
-            ...
-        ]
-
-        Format without attachments/skills (legacy):
-        [
-            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": system_prompt},           # STABLE
+            {"role": "user", "content": <context>...</context>},    # Cached
+            {"role": "assistant", "content": "Context loaded."},    # Cached
             {"role": "user", "content": "previous turn 1"},
             {"role": "assistant", "content": "previous response 1"},
             {"role": "user", "content": task},
+            {"role": "assistant", "content": "```python\\n...```"},
+            {"role": "user", "content": <loaded_skill>...</loaded_skill>\\n<observation>..."},
             ...
         ]
         """
         messages = []
 
-        # Build system message with or without attachments/skills
-        if self.attachments or self.skills:
-            # Use system blocks with cache control for better caching
-            system_blocks = [{"type": "text", "text": self._build_system_prompt()}]
+        # 1. Stable system message (never changes mid-conversation)
+        messages.append({"role": "system", "content": self._build_system_prompt()})
 
-            # Add each attachment as a separate cacheable block
-            for attachment in self.attachments:
-                attachment_block = self._format_attachment(attachment)
-                if attachment_block:
-                    attachment_block["cache_control"] = {"type": "ephemeral"}
-                    system_blocks.append(attachment_block)
+        # 2. Context turn (attachments + auto-loaded skills)
+        context = self._build_context_turn()
+        if context:
+            messages.append(
+                {"role": "user", "content": context, "cache_control": {"type": "ephemeral"}}
+            )
+            messages.append(
+                {"role": "assistant", "content": "Context loaded.", "cache_control": {"type": "ephemeral"}}
+            )
 
-            # Add each skill as a separate cacheable block
-            for skill in self.skills:
-                system_blocks.append(
-                    {
-                        "type": "text",
-                        "text": f"<Skill: {skill.name}>\n{skill.content}\n</Skill: {skill.name}>",
-                        "cache_control": {"type": "ephemeral"},
-                    }
-                )
-
-            messages.append({"role": "system", "content": system_blocks})
-        else:
-            # Legacy format: simple string
-            messages.append({"role": "system", "content": self._build_system_prompt()})
-
-        # Previous conversation messages (if continuing a conversation)
+        # 3. Previous conversation messages (if continuing a conversation)
         if self.previous_messages:
             messages.extend(self.previous_messages)
 
-        # Task
+        # 4. Task
         messages.append({"role": "user", "content": self.memory.task})
 
-        # Previous steps (Code → XML Observation pairs)
+        # 5. Previous steps (Code → Observation with embedded skills)
         for step in self.memory.steps:
             # Assistant message is just code (comments can provide reasoning)
             assistant_msg = f"```python\n{step.code}\n```"
             messages.append({"role": "assistant", "content": assistant_msg})
 
-            # XML observation from execution
-            messages.append({"role": "user", "content": step.xml_observation})
+            # Observation with loaded skills embedded
+            messages.append({"role": "user", "content": self._build_observation(step)})
 
         return messages
 

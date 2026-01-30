@@ -30,6 +30,18 @@ class SkillManager:
         self._loaded_skills: Dict[str, str] = {}
         self._registry_initialized = False
         self._workspace = workspace
+        self._executor = None
+
+    def set_executor(self, executor):
+        """Set executor reference for skill tracking.
+
+        When set, loaded skills are registered with the executor for
+        embedding in the observation of the current turn.
+
+        Args:
+            executor: LocalExecutor instance
+        """
+        self._executor = executor
 
     def _ensure_registry_initialized(self):
         """Initialize skill registry if not already initialized."""
@@ -84,6 +96,10 @@ class SkillManager:
             rendered_content = agent_renderer.render(content, context)
 
             self._loaded_skills[skill_name] = rendered_content
+
+            # Register with executor for embedding in observation
+            if self._executor and hasattr(self._executor, "register_loaded_skill"):
+                self._executor.register_loaded_skill(skill_name, rendered_content)
 
             from tsugite.events.helpers import emit_skill_loaded_event
 

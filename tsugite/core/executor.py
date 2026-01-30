@@ -29,6 +29,7 @@ class ExecutionResult:
     final_answer: Optional[Any] = None
     tools_called: List[str] = field(default_factory=list)
     variables_set: Dict[str, str] = field(default_factory=dict)  # name -> "type(size)"
+    loaded_skills: Dict[str, str] = field(default_factory=dict)  # name -> content
     truncated: bool = False
     truncated_to: Optional[str] = None  # Path to full output if truncated
 
@@ -174,6 +175,7 @@ class LocalExecutor(CodeExecutor):
         self.namespace = {}
         self._final_answer_value = None
         self._tools_called = []
+        self._loaded_skills_for_turn: Dict[str, str] = {}
         self.workspace_dir = workspace_dir
         self.event_bus = event_bus
         self.path_context = path_context
@@ -319,6 +321,13 @@ Example:
         """
         self._final_answer_value = None
         self._tools_called = []
+        self._loaded_skills_for_turn = {}
+
+        # Set executor on skill manager so load_skill() can track
+        from tsugite.tools.skills import get_skill_manager
+
+        skill_manager = get_skill_manager()
+        skill_manager.set_executor(self)
 
         safety_error = self._check_code_safety(code)
         if safety_error:
@@ -372,6 +381,7 @@ Example:
                 final_answer=self._final_answer_value,
                 tools_called=self._tools_called.copy(),
                 variables_set=variables_set,
+                loaded_skills=self._loaded_skills_for_turn.copy(),
             )
 
         except Exception as e:
@@ -388,6 +398,7 @@ Example:
                 final_answer=None,
                 tools_called=self._tools_called.copy(),
                 variables_set=variables_set,
+                loaded_skills=self._loaded_skills_for_turn.copy(),
             )
 
         finally:
@@ -426,3 +437,14 @@ Example:
             variables: Dict of {name: value} to inject
         """
         self.namespace.update(variables)
+
+    def register_loaded_skill(self, name: str, content: str):
+        """Register a skill loaded during this execution turn.
+
+        Called by load_skill() tool to track skills for observation embedding.
+
+        Args:
+            name: Skill name
+            content: Rendered skill content
+        """
+        self._loaded_skills_for_turn[name] = content

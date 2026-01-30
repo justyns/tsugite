@@ -26,17 +26,17 @@ uv run pylint tsugite
 
 ### Testing Agents
 ```bash
-# Run a basic agent
-uv run python -m tsugite.tsugite run examples/simple_variable_injection.md "test task"
+# Run a basic agent (both `tsugite` and `tsu` aliases work)
+uv run tsugite run examples/simple_variable_injection.md "test task"
 
 # Run with specific model
-uv run python -m tsugite.tsugite run +agent "task" --model openai:gpt-4o-mini
+uv run tsu run +agent "task" --model openai:gpt-4o-mini
 
-# Debug agent rendering (see what LLM receives)
-uv run python -m tsugite.tsugite render agent.md "task" --debug
+# Preview agent rendering (see what LLM receives)
+uv run tsu render agent.md "task"
 
 # Validate agent schema
-uv run python -m tsugite.tsugite validate agents/*.md
+uv run tsu validate agents/*.md
 ```
 
 ### Schema Management
@@ -52,11 +52,13 @@ Tsugite is an agentic CLI that executes AI agents defined as markdown files with
 ### Core Execution Flow
 
 1. **CLI Entry** (`tsugite/cli/__init__.py`)
-   - Typer-based CLI with subcommands (run, chat, render, config, etc.)
+   - Typer-based CLI with subcommands
    - Main commands: `run` (single-shot), `chat` (interactive), `render` (preview)
+   - Additional: `daemon`, `workspace`, `init`, `validate`, `benchmark`, `mcp`, `serve`, `agents`, `config`, `attachments`, `cache`, `tools`, `history`
 
 2. **Agent Resolution & Inheritance** (`tsugite/agent_inheritance.py`)
    - Resolves agent names to file paths using search order:
+     - Workspace agents directory (if workspace provided)
      - `.tsugite/{name}.md` (project-local)
      - `agents/{name}.md` (project convention)
      - `./{name}.md` (current directory)
@@ -79,13 +81,16 @@ Tsugite is an agentic CLI that executes AI agents defined as markdown files with
    - Builds template context (tasks, variables, helpers)
    - Renders Jinja2 templates
    - Expands tool globs and categories
+   - Loads auto_load_skills
    - Builds system prompt with tools and instructions
 
 5. **Template Rendering** (`tsugite/renderer.py`)
    - Jinja2 environment with custom helpers:
      - `{{ user_prompt }}`, `{{ tasks }}`, `{{ task_summary }}`
-     - `{{ now() }}`, `{{ today() }}`, `{{ slugify(text) }}`
-     - `{{ file_exists(path) }}`, `{{ read_text(path) }}`
+     - `{{ now() }}`, `{{ today() }}`, `{{ yesterday() }}`, `{{ tomorrow() }}`
+     - `{{ slugify(text) }}`, `{{ cwd() }}`
+     - `{{ file_exists(path) }}`, `{{ is_file(path) }}`, `{{ is_dir(path) }}`, `{{ read_text(path) }}`
+   - Context also includes: `env` (os.environ), `datetime`, `timedelta`
    - Supports step-scoped variables for multi-step agents
    - Strips ignored sections before LLM execution
 
@@ -104,22 +109,22 @@ Tsugite is an agentic CLI that executes AI agents defined as markdown files with
    - Code execution via `LocalExecutor`
 
 8. **Tool System** (`tsugite/tools/`)
-   - Tool registry with built-in tools (fs, http, shell, tasks, agents)
-   - Category system: `@fs`, `@http`, `@shell`, `@tasks`, `@agents`
+   - Tool registry with built-in tools (fs, http, shell, tasks, agents, memory, skills, history, interactive)
+   - Category system: `@fs`, `@http`, `@shell`, `@tasks`, `@agents`, `@memory`, `@skills`, `@history`, `@interactive`
    - Custom shell tools (config-based command wrappers)
    - MCP integration (`tsugite/mcp_client.py`)
    - Tool expansion supports globs (`*_search`) and exclusions (`-delete_file`)
 
 9. **Event System** (`tsugite/events/`)
    - Event-driven architecture for UI decoupling
-   - 19 event types: execution, LLM, meta, progress
+   - 24 event types: execution, LLM, meta, progress, skills
    - `EventBus` dispatches to multiple handlers
-   - Handlers: Rich console, plain text, JSONL, Textual TUI
+   - Handlers: Rich console, plain text, JSONL, Textual TUI, chat, REPL
 
 10. **History System** (`tsugite/history/`)
-    - SQLite-based conversation history
+    - JSONL-based conversation history (one `.jsonl` file per conversation)
     - Stores turns (user prompts, assistant responses)
-    - Supports continuation (`--continue` flag)
+    - Supports continuation (`--continue` flag, optional `--conversation-id`)
     - Indexed by conversation_id, agent_name, machine_name
 
 11. **Configuration** (`tsugite/config.py`)
@@ -136,7 +141,7 @@ Tsugite is an agentic CLI that executes AI agents defined as markdown files with
 - Validates all fields (name, model, tools, max_turns, etc.)
 - Schema exported to `tsugite/schemas/agent.schema.json`
 
-**PreparedAgent** (`agent_preparation.py:10`)
+**PreparedAgent** (`agent_preparation.py:17`)
 - Dataclass containing everything for execution/display
 - Ensures `render` shows exactly what `run` executes
 - Contains: agent, config, system_message, user_message, tools, context
@@ -182,7 +187,7 @@ Task management is built-in for agents (`tsugite/tools/tasks.py`):
 - **TaskManager** (singleton, thread-safe)
 - Tasks have: id, title, status (pending/in_progress/completed/blocked/cancelled), optional flag
 - Pre-populate tasks via `initial_tasks` in frontmatter
-- Tools: `add_task`, `update_task`, `list_tasks`, `complete_task`, `mark_task_in_progress`
+- Tools: `task_add`, `task_update`, `task_list`, `task_get`, `task_complete`
 - Template context: `{{ tasks }}` (list for iteration), `{{ task_summary }}` (formatted string)
 
 ### Event-Driven UI
@@ -190,15 +195,18 @@ Task management is built-in for agents (`tsugite/tools/tasks.py`):
 All UI output goes through the event system:
 
 **Event Types** (events/base.py:9):
-- Execution: TASK_START, STEP_START, CODE_EXECUTION, TOOL_CALL, OBSERVATION, FINAL_ANSWER
-- LLM: LLM_MESSAGE, EXECUTION_RESULT, REASONING_CONTENT, REASONING_TOKENS
-- Meta: COST_SUMMARY, STREAM_CHUNK, INFO, ERROR, WARNING
+- Execution: TASK_START, STEP_START, CODE_EXECUTION, TOOL_CALL, OBSERVATION, FINAL_ANSWER, ERROR
+- LLM: LLM_MESSAGE, EXECUTION_RESULT, EXECUTION_LOGS, REASONING_CONTENT, REASONING_TOKENS
+- Meta: COST_SUMMARY, STREAM_CHUNK, STREAM_COMPLETE, INFO, WARNING, DEBUG_MESSAGE
+- Skills: SKILL_LOADED, SKILL_UNLOADED, SKILL_LOAD_FAILED
+- Progress: STEP_PROGRESS, FILE_READ
 
 **Handlers** (ui/):
 - `base.py` - UIHandler interface
 - `plain.py` - Plain text (no colors, copy-paste friendly)
 - `jsonl.py` - JSONL protocol (for subprocess subagents)
 - `textual_chat.py` - Textual TUI for chat mode
+- `chat.py`, `repl_handler.py` - Interactive chat/REPL modes
 
 ### Agent Spawning (Multi-Agent)
 
@@ -223,10 +231,9 @@ tsugite run +coordinator +researcher +writer "task"
 
 Automatic caching for supported providers (OpenAI, Anthropic, Bedrock, Deepseek):
 
-- Attachments sent as separate system content blocks
-- Cache markers added automatically
-- Conversation history cached (last N turns, default 5)
-- Config: `cache_conversation_messages`, `cache_conversation_turns`
+- Attachments sent as separate system content blocks with `cache_control` markers
+- Skills also receive cache markers for reuse across turns
+- Cache markers added automatically by `tsugite/core/agent.py`
 
 ### Multi-Modal Attachments
 
@@ -282,6 +289,8 @@ tsu run -f image1.jpg -f image2.jpg "Compare these images"
 - `Attachment` dataclass: `tsugite/attachments/base.py`
 - URL handler: `tsugite/attachments/url.py` (detects content type via HEAD request)
 - File handler: `tsugite/attachments/file.py` (detects type by extension)
+- Auto-context handler: `tsugite/attachments/auto_context.py` (discovers CONTEXT.md, AGENTS.md, CLAUDE.md)
+- YouTube handler: `tsugite/attachments/youtube.py` (fetches transcripts)
 - LLM formatting: `tsugite/core/agent.py:_format_attachment()`
 
 ## Development Patterns

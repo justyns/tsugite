@@ -288,7 +288,7 @@ class TestSystemPromptWithSkills:
         )
 
     def test_build_messages_includes_skills(self, mock_agent_with_skills):
-        """Test that _build_messages includes skills with cache control."""
+        """Test that _build_messages includes skills in context turn."""
         from tsugite.core.agent import TsugiteAgent
 
         # Create agent instance with correct parameters
@@ -306,32 +306,31 @@ class TestSystemPromptWithSkills:
 
         messages = agent._build_messages()
 
-        # System message should be a list of blocks
-        assert len(messages) > 0
+        # New architecture: system message is stable string, skills in context turn
+        assert len(messages) >= 4  # system, context user, context assistant, task
         assert messages[0]["role"] == "system"
-        assert isinstance(messages[0]["content"], list)
+        assert isinstance(messages[0]["content"], str)  # Stable system message
 
-        # Should have base system prompt + 2 skills
-        content_blocks = messages[0]["content"]
-        assert len(content_blocks) >= 3  # base + 2 skills
+        # Context turn should exist (user message with skills)
+        assert messages[1]["role"] == "user"
+        assert "cache_control" in messages[1]
 
-        # Find skill blocks
-        skill_blocks = [b for b in content_blocks if isinstance(b, dict) and "<Skill:" in b.get("text", "")]
+        # Context should contain skills in XML format
+        context_content = messages[1]["content"]
+        assert isinstance(context_content, list)
+        context_text = context_content[0]["text"]
+        assert "<context>" in context_text
+        assert '<skill name="skill1">' in context_text
+        assert '<skill name="skill2">' in context_text
+        assert "# Skill 1" in context_text
+        assert "# Skill 2" in context_text
 
-        assert len(skill_blocks) == 2
-
-        # Check skill formatting
-        skill_texts = [b["text"] for b in skill_blocks]
-        assert any("<Skill: skill1>" in t for t in skill_texts)
-        assert any("<Skill: skill2>" in t for t in skill_texts)
-
-        # Check cache control markers
-        for block in skill_blocks:
-            assert "cache_control" in block
-            assert block["cache_control"]["type"] == "ephemeral"
+        # Assistant acknowledgement
+        assert messages[2]["role"] == "assistant"
+        assert messages[2]["content"] == "Context loaded."
 
     def test_skills_formatted_like_attachments(self):
-        """Test that skills use same format as attachments."""
+        """Test that skills and attachments are in the same context turn."""
         from tsugite.core.agent import TsugiteAgent
 
         # Create agent instance with correct parameters
@@ -355,18 +354,23 @@ class TestSystemPromptWithSkills:
         agent.memory.task = "Test task"
 
         messages = agent._build_messages()
-        content_blocks = messages[0]["content"]
 
-        # Find attachment and skill blocks
-        attachment_blocks = [b for b in content_blocks if isinstance(b, dict) and "<Attachment:" in b.get("text", "")]
-        skill_blocks = [b for b in content_blocks if isinstance(b, dict) and "<Skill:" in b.get("text", "")]
+        # New architecture: both in context turn (user message)
+        assert messages[1]["role"] == "user"
+        context_content = messages[1]["content"]
+        assert isinstance(context_content, list)
+        context_text = context_content[0]["text"]
 
-        # Both should exist
-        assert len(attachment_blocks) == 1
-        assert len(skill_blocks) == 1
+        # Both attachment and skill should be in context turn
+        assert "<context>" in context_text
+        assert '<attachment name="attach1">' in context_text
+        assert "Attachment content" in context_text
+        assert '<skill name="skill1">' in context_text
+        assert "Skill content" in context_text
 
-        # Both should have same cache control structure
-        assert attachment_blocks[0].get("cache_control") == skill_blocks[0].get("cache_control")
+        # Context turn should have cache control
+        assert "cache_control" in messages[1]
+        assert messages[1]["cache_control"]["type"] == "ephemeral"
 
 
 class TestSkillLoadErrorHandling:

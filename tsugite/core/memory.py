@@ -4,7 +4,7 @@ Tracks execution history for building conversation context.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
@@ -17,6 +17,7 @@ class StepResult:
     output: str
     error: Optional[str] = None
     tools_called: List[str] = field(default_factory=list)
+    loaded_skills: Dict[str, str] = field(default_factory=dict)
     xml_observation: Optional[str] = None
 
 
@@ -47,6 +48,7 @@ class AgentMemory:
         output: str,
         error: Optional[str] = None,
         tools_called: Optional[List[str]] = None,
+        loaded_skills: Optional[Dict[str, str]] = None,
         xml_observation: Optional[str] = None,
     ) -> None:
         """Add a step to history."""
@@ -57,6 +59,7 @@ class AgentMemory:
             output=output,
             error=error,
             tools_called=tools_called or [],
+            loaded_skills=loaded_skills or {},
             xml_observation=xml_observation,
         )
         self.steps.append(step)
