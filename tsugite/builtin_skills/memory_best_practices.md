@@ -5,7 +5,7 @@ description: Best practices for using the persistent memory system effectively
 
 # Memory System Best Practices
 
-You have access to persistent memory tools for storing and recalling information across sessions.
+You have access to persistent memory functions for storing and recalling information across sessions.
 
 ## Memory Types
 

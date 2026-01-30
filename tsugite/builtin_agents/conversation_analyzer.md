@@ -55,17 +55,17 @@ Examine the conversation for these issue types:
 - 🟡 **Medium**: Obvious next steps not taken
 - 🟢 **Minor**: Nice-to-have proactive actions
 
-### 4. **Tool Usage Issues** (Inefficient patterns)
-- Wrong tool selected for the task
-- Could have used a more appropriate tool
-- Tool called with wrong parameters
-- Missed opportunity to use available tools
-- Used code execution when a tool exists
+### 4. **Function Usage Issues** (Inefficient patterns)
+- Wrong function selected for the task
+- Could have used a more appropriate function
+- Function called with wrong parameters
+- Missed opportunity to use available functions
+- Used code execution when a function exists
 
 **Severity:**
-- 🔴 **Critical**: Tool misuse caused errors or delays
-- 🟡 **Medium**: Suboptimal tool choice but worked
-- 🟢 **Minor**: Alternative tool would be slightly better
+- 🔴 **Critical**: Function misuse caused errors or delays
+- 🟡 **Medium**: Suboptimal function choice but worked
+- 🟢 **Minor**: Alternative function would be slightly better
 
 ### 5. **Skill Usage Issues** (Should be automatic)
 - Should have auto-loaded a relevant skill
@@ -102,14 +102,14 @@ conversation = read_conversation("{{ user_prompt }}")
 Examine each turn carefully:
 - What did the user ask?
 - What did the agent do?
-- What tools were used?
+- What functions were called?
 - Was the response correct and complete?
 - How many turns did it take?
 - What could have been better?
 
 ### Step 3: Identify Issues
 For each issue found:
-- Categorize by type (efficiency/correctness/proactivity/tools/skills/subagents)
+- Categorize by type (efficiency/correctness/proactivity/functions/skills/subagents)
 - Assign severity (🔴 critical, 🟡 medium, 🟢 minor)
 - Note specific turn numbers where issue occurred
 - Explain why it's a problem
@@ -161,8 +161,8 @@ Produce a structured markdown report with these sections:
 ### Proactivity Issues
 [Missed opportunities, should have been automatic]
 
-### Tool Usage Issues
-[Wrong tools, missed tools, inefficient patterns]
+### Function Usage Issues
+[Wrong functions, missed functions, inefficient patterns]
 
 ### Skill Usage Issues
 [Missing skills, skill candidates, knowledge gaps]
@@ -189,7 +189,7 @@ Produce a structured markdown report with these sections:
 | Metric | Value | Assessment |
 |--------|-------|------------|
 | Turns per task | X | [Too many / Acceptable / Efficient] |
-| Tool efficiency | X% | [Poor / Fair / Good / Excellent] |
+| Function efficiency | X% | [Poor / Fair / Good / Excellent] |
 | Error rate | X% | [High / Moderate / Low] |
 | User corrections | X | [Too many / Some / None] |
 | Proactivity score | X/10 | [Reactive / Balanced / Proactive] |
@@ -216,9 +216,9 @@ Produce a structured markdown report with these sections:
 
 ❌ **Bad**: "Too many turns"
 
-✅ **Good**: "Turn 7: Agent used `run('grep pattern file')` instead of available `search_file` tool. Search tool is more robust (escapes patterns) and provides structured output. Recommendation: Use search_file(pattern='...', path='file')."
+✅ **Good**: "Turn 7: Agent used `run('grep pattern file')` instead of available `search_file` function. Search function is more robust (escapes patterns) and provides structured output. Recommendation: Use search_file(pattern='...', path='file')."
 
-❌ **Bad**: "Used wrong tool"
+❌ **Bad**: "Used wrong function"
 
 ✅ **Good**: "Turns 2-8: Agent repeatedly explained Python best practices that exist in 'python_best_practices' skill. Recommendation: Add `auto_load_skills: [python_best_practices]` to agent frontmatter."
 

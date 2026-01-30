@@ -11,7 +11,7 @@ This skill provides systematic approaches for understanding unfamiliar codebases
 
 **Each code block executes independently** - you won't see results until the next turn. This means:
 
-✅ **Good:** One tool call per code block
+✅ **Good:** One function call per code block
 ```python
 file_search(pattern="class.*Base", path="src")
 ```
@@ -23,7 +23,7 @@ results = file_search(pattern="class", path="src")
 read_file(results[0])  # Won't work - results not visible until next turn
 ```
 
-**Best practice:** Execute one tool, observe results, then decide next action based on what you learned.
+**Best practice:** Execute one function, observe results, then decide next action based on what you learned.
 
 ## Multi-Phase Exploration Pattern
 
@@ -288,7 +288,7 @@ read_file("src/routes.py")
 ```
 3. Map pattern usage across codebase based on findings
 
-## Tool Usage Patterns
+## Function Usage Patterns
 
 ### File Discovery (list_files)
 **Best for:** Finding files by name pattern, understanding structure
@@ -661,7 +661,7 @@ task_complete(task_id=1)
 **When stuck or unclear:**
 → Ask user to narrow scope or specify area of interest
 
-**Core Tools:**
+**Core Functions:**
 - `list_files(path, pattern)` - Find files by name pattern
 - `file_search(pattern, path)` - Search code with ripgrep (fast!)
 - `read_file(path)` - Read file contents

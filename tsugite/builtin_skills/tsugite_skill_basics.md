@@ -76,9 +76,9 @@ Your agent content here.
 
 Skills are loaded during agent preparation, before the first LLM turn.
 
-### Dynamic Loading with Tools
+### Dynamic Loading with Functions
 
-Agents can also load skills during execution using the `load_skill` tool:
+Agents can also load skills during execution using the `load_skill` function:
 
 ```python
 # Agent can decide to load skills based on the task
@@ -237,7 +237,7 @@ tsugite render test_skill.md "test task" --debug
 
 When writing code examples in skills, show realistic single-purpose code blocks:
 
-✅ **Good - One tool call per block:**
+✅ **Good - One function call per block:**
 ```python
 # Step 1: Search for files
 file_search(pattern="class.*Base", path="src")

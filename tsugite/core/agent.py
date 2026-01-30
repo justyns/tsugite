@@ -855,7 +855,7 @@ def build_tools_section(tools: List[Tool]) -> str:
 
     tool_definitions = "\n\n".join([tool.to_code_prompt() for tool in tools])
     return f"""
-## Available tools:
+## Available functions:
 
 You have access to these Python functions:
 
@@ -879,7 +879,7 @@ def build_text_mode_prompt(tools_section: str, instructions: str, has_tools: boo
     import os
 
     tool_rule = (
-        "4. When using code, call tools with keyword arguments: result = tool_name(arg1=value1, arg2=value2)"
+        "4. When using code, call functions with keyword arguments: result = tool_name(arg1=value1, arg2=value2)"
         if has_tools
         else "4. Use Python when you need to perform actions"
     )
@@ -895,7 +895,7 @@ Just provide your Thought with the answer directly:
 
 Thought: [Your response here]
 
-**When you need to use tools or perform actions:**
+**When you need to call functions or perform actions:**
 Write Python code in a code block (use comments for reasoning):
 
 ```python
@@ -957,7 +957,7 @@ def build_standard_mode_prompt(tools_section: str, instructions: str, has_tools:
     import os
 
     tool_rule = (
-        "3. Call tools with keyword arguments: result = tool_name(arg1=value1, arg2=value2)"
+        "3. Call functions with keyword arguments: result = tool_name(arg1=value1, arg2=value2)"
         if has_tools
         else "3. Use standard Python to solve the task"
     )

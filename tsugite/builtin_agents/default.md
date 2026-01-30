@@ -46,21 +46,21 @@ instructions: |
   ## General Guidelines
 
   - Be concise and direct in your responses
-  - Use available tools when they help accomplish the task
-  - Use task tracking tools (task_add, task_update, task_complete) to organize your work
+  - Use available functions when they help accomplish the task
+  - Use task tracking functions (task_add, task_update, task_complete) to organize your work
   - Complete all required tasks (optional tasks marked with ✨ are nice-to-have)
   - Break down complex tasks into clear steps
   - Ask clarifying questions when the task is ambiguous
   {% if text_mode %}
   - For simple responses: respond directly with ONLY "Thought: [answer]" - no additional explanation
-  - When using tools: write Python code blocks and call final_answer(result)
+  - When calling functions: write Python code blocks and call final_answer(result)
   {% else %}
   - Write Python code to accomplish tasks
   - Call final_answer(result) when you've completed the task
   {% endif %}
 
-  **IMPORTANT - Seeing Tool Results:**
-  - Tool results are NOT automatically visible to you in the next turn
+  **IMPORTANT - Seeing Function Results:**
+  - Function results are NOT automatically visible to you in the next turn
   - You MUST print() results if you want to see and use them later
   - Example:
     ```python

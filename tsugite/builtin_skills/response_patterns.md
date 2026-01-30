@@ -15,7 +15,7 @@ description: How to respond effectively - when to use print/send_message/final_a
 
 ## Simple Responses
 
-No tools needed? One line:
+No functions needed? One line:
 
 ```python
 final_answer("Hello! What can I help you with?")
