@@ -481,6 +481,7 @@ class TestToolCallHistory:
                     "thought": "Reading file",
                     "code": "read_file('test.txt')",
                     "output": "contents",
+                    "xml_observation": "<tsugite_execution_result>contents</tsugite_execution_result>",
                 },
             ],
         )

@@ -9,27 +9,39 @@ def _process_messages_field(turn, messages: list) -> None:
     """Process turn with messages field (full message history)."""
     for msg in turn.messages:
         if msg.get("role") != "system":
+            # Skip messages with null/empty content (can happen when previous run failed)
+            content = msg.get("content")
+            if content is None or (isinstance(content, str) and not content.strip()):
+                continue
             messages.append(msg)
 
 
 def _process_steps_field(turn, messages: list) -> None:
     """Process turn with steps field (execution steps)."""
-    messages.append({"role": "user", "content": turn.user})
+    if turn.user:
+        messages.append({"role": "user", "content": turn.user})
     for step in turn.steps:
         code = step.get("code", "")
         xml_observation = step.get("xml_observation", "")
 
-        # Assistant message is just code
-        messages.append({"role": "assistant", "content": f"```python\n{code}\n```"})
-        messages.append({"role": "user", "content": xml_observation})
+        # Skip steps with empty code (shouldn't happen, but be defensive)
+        if code:
+            messages.append({"role": "assistant", "content": f"```python\n{code}\n```"})
+        if xml_observation:
+            messages.append({"role": "user", "content": xml_observation})
 
-    messages.append({"role": "assistant", "content": turn.assistant})
+    # Skip assistant message if content is null/empty (can happen when previous run failed)
+    if turn.assistant:
+        messages.append({"role": "assistant", "content": turn.assistant})
 
 
 def _process_simple_turn(turn, messages: list) -> None:
     """Process simple turn (user/assistant only)."""
-    messages.append({"role": "user", "content": turn.user})
-    messages.append({"role": "assistant", "content": turn.assistant})
+    if turn.user:
+        messages.append({"role": "user", "content": turn.user})
+    # Skip assistant message if content is null/empty (can happen when previous run failed)
+    if turn.assistant:
+        messages.append({"role": "assistant", "content": turn.assistant})
 
 
 def load_conversation_messages(conversation_id: str) -> list[dict]:
@@ -229,7 +241,9 @@ def save_run_to_history(
                 messages.append({"role": "assistant", "content": f"```python\n{code}\n```"})
                 messages.append({"role": "user", "content": xml_observation})
 
-        messages.append({"role": "assistant", "content": result})
+        # Only add assistant message if result is not null/empty
+        if result:
+            messages.append({"role": "assistant", "content": result})
 
         save_chat_turn(
             conversation_id=conv_id,
