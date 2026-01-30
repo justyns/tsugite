@@ -8,7 +8,6 @@ Maintains state (variables persist between runs).
 
 import ast
 import io
-import os
 import pprint
 import sys
 from abc import ABC, abstractmethod
@@ -29,6 +28,86 @@ class ExecutionResult:
     stderr: str
     final_answer: Optional[Any] = None
     tools_called: List[str] = field(default_factory=list)
+    variables_set: Dict[str, str] = field(default_factory=dict)  # name -> "type(size)"
+    truncated: bool = False
+    truncated_to: Optional[str] = None  # Path to full output if truncated
+
+    def to_xml(self, duration_ms: int = 0, max_output_kb: int = 50) -> str:
+        """Convert execution result to structured XML format.
+
+        Args:
+            duration_ms: Execution duration in milliseconds
+            max_output_kb: Maximum output size in KB before truncation
+
+        Returns:
+            XML string with execution result
+        """
+        from xml.sax.saxutils import escape
+
+        # Check for truncation first (before building attrs)
+        output = self.output or ""
+        max_bytes = max_output_kb * 1024
+        if len(output) > max_bytes:
+            output = output[:max_bytes]
+            self.truncated = True
+
+        status = "error" if self.error else "success"
+        attrs = f'status="{status}"'
+        if duration_ms:
+            attrs += f' duration_ms="{duration_ms}"'
+        if self.truncated:
+            attrs += ' truncated="true"'
+
+        parts = [f"<tsugite_execution_result {attrs}>"]
+        parts.append(f"<output>{escape(output)}</output>")
+
+        if self.error:
+            parts.append(f"<error>{escape(self.error)}</error>")
+            # Include traceback from stderr (last 10 lines)
+            if self.stderr:
+                tb_lines = self.stderr.strip().split("\n")[-10:]
+                parts.append(f"<traceback>{escape(chr(10).join(tb_lines))}</traceback>")
+
+        if self.truncated_to:
+            parts.append(f"<truncated_to>{escape(self.truncated_to)}</truncated_to>")
+
+        if self.variables_set:
+            var_list = ", ".join(f"{escape(k)}={escape(v)}" for k, v in self.variables_set.items())
+            parts.append(f"<variables_set>{var_list}</variables_set>")
+
+        if self.final_answer is not None:
+            parts.append(f"<final_answer>{escape(str(self.final_answer))}</final_answer>")
+
+        parts.append("</tsugite_execution_result>")
+        return "\n".join(parts)
+
+
+def _summarize_variable(value: Any) -> str:
+    """Summarize a variable's type and size for display.
+
+    Args:
+        value: The variable value to summarize
+
+    Returns:
+        Summary string like "dict(3 keys)" or "list(5 items)"
+    """
+    t = type(value).__name__
+    if isinstance(value, dict):
+        return f"{t}({len(value)} keys)"
+    elif isinstance(value, (list, tuple, set, frozenset)):
+        return f"{t}({len(value)} items)"
+    elif isinstance(value, str):
+        return f"{t}({len(value)} chars)"
+    elif isinstance(value, bytes):
+        return f"{t}({len(value)} bytes)"
+    elif hasattr(value, "shape"):  # numpy/pandas
+        return f"{t}(shape={value.shape})"
+    elif hasattr(value, "__len__"):
+        try:
+            return f"{t}({len(value)} items)"
+        except Exception:
+            pass
+    return t
 
 
 class CodeExecutor(ABC):
@@ -236,7 +315,7 @@ Example:
             code: Python code to execute
 
         Returns:
-            ExecutionResult with output, error, stdout, stderr, final_answer, and tools_called
+            ExecutionResult with output, error, stdout, stderr, final_answer, tools_called, and variables_set
         """
         self._final_answer_value = None
         self._tools_called = []
@@ -257,6 +336,9 @@ Example:
 
         old_stdout = sys.stdout
         old_stderr = sys.stderr
+
+        # Track variables before execution
+        namespace_before = set(self.namespace.keys())
 
         try:
             sys.stdout = stdout_capture
@@ -279,6 +361,9 @@ Example:
             output = stdout_capture.getvalue()
             stderr_output = stderr_capture.getvalue()
 
+            # Track new variables (exclude _ prefixed private vars)
+            variables_set = self._get_new_variables(namespace_before)
+
             return ExecutionResult(
                 output=output,
                 error=None,
@@ -286,10 +371,15 @@ Example:
                 stderr=stderr_output,
                 final_answer=self._final_answer_value,
                 tools_called=self._tools_called.copy(),
+                variables_set=variables_set,
             )
 
         except Exception as e:
             error_msg = f"{type(e).__name__}: {str(e)}"
+
+            # Still capture any variables set before error
+            variables_set = self._get_new_variables(namespace_before)
+
             return ExecutionResult(
                 output=stdout_capture.getvalue(),
                 error=error_msg,
@@ -297,11 +387,35 @@ Example:
                 stderr=stderr_capture.getvalue() + "\n" + error_msg,
                 final_answer=None,
                 tools_called=self._tools_called.copy(),
+                variables_set=variables_set,
             )
 
         finally:
             sys.stdout = old_stdout
             sys.stderr = old_stderr
+
+    def _get_new_variables(self, namespace_before: set) -> Dict[str, str]:
+        """Get new variables created since namespace_before snapshot.
+
+        Args:
+            namespace_before: Set of variable names before execution
+
+        Returns:
+            Dict of {variable_name: summary} for new variables
+        """
+        namespace_after = set(self.namespace.keys())
+        new_vars = namespace_after - namespace_before
+
+        variables_set = {}
+        for var_name in new_vars:
+            # Skip private variables (starting with _)
+            if var_name.startswith("_"):
+                continue
+            try:
+                variables_set[var_name] = _summarize_variable(self.namespace[var_name])
+            except Exception:
+                variables_set[var_name] = type(self.namespace[var_name]).__name__
+        return variables_set
 
     async def send_variables(self, variables: Dict[str, Any]):
         """Inject variables into namespace.

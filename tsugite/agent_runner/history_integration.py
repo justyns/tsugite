@@ -16,17 +16,12 @@ def _process_steps_field(turn, messages: list) -> None:
     """Process turn with steps field (execution steps)."""
     messages.append({"role": "user", "content": turn.user})
     for step in turn.steps:
-        thought = step.get("thought", "")
         code = step.get("code", "")
-        output = step.get("output", "")
-        error = step.get("error")
+        xml_observation = step.get("xml_observation", "")
 
-        messages.append({"role": "assistant", "content": f"Thought: {thought}\n\n```python\n{code}\n```"})
-
-        observation = f"Observation: {output}"
-        if error:
-            observation += f"\nError: {error}"
-        messages.append({"role": "user", "content": observation})
+        # Assistant message is just code
+        messages.append({"role": "assistant", "content": f"```python\n{code}\n```"})
+        messages.append({"role": "user", "content": xml_observation})
 
     messages.append({"role": "assistant", "content": turn.assistant})
 
@@ -227,12 +222,12 @@ def save_run_to_history(
 
         if execution_steps:
             for step in execution_steps:
-                thought = getattr(step, "thought", "")
                 code = getattr(step, "code", "")
-                output = getattr(step, "output", "")
+                xml_observation = getattr(step, "xml_observation", "")
 
-                messages.append({"role": "assistant", "content": f"Thought: {thought}\n\n```python\n{code}\n```"})
-                messages.append({"role": "user", "content": f"Observation: {output}"})
+                # Assistant message is just code
+                messages.append({"role": "assistant", "content": f"```python\n{code}\n```"})
+                messages.append({"role": "user", "content": xml_observation})
 
         messages.append({"role": "assistant", "content": result})
 

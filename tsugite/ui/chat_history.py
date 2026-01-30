@@ -139,6 +139,7 @@ def save_chat_turn(
                     "output": getattr(step, "output", ""),
                     "error": getattr(step, "error", None),
                     "tools_called": getattr(step, "tools_called", []),
+                    "xml_observation": getattr(step, "xml_observation", None),
                 }
                 steps_dicts.append(step_dict)
             elif isinstance(step, dict):

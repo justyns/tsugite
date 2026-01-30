@@ -2,7 +2,7 @@
 
 import pytest
 
-from tsugite.core.executor import ExecutionResult, LocalExecutor
+from tsugite.core.executor import ExecutionResult, LocalExecutor, _summarize_variable
 
 
 @pytest.mark.asyncio
@@ -311,3 +311,250 @@ async def test_local_executor_single_expression():
 
     assert result.error is None
     assert "4" in result.output
+
+
+# ============================================================================
+# XML Execution Result Tests
+# ============================================================================
+
+
+class TestSummarizeVariable:
+    """Tests for the _summarize_variable helper function."""
+
+    def test_dict(self):
+        assert _summarize_variable({"a": 1, "b": 2, "c": 3}) == "dict(3 keys)"
+
+    def test_list(self):
+        assert _summarize_variable([1, 2, 3, 4, 5]) == "list(5 items)"
+
+    def test_tuple(self):
+        assert _summarize_variable((1, 2, 3)) == "tuple(3 items)"
+
+    def test_set(self):
+        assert _summarize_variable({1, 2, 3, 4}) == "set(4 items)"
+
+    def test_str(self):
+        assert _summarize_variable("hello world") == "str(11 chars)"
+
+    def test_bytes(self):
+        assert _summarize_variable(b"test") == "bytes(4 bytes)"
+
+    def test_int(self):
+        assert _summarize_variable(42) == "int"
+
+    def test_float(self):
+        assert _summarize_variable(3.14) == "float"
+
+    def test_bool(self):
+        assert _summarize_variable(True) == "bool"
+
+    def test_none(self):
+        assert _summarize_variable(None) == "NoneType"
+
+    def test_custom_class(self):
+        class MyClass:
+            pass
+
+        assert _summarize_variable(MyClass()) == "MyClass"
+
+
+class TestExecutionResultToXml:
+    """Tests for ExecutionResult.to_xml() method."""
+
+    def test_success_basic(self):
+        result = ExecutionResult(
+            output="Hello, world!",
+            error=None,
+            stdout="Hello, world!",
+            stderr="",
+        )
+        xml = result.to_xml()
+        assert '<tsugite_execution_result status="success">' in xml
+        assert "<output>Hello, world!</output>" in xml
+        assert "</tsugite_execution_result>" in xml
+        assert "<error>" not in xml
+
+    def test_success_with_duration(self):
+        result = ExecutionResult(
+            output="test",
+            error=None,
+            stdout="test",
+            stderr="",
+        )
+        xml = result.to_xml(duration_ms=142)
+        assert 'duration_ms="142"' in xml
+
+    def test_error_with_traceback(self):
+        result = ExecutionResult(
+            output="partial output",
+            error="FileNotFoundError: /tmp/missing.txt",
+            stdout="partial output",
+            stderr='Traceback:\n  File "test.py", line 1\nFileNotFoundError: /tmp/missing.txt',
+        )
+        xml = result.to_xml()
+        assert '<tsugite_execution_result status="error">' in xml
+        assert "<error>FileNotFoundError: /tmp/missing.txt</error>" in xml
+        assert "<traceback>" in xml
+        assert "</traceback>" in xml
+
+    def test_xml_escaping(self):
+        result = ExecutionResult(
+            output="<script>alert('xss')</script>",
+            error=None,
+            stdout="<script>alert('xss')</script>",
+            stderr="",
+        )
+        xml = result.to_xml()
+        assert "&lt;script&gt;" in xml
+        assert "<script>" not in xml.replace("&lt;script&gt;", "")
+
+    def test_variables_set(self):
+        result = ExecutionResult(
+            output="",
+            error=None,
+            stdout="",
+            stderr="",
+            variables_set={"config": "dict(3 keys)", "files": "list(5 items)"},
+        )
+        xml = result.to_xml()
+        assert "<variables_set>" in xml
+        assert "config=dict(3 keys)" in xml
+        assert "files=list(5 items)" in xml
+
+    def test_final_answer(self):
+        result = ExecutionResult(
+            output="",
+            error=None,
+            stdout="",
+            stderr="",
+            final_answer="The answer is 42",
+        )
+        xml = result.to_xml()
+        assert "<final_answer>The answer is 42</final_answer>" in xml
+
+    def test_truncation(self):
+        large_output = "x" * (100 * 1024)  # 100KB
+        result = ExecutionResult(
+            output=large_output,
+            error=None,
+            stdout=large_output,
+            stderr="",
+        )
+        xml = result.to_xml(max_output_kb=50)
+        assert 'truncated="true"' in xml
+        assert result.truncated is True
+        # Output should be truncated to ~50KB
+        assert len(xml) < len(large_output)
+
+    def test_empty_output_still_present(self):
+        result = ExecutionResult(
+            output="",
+            error=None,
+            stdout="",
+            stderr="",
+        )
+        xml = result.to_xml()
+        assert "<output></output>" in xml
+
+    def test_unicode_in_output(self):
+        result = ExecutionResult(
+            output="Hello 世界 🌍",
+            error=None,
+            stdout="Hello 世界 🌍",
+            stderr="",
+        )
+        xml = result.to_xml()
+        assert "Hello 世界 🌍" in xml
+
+    def test_variable_name_escaping(self):
+        result = ExecutionResult(
+            output="",
+            error=None,
+            stdout="",
+            stderr="",
+            variables_set={"my<var>": "str(10 chars)"},
+        )
+        xml = result.to_xml()
+        assert "my&lt;var&gt;=" in xml
+
+
+@pytest.mark.asyncio
+async def test_local_executor_variable_tracking():
+    """Test that new variables are tracked in variables_set."""
+    executor = LocalExecutor()
+
+    result = await executor.execute("x = 42\ny = 'hello'\nz = [1, 2, 3]")
+
+    assert result.error is None
+    assert "x" in result.variables_set
+    assert "y" in result.variables_set
+    assert "z" in result.variables_set
+    assert result.variables_set["x"] == "int"
+    assert result.variables_set["y"] == "str(5 chars)"
+    assert result.variables_set["z"] == "list(3 items)"
+
+
+@pytest.mark.asyncio
+async def test_local_executor_private_variables_excluded():
+    """Test that private variables (starting with _) are not tracked."""
+    executor = LocalExecutor()
+
+    result = await executor.execute("x = 1\n_private = 2\n__dunder = 3")
+
+    assert result.error is None
+    assert "x" in result.variables_set
+    assert "_private" not in result.variables_set
+    assert "__dunder" not in result.variables_set
+
+
+@pytest.mark.asyncio
+async def test_local_executor_variables_tracked_on_error():
+    """Test that variables set before an error are still captured."""
+    executor = LocalExecutor()
+
+    result = await executor.execute("x = 42\ny = 'set before error'\n1/0")
+
+    assert result.error is not None
+    assert "ZeroDivisionError" in result.error
+    # Variables set before the error should still be captured
+    assert "x" in result.variables_set
+    assert "y" in result.variables_set
+
+
+@pytest.mark.asyncio
+async def test_local_executor_xml_observation_success():
+    """Test that to_xml() produces valid XML on success."""
+    executor = LocalExecutor()
+
+    result = await executor.execute("x = {'a': 1, 'b': 2}\nprint('hello')")
+    xml = result.to_xml(duration_ms=50)
+
+    assert '<tsugite_execution_result status="success"' in xml
+    assert "<output>hello" in xml
+    assert "x=dict(2 keys)" in xml
+    assert "</tsugite_execution_result>" in xml
+
+
+@pytest.mark.asyncio
+async def test_local_executor_xml_observation_error():
+    """Test that to_xml() produces valid XML on error."""
+    executor = LocalExecutor()
+
+    result = await executor.execute("print('before error')\nundefined_var")
+    xml = result.to_xml(duration_ms=25)
+
+    assert '<tsugite_execution_result status="error"' in xml
+    assert "<output>before error" in xml
+    assert "<error>NameError:" in xml
+    assert "</tsugite_execution_result>" in xml
+
+
+@pytest.mark.asyncio
+async def test_local_executor_xml_with_final_answer():
+    """Test that final_answer appears in XML."""
+    executor = LocalExecutor()
+
+    result = await executor.execute("final_answer('completed!')")
+    xml = result.to_xml()
+
+    assert "<final_answer>completed!</final_answer>" in xml

@@ -393,8 +393,13 @@ class TsugiteAgent:
                 if self.event_bus:
                     self.event_bus.emit(CodeExecutionEvent(code=code))
 
-                # Execute the code
+                # Execute the code and track duration
+                exec_start_time = time.perf_counter()
                 exec_result = await self.executor.execute(code)
+                exec_duration_ms = int((time.perf_counter() - exec_start_time) * 1000)
+
+                # Generate XML observation
+                xml_observation = exec_result.to_xml(duration_ms=exec_duration_ms)
 
                 # Trigger observation event
                 if self.event_bus:
@@ -423,6 +428,7 @@ class TsugiteAgent:
                 from .executor import ExecutionResult
 
                 exec_result = ExecutionResult(output="", error=None, stdout="", stderr="")
+                xml_observation = None  # No XML for non-code responses
 
                 if self.text_mode:
                     # In text mode, code blocks are optional
@@ -467,12 +473,22 @@ class TsugiteAgent:
 
                     # Add the thought and correction as a step
                     # This will show the LLM what it did wrong and how to fix it
+                    # Use XML format for the correction message
+                    from xml.sax.saxutils import escape
+
+                    correction_xml = (
+                        '<tsugite_execution_result status="error">\n'
+                        "<output></output>\n"
+                        f"<error>{escape(correction_msg)}</error>\n"
+                        "</tsugite_execution_result>"
+                    )
                     self.memory.add_step(
                         thought=thought if thought else "(No thought provided)",
                         code="",
                         output=correction_msg,
                         error=None,
                         tools_called=[],
+                        xml_observation=correction_xml,
                     )
 
                     # Continue to next turn - the correction will be in the observation
@@ -493,6 +509,7 @@ class TsugiteAgent:
                 output=step_output,
                 error=exec_result.error,
                 tools_called=exec_result.tools_called,
+                xml_observation=xml_observation,
             )
 
             # Check if final_answer was called during execution
@@ -713,18 +730,14 @@ class TsugiteAgent:
         # Task
         messages.append({"role": "user", "content": self.memory.task})
 
-        # Previous steps (Thought/Code → Observation pairs)
+        # Previous steps (Code → XML Observation pairs)
         for step in self.memory.steps:
-            # Assistant's thought + code
-            assistant_msg = f"Thought: {step.thought}\n\n```python\n{step.code}\n```"
+            # Assistant message is just code (comments can provide reasoning)
+            assistant_msg = f"```python\n{step.code}\n```"
             messages.append({"role": "assistant", "content": assistant_msg})
 
-            # Observation (code execution result)
-            observation = f"Observation: {step.output}"
-            if step.error:
-                observation += f"\nError: {step.error}"
-
-            messages.append({"role": "user", "content": observation})
+            # XML observation from execution
+            messages.append({"role": "user", "content": step.xml_observation})
 
         return messages
 
@@ -845,23 +858,42 @@ Just provide your Thought with the answer directly:
 Thought: [Your response here]
 
 **When you need to use tools or perform actions:**
-Provide a Thought and write Python code:
+Write Python code in a code block (use comments for reasoning):
 
-Thought: [What you'll do and why]
 ```python
-# Your code here
-final_answer(result)
+# First, read the config to understand the structure
+config = read_file("config.yaml")
+print(config)  # See the contents
 ```
 
 ## Current Working Directory
 
 {cwd}
 {tools_section}
+## Execution Results
+
+After code runs, you'll see structured XML:
+
+```xml
+<tsugite_execution_result status="success" duration_ms="142">
+<output>file contents here...</output>
+<variables_set>config=str(1234 chars)</variables_set>
+</tsugite_execution_result>
+```
+
+Fields:
+- `status`: "success" or "error"
+- `<output>`: Your print() output
+- `<error>`: Error message if failed
+- `<traceback>`: Python traceback if failed
+- `<variables_set>`: New variables you created
+- `<final_answer>`: Confirms completion when you call final_answer()
+
 ## Rules:
 
-1. Start with "Thought:" to explain your reasoning
-2. Code blocks are OPTIONAL - only use them when you need tools or complex logic
-3. For direct answers, just provide the Thought without code
+1. Code blocks are OPTIONAL - only use them when you need tools or complex logic
+2. For direct answers, provide the answer directly starting with "Thought:"
+3. Use comments in code for reasoning if needed
 {tool_rule}
 5. Variables persist across code blocks
 6. **To complete your turn, you MUST call one of:**
@@ -896,21 +928,41 @@ def build_standard_mode_prompt(tools_section: str, instructions: str, has_tools:
 
     return f"""You are an expert assistant who solves tasks using Python code.
 
-To solve a task, you proceed in steps using this pattern:
+## How to Respond
 
-1. **Thought:** Explain your reasoning (what you'll do and why)
-2. **Code:** Write Python code in a code block
-3. **Observation:** You'll see the code execution result
+Write Python code in a code block. Use comments for reasoning if needed:
 
-You repeat this Thought → Code → Observation cycle until you have the final answer.
+```python
+# First, read the config to understand the structure
+config = read_file("config.yaml")
+print(config)  # See the contents
+```
 
 ## Current Working Directory
 
 {cwd}
 
+## Execution Results
+
+After code runs, you'll see structured XML:
+
+```xml
+<tsugite_execution_result status="success" duration_ms="142">
+<output>file contents here...</output>
+<variables_set>config=str(1234 chars)</variables_set>
+</tsugite_execution_result>
+```
+
+Fields:
+- `status`: "success" or "error"
+- `<output>`: Your print() output
+- `<error>`: Error message if failed
+- `<traceback>`: Python traceback if failed (last 10 lines)
+- `<variables_set>`: New variables you created
+- `<final_answer>`: Confirms completion when you call final_answer()
+
 ## How to write code:
 
-- Always start with a Thought explaining your approach
 - Write code in triple-backtick code blocks: ```python
 - Use print() to output important information
 - Variables persist between code blocks
@@ -918,8 +970,8 @@ You repeat this Thought → Code → Observation cycle until you have the final 
 {tools_section}
 ## Rules:
 
-1. Always provide Thought before code
-2. Only use variables you've defined
+1. Only use variables you've defined
+2. Use comments in code for reasoning if needed
 {tool_rule}
 4. If you get an error, try a different approach
 5. State persists - variables remain available across code blocks

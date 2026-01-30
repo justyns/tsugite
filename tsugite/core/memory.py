@@ -17,6 +17,7 @@ class StepResult:
     output: str
     error: Optional[str] = None
     tools_called: List[str] = field(default_factory=list)
+    xml_observation: Optional[str] = None
 
 
 @dataclass
@@ -46,6 +47,7 @@ class AgentMemory:
         output: str,
         error: Optional[str] = None,
         tools_called: Optional[List[str]] = None,
+        xml_observation: Optional[str] = None,
     ) -> None:
         """Add a step to history."""
         step = StepResult(
@@ -55,6 +57,7 @@ class AgentMemory:
             output=output,
             error=error,
             tools_called=tools_called or [],
+            xml_observation=xml_observation,
         )
         self.steps.append(step)
 

@@ -361,11 +361,10 @@ async def test_agent_build_system_prompt():
     # Check that prompt includes instructions
     assert "You are an expert researcher." in prompt
 
-    # Check that prompt has basic structure
-    assert "Thought" in prompt
-    assert "Code" in prompt
-    assert "Observation" in prompt
+    # Check that prompt has basic structure (XML execution results)
+    assert "tsugite_execution_result" in prompt
     assert "final_answer" in prompt
+    assert "```python" in prompt
 
 
 @pytest.mark.asyncio
@@ -453,35 +452,37 @@ async def test_agent_build_messages():
     # Set task
     agent.memory.add_task("Calculate 5 + 3")
 
-    # Add a step
+    # Add a step (with xml_observation for new format)
     agent.memory.add_step(
         thought="I'll use Python to calculate",
         code="result = 5 + 3\nprint(result)",
         output="8",
         error=None,
+        xml_observation='<tsugite_execution_result status="success">\n<output>8</output>\n</tsugite_execution_result>',
     )
 
     messages = agent._build_messages()
 
-    # Should have system, user (task), assistant (thought+code), user (observation)
+    # Should have system, user (task), assistant (code), user (observation)
     assert len(messages) == 4
 
     # Check system message
     assert messages[0]["role"] == "system"
-    assert "Thought" in messages[0]["content"]
+    assert "tsugite_execution_result" in messages[0]["content"]
 
     # Check task
     assert messages[1]["role"] == "user"
     assert messages[1]["content"] == "Calculate 5 + 3"
 
-    # Check assistant response
+    # Check assistant response (just code, no Thought prefix)
     assert messages[2]["role"] == "assistant"
-    assert "Thought: I'll use Python to calculate" in messages[2]["content"]
     assert "```python" in messages[2]["content"]
+    assert "result = 5 + 3" in messages[2]["content"]
 
-    # Check observation
+    # Check observation (XML format)
     assert messages[3]["role"] == "user"
-    assert "Observation: 8" in messages[3]["content"]
+    assert "<tsugite_execution_result" in messages[3]["content"]
+    assert "<output>8</output>" in messages[3]["content"]
 
 
 @pytest.mark.asyncio

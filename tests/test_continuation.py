@@ -348,6 +348,7 @@ class TestToolCallHistory:
 
         conv_id = start_conversation("test_agent", "test:model")
 
+        # Steps now require xml_observation field
         turn = Turn(
             timestamp=datetime.now(timezone.utc),
             user="Read config.json",
@@ -360,6 +361,7 @@ class TestToolCallHistory:
                     "thought": "I need to read the config file",
                     "code": "read_file('config.json')",
                     "output": '{"key": "value"}',
+                    "xml_observation": '<tsugite_execution_result status="success">\n<output>{"key": "value"}</output>\n</tsugite_execution_result>',
                 },
             ],
         )
@@ -370,11 +372,13 @@ class TestToolCallHistory:
         assert len(messages) == 4
         assert messages[0]["role"] == "user"
         assert messages[0]["content"] == "Read config.json"
+        # Assistant message now just contains code (no Thought prefix)
         assert messages[1]["role"] == "assistant"
-        assert "Thought: I need to read the config file" in messages[1]["content"]
         assert "read_file('config.json')" in messages[1]["content"]
+        assert "```python" in messages[1]["content"]
+        # Observation is XML format
         assert messages[2]["role"] == "user"
-        assert "Observation:" in messages[2]["content"]
+        assert "<tsugite_execution_result" in messages[2]["content"]
         assert '{"key": "value"}' in messages[2]["content"]
         assert messages[3]["role"] == "assistant"
         assert messages[3]["content"] == "The config contains: {...}"
@@ -397,11 +401,13 @@ class TestToolCallHistory:
                     "thought": "First search the web",
                     "code": "web_search('python')",
                     "output": "Found 100 results",
+                    "xml_observation": '<tsugite_execution_result status="success">\n<output>Found 100 results</output>\n</tsugite_execution_result>',
                 },
                 {
                     "thought": "Now write to file",
                     "code": "write_file('results.txt', data)",
                     "output": "File written successfully",
+                    "xml_observation": '<tsugite_execution_result status="success">\n<output>File written successfully</output>\n</tsugite_execution_result>',
                 },
             ],
         )

@@ -588,7 +588,6 @@ def workspace_directory_context(
     Raises:
         typer.Exit: If specified directory doesn't exist
     """
-    from typing import Generator
 
     invoked_from = Path.cwd()
     workspace_dir = Path(workspace.path) if workspace else None
