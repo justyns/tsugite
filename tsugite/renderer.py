@@ -100,6 +100,13 @@ def strip_ignored_sections(content: str) -> str:
     return result
 
 
+def cwd() -> str:
+    """Get current working directory."""
+    from pathlib import Path
+
+    return str(Path.cwd())
+
+
 class AgentRenderer:
     """Jinja2 template renderer for agent content."""
 
@@ -126,6 +133,7 @@ class AgentRenderer:
                 "is_dir": is_dir,
                 "read_text": read_text,
                 "env": dict(os.environ),
+                "cwd": cwd,
             }
         )
 

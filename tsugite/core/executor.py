@@ -79,18 +79,25 @@ class LocalExecutor(CodeExecutor):
         result = await executor.execute("print(x + 3)")  # Prints: 8
     """
 
-    def __init__(self, workspace_dir: Optional[Path] = None, event_bus: Optional[Any] = None):
+    def __init__(
+        self,
+        workspace_dir: Optional[Path] = None,
+        event_bus: Optional[Any] = None,
+        path_context: Optional[Any] = None,
+    ):
         """Initialize executor with empty namespace.
 
         Args:
-            workspace_dir: Optional workspace directory to use as working directory
+            workspace_dir: Optional workspace directory (for reference, CWD set at CLI level)
             event_bus: Optional event bus for emitting events (used by send_message)
+            path_context: Optional PathContext with invoked_from, workspace_dir, effective_cwd
         """
         self.namespace = {}
         self._final_answer_value = None
         self._tools_called = []
         self.workspace_dir = workspace_dir
         self.event_bus = event_bus
+        self.path_context = path_context
 
         # Inject final_answer function into namespace
         # Accept any arg name (value, result, etc.) since LLMs may vary
@@ -118,6 +125,14 @@ class LocalExecutor(CodeExecutor):
             return f"Message sent: {msg}"
 
         self.namespace["send_message"] = send_message
+
+        # Inject path context variables for workspace-aware code
+        if path_context:
+            self.namespace["WORKSPACE_DIR"] = str(path_context.workspace_dir) if path_context.workspace_dir else None
+            self.namespace["INVOKED_FROM"] = str(path_context.invoked_from) if path_context.invoked_from else None
+        else:
+            self.namespace["WORKSPACE_DIR"] = None
+            self.namespace["INVOKED_FROM"] = None
 
     def _split_code_for_last_expr(self, code: str) -> tuple[str, Optional[str]]:
         """Split code into setup and last expression if applicable.
@@ -215,7 +230,7 @@ Example:
         """Execute code using exec().
 
         Automatically displays the value of the last expression (REPL-like behavior).
-        If workspace_dir is set, changes to that directory before execution.
+        CWD is managed at CLI level - no directory changes here.
 
         Args:
             code: Python code to execute
@@ -242,14 +257,8 @@ Example:
 
         old_stdout = sys.stdout
         old_stderr = sys.stderr
-        old_cwd = None
 
         try:
-            # Change to workspace directory if specified
-            if self.workspace_dir:
-                old_cwd = os.getcwd()
-                os.chdir(self.workspace_dir)
-
             sys.stdout = stdout_capture
             sys.stderr = stderr_capture
 
@@ -293,8 +302,6 @@ Example:
         finally:
             sys.stdout = old_stdout
             sys.stderr = old_stderr
-            if old_cwd:
-                os.chdir(old_cwd)
 
     async def send_variables(self, variables: Dict[str, Any]):
         """Inject variables into namespace.

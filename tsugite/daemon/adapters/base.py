@@ -128,7 +128,6 @@ class BaseAdapter(ABC):
             attachments=self.workspace_attachments,
             exec_options=ExecutionOptions(
                 return_token_usage=True,  # Need tokens for tracking
-                auto_context=False,
             ),
             channel_metadata=metadata,
             custom_logger=custom_logger,

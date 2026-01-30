@@ -4,8 +4,12 @@ import hashlib
 import io
 import os
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Generator, List, Optional, Tuple
+
+if TYPE_CHECKING:
+    pass
 
 import typer
 from rich.console import Console
@@ -521,6 +525,21 @@ def _validate_and_change_to_root(root: Optional[str], console: Console) -> Optio
     return original_cwd
 
 
+@dataclass
+class PathContext:
+    """Context for tracking working directory and invocation location.
+
+    Attributes:
+        invoked_from: Directory where the command was invoked from
+        workspace_dir: Workspace directory path (if using workspace)
+        effective_cwd: The actual working directory during execution
+    """
+
+    invoked_from: Path
+    workspace_dir: Optional[Path]
+    effective_cwd: Path
+
+
 @contextmanager
 def change_to_root_directory(root: Optional[str], console: Console):
     """Context manager for temporarily changing to a root directory.
@@ -542,6 +561,66 @@ def change_to_root_directory(root: Optional[str], console: Console):
     finally:
         if original_cwd:
             os.chdir(original_cwd)
+
+
+@contextmanager
+def workspace_directory_context(
+    workspace: Optional[Any],
+    root: Optional[str],
+    console: Console,
+) -> "Generator[PathContext, None, None]":
+    """Context manager for workspace-aware directory handling.
+
+    Implements the workspace CWD behavior:
+    - No workspace, no root: CWD unchanged
+    - Workspace only: CWD = workspace.path
+    - Root only: CWD = root
+    - Workspace + root: CWD = root (workspace_dir tracked separately)
+
+    Args:
+        workspace: Resolved workspace object (with .path attribute)
+        root: Optional explicit root directory override
+        console: Console for error messages
+
+    Yields:
+        PathContext with invoked_from, workspace_dir, effective_cwd
+
+    Raises:
+        typer.Exit: If specified directory doesn't exist
+    """
+    from typing import Generator
+
+    invoked_from = Path.cwd()
+    workspace_dir = Path(workspace.path) if workspace else None
+
+    # Determine effective CWD based on flags
+    if workspace and not root:
+        effective_cwd = Path(workspace.path)
+    elif root:
+        effective_cwd = Path(root)
+    else:
+        effective_cwd = invoked_from
+
+    # Validate and change directory
+    if effective_cwd != invoked_from:
+        if not effective_cwd.exists():
+            dir_type = "Workspace" if workspace and not root else "Working"
+            console.print(f"[red]{dir_type} directory not found: {effective_cwd}[/red]")
+            raise typer.Exit(1)
+        os.chdir(str(effective_cwd))
+
+    path_context = PathContext(
+        invoked_from=invoked_from,
+        workspace_dir=workspace_dir,
+        effective_cwd=effective_cwd,
+    )
+
+    try:
+        yield path_context
+    finally:
+        # Always restore original CWD
+        if effective_cwd != invoked_from:
+            os.chdir(str(invoked_from))
 
 
 @contextmanager

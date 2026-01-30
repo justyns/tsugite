@@ -118,9 +118,13 @@ def send_message(message: str) -> str:
         send_message(f"Found {len(files)} files, processing...")
         final_answer("Analysis complete")
     """
-    # This tool exists for documentation purposes only.
-    # The executor has a built-in send_message that has access to the event_bus.
-    # See agent.py _inject_tools_into_executor() for why this isn't injected.
+    from tsugite.ui_context import get_event_bus
+
+    event_bus = get_event_bus()
+    if event_bus:
+        from tsugite.events import InfoEvent
+
+        event_bus.emit(InfoEvent(message=str(message)))
     return f"Message sent: {message}"
 
 

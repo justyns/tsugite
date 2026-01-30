@@ -145,8 +145,8 @@ def test_list_local_agents_empty(tmp_path):
     assert len(result) == 1
     assert "Built-in" in result
     assert (
-        len(result["Built-in"]) == 6
-    )  # default, chat-assistant, file_searcher, code_searcher, conversation_analyzer, memory
+        len(result["Built-in"]) == 7
+    )  # default, chat-assistant, file_searcher, code_searcher, conversation_analyzer, memory, memory-extraction
 
 
 def test_list_local_agents_current_dir(tmp_path):

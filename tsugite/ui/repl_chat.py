@@ -1,7 +1,7 @@
 """REPL-style chat interface using prompt_toolkit for input and rich for output."""
 
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, List, Optional
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
@@ -16,6 +16,9 @@ from tsugite.config import get_xdg_data_path
 from tsugite.md_agents import parse_agent_file
 from tsugite.ui import CustomUILogger
 from tsugite.ui.chat import ChatManager
+
+if TYPE_CHECKING:
+    from tsugite.cli.helpers import PathContext
 from tsugite.ui.repl_commands import (
     handle_attach,
     handle_clear,
@@ -81,9 +84,19 @@ def run_repl_chat(
     exec_options: "ExecutionOptions",
     history_options: "HistoryOptions",
     resume_turns: Optional[list] = None,
+    path_context: Optional["PathContext"] = None,
+    workspace_attachments: Optional[List[str]] = None,
 ) -> None:
-    """Run REPL-style chat session."""
+    """Run REPL-style chat session.
 
+    Args:
+        agent_path: Path to agent markdown file
+        exec_options: Execution options (model, stream, etc.)
+        history_options: History options (enabled, max_turns, continue_id)
+        resume_turns: Optional list of Turn objects to resume from
+        path_context: Optional workspace path context
+        workspace_attachments: Optional list of workspace attachment paths
+    """
     # Initialize console
     console = Console()
 
@@ -109,6 +122,8 @@ def run_repl_chat(
             stream=exec_options.stream,
             disable_history=not history_options.enabled,
             resume_conversation_id=history_options.continue_id,
+            path_context=path_context,
+            workspace_attachments=workspace_attachments,
         )
 
         # Load history if resuming

@@ -85,7 +85,7 @@ class TestFindLatestSessionPerformance:
 
     def test_baseline_no_filters(self, tmp_path, monkeypatch, create_conversations):
         """Baseline: find latest with no filters (just index lookup)."""
-        conversations = create_conversations("odyn", 100, daemon_ratio=0.5)
+        create_conversations("odyn", 100, daemon_ratio=0.5)
 
         start = time.perf_counter()
         result = find_latest_session("odyn", daemon_only=False)
@@ -96,7 +96,7 @@ class TestFindLatestSessionPerformance:
 
     def test_daemon_only_filter_small(self, tmp_path, monkeypatch, create_conversations):
         """Daemon filter with 10 conversations."""
-        conversations = create_conversations("odyn", 10, daemon_ratio=0.5)
+        create_conversations("odyn", 10, daemon_ratio=0.5)
 
         start = time.perf_counter()
         result = find_latest_session("odyn", daemon_only=True)
@@ -107,7 +107,7 @@ class TestFindLatestSessionPerformance:
 
     def test_daemon_only_filter_medium(self, tmp_path, monkeypatch, create_conversations):
         """Daemon filter with 100 conversations."""
-        conversations = create_conversations("odyn", 100, daemon_ratio=0.5)
+        create_conversations("odyn", 100, daemon_ratio=0.5)
 
         start = time.perf_counter()
         result = find_latest_session("odyn", daemon_only=True)
@@ -118,7 +118,7 @@ class TestFindLatestSessionPerformance:
 
     def test_daemon_only_filter_large(self, tmp_path, monkeypatch, create_conversations):
         """Daemon filter with 1000 conversations."""
-        conversations = create_conversations("odyn", 1000, daemon_ratio=0.5)
+        create_conversations("odyn", 1000, daemon_ratio=0.5)
 
         start = time.perf_counter()
         result = find_latest_session("odyn", daemon_only=True)
@@ -129,9 +129,7 @@ class TestFindLatestSessionPerformance:
 
     def test_user_id_filter_medium(self, tmp_path, monkeypatch, create_conversations):
         """User ID filter with 100 conversations across 5 users."""
-        conversations = create_conversations(
-            "odyn", 100, daemon_ratio=0.5, users=["user1", "user2", "user3", "user4", "user5"]
-        )
+        create_conversations("odyn", 100, daemon_ratio=0.5, users=["user1", "user2", "user3", "user4", "user5"])
 
         start = time.perf_counter()
         result = find_latest_session("odyn", user_id="user3")
@@ -142,9 +140,7 @@ class TestFindLatestSessionPerformance:
 
     def test_combined_filters_medium(self, tmp_path, monkeypatch, create_conversations):
         """Combined daemon_only + user_id filter with 100 conversations."""
-        conversations = create_conversations(
-            "odyn", 100, daemon_ratio=0.5, users=["user1", "user2", "user3", "user4", "user5"]
-        )
+        create_conversations("odyn", 100, daemon_ratio=0.5, users=["user1", "user2", "user3", "user4", "user5"])
 
         start = time.perf_counter()
         result = find_latest_session("odyn", user_id="user3", daemon_only=True)
@@ -156,7 +152,7 @@ class TestFindLatestSessionPerformance:
     def test_worst_case_no_match(self, tmp_path, monkeypatch, create_conversations):
         """Worst case: filter that requires reading all files but finds nothing."""
         # Create 100 CLI-only conversations
-        conversations = create_conversations("odyn", 100, daemon_ratio=0.0)
+        create_conversations("odyn", 100, daemon_ratio=0.0)
 
         start = time.perf_counter()
         result = find_latest_session("odyn", daemon_only=True)
@@ -167,7 +163,7 @@ class TestFindLatestSessionPerformance:
 
     def test_index_load_overhead(self, tmp_path, monkeypatch, create_conversations):
         """Measure index loading overhead."""
-        conversations = create_conversations("odyn", 100, daemon_ratio=0.5)
+        create_conversations("odyn", 100, daemon_ratio=0.5)
 
         # Clear any internal caching by reloading
         start = time.perf_counter()
@@ -209,7 +205,7 @@ class TestFindLatestSessionPerformance:
     def test_early_exit_optimization(self, tmp_path, monkeypatch, create_conversations):
         """Test early exit when match found immediately."""
         # Create 100 conversations, with daemon conversations being newer
-        conversations = create_conversations("odyn", 100, daemon_ratio=0.5)
+        create_conversations("odyn", 100, daemon_ratio=0.5)
 
         # The most recent conversation should be daemon-managed (based on our creation order)
         # This should exit early

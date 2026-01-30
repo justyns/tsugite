@@ -1,18 +1,14 @@
 """Tests for the memory system."""
 
+# Check if duckdb is available
+import importlib.util
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-# Check if duckdb is available
-try:
-    import duckdb
-
-    HAS_DUCKDB = True
-except ImportError:
-    HAS_DUCKDB = False
+HAS_DUCKDB = importlib.util.find_spec("duckdb") is not None
 
 requires_duckdb = pytest.mark.skipif(not HAS_DUCKDB, reason="duckdb not installed")
 

@@ -1,7 +1,7 @@
 """Textual-based chat UI for interactive conversations."""
 
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, List, Optional
 
 import litellm
 from rich.console import Console
@@ -17,6 +17,9 @@ from tsugite.ui import CustomUILogger
 from tsugite.ui.chat import ChatManager
 from tsugite.ui.textual_handler import TextualUIHandler
 from tsugite.ui.widgets import MessageList, ThoughtLog
+
+if TYPE_CHECKING:
+    from tsugite.cli.helpers import PathContext
 
 # Slash commands for autocomplete
 SLASH_COMMANDS = [
@@ -53,6 +56,8 @@ class ChatApp(App):
         disable_history: bool = False,
         resume_conversation_id: Optional[str] = None,
         resume_turns: Optional[list] = None,
+        path_context: Optional["PathContext"] = None,
+        workspace_attachments: Optional[List[str]] = None,
     ):
         """Initialize chat app.
 
@@ -65,6 +70,8 @@ class ChatApp(App):
             disable_history: Disable conversation history persistence
             resume_conversation_id: Optional conversation ID to resume
             resume_turns: Optional list of Turn objects from history to resume
+            path_context: Optional workspace path context for directory tracking
+            workspace_attachments: Optional list of workspace attachment paths
         """
         super().__init__()
         self.agent_path = agent_path
@@ -75,6 +82,8 @@ class ChatApp(App):
         self.disable_history = disable_history
         self.resume_conversation_id = resume_conversation_id
         self.resume_turns = resume_turns
+        self.path_context = path_context
+        self.workspace_attachments = workspace_attachments or []
 
         # Parse agent info
         agent = parse_agent_file(agent_path)
@@ -219,6 +228,8 @@ class ChatApp(App):
             stream=self.stream_enabled,
             disable_history=self.disable_history,
             resume_conversation_id=self.resume_conversation_id,
+            path_context=self.path_context,
+            workspace_attachments=self.workspace_attachments,
         )
 
         # Load conversation history if resuming
@@ -613,9 +624,20 @@ def run_textual_chat(
     history_options: "HistoryOptions",
     show_execution_details: bool = True,
     resume_turns: Optional[list] = None,
+    path_context: Optional["PathContext"] = None,
+    workspace_attachments: Optional[List[str]] = None,
 ) -> None:
-    """Run the Textual chat interface."""
+    """Run the Textual chat interface.
 
+    Args:
+        agent_path: Path to agent markdown file
+        exec_options: Execution options (model, stream, etc.)
+        history_options: History options (enabled, max_turns, continue_id)
+        show_execution_details: Whether to show tool calls and code execution
+        resume_turns: Optional list of Turn objects to resume from
+        path_context: Optional workspace path context
+        workspace_attachments: Optional list of workspace attachment paths
+    """
     app = ChatApp(
         agent_path=agent_path,
         model_override=exec_options.model_override,
@@ -625,5 +647,7 @@ def run_textual_chat(
         disable_history=not history_options.enabled,
         resume_conversation_id=history_options.continue_id,
         resume_turns=resume_turns,
+        path_context=path_context,
+        workspace_attachments=workspace_attachments,
     )
     app.run()

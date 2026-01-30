@@ -16,8 +16,8 @@ sys.modules["discord"] = MagicMock()
 sys.modules["discord.ext"] = MagicMock()
 sys.modules["discord.ext.commands"] = MagicMock()
 
-from tsugite.daemon.adapters.discord import DiscordProgressHandler
-from tsugite.events import FinalAnswerEvent, ReasoningContentEvent, ToolCallEvent
+from tsugite.daemon.adapters.discord import DiscordProgressHandler  # noqa: E402
+from tsugite.events import FinalAnswerEvent, ReasoningContentEvent, ToolCallEvent  # noqa: E402
 
 
 @pytest.fixture(autouse=True, scope="module")

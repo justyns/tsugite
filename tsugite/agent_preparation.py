@@ -1,6 +1,7 @@
 """Agent preparation pipeline - unified logic for render and execution."""
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from tsugite.attachments.base import Attachment
@@ -108,6 +109,7 @@ class AgentPreparer:
         tasks: Optional[List[Dict[str, Any]]] = None,
         attachments: Optional[List[Attachment]] = None,
         event_bus: Optional[Any] = None,
+        path_context: Optional[Any] = None,
     ) -> PreparedAgent:
         """Prepare agent with all context, tools, and instructions.
 
@@ -121,6 +123,7 @@ class AgentPreparer:
             tasks: List of task dicts for template iteration (from task manager)
             attachments: List of Attachment objects for multi-modal inputs
             event_bus: Optional event bus for emitting skill load events
+            path_context: Optional PathContext with invoked_from, workspace_dir, effective_cwd
 
         Returns:
             PreparedAgent ready for execution or display
@@ -176,6 +179,12 @@ class AgentPreparer:
 
         # Step 3: Build template context
         interactive_mode = is_interactive()
+
+        # Extract path context values if available
+        cwd = str(Path.cwd())
+        invoked_from = str(path_context.invoked_from) if path_context else None
+        workspace_dir = str(path_context.workspace_dir) if path_context and path_context.workspace_dir else None
+
         full_context = {
             **context,
             **prefetch_context,
@@ -191,6 +200,10 @@ class AgentPreparer:
             "parent_agent": context.get("parent_agent", None),
             # Chat history (for chat agents)
             "chat_history": context.get("chat_history", []),
+            # Path context for workspace-aware agents
+            "CWD": cwd,
+            "INVOKED_FROM": invoked_from,
+            "WORKSPACE_DIR": workspace_dir,
         }
 
         # Step 4: Render template
@@ -262,6 +275,19 @@ class AgentPreparer:
 
         # Step 8: Build system message (what LLM actually sees)
         system_message = build_system_prompt(tools, combined_instructions, agent_config.text_mode)
+
+        # Add environment context when invoked_from differs from CWD
+        if invoked_from and invoked_from != cwd:
+            env_block = f"""
+## Environment
+
+Working directory: {cwd}
+Invoked from: {invoked_from}
+
+When the user refers to "this folder", "current directory", or "here",
+they typically mean the invoked location ({invoked_from}).
+"""
+            system_message = system_message + env_block
 
         # User message is the rendered prompt
         user_message = rendered_prompt

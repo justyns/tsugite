@@ -3,13 +3,16 @@
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from tsugite.config import load_config
 from tsugite.md_agents import parse_agent_file
 from tsugite.ui import CustomUILogger
+
+if TYPE_CHECKING:
+    from tsugite.cli.helpers import PathContext
 
 
 class ChatTurn(BaseModel):
@@ -39,6 +42,8 @@ class ChatManager:
         stream: bool = False,
         disable_history: bool = False,
         resume_conversation_id: Optional[str] = None,
+        path_context: Optional["PathContext"] = None,
+        workspace_attachments: Optional[List[str]] = None,
     ):
         """Initialize chat manager.
 
@@ -50,12 +55,16 @@ class ChatManager:
             stream: Whether to stream responses in real-time
             disable_history: Disable conversation history persistence
             resume_conversation_id: Optional conversation ID to resume (skips auto-generation)
+            path_context: Optional workspace path context for directory tracking
+            workspace_attachments: Optional list of workspace attachment paths
         """
         self.agent_path = agent_path
         self.model_override = model_override
         self.max_history = max_history
         self.custom_logger = custom_logger
         self.stream = stream
+        self.path_context = path_context
+        self.workspace_attachments = workspace_attachments or []
         self.conversation_history: List[ChatTurn] = []
         self.session_start = datetime.now()
 
@@ -214,6 +223,15 @@ class ChatManager:
 
         try:
             from tsugite.options import ExecutionOptions
+            from tsugite.utils import resolve_attachments
+
+            # Resolve workspace attachments if present
+            resolved_attachments = None
+            if self.workspace_attachments:
+                try:
+                    resolved_attachments = resolve_attachments(self.workspace_attachments, refresh_cache=False)
+                except ValueError:
+                    pass  # Skip attachments that fail to resolve
 
             result = run_agent(
                 agent_path=self.agent_path,
@@ -227,6 +245,8 @@ class ChatManager:
                 custom_logger=self.custom_logger,
                 context={"chat_history": self.conversation_history},
                 continue_conversation_id=self.conversation_id if self.conversation_history else None,
+                attachments=resolved_attachments,
+                path_context=self.path_context,
             )
 
             # Handle result - either string or AgentExecutionResult model

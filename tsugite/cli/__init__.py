@@ -1,6 +1,5 @@
 """Tsugite CLI application - main entry point."""
 
-import os
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -20,12 +19,14 @@ from tsugite.options import (
 )
 
 from .helpers import (
+    PathContext,
     assemble_prompt_with_attachments,
     change_to_root_directory,
     get_logo,
     inject_auto_context_if_enabled,
     load_and_validate_agent,
     print_plain_info,
+    workspace_directory_context,
 )
 
 # Chat history limit - keeps last N turns to balance context retention vs memory usage
@@ -196,6 +197,7 @@ def _build_executor_kwargs(
     history_opts: HistoryOptions,
     resolved_attachments: List[Tuple[str, str]],
     executor: Any,
+    path_context: Optional["PathContext"] = None,
 ) -> Dict[str, Any]:
     """Build executor kwargs dict for run_agent/run_multistep_agent."""
     from tsugite.agent_runner import run_agent
@@ -206,6 +208,7 @@ def _build_executor_kwargs(
         "exec_options": exec_opts,
         "continue_conversation_id": history_opts.continue_id,
         "attachments": resolved_attachments,
+        "path_context": path_context,
     }
     if history_opts.enabled and executor == run_agent:
         kwargs["exec_options"] = ExecutionOptions(
@@ -626,7 +629,7 @@ def run(
         console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1)
 
-    with change_to_root_directory(root, console):
+    with workspace_directory_context(resolved_workspace, root, console) as path_context:
         try:
             base_dir = Path.cwd()
 
@@ -777,6 +780,7 @@ def run(
                 history_opts,
                 resolved_attachments,
                 executor,
+                path_context,
             )
 
             result = _execute_agent_with_ui(
@@ -1088,13 +1092,42 @@ def chat(
     ),
     ui: str = typer.Option("repl", "--ui", help="UI mode: 'repl' (default) or 'tui'"),
     root: Optional[str] = typer.Option(None, "--root", help="Working directory"),
+    workspace: Optional[str] = typer.Option(
+        None, "--workspace", "-w", help="Workspace directory (auto-loads PERSONA.md, USER.md, MEMORY.md)"
+    ),
+    no_workspace: bool = typer.Option(False, "--no-workspace", help="Disable workspace (ignore default workspace)"),
 ):
     """Start an interactive chat session with an agent."""
+    # Validate flag combinations
+    if workspace and no_workspace:
+        console.print("[red]Error: Cannot use --workspace with --no-workspace[/red]")
+        raise typer.Exit(1)
+
     # Build option dataclasses
     exec_opts = ExecutionOptions(model_override=model, stream=stream)
     history_opts = HistoryOptions(enabled=not no_history, max_turns=max_history)
 
-    with change_to_root_directory(root, console):
+    # Load config to check for default workspace
+    from tsugite.config import load_config
+
+    config = load_config()
+
+    # Determine which workspace to use: explicit > no-workspace > default from config
+    workspace_to_use = workspace
+    if not workspace and not no_workspace and config.default_workspace:
+        workspace_to_use = config.default_workspace
+
+    # Resolve workspace (name or path)
+    resolved_workspace = _resolve_workspace(workspace_to_use)
+    if workspace_to_use and not resolved_workspace:
+        console.print(f"[yellow]Warning: Workspace '{workspace_to_use}' not found[/yellow]")
+
+    # Build workspace attachments
+    workspace_attachments = []
+    if resolved_workspace:
+        workspace_attachments = _build_workspace_attachments(resolved_workspace)
+
+    with workspace_directory_context(resolved_workspace, root, console) as path_context:
         # Handle conversation resume
         resume_turns = None
 
@@ -1132,6 +1165,8 @@ def chat(
                 exec_options=exec_opts,
                 history_options=history_opts,
                 resume_turns=resume_turns,
+                path_context=path_context,
+                workspace_attachments=workspace_attachments,
             )
         elif ui.lower() == "repl":
             from tsugite.ui.repl_chat import run_repl_chat
@@ -1144,6 +1179,8 @@ def chat(
                 exec_options=exec_opts,
                 history_options=history_opts,
                 resume_turns=resume_turns,
+                path_context=path_context,
+                workspace_attachments=workspace_attachments,
             )
         else:
             console.print(f"[red]Unknown UI mode: {ui}. Use 'repl' or 'tui'.[/red]")

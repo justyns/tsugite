@@ -95,5 +95,5 @@ Categories: Decision, Fact, Preference, Action Item, Technical Detail
     await run_agent_async(
         agent_path=agent_path,
         prompt=prompt,
-        exec_options=ExecutionOptions(auto_context=False, return_token_usage=False),
+        exec_options=ExecutionOptions(return_token_usage=False),
     )

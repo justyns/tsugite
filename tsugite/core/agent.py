@@ -478,11 +478,19 @@ class TsugiteAgent:
                     # Continue to next turn - the correction will be in the observation
                     continue
 
+            # Build observation output, adding reminder if no final_answer
+            step_output = exec_result.output
+            if exec_result.final_answer is None and not exec_result.error:
+                step_output += (
+                    "\n\n(Reminder: Call final_answer() when you have the result, "
+                    "or ask_user() if you need input from the user.)"
+                )
+
             # Add this step to memory (only for successful executions or text mode)
             self.memory.add_step(
                 thought=thought,
                 code=code,
-                output=exec_result.output,
+                output=step_output,
                 error=exec_result.error,
                 tools_called=exec_result.tools_called,
             )
@@ -855,8 +863,10 @@ final_answer(result)
 2. Code blocks are OPTIONAL - only use them when you need tools or complex logic
 3. For direct answers, just provide the Thought without code
 {tool_rule}
-5. When using code blocks, call final_answer() with the result
-6. Variables persist across code blocks
+5. Variables persist across code blocks
+6. **To complete your turn, you MUST call one of:**
+   - `final_answer(result)` - when you have the answer
+   - `ask_user(question)` - when you need input from the user
 
 {instructions}
 
@@ -911,9 +921,11 @@ You repeat this Thought → Code → Observation cycle until you have the final 
 1. Always provide Thought before code
 2. Only use variables you've defined
 {tool_rule}
-4. Call final_answer() when you have the answer
-5. If you get an error, try a different approach
-6. State persists - variables remain available across code blocks
+4. If you get an error, try a different approach
+5. State persists - variables remain available across code blocks
+6. **To complete your turn, you MUST call one of:**
+   - `final_answer(result)` - when you have the answer
+   - `ask_user(question)` - when you need input from the user
 
 {instructions}
 

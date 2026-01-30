@@ -420,6 +420,7 @@ async def _execute_agent_with_prompt(
     model_kwargs: Optional[Dict[str, Any]] = None,
     injectable_vars: Optional[Dict[str, Any]] = None,
     previous_messages: Optional[List[Dict]] = None,
+    path_context: Optional[Any] = None,
 ) -> str | AgentExecutionResult:
     """Execute agent with a prepared agent.
 
@@ -527,7 +528,7 @@ async def _execute_agent_with_prompt(
 
     # Create executor with workspace directory and event bus
     workspace_dir = workspace.path if workspace else None
-    executor = LocalExecutor(workspace_dir=workspace_dir, event_bus=event_bus)
+    executor = LocalExecutor(workspace_dir=workspace_dir, event_bus=event_bus, path_context=path_context)
 
     # Inject variables into executor (for multi-step agents)
     if injectable_vars:
@@ -663,6 +664,7 @@ def run_agent(
     custom_logger: Optional[Any] = None,
     continue_conversation_id: Optional[str] = None,
     attachments: Optional[List[Any]] = None,
+    path_context: Optional[Any] = None,
 ) -> str | AgentExecutionResult:
     """Run a Tsugite agent (sync wrapper around run_agent_async).
 
@@ -674,6 +676,7 @@ def run_agent(
         custom_logger: Custom logger for agent output
         continue_conversation_id: Optional conversation ID to continue
         attachments: Optional list of Attachment objects
+        path_context: Optional PathContext with invoked_from, workspace_dir, effective_cwd
 
     Returns:
         Agent execution result as string or AgentExecutionResult with metrics
@@ -710,6 +713,7 @@ def run_agent(
             custom_logger=custom_logger,
             continue_conversation_id=continue_conversation_id,
             attachments=attachments,
+            path_context=path_context,
         )
     )
 
@@ -724,6 +728,7 @@ async def run_agent_async(
     continue_conversation_id: Optional[str] = None,
     attachments: Optional[List[Any]] = None,
     channel_metadata: Optional[Dict[str, Any]] = None,
+    path_context: Optional[Any] = None,
 ) -> str | AgentExecutionResult:
     """Run a Tsugite agent (async version for tests and async contexts).
 
@@ -737,6 +742,7 @@ async def run_agent_async(
         continue_conversation_id: Optional conversation ID to continue
         attachments: Optional list of Attachment objects
         channel_metadata: Optional channel routing metadata (source, channel_id, user_id, reply_to)
+        path_context: Optional PathContext with invoked_from, workspace_dir, effective_cwd
 
     Returns:
         Agent execution result as string or AgentExecutionResult with metrics
@@ -788,6 +794,7 @@ async def run_agent_async(
             task_summary=task_manager.get_task_summary(),
             tasks=task_manager.get_tasks_for_template(),
             attachments=attachments,
+            path_context=path_context,
         )
 
         # Debug output if requested
@@ -803,6 +810,7 @@ async def run_agent_async(
             workspace=workspace,
             custom_logger=custom_logger,
             previous_messages=previous_messages,
+            path_context=path_context,
         )
     finally:
         # Always clear the current agent context when done
