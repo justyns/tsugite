@@ -181,7 +181,11 @@ class AgentPreparer:
         interactive_mode = is_interactive()
 
         # Extract path context values if available
-        cwd = str(Path.cwd())
+        # Use effective_cwd from path_context (for daemon) or fall back to actual cwd
+        if path_context and path_context.effective_cwd:
+            cwd = str(path_context.effective_cwd)
+        else:
+            cwd = str(Path.cwd())
         invoked_from = str(path_context.invoked_from) if path_context else None
         workspace_dir = str(path_context.workspace_dir) if path_context and path_context.workspace_dir else None
 

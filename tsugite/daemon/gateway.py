@@ -4,7 +4,7 @@ import asyncio
 from pathlib import Path
 from typing import List, Optional
 
-from tsugite.daemon.adapters.base import BaseAdapter
+from tsugite.daemon.adapters.base import BaseAdapter, resolve_agent_path
 from tsugite.daemon.config import DaemonConfig, load_daemon_config
 from tsugite.daemon.session import SessionManager
 
@@ -39,6 +39,24 @@ class Gateway:
                     raise ValueError(f"Discord bot '{bot_config.name}' references unknown agent '{agent_name}'")
 
                 agent_config = self.config.agents[agent_name]
+
+                # Validate agent file exists at startup
+                from tsugite.workspace import Workspace, WorkspaceNotFoundError
+
+                try:
+                    workspace = Workspace.load(agent_config.workspace_dir)
+                except WorkspaceNotFoundError:
+                    workspace = None
+
+                agent_path = resolve_agent_path(
+                    agent_config.agent_file, agent_config.workspace_dir, workspace
+                )
+                if not agent_path:
+                    raise ValueError(
+                        f"Agent file '{agent_config.agent_file}' not found for bot '{bot_config.name}'. "
+                        f"Searched in workspace '{agent_config.workspace_dir}' and standard paths."
+                    )
+                print(f"  ✓ Bot '{bot_config.name}' using agent: {agent_path}")
 
                 session_manager = SessionManager(
                     agent_name, agent_config.workspace_dir, context_limit=agent_config.context_limit

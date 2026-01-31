@@ -1065,21 +1065,6 @@ def version():
     console.print(f"Tsugite version {__version__}")
 
 
-@app.command()
-def daemon(
-    config: Optional[Path] = typer.Option(
-        None, "--config", "-c", help="Path to daemon config (default: ~/.config/tsugite/daemon.yaml)"
-    ),
-):
-    """Start tsugite daemon for Discord/Telegram bots."""
-    import asyncio
-
-    from tsugite.daemon.gateway import run_daemon
-
-    try:
-        asyncio.run(run_daemon(config))
-    except KeyboardInterrupt:
-        console.print("\n[yellow]Daemon stopped[/yellow]")
 
 
 @app.command()
@@ -1196,6 +1181,7 @@ from .attachments import attachments_app  # noqa: E402
 from .benchmark import benchmark_command  # noqa: E402
 from .cache import cache_app  # noqa: E402
 from .config import config_app  # noqa: E402
+from .daemon import daemon_app  # noqa: E402
 from .history import history_app  # noqa: E402
 from .init import init  # noqa: E402
 from .mcp import mcp_app  # noqa: E402
@@ -1208,6 +1194,7 @@ app.add_typer(mcp_app, name="mcp")
 app.add_typer(serve_app, name="serve")
 app.add_typer(agents_app, name="agents")
 app.add_typer(config_app, name="config")
+app.add_typer(daemon_app, name="daemon")
 app.add_typer(attachments_app, name="attachments")
 app.add_typer(cache_app, name="cache")
 app.add_typer(tools_app, name="tools")

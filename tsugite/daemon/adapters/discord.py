@@ -22,6 +22,20 @@ class ProgressStep(NamedTuple):
     emoji: str
 
 
+def _handle_task_exception(task: asyncio.Task, context: str = "") -> None:
+    """Handle exceptions from background tasks to prevent crashes."""
+    try:
+        task.result()
+    except asyncio.CancelledError:
+        pass
+    except Exception as e:
+        import traceback
+
+        prefix = f"[{context}] " if context else ""
+        print(f"{prefix}Background task error: {e}")
+        traceback.print_exc()
+
+
 class DiscordProgressHandler:
     """Lightweight handler for Discord progress updates."""
 
@@ -41,8 +55,16 @@ class DiscordProgressHandler:
         self.done = False
         self._thinking_shown = False
 
-    async def handle_event(self, event: BaseEvent) -> None:
-        """Handle EventBus events and update Discord message."""
+    def handle_event(self, event: BaseEvent) -> None:
+        """Handle EventBus events and update Discord message.
+
+        This is called synchronously by EventBus, so we schedule async work.
+        """
+        task = asyncio.create_task(self._handle_event_async(event))
+        task.add_done_callback(lambda t: _handle_task_exception(t, "progress"))
+
+    async def _handle_event_async(self, event: BaseEvent) -> None:
+        """Async implementation of event handling."""
         async with self.update_lock:
             if isinstance(event, ToolCallEvent):
                 if self.updates:
@@ -147,10 +169,15 @@ class DiscordProgressHandler:
         async def typing_loop():
             try:
                 while not self.done:
-                    await self.channel.trigger_typing()
+                    try:
+                        await self.channel.typing()
+                    except (AttributeError, discord.errors.HTTPException):
+                        pass  # Some channel types may not support typing
                     await asyncio.sleep(8)  # Re-trigger before 10s expiry
             except asyncio.CancelledError:
                 pass
+            except Exception as e:
+                print(f"Typing loop error: {e}")
 
         self.typing_task = asyncio.create_task(typing_loop())
 
@@ -205,58 +232,93 @@ class DiscordAdapter(BaseAdapter):
             print(f"Discord bot '{bot_config.name}' logged in as {self.bot.user} (agent: {agent_name})")
 
         @self.bot.event
+        async def on_error(event_method, *args, **kwargs):
+            import traceback
+
+            print(f"[{bot_config.name}] Discord event error in {event_method}:")
+            traceback.print_exc()
+
+        @self.bot.event
         async def on_message(message):
             if message.author == self.bot.user:
                 return
 
-            if isinstance(message.channel, discord.DMChannel):
-                if bot_config.dm_policy == "allowlist":
-                    if str(message.author.id) not in bot_config.allow_from:
+            is_dm = isinstance(message.channel, discord.DMChannel)
+
+            # Check allowlist for both DMs and server channels
+            if bot_config.dm_policy == "allowlist":
+                if str(message.author.id) not in bot_config.allow_from:
+                    if is_dm:
                         await message.channel.send("You are not authorized.")
-                        return
+                    return
 
-            if not message.content.startswith(bot_config.command_prefix):
-                return
+            if is_dm:
+                # DMs don't require prefix
+                user_msg = message.content.strip()
+            else:
+                # Server channels require @mention
+                if not self.bot.user.mentioned_in(message):
+                    return
+                # Remove the mention from the message
+                user_msg = message.content.replace(f"<@{self.bot.user.id}>", "").strip()
+                user_msg = user_msg.replace(f"<@!{self.bot.user.id}>", "").strip()
 
-            user_msg = message.content[len(bot_config.command_prefix) :].strip()
             if not user_msg:
                 return
 
-            channel_context = ChannelContext(
-                source="discord",
-                channel_id=str(message.channel.id),
-                user_id=str(message.author.id),
-                reply_to=f"discord:{message.channel.id}",
-                metadata={
-                    "author_name": str(message.author),
-                    "guild_id": str(message.guild.id) if message.guild else None,
-                },
+            # Log incoming message
+            channel_type = "DM" if is_dm else "channel"
+            print(f"[{bot_config.name}] <- {message.author} ({channel_type}): {user_msg[:100]}{'...' if len(user_msg) > 100 else ''}")
+
+            # Process message in isolated task to prevent crashes from affecting the bot
+            task = asyncio.create_task(
+                self._process_message(message, user_msg, bot_config.name)
             )
+            task.add_done_callback(lambda t: _handle_task_exception(t, bot_config.name))
 
-            progress = DiscordProgressHandler(message.channel)
-            custom_logger = SimpleNamespace(ui_handler=progress)
+    async def _process_message(self, message, user_msg: str, bot_name: str):
+        """Process a message in an isolated task."""
+        channel_context = ChannelContext(
+            source="discord",
+            channel_id=str(message.channel.id),
+            user_id=str(message.author.id),
+            reply_to=f"discord:{message.channel.id}",
+            metadata={
+                "author_name": str(message.author),
+                "guild_id": str(message.guild.id) if message.guild else None,
+            },
+        )
 
-            await progress.start_typing_loop()
-            self.active_progress_handlers.append(progress)
+        progress = DiscordProgressHandler(message.channel)
+        custom_logger = SimpleNamespace(ui_handler=progress)
 
-            try:
-                response = await self.handle_message(
-                    user_id=str(message.author.id),
-                    message=user_msg,
-                    channel_context=channel_context,
-                    custom_logger=custom_logger,
-                )
-                await progress.cleanup(success=True)
+        await progress.start_typing_loop()
+        self.active_progress_handlers.append(progress)
 
-            except Exception as e:
-                await progress.cleanup(success=False)
-                response = f"Error processing message: {e}"
-            finally:
-                # Remove from active handlers after cleanup
-                if progress in self.active_progress_handlers:
-                    self.active_progress_handlers.remove(progress)
+        try:
+            response = await self.handle_message(
+                user_id=str(message.author.id),
+                message=user_msg,
+                channel_context=channel_context,
+                custom_logger=custom_logger,
+            )
+            await progress.cleanup(success=True)
 
-            await self._send_chunked(message.channel, response)
+        except Exception as e:
+            import traceback
+
+            await progress.cleanup(success=False)
+            response = f"Error processing message: {e}"
+            print(f"[{bot_name}] ERROR: {e}")
+            traceback.print_exc()
+        finally:
+            # Remove from active handlers after cleanup
+            if progress in self.active_progress_handlers:
+                self.active_progress_handlers.remove(progress)
+
+        # Log outgoing response
+        print(f"[{bot_name}] -> {message.author}: {response[:100]}{'...' if len(response) > 100 else ''}")
+        await self._send_chunked(message.channel, response)
 
     async def _send_chunked(self, channel, text: str):
         """Send message, splitting if longer than 2000 chars.

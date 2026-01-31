@@ -55,8 +55,12 @@ class MockChannel:
         self.messages.append(msg)
         return msg
 
+    async def typing(self):
+        """Mock typing indicator."""
+        self.typing_triggered += 1
+
     async def trigger_typing(self):
-        """Mock trigger_typing."""
+        """Mock trigger_typing (alias)."""
         self.typing_triggered += 1
 
 
@@ -79,20 +83,20 @@ async def test_progress_handler_tool_calls():
     channel = MockChannel()
     handler = DiscordProgressHandler(channel)
 
-    # First tool call
-    await handler.handle_event(ToolCallEvent(tool="read_file", args={"path": "test.txt"}))
+    # First tool call (use _handle_event_async directly for testing)
+    await handler._handle_event_async(ToolCallEvent(tool="read_file", args={"path": "test.txt"}))
     assert len(channel.messages) == 1
     assert "read_file" in channel.messages[0].content
     assert "🤔 Working..." in channel.messages[0].content
 
     # Second tool call (marks previous as complete)
-    await handler.handle_event(ToolCallEvent(tool="write_file", args={"path": "out.txt", "content": "test"}))
+    await handler._handle_event_async(ToolCallEvent(tool="write_file", args={"path": "out.txt", "content": "test"}))
     assert len(channel.messages[0].edit_history) >= 2
     assert "✓" in channel.messages[0].content  # Previous tool marked complete
     assert "write_file" in channel.messages[0].content
 
     # Final answer
-    await handler.handle_event(FinalAnswerEvent(answer="Done!", turns=2, tokens=100, cost=0.01))
+    await handler._handle_event_async(FinalAnswerEvent(answer="Done!", turns=2, tokens=100, cost=0.01))
     assert "✅ Done" in channel.messages[0].content
     assert handler.done
 
@@ -103,8 +107,8 @@ async def test_progress_handler_reasoning():
     channel = MockChannel()
     handler = DiscordProgressHandler(channel)
 
-    # Reasoning event
-    await handler.handle_event(ReasoningContentEvent(content="Thinking about the problem..."))
+    # Reasoning event (use _handle_event_async directly for testing)
+    await handler._handle_event_async(ReasoningContentEvent(content="Thinking about the problem..."))
     assert len(channel.messages) == 1
     assert "Thinking" in channel.messages[0].content
     assert "💭" in channel.messages[0].content
@@ -130,7 +134,7 @@ async def test_progress_handler_truncation():
 
     # Add 15 tool calls (more than MAX_DISPLAY_STEPS)
     for i in range(15):
-        await handler.handle_event(ToolCallEvent(tool=f"tool_{i}", args={}))
+        await handler._handle_event_async(ToolCallEvent(tool=f"tool_{i}", args={}))
 
     # Check that only recent steps are shown
     content = channel.messages[0].content
@@ -168,7 +172,7 @@ async def test_progress_handler_error_state():
     handler = DiscordProgressHandler(channel)
 
     # Add a tool call
-    await handler.handle_event(ToolCallEvent(tool="failing_tool", args={}))
+    await handler._handle_event_async(ToolCallEvent(tool="failing_tool", args={}))
 
     # Cleanup with failure
     await handler.cleanup(success=False)
@@ -185,13 +189,13 @@ async def test_progress_handler_summary():
     handler = DiscordProgressHandler(channel)
 
     # Add multiple tool calls (some repeated)
-    await handler.handle_event(ToolCallEvent(tool="read_file", args={}))
-    await handler.handle_event(ToolCallEvent(tool="read_file", args={}))
-    await handler.handle_event(ToolCallEvent(tool="write_file", args={}))
-    await handler.handle_event(ToolCallEvent(tool="read_file", args={}))
+    await handler._handle_event_async(ToolCallEvent(tool="read_file", args={}))
+    await handler._handle_event_async(ToolCallEvent(tool="read_file", args={}))
+    await handler._handle_event_async(ToolCallEvent(tool="write_file", args={}))
+    await handler._handle_event_async(ToolCallEvent(tool="read_file", args={}))
 
     # Final answer
-    await handler.handle_event(FinalAnswerEvent(answer="Done!", turns=1, tokens=50, cost=0.005))
+    await handler._handle_event_async(FinalAnswerEvent(answer="Done!", turns=1, tokens=50, cost=0.005))
 
     # Check summary shows counts
     content = channel.messages[0].content

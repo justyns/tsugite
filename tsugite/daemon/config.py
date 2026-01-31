@@ -77,3 +77,53 @@ def load_daemon_config(path: Optional[Path] = None) -> DaemonConfig:
         data["state_dir"] = Path(data["state_dir"]).expanduser()
 
     return DaemonConfig.model_validate(data)
+
+
+def save_daemon_config(config: DaemonConfig, path: Optional[Path] = None) -> Path:
+    """Save daemon config to YAML file.
+
+    Args:
+        config: DaemonConfig instance to save
+        path: Path to save config. If None, uses default XDG location
+
+    Returns:
+        Path where config was saved
+    """
+    if path is None:
+        from tsugite.config import get_xdg_write_path
+
+        path = get_xdg_write_path("daemon.yaml")
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    config_data = {
+        "state_dir": str(config.state_dir),
+        "log_level": config.log_level,
+        "agents": {
+            name: {
+                "workspace_dir": str(agent_cfg.workspace_dir),
+                "agent_file": agent_cfg.agent_file,
+                "memory_enabled": agent_cfg.memory_enabled,
+                "memory_inject_days": agent_cfg.memory_inject_days,
+                "context_limit": agent_cfg.context_limit,
+                "memory_extraction_interval": agent_cfg.memory_extraction_interval,
+            }
+            for name, agent_cfg in config.agents.items()
+        },
+        "discord_bots": [
+            {
+                "name": bot.name,
+                "token": bot.token,
+                "agent": bot.agent,
+                "command_prefix": bot.command_prefix,
+                "dm_policy": bot.dm_policy,
+                "allow_from": bot.allow_from,
+            }
+            for bot in config.discord_bots
+        ],
+    }
+
+    with open(path, "w", encoding="utf-8") as f:
+        yaml.safe_dump(config_data, f, default_flow_style=False, sort_keys=False)
+
+    return path
