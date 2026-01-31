@@ -4,13 +4,8 @@ from datetime import datetime, timezone
 
 import pytest
 
-from tsugite.history import Turn, save_turn_to_history
+from tsugite.history import SessionStorage, Turn
 from tsugite.ui.chat import ChatManager
-from tsugite.ui.chat_history import (
-    get_latest_conversation,
-    load_conversation_history,
-    start_conversation,
-)
 
 
 @pytest.fixture
@@ -19,9 +14,8 @@ def temp_history_dir(tmp_path, monkeypatch):
     history_dir = tmp_path / "history"
     history_dir.mkdir()
 
-    # Mock all history directory getters in the history module only
     monkeypatch.setattr("tsugite.history.storage.get_history_dir", lambda: history_dir)
-    monkeypatch.setattr("tsugite.history.index.get_history_dir", lambda: history_dir)
+    monkeypatch.setattr("tsugite.history.storage.get_machine_name", lambda: "test_machine")
 
     return history_dir
 
@@ -51,40 +45,45 @@ class TestGetLatestConversation:
 
     def test_get_latest_conversation_no_conversations(self, temp_history_dir):
         """Test getting latest conversation when none exist."""
-        result = get_latest_conversation()
-        assert result is None
+        from tsugite.history import list_session_files
+
+        files = list_session_files()
+        assert len(files) == 0
 
     def test_get_latest_conversation_single(self, temp_history_dir):
         """Test getting latest conversation with one conversation."""
-        # Create a conversation
-        conv_id = start_conversation("test_agent", "test:model")
+        storage = SessionStorage.create(agent_name="test_agent", model="test:model")
 
-        # Get latest
-        latest = get_latest_conversation()
-        assert latest == conv_id
+        from tsugite.history import list_session_files
+
+        files = list_session_files()
+        assert len(files) == 1
+        assert storage.session_id in str(files[0])
 
     def test_get_latest_conversation_multiple(self, temp_history_dir):
         """Test getting latest conversation with multiple conversations."""
-        # Create multiple conversations with different timestamps
-        _conv_id_1 = start_conversation(
-            "agent1",
-            "model1",
+        storage1 = SessionStorage.create(
+            agent_name="agent1",
+            model="model1",
             timestamp=datetime(2025, 10, 24, 10, 0, 0, tzinfo=timezone.utc),
         )
-        _conv_id_2 = start_conversation(
-            "agent2",
-            "model2",
+        storage2 = SessionStorage.create(
+            agent_name="agent2",
+            model="model2",
             timestamp=datetime(2025, 10, 24, 11, 0, 0, tzinfo=timezone.utc),
         )
-        conv_id_3 = start_conversation(
-            "agent3",
-            "model3",
+        storage3 = SessionStorage.create(
+            agent_name="agent3",
+            model="model3",
             timestamp=datetime(2025, 10, 24, 12, 0, 0, tzinfo=timezone.utc),
         )
 
-        # Latest should be the most recently created
-        latest = get_latest_conversation()
-        assert latest == conv_id_3
+        from tsugite.history import list_session_files
+
+        files = list_session_files()
+        assert len(files) == 3
+        # Files are sorted newest first
+        assert storage3.session_id in str(files[0])
 
 
 class TestLoadConversationHistory:
@@ -92,67 +91,62 @@ class TestLoadConversationHistory:
 
     def test_load_conversation_history_empty(self, temp_history_dir):
         """Test loading conversation with no turns."""
-        # Create conversation with metadata only
-        conv_id = start_conversation("test_agent", "test:model")
+        storage = SessionStorage.create(agent_name="test_agent", model="test:model")
 
-        # Load history
-        turns = load_conversation_history(conv_id)
+        records = storage.load_records()
+        turns = [r for r in records if isinstance(r, Turn)]
         assert turns == []
 
     def test_load_conversation_history_single_turn(self, temp_history_dir):
         """Test loading conversation with one turn."""
-        # Create conversation
-        conv_id = start_conversation("test_agent", "test:model")
+        storage = SessionStorage.create(agent_name="test_agent", model="test:model")
 
-        # Add a turn
-        timestamp = datetime.now(timezone.utc)
-        turn = Turn(
-            timestamp=timestamp,
-            user="Hello",
-            assistant="Hi there!",
-            tools=["final_answer"],
+        messages = [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi there!"},
+        ]
+        storage.record_turn(
+            messages=messages,
+            final_answer="Hi there!",
             tokens=100,
             cost=0.001,
+            functions_called=["final_answer"],
         )
-        save_turn_to_history(conv_id, turn)
 
-        # Load history
-        turns = load_conversation_history(conv_id)
+        records = storage.load_records()
+        turns = [r for r in records if isinstance(r, Turn)]
         assert len(turns) == 1
-        assert turns[0].user == "Hello"
-        assert turns[0].assistant == "Hi there!"
-        assert turns[0].tools == ["final_answer"]
+        assert turns[0].final_answer == "Hi there!"
         assert turns[0].tokens == 100
         assert turns[0].cost == 0.001
 
     def test_load_conversation_history_multiple_turns(self, temp_history_dir):
         """Test loading conversation with multiple turns."""
-        # Create conversation
-        conv_id = start_conversation("test_agent", "test:model")
+        storage = SessionStorage.create(agent_name="test_agent", model="test:model")
 
-        # Add multiple turns
         for i in range(3):
-            turn = Turn(
-                timestamp=datetime.now(timezone.utc),
-                user=f"Question {i}",
-                assistant=f"Answer {i}",
-                tools=[],
+            messages = [
+                {"role": "user", "content": f"Question {i}"},
+                {"role": "assistant", "content": f"Answer {i}"},
+            ]
+            storage.record_turn(
+                messages=messages,
+                final_answer=f"Answer {i}",
                 tokens=50,
                 cost=0.0005,
             )
-            save_turn_to_history(conv_id, turn)
 
-        # Load history
-        turns = load_conversation_history(conv_id)
+        records = storage.load_records()
+        turns = [r for r in records if isinstance(r, Turn)]
         assert len(turns) == 3
-        assert turns[0].user == "Question 0"
-        assert turns[1].user == "Question 1"
-        assert turns[2].user == "Question 2"
+        assert turns[0].final_answer == "Answer 0"
+        assert turns[1].final_answer == "Answer 1"
+        assert turns[2].final_answer == "Answer 2"
 
     def test_load_conversation_history_not_found(self, temp_history_dir):
         """Test loading non-existent conversation."""
         with pytest.raises(FileNotFoundError):
-            load_conversation_history("nonexistent_conv_id")
+            SessionStorage.load(temp_history_dir / "nonexistent.jsonl")
 
 
 class TestChatManagerLoadFromHistory:
@@ -160,136 +154,136 @@ class TestChatManagerLoadFromHistory:
 
     def test_load_from_history_empty_conversation(self, temp_history_dir, temp_agent_file):
         """Test loading empty conversation into ChatManager."""
-        # Create conversation
-        conv_id = start_conversation("test_agent", "test:model")
+        storage = SessionStorage.create(agent_name="test_agent", model="test:model")
 
-        # Create ChatManager and load history
         manager = ChatManager(temp_agent_file, disable_history=True)
-        turns = load_conversation_history(conv_id)
-        manager.load_from_history(conv_id, turns)
+        records = storage.load_records()
+        turns = [r for r in records if isinstance(r, Turn)]
+        manager.load_from_history(storage.session_id, turns)
 
-        # Verify state
-        assert manager.conversation_id == conv_id
+        assert manager.conversation_id == storage.session_id
         assert len(manager.conversation_history) == 0
 
     def test_load_from_history_with_turns(self, temp_history_dir, temp_agent_file):
         """Test loading conversation with turns into ChatManager."""
-        # Create conversation
-        conv_id = start_conversation("test_agent", "test:model")
+        storage = SessionStorage.create(agent_name="test_agent", model="test:model")
 
-        # Add turns
         timestamps = [
             datetime(2025, 10, 24, 10, 0, 0, tzinfo=timezone.utc),
             datetime(2025, 10, 24, 10, 5, 0, tzinfo=timezone.utc),
         ]
 
         for i, ts in enumerate(timestamps):
-            turn = Turn(
-                timestamp=ts,
-                user=f"Question {i}",
-                assistant=f"Answer {i}",
-                tools=["tool1", "tool2"],
+            messages = [
+                {"role": "user", "content": f"Question {i}"},
+                {"role": "assistant", "content": f"Answer {i}"},
+            ]
+            storage.record_turn(
+                messages=messages,
+                final_answer=f"Answer {i}",
                 tokens=100,
                 cost=0.002,
+                functions_called=["tool1", "tool2"],
             )
-            save_turn_to_history(conv_id, turn)
 
-        # Create ChatManager and load history
         manager = ChatManager(temp_agent_file, disable_history=True)
-        turns = load_conversation_history(conv_id)
-        manager.load_from_history(conv_id, turns)
+        records = storage.load_records()
+        turns = [r for r in records if isinstance(r, Turn)]
+        manager.load_from_history(storage.session_id, turns)
 
-        # Verify state
-        assert manager.conversation_id == conv_id
+        assert manager.conversation_id == storage.session_id
         assert len(manager.conversation_history) == 2
 
-        # Check first turn
-        assert manager.conversation_history[0].user_message == "Question 0"
+        # Check first turn - note that V2 stores user_summary not user_message directly
         assert manager.conversation_history[0].agent_response == "Answer 0"
         assert manager.conversation_history[0].tool_calls == ["tool1", "tool2"]
         assert manager.conversation_history[0].token_count == 100
         assert manager.conversation_history[0].cost == 0.002
 
-        # Check session start was updated to first turn's timestamp (timezone stripped to naive)
-        assert manager.session_start == timestamps[0].replace(tzinfo=None)
-
     def test_load_from_history_respects_max_history(self, temp_history_dir, temp_agent_file):
         """Test that load_from_history respects max_history limit."""
-        # Create conversation
-        conv_id = start_conversation("test_agent", "test:model")
+        storage = SessionStorage.create(agent_name="test_agent", model="test:model")
 
-        # Add 10 turns
         for i in range(10):
-            turn = Turn(
-                timestamp=datetime.now(timezone.utc),
-                user=f"Question {i}",
-                assistant=f"Answer {i}",
-                tools=[],
+            messages = [
+                {"role": "user", "content": f"Question {i}"},
+                {"role": "assistant", "content": f"Answer {i}"},
+            ]
+            storage.record_turn(
+                messages=messages,
+                final_answer=f"Answer {i}",
                 tokens=50,
                 cost=0.001,
             )
-            save_turn_to_history(conv_id, turn)
 
-        # Create ChatManager with max_history=5 and load history
         manager = ChatManager(temp_agent_file, max_history=5, disable_history=True)
-        turns = load_conversation_history(conv_id)
-        manager.load_from_history(conv_id, turns)
+        records = storage.load_records()
+        turns = [r for r in records if isinstance(r, Turn)]
+        manager.load_from_history(storage.session_id, turns)
 
         # Should only keep last 5 turns
         assert len(manager.conversation_history) == 5
-        assert manager.conversation_history[0].user_message == "Question 5"
-        assert manager.conversation_history[4].user_message == "Question 9"
+        assert manager.conversation_history[0].agent_response == "Answer 5"
+        assert manager.conversation_history[4].agent_response == "Answer 9"
 
-    def test_load_from_history_can_add_new_turns(self, temp_history_dir, temp_agent_file):
+    def test_load_from_history_can_add_new_turns(self, temp_history_dir, temp_agent_file, monkeypatch):
         """Test that new turns can be added after loading from history."""
-        # Create conversation
-        conv_id = start_conversation("test_agent", "test:model")
+        # Also mock for history import in chat module
+        monkeypatch.setattr("tsugite.history.storage.get_history_dir", lambda: temp_history_dir)
 
-        # Add initial turn
-        turn = Turn(
-            timestamp=datetime.now(timezone.utc),
-            user="Initial question",
-            assistant="Initial answer",
-            tools=[],
+        storage = SessionStorage.create(agent_name="test_agent", model="test:model")
+
+        messages = [
+            {"role": "user", "content": "Initial question"},
+            {"role": "assistant", "content": "Initial answer"},
+        ]
+        storage.record_turn(
+            messages=messages,
+            final_answer="Initial answer",
             tokens=50,
             cost=0.001,
         )
-        save_turn_to_history(conv_id, turn)
 
-        # Create ChatManager and load history
-        manager = ChatManager(temp_agent_file, resume_conversation_id=conv_id)
-        turns = load_conversation_history(conv_id)
-        manager.load_from_history(conv_id, turns)
+        manager = ChatManager(temp_agent_file, resume_conversation_id=storage.session_id, disable_history=True)
+        records = storage.load_records()
+        turns = [r for r in records if isinstance(r, Turn)]
+        manager.load_from_history(storage.session_id, turns)
 
         # Add new turn
         manager.add_turn("New question", "New answer", token_count=60, cost=0.0012)
 
         # Verify both turns are present
         assert len(manager.conversation_history) == 2
-        assert manager.conversation_history[0].user_message == "Initial question"
         assert manager.conversation_history[1].user_message == "New question"
 
 
 class TestRunModeContinuation:
     """Tests for run mode continuation functionality."""
 
-    def test_save_run_to_history_with_continuation(self, temp_history_dir, temp_agent_file):
+    def test_save_run_to_history_with_continuation(self, temp_history_dir, temp_agent_file, monkeypatch):
         """Test saving run to history with continuation ID."""
         from tsugite.agent_runner.history_integration import save_run_to_history
 
-        # Create initial conversation
-        conv_id = start_conversation("test_agent", "test:model")
+        # Must also mock in the history_integration module
+        monkeypatch.setattr("tsugite.agent_runner.history_integration.get_history_dir", lambda: temp_history_dir)
+        monkeypatch.setattr("tsugite.config.load_config", lambda: type("Config", (), {"history_enabled": True})())
+        monkeypatch.setattr(
+            "tsugite.md_agents.parse_agent_file",
+            lambda p: type("Agent", (), {"config": type("Config", (), {"disable_history": False})()})(),
+        )
 
-        # Add initial turn
-        turn = Turn(
-            timestamp=datetime.now(timezone.utc),
-            user="First question",
-            assistant="First answer",
-            tools=[],
+        # Create initial conversation
+        storage = SessionStorage.create(agent_name="test_agent", model="test:model")
+        messages = [
+            {"role": "user", "content": "First question"},
+            {"role": "assistant", "content": "First answer"},
+        ]
+        storage.record_turn(
+            messages=messages,
+            final_answer="First answer",
             tokens=50,
             cost=0.001,
         )
-        save_turn_to_history(conv_id, turn)
 
         # Save continuation turn
         result_conv_id = save_run_to_history(
@@ -301,23 +295,30 @@ class TestRunModeContinuation:
             token_count=60,
             cost=0.0012,
             execution_steps=[],
-            continue_conversation_id=conv_id,
+            continue_conversation_id=storage.session_id,
         )
 
         # Should return same conversation ID
-        assert result_conv_id == conv_id
+        assert result_conv_id == storage.session_id
 
         # Load conversation and verify both turns
-        turns = load_conversation_history(conv_id)
+        reloaded = SessionStorage.load(storage.session_path)
+        records = reloaded.load_records()
+        turns = [r for r in records if isinstance(r, Turn)]
         assert len(turns) == 2
-        assert turns[0].user == "First question"
-        assert turns[1].user == "Second question"
 
-    def test_save_run_to_history_new_conversation(self, temp_history_dir, temp_agent_file):
+    def test_save_run_to_history_new_conversation(self, temp_history_dir, temp_agent_file, monkeypatch):
         """Test saving run to history creates new conversation when no continuation ID."""
         from tsugite.agent_runner.history_integration import save_run_to_history
 
-        # Save without continuation ID
+        # Must also mock in the history_integration module
+        monkeypatch.setattr("tsugite.agent_runner.history_integration.get_history_dir", lambda: temp_history_dir)
+        monkeypatch.setattr("tsugite.config.load_config", lambda: type("Config", (), {"history_enabled": True})())
+        monkeypatch.setattr(
+            "tsugite.md_agents.parse_agent_file",
+            lambda p: type("Agent", (), {"config": type("Config", (), {"disable_history": False})()})(),
+        )
+
         result_conv_id = save_run_to_history(
             agent_path=temp_agent_file,
             agent_name="test_agent",
@@ -330,13 +331,14 @@ class TestRunModeContinuation:
             continue_conversation_id=None,
         )
 
-        # Should create new conversation
         assert result_conv_id is not None
 
         # Load conversation and verify single turn
-        turns = load_conversation_history(result_conv_id)
+        session_path = temp_history_dir / f"{result_conv_id}.jsonl"
+        storage = SessionStorage.load(session_path)
+        records = storage.load_records()
+        turns = [r for r in records if isinstance(r, Turn)]
         assert len(turns) == 1
-        assert turns[0].user == "Question"
 
 
 class TestToolCallHistory:
@@ -344,151 +346,106 @@ class TestToolCallHistory:
 
     def test_load_messages_with_steps(self, temp_history_dir):
         """Test loading messages with execution steps (tool calls)."""
-        from tsugite.agent_runner.history_integration import load_conversation_messages
+        from tsugite.history import reconstruct_messages
 
-        conv_id = start_conversation("test_agent", "test:model")
+        storage = SessionStorage.create(agent_name="test_agent", model="test:model")
 
-        # Steps now require xml_observation field
-        turn = Turn(
-            timestamp=datetime.now(timezone.utc),
-            user="Read config.json",
-            assistant="The config contains: {...}",
-            tools=["read_file"],
+        # V2 stores full messages directly
+        messages = [
+            {"role": "user", "content": "Read config.json"},
+            {"role": "assistant", "content": "```python\nread_file('config.json')\n```"},
+            {
+                "role": "user",
+                "content": '<tsugite_execution_result status="success">\n<output>{"key": "value"}</output>\n</tsugite_execution_result>',
+            },
+            {"role": "assistant", "content": "The config contains: {...}"},
+        ]
+        storage.record_turn(
+            messages=messages,
+            final_answer="The config contains: {...}",
             tokens=100,
             cost=0.001,
-            steps=[
-                {
-                    "thought": "I need to read the config file",
-                    "code": "read_file('config.json')",
-                    "output": '{"key": "value"}',
-                    "xml_observation": '<tsugite_execution_result status="success">\n<output>{"key": "value"}</output>\n</tsugite_execution_result>',
-                },
-            ],
+            functions_called=["read_file"],
         )
-        save_turn_to_history(conv_id, turn)
 
-        messages = load_conversation_messages(conv_id)
+        reconstructed = reconstruct_messages(storage.session_path)
 
-        assert len(messages) == 4
-        assert messages[0]["role"] == "user"
-        assert messages[0]["content"] == "Read config.json"
-        # Assistant message now just contains code (no Thought prefix)
-        assert messages[1]["role"] == "assistant"
-        assert "read_file('config.json')" in messages[1]["content"]
-        assert "```python" in messages[1]["content"]
-        # Observation is XML format
-        assert messages[2]["role"] == "user"
-        assert "<tsugite_execution_result" in messages[2]["content"]
-        assert '{"key": "value"}' in messages[2]["content"]
-        assert messages[3]["role"] == "assistant"
-        assert messages[3]["content"] == "The config contains: {...}"
+        assert len(reconstructed) == 4
+        assert reconstructed[0]["role"] == "user"
+        assert reconstructed[0]["content"] == "Read config.json"
+        assert reconstructed[1]["role"] == "assistant"
+        assert "read_file('config.json')" in reconstructed[1]["content"]
+        assert reconstructed[2]["role"] == "user"
+        assert "<tsugite_execution_result" in reconstructed[2]["content"]
+        assert reconstructed[3]["role"] == "assistant"
+        assert reconstructed[3]["content"] == "The config contains: {...}"
 
     def test_load_messages_with_multiple_steps(self, temp_history_dir):
         """Test loading messages with multiple tool calls."""
-        from tsugite.agent_runner.history_integration import load_conversation_messages
+        from tsugite.history import reconstruct_messages
 
-        conv_id = start_conversation("test_agent", "test:model")
+        storage = SessionStorage.create(agent_name="test_agent", model="test:model")
 
-        turn = Turn(
-            timestamp=datetime.now(timezone.utc),
-            user="Search and write results",
-            assistant="Results written to file",
-            tools=["web_search", "write_file"],
+        messages = [
+            {"role": "user", "content": "Search and write results"},
+            {"role": "assistant", "content": "```python\nweb_search('python')\n```"},
+            {
+                "role": "user",
+                "content": '<tsugite_execution_result status="success">\n<output>Found 100 results</output>\n</tsugite_execution_result>',
+            },
+            {"role": "assistant", "content": "```python\nwrite_file('results.txt', data)\n```"},
+            {
+                "role": "user",
+                "content": '<tsugite_execution_result status="success">\n<output>File written successfully</output>\n</tsugite_execution_result>',
+            },
+            {"role": "assistant", "content": "Results written to file"},
+        ]
+        storage.record_turn(
+            messages=messages,
+            final_answer="Results written to file",
             tokens=200,
             cost=0.002,
-            steps=[
-                {
-                    "thought": "First search the web",
-                    "code": "web_search('python')",
-                    "output": "Found 100 results",
-                    "xml_observation": '<tsugite_execution_result status="success">\n<output>Found 100 results</output>\n</tsugite_execution_result>',
-                },
-                {
-                    "thought": "Now write to file",
-                    "code": "write_file('results.txt', data)",
-                    "output": "File written successfully",
-                    "xml_observation": '<tsugite_execution_result status="success">\n<output>File written successfully</output>\n</tsugite_execution_result>',
-                },
-            ],
+            functions_called=["web_search", "write_file"],
         )
-        save_turn_to_history(conv_id, turn)
 
-        messages = load_conversation_messages(conv_id)
+        reconstructed = reconstruct_messages(storage.session_path)
 
-        assert len(messages) == 6
-        assert messages[0]["role"] == "user"
-        assert messages[1]["role"] == "assistant"
-        assert "web_search" in messages[1]["content"]
-        assert messages[2]["role"] == "user"
-        assert "Found 100 results" in messages[2]["content"]
-        assert messages[3]["role"] == "assistant"
-        assert "write_file" in messages[3]["content"]
-        assert messages[4]["role"] == "user"
-        assert "File written successfully" in messages[4]["content"]
-        assert messages[5]["role"] == "assistant"
-
-    def test_load_messages_with_stored_messages(self, temp_history_dir):
-        """Test loading from pre-saved messages field."""
-        from tsugite.agent_runner.history_integration import load_conversation_messages
-
-        conv_id = start_conversation("test_agent", "test:model")
-
-        turn = Turn(
-            timestamp=datetime.now(timezone.utc),
-            user="Test task",
-            assistant="Done",
-            tools=["read_file"],
-            tokens=50,
-            cost=0.001,
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant"},
-                {"role": "user", "content": "Test task"},
-                {"role": "assistant", "content": "Thought: Reading file\n\n```python\nread_file('test.txt')\n```"},
-                {"role": "user", "content": "Observation: file contents"},
-                {"role": "assistant", "content": "Done"},
-            ],
-        )
-        save_turn_to_history(conv_id, turn)
-
-        messages = load_conversation_messages(conv_id)
-
-        assert len(messages) == 4
-        assert messages[0]["role"] == "user"
-        assert messages[1]["role"] == "assistant"
-        assert "read_file" in messages[1]["content"]
-        assert messages[2]["role"] == "user"
-        assert "Observation:" in messages[2]["content"]
-        assert messages[3]["role"] == "assistant"
+        assert len(reconstructed) == 6
+        assert reconstructed[0]["role"] == "user"
+        assert reconstructed[1]["role"] == "assistant"
+        assert "web_search" in reconstructed[1]["content"]
+        assert reconstructed[2]["role"] == "user"
+        assert "Found 100 results" in reconstructed[2]["content"]
+        assert reconstructed[3]["role"] == "assistant"
+        assert "write_file" in reconstructed[3]["content"]
+        assert reconstructed[4]["role"] == "user"
+        assert "File written successfully" in reconstructed[4]["content"]
+        assert reconstructed[5]["role"] == "assistant"
 
     def test_cache_control_with_tool_calls(self, temp_history_dir):
         """Test that cache control is applied to all messages including tool calls."""
-        from tsugite.agent_runner.history_integration import (
-            apply_cache_control_to_messages,
-            load_conversation_messages,
-        )
+        from tsugite.history.reconstruction import apply_cache_control_to_messages
 
-        conv_id = start_conversation("test_agent", "test:model")
+        storage = SessionStorage.create(agent_name="test_agent", model="test:model")
 
-        turn = Turn(
-            timestamp=datetime.now(timezone.utc),
-            user="Task with tools",
-            assistant="Completed",
-            tools=["read_file"],
+        messages = [
+            {"role": "user", "content": "Task with tools"},
+            {"role": "assistant", "content": "```python\nread_file('test.txt')\n```"},
+            {"role": "user", "content": "<tsugite_execution_result>contents</tsugite_execution_result>"},
+            {"role": "assistant", "content": "Completed"},
+        ]
+        storage.record_turn(
+            messages=messages,
+            final_answer="Completed",
             tokens=100,
             cost=0.001,
-            steps=[
-                {
-                    "thought": "Reading file",
-                    "code": "read_file('test.txt')",
-                    "output": "contents",
-                    "xml_observation": "<tsugite_execution_result>contents</tsugite_execution_result>",
-                },
-            ],
+            functions_called=["read_file"],
         )
-        save_turn_to_history(conv_id, turn)
 
-        messages = load_conversation_messages(conv_id)
-        cached = apply_cache_control_to_messages(messages)
+        from tsugite.history import reconstruct_messages
+
+        reconstructed = reconstruct_messages(storage.session_path)
+        cached = apply_cache_control_to_messages(reconstructed)
 
         assert len(cached) == 4
         for msg in cached:

@@ -1,7 +1,6 @@
 """History management CLI commands."""
 
 import json
-from datetime import datetime
 from typing import TYPE_CHECKING
 
 import typer
@@ -29,12 +28,12 @@ def history_list(
         tsugite history list --machine laptop
         tsugite history list --agent chat_assistant --limit 10
     """
-    from tsugite.history import get_history_dir, query_index
+    from tsugite.history import SessionStorage, get_history_dir, list_session_files
 
     try:
-        conversations = query_index(machine=machine, agent=agent, limit=limit)
+        session_files = list_session_files()
 
-        if not conversations:
+        if not session_files:
             console.print("[yellow]No conversations found[/yellow]")
 
             history_dir = get_history_dir()
@@ -43,7 +42,7 @@ def history_list(
                 console.print("Conversations will be saved automatically when you use chat mode.")
             return
 
-        table = Table(title=f"Conversation History ({len(conversations)} found)")
+        table = Table(title=f"Conversation History ({len(session_files)} found)")
         table.add_column("ID", style="cyan", no_wrap=True)
         table.add_column("Agent", style="green")
         table.add_column("Machine", style="dim")
@@ -51,33 +50,41 @@ def history_list(
         table.add_column("Tokens", justify="right", style="dim")
         table.add_column("Updated", style="dim")
 
-        for conv in conversations:
-            conv_id = conv.get("conversation_id", "unknown")
-            agent_name = conv.get("agent", "unknown")
-            machine_name = conv.get("machine", "unknown")
-            turn_count = conv.get("turn_count", 0)
-            total_tokens = conv.get("total_tokens", 0)
-            updated_at = conv.get("updated_at", "unknown")
+        count = 0
+        for session_file in session_files:
+            if count >= limit:
+                break
 
-            # Format date
             try:
-                dt = datetime.fromisoformat(updated_at)
-                updated_str = dt.strftime("%Y-%m-%d %H:%M")
-            except (ValueError, TypeError):
-                updated_str = updated_at[:16] if len(updated_at) > 16 else updated_at
+                storage = SessionStorage.load(session_file)
 
-            table.add_row(
-                conv_id,
-                agent_name,
-                machine_name,
-                str(turn_count),
-                f"{total_tokens:,}" if total_tokens > 0 else "-",
-                updated_str,
-            )
+                # Apply filters
+                if machine and storage.machine != machine:
+                    continue
+                if agent and storage.agent != agent:
+                    continue
+
+                # Format date
+                try:
+                    updated_str = storage.created_at.strftime("%Y-%m-%d %H:%M") if storage.created_at else "unknown"
+                except (ValueError, TypeError):
+                    updated_str = "unknown"
+
+                table.add_row(
+                    storage.session_id,
+                    storage.agent or "unknown",
+                    storage.machine or "unknown",
+                    str(storage.turn_count),
+                    f"{storage.total_tokens:,}" if storage.total_tokens > 0 else "-",
+                    updated_str,
+                )
+                count += 1
+
+            except Exception:
+                continue
 
         console.print(table)
 
-        # Show usage hint
         console.print("\n[dim]Use 'tsugite history show CONVERSATION_ID' to view details[/dim]")
 
     except Exception as e:
@@ -97,75 +104,75 @@ def history_show(
         tsugite history show 20251024_103000_chat_abc123 --format json
         tsugite history show 20251024_103000_chat_abc123 --format markdown
     """
-    from tsugite.history import ConversationMetadata, Turn, load_conversation
-    from tsugite.ui.chat_history import format_conversation_for_display
+    from tsugite.history import SessionStorage, Turn, get_history_dir
 
     try:
-        turns = load_conversation(conversation_id)
+        session_path = get_history_dir() / f"{conversation_id}.jsonl"
+        storage = SessionStorage.load(session_path)
+        records = storage.load_records()
 
-        if not turns:
+        if not records:
             console.print(f"[yellow]Conversation '{conversation_id}' is empty[/yellow]")
             return
 
         if format == "json":
-            # JSON output - convert Pydantic models to dicts
-            turns_as_dicts = [t.model_dump(mode="json") for t in turns]
-            output = json.dumps(turns_as_dicts, indent=2, ensure_ascii=False)
-            # Use plain print to avoid Rich wrapping that breaks JSON
+            records_as_dicts = [r.model_dump(mode="json") for r in records]
+            output = json.dumps(records_as_dicts, indent=2, ensure_ascii=False)
             print(output)
 
         elif format == "markdown":
-            # Markdown output
-            metadata = next((t for t in turns if isinstance(t, ConversationMetadata)), None)
-
             console.print(f"# Conversation: {conversation_id}\n")
-            if metadata:
-                console.print(f"- **Agent**: {metadata.agent}")
-                console.print(f"- **Model**: {metadata.model}")
-                console.print(f"- **Machine**: {metadata.machine}")
-                console.print(f"- **Created**: {metadata.created_at}\n")
+            if storage.agent:
+                console.print(f"- **Agent**: {storage.agent}")
+            if storage.model:
+                console.print(f"- **Model**: {storage.model}")
+            if storage.machine:
+                console.print(f"- **Machine**: {storage.machine}")
+            if storage.created_at:
+                console.print(f"- **Created**: {storage.created_at}\n")
             console.print("---\n")
 
-            for turn in turns:
-                if isinstance(turn, Turn):
-                    console.print(f"## Turn ({turn.timestamp})\n")
-                    console.print(f"**User**: {turn.user}\n")
-                    console.print(f"**Assistant**: {turn.assistant}\n")
+            for record in records:
+                if isinstance(record, Turn):
+                    console.print(f"## Turn ({record.timestamp})\n")
 
-                    if turn.tools:
-                        console.print(f"*Tools*: {', '.join(turn.tools)}\n")
+                    # Show user summary or first message
+                    if record.user_summary:
+                        console.print(f"**User**: {record.user_summary}\n")
 
-                    # Display execution steps if available
-                    if turn.steps:
-                        console.print("### Execution Steps\n")
-                        for step in turn.steps:
-                            step_num = step.get("step_number", "?")
-                            thought = step.get("thought", "").strip()
-                            code = step.get("code", "").strip()
-                            output = step.get("output", "").strip()
-                            error = step.get("error")
-                            tools_called = step.get("tools_called", [])
+                    if record.final_answer:
+                        console.print(f"**Assistant**: {record.final_answer}\n")
 
-                            console.print(f"**Step {step_num}**\n")
-                            if thought:
-                                console.print(f"*Thought*: {thought}\n")
-                            if tools_called:
-                                console.print(f"*Tools used*: {', '.join(tools_called)}\n")
-                            if code:
-                                console.print("*Code*:")
-                                console.print(f"```python\n{code}\n```\n")
-                            if output:
-                                console.print(f"*Output*: {output}\n")
-                            if error:
-                                console.print(f"*Error*: {error}\n")
+                    if record.functions_called:
+                        console.print(f"*Functions*: {', '.join(record.functions_called)}\n")
 
-                    console.print(f"*Tokens*: {turn.tokens or 0} | *Cost*: ${turn.cost or 0.0:.4f}\n")
+                    console.print(f"*Tokens*: {record.tokens or 0} | *Cost*: ${record.cost or 0.0:.4f}\n")
                     console.print("---\n")
 
         else:
-            # Plain text output (default)
-            output = format_conversation_for_display(turns)
-            console.print(output)
+            # Plain text output
+            console.print("=" * 60)
+            console.print(f"Conversation: {conversation_id}")
+            console.print(f"Agent: {storage.agent or 'unknown'}")
+            console.print(f"Model: {storage.model or 'unknown'}")
+            console.print(f"Machine: {storage.machine or 'unknown'}")
+            console.print(f"Created: {storage.created_at}")
+            console.print("=" * 60)
+            console.print()
+
+            for record in records:
+                if isinstance(record, Turn):
+                    console.print(f"[{record.timestamp}]")
+                    if record.user_summary:
+                        console.print(f"User: {record.user_summary}")
+                    if record.final_answer:
+                        console.print(f"Assistant: {record.final_answer}")
+                    if record.functions_called:
+                        console.print(f"  Functions: {', '.join(record.functions_called)}")
+                    console.print(f"  Tokens: {record.tokens or 0} | Cost: ${record.cost or 0.0:.4f}")
+                    console.print()
+                    console.print("-" * 60)
+                    console.print()
 
     except FileNotFoundError:
         console.print(f"[red]Conversation '{conversation_id}' not found[/red]")
@@ -179,16 +186,24 @@ def history_show(
 def history_rebuild_index():
     """Rebuild conversation index from JSONL files.
 
-    Scans all conversation files and rebuilds the index.
-    Useful after manual file changes or index corruption.
+    Note: V2 storage format no longer uses a separate index file.
+    This command scans all session files to verify they are valid.
     """
-    from tsugite.history import rebuild_index
+    from tsugite.history import SessionStorage, list_session_files
 
     try:
-        console.print("Rebuilding conversation index...")
-        count = rebuild_index()
-        console.print(f"[green]✓ Indexed {count} conversations[/green]")
+        console.print("Scanning session files...")
+        session_files = list_session_files()
+        valid_count = 0
+        for session_file in session_files:
+            try:
+                SessionStorage.load(session_file)
+                valid_count += 1
+            except Exception as e:
+                console.print(f"[yellow]Skipping invalid session {session_file.stem}: {e}[/yellow]")
+
+        console.print(f"[green]✓ Found {valid_count} valid sessions[/green]")
 
     except Exception as e:
-        console.print(f"[red]Failed to rebuild index: {e}[/red]")
+        console.print(f"[red]Failed to scan sessions: {e}[/red]")
         raise typer.Exit(1)

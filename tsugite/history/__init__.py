@@ -1,29 +1,50 @@
-"""Conversation history management."""
+"""Session storage V2 - conversation history management."""
 
-from .index import (
-    get_conversation_metadata,
-    query_index,
-    rebuild_index,
-    update_index,
+from .models import (
+    AttachmentRef,
+    CompactionSummary,
+    ContextSnapshot,
+    ContextUpdate,
+    SessionMeta,
+    SessionRecord,
+    Turn,
 )
-from .models import ConversationMetadata, IndexEntry, Turn
+from .reconstruction import (
+    apply_cache_control_to_messages,
+    dereference_cached_content,
+    get_current_context,
+    get_turns,
+    load_and_apply_history,
+    reconstruct_messages,
+)
 from .storage import (
-    generate_conversation_id,
+    SessionStorage,
+    generate_session_id,
     get_history_dir,
-    load_conversation,
-    save_turn_to_history,
+    get_machine_name,
+    list_session_files,
 )
 
 __all__ = [
-    "ConversationMetadata",
-    "IndexEntry",
+    # Models
+    "AttachmentRef",
+    "CompactionSummary",
+    "ContextSnapshot",
+    "ContextUpdate",
+    "SessionMeta",
+    "SessionRecord",
     "Turn",
-    "generate_conversation_id",
-    "get_conversation_metadata",
+    # Storage
+    "SessionStorage",
+    "generate_session_id",
     "get_history_dir",
-    "load_conversation",
-    "query_index",
-    "rebuild_index",
-    "save_turn_to_history",
-    "update_index",
+    "get_machine_name",
+    "list_session_files",
+    # Reconstruction
+    "apply_cache_control_to_messages",
+    "dereference_cached_content",
+    "get_current_context",
+    "get_turns",
+    "load_and_apply_history",
+    "reconstruct_messages",
 ]

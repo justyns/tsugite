@@ -84,7 +84,7 @@ def test_handle_history():
     console = Console()
 
     # Test with no results
-    with patch("tsugite.ui.repl_commands.query_index", return_value=[]):
+    with patch("tsugite.ui.repl_commands.list_session_files", return_value=[]):
         with patch.object(console, "print") as mock_print:
             handle_history(console, limit=10)
             # Should indicate no history found

@@ -1,174 +1,212 @@
-"""Tests for Pydantic history models."""
+"""Tests for Pydantic history models (V2 format)."""
 
 import json
 from datetime import datetime, timezone
 
-from tsugite.history.models import ConversationMetadata, IndexEntry, Turn
+from tsugite.history.models import (
+    AttachmentRef,
+    CompactionSummary,
+    ContextSnapshot,
+    ContextUpdate,
+    SessionMeta,
+    Turn,
+)
 
 
-class TestConversationMetadata:
-    """Tests for ConversationMetadata model."""
+class TestSessionMeta:
+    """Tests for SessionMeta model."""
 
     def test_valid_metadata(self):
-        """Test creating valid metadata."""
+        """Test creating valid session metadata."""
         now = datetime.now(timezone.utc)
-        metadata = ConversationMetadata(
-            id="20251024_103000_chat_abc123",
+        meta = SessionMeta(
             agent="chat_assistant",
             model="openai:gpt-4o",
             machine="laptop",
             created_at=now,
         )
 
-        assert metadata.id == "20251024_103000_chat_abc123"
-        assert metadata.agent == "chat_assistant"
-        assert metadata.model == "openai:gpt-4o"
-        assert metadata.machine == "laptop"
-        assert metadata.created_at == now
+        assert meta.type == "session_meta"
+        assert meta.agent == "chat_assistant"
+        assert meta.model == "openai:gpt-4o"
+        assert meta.machine == "laptop"
+        assert meta.created_at == now
+        assert meta.workspace is None
+        assert meta.compacted_from is None
 
     def test_metadata_from_dict(self):
         """Test creating metadata from dict (model_validate)."""
         now = datetime.now(timezone.utc)
         data = {
-            "id": "test_id",
+            "type": "session_meta",
             "agent": "test_agent",
             "model": "test:model",
             "machine": "test_machine",
             "created_at": now.isoformat(),
         }
 
-        metadata = ConversationMetadata.model_validate(data)
-        assert metadata.id == "test_id"
-        assert metadata.agent == "test_agent"
-        assert isinstance(metadata.created_at, datetime)
+        meta = SessionMeta.model_validate(data)
+        assert meta.agent == "test_agent"
+        assert isinstance(meta.created_at, datetime)
 
     def test_metadata_to_dict(self):
         """Test serializing metadata to dict."""
         now = datetime.now(timezone.utc)
-        metadata = ConversationMetadata(
-            id="test_id",
+        meta = SessionMeta(
             agent="test_agent",
             model="test:model",
             machine="test_machine",
             created_at=now,
         )
 
-        data = metadata.model_dump(mode="json")
-        assert data["id"] == "test_id"
+        data = meta.model_dump(mode="json")
+        assert data["type"] == "session_meta"
         assert data["agent"] == "test_agent"
-        assert isinstance(data["created_at"], str)  # ISO format string
+        assert isinstance(data["created_at"], str)
 
     def test_metadata_json_round_trip(self):
         """Test JSON serialization round-trip."""
         now = datetime.now(timezone.utc)
-        original = ConversationMetadata(
-            id="test_id",
+        original = SessionMeta(
             agent="test_agent",
             model="test:model",
             machine="test_machine",
             created_at=now,
+            workspace="my_workspace",
         )
 
-        # Serialize to JSON
         json_str = original.model_dump_json()
-
-        # Deserialize back
         data = json.loads(json_str)
-        restored = ConversationMetadata.model_validate(data)
+        restored = SessionMeta.model_validate(data)
 
-        assert restored.id == original.id
         assert restored.agent == original.agent
         assert restored.model == original.model
+        assert restored.workspace == original.workspace
 
     def test_metadata_whitespace_stripping(self):
         """Test that whitespace is stripped from strings."""
         data = {
-            "id": "  test_id  ",
+            "type": "session_meta",
             "agent": "  test_agent  ",
             "model": "  test:model  ",
             "machine": "  test_machine  ",
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
 
-        metadata = ConversationMetadata.model_validate(data)
-        assert metadata.id == "test_id"  # No leading/trailing spaces
-        assert metadata.agent == "test_agent"
+        meta = SessionMeta.model_validate(data)
+        assert meta.agent == "test_agent"
+
+    def test_metadata_with_compaction(self):
+        """Test metadata with compaction info."""
+        now = datetime.now(timezone.utc)
+        meta = SessionMeta(
+            agent="chat",
+            model="openai:gpt-4o",
+            machine="laptop",
+            created_at=now,
+            compacted_from="20251024_100000_chat_abc123",
+        )
+
+        assert meta.compacted_from == "20251024_100000_chat_abc123"
 
 
 class TestTurn:
-    """Tests for Turn model."""
+    """Tests for Turn model (V2 format with messages array)."""
 
     def test_valid_turn(self):
         """Test creating valid turn."""
         now = datetime.now(timezone.utc)
+        messages = [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi there!"},
+        ]
         turn = Turn(
             timestamp=now,
-            user="Hello",
-            assistant="Hi there!",
-            tools=["web_search"],
+            messages=messages,
+            final_answer="Hi there!",
             tokens=100,
             cost=0.01,
+            functions_called=["web_search"],
         )
 
+        assert turn.type == "turn"
         assert turn.timestamp == now
-        assert turn.user == "Hello"
-        assert turn.assistant == "Hi there!"
-        assert turn.tools == ["web_search"]
+        assert turn.messages == messages
+        assert turn.final_answer == "Hi there!"
         assert turn.tokens == 100
         assert turn.cost == 0.01
+        assert turn.functions_called == ["web_search"]
 
     def test_turn_defaults(self):
         """Test turn with default values."""
         now = datetime.now(timezone.utc)
+        messages = [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi"},
+        ]
         turn = Turn(
             timestamp=now,
-            user="Hello",
-            assistant="Hi",
+            messages=messages,
         )
 
-        assert turn.tools == []  # Default empty list
-        assert turn.tokens is None  # Default None
-        assert turn.cost is None  # Default None
+        assert turn.functions_called == []
+        assert turn.tokens is None
+        assert turn.cost is None
+        assert turn.final_answer is None
+        assert turn.user_summary is None
 
     def test_turn_from_dict(self):
         """Test creating turn from dict."""
         now = datetime.now(timezone.utc)
         data = {
+            "type": "turn",
             "timestamp": now.isoformat(),
-            "user": "Hello",
-            "assistant": "Hi",
-            "tools": ["read_file", "write_file"],
+            "messages": [
+                {"role": "user", "content": "Hello"},
+                {"role": "assistant", "content": "Hi"},
+            ],
+            "final_answer": "Hi",
+            "functions_called": ["read_file", "write_file"],
             "tokens": 150,
             "cost": 0.02,
         }
 
         turn = Turn.model_validate(data)
         assert isinstance(turn.timestamp, datetime)
-        assert turn.tools == ["read_file", "write_file"]
+        assert turn.functions_called == ["read_file", "write_file"]
+        assert len(turn.messages) == 2
 
     def test_turn_to_dict(self):
         """Test serializing turn to dict."""
         now = datetime.now(timezone.utc)
+        messages = [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi"},
+        ]
         turn = Turn(
             timestamp=now,
-            user="Hello",
-            assistant="Hi",
-            tools=["web_search"],
+            messages=messages,
+            final_answer="Hi",
+            functions_called=["web_search"],
             tokens=100,
         )
 
         data = turn.model_dump(mode="json", exclude_none=True)
-        assert data["user"] == "Hello"
+        assert data["type"] == "turn"
+        assert data["messages"] == messages
         assert isinstance(data["timestamp"], str)
-        assert "cost" not in data  # Excluded because it's None
+        assert "cost" not in data
 
     def test_turn_json_serialization(self):
         """Test JSON serialization."""
         now = datetime.now(timezone.utc)
+        messages = [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi"},
+        ]
         turn = Turn(
             timestamp=now,
-            user="Hello",
-            assistant="Hi",
+            messages=messages,
         )
 
         json_str = turn.model_dump_json(exclude_none=True)
@@ -178,30 +216,38 @@ class TestTurn:
     def test_turn_with_channel_metadata(self):
         """Test turn with channel routing metadata."""
         now = datetime.now(timezone.utc)
+        messages = [
+            {"role": "user", "content": "Hello from Discord"},
+            {"role": "assistant", "content": "Hi there!"},
+        ]
         metadata = {
             "source": "discord",
             "channel_id": "123456789",
             "user_id": "user123",
             "reply_to": "discord:123456789",
             "author_name": "TestUser",
+            "is_daemon_managed": True,
         }
 
         turn = Turn(
             timestamp=now,
-            user="Hello from Discord",
-            assistant="Hi there!",
+            messages=messages,
+            final_answer="Hi there!",
             metadata=metadata,
         )
 
         assert turn.metadata is not None
         assert turn.metadata["source"] == "discord"
         assert turn.metadata["channel_id"] == "123456789"
-        assert turn.metadata["user_id"] == "user123"
-        assert turn.metadata["reply_to"] == "discord:123456789"
+        assert turn.metadata["is_daemon_managed"] is True
 
     def test_turn_metadata_serialization(self):
         """Test metadata field serialization."""
         now = datetime.now(timezone.utc)
+        messages = [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi"},
+        ]
         metadata = {
             "source": "cli",
             "user_id": "cli-user",
@@ -210,94 +256,174 @@ class TestTurn:
 
         turn = Turn(
             timestamp=now,
-            user="Hello",
-            assistant="Hi",
+            messages=messages,
             metadata=metadata,
         )
 
-        # Serialize
         data = turn.model_dump(mode="json")
         assert "metadata" in data
         assert data["metadata"]["source"] == "cli"
 
-        # Deserialize
         turn2 = Turn.model_validate(data)
         assert turn2.metadata == metadata
 
-
-class TestIndexEntry:
-    """Tests for IndexEntry model."""
-
-    def test_valid_index_entry(self):
-        """Test creating valid index entry."""
+    def test_turn_with_user_summary(self):
+        """Test turn with user summary."""
         now = datetime.now(timezone.utc)
-        entry = IndexEntry(
-            agent="chat_assistant",
-            model="openai:gpt-4o",
-            machine="laptop",
-            created_at=now,
-            updated_at=now,
-            turn_count=5,
-            total_tokens=1000,
-            total_cost=0.05,
+        messages = [
+            {"role": "user", "content": "This is a very long message..."},
+            {"role": "assistant", "content": "Response"},
+        ]
+        turn = Turn(
+            timestamp=now,
+            messages=messages,
+            user_summary="This is a very long message...",
         )
 
-        assert entry.agent == "chat_assistant"
-        assert entry.turn_count == 5
-        assert entry.total_tokens == 1000
-        assert entry.total_cost == 0.05
+        assert turn.user_summary == "This is a very long message..."
 
-    def test_index_entry_defaults(self):
-        """Test index entry with defaults."""
-        now = datetime.now(timezone.utc)
-        entry = IndexEntry(
-            agent="test_agent",
-            model="test:model",
-            machine="test_machine",
-            created_at=now,
-            updated_at=now,
+
+class TestAttachmentRef:
+    """Tests for AttachmentRef model."""
+
+    def test_file_attachment_ref(self):
+        """Test file-based attachment reference."""
+        ref = AttachmentRef(
+            hash="sha256_abc123",
+            type="text",
+            source="file",
         )
 
-        assert entry.turn_count == 0  # Default
-        assert entry.total_tokens is None  # Default
-        assert entry.total_cost is None  # Default
+        assert ref.hash == "sha256_abc123"
+        assert ref.type == "text"
+        assert ref.source == "file"
+        assert ref.url is None
 
-    def test_index_entry_from_dict(self):
-        """Test creating index entry from dict."""
-        now = datetime.now(timezone.utc)
-        data = {
-            "agent": "chat_assistant",
-            "model": "openai:gpt-4o",
-            "machine": "laptop",
-            "created_at": now.isoformat(),
-            "updated_at": now.isoformat(),
-            "turn_count": 10,
-            "total_tokens": 2000,
-            "total_cost": 0.1,
+    def test_url_attachment_ref(self):
+        """Test URL-based attachment reference."""
+        ref = AttachmentRef(
+            url="https://example.com/image.png",
+            type="image",
+            source="url",
+            mime_type="image/png",
+        )
+
+        assert ref.url == "https://example.com/image.png"
+        assert ref.type == "image"
+        assert ref.source == "url"
+        assert ref.mime_type == "image/png"
+        assert ref.hash is None
+
+    def test_attachment_ref_with_original_path(self):
+        """Test attachment with fallback path."""
+        ref = AttachmentRef(
+            hash="sha256_xyz",
+            type="document",
+            source="file",
+            original_path="/home/user/docs/report.pdf",
+            mime_type="application/pdf",
+        )
+
+        assert ref.original_path == "/home/user/docs/report.pdf"
+
+
+class TestContextSnapshot:
+    """Tests for ContextSnapshot model."""
+
+    def test_valid_context_snapshot(self):
+        """Test creating valid context snapshot."""
+        attachments = {
+            "PERSONA.md": AttachmentRef(hash="abc123", type="text", source="file"),
+            "logo.png": AttachmentRef(url="https://example.com/logo.png", type="image", source="url"),
         }
-
-        entry = IndexEntry.model_validate(data)
-        assert entry.turn_count == 10
-        assert isinstance(entry.created_at, datetime)
-        assert isinstance(entry.updated_at, datetime)
-
-    def test_index_entry_to_dict(self):
-        """Test serializing index entry to dict."""
-        now = datetime.now(timezone.utc)
-        entry = IndexEntry(
-            agent="test_agent",
-            model="test:model",
-            machine="test_machine",
-            created_at=now,
-            updated_at=now,
-            turn_count=5,
+        snapshot = ContextSnapshot(
+            attachments=attachments,
+            skills=["web_search", "code_review"],
+            hash="ctx_hash_123",
         )
 
-        data = entry.model_dump(mode="json", exclude_none=True)
-        assert data["agent"] == "test_agent"
-        assert data["turn_count"] == 5
-        assert isinstance(data["created_at"], str)
-        assert "total_tokens" not in data  # Excluded because None
+        assert snapshot.type == "context"
+        assert len(snapshot.attachments) == 2
+        assert snapshot.skills == ["web_search", "code_review"]
+        assert snapshot.hash == "ctx_hash_123"
+
+    def test_context_snapshot_empty(self):
+        """Test context snapshot with no attachments."""
+        snapshot = ContextSnapshot(
+            attachments={},
+            skills=[],
+            hash="empty_ctx_hash",
+        )
+
+        assert snapshot.attachments == {}
+        assert snapshot.skills == []
+
+
+class TestContextUpdate:
+    """Tests for ContextUpdate model."""
+
+    def test_valid_context_update(self):
+        """Test creating valid context update."""
+        now = datetime.now(timezone.utc)
+        changed = {
+            "PERSONA.md": AttachmentRef(hash="new_hash", type="text", source="file"),
+        }
+        update = ContextUpdate(
+            changed=changed,
+            removed=["old_file.md"],
+            added_skills=["new_skill"],
+            removed_skills=["old_skill"],
+            timestamp=now,
+            hash="new_ctx_hash",
+        )
+
+        assert update.type == "context_update"
+        assert len(update.changed) == 1
+        assert update.removed == ["old_file.md"]
+        assert update.added_skills == ["new_skill"]
+        assert update.removed_skills == ["old_skill"]
+
+    def test_context_update_defaults(self):
+        """Test context update with defaults."""
+        now = datetime.now(timezone.utc)
+        update = ContextUpdate(
+            timestamp=now,
+            hash="hash123",
+        )
+
+        assert update.changed == {}
+        assert update.removed == []
+        assert update.added_skills == []
+        assert update.removed_skills == []
+
+
+class TestCompactionSummary:
+    """Tests for CompactionSummary model."""
+
+    def test_valid_compaction_summary(self):
+        """Test creating valid compaction summary."""
+        summary = CompactionSummary(
+            summary="The user discussed project setup and configuration.",
+            previous_turns=50,
+        )
+
+        assert summary.type == "compaction_summary"
+        assert "project setup" in summary.summary
+        assert summary.previous_turns == 50
+
+    def test_compaction_summary_serialization(self):
+        """Test compaction summary serialization."""
+        summary = CompactionSummary(
+            summary="Previous conversation summary.",
+            previous_turns=25,
+        )
+
+        data = summary.model_dump(mode="json")
+        assert data["type"] == "compaction_summary"
+        assert data["previous_turns"] == 25
+
+        restored = CompactionSummary.model_validate(data)
+        assert restored.summary == summary.summary
 
 
 class TestDatetimeHandling:
@@ -306,23 +432,23 @@ class TestDatetimeHandling:
     def test_iso_string_with_z(self):
         """Test parsing ISO string with Z suffix."""
         data = {
-            "id": "test",
+            "type": "session_meta",
             "agent": "test",
             "model": "test",
             "machine": "test",
             "created_at": "2025-10-24T10:30:00Z",
         }
 
-        metadata = ConversationMetadata.model_validate(data)
-        assert isinstance(metadata.created_at, datetime)
-        assert metadata.created_at.tzinfo is not None  # Has timezone info
+        meta = SessionMeta.model_validate(data)
+        assert isinstance(meta.created_at, datetime)
+        assert meta.created_at.tzinfo is not None
 
     def test_iso_string_with_offset(self):
         """Test parsing ISO string with timezone offset."""
         data = {
+            "type": "turn",
             "timestamp": "2025-10-24T10:30:00+00:00",
-            "user": "test",
-            "assistant": "test",
+            "messages": [{"role": "user", "content": "test"}],
         }
 
         turn = Turn.model_validate(data)
@@ -331,10 +457,10 @@ class TestDatetimeHandling:
     def test_datetime_object(self):
         """Test that datetime objects pass through unchanged."""
         now = datetime.now(timezone.utc)
+        messages = [{"role": "user", "content": "test"}]
         turn = Turn(
             timestamp=now,
-            user="test",
-            assistant="test",
+            messages=messages,
         )
 
         assert turn.timestamp == now

@@ -2,8 +2,7 @@
 
 from typing import Any, Dict, List, Optional
 
-from ..history import load_conversation
-from ..history.index import query_index
+from ..history import SessionStorage, Turn, get_history_dir, list_session_files
 from . import tool
 
 
@@ -17,69 +16,62 @@ def read_conversation(conversation_id: str) -> Dict[str, Any]:
     Returns:
         Dictionary containing:
         - metadata: Conversation metadata (id, agent, model, machine, created_at)
-        - turns: List of conversation turns with user/assistant messages, tools used, tokens, costs
+        - turns: List of conversation turns with messages, functions called, tokens, costs
         - summary: High-level statistics
 
     Raises:
         ValueError: If conversation_id is not found
     """
+    session_path = get_history_dir() / f"{conversation_id}.jsonl"
+
     try:
-        records = load_conversation(conversation_id)
+        storage = SessionStorage.load(session_path)
     except FileNotFoundError as e:
         raise ValueError(f"Conversation '{conversation_id}' not found: {e}")
 
+    records = storage.load_records()
     if not records:
         raise ValueError(f"Conversation '{conversation_id}' is empty")
 
-    # First record is always metadata
-    metadata_record = records[0]
-    turn_records = records[1:]
-
-    # Extract metadata
     metadata = {
-        "conversation_id": metadata_record.id,
-        "agent": metadata_record.agent,
-        "model": metadata_record.model,
-        "machine": metadata_record.machine,
-        "created_at": metadata_record.created_at.isoformat(),
+        "conversation_id": storage.session_id,
+        "agent": storage.agent,
+        "model": storage.model,
+        "machine": storage.machine,
+        "created_at": storage.created_at.isoformat() if storage.created_at else None,
     }
 
-    # Extract turns
     turns = []
     total_tokens = 0
     total_cost = 0.0
+    all_functions = set()
 
-    for turn in turn_records:
-        turn_data = {
-            "timestamp": turn.timestamp.isoformat(),
-            "user": turn.user,
-            "assistant": turn.assistant,
-            "tools": turn.tools or [],
-            "tokens": turn.tokens,
-            "cost": turn.cost,
-        }
+    for record in records:
+        if isinstance(record, Turn):
+            turn_data = {
+                "timestamp": record.timestamp.isoformat(),
+                "user_summary": record.user_summary,
+                "final_answer": record.final_answer,
+                "functions_called": record.functions_called or [],
+                "tokens": record.tokens,
+                "cost": record.cost,
+                "messages": record.messages,
+            }
 
-        # Include execution steps if available (thought/code/observation)
-        if turn.steps:
-            turn_data["steps"] = turn.steps
+            turns.append(turn_data)
 
-        # Include full message history if available
-        if turn.messages:
-            turn_data["messages"] = turn.messages
+            if record.tokens:
+                total_tokens += record.tokens
+            if record.cost:
+                total_cost += record.cost
+            if record.functions_called:
+                all_functions.update(record.functions_called)
 
-        turns.append(turn_data)
-
-        if turn.tokens:
-            total_tokens += turn.tokens
-        if turn.cost:
-            total_cost += turn.cost
-
-    # Summary statistics
     summary = {
         "turn_count": len(turns),
         "total_tokens": total_tokens if total_tokens > 0 else None,
         "total_cost": round(total_cost, 4) if total_cost > 0 else None,
-        "tools_used": list(set(tool for turn in turn_records for tool in (turn.tools or []))),
+        "functions_used": sorted(list(all_functions)),
     }
 
     return {"metadata": metadata, "turns": turns, "summary": summary}
@@ -100,28 +92,42 @@ def list_conversations(
 
     Returns:
         List of conversation summaries, sorted by most recent first.
-        Each entry contains: conversation_id, agent, model, machine, created_at, updated_at,
+        Each entry contains: conversation_id, agent, model, machine, created_at,
         turn_count, total_tokens, total_cost
     """
     if limit < 1 or limit > 100:
         raise ValueError("Limit must be between 1 and 100")
 
-    results = query_index(machine=machine, agent=agent, limit=limit)
+    session_files = list_session_files()
 
     conversations = []
-    for result in results:
-        conversations.append(
-            {
-                "conversation_id": result["conversation_id"],
-                "agent": result["agent"],
-                "model": result["model"],
-                "machine": result["machine"],
-                "created_at": result["created_at"],
-                "updated_at": result["updated_at"],
-                "turn_count": result.get("turn_count", 0),
-                "total_tokens": result.get("total_tokens"),
-                "total_cost": result.get("total_cost"),
-            }
-        )
+    for session_file in session_files:
+        if len(conversations) >= limit:
+            break
+
+        try:
+            storage = SessionStorage.load(session_file)
+
+            # Apply filters
+            if agent and storage.agent != agent:
+                continue
+            if machine and storage.machine != machine:
+                continue
+
+            conversations.append(
+                {
+                    "conversation_id": storage.session_id,
+                    "agent": storage.agent,
+                    "model": storage.model,
+                    "machine": storage.machine,
+                    "created_at": storage.created_at.isoformat() if storage.created_at else None,
+                    "turn_count": storage.turn_count,
+                    "total_tokens": storage.total_tokens,
+                    "total_cost": round(storage.total_cost, 4) if storage.total_cost else None,
+                }
+            )
+
+        except Exception:
+            continue
 
     return conversations

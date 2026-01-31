@@ -95,16 +95,16 @@ class ChatManager:
         # Only create new conversation if not resuming
         if history_enabled and not resume_conversation_id:
             try:
-                from tsugite.ui.chat_history import start_conversation
+                from tsugite.history import SessionStorage
 
                 agent = parse_agent_file(agent_path)
                 model = model_override or agent.config.model or "unknown"
 
-                self.conversation_id = start_conversation(
+                storage = SessionStorage.create(
                     agent_name=agent.config.name or agent_path.stem,
                     model=model,
-                    timestamp=self.session_start,
                 )
+                self.conversation_id = storage.session_id
             except Exception as e:
                 # Don't fail if history can't be initialized
                 print(f"Warning: Failed to initialize conversation history: {e}")
@@ -115,7 +115,7 @@ class ChatManager:
 
         Args:
             conversation_id: Conversation ID to resume
-            turns: List of Turn objects from history
+            turns: List of Turn objects from history (V2 format)
 
         Raises:
             RuntimeError: If loading fails
@@ -133,9 +133,9 @@ class ChatManager:
 
                 chat_turn = ChatTurn(
                     timestamp=turn.timestamp,
-                    user_message=turn.user,
-                    agent_response=turn.assistant,
-                    tool_calls=turn.tools or [],
+                    user_message=turn.user_summary or "",
+                    agent_response=turn.final_answer or "",
+                    tool_calls=turn.functions_called or [],
                     token_count=turn.tokens,
                     cost=turn.cost,
                 )
@@ -188,18 +188,20 @@ class ChatManager:
         # Save to persistent history if enabled
         if self.conversation_id:
             try:
-                from tsugite.ui.chat_history import save_chat_turn
+                from tsugite.history import SessionStorage, get_history_dir
 
-                save_chat_turn(
-                    conversation_id=self.conversation_id,
-                    user_message=user_message,
-                    agent_response=agent_response,
-                    tool_calls=tool_calls or [],
-                    token_count=token_count,
+                session_path = get_history_dir() / f"{self.conversation_id}.jsonl"
+                storage = SessionStorage.load(session_path)
+                storage.record_turn(
+                    messages=messages
+                    or [
+                        {"role": "user", "content": user_message},
+                        {"role": "assistant", "content": agent_response},
+                    ],
+                    final_answer=agent_response,
+                    tokens=token_count,
                     cost=cost,
-                    timestamp=turn.timestamp,
-                    execution_steps=execution_steps,
-                    messages=messages,
+                    functions_called=tool_calls or [],
                 )
             except Exception as e:
                 # Don't fail the turn if history save fails

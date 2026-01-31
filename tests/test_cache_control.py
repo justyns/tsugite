@@ -1,12 +1,9 @@
 """Tests for conversation history caching functionality."""
 
-from datetime import datetime, timezone
-
 import pytest
 
-from tsugite.agent_runner.history_integration import apply_cache_control_to_messages
-from tsugite.history import Turn, save_turn_to_history
-from tsugite.ui.chat_history import start_conversation
+from tsugite.history import SessionStorage
+from tsugite.history.reconstruction import apply_cache_control_to_messages
 
 
 @pytest.fixture
@@ -15,9 +12,8 @@ def temp_history_dir(tmp_path, monkeypatch):
     history_dir = tmp_path / "history"
     history_dir.mkdir()
 
-    # Mock all history directory getters
     monkeypatch.setattr("tsugite.history.storage.get_history_dir", lambda: history_dir)
-    monkeypatch.setattr("tsugite.history.index.get_history_dir", lambda: history_dir)
+    monkeypatch.setattr("tsugite.history.storage.get_machine_name", lambda: "test_machine")
 
     return history_dir
 
@@ -100,24 +96,24 @@ class TestCacheControlIntegration:
 
     def test_load_and_cache_conversation(self, temp_history_dir):
         """Test loading conversation and applying cache control to all messages."""
-        from tsugite.agent_runner.history_integration import load_conversation_messages
+        from tsugite.history import reconstruct_messages
 
-        # Create conversation with 3 turns
-        conv_id = start_conversation("test_agent", "test:model")
+        storage = SessionStorage.create(agent_name="test_agent", model="test:model")
 
         for i in range(3):
-            turn = Turn(
-                timestamp=datetime.now(timezone.utc),
-                user=f"Question {i}",
-                assistant=f"Answer {i}",
-                tools=[],
+            messages = [
+                {"role": "user", "content": f"Question {i}"},
+                {"role": "assistant", "content": f"Answer {i}"},
+            ]
+            storage.record_turn(
+                messages=messages,
+                final_answer=f"Answer {i}",
                 tokens=50,
                 cost=0.001,
             )
-            save_turn_to_history(conv_id, turn)
 
         # Load messages
-        messages = load_conversation_messages(conv_id)
+        messages = reconstruct_messages(storage.session_path)
         assert len(messages) == 6  # 3 turns × 2 messages
 
         # Apply cache control to all messages (industry best practice)
@@ -130,23 +126,23 @@ class TestCacheControlIntegration:
 
     def test_long_conversation_all_cached(self, temp_history_dir):
         """Test that even long conversations have all messages cached."""
-        from tsugite.agent_runner.history_integration import load_conversation_messages
+        from tsugite.history import reconstruct_messages
 
-        # Create conversation with 10 turns
-        conv_id = start_conversation("test_agent", "test:model")
+        storage = SessionStorage.create(agent_name="test_agent", model="test:model")
 
         for i in range(10):
-            turn = Turn(
-                timestamp=datetime.now(timezone.utc),
-                user=f"Question {i}",
-                assistant=f"Answer {i}",
-                tools=[],
+            messages = [
+                {"role": "user", "content": f"Question {i}"},
+                {"role": "assistant", "content": f"Answer {i}"},
+            ]
+            storage.record_turn(
+                messages=messages,
+                final_answer=f"Answer {i}",
                 tokens=50,
                 cost=0.001,
             )
-            save_turn_to_history(conv_id, turn)
 
-        messages = load_conversation_messages(conv_id)
+        messages = reconstruct_messages(storage.session_path)
         assert len(messages) == 20  # 10 turns × 2 messages
 
         # Apply cache control - should cache all messages

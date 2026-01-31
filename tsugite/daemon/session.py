@@ -1,10 +1,12 @@
-"""Session management for daemon - maps users to conversations."""
+"""Session management for daemon - maps users to sessions."""
 
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional
+
+from tsugite.history import SessionStorage, generate_session_id, get_history_dir
 
 
 @dataclass
@@ -65,18 +67,19 @@ class SessionManager:
         }
         path.write_text(json.dumps(data))
 
-    def _estimate_tokens_from_history(self, conv_id: str) -> tuple[int, int]:
-        """Estimate token count from conversation history.
+    def _estimate_tokens_from_storage(self, session_id: str) -> tuple[int, int]:
+        """Estimate token count from session storage.
 
         Returns:
             Tuple of (estimated_tokens, message_count)
         """
         try:
-            from tsugite.history import load_conversation
+            session_path = get_history_dir() / f"{session_id}.jsonl"
+            if not session_path.exists():
+                return 0, 0
 
-            turns = load_conversation(conv_id)
-            tokens = sum((len(t.user or "") + len(t.assistant or "")) // 4 for t in turns if hasattr(t, "user"))
-            return tokens, len(turns)
+            storage = SessionStorage.load(session_path)
+            return storage.total_tokens, storage.turn_count
         except Exception:
             return 0, 0
 
@@ -90,7 +93,7 @@ class SessionManager:
             user_id: Platform user ID (e.g., Discord user ID)
 
         Returns:
-            Conversation ID for tsugite history system
+            Session ID for history system
         """
         if user_id in self.sessions:
             return self.sessions[user_id].conversation_id
@@ -99,10 +102,8 @@ class SessionManager:
         session_data = self._load_session_file(user_id)
         if session_data:
             conv_id = session_data["conversation_id"]
-            # Estimate tokens from history to restore state
-            initial_tokens, initial_messages = self._estimate_tokens_from_history(conv_id)
+            initial_tokens, initial_messages = self._estimate_tokens_from_storage(conv_id)
         else:
-            # New session - use deterministic ID
             conv_id = f"daemon_{self.agent_name}_{user_id}"
             self._save_session_file(user_id, conv_id)
             initial_tokens = 0
@@ -140,26 +141,20 @@ class SessionManager:
         return self.sessions[user_id].cumulative_tokens >= self.compaction_threshold
 
     def compact_session(self, user_id: str) -> str:
-        """Compact session: create new conversation and update persistent storage.
+        """Compact session: create new session and update persistent storage.
 
         Args:
             user_id: Platform user ID
 
         Returns:
-            New conversation ID
+            New session ID
         """
-        from tsugite.history import generate_conversation_id
-
-        # Load current session data to get compaction count
         session_data = self._load_session_file(user_id) or {}
         compaction_count = session_data.get("compaction_count", 0) + 1
 
-        # Generate new conversation ID
-        new_conv_id = generate_conversation_id(self.agent_name)
+        new_conv_id = generate_session_id(self.agent_name)
 
-        # Update persistent storage
         self._save_session_file(user_id, new_conv_id, compaction_count)
 
-        # Update in-memory state
         self.sessions[user_id] = SessionInfo(conversation_id=new_conv_id)
         return new_conv_id

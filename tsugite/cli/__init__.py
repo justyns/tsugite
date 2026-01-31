@@ -265,7 +265,7 @@ def _resolve_conversation_continuation(continue_conversation: bool, conversation
     if not continue_conversation:
         return None
 
-    from tsugite.ui.chat_history import get_latest_conversation
+    from tsugite.agent_runner.history_integration import get_latest_conversation
 
     if conversation_id:
         console.print(f"[cyan]Continuing conversation: {conversation_id}[/cyan]")
@@ -557,7 +557,7 @@ def run(
     # Handle daemon mode
     daemon_metadata = None
     if daemon_agent:
-        from tsugite.history.index import find_latest_session
+        from tsugite.history import SessionStorage, get_history_dir, list_session_files
 
         try:
             from tsugite.daemon.config import load_daemon_config
@@ -577,7 +577,16 @@ def run(
         # Find latest session for this agent
         user_id = os.environ.get("USER", "cli-user")
 
-        latest_conv_id = find_latest_session(daemon_agent, user_id, daemon_only=True)
+        # Search for daemon-managed sessions for this agent
+        latest_conv_id = None
+        for session_file in list_session_files():
+            try:
+                storage = SessionStorage.load(session_file)
+                if storage.agent == daemon_agent:
+                    latest_conv_id = storage.session_id
+                    break
+            except Exception:
+                continue
 
         if latest_conv_id:
             console.print(f"[cyan]Joining daemon session: {latest_conv_id}[/cyan]")
@@ -636,14 +645,16 @@ def run(
             base_dir = Path.cwd()
 
             if not agent_refs and continue_conversation:
-                from tsugite.history import get_conversation_metadata
+                from tsugite.history import SessionStorage, get_history_dir
 
-                metadata = get_conversation_metadata(history_opts.continue_id)
-                if not metadata:
+                session_path = get_history_dir() / f"{history_opts.continue_id}.jsonl"
+                try:
+                    storage = SessionStorage.load(session_path)
+                    agent_name = storage.agent
+                except Exception:
                     console.print(f"[red]Could not load metadata for conversation: {history_opts.continue_id}[/red]")
                     raise typer.Exit(1)
 
-                agent_name = metadata.agent
                 console.print(f"[cyan]Auto-detected agent from conversation: {agent_name}[/cyan]")
                 agent_refs = [f"+{agent_name}"]
 
@@ -883,7 +894,7 @@ def render(
     # Handle conversation continuation
     continue_conversation_id = None
     if continue_conversation:
-        from tsugite.ui.chat_history import get_latest_conversation
+        from tsugite.agent_runner.history_integration import get_latest_conversation
 
         if conversation_id:
             continue_conversation_id = conversation_id
@@ -897,15 +908,18 @@ def render(
 
     # Auto-detect agent from conversation if not specified
     if continue_conversation_id and not agent_path:
-        from tsugite.history import get_conversation_metadata
+        from tsugite.history import SessionStorage, get_history_dir
 
-        metadata = get_conversation_metadata(continue_conversation_id)
-        if not metadata:
+        session_path = get_history_dir() / f"{continue_conversation_id}.jsonl"
+        try:
+            storage = SessionStorage.load(session_path)
+            agent_name = storage.agent
+        except Exception:
             console.print(f"[red]Could not load metadata for conversation: {continue_conversation_id}[/red]")
             raise typer.Exit(1)
 
-        agent_path = f"+{metadata.agent}"
-        console.print(f"[cyan]Auto-detected agent from conversation: {metadata.agent}[/cyan]")
+        agent_path = f"+{agent_name}"
+        console.print(f"[cyan]Auto-detected agent from conversation: {agent_name}[/cyan]")
 
     # Validate agent_path is provided
     if not agent_path:
@@ -1117,7 +1131,8 @@ def chat(
         resume_turns = None
 
         if continue_ is not None:
-            from tsugite.ui.chat_history import get_latest_conversation, load_conversation_history
+            from tsugite.agent_runner.history_integration import get_latest_conversation
+            from tsugite.history import SessionStorage, get_history_dir, get_turns
 
             if continue_ == "" or continue_.lower() == "latest":
                 history_opts.continue_id = get_latest_conversation()
@@ -1130,7 +1145,8 @@ def chat(
                 console.print(f"[cyan]Resuming conversation: {history_opts.continue_id}[/cyan]")
 
             try:
-                resume_turns = load_conversation_history(history_opts.continue_id)
+                session_path = get_history_dir() / f"{history_opts.continue_id}.jsonl"
+                resume_turns = get_turns(session_path)
                 console.print(f"[cyan]Loaded {len(resume_turns)} previous turns[/cyan]")
             except FileNotFoundError:
                 console.print(f"[red]Conversation not found: {history_opts.continue_id}[/red]")

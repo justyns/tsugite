@@ -1,14 +1,13 @@
 """Slash command handlers for REPL mode."""
 
 import os
-from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 from rich.console import Console
 from rich.table import Table
 
-from tsugite.history import query_index
+from tsugite.history import SessionStorage, list_session_files
 
 if TYPE_CHECKING:
     from tsugite.ui.chat import ChatManager
@@ -87,14 +86,13 @@ def handle_history(console: Console, limit: int = 10) -> None:
         console: Rich console for output
         limit: Maximum number of conversations to show
     """
-    # Query index for recent conversations (already sorted by updated_at, newest first)
-    results = query_index(limit=limit)
+    session_files = list_session_files()
 
-    if not results:
+    if not session_files:
         console.print("[yellow]No conversation history found.[/yellow]")
         return
 
-    table = Table(title=f"Recent Conversations (Last {len(results)})", title_style="bold cyan")
+    table = Table(title="Recent Conversations", title_style="bold cyan")
     table.add_column("ID", style="cyan", width=12)
     table.add_column("Agent", style="yellow")
     table.add_column("Model", style="green")
@@ -102,35 +100,41 @@ def handle_history(console: Console, limit: int = 10) -> None:
     table.add_column("Turns", justify="right")
     table.add_column("Tokens", justify="right")
 
-    for result in results:
-        # Extract conversation ID
-        conv_id = result.get("conversation_id", "unknown")
+    count = 0
+    for session_file in session_files:
+        if count >= limit:
+            break
 
-        # Format date
-        created_at_str = result.get("created_at", "")
-        if created_at_str:
-            try:
-                created_at = datetime.fromisoformat(created_at_str).strftime("%Y-%m-%d %H:%M")
-            except (ValueError, AttributeError):
-                created_at = created_at_str[:16] if len(created_at_str) >= 16 else created_at_str
-        else:
-            created_at = "unknown"
+        try:
+            storage = SessionStorage.load(session_file)
 
-        # Truncate ID for display
-        short_id = conv_id[:12]
+            # Format date
+            if storage.created_at:
+                try:
+                    created_at = storage.created_at.strftime("%Y-%m-%d %H:%M")
+                except (ValueError, AttributeError):
+                    created_at = "unknown"
+            else:
+                created_at = "unknown"
 
-        # Format tokens with commas
-        total_tokens = result.get("total_tokens", 0)
-        tokens_str = f"{total_tokens:,}" if total_tokens else "0"
+            # Truncate ID for display
+            short_id = storage.session_id[:12]
 
-        table.add_row(
-            short_id,
-            result.get("agent", "unknown"),
-            result.get("model", "unknown"),
-            created_at,
-            str(result.get("turn_count", 0)),
-            tokens_str,
-        )
+            # Format tokens with commas
+            tokens_str = f"{storage.total_tokens:,}" if storage.total_tokens else "0"
+
+            table.add_row(
+                short_id,
+                storage.agent or "unknown",
+                storage.model or "unknown",
+                created_at,
+                str(storage.turn_count),
+                tokens_str,
+            )
+            count += 1
+
+        except Exception:
+            continue
 
     console.print(table)
     console.print()
@@ -235,21 +239,24 @@ def handle_save(console: Console, path: str, manager: "ChatManager") -> None:
         return
 
     try:
-        from tsugite.ui.chat_history import load_conversation_history
+        from tsugite.history import Turn, get_history_dir
 
         # Load conversation turns
-        turns = load_conversation_history(manager.conversation_id)
+        session_path = get_history_dir() / f"{manager.conversation_id}.jsonl"
+        storage = SessionStorage.load(session_path)
+        records = storage.load_records()
 
         # Format as markdown
         output = f"# Conversation: {manager.conversation_id}\n\n"
-        output += f"**Agent:** {manager.agent_name}\n"
-        output += f"**Model:** {manager.model}\n\n"
+        output += f"**Agent:** {storage.agent or 'unknown'}\n"
+        output += f"**Model:** {storage.model or 'unknown'}\n\n"
         output += "---\n\n"
 
-        for turn in turns:
-            output += f"## User\n\n{turn.user}\n\n"
-            output += f"## Assistant\n\n{turn.assistant}\n\n"
-            output += "---\n\n"
+        for record in records:
+            if isinstance(record, Turn):
+                output += f"## User\n\n{record.user_summary or ''}\n\n"
+                output += f"## Assistant\n\n{record.final_answer or ''}\n\n"
+                output += "---\n\n"
 
         # Write to file
         expanded_path = os.path.expanduser(path)

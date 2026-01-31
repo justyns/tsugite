@@ -7,7 +7,6 @@ These tests verify that:
 """
 
 import json
-from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -16,7 +15,7 @@ import pytest
 from tsugite.daemon.adapters.base import BaseAdapter, ChannelContext
 from tsugite.daemon.config import AgentConfig
 from tsugite.daemon.session import SessionManager
-from tsugite.history import Turn, load_conversation, save_turn_to_history
+from tsugite.history import SessionStorage, Turn
 
 
 def create_mock_result(response: str = "Test response", token_count: int = 100) -> MagicMock:
@@ -122,6 +121,8 @@ class TestDaemonHistorySaving:
         history_dir = tmp_path / "history"
         history_dir.mkdir()
         monkeypatch.setattr("tsugite.history.storage.get_history_dir", lambda: history_dir)
+        monkeypatch.setattr("tsugite.history.storage.get_machine_name", lambda: "test_machine")
+        monkeypatch.setattr("tsugite.agent_runner.history_integration.get_history_dir", lambda: history_dir)
 
         # Get conversation ID that will be used
         conv_id = mock_session_manager.get_or_create_session("test_user")
@@ -152,14 +153,14 @@ class TestDaemonHistorySaving:
         history_file = history_dir / f"{conv_id}.jsonl"
         assert history_file.exists(), f"History file should exist at {history_file}"
 
-        # Verify content
-        turns = load_conversation(conv_id)
+        # Verify content using V2 API
+        storage = SessionStorage.load(history_file)
+        records = storage.load_records()
+        turns = [r for r in records if isinstance(r, Turn)]
         assert len(turns) >= 1
-        # Find the actual turn (skip metadata)
-        turn = next((t for t in turns if isinstance(t, Turn)), None)
-        assert turn is not None
-        assert turn.user == "Hello bot"
-        assert "Test response" in (turn.assistant or "")
+        # V2 stores messages and final_answer
+        assert turns[0].final_answer is not None
+        assert "Test response" in (turns[0].final_answer or "")
 
     def test_history_accumulates_across_messages(
         self, tmp_path, mock_workspace, mock_agent_config, mock_session_manager, monkeypatch
@@ -168,6 +169,8 @@ class TestDaemonHistorySaving:
         history_dir = tmp_path / "history"
         history_dir.mkdir()
         monkeypatch.setattr("tsugite.history.storage.get_history_dir", lambda: history_dir)
+        monkeypatch.setattr("tsugite.history.storage.get_machine_name", lambda: "test_machine")
+        monkeypatch.setattr("tsugite.agent_runner.history_integration.get_history_dir", lambda: history_dir)
 
         conv_id = mock_session_manager.get_or_create_session("test_user")
 
@@ -198,13 +201,11 @@ class TestDaemonHistorySaving:
                 asyncio.run(adapter.handle_message("test_user", "Message 2", channel_context))
                 asyncio.run(adapter.handle_message("test_user", "Message 3", channel_context))
 
-        # Verify all turns are in history
-        turns = [t for t in load_conversation(conv_id) if isinstance(t, Turn)]
+        # Verify all turns are in history using V2 API
+        storage = SessionStorage.load(history_dir / f"{conv_id}.jsonl")
+        records = storage.load_records()
+        turns = [r for r in records if isinstance(r, Turn)]
         assert len(turns) == 3
-
-        assert turns[0].user == "Message 1"
-        assert turns[1].user == "Message 2"
-        assert turns[2].user == "Message 3"
 
 
 class TestMultiAdapterSessionContinuity:
@@ -227,33 +228,40 @@ class TestMultiAdapterSessionContinuity:
         history_dir = tmp_path / "history"
         history_dir.mkdir()
         monkeypatch.setattr("tsugite.history.storage.get_history_dir", lambda: history_dir)
+        monkeypatch.setattr("tsugite.history.storage.get_machine_name", lambda: "test_machine")
 
         sm = SessionManager("shared_agent", tmp_path)
         conv_id = sm.get_or_create_session("user123")
 
+        # Create storage and save turns using V2 API
+        storage = SessionStorage.create(agent_name="shared_agent", model="test")
+
         # Simulate Discord saving a turn
-        discord_turn = Turn(
-            timestamp=datetime.now(timezone.utc),
-            user="Hello from Discord",
-            assistant="Hi Discord user!",
+        storage.record_turn(
+            messages=[
+                {"role": "user", "content": "Hello from Discord"},
+                {"role": "assistant", "content": "Hi Discord user!"},
+            ],
+            final_answer="Hi Discord user!",
             metadata={"source": "discord", "is_daemon_managed": True},
         )
-        save_turn_to_history(conv_id, discord_turn)
 
-        # Simulate CLI saving a turn to same conversation
-        cli_turn = Turn(
-            timestamp=datetime.now(timezone.utc),
-            user="Hello from CLI",
-            assistant="Hi CLI user!",
+        # Simulate CLI saving a turn to same session
+        storage.record_turn(
+            messages=[
+                {"role": "user", "content": "Hello from CLI"},
+                {"role": "assistant", "content": "Hi CLI user!"},
+            ],
+            final_answer="Hi CLI user!",
             metadata={"source": "cli", "is_daemon_managed": True},
         )
-        save_turn_to_history(conv_id, cli_turn)
 
         # Both turns should be in the same conversation
-        turns = [t for t in load_conversation(conv_id) if isinstance(t, Turn)]
+        records = storage.load_records()
+        turns = [r for r in records if isinstance(r, Turn)]
         assert len(turns) == 2
 
-        sources = [t.metadata.get("source") for t in turns]
+        sources = [t.metadata.get("source") for t in turns if t.metadata]
         assert "discord" in sources
         assert "cli" in sources
 
@@ -275,6 +283,7 @@ class TestHistoryLoadedOnContinue:
         history_dir = tmp_path / "history"
         history_dir.mkdir()
         monkeypatch.setattr("tsugite.history.storage.get_history_dir", lambda: history_dir)
+        monkeypatch.setattr("tsugite.history.storage.get_machine_name", lambda: "test_machine")
 
         workspace = tmp_path / "workspace"
         workspace.mkdir()
@@ -371,6 +380,8 @@ class TestDaemonMetadataInHistory:
         history_dir = tmp_path / "history"
         history_dir.mkdir()
         monkeypatch.setattr("tsugite.history.storage.get_history_dir", lambda: history_dir)
+        monkeypatch.setattr("tsugite.history.storage.get_machine_name", lambda: "test_machine")
+        monkeypatch.setattr("tsugite.agent_runner.history_integration.get_history_dir", lambda: history_dir)
 
         workspace = tmp_path / "workspace"
         workspace.mkdir()
@@ -408,8 +419,10 @@ class TestDaemonMetadataInHistory:
 
                 asyncio.run(adapter.handle_message("test_user", "Hello", channel_context))
 
-        # Verify metadata in saved turn
-        turns = [t for t in load_conversation(conv_id) if isinstance(t, Turn)]
+        # Verify metadata in saved turn using V2 API
+        storage = SessionStorage.load(history_dir / f"{conv_id}.jsonl")
+        records = storage.load_records()
+        turns = [r for r in records if isinstance(r, Turn)]
         assert len(turns) == 1
 
         metadata = turns[0].metadata

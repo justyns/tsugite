@@ -682,14 +682,14 @@ class TestRunCommandHistory:
 
         with (
             patch("tsugite.history.storage.get_history_dir", return_value=tmp_path),
-            patch("tsugite.history.index.get_history_dir", return_value=tmp_path),
-            patch("tsugite.ui.chat_history.get_machine_name", return_value="test_machine"),
+            patch("tsugite.history.storage.get_machine_name", return_value="test_machine"),
+            patch("tsugite.agent_runner.history_integration.get_history_dir", return_value=tmp_path),
             patch("tsugite.agent_runner.run_agent") as mock_run_agent,
             patch("tsugite.md_agents.validate_agent_execution") as mock_validate,
             patch("tsugite.config.load_config") as mock_config,
             patch("tsugite.md_agents.parse_agent_file") as mock_parse,
         ):
-            from tsugite.history import load_conversation
+            from tsugite.history import SessionStorage, Turn
 
             mock_run_agent.return_value = mock_agent_execution_result(
                 response="Result",
@@ -714,10 +714,11 @@ class TestRunCommandHistory:
             conv_files = list(tmp_path.glob("*.jsonl"))
             assert len(conv_files) > 0
 
-            # Verify it can be loaded
-            conv_id = conv_files[0].stem
-            turns = load_conversation(conv_id)
-            assert len(turns) == 2  # metadata + turn
+            # Verify it can be loaded using V2 API
+            storage = SessionStorage.load(conv_files[0])
+            records = storage.load_records()
+            turns = [r for r in records if isinstance(r, Turn)]
+            assert len(turns) == 1  # One turn
 
     def test_run_command_history_error_handling(self, cli_runner, sample_agent_file, capsys):
         """Test that history errors don't crash the run."""

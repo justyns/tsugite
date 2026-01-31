@@ -1,13 +1,12 @@
 """Session management for workspaces."""
 
 import json
-import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-import portalocker
+from tsugite.history import SessionStorage
 
 from .models import DEFAULT_COMPACTION_THRESHOLD, Workspace
 
@@ -68,24 +67,14 @@ class WorkspaceSession:
         if not self.workspace.session_path.exists():
             return False
 
-        total_tokens = 0
-
         try:
-            with open(self.workspace.session_path) as f:
-                for line in f:
-                    entry = json.loads(line.strip())
-                    if "usage" in entry:
-                        total_tokens += entry["usage"].get("total_tokens", 0)
-
-            return total_tokens >= (MAX_CONTEXT_TOKENS * threshold)
+            storage = SessionStorage.load(self.workspace.session_path)
+            return storage.total_tokens >= (MAX_CONTEXT_TOKENS * threshold)
         except Exception:
             return False
 
     def compact(self) -> str:
-        """Compact session using memory extraction agent.
-
-        TODO: Implement memory extraction agent integration.
-        For now, just archive and create new session.
+        """Compact session using session storage V2.
 
         Returns:
             New session ID
@@ -111,43 +100,23 @@ class WorkspaceSession:
                 last_updated=None,
             )
 
-        conversation_id = None
-        message_count = 0
-        token_estimate = 0
-        last_agent = None
-        last_updated = None
-
         try:
-            with open(self.workspace.session_path) as f:
-                for line in f:
-                    entry = json.loads(line.strip())
-                    metadata = entry.get("metadata", {})
-
-                    if "conversation_id" in entry:
-                        conversation_id = entry["conversation_id"]
-
-                    if "role" in entry:
-                        message_count += 1
-
-                    if "usage" in entry:
-                        token_estimate += entry["usage"].get("total_tokens", 0)
-
-                    if "agent" in metadata:
-                        last_agent = metadata["agent"]
-
-                    if "timestamp" in metadata:
-                        last_updated = datetime.fromisoformat(metadata["timestamp"])
-
+            storage = SessionStorage.load(self.workspace.session_path)
+            return SessionInfo(
+                conversation_id=storage.session_id,
+                message_count=storage.turn_count,
+                token_estimate=storage.total_tokens,
+                last_agent=storage.agent,
+                last_updated=storage.created_at,
+            )
         except Exception:
-            pass
-
-        return SessionInfo(
-            conversation_id=conversation_id,
-            message_count=message_count,
-            token_estimate=token_estimate,
-            last_agent=last_agent,
-            last_updated=last_updated,
-        )
+            return SessionInfo(
+                conversation_id=None,
+                message_count=0,
+                token_estimate=0,
+                last_agent=None,
+                last_updated=None,
+            )
 
     def list_archived(self) -> List[Path]:
         """List archived session files.
@@ -162,35 +131,32 @@ class WorkspaceSession:
         return sorted(sessions, key=lambda p: p.stat().st_mtime, reverse=True)
 
     def _load_session_id(self) -> Optional[str]:
-        """Load session ID from first line of session file."""
+        """Load session ID from session file (V2 format only)."""
         try:
             with open(self.workspace.session_path) as f:
                 first_line = f.readline().strip()
                 if first_line:
                     entry = json.loads(first_line)
-                    return entry.get("conversation_id")
+                    if entry.get("type") == "session_meta":
+                        return self.workspace.session_path.stem
         except Exception:
             pass
         return None
 
     def _create_session(self) -> str:
-        """Create new session and write header.
+        """Create new session.
 
         Returns:
             New session ID
         """
-        session_id = str(uuid.uuid4())
+        storage = SessionStorage.create(
+            agent_name="default",
+            model="unknown",
+            workspace=self.workspace.name,
+            session_path=self.workspace.session_path,
+        )
 
-        header = {
-            "conversation_id": session_id,
-            "workspace": self.workspace.name,
-            "created_at": datetime.now().isoformat(),
-        }
-
-        with portalocker.Lock(self.workspace.session_path, "w", timeout=5) as f:
-            f.write(json.dumps(header) + "\n")
-
-        return session_id
+        return storage.session_id
 
     def _archive_current_session(self) -> None:
         """Archive current session to sessions directory."""

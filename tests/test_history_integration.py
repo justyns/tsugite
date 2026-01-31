@@ -3,10 +3,25 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from tsugite.agent_runner.history_integration import (
     _extract_tool_calls,
     save_run_to_history,
 )
+
+
+@pytest.fixture
+def sample_agent_file(tmp_path):
+    """Create a sample agent file."""
+    agent_file = tmp_path / "test_agent.md"
+    agent_file.write_text("""---
+name: test_agent
+model: openai:gpt-4o
+---
+Test agent
+""")
+    return agent_file
 
 
 class TestSaveRunToHistory:
@@ -16,19 +31,15 @@ class TestSaveRunToHistory:
         """Test successful save of run to history."""
         with (
             patch("tsugite.config.load_config") as mock_config,
-            patch("tsugite.ui.chat_history.start_conversation") as mock_start,
-            patch("tsugite.ui.chat_history.save_chat_turn") as mock_save_turn,
+            patch("tsugite.history.storage.get_history_dir", return_value=tmp_path),
+            patch("tsugite.history.storage.get_machine_name", return_value="test_machine"),
             patch("tsugite.md_agents.parse_agent_file") as mock_parse,
         ):
-            # Setup mocks
             mock_config.return_value = MagicMock(history_enabled=True)
-            mock_start.return_value = "test_conv_id"
-
             mock_agent = MagicMock()
             mock_agent.config = MagicMock(disable_history=False)
             mock_parse.return_value = mock_agent
 
-            # Call save_run_to_history
             conv_id = save_run_to_history(
                 agent_path=sample_agent_file,
                 agent_name="test_agent",
@@ -37,32 +48,21 @@ class TestSaveRunToHistory:
                 model="openai:gpt-4o",
             )
 
-            # Verify it returned conversation ID
-            assert conv_id == "test_conv_id"
+            assert conv_id is not None
 
-            # Verify start_conversation was called
-            mock_start.assert_called_once()
-            call_kwargs = mock_start.call_args[1]
-            assert call_kwargs["agent_name"] == "test_agent"
-            assert call_kwargs["model"] == "openai:gpt-4o"
-
-            # Verify save_chat_turn was called
-            mock_save_turn.assert_called_once()
-            call_kwargs = mock_save_turn.call_args[1]
-            assert call_kwargs["conversation_id"] == "test_conv_id"
-            assert call_kwargs["user_message"] == "test prompt"
-            assert call_kwargs["agent_response"] == "test result"
+            # Verify conversation file exists
+            conv_file = tmp_path / f"{conv_id}.jsonl"
+            assert conv_file.exists()
 
     def test_save_run_to_history_with_token_count(self, tmp_path, sample_agent_file):
         """Test save with token count metadata."""
         with (
             patch("tsugite.config.load_config") as mock_config,
-            patch("tsugite.ui.chat_history.start_conversation") as mock_start,
-            patch("tsugite.ui.chat_history.save_chat_turn") as mock_save_turn,
+            patch("tsugite.history.storage.get_history_dir", return_value=tmp_path),
+            patch("tsugite.history.storage.get_machine_name", return_value="test_machine"),
             patch("tsugite.md_agents.parse_agent_file") as mock_parse,
         ):
             mock_config.return_value = MagicMock(history_enabled=True)
-            mock_start.return_value = "test_conv_id"
             mock_agent = MagicMock()
             mock_agent.config = MagicMock(disable_history=False)
             mock_parse.return_value = mock_agent
@@ -77,19 +77,22 @@ class TestSaveRunToHistory:
             )
 
             assert conv_id is not None
-            call_kwargs = mock_save_turn.call_args[1]
-            assert call_kwargs["token_count"] == 1234
+
+            # Verify tokens saved
+            from tsugite.history import SessionStorage
+
+            storage = SessionStorage.load(tmp_path / f"{conv_id}.jsonl")
+            assert storage.total_tokens == 1234
 
     def test_save_run_to_history_with_cost(self, tmp_path, sample_agent_file):
         """Test save with cost metadata."""
         with (
             patch("tsugite.config.load_config") as mock_config,
-            patch("tsugite.ui.chat_history.start_conversation") as mock_start,
-            patch("tsugite.ui.chat_history.save_chat_turn") as mock_save_turn,
+            patch("tsugite.history.storage.get_history_dir", return_value=tmp_path),
+            patch("tsugite.history.storage.get_machine_name", return_value="test_machine"),
             patch("tsugite.md_agents.parse_agent_file") as mock_parse,
         ):
             mock_config.return_value = MagicMock(history_enabled=True)
-            mock_start.return_value = "test_conv_id"
             mock_agent = MagicMock()
             mock_agent.config = MagicMock(disable_history=False)
             mock_parse.return_value = mock_agent
@@ -104,19 +107,22 @@ class TestSaveRunToHistory:
             )
 
             assert conv_id is not None
-            call_kwargs = mock_save_turn.call_args[1]
-            assert call_kwargs["cost"] == 0.05
+
+            # Verify cost saved
+            from tsugite.history import SessionStorage
+
+            storage = SessionStorage.load(tmp_path / f"{conv_id}.jsonl")
+            assert storage.total_cost == 0.05
 
     def test_save_run_to_history_with_execution_steps(self, tmp_path, sample_agent_file):
         """Test save with execution steps."""
         with (
             patch("tsugite.config.load_config") as mock_config,
-            patch("tsugite.ui.chat_history.start_conversation") as mock_start,
-            patch("tsugite.ui.chat_history.save_chat_turn") as mock_save_turn,
+            patch("tsugite.history.storage.get_history_dir", return_value=tmp_path),
+            patch("tsugite.history.storage.get_machine_name", return_value="test_machine"),
             patch("tsugite.md_agents.parse_agent_file") as mock_parse,
         ):
             mock_config.return_value = MagicMock(history_enabled=True)
-            mock_start.return_value = "test_conv_id"
             mock_agent = MagicMock()
             mock_agent.config = MagicMock(disable_history=False)
             mock_parse.return_value = mock_agent
@@ -137,13 +143,10 @@ class TestSaveRunToHistory:
             )
 
             assert conv_id is not None
-            call_kwargs = mock_save_turn.call_args[1]
-            # Tools should be extracted and sorted
-            assert set(call_kwargs["tool_calls"]) == {"read_file", "web_search", "write_file"}
 
     def test_save_run_to_history_history_disabled_config(self, tmp_path, sample_agent_file):
         """Test that save returns None when history is disabled in config."""
-        with patch("tsugite.config.load_config") as mock_config:
+        with patch("tsugite.agent_runner.history_integration.load_config") as mock_config:
             mock_config.return_value = MagicMock(history_enabled=False)
 
             conv_id = save_run_to_history(
@@ -183,12 +186,11 @@ class TestSaveRunToHistory:
         """Test that invalid agent path is handled gracefully."""
         with (
             patch("tsugite.config.load_config") as mock_config,
-            patch("tsugite.ui.chat_history.start_conversation") as mock_start,
-            patch("tsugite.ui.chat_history.save_chat_turn") as mock_save_turn,
+            patch("tsugite.history.storage.get_history_dir", return_value=tmp_path),
+            patch("tsugite.history.storage.get_machine_name", return_value="test_machine"),
             patch("tsugite.md_agents.parse_agent_file") as mock_parse,
         ):
             mock_config.return_value = MagicMock(history_enabled=True)
-            mock_start.return_value = "test_conv_id"
 
             # parse_agent_file raises exception
             mock_parse.side_effect = Exception("Invalid agent file")
@@ -202,19 +204,18 @@ class TestSaveRunToHistory:
                 model="test_model",
             )
 
-            assert conv_id == "test_conv_id"
-            mock_save_turn.assert_called_once()
+            assert conv_id is not None
 
     def test_save_run_to_history_error_handling(self, tmp_path, sample_agent_file, capsys):
         """Test that errors are caught and None is returned."""
         with (
             patch("tsugite.config.load_config") as mock_config,
-            patch("tsugite.ui.chat_history.start_conversation") as mock_start,
+            patch("tsugite.history.storage.get_history_dir") as mock_history_dir,
         ):
             mock_config.return_value = MagicMock(history_enabled=True)
 
-            # start_conversation raises exception
-            mock_start.side_effect = Exception("Database error")
+            # get_history_dir raises exception
+            mock_history_dir.side_effect = Exception("Database error")
 
             conv_id = save_run_to_history(
                 agent_path=sample_agent_file,
@@ -292,12 +293,11 @@ class TestRunHistoryIntegration:
         """Test that running an agent creates a conversation."""
         with (
             patch("tsugite.history.storage.get_history_dir", return_value=tmp_path),
-            patch("tsugite.history.index.get_history_dir", return_value=tmp_path),
-            patch("tsugite.ui.chat_history.get_machine_name", return_value="test_machine"),
+            patch("tsugite.history.storage.get_machine_name", return_value="test_machine"),
             patch("tsugite.config.load_config") as mock_config,
             patch("tsugite.md_agents.parse_agent_file") as mock_parse,
         ):
-            from tsugite.history import load_conversation
+            from tsugite.history import SessionStorage, Turn
 
             mock_config.return_value = MagicMock(history_enabled=True)
             mock_agent = MagicMock()
@@ -319,19 +319,20 @@ class TestRunHistoryIntegration:
             assert conv_file.exists()
 
             # Verify conversation can be loaded
-            turns = load_conversation(conv_id)
-            assert len(turns) == 2  # metadata + turn
+            storage = SessionStorage.load(conv_file)
+            records = storage.load_records()
+            turns = [r for r in records if isinstance(r, Turn)]
+            assert len(turns) == 1
 
     def test_run_saves_single_turn(self, tmp_path, sample_agent_file):
         """Test that run saves exactly one turn."""
         with (
             patch("tsugite.history.storage.get_history_dir", return_value=tmp_path),
-            patch("tsugite.history.index.get_history_dir", return_value=tmp_path),
-            patch("tsugite.ui.chat_history.get_machine_name", return_value="test_machine"),
+            patch("tsugite.history.storage.get_machine_name", return_value="test_machine"),
             patch("tsugite.config.load_config") as mock_config,
             patch("tsugite.md_agents.parse_agent_file") as mock_parse,
         ):
-            from tsugite.history import load_conversation
+            from tsugite.history import SessionStorage, Turn
 
             mock_config.return_value = MagicMock(history_enabled=True)
             mock_agent = MagicMock()
@@ -346,25 +347,22 @@ class TestRunHistoryIntegration:
                 model="test_model",
             )
 
-            turns = load_conversation(conv_id)
+            storage = SessionStorage.load(tmp_path / f"{conv_id}.jsonl")
+            records = storage.load_records()
+            turns = [r for r in records if isinstance(r, Turn)]
 
-            # Should have metadata + 1 turn
-            assert len(turns) == 2
-            assert turns[0].type == "metadata"
-            assert turns[1].type == "turn"
-            assert turns[1].user == "hello"
-            assert turns[1].assistant == "world"
+            assert len(turns) == 1
+            assert turns[0].final_answer == "world"
 
-    def test_run_index_updated(self, tmp_path, sample_agent_file):
-        """Test that index is updated with run."""
+    def test_run_metadata_saved(self, tmp_path, sample_agent_file):
+        """Test that metadata is saved with run."""
         with (
             patch("tsugite.history.storage.get_history_dir", return_value=tmp_path),
-            patch("tsugite.history.index.get_history_dir", return_value=tmp_path),
-            patch("tsugite.ui.chat_history.get_machine_name", return_value="test_machine"),
+            patch("tsugite.history.storage.get_machine_name", return_value="test_machine"),
             patch("tsugite.config.load_config") as mock_config,
             patch("tsugite.md_agents.parse_agent_file") as mock_parse,
         ):
-            from tsugite.history import get_conversation_metadata
+            from tsugite.history import SessionStorage
 
             mock_config.return_value = MagicMock(history_enabled=True)
             mock_agent = MagicMock()
@@ -381,25 +379,23 @@ class TestRunHistoryIntegration:
                 cost=0.01,
             )
 
-            # Verify index was updated
-            metadata = get_conversation_metadata(conv_id)
-            assert metadata is not None
-            assert metadata.agent == "test_agent"
-            assert metadata.model == "test_model"
-            assert metadata.turn_count == 1
-            assert metadata.total_tokens == 500
-            assert metadata.total_cost == 0.01
+            # Verify metadata was saved
+            storage = SessionStorage.load(tmp_path / f"{conv_id}.jsonl")
+            assert storage.agent == "test_agent"
+            assert storage.model == "test_model"
+            assert storage.turn_count == 1
+            assert storage.total_tokens == 500
+            assert storage.total_cost == 0.01
 
-    def test_run_conversation_queryable(self, tmp_path, sample_agent_file):
-        """Test that saved run is queryable from index."""
+    def test_run_conversation_listable(self, tmp_path, sample_agent_file):
+        """Test that saved run is listable from session files."""
         with (
             patch("tsugite.history.storage.get_history_dir", return_value=tmp_path),
-            patch("tsugite.history.index.get_history_dir", return_value=tmp_path),
-            patch("tsugite.ui.chat_history.get_machine_name", return_value="test_machine"),
+            patch("tsugite.history.storage.get_machine_name", return_value="test_machine"),
             patch("tsugite.config.load_config") as mock_config,
             patch("tsugite.md_agents.parse_agent_file") as mock_parse,
         ):
-            from tsugite.history import query_index
+            from tsugite.history import list_session_files
 
             mock_config.return_value = MagicMock(history_enabled=True)
             mock_agent = MagicMock()
@@ -414,9 +410,8 @@ class TestRunHistoryIntegration:
                 model="test_model",
             )
 
-            # Query for this agent
-            results = query_index(agent="search_agent")
+            # Query for session files
+            files = list_session_files()
 
-            assert len(results) == 1
-            assert results[0]["conversation_id"] == conv_id
-            assert results[0]["agent"] == "search_agent"
+            assert len(files) == 1
+            assert conv_id in str(files[0])

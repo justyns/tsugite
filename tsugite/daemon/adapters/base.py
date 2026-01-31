@@ -230,55 +230,48 @@ class BaseAdapter(ABC):
             memory_agent_path = self.agent_config.workspace_dir / "memory_extraction.md"
             if memory_agent_path.exists():
                 from tsugite.daemon.memory import extract_memories
-                from tsugite.history import load_conversation
+                from tsugite.history import get_history_dir, reconstruct_messages
 
-                history = load_conversation(conv_id)
-                asyncio.create_task(extract_memories(history, self.agent_config.workspace_dir, memory_agent_path))
+                session_path = get_history_dir() / f"{conv_id}.jsonl"
+                messages = reconstruct_messages(session_path)
+                asyncio.create_task(extract_memories(messages, self.agent_config.workspace_dir, memory_agent_path))
 
         return str(result)
 
     async def _compact_session(self, user_id: str) -> None:
         """Compact session when approaching context limit.
 
-        1. Load conversation history
+        1. Load session and reconstruct messages
         2. Summarize conversation
         3. Extract memories (background agent)
-        4. Create new session with summary as first message
+        4. Create new session with compaction summary
 
         Args:
             user_id: Platform user ID
         """
         from tsugite.daemon.memory import extract_memories, summarize_session
-        from tsugite.history import load_conversation
-        from tsugite.history.models import Turn
+        from tsugite.history import SessionStorage, get_history_dir, reconstruct_messages
 
         old_conv_id = self.session_manager.sessions[user_id].conversation_id
         session_info = self.session_manager.sessions[user_id]
+        old_session_path = get_history_dir() / f"{old_conv_id}.jsonl"
 
-        history = load_conversation(old_conv_id)
-        summary = await summarize_session(history)
+        messages = reconstruct_messages(old_session_path)
+        summary = await summarize_session(messages)
 
         if self.agent_config.memory_enabled:
             memory_agent_path = self.agent_config.workspace_dir / "memory_extraction.md"
             if memory_agent_path.exists():
-                await extract_memories(history, self.agent_config.workspace_dir, memory_agent_path)
+                await extract_memories(messages, self.agent_config.workspace_dir, memory_agent_path)
 
         new_conv_id = self.session_manager.compact_session(user_id)
 
-        from tsugite.history.storage import save_turn_to_history
-
-        summary_turn = Turn(
-            timestamp=datetime.now(timezone.utc),
-            user="[Session Summary]",
-            assistant=f"Previous session summary:\n\n{summary}",
-            metadata={
-                "type": "compaction_summary",
-                "source_session": old_conv_id,
-                "compacted_at": datetime.now(timezone.utc).isoformat(),
-                "original_message_count": session_info.message_count,
-                "is_daemon_managed": True,
-                "daemon_agent": self.agent_name,
-            },
+        new_session_path = get_history_dir() / f"{new_conv_id}.jsonl"
+        new_storage = SessionStorage.create(
+            agent_name=self.agent_name,
+            model=self.agent_config.agent_file,
+            compacted_from=old_conv_id,
+            session_path=new_session_path,
         )
 
-        save_turn_to_history(new_conv_id, summary_turn)
+        new_storage.record_compaction_summary(summary, session_info.message_count)

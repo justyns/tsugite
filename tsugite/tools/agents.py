@@ -34,14 +34,21 @@ def spawn_agent(
     import json
     import subprocess
 
+    # Resolve agent path (supports both paths and agent names)
+    from ..agent_inheritance import find_agent_file
     from ..agent_runner import get_allowed_agents, get_current_agent
 
-    # Validate agent path
     agent_file = Path(agent_path)
     if not agent_file.is_absolute():
         agent_file = Path.cwd() / agent_file
+
     if not agent_file.exists():
-        raise ValueError(f"Agent not found: {agent_path}")
+        # Try resolving as agent name (e.g., "memory" -> builtin memory.md)
+        resolved = find_agent_file(agent_path)
+        if resolved:
+            agent_file = resolved
+        else:
+            raise ValueError(f"Agent not found: {agent_path}")
 
     # Parse agent config to check visibility and spawnable
     content = agent_file.read_text()
