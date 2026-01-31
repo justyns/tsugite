@@ -268,12 +268,12 @@ class DiscordAdapter(BaseAdapter):
 
             # Log incoming message
             channel_type = "DM" if is_dm else "channel"
-            print(f"[{bot_config.name}] <- {message.author} ({channel_type}): {user_msg[:100]}{'...' if len(user_msg) > 100 else ''}")
+            print(
+                f"[{bot_config.name}] <- {message.author} ({channel_type}): {user_msg[:100]}{'...' if len(user_msg) > 100 else ''}"
+            )
 
             # Process message in isolated task to prevent crashes from affecting the bot
-            task = asyncio.create_task(
-                self._process_message(message, user_msg, bot_config.name)
-            )
+            task = asyncio.create_task(self._process_message(message, user_msg, bot_config.name))
             task.add_done_callback(lambda t: _handle_task_exception(t, bot_config.name))
 
     async def _process_message(self, message, user_msg: str, bot_name: str):

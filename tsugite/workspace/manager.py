@@ -3,6 +3,8 @@
 from pathlib import Path
 from typing import List, Optional
 
+from tsugite.config import get_xdg_data_path
+
 from .models import Workspace, WorkspaceNotFoundError
 
 
@@ -12,7 +14,7 @@ class WorkspaceManager:
     def __init__(self):
         """Initialize workspace manager with default search paths."""
         self.workspace_dirs = [
-            Path.home() / ".tsugite" / "workspaces",
+            get_xdg_data_path("workspaces"),
             Path.cwd() / ".tsugite" / "workspaces",
         ]
 
@@ -93,7 +95,7 @@ class WorkspaceManager:
             ValueError: If workspace already exists
         """
         if path is None:
-            path = Path.home() / ".tsugite" / "workspaces" / name
+            path = get_xdg_data_path("workspaces") / name
 
         if path.exists():
             raise ValueError(f"Workspace already exists: {path}")

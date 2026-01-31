@@ -48,9 +48,7 @@ class Gateway:
                 except WorkspaceNotFoundError:
                     workspace = None
 
-                agent_path = resolve_agent_path(
-                    agent_config.agent_file, agent_config.workspace_dir, workspace
-                )
+                agent_path = resolve_agent_path(agent_config.agent_file, agent_config.workspace_dir, workspace)
                 if not agent_path:
                     raise ValueError(
                         f"Agent file '{agent_config.agent_file}' not found for bot '{bot_config.name}'. "

@@ -1065,8 +1065,6 @@ def version():
     console.print(f"Tsugite version {__version__}")
 
 
-
-
 @app.command()
 def chat(
     agent: Optional[str] = typer.Argument(None, help="Agent name or path (optional, uses default if not provided)"),

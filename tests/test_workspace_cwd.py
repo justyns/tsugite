@@ -180,8 +180,8 @@ class TestContextVariablesInTemplates:
                 path_context=path_context,
             )
 
-        # Verify context variables
-        assert prepared.context["CWD"] == str(Path.cwd())
+        # Verify context variables - CWD should be the effective_cwd from path_context
+        assert prepared.context["CWD"] == "/home/user/workspace"
         assert prepared.context["INVOKED_FROM"] == "/home/user/projects"
         assert prepared.context["WORKSPACE_DIR"] == "/home/user/workspace"
 

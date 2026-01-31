@@ -18,11 +18,12 @@ def test_get_global_agents_paths():
     """Test global agents path resolution."""
     paths = get_global_agents_paths()
 
-    # Should have 2-3 paths depending on XDG_CONFIG_HOME
-    assert len(paths) >= 2
+    # Should have 1-2 paths depending on XDG_CONFIG_HOME
+    assert len(paths) >= 1
     assert all(isinstance(p, Path) for p in paths)
-    assert any(".tsugite" in str(p) for p in paths)
+    # All paths should be XDG-compliant (under .config)
     assert any(".config" in str(p) for p in paths)
+    assert all("tsugite/agents" in str(p) for p in paths)
 
 
 def test_merge_agent_configs_scalars():

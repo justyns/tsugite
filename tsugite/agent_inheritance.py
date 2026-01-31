@@ -24,10 +24,6 @@ def get_global_agents_paths() -> List[Path]:
     """
     paths = []
 
-    # ~/.tsugite/agents/
-    home_tsugite = Path.home() / ".tsugite" / "agents"
-    paths.append(home_tsugite)
-
     # $XDG_CONFIG_HOME/tsugite/agents/
     xdg_config = os.environ.get("XDG_CONFIG_HOME")
     if xdg_config:

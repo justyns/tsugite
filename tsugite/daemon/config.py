@@ -8,6 +8,13 @@ import yaml
 from pydantic import BaseModel, Field
 
 
+def _get_default_state_dir() -> Path:
+    """Get the default state directory for daemon."""
+    from tsugite.config import get_xdg_data_path
+
+    return get_xdg_data_path("daemon")
+
+
 class AgentConfig(BaseModel):
     """Configuration for a single agent."""
 
@@ -33,7 +40,7 @@ class DiscordBotConfig(BaseModel):
 class DaemonConfig(BaseModel):
     """Main daemon configuration."""
 
-    state_dir: Path = Field(default_factory=lambda: Path.home() / ".tsugite-daemon")
+    state_dir: Path = Field(default_factory=lambda: _get_default_state_dir())
     log_level: str = "info"
     agents: Dict[str, AgentConfig]
     discord_bots: List[DiscordBotConfig] = Field(default_factory=list)

@@ -114,7 +114,9 @@ class TestDaemonHistorySaving:
         """Create a session manager."""
         return SessionManager("test_agent", mock_workspace)
 
-    def test_history_saved_after_message(self, tmp_path, mock_workspace, mock_agent_config, mock_session_manager, monkeypatch):
+    def test_history_saved_after_message(
+        self, tmp_path, mock_workspace, mock_agent_config, mock_session_manager, monkeypatch
+    ):
         """Conversation history should be saved after handle_message."""
         # Patch history directory
         history_dir = tmp_path / "history"
@@ -159,7 +161,9 @@ class TestDaemonHistorySaving:
         assert turn.user == "Hello bot"
         assert "Test response" in (turn.assistant or "")
 
-    def test_history_accumulates_across_messages(self, tmp_path, mock_workspace, mock_agent_config, mock_session_manager, monkeypatch):
+    def test_history_accumulates_across_messages(
+        self, tmp_path, mock_workspace, mock_agent_config, mock_session_manager, monkeypatch
+    ):
         """Multiple messages should accumulate in the same conversation history."""
         history_dir = tmp_path / "history"
         history_dir.mkdir()

@@ -7,7 +7,7 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 
-from tsugite.config import get_xdg_write_path
+from tsugite.config import get_xdg_data_path, get_xdg_write_path
 
 daemon_app = typer.Typer(help="Daemon management commands")
 console = Console()
@@ -73,11 +73,15 @@ def _prompt_dm_policy(style) -> str:
     console.print("  • [cyan]allowlist[/cyan]: Only respond to users in allow list (recommended)")
     console.print("  • [cyan]open[/cyan]: Respond to any DM (use with caution)")
 
-    return questionary.select(
-        "Select DM policy:",
-        choices=["allowlist (Recommended)", "open"],
-        style=style,
-    ).ask().split()[0]  # Extract just "allowlist" or "open"
+    return (
+        questionary.select(
+            "Select DM policy:",
+            choices=["allowlist (Recommended)", "open"],
+            style=style,
+        )
+        .ask()
+        .split()[0]
+    )  # Extract just "allowlist" or "open"
 
 
 def _prompt_allowed_users(style) -> List[str]:
@@ -162,7 +166,7 @@ def _create_new_workspace(style) -> tuple[str, Path]:
         style=style,
     ).ask()
 
-    default_path = Path.home() / ".tsugite" / "workspaces" / workspace_name
+    default_path = get_xdg_data_path("workspaces") / workspace_name
     path_input = questionary.text(
         "Workspace path:",
         default=str(default_path),
@@ -227,7 +231,7 @@ def _show_next_steps(token_env_var: str, bot_name: str):
     console.print("=" * 60)
 
     console.print("\n[bold]Next Steps:[/bold]")
-    console.print(f"  1. Set your Discord token: [cyan]export {token_env_var}=\"your-token\"[/cyan]")
+    console.print(f'  1. Set your Discord token: [cyan]export {token_env_var}="your-token"[/cyan]')
     console.print("  2. Start the daemon: [cyan]tsugite daemon[/cyan]")
     console.print("  3. DM your bot with: [cyan]!hello[/cyan]")
 
@@ -322,7 +326,7 @@ def init_daemon(
         config_data = _config_to_dict(existing_config)
     else:
         config_data = {
-            "state_dir": str(Path.home() / ".tsugite-daemon"),
+            "state_dir": str(get_xdg_data_path("daemon")),
             "log_level": "info",
             "agents": {},
             "discord_bots": [],
