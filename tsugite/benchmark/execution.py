@@ -196,7 +196,6 @@ class TestExecutor:
             "model": model_name,  # Override model
             "max_turns": yaml_data.get("max_turns", 5),
             "tools": yaml_data.get("tools", []),
-            "text_mode": yaml_data.get("text_mode"),
             "prefetch": yaml_data.get("prefetch", []),
             "permissions_profile": yaml_data.get("permissions_profile", "default"),
             "context_budget": yaml_data.get("context_budget"),

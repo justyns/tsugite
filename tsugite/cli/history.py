@@ -1,14 +1,10 @@
 """History management CLI commands."""
 
 import json
-from typing import TYPE_CHECKING
 
 import typer
 from rich.console import Console
 from rich.table import Table
-
-if TYPE_CHECKING:
-    pass
 
 console = Console()
 

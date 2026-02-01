@@ -247,14 +247,11 @@ def _setup_event_context(event_bus: Optional["EventBus"]) -> None:
         set_ui_context(event_bus=event_bus)
 
 
-def get_default_instructions(text_mode: bool = False) -> str:
+def get_default_instructions() -> str:
     """Get minimal default instructions. Detailed guidance comes from skills.
 
-    Args:
-        text_mode: Whether agent is in text mode
-
     Returns:
-        Mode-appropriate default instructions
+        Default instructions for code execution mode
     """
     base = "You accomplish tasks by writing Python code.\n\n"
 
@@ -265,20 +262,12 @@ def get_default_instructions(text_mode: bool = False) -> str:
         "- `final_answer(msg)` - Final response (stops execution)\n\n"
     )
 
-    if text_mode:
-        rules = (
-            "## Rules\n\n"
-            "1. Simple responses: just answer directly\n"
-            "2. Using tools: write Python code, call `final_answer()` when done\n"
-            "3. Variables persist between turns\n"
-        )
-    else:
-        rules = (
-            "## Rules\n\n"
-            "1. Always respond with Python code blocks\n"
-            "2. Call `final_answer()` when done\n"
-            "3. Variables persist between turns\n"
-        )
+    rules = (
+        "## Rules\n\n"
+        "1. Always respond with Python code blocks\n"
+        "2. Call `final_answer()` when done\n"
+        "3. Variables persist between turns\n"
+    )
 
     return base + output + rules
 
@@ -545,7 +534,6 @@ async def _execute_agent_with_prompt(
             model_kwargs=final_model_kwargs,
             event_bus=event_bus,
             model_name=model_string,
-            text_mode=agent_config.text_mode,
             attachments=prepared.attachments,
             skills=prepared.skills,
             previous_messages=previous_messages,
@@ -782,10 +770,6 @@ async def run_agent_async(
     set_current_agent(agent_config.name)
 
     try:
-        # Override text_mode if force_text_mode is True (for chat UI) or continuing conversation
-        if exec_options.force_text_mode or continue_conversation_id:
-            agent_config.text_mode = True
-
         # Prepare agent using unified preparation pipeline
         from tsugite.agent_preparation import AgentPreparer
 
@@ -888,7 +872,7 @@ def _build_prepared_agent_for_step(
     from tsugite.tools import expand_tool_specs
 
     # Build instructions
-    base_instructions = get_default_instructions(text_mode=agent.config.text_mode)
+    base_instructions = get_default_instructions()
     agent_instructions = getattr(agent.config, "instructions", "")
     combined_instructions = _combine_instructions(base_instructions, agent_instructions)
 
@@ -899,7 +883,7 @@ def _build_prepared_agent_for_step(
     tools = [create_tool_from_tsugite(name) for name in all_tool_names]
 
     # Build system message
-    system_message = build_system_prompt(tools, combined_instructions, agent.config.text_mode)
+    system_message = build_system_prompt(tools, combined_instructions)
 
     # Create PreparedAgent
     return PreparedAgent(
@@ -1346,7 +1330,6 @@ async def _run_multistep_agent_impl(
             "task_summary": task_manager.get_task_summary(),
             "tasks": task_manager.get_tasks_for_template(),
             "is_interactive": interactive_mode,
-            "text_mode": agent.config.text_mode,
             "tools": agent.config.tools,
             "is_subagent": context.get("is_subagent", False),
             "parent_agent": context.get("parent_agent", None),
@@ -1675,7 +1658,6 @@ def preview_multistep_agent(
             "all_errors",
             "tasks",
             "is_interactive",
-            "text_mode",
             "tools",
             "is_subagent",
             "parent_agent",

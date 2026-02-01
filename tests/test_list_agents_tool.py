@@ -109,7 +109,7 @@ Content
         assert "normal" in result
         # Package-provided agents should also be included
         assert "default" in result
-        assert "chat-assistant" in result
+        assert "file_searcher" in result
 
     def test_list_agents_priority_order(self, tmp_path, monkeypatch):
         """Test that higher priority paths win for duplicate agent names."""
@@ -145,14 +145,12 @@ description: From agents (lower priority)
             result = list_agents()
 
             # Should show higher priority duplicate + package-provided agents
-            assert (
-                result.count("\n") == 7
-            )  # 8 agents total: duplicate, default, chat-assistant, file_searcher, code_searcher, conversation_analyzer, memory, memory-extraction
+            assert result.count("\n") == 3  # 4 agents total: duplicate, default, file_searcher, code_searcher
             assert "From .tsugite (higher priority)" in result
             assert "From agents (lower priority)" not in result
             # Package-provided agents should also be listed
             assert "default" in result
-            assert "chat-assistant" in result
+            assert "file_searcher" in result
 
     def test_list_agents_format(self, tmp_path, monkeypatch):
         """Test that list_agents returns proper markdown format."""

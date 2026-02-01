@@ -7,10 +7,7 @@ model parameters and reasoning model support.
 import asyncio
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
-
-if TYPE_CHECKING:
-    pass
+from typing import Any, Dict, List, Optional
 
 from tsugite.attachments.base import Attachment, AttachmentContentType
 from tsugite.events import (
@@ -39,7 +36,7 @@ from .tools import Tool
 DEFAULT_MAX_TURNS = 10  # Default maximum reasoning iterations before timeout
 
 
-def build_system_prompt(tools: List[Tool], instructions: str = "", text_mode: bool = False) -> str:
+def build_system_prompt(tools: List[Tool], instructions: str = "") -> str:
     """Build system prompt for LLM with tools and instructions.
 
     This is shared between TsugiteAgent and the render command to ensure
@@ -48,18 +45,13 @@ def build_system_prompt(tools: List[Tool], instructions: str = "", text_mode: bo
     Args:
         tools: List of Tool objects available to the agent
         instructions: Additional instructions from agent config
-        text_mode: If True, use text mode (code blocks optional)
 
     Returns:
         Complete system prompt string
     """
     tools_section = build_tools_section(tools)
     has_tools = bool(tools)
-
-    if text_mode:
-        return build_text_mode_prompt(tools_section, instructions, has_tools)
-    else:
-        return build_standard_mode_prompt(tools_section, instructions, has_tools)
+    return build_standard_mode_prompt(tools_section, instructions, has_tools)
 
 
 @dataclass
@@ -101,7 +93,6 @@ class TsugiteAgent:
         model_kwargs: dict = None,
         event_bus: EventBus = None,
         model_name: str = None,
-        text_mode: bool = False,
         attachments: List[Attachment] = None,
         skills: List[Skill] = None,
         previous_messages: List[Dict] = None,
@@ -117,7 +108,6 @@ class TsugiteAgent:
             model_kwargs: Extra parameters for LiteLLM (reasoning_effort, response_format, etc.)
             event_bus: Optional EventBus for broadcasting events
             model_name: Optional display name for the model (for UI)
-            text_mode: Allow text-only responses (code blocks optional)
             attachments: List of Attachment objects for multi-modal inputs
             skills: List of Skill objects for loaded skills
             previous_messages: List of previous conversation messages (user/assistant pairs)
@@ -132,7 +122,6 @@ class TsugiteAgent:
         self.memory = AgentMemory()
         self.event_bus = event_bus
         self.model_name = model_name or model_string
-        self.text_mode = text_mode
         self.attachments = attachments or []
         self.skills = skills or []
         self.previous_messages = previous_messages or []
@@ -376,11 +365,7 @@ class TsugiteAgent:
                 # (this helps debug when LLM doesn't follow the expected format)
                 display_content = thought if thought else response.choices[0].message.content
 
-                # In text mode, if there's a thought but no code, skip showing the thought here
-                # because it will be shown as the final answer (to avoid duplication)
-                skip_llm_message = self.text_mode and thought and not (code and code.strip())
-
-                if display_content and display_content.strip() and not skip_llm_message:
+                if display_content and display_content.strip():
                     self.event_bus.emit(
                         LLMMessageEvent(
                             content=display_content, title=f"Turn {turn_num + 1} Reasoning", step=turn_num + 1
@@ -430,69 +415,50 @@ class TsugiteAgent:
                 exec_result = ExecutionResult(output="", error=None, stdout="", stderr="")
                 xml_observation = None  # No XML for non-code responses
 
-                if self.text_mode:
-                    # In text mode, code blocks are optional
-                    # If there's a thought but no code, treat the thought as the final answer
-                    if thought and thought.strip():
-                        exec_result.final_answer = thought
-                        # Don't show error - this is expected behavior in text mode
-                    else:
-                        # No thought and no code - this is an error even in text mode
-                        if self.event_bus:
-                            self.event_bus.emit(
-                                ErrorEvent(
-                                    error="No response generated. Expected at least a Thought.",
-                                    error_type="Format Error",
-                                    step=turn_num + 1,
-                                )
-                            )
-                else:
-                    # Standard mode: code is required
-                    # Show a warning that the LLM didn't generate code
-                    if self.event_bus:
-                        self.event_bus.emit(
-                            ErrorEvent(
-                                error="LLM did not generate code. Expected format:\n\nThought: <explanation>\n```python\n<code>\n```",
-                                error_type="Format Error",
-                                step=turn_num + 1,
-                            )
+                # Code is required - show a warning that the LLM didn't generate code
+                if self.event_bus:
+                    self.event_bus.emit(
+                        ErrorEvent(
+                            error="LLM did not generate code. Expected format:\n\nThought: <explanation>\n```python\n<code>\n```",
+                            error_type="Format Error",
+                            step=turn_num + 1,
                         )
-
-                    # Add a correction to memory to guide the LLM
-                    # Instead of adding a step with empty code, add an observation telling LLM what to do
-                    correction_msg = (
-                        "Format Error: You must provide your response in a Python code block.\n\n"
-                        "Use this format:\n\n"
-                        "Thought: <your explanation>\n"
-                        "```python\n"
-                        "# Your code here\n"
-                        'final_answer("your answer")\n'
-                        "```\n\n"
-                        "Remember to call final_answer() with your result."
                     )
 
-                    # Add the thought and correction as a step
-                    # This will show the LLM what it did wrong and how to fix it
-                    # Use XML format for the correction message
-                    from xml.sax.saxutils import escape
+                # Add a correction to memory to guide the LLM
+                correction_msg = (
+                    "Format Error: You must provide your response in a Python code block.\n\n"
+                    "Use this format:\n\n"
+                    "Thought: <your explanation>\n"
+                    "```python\n"
+                    "# Your code here\n"
+                    'final_answer("your answer")\n'
+                    "```\n\n"
+                    "Remember to call final_answer() with your result."
+                )
 
-                    correction_xml = (
-                        '<tsugite_execution_result status="error">\n'
-                        "<output></output>\n"
-                        f"<error>{escape(correction_msg)}</error>\n"
-                        "</tsugite_execution_result>"
-                    )
-                    self.memory.add_step(
-                        thought=thought if thought else "(No thought provided)",
-                        code="",
-                        output=correction_msg,
-                        error=None,
-                        tools_called=[],
-                        xml_observation=correction_xml,
-                    )
+                # Add the thought and correction as a step
+                # This will show the LLM what it did wrong and how to fix it
+                # Use XML format for the correction message
+                from xml.sax.saxutils import escape
 
-                    # Continue to next turn - the correction will be in the observation
-                    continue
+                correction_xml = (
+                    '<tsugite_execution_result status="error">\n'
+                    "<output></output>\n"
+                    f"<error>{escape(correction_msg)}</error>\n"
+                    "</tsugite_execution_result>"
+                )
+                self.memory.add_step(
+                    thought=thought if thought else "(No thought provided)",
+                    code="",
+                    output=correction_msg,
+                    error=None,
+                    tools_called=[],
+                    xml_observation=correction_xml,
+                )
+
+                # Continue to next turn - the correction will be in the observation
+                continue
 
             # Build observation output, adding reminder if no final_answer
             step_output = exec_result.output
@@ -781,7 +747,7 @@ class TsugiteAgent:
 
     def _build_system_prompt(self) -> str:
         """Build system prompt that teaches LLM how to solve tasks."""
-        return build_system_prompt(self.tools, self.instructions, self.text_mode)
+        return build_system_prompt(self.tools, self.instructions)
 
     def _parse_response(self, response) -> tuple[str, str, Optional[str]]:
         """Parse LLM response into thought, code, and final_answer.
@@ -863,84 +829,6 @@ You have access to these Python functions:
 {tool_definitions}
 ```
 """
-
-
-def build_text_mode_prompt(tools_section: str, instructions: str, has_tools: bool) -> str:
-    """Build system prompt for text mode (code blocks optional).
-
-    Args:
-        tools_section: Formatted tools section
-        instructions: Additional instructions from agent config
-        has_tools: Whether tools are available
-
-    Returns:
-        Complete system prompt for text mode
-    """
-    import os
-
-    tool_rule = (
-        "4. When using code, call functions with keyword arguments: result = tool_name(arg1=value1, arg2=value2)"
-        if has_tools
-        else "4. Use Python when you need to perform actions"
-    )
-
-    cwd = os.getcwd()
-
-    return f"""You are an expert assistant who helps with tasks.
-
-You can respond in two ways:
-
-**For conversational questions or simple responses:**
-Just provide your Thought with the answer directly:
-
-Thought: [Your response here]
-
-**When you need to call functions or perform actions:**
-Write Python code in a code block (use comments for reasoning):
-
-```python
-# First, read the config to understand the structure
-config = read_file("config.yaml")
-print(config)  # See the contents
-```
-
-## Current Working Directory
-
-{cwd}
-{tools_section}
-## Execution Results
-
-After code runs, you'll see structured XML:
-
-```xml
-<tsugite_execution_result status="success" duration_ms="142">
-<output>file contents here...</output>
-<variables_set>config=str(1234 chars)</variables_set>
-</tsugite_execution_result>
-```
-
-Fields:
-- `status`: "success" or "error"
-- `<output>`: Your print() output
-- `<error>`: Error message if failed
-- `<traceback>`: Python traceback if failed
-- `<variables_set>`: New variables you created
-- `<final_answer>`: Confirms completion when you call final_answer()
-
-## Rules:
-
-1. Code blocks are OPTIONAL - only use them when you need tools or complex logic
-2. For direct answers, provide the answer directly starting with "Thought:"
-3. Use comments in code for reasoning if needed
-{tool_rule}
-5. Variables persist across code blocks
-6. **To complete your turn, you MUST call one of:**
-   - `final_answer(result)` - when you have the answer
-   - `ask_user(question)` - when you need input from the user
-
-{instructions}
-
-Now begin!"""
 
 
 def build_standard_mode_prompt(tools_section: str, instructions: str, has_tools: bool) -> str:

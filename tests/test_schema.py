@@ -35,7 +35,6 @@ def test_generate_schema_has_all_fields():
         "extends",
         "reasoning_effort",
         "custom_tools",
-        "text_mode",
         "initial_tasks",
         "disable_history",
         "auto_context",
@@ -215,7 +214,6 @@ def test_schema_default_values():
     # Check some default values
     assert properties["description"]["default"] == ""
     assert properties["max_turns"]["default"] == 5
-    assert properties["text_mode"]["default"] is False
     assert properties["disable_history"]["default"] is False
     assert properties["spawnable"]["default"] is True
     assert properties["visibility"]["default"] == "public"

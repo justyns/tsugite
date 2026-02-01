@@ -20,7 +20,6 @@ Available in both the agent body and `instructions` during preparation:
 - `task_summary`: Markdown summary of tracked tasks (string)
 - `tasks`: List of task dicts with keys: `title`, `status`, `optional` (list)
 - `tools`: Expanded tool list after glob/category expansion (list of strings)
-- `text_mode`: Boolean matching the agent config flag
 - `is_interactive`: True when running in interactive CLI/TUI (boolean)
 
 ### Chat Mode Context
@@ -105,18 +104,6 @@ Work on the next pending task until all tasks are complete.
 ## Control Patterns
 
 ### Conditional Blocks
-
-**Text mode toggling:**
-```jinja2
-{% if text_mode %}
-Provide explanations without code blocks.
-{% else %}
-You can use code blocks freely:
-```python
-# Example code
-```
-{% endif %}
-```
 
 **Environment-based configuration:**
 ```jinja2

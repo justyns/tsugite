@@ -168,7 +168,7 @@ def merge_agent_configs(parent, child):
         Merged AgentConfig with child taking precedence
 
     Merge rules:
-    - Scalars (model, max_turns, reasoning_effort, text_mode, etc.): child overwrites parent
+    - Scalars (model, max_turns, reasoning_effort, etc.): child overwrites parent
     - Lists (tools, attachments): merge and deduplicate
     - Lists (prefetch): concatenate (parent first, no deduplication)
     - Lists of dicts (custom_tools): merge and deduplicate by "name" field
@@ -286,7 +286,6 @@ def merge_scalar_fields(parent, child) -> Dict[str, Any]:
             child.permissions_profile if child.permissions_profile != "default" else parent.permissions_profile
         ),
         "reasoning_effort": child.reasoning_effort if child.reasoning_effort else parent.reasoning_effort,
-        "text_mode": child.text_mode if child.text_mode else parent.text_mode,
         "memory_enabled": child.memory_enabled if child.memory_enabled is not None else parent.memory_enabled,
     }
 

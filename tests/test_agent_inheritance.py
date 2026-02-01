@@ -201,46 +201,6 @@ def test_merge_agent_configs_custom_tools():
     assert tools_by_name["tool3"]["command"] == "echo child3"
 
 
-def test_merge_agent_configs_text_mode():
-    """Test merging text_mode boolean (child overwrites if True).
-
-    Since text_mode defaults to False, we can't distinguish between "not set"
-    and "explicitly set to False". The merge logic treats False as the default,
-    so parent's value is inherited unless child explicitly sets True.
-    """
-    parent = AgentConfig(
-        name="parent",
-        text_mode=True,
-    )
-
-    child = AgentConfig(
-        name="child",
-        text_mode=False,  # Default value, so parent's True is inherited
-    )
-
-    merged = merge_agent_configs(parent, child)
-    # Child has default value (False), so parent's True is inherited
-    assert merged.text_mode
-
-    # When child explicitly sets True, it overrides parent
-    child_true = AgentConfig(
-        name="child2",
-        text_mode=True,
-    )
-
-    merged2 = merge_agent_configs(parent, child_true)
-    assert merged2.text_mode
-
-    # When both are False, result is False
-    parent_false = AgentConfig(
-        name="parent2",
-        text_mode=False,
-    )
-
-    merged3 = merge_agent_configs(parent_false, child)
-    assert not merged3.text_mode
-
-
 def test_detect_circular_inheritance():
     """Test circular inheritance detection."""
     path1 = Path("/fake/agent1.md")

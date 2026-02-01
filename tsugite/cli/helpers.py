@@ -6,10 +6,7 @@ import os
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Generator, List, Optional, Tuple
-
-if TYPE_CHECKING:
-    pass
+from typing import Any, Generator, List, Optional, Tuple
 
 import typer
 from rich.console import Console

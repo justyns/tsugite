@@ -12,7 +12,7 @@ def test_run_turn_catches_and_returns_errors(tmp_path):
     agent_file.write_text(
         """---
 name: test-agent
-text_mode: true
+extends: none
 ---
 
 Test agent
@@ -44,7 +44,7 @@ def test_error_message_added_to_history(tmp_path):
     agent_file.write_text(
         """---
 name: test-agent
-text_mode: true
+extends: none
 ---
 
 Test agent

@@ -28,7 +28,6 @@ class ExecutionOptions:
     stream: bool = False
     trust_mcp_code: bool = False
     dry_run: bool = False
-    force_text_mode: bool = False
     return_token_usage: bool = False
     memory_enabled: Optional[bool] = None  # None = use agent/config default
 

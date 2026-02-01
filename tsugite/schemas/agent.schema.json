@@ -127,10 +127,9 @@
       ],
       "default": null,
       "title": "Extends",
-      "description": "Parent agent to inherit from. Use 'none' to opt out of default inheritance. Examples: 'default', 'chat-assistant', 'none'",
+      "description": "Parent agent to inherit from. Use 'none' to opt out of default inheritance. Examples: 'default', 'none'",
       "examples": [
         "default",
-        "chat-assistant",
         "none"
       ]
     },
@@ -159,11 +158,6 @@
       },
       "title": "Custom Tools",
       "type": "array"
-    },
-    "text_mode": {
-      "default": false,
-      "title": "Text Mode",
-      "type": "boolean"
     },
     "initial_tasks": {
       "items": {

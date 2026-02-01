@@ -1,9 +1,9 @@
 ---
 name: echo
 description: A simple agent that repeats exactly what is asked
+extends: none
 max_turns: 10
 tools: []
-text_mode: true
 ---
 
 # Echo Agent

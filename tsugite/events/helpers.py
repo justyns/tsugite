@@ -1,10 +1,5 @@
 """Helper functions for event emission."""
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    pass
-
 
 def emit_file_read_event(path: str, content: str, operation: str) -> None:
     """Emit FileReadEvent if event bus is available.

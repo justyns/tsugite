@@ -197,7 +197,6 @@ class AgentPreparer:
             "task_summary": task_summary,
             "tasks": tasks or [],
             "is_interactive": interactive_mode,
-            "text_mode": agent_config.text_mode,
             "tools": agent_config.tools,
             # Subagent context
             "is_subagent": context.get("is_subagent", False),
@@ -218,10 +217,10 @@ class AgentPreparer:
             raise RuntimeError(f"Template rendering failed: {e}") from e
 
         # Step 5: Build instructions
-        base_instructions = get_default_instructions(text_mode=agent_config.text_mode)
+        base_instructions = get_default_instructions()
         agent_instructions = getattr(agent_config, "instructions", "")
 
-        # Render agent instructions as Jinja2 template (they may contain {% if text_mode %}, etc.)
+        # Render agent instructions as Jinja2 template
         if agent_instructions:
             try:
                 agent_instructions = renderer.render(agent_instructions, full_context)
@@ -278,7 +277,7 @@ class AgentPreparer:
             skills = [Skill(name=name, content=content) for name, content in loaded_skills_dict.items()]
 
         # Step 8: Build system message (what LLM actually sees)
-        system_message = build_system_prompt(tools, combined_instructions, agent_config.text_mode)
+        system_message = build_system_prompt(tools, combined_instructions)
 
         # Add environment context when invoked_from differs from CWD
         if invoked_from and invoked_from != cwd:

@@ -150,7 +150,6 @@ class TestContextVariablesInTemplates:
         # Create mock agent
         agent = MagicMock()
         agent.config.prefetch = None
-        agent.config.text_mode = False
         agent.config.tools = []
         agent.config.instructions = ""
         agent.config.auto_load_skills = []
@@ -194,7 +193,6 @@ class TestContextVariablesInTemplates:
         # Create mock agent
         agent = MagicMock()
         agent.config.prefetch = None
-        agent.config.text_mode = False
         agent.config.tools = []
         agent.config.instructions = ""
         agent.config.auto_load_skills = []
@@ -233,7 +231,6 @@ class TestEnvironmentBlockInSystemPrompt:
         # Create mock agent
         agent = MagicMock()
         agent.config.prefetch = None
-        agent.config.text_mode = False
         agent.config.tools = []
         agent.config.instructions = ""
         agent.config.auto_load_skills = []
@@ -281,7 +278,6 @@ class TestEnvironmentBlockInSystemPrompt:
         # Create mock agent
         agent = MagicMock()
         agent.config.prefetch = None
-        agent.config.text_mode = False
         agent.config.tools = []
         agent.config.instructions = ""
         agent.config.auto_load_skills = []

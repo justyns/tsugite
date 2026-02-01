@@ -23,7 +23,6 @@ Agents are Markdown files with YAML frontmatter followed by templated content.
 - `auto_load_skills`: Skills to load before execution
 - `attachments`: Files to include in prompt (with caching)
 - `instructions`: Additional Jinja2-templated instructions
-- `text_mode`: Discourage code blocks (default: false)
 - `reasoning_effort`: For reasoning models (low/medium/high)
 - `initial_tasks`: Pre-populate task manager
 - `visibility`: public/private/internal (default: public)
@@ -69,7 +68,7 @@ Agents automatically inherit from a base agent unless you opt out. This enables:
 ### Merge Strategy
 
 **Scalars (single values):** Child overwrites parent
-- `model`, `max_turns`, `reasoning_effort`, `text_mode`
+- `model`, `max_turns`, `reasoning_effort`
 - Child value completely replaces parent value
 
 **Lists (arrays):** Merge and deduplicate

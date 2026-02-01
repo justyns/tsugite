@@ -200,6 +200,6 @@ class TestChatCommand:
             with patch("tsugite.ui.repl_chat.run_repl_chat") as mock_run:
                 result = runner.invoke(app, ["chat", "--root", tmpdir])
                 # The chat command should succeed and run_repl_chat should be called (default UI is repl)
-                # Built-in chat assistant exists by default
+                # Built-in default agent exists and can be used for chat
                 assert result.exit_code == 0
                 mock_run.assert_called_once()

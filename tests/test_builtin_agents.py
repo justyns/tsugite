@@ -208,93 +208,53 @@ class TestBuiltinDefaultAutoDiscovery:
         content_lower = agent.content.lower()
         assert "specialized" in content_lower or "delegate" in content_lower
 
-    def test_builtin_default_web_search_guidelines_conditional(self):
-        """Test that web search guidelines only appear when web_search tool is available."""
+    def test_builtin_default_has_web_search_tool(self):
+        """Test that default agent includes web_search tool."""
         builtin_path = get_builtin_agents_path() / "default.md"
-        agent = parse_agent_file(builtin_path)
-        renderer = AgentRenderer()
-
-        # Base context needed for default template
-        base_context = {
-            "user_prompt": "test",
-            "task_summary": "",
-            "text_mode": False,
-            "is_interactive": False,
-            "available_agents": "",  # From prefetch
-            "available_skills": "",  # From prefetch
-        }
-
-        # Test WITH web_search tool
-        context_with_web_search = {
-            **base_context,
-            "tools": ["read_file", "write_file", "web_search"],
-        }
-        rendered_with = renderer.render(agent.content, context_with_web_search)
-        assert "Web Search Guidelines" in rendered_with
-        assert "web_search(query=" in rendered_with
-
-        # Test WITHOUT web_search tool
-        context_without_web_search = {
-            **base_context,
-            "tools": ["read_file", "write_file"],
-        }
-        rendered_without = renderer.render(agent.content, context_without_web_search)
-        assert "Web Search Guidelines" not in rendered_without
-        assert "web_search(query=" not in rendered_without
-
-
-class TestBuiltinChatAssistant:
-    """Test chat-assistant agent configuration."""
-
-    def test_chat_assistant_has_web_search_tool(self):
-        """Test that chat assistant includes web_search tool."""
-        builtin_path = get_builtin_agents_path() / "chat-assistant.md"
         agent = parse_agent_file(builtin_path)
 
         assert "web_search" in agent.config.tools
 
-    def test_chat_assistant_has_fetch_text_tool(self):
-        """Test that chat assistant includes fetch_text tool."""
-        builtin_path = get_builtin_agents_path() / "chat-assistant.md"
+    def test_builtin_default_has_fetch_text_tool(self):
+        """Test that default agent includes fetch_text tool."""
+        builtin_path = get_builtin_agents_path() / "default.md"
         agent = parse_agent_file(builtin_path)
 
         assert "fetch_text" in agent.config.tools
 
-    def test_chat_assistant_documents_web_search_format(self):
-        """Test that chat assistant explains web_search return format."""
-        builtin_path = get_builtin_agents_path() / "chat-assistant.md"
+    def test_builtin_default_has_run_tool(self):
+        """Test that default agent includes run (shell) tool."""
+        builtin_path = get_builtin_agents_path() / "default.md"
         agent = parse_agent_file(builtin_path)
 
-        content = agent.content.lower()
+        assert "run" in agent.config.tools
 
-        # Should document the return format with all three fields
-        assert "title" in content
-        assert "url" in content
-        assert "snippet" in content
-
-        # Should show example structure (the [{"... format)
-        assert "[{" in content or "returns:" in content
-
-    def test_chat_assistant_warns_against_raw_json(self):
-        """Test that chat assistant warns against returning raw JSON."""
-        builtin_path = get_builtin_agents_path() / "chat-assistant.md"
+    def test_builtin_default_has_memory_tools(self):
+        """Test that default agent includes @memory tools."""
+        builtin_path = get_builtin_agents_path() / "default.md"
         agent = parse_agent_file(builtin_path)
 
-        content = agent.content.lower()
+        assert "@memory" in agent.config.tools
 
-        # Should instruct to format results as readable text and warn against raw dicts/lists
-        assert "format" in content, "Chat assistant should mention formatting output"
-        assert "readable text" in content or "raw python" in content, (
-            "Chat assistant should warn about raw Python objects"
-        )
-
-    def test_chat_assistant_mentions_fetch_text_usage(self):
-        """Test that chat assistant explains when to use fetch_text."""
-        builtin_path = get_builtin_agents_path() / "chat-assistant.md"
+    def test_builtin_default_memory_enabled(self):
+        """Test that default agent has memory enabled."""
+        builtin_path = get_builtin_agents_path() / "default.md"
         agent = parse_agent_file(builtin_path)
 
-        content = agent.content.lower()
+        assert agent.config.memory_enabled is True
 
-        # Should mention using fetch_text for full page content
-        assert "fetch_text" in content
-        assert "full" in content or "page" in content or "content" in content
+    def test_builtin_default_has_web_search_guidelines(self):
+        """Test that default agent has web search guidelines."""
+        builtin_path = get_builtin_agents_path() / "default.md"
+        agent = parse_agent_file(builtin_path)
+
+        assert "Web Search Guidelines" in agent.content
+        assert "web_search(query=" in agent.content
+
+    def test_builtin_default_has_memory_guidelines(self):
+        """Test that default agent has memory guidelines."""
+        builtin_path = get_builtin_agents_path() / "default.md"
+        agent = parse_agent_file(builtin_path)
+
+        assert "Memory Guidelines" in agent.content
+        assert "memory_search" in agent.content

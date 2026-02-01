@@ -42,8 +42,9 @@ uv run black . && uv run ruff check .
 File-based agents distributed with the package in `tsugite/builtin_agents/` directory.
 
 **Current Built-ins:**
-1. `default.md` - Base agent with task tracking, spawn_agent, and file tools
-2. `chat-assistant.md` - Chat agent with tools (read_file, write_file, list_files, web_search, fetch_text, run), text_mode enabled
+1. `default.md` - General-purpose agent with task tracking, spawn_agent, file tools, web search, memory, and shell execution
+2. `file_searcher.md` - Specialized agent for finding files and searching content
+3. `code_searcher.md` - AST-based structural code search using ast-grep
 
 **Location:** `tsugite/builtin_agents/{name}.md`
 
@@ -74,16 +75,14 @@ File-based agents distributed with the package in `tsugite/builtin_agents/` dire
 - `ui/textual_chat.py:ChatApp` - Textual TUI
 - `ui/widgets/` - MessageList, ThoughtLog
 
-**Default Agent:** `chat-assistant`. Override with `.tsugite/chat-assistant.md`.
+**Default Agent:** `default`. Override with `.tsugite/default.md`.
 
 **Flow:**
 1. User input → `ChatManager.run_turn()`
 2. Inject `chat_history` context (list of ChatTurn objects)
-3. Call `agent_runner.run_agent()` with `force_text_mode=True`
+3. Call `agent_runner.run_agent()`
 4. Store result in ChatTurn (timestamp, messages, token_count, cost)
 5. Prune history if `> max_history`
-
-**Text Mode:** `text_mode: true` allows LLM responses without code blocks.
 
 ### Directives
 
@@ -155,7 +154,6 @@ Chat:
 ---
 name: my_chat
 model: openai:gpt-4o
-text_mode: true
 tools: [read_file, web_search]
 ---
 {% if chat_history %}

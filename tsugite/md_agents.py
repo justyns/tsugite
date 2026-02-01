@@ -63,7 +63,6 @@ class AgentConfig(BaseModel):
     extends: Optional[str] = None
     reasoning_effort: Optional[str] = None  # For reasoning models (low, medium, high)
     custom_tools: List[Dict[str, Any]] = Field(default_factory=list)  # Per-agent shell tools
-    text_mode: bool = False  # Allow text-only responses (code blocks optional)
     initial_tasks: List[Union[str, Dict[str, Any]]] = Field(
         default_factory=list
     )  # Tasks to pre-populate (strings or dicts)
@@ -668,7 +667,6 @@ def build_validation_test_context(agent, include_prefetch: bool = True) -> dict[
         "task_summary": "## Current Tasks\nNo tasks yet.",
         "is_interactive": False,
         "tools": agent.config.tools or [],
-        "text_mode": agent.config.text_mode,
         "is_subagent": False,
         "parent_agent": None,
         "chat_history": [],

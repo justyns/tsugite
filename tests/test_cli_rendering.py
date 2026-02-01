@@ -331,6 +331,9 @@ class TestBuiltinAgentRendering:
         task_tools,
         skill_tools,
         interactive_tools,
+        http_tools,
+        shell_tools,
+        memory_tools,
         mock_default_agent_prefetch,
     ):
         """Test rendering default with + prefix."""
@@ -354,6 +357,9 @@ class TestBuiltinAgentRendering:
         task_tools,
         skill_tools,
         interactive_tools,
+        http_tools,
+        shell_tools,
+        memory_tools,
         mock_default_agent_prefetch,
     ):
         """Test that builtin agent prefetch tools are executed."""
@@ -366,7 +372,9 @@ class TestBuiltinAgentRendering:
 
         result = self.runner.invoke(app, ["render", "+default", "test"])
 
-        assert result.exit_code == 0
+        if result.exit_code != 0:
+            print(f"\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}\n")
+        assert result.exit_code == 0, f"Command failed with stdout: {result.stdout}"
         # Verify prefetch was called (both tools)
         assert mock_call_tool.call_count == 2
 
@@ -376,15 +384,6 @@ class TestBuiltinAgentRendering:
 
         assert result.exit_code == 1
         assert "not found" in result.stdout.lower()
-
-    def test_render_builtin_chat_assistant(self, file_tools, http_tools, shell_tools, task_tools, memory_tools):
-        """Test rendering chat-assistant with chat_history."""
-        result = self.runner.invoke(app, ["render", "chat-assistant", "test prompt"])
-
-        assert result.exit_code == 0
-        assert "test prompt" in result.stdout
-        assert "chat-assistant" in result.stdout
-        # Should render without error even though chat_history is empty
 
 
 @pytest.fixture

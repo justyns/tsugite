@@ -217,7 +217,6 @@ def _build_executor_kwargs(
             stream=exec_opts.stream,
             trust_mcp_code=exec_opts.trust_mcp_code,
             dry_run=exec_opts.dry_run,
-            force_text_mode=exec_opts.force_text_mode,
             return_token_usage=True,
         )
     return kwargs
@@ -954,9 +953,6 @@ def render(
             # template blocks have been removed from modern agents. History is now
             # handled via previous_messages in agent execution, not template rendering.
             context = {}
-            if continue_conversation_id:
-                # Enable text_mode when continuing (matches run behavior)
-                agent.config.text_mode = True
 
             # Prepare agent (all rendering + tool building logic)
             preparer = AgentPreparer()
@@ -1155,7 +1151,7 @@ def chat(
                 console.print(f"[red]Failed to load conversation: {e}[/red]")
                 raise typer.Exit(1)
 
-        agent_to_load = agent if agent else "chat-assistant"
+        agent_to_load = agent if agent else "default"
         _, primary_agent_path, _ = load_and_validate_agent(agent_to_load, console)
 
         if ui.lower() == "tui":

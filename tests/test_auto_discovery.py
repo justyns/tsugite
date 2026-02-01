@@ -59,7 +59,7 @@ description: Test agent
             # Should include package-provided agents
             assert "available_agents" in context
             assert "default" in context["available_agents"]
-            assert "chat-assistant" in context["available_agents"]
+            assert "file_searcher" in context["available_agents"]
 
 
 class TestAutoDiscoveryWorkflow:
@@ -174,7 +174,7 @@ No agents found.
         # Package-provided agents are always available
         assert "Agents available:" in result
         assert "default" in result
-        assert "chat-assistant" in result
+        assert "file_searcher" in result
 
 
 class TestBuiltinDefaultIntegration:

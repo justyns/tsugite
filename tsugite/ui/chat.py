@@ -242,7 +242,6 @@ class ChatManager:
                     model_override=self.model_override,
                     return_token_usage=True,
                     stream=self.stream,
-                    force_text_mode=True,  # Enable text mode for chat UI
                 ),
                 custom_logger=self.custom_logger,
                 context={"chat_history": self.conversation_history},

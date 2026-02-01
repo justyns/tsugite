@@ -1,9 +1,9 @@
 ---
 name: hello_world
 description: A simple agent that outputs greetings
+extends: none
 max_turns: 10
 tools: []
-text_mode: true
 ---
 
 # Hello World Agent

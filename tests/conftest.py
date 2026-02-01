@@ -51,6 +51,26 @@ def event_loop_policy():
     asyncio.set_event_loop_policy(asyncio.DefaultEventLoopPolicy())
 
 
+@pytest.fixture(autouse=True)
+def clear_agent_context():
+    """Clear agent context state between tests.
+
+    This prevents test pollution where one test sets current_agent
+    and affects another test running in the same worker.
+    """
+    from tsugite.agent_runner.helpers import clear_current_agent, clear_allowed_agents
+
+    # Clear before test
+    clear_current_agent()
+    clear_allowed_agents()
+
+    yield
+
+    # Clear after test
+    clear_current_agent()
+    clear_allowed_agents()
+
+
 @pytest.fixture
 def temp_dir() -> Generator[Path, None, None]:
     """Create a temporary directory for tests."""
