@@ -180,16 +180,6 @@ Summarize findings
 - Safety: `max_iterations` (default 10) prevents infinite loops
 - Loop context: `{{ iteration }}`, `{{ max_iterations }}`, `{{ is_looping_step }}`
 
-### Task Tracking System
-
-Task management is built-in for agents (`tsugite/tools/tasks.py`):
-
-- **TaskManager** (singleton, thread-safe)
-- Tasks have: id, title, status (pending/in_progress/completed/blocked/cancelled), optional flag
-- Pre-populate tasks via `initial_tasks` in frontmatter
-- Tools: `task_add`, `task_update`, `task_list`, `task_get`, `task_complete`
-- Template context: `{{ tasks }}` (list for iteration), `{{ task_summary }}` (formatted string)
-
 ### Event-Driven UI
 
 All UI output goes through the event system:
@@ -350,5 +340,4 @@ tsu run -f image1.jpg -f image2.jpg "Compare these images"
 3. **Don't forget schema regen**: After modifying `AgentConfig`, regenerate schema
 4. **Don't hardcode paths**: Use XDG utilities (`get_xdg_config_path()`, etc.)
 5. **Don't use blocking IO in async**: Use `asyncio.to_thread()` for sync tools
-6. **Task manager is a singleton**: Always use `get_task_manager()`, never instantiate directly
-7. **Test both sync and async paths**: Many tools support both execution modes
+6. **Test both sync and async paths**: Many tools support both execution modes

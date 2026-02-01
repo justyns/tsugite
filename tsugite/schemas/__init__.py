@@ -78,19 +78,6 @@ def generate_agent_schema() -> Dict[str, Any]:
         )
         properties["extends"]["examples"] = ["default", "none"]
 
-    if "initial_tasks" in properties:
-        properties["initial_tasks"]["description"] = (
-            "Tasks to pre-populate when agent starts. Can be strings (default to pending/required) "
-            "or objects with title, status, and optional fields."
-        )
-        properties["initial_tasks"]["examples"] = [
-            ["Read and analyze code", "Check for security issues"],
-            [
-                {"title": "Core feature", "status": "pending", "optional": False},
-                {"title": "Nice formatting", "optional": True},
-            ],
-        ]
-
     return schema
 
 

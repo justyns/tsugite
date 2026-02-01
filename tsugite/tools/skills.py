@@ -241,17 +241,6 @@ def get_skills_for_template() -> List[Dict[str, str]]:
     return get_available_skills_list()
 
 
-@tool
-def list_loaded_skills() -> str:
-    """Show which skills are currently loaded in this session.
-
-    Returns:
-        List of loaded skill names
-    """
-    manager = get_skill_manager()
-    return manager.list_loaded_skills()
-
-
 def get_available_skills_list() -> List[Dict[str, str]]:
     """Get list of all available skills as dicts (for template rendering).
 

@@ -105,9 +105,6 @@ def test_config_with_empty_values(tmp_path):
         "auto_context_enabled": True,
         "auto_context_files": [".tsugite/CONTEXT.md", "AGENTS.md", "CLAUDE.md"],
         "auto_context_include_global": True,
-        "memory_enabled": False,
-        "memory_embedding_model": "BAAI/bge-small-en-v1.5",
-        "memory_embedding_dimension": 384,
     }
 
 

@@ -24,7 +24,6 @@ Agents are Markdown files with YAML frontmatter followed by templated content.
 - `attachments`: Files to include in prompt (with caching)
 - `instructions`: Additional Jinja2-templated instructions
 - `reasoning_effort`: For reasoning models (low/medium/high)
-- `initial_tasks`: Pre-populate task manager
 - `visibility`: public/private/internal (default: public)
 - `spawnable`: Allow other agents to spawn this one (default: true)
 - `extends`: Parent agent to inherit from (default: auto-detect base)
@@ -77,7 +76,7 @@ Agents automatically inherit from a base agent unless you opt out. This enables:
 - Duplicates removed (first occurrence wins)
 
 **Lists (no deduplication):** Concatenate
-- `prefetch`, `initial_tasks`
+- `prefetch`
 - Parent items first, then child items
 - Order preserved
 
@@ -258,9 +257,8 @@ Instructions are concatenated: parent + "\n\n" + child (via inheritance).
 
 Understanding this flow helps target failures (e.g., prefetch errors, missing template vars, tool expansion issues).
 
-## Task and Skill Hooks
+## Skill and Attachment Hooks
 
-- `initial_tasks` seeds the task manager before execution.
 - `auto_load_skills` lists skills to load before the first LLM turn.
 - `attachments` lists attachments to load before the first LLM turn.
 
@@ -335,28 +333,21 @@ Write the final article.
 
 ### Looping Steps Examples
 
-**Example 1: Task Loop**
+**Example 1: Item Processing Loop**
 
 ```markdown
 ---
-name: task_processor
-initial_tasks:
-  - title: Review code
-  - title: Write tests
-  - title: Update docs
+name: item_processor
 ---
 
-<!-- tsu:step name="process_tasks" repeat_while="has_pending_tasks()" max_iterations="10" -->
+<!-- tsu:step name="process_items" repeat_while="items | length > 0" max_iterations="10" -->
 {% if iteration == 1 %}
-Starting task processing...
+Starting item processing...
 {% endif %}
 
 Current iteration: {{ iteration }} of {{ max_iterations }}
 
-Pending tasks:
-{{ task_summary }}
-
-Work on the next pending task. Mark it complete when done.
+Process the next item from the list. Remove it when complete.
 ```
 
 **Example 2: Convergence Loop**
@@ -395,23 +386,19 @@ This step runs even if previous step failed (continue_on_error=true).
 Implement fallback logic here.
 ```
 
-### Loop Helpers
+### Loop Context Variables
 
 Available in `repeat_while` / `repeat_until` conditions:
 
-- `has_pending_tasks()` - Any tasks not completed
-- `all_tasks_complete()` - All tasks completed
-- `has_task_status(status)` - Any task with specific status
-- `task_count_by_status(status)` - Count tasks by status
-- `iteration` - Current iteration number
+- `iteration` - Current iteration number (1-indexed)
 - `max_iterations` - Maximum iterations allowed
+- Any Jinja2 expression using step variables
 
 **Example conditions:**
 ```markdown
-repeat_while="has_pending_tasks()"
-repeat_until="all_tasks_complete()"
-repeat_while="iteration < 5"
-repeat_until="task_count_by_status('completed') >= 3"
+repeat_while="not done"
+repeat_until="result == 'success'"
+repeat_while="items | length > 0"
 ```
 
 ### Step Variables in Templates

@@ -12,7 +12,6 @@ from tsugite.exceptions import AgentExecutionError
 from tsugite.md_agents import AgentConfig, parse_agent_file
 from tsugite.options import ExecutionOptions
 from tsugite.renderer import AgentRenderer
-from tsugite.tools.tasks import TaskStatus, get_task_manager, reset_task_manager
 from tsugite.utils import is_interactive
 
 from .helpers import (
@@ -132,35 +131,6 @@ def _get_model_string(model_override: Optional[str], agent_config: AgentConfig) 
         )
 
     return model_string
-
-
-def _populate_initial_tasks(agent_config: AgentConfig) -> None:
-    """Populate task manager with initial tasks from agent config.
-
-    Args:
-        agent_config: Agent configuration with initial_tasks list
-    """
-    if not agent_config.initial_tasks:
-        return
-
-    task_manager = get_task_manager()
-
-    for task_def in agent_config.initial_tasks:
-        # At this point, all tasks should be normalized dicts (done in AgentConfig.__post_init__)
-        title = task_def.get("title", "")
-        status_str = task_def.get("status", "pending")
-        optional = task_def.get("optional", False)
-
-        if not title:
-            continue
-
-        try:
-            status = TaskStatus(status_str)
-        except ValueError:
-            # If invalid status, default to pending
-            status = TaskStatus.PENDING
-
-        task_manager.add_task(title, status, parent_id=None, optional=optional)
 
 
 def _build_step_error_message(
@@ -418,15 +388,7 @@ async def _execute_agent_with_prompt(
     if exec_options is None:
         exec_options = ExecutionOptions()
 
-    # Initialize task manager for this execution (unless skipped for multi-step)
-    if not skip_task_reset:
-        reset_task_manager()
-
     agent_config = prepared.agent_config
-
-    # Populate initial tasks if any
-    if not skip_task_reset:
-        _populate_initial_tasks(agent_config)
 
     # Add variable documentation to instructions if variables are available
     combined_instructions = prepared.combined_instructions
@@ -752,19 +714,12 @@ async def run_agent_async(
             # New conversation (e.g., fresh workspace session) - start with empty history
             pass
 
-    # Initialize task manager for this agent session
-    reset_task_manager()
-    task_manager = get_task_manager()
-
     # Parse agent configuration (with inheritance resolution)
     try:
         agent = parse_agent_file(agent_path)
         agent_config = agent.config
     except Exception as e:
         raise ValueError(f"Failed to parse agent file: {e}")
-
-    # Populate initial tasks from agent config
-    _populate_initial_tasks(agent_config)
 
     # Set current agent in thread-local storage for spawn_agent tracking
     set_current_agent(agent_config.name)
@@ -779,8 +734,6 @@ async def run_agent_async(
             prompt=prompt,
             context=context,
             workspace=workspace,
-            task_summary=task_manager.get_task_summary(),
-            tasks=task_manager.get_tasks_for_template(),
             attachments=attachments,
             path_context=path_context,
         )
@@ -808,17 +761,7 @@ async def run_agent_async(
 
 # Predefined loop condition helpers
 # These are plain Jinja2 expressions (no {{ }}) that can be used in {% if %} blocks
-LOOP_HELPERS = {
-    "has_pending_tasks": "tasks | selectattr('status', 'equalto', 'pending') | list | length > 0",
-    "has_pending_required_tasks": (
-        "tasks | selectattr('status', 'equalto', 'pending') | "
-        "selectattr('optional', 'equalto', false) | list | length > 0"
-    ),
-    "all_tasks_complete": "(tasks | selectattr('status', 'equalto', 'completed') | list | length) == (tasks | length)",
-    "has_incomplete_tasks": "tasks | rejectattr('status', 'equalto', 'completed') | list | length > 0",
-    "has_in_progress_tasks": "tasks | selectattr('status', 'equalto', 'in_progress') | list | length > 0",
-    "has_blocked_tasks": "tasks | selectattr('status', 'equalto', 'blocked') | list | length > 0",
-}
+LOOP_HELPERS = {}
 
 
 def _build_injectable_vars(step_context: Dict[str, Any], assigned_vars: Optional[set] = None) -> Dict[str, Any]:
@@ -876,11 +819,12 @@ def _build_prepared_agent_for_step(
     agent_instructions = getattr(agent.config, "instructions", "")
     combined_instructions = _combine_instructions(base_instructions, agent_instructions)
 
-    # Expand and create tools (avoid duplicates from @tasks category)
+    # Expand and create tools
     expanded_tools = expand_tool_specs(agent.config.tools) if agent.config.tools else []
-    task_tools = {"task_add", "task_update", "task_complete", "task_list", "task_get", "spawn_agent"}
-    all_tool_names = expanded_tools + [t for t in task_tools if t not in expanded_tools]
-    tools = [create_tool_from_tsugite(name) for name in all_tool_names]
+    # Always include spawn_agent if not already present
+    if "spawn_agent" not in expanded_tools:
+        expanded_tools.append("spawn_agent")
+    tools = [create_tool_from_tsugite(name) for name in expanded_tools]
 
     # Build system message
     system_message = build_system_prompt(tools, combined_instructions)
@@ -1040,7 +984,6 @@ async def _execute_step_with_retries(
     step_header: str,
     exec_options: ExecutionOptions,
     custom_logger: Optional[Any],
-    task_manager: Any,
     event_bus: Optional["EventBus"] = None,
     assigned_vars: Optional[set] = None,
 ) -> tuple[str, float]:
@@ -1138,10 +1081,6 @@ async def _execute_step_with_retries(
                     from tsugite.events import DebugMessageEvent
 
                     event_bus.emit(DebugMessageEvent(message=f"Assigned result to variable: {step.assign_var}"))
-
-            # Update task summary and tasks list for next step
-            step_context["task_summary"] = task_manager.get_task_summary()
-            step_context["tasks"] = task_manager.get_tasks_for_template()
 
             # Show step completion
             if not debug:
@@ -1304,14 +1243,6 @@ async def _run_multistep_agent_impl(
             duplicates = [name for name in step_names if step_names.count(name) > 1]
             raise ValueError(f"Duplicate step names found: {', '.join(set(duplicates))}")
 
-        # Initialize task manager ONCE for entire multi-step execution
-        # This allows tasks to persist and accumulate across steps
-        reset_task_manager()
-        task_manager = get_task_manager()
-
-        # Populate initial tasks from agent config
-        _populate_initial_tasks(agent.config)
-
         # Create event_bus for emitting events throughout multi-step execution
         from tsugite.events import DebugMessageEvent, EventBus, InfoEvent, WarningEvent
 
@@ -1327,8 +1258,6 @@ async def _run_multistep_agent_impl(
         step_context = {
             **context,
             "user_prompt": prompt,
-            "task_summary": task_manager.get_task_summary(),
-            "tasks": task_manager.get_tasks_for_template(),
             "is_interactive": interactive_mode,
             "tools": agent.config.tools,
             "is_subagent": context.get("is_subagent", False),
@@ -1385,7 +1314,6 @@ async def _run_multistep_agent_impl(
                         step_header=step_header,
                         exec_options=exec_options,
                         custom_logger=custom_logger,
-                        task_manager=task_manager,
                         event_bus=event_bus,
                         assigned_vars=assigned_vars,
                     )
@@ -1445,10 +1373,6 @@ async def _run_multistep_agent_impl(
                     if step_is_looping and iteration > 1 and not exec_options.debug:
                         event_bus.emit(InfoEvent(message=f"Step '{step.name}' completed after {iteration} iterations"))
                     break
-
-                # Update task context for next iteration
-                step_context["task_summary"] = task_manager.get_task_summary()
-                step_context["tasks"] = task_manager.get_tasks_for_template()
 
                 if not exec_options.debug:
                     event_bus.emit(InfoEvent(message=f"🔁 Repeating step '{step.name}' (iteration {iteration + 1})"))
@@ -1647,7 +1571,6 @@ def preview_multistep_agent(
         # Filter out template helpers and metadata (these are always available, not real deps)
         builtin_vars = {
             "user_prompt",
-            "task_summary",
             "step_number",
             "step_name",
             "total_steps",
@@ -1656,7 +1579,6 @@ def preview_multistep_agent(
             "max_retries",
             "last_error",
             "all_errors",
-            "tasks",
             "is_interactive",
             "tools",
             "is_subagent",

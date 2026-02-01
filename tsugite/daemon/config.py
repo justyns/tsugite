@@ -20,10 +20,7 @@ class AgentConfig(BaseModel):
 
     workspace_dir: Path
     agent_file: str
-    memory_enabled: bool = True
-    memory_inject_days: int = 2
     context_limit: int = 128000  # Model's context window (tokens)
-    memory_extraction_interval: int = 10  # Run memory extraction every N messages
 
 
 class DiscordBotConfig(BaseModel):
@@ -110,10 +107,7 @@ def save_daemon_config(config: DaemonConfig, path: Optional[Path] = None) -> Pat
             name: {
                 "workspace_dir": str(agent_cfg.workspace_dir),
                 "agent_file": agent_cfg.agent_file,
-                "memory_enabled": agent_cfg.memory_enabled,
-                "memory_inject_days": agent_cfg.memory_inject_days,
                 "context_limit": agent_cfg.context_limit,
-                "memory_extraction_interval": agent_cfg.memory_extraction_interval,
             }
             for name, agent_cfg in config.agents.items()
         },

@@ -35,7 +35,6 @@ def test_generate_schema_has_all_fields():
         "extends",
         "reasoning_effort",
         "custom_tools",
-        "initial_tasks",
         "disable_history",
         "auto_context",
         "visibility",

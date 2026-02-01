@@ -58,7 +58,7 @@ def clear_agent_context():
     This prevents test pollution where one test sets current_agent
     and affects another test running in the same worker.
     """
-    from tsugite.agent_runner.helpers import clear_current_agent, clear_allowed_agents
+    from tsugite.agent_runner.helpers import clear_allowed_agents, clear_current_agent
 
     # Clear before test
     clear_current_agent()
@@ -221,16 +221,6 @@ def reset_tool_registry():
 
 
 @pytest.fixture(autouse=True)
-def reset_task_manager():
-    """Reset the task manager before each test."""
-    from tsugite.tools.tasks import reset_task_manager as reset_tm
-
-    reset_tm()
-    yield
-    reset_tm()
-
-
-@pytest.fixture(autouse=True)
 def isolate_config_files(tmp_path, monkeypatch):
     """Isolate config files for each test to prevent cross-test contamination.
 
@@ -289,12 +279,11 @@ def reset_skill_manager():
 
 
 @pytest.fixture(autouse=True)
-def task_tools(reset_tool_registry, request):
-    """Register task management tools for testing.
+def spawn_agent_tool(reset_tool_registry, request):
+    """Register spawn_agent tool for testing.
 
-    Autouse fixture because task tools are automatically added to all agents
-    in agent_preparation.py. Includes spawn_agent which is always added
-    alongside task tools.
+    Autouse fixture because spawn_agent is automatically added to all agents
+    in agent_preparation.py.
 
     Skips registration for test_tool_registry.py tests that need an empty registry.
     """
@@ -304,20 +293,8 @@ def task_tools(reset_tool_registry, request):
 
     from tsugite.tools import tool
     from tsugite.tools.agents import spawn_agent
-    from tsugite.tools.tasks import (
-        task_add,
-        task_complete,
-        task_get,
-        task_list,
-        task_update,
-    )
 
     # Re-register the tools after registry reset
-    tool(task_add)
-    tool(task_update)
-    tool(task_complete)
-    tool(task_list)
-    tool(task_get)
     tool(spawn_agent)
 
 
@@ -372,39 +349,13 @@ def skill_tools(reset_tool_registry):
     from tsugite.tools.skills import (
         get_skills_for_template,
         list_available_skills,
-        list_loaded_skills,
         load_skill,
     )
 
     # Re-register the tools after registry reset
     tool(load_skill)
     tool(list_available_skills)
-    tool(list_loaded_skills)
     tool(get_skills_for_template)
-
-
-@pytest.fixture
-def memory_tools(reset_tool_registry):
-    """Register memory tools for testing."""
-    from tsugite.tools import tool
-    from tsugite.tools.memory import (
-        memory_count,
-        memory_delete,
-        memory_get,
-        memory_list,
-        memory_search,
-        memory_store,
-        memory_update,
-    )
-
-    # Re-register the tools after registry reset
-    tool(memory_store)
-    tool(memory_search)
-    tool(memory_list)
-    tool(memory_get)
-    tool(memory_update)
-    tool(memory_delete)
-    tool(memory_count)
 
 
 @pytest.fixture

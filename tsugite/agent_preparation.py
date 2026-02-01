@@ -105,8 +105,6 @@ class AgentPreparer:
         context: Optional[Dict[str, Any]] = None,
         workspace: Optional["Workspace"] = None,
         skip_tool_directives: bool = False,
-        task_summary: str = "## Current Tasks\nNo tasks yet.",
-        tasks: Optional[List[Dict[str, Any]]] = None,
         attachments: Optional[List[Attachment]] = None,
         event_bus: Optional[Any] = None,
         path_context: Optional[Any] = None,
@@ -119,8 +117,6 @@ class AgentPreparer:
             context: Additional context variables
             workspace: Optional workspace for context files and persistent sessions
             skip_tool_directives: Skip executing tool directives (for render)
-            task_summary: Current task summary (from task manager)
-            tasks: List of task dicts for template iteration (from task manager)
             attachments: List of Attachment objects for multi-modal inputs
             event_bus: Optional event bus for emitting skill load events
             path_context: Optional PathContext with invoked_from, workspace_dir, effective_cwd
@@ -194,8 +190,6 @@ class AgentPreparer:
             **prefetch_context,
             **tool_context,
             "user_prompt": prompt,
-            "task_summary": task_summary,
-            "tasks": tasks or [],
             "is_interactive": interactive_mode,
             "tools": agent_config.tools,
             # Subagent context
@@ -234,28 +228,21 @@ class AgentPreparer:
             # Expand tool specifications (categories, globs, regular names)
             expanded_tools = expand_tool_specs(agent_config.tools) if agent_config.tools else []
 
-            # Add task management tools and spawn_agent (only if not already present)
-            task_tools = {"task_add", "task_update", "task_complete", "task_list", "task_get", "spawn_agent"}
-            all_tool_names = expanded_tools + [t for t in task_tools if t not in expanded_tools]
+            # Add spawn_agent (only if not already present)
+            if "spawn_agent" not in expanded_tools:
+                expanded_tools.append("spawn_agent")
 
             # Filter out interactive tools in non-interactive mode
-            if not interactive_mode and "ask_user" in all_tool_names:
-                all_tool_names.remove("ask_user")
+            if not interactive_mode and "ask_user" in expanded_tools:
+                expanded_tools.remove("ask_user")
 
             # Convert to Tool objects
-            tools = [create_tool_from_tsugite(name) for name in all_tool_names]
+            tools = [create_tool_from_tsugite(name) for name in expanded_tools]
         except Exception as e:
             raise RuntimeError(f"Failed to create tools: {e}") from e
 
         # Step 7: Load auto_load_skills
-        # Auto-add memory_best_practices skill for memory-enabled agents
         auto_load_skills = list(agent_config.auto_load_skills or [])
-        if getattr(agent_config, "memory_enabled", False):
-            has_memory_tools = any(
-                tool.startswith("memory_") or tool == "@memory" for tool in (agent_config.tools or [])
-            )
-            if has_memory_tools and "memory_best_practices" not in auto_load_skills:
-                auto_load_skills.append("memory_best_practices")
 
         skills = []
         if auto_load_skills:

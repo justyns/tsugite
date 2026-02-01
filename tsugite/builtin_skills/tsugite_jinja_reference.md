@@ -17,8 +17,6 @@ Available in both the agent body and `instructions` during preparation:
 
 ### Always Available
 - `user_prompt`: Raw user task text (string)
-- `task_summary`: Markdown summary of tracked tasks (string)
-- `tasks`: List of task dicts with keys: `title`, `status`, `optional` (list)
 - `tools`: Expanded tool list after glob/category expansion (list of strings)
 - `is_interactive`: True when running in interactive CLI/TUI (boolean)
 
@@ -84,23 +82,6 @@ Injected via `AgentRenderer.env.globals`:
   API endpoint: {{ env["API_URL"] }}
   ```
 
-## Task Management Helpers
-
-### Task Loop Conditions
-
-These helpers are used in multi-step `repeat_while` / `repeat_until` conditions:
-
-- `has_pending_tasks()` → True if any tasks are not completed
-- `all_tasks_complete()` → True if all tasks are completed
-- `has_task_status(status)` → True if any task has given status
-- `task_count_by_status(status)` → Count of tasks with given status
-
-**Example usage in step directive:**
-```markdown
-<!-- tsu:step name="work_on_tasks" repeat_while="has_pending_tasks()" max_iterations="10" -->
-Work on the next pending task until all tasks are complete.
-```
-
 ## Control Patterns
 
 ### Conditional Blocks
@@ -135,53 +116,6 @@ Report results concisely.
 {% else %}
 You are the primary agent. Provide detailed explanations.
 {% endif %}
-```
-
-### Task Iteration
-
-**Filter tasks by status:**
-```jinja2
-{% if tasks %}
-Pending tasks:
-{% for task in tasks if task.status == "pending" %}
-- [ ] {{ task.title }}
-{% endfor %}
-
-In progress:
-{% for task in tasks if task.status == "in_progress" %}
-- [~] {{ task.title }}
-{% endfor %}
-
-Completed:
-{% for task in tasks if task.status == "completed" %}
-- [x] {{ task.title }}
-{% endfor %}
-{% else %}
-No tasks defined.
-{% endif %}
-```
-
-**Count and conditionals:**
-```jinja2
-{% set pending = tasks|selectattr("status", "equalto", "pending")|list %}
-{% if pending|length > 0 %}
-You have {{ pending|length }} pending task(s):
-{% for task in pending %}
-{{ loop.index }}. {{ task.title }}
-{% endfor %}
-{% else %}
-All tasks complete!
-{% endif %}
-```
-
-**Task summary with loop variables:**
-```jinja2
-{% for task in tasks %}
-Task {{ loop.index }} of {{ loop.length }}: {{ task.title }}
-Status: {{ task.status }}
-{% if task.optional %}(optional){% endif %}
-{% if not loop.last %}---{% endif %}
-{% endfor %}
 ```
 
 ### Multi-Step Loops

@@ -3,7 +3,7 @@
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -63,14 +63,10 @@ class AgentConfig(BaseModel):
     extends: Optional[str] = None
     reasoning_effort: Optional[str] = None  # For reasoning models (low, medium, high)
     custom_tools: List[Dict[str, Any]] = Field(default_factory=list)  # Per-agent shell tools
-    initial_tasks: List[Union[str, Dict[str, Any]]] = Field(
-        default_factory=list
-    )  # Tasks to pre-populate (strings or dicts)
     disable_history: bool = False  # Disable conversation history persistence for this agent
     auto_context: Optional[bool] = None  # Auto-load context files (None = use config default)
     visibility: str = "public"  # Agent visibility: public, private, internal
     spawnable: bool = True  # Whether this agent can be spawned by other agents
-    memory_enabled: Optional[bool] = None  # Enable memory system (None = use config default)
 
     @field_validator("visibility", mode="after")
     @classmethod
@@ -81,27 +77,6 @@ class AgentConfig(BaseModel):
             raise ValueError(f"visibility must be one of {allowed}, got: {v}")
         return v
 
-    @field_validator("initial_tasks", mode="after")
-    @classmethod
-    def normalize_initial_tasks(cls, v: List[Union[str, Dict[str, Any]]]) -> List[Dict[str, Any]]:
-        """Normalize initial_tasks: convert strings to dicts with defaults."""
-        normalized_tasks = []
-        for task in v:
-            if isinstance(task, str):
-                # Simple string format: convert to dict with defaults
-                normalized_tasks.append({"title": task, "status": "pending", "optional": False})
-            elif isinstance(task, dict):
-                # Dict format: ensure all required fields exist with defaults
-                normalized = {
-                    "title": task.get("title", ""),
-                    "status": task.get("status", "pending"),
-                    "optional": task.get("optional", False),
-                }
-                normalized_tasks.append(normalized)
-            else:
-                raise ValueError(f"Invalid initial_tasks entry: {task}. Must be string or dict.")
-
-        return normalized_tasks
 
 
 @dataclass
@@ -664,7 +639,6 @@ def build_validation_test_context(agent, include_prefetch: bool = True) -> dict[
     """
     test_context = {
         "user_prompt": "test",
-        "task_summary": "## Current Tasks\nNo tasks yet.",
         "is_interactive": False,
         "tools": agent.config.tools or [],
         "is_subagent": False,

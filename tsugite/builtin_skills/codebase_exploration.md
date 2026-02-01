@@ -619,28 +619,6 @@ read_file("tests/test_auth.py")
 - ❌ **Not using file_search:** Reading files to find simple patterns when search would suffice
 - ❌ **Over-focusing on one area:** Missing architectural patterns visible in structure
 
-## Integration with Task Tracking
-
-When exploring complex codebases, use task tracking to organize findings:
-
-**First, add all exploration phases as tasks:**
-```python
-task_add(title="Phase 1: Analyze directory structure and file counts")
-task_add(title="Phase 2: Read README and entry points")
-task_add(title="Phase 3: Map core symbols and abstractions")
-task_add(title="Phase 4: Generate exploration report")
-```
-
-**Then update as you progress (one per turn):**
-```python
-task_update(task_id=1, status="in_progress")
-```
-
-**After completing a phase:**
-```python
-task_complete(task_id=1)
-```
-
 ## Quick Reference
 
 **For small codebases (<100 files):**

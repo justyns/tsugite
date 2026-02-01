@@ -224,46 +224,6 @@ class TestListAvailableSkillsTool:
         assert "no skill" in result.lower() or "empty" in result.lower() or result == ""
 
 
-class TestListLoadedSkillsTool:
-    """Test list_loaded_skills tool."""
-
-    def test_list_loaded_skills(self):
-        """Test listing currently loaded skills."""
-        # Create a skill manager with loaded skills
-        manager = SkillManager()
-        manager._loaded_skills = {
-            "skill1": "content1",
-            "skill2": "content2",
-        }
-        set_skill_manager(manager)
-
-        from tsugite.tools import tool
-        from tsugite.tools.skills import list_loaded_skills
-
-        tool(list_loaded_skills)
-
-        result = call_tool("list_loaded_skills")
-
-        assert "skill1" in result
-        assert "skill2" in result
-
-    def test_list_loaded_skills_empty(self):
-        """Test listing when no skills are loaded."""
-        # Create a skill manager with no loaded skills
-        manager = SkillManager()
-        manager._loaded_skills = {}
-        set_skill_manager(manager)
-
-        from tsugite.tools import tool
-        from tsugite.tools.skills import list_loaded_skills
-
-        tool(list_loaded_skills)
-
-        result = call_tool("list_loaded_skills")
-
-        assert "no skill" in result.lower() or "empty" in result.lower() or "none" in result.lower()
-
-
 class TestSkillManagerEvents:
     """Test skill manager event emission."""
 

@@ -29,7 +29,6 @@ class ExecutionOptions:
     trust_mcp_code: bool = False
     dry_run: bool = False
     return_token_usage: bool = False
-    memory_enabled: Optional[bool] = None  # None = use agent/config default
 
 
 @dataclass

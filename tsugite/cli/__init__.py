@@ -416,9 +416,6 @@ def run(
     subagent_mode: bool = typer.Option(
         False, "--subagent-mode", help="Run as subagent: read JSON from stdin, emit JSONL to stdout"
     ),
-    memory: Optional[bool] = typer.Option(
-        None, "--memory/--no-memory", help="Enable/disable memory system (overrides agent/config default)"
-    ),
     workspace: Optional[str] = typer.Option(
         None, "--workspace", "-w", help="Workspace directory (auto-loads PERSONA.md, USER.md, MEMORY.md)"
     ),
@@ -483,7 +480,6 @@ def run(
         stream=stream,
         trust_mcp_code=trust_mcp_code,
         dry_run=dry_run,
-        memory_enabled=memory,
     )
     history_opts = HistoryOptions(
         enabled=not no_history,

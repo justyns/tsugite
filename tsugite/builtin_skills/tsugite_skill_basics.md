@@ -95,9 +95,6 @@ list_available_skills()
 # - python_math: Reference for performing common math operations in Python
 # - tsugite_jinja_reference: Reference for Jinja templating in Tsugite agents
 # - ...
-
-# See what's currently loaded
-list_loaded_skills()
 ```
 
 ## How Skills Are Injected Into Prompts
@@ -146,8 +143,6 @@ Skills are rendered as Jinja2 templates, but with **minimal context** (unlike ag
 
 Skills cannot access agent-specific context:
 - `user_prompt` - Set to empty string
-- `task_summary` - Not available
-- `tasks` - Not available
 - `tools` - Not available
 - `is_interactive` - Not available
 - Prefetch results - Not available

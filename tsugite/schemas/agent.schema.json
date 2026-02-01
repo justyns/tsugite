@@ -159,39 +159,6 @@
       "title": "Custom Tools",
       "type": "array"
     },
-    "initial_tasks": {
-      "items": {
-        "anyOf": [
-          {
-            "type": "string"
-          },
-          {
-            "additionalProperties": true,
-            "type": "object"
-          }
-        ]
-      },
-      "title": "Initial Tasks",
-      "type": "array",
-      "description": "Tasks to pre-populate when agent starts. Can be strings (default to pending/required) or objects with title, status, and optional fields.",
-      "examples": [
-        [
-          "Read and analyze code",
-          "Check for security issues"
-        ],
-        [
-          {
-            "title": "Core feature",
-            "status": "pending",
-            "optional": false
-          },
-          {
-            "title": "Nice formatting",
-            "optional": true
-          }
-        ]
-      ]
-    },
     "disable_history": {
       "default": false,
       "title": "Disable History",
@@ -224,18 +191,6 @@
       "default": true,
       "title": "Spawnable",
       "type": "boolean"
-    },
-    "memory_enabled": {
-      "anyOf": [
-        {
-          "type": "boolean"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "title": "Memory Enabled"
     }
   },
   "required": [

@@ -105,7 +105,6 @@ class TestDaemonHistorySaving:
         return AgentConfig(
             workspace_dir=mock_workspace,
             agent_file="test.md",
-            memory_enabled=False,
         )
 
     @pytest.fixture
@@ -294,8 +293,7 @@ class TestHistoryLoadedOnContinue:
         agent_config = AgentConfig(
             workspace_dir=workspace,
             agent_file="test.md",
-            memory_enabled=False,
-        )
+                    )
 
         class TestAdapter(BaseAdapter):
             async def start(self):
@@ -339,8 +337,7 @@ class TestHistorySaveErrorHandling:
         agent_config = AgentConfig(
             workspace_dir=workspace,
             agent_file="test.md",
-            memory_enabled=False,
-        )
+                    )
 
         class TestAdapter(BaseAdapter):
             async def start(self):
@@ -392,8 +389,7 @@ class TestDaemonMetadataInHistory:
         agent_config = AgentConfig(
             workspace_dir=workspace,
             agent_file="test.md",
-            memory_enabled=False,
-        )
+                    )
 
         class TestAdapter(BaseAdapter):
             async def start(self):

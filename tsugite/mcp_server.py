@@ -9,13 +9,6 @@ from mcp.types import TextContent, Tool
 
 # Tools to expose via MCP
 EXPOSED_TOOLS = [
-    "memory_store",
-    "memory_search",
-    "memory_list",
-    "memory_get",
-    "memory_update",
-    "memory_delete",
-    "memory_count",
     "spawn_agent",
     "list_agents",
 ]

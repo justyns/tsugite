@@ -495,78 +495,7 @@ Use {{ result1 }}
         assert "## Step 2" in steps[1].content
 
 
-class TestMultiStepTaskSharing:
-    def test_tasks_persist_across_steps(self, tmp_path):
-        """Test that task list is shared across steps, not reset."""
-        from unittest.mock import MagicMock, patch
-
-        from tsugite.agent_runner import run_multistep_agent
-
-        agent_file = tmp_path / "task_sharing.md"
-        agent_file.write_text(
-            """---
-name: task_test
-model: ollama:qwen2.5-coder:7b
-tools: [task_add]
----
-
-<!-- tsu:step name="step1" -->
-Step 1: Create some tasks using task_add
-
-<!-- tsu:step name="step2" -->
-Step 2: Should see tasks from step 1
-"""
-        )
-
-        # Mock the TsugiteAgent to simulate task creation
-        with patch("tsugite.core.agent.TsugiteAgent") as mock_agent_class:
-            mock_agent = MagicMock()
-            mock_agent_class.return_value = mock_agent
-
-            # Simulate step 1 creating a task
-            def step1_side_effect(prompt):
-                if "Step 1" in prompt:
-                    # Simulate the agent calling task_add
-                    from tsugite.tools.tasks import get_task_manager
-
-                    tm = get_task_manager()
-                    tm.add_task("test_task", "Task from step 1")
-                    return "Step 1 complete, created task"
-                else:
-                    # Step 2 should see the task
-                    tm = get_task_manager()
-                    tasks = tm.list_tasks()
-                    return f"Step 2 sees {len(tasks)} task(s)"
-
-            mock_agent.run.side_effect = step1_side_effect
-
-            # This will fail due to no real model, but we're testing task persistence
-            with pytest.raises((RuntimeError, ValueError)):
-                run_multistep_agent(agent_file, "test")
-
-    def test_task_summary_in_context(self, tmp_path):
-        """Test that task_summary is available in step templates."""
-        from tsugite.md_agents import extract_step_directives
-
-        agent_file = tmp_path / "with_task_summary.md"
-        agent_file.write_text(
-            """---
-name: task_summary_test
----
-
-<!-- tsu:step name="step1" -->
-Current tasks: {{ task_summary }}
-
-<!-- tsu:step name="step2" -->
-Updated tasks: {{ task_summary }}
-"""
-        )
-
-        # Just verify the template can reference task_summary
-        preamble, steps = extract_step_directives(agent_file.read_text())
-        assert "{{ task_summary }}" in steps[0].content
-        assert "{{ task_summary }}" in steps[1].content
-
+class TestMultiStepContextVariables:
     def test_step_context_variables(self, tmp_path):
         """Test that step context variables are available in templates."""
         from tsugite.md_agents import extract_step_directives
@@ -760,7 +689,6 @@ class TestVariableInjection:
         # Simulate step_context with metadata and user-assigned variables
         step_context = {
             "user_prompt": "test task",
-            "task_summary": "## Tasks\nNone",
             "step_number": 2,
             "step_name": "process",
             "total_steps": 3,
@@ -777,7 +705,6 @@ class TestVariableInjection:
         assert "analysis" in injectable_vars
         # Metadata should NOT be at top-level
         assert "user_prompt" not in injectable_vars
-        assert "task_summary" not in injectable_vars
         assert "step_number" not in injectable_vars
         assert "step_name" not in injectable_vars
         assert "total_steps" not in injectable_vars
@@ -835,39 +762,39 @@ class TestLoopingSteps:
     def test_parse_repeat_while(self):
         """Test parsing repeat_while parameter."""
         content = """
-<!-- tsu:step name="process" repeat_while="has_pending_tasks" -->
-Process tasks
+<!-- tsu:step name="process" repeat_while="not done" -->
+Process items
 """
         preamble, steps = extract_step_directives(content)
 
         assert len(steps) == 1
-        assert steps[0].repeat_while == "has_pending_tasks"
+        assert steps[0].repeat_while == "not done"
         assert steps[0].repeat_until is None
         assert steps[0].max_iterations == 10  # default
 
     def test_parse_repeat_until(self):
         """Test parsing repeat_until parameter."""
         content = """
-<!-- tsu:step name="work" repeat_until="all_tasks_complete" -->
+<!-- tsu:step name="work" repeat_until="done == true" -->
 Work until done
 """
         preamble, steps = extract_step_directives(content)
 
         assert len(steps) == 1
-        assert steps[0].repeat_until == "all_tasks_complete"
+        assert steps[0].repeat_until == "done == true"
         assert steps[0].repeat_while is None
         assert steps[0].max_iterations == 10  # default
 
     def test_parse_max_iterations(self):
         """Test parsing max_iterations parameter."""
         content = """
-<!-- tsu:step name="limited" repeat_while="has_pending_tasks" max_iterations="20" -->
+<!-- tsu:step name="limited" repeat_while="not done" max_iterations="20" -->
 Process with custom limit
 """
         preamble, steps = extract_step_directives(content)
 
         assert len(steps) == 1
-        assert steps[0].repeat_while == "has_pending_tasks"
+        assert steps[0].repeat_while == "not done"
         assert steps[0].max_iterations == 20
 
     def test_parse_both_repeat_while_and_until_raises_error(self):
@@ -879,156 +806,24 @@ Invalid config
         with pytest.raises(ValueError, match="cannot specify both repeat_while and repeat_until"):
             extract_step_directives(content)
 
-    def test_evaluate_loop_condition_helper_has_pending_tasks(self):
-        """Test evaluating has_pending_tasks helper condition."""
-        from tsugite.agent_runner.runner import evaluate_loop_condition
-
-        # Context with pending tasks
-        context_with_pending = {
-            "tasks": [
-                {"status": "pending", "title": "Task 1"},
-                {"status": "completed", "title": "Task 2"},
-            ]
-        }
-        assert evaluate_loop_condition("has_pending_tasks", context_with_pending) is True
-
-        # Context without pending tasks
-        context_no_pending = {
-            "tasks": [
-                {"status": "completed", "title": "Task 1"},
-                {"status": "completed", "title": "Task 2"},
-            ]
-        }
-        assert evaluate_loop_condition("has_pending_tasks", context_no_pending) is False
-
-    def test_evaluate_loop_condition_helper_has_pending_required_tasks(self):
-        """Test evaluating has_pending_required_tasks helper condition."""
-        from tsugite.agent_runner.runner import evaluate_loop_condition
-
-        # Context with pending required tasks
-        context_with_required = {
-            "tasks": [
-                {"status": "pending", "optional": False, "title": "Required"},
-                {"status": "pending", "optional": True, "title": "Optional"},
-            ]
-        }
-        assert evaluate_loop_condition("has_pending_required_tasks", context_with_required) is True
-
-        # Context with only optional pending tasks
-        context_only_optional = {
-            "tasks": [
-                {"status": "completed", "optional": False, "title": "Required"},
-                {"status": "pending", "optional": True, "title": "Optional"},
-            ]
-        }
-        assert evaluate_loop_condition("has_pending_required_tasks", context_only_optional) is False
-
-    def test_evaluate_loop_condition_helper_all_tasks_complete(self):
-        """Test evaluating all_tasks_complete helper condition."""
-        from tsugite.agent_runner.runner import evaluate_loop_condition
-
-        # All completed
-        context_complete = {
-            "tasks": [
-                {"status": "completed", "title": "Task 1"},
-                {"status": "completed", "title": "Task 2"},
-            ]
-        }
-        assert evaluate_loop_condition("all_tasks_complete", context_complete) is True
-
-        # Some incomplete
-        context_incomplete = {
-            "tasks": [
-                {"status": "completed", "title": "Task 1"},
-                {"status": "pending", "title": "Task 2"},
-            ]
-        }
-        assert evaluate_loop_condition("all_tasks_complete", context_incomplete) is False
-
-    def test_evaluate_loop_condition_helper_has_incomplete_tasks(self):
-        """Test evaluating has_incomplete_tasks helper condition."""
-        from tsugite.agent_runner.runner import evaluate_loop_condition
-
-        # Has incomplete tasks
-        context_incomplete = {
-            "tasks": [
-                {"status": "completed", "title": "Task 1"},
-                {"status": "pending", "title": "Task 2"},
-            ]
-        }
-        assert evaluate_loop_condition("has_incomplete_tasks", context_incomplete) is True
-
-        # All complete
-        context_complete = {
-            "tasks": [
-                {"status": "completed", "title": "Task 1"},
-                {"status": "completed", "title": "Task 2"},
-            ]
-        }
-        assert evaluate_loop_condition("has_incomplete_tasks", context_complete) is False
-
-    def test_evaluate_loop_condition_helper_has_in_progress_tasks(self):
-        """Test evaluating has_in_progress_tasks helper condition."""
-        from tsugite.agent_runner.runner import evaluate_loop_condition
-
-        # Has in_progress tasks
-        context_in_progress = {
-            "tasks": [
-                {"status": "in_progress", "title": "Task 1"},
-                {"status": "pending", "title": "Task 2"},
-            ]
-        }
-        assert evaluate_loop_condition("has_in_progress_tasks", context_in_progress) is True
-
-        # No in_progress tasks
-        context_no_in_progress = {
-            "tasks": [
-                {"status": "completed", "title": "Task 1"},
-                {"status": "pending", "title": "Task 2"},
-            ]
-        }
-        assert evaluate_loop_condition("has_in_progress_tasks", context_no_in_progress) is False
-
-    def test_evaluate_loop_condition_helper_has_blocked_tasks(self):
-        """Test evaluating has_blocked_tasks helper condition."""
-        from tsugite.agent_runner.runner import evaluate_loop_condition
-
-        # Has blocked tasks
-        context_blocked = {
-            "tasks": [
-                {"status": "blocked", "title": "Task 1"},
-                {"status": "pending", "title": "Task 2"},
-            ]
-        }
-        assert evaluate_loop_condition("has_blocked_tasks", context_blocked) is True
-
-        # No blocked tasks
-        context_no_blocked = {
-            "tasks": [
-                {"status": "completed", "title": "Task 1"},
-                {"status": "pending", "title": "Task 2"},
-            ]
-        }
-        assert evaluate_loop_condition("has_blocked_tasks", context_no_blocked) is False
-
     def test_evaluate_loop_condition_custom_jinja2_expression(self):
         """Test evaluating custom Jinja2 expressions."""
         from tsugite.agent_runner.runner import evaluate_loop_condition
 
         # Test numeric comparison
         context = {
-            "tasks": [
+            "items": [
                 {"status": "pending"},
                 {"status": "pending"},
                 {"status": "completed"},
             ]
         }
-        assert evaluate_loop_condition("tasks | length > 2", context) is True
-        assert evaluate_loop_condition("tasks | length > 5", context) is False
+        assert evaluate_loop_condition("items | length > 2", context) is True
+        assert evaluate_loop_condition("items | length > 5", context) is False
 
         # Test complex filter
         assert (
-            evaluate_loop_condition("(tasks | selectattr('status', 'equalto', 'pending') | list | length) > 1", context)
+            evaluate_loop_condition("(items | selectattr('status', 'equalto', 'pending') | list | length) > 1", context)
             is True
         )
 
@@ -1036,75 +831,15 @@ Invalid config
         """Test that invalid loop condition expression raises ValueError."""
         from tsugite.agent_runner.runner import evaluate_loop_condition
 
-        context = {"tasks": []}
+        context = {"items": []}
 
         with pytest.raises(ValueError, match="Invalid loop condition expression"):
             evaluate_loop_condition("{{ invalid syntax", context)
 
-    def test_looping_step_structure_in_agent(self, tmp_path):
-        """Test that looping steps parse correctly in full agent."""
-        agent_file = tmp_path / "looping.md"
-        agent_file.write_text(
-            """---
-name: task_processor
-model: ollama:qwen2.5-coder:7b
-initial_tasks:
-  - "Task 1"
-  - "Task 2"
-  - "Task 3"
----
-
-{{ task_summary }}
-
-<!-- tsu:step name="process_tasks" repeat_while="has_pending_required_tasks" max_iterations="15" -->
-
-**Iteration {{ iteration }}/{{ max_iterations }}**
-
-Process the next pending task.
-"""
-        )
-
-        from tsugite.md_agents import parse_agent
-
-        agent = parse_agent(agent_file.read_text(), agent_file)
-        preamble, steps = extract_step_directives(agent.content)
-
-        assert len(steps) == 1
-        assert steps[0].name == "process_tasks"
-        assert steps[0].repeat_while == "has_pending_required_tasks"
-        assert steps[0].max_iterations == 15
-        assert "{{ iteration }}" in steps[0].content
-        assert "{{ max_iterations }}" in steps[0].content
-
-    def test_looping_with_repeat_until(self, tmp_path):
-        """Test repeat_until in full agent."""
-        agent_file = tmp_path / "repeat_until.md"
-        agent_file.write_text(
-            """---
-name: work_until_done
-model: ollama:qwen2.5-coder:7b
----
-
-<!-- tsu:step name="work" repeat_until="all_tasks_complete" max_iterations="10" -->
-
-Keep working until all tasks are complete.
-"""
-        )
-
-        from tsugite.md_agents import parse_agent
-
-        agent = parse_agent(agent_file.read_text(), agent_file)
-        preamble, steps = extract_step_directives(agent.content)
-
-        assert len(steps) == 1
-        assert steps[0].repeat_until == "all_tasks_complete"
-        assert steps[0].repeat_while is None
-        assert steps[0].max_iterations == 10
-
     def test_looping_step_default_max_iterations(self):
         """Test that max_iterations defaults to 10."""
         content = """
-<!-- tsu:step name="loop" repeat_while="has_pending_tasks" -->
+<!-- tsu:step name="loop" repeat_while="not done" -->
 No explicit max_iterations
 """
         preamble, steps = extract_step_directives(content)
@@ -1118,8 +853,8 @@ No explicit max_iterations
 <!-- tsu:step name="setup" -->
 Do initial setup
 
-<!-- tsu:step name="process" repeat_while="has_pending_tasks" max_iterations="20" -->
-Process tasks in loop
+<!-- tsu:step name="process" repeat_while="not done" max_iterations="20" -->
+Process items in loop
 
 <!-- tsu:step name="finalize" -->
 Finalize results
@@ -1133,7 +868,7 @@ Finalize results
         assert steps[0].repeat_until is None
 
         # Second step: looping
-        assert steps[1].repeat_while == "has_pending_tasks"
+        assert steps[1].repeat_while == "not done"
         assert steps[1].max_iterations == 20
 
         # Third step: not looping
@@ -1143,7 +878,7 @@ Finalize results
     def test_loop_context_variables_in_template(self):
         """Test that loop context variables are available in templates."""
         content = """
-<!-- tsu:step name="worker" repeat_while="has_pending_tasks" max_iterations="25" -->
+<!-- tsu:step name="worker" repeat_while="not done" max_iterations="25" -->
 
 Iteration {{ iteration }} of {{ max_iterations }}
 
@@ -1160,44 +895,3 @@ Progress: {{ iteration }}/{{ max_iterations }}
         assert "{{ max_iterations }}" in steps[0].content
         assert "{% if is_looping_step %}" in steps[0].content
 
-    def test_evaluate_loop_condition_with_empty_tasks(self):
-        """Test loop condition evaluation with empty task list."""
-        from tsugite.agent_runner.runner import evaluate_loop_condition
-
-        context_empty = {"tasks": []}
-
-        # All conditions should return False for empty task list
-        assert evaluate_loop_condition("has_pending_tasks", context_empty) is False
-        assert evaluate_loop_condition("has_incomplete_tasks", context_empty) is False
-        assert evaluate_loop_condition("has_in_progress_tasks", context_empty) is False
-        assert evaluate_loop_condition("has_blocked_tasks", context_empty) is False
-
-        # all_tasks_complete should be True for empty list (vacuous truth)
-        assert evaluate_loop_condition("all_tasks_complete", context_empty) is True
-
-    def test_custom_condition_with_optional_filter(self):
-        """Test custom Jinja2 condition filtering optional tasks."""
-        from tsugite.agent_runner.runner import evaluate_loop_condition
-
-        context = {
-            "tasks": [
-                {"status": "pending", "optional": False, "title": "Required 1"},
-                {"status": "pending", "optional": True, "title": "Optional 1"},
-                {"status": "completed", "optional": False, "title": "Required 2"},
-            ]
-        }
-
-        # Count only pending optional tasks
-        condition = (
-            "tasks | selectattr('optional', 'equalto', true) | "
-            "selectattr('status', 'equalto', 'pending') | list | length > 0"
-        )
-        assert evaluate_loop_condition(condition, context) is True
-
-        # Count pending tasks > 1
-        condition2 = "(tasks | selectattr('status', 'equalto', 'pending') | list | length) > 1"
-        assert evaluate_loop_condition(condition2, context) is True
-
-        # Count pending tasks > 5 (should be false)
-        condition3 = "(tasks | selectattr('status', 'equalto', 'pending') | list | length) > 5"
-        assert evaluate_loop_condition(condition3, context) is False

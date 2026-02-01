@@ -197,7 +197,6 @@ def _config_to_dict(config) -> dict:
             name: {
                 "workspace_dir": str(agent_cfg.workspace_dir),
                 "agent_file": agent_cfg.agent_file,
-                "memory_enabled": agent_cfg.memory_enabled,
             }
             for name, agent_cfg in config.agents.items()
         },
@@ -335,7 +334,6 @@ def init_daemon(
     config_data["agents"][agent_config_name] = {
         "workspace_dir": str(workspace_path),
         "agent_file": agent_file,
-        "memory_enabled": True,
     }
 
     bot_config = {

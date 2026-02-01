@@ -286,7 +286,6 @@ def merge_scalar_fields(parent, child) -> Dict[str, Any]:
             child.permissions_profile if child.permissions_profile != "default" else parent.permissions_profile
         ),
         "reasoning_effort": child.reasoning_effort if child.reasoning_effort else parent.reasoning_effort,
-        "memory_enabled": child.memory_enabled if child.memory_enabled is not None else parent.memory_enabled,
     }
 
 
@@ -295,7 +294,7 @@ def merge_list_fields(parent, child) -> Dict[str, List]:
 
     Different list types have different merge strategies:
     - tools, attachments: merge and deduplicate
-    - prefetch, initial_tasks: concatenate (parent first)
+    - prefetch: concatenate (parent first)
     - custom_tools: deduplicate by "name" field
 
     Args:
@@ -322,9 +321,6 @@ def merge_list_fields(parent, child) -> Dict[str, List]:
     parent_prefetch = parent.prefetch if parent.prefetch else []
     child_prefetch = child.prefetch if child.prefetch else []
 
-    parent_initial_tasks = parent.initial_tasks if parent.initial_tasks else []
-    child_initial_tasks = child.initial_tasks if child.initial_tasks else []
-
     # Custom tools - deduplicate by "name" field (child overrides parent)
     parent_custom = parent.custom_tools if parent.custom_tools else []
     child_custom = child.custom_tools if child.custom_tools else []
@@ -336,7 +332,6 @@ def merge_list_fields(parent, child) -> Dict[str, List]:
         "tools": merged_tools,
         "attachments": merged_attachments,
         "prefetch": parent_prefetch + child_prefetch,
-        "initial_tasks": parent_initial_tasks + child_initial_tasks,
         "custom_tools": list(custom_tool_dict.values()),
         "auto_load_skills": merged_skills,
     }

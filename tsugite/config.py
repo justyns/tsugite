@@ -2,7 +2,6 @@
 
 import json
 import os
-from datetime import datetime
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
@@ -116,12 +115,6 @@ class Config(BaseModel):
     auto_context_enabled: bool = True
     auto_context_files: List[str] = Field(default_factory=lambda: [".tsugite/CONTEXT.md", "AGENTS.md", "CLAUDE.md"])
     auto_context_include_global: bool = True
-
-    # Memory configuration
-    memory_enabled: bool = False  # Disabled by default
-    memory_db_path: Optional[Path] = None  # Defaults to XDG data path
-    memory_embedding_model: str = "BAAI/bge-small-en-v1.5"
-    memory_embedding_dimension: int = 384
 
 
 def get_config_path() -> Path:
@@ -262,18 +255,3 @@ def get_chat_theme(path: Optional[Path] = None) -> str:
     return config.chat_theme
 
 
-def get_daily_memory_path(workspace_dir: Path, date: Optional[datetime] = None) -> Path:
-    """Get path to daily memory file: {workspace}/memory/YYYY-MM-DD.md
-
-    Args:
-        workspace_dir: Root workspace directory
-        date: Date for memory file (defaults to today)
-
-    Returns:
-        Path to memory file
-    """
-    if date is None:
-        date = datetime.now()
-
-    memory_dir = workspace_dir / "memory"
-    return memory_dir / f"{date.strftime('%Y-%m-%d')}.md"

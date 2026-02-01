@@ -14,17 +14,11 @@ def test_agent_config():
     config = AgentConfig(
         workspace_dir=Path("/tmp/workspace"),
         agent_file="assistant.md",
-        memory_enabled=True,
-        memory_inject_days=2,
         context_limit=128000,
-        memory_extraction_interval=10,
     )
     assert config.workspace_dir == Path("/tmp/workspace")
     assert config.agent_file == "assistant.md"
-    assert config.memory_enabled is True
-    assert config.memory_inject_days == 2
     assert config.context_limit == 128000
-    assert config.memory_extraction_interval == 10
 
 
 def test_discord_bot_config():
@@ -54,8 +48,6 @@ def test_daemon_config():
             "test": AgentConfig(
                 workspace_dir=Path("/tmp/workspace"),
                 agent_file="assistant.md",
-                memory_enabled=True,
-                memory_inject_days=2,
             )
         },
         discord_bots=[DiscordBotConfig(name="bot", token="token", agent="test")],
@@ -78,10 +70,7 @@ def test_load_daemon_config(tmp_path):
             "test": {
                 "workspace_dir": str(tmp_path / "workspace"),
                 "agent_file": "assistant.md",
-                "memory_enabled": True,
-                "memory_inject_days": 2,
                 "context_limit": 100000,
-                "memory_extraction_interval": 5,
             }
         },
         "discord_bots": [{"name": "test-bot", "token": "test-token", "agent": "test", "command_prefix": "!"}],
@@ -133,10 +122,7 @@ def test_load_daemon_config_not_found():
 def test_agent_config_defaults():
     """Test AgentConfig default values."""
     config = AgentConfig(workspace_dir=Path("/tmp/workspace"), agent_file="assistant.md")
-    assert config.memory_enabled is True  # default
-    assert config.memory_inject_days == 2  # default
     assert config.context_limit == 128000  # default
-    assert config.memory_extraction_interval == 10  # default
 
 
 def test_discord_bot_config_defaults():

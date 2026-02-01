@@ -49,13 +49,13 @@ class TestTypeConversion:
 class TestGetMCPTools:
     """Tests for MCP tool generation."""
 
-    def test_get_mcp_tools_returns_list(self, memory_tools, agents_tools):
+    def test_get_mcp_tools_returns_list(self, agents_tools):
         """Test that get_mcp_tools returns a list of Tools."""
         tools = get_mcp_tools()
         assert isinstance(tools, list)
         assert len(tools) > 0
 
-    def test_exposed_tools_are_present(self, memory_tools, agents_tools):
+    def test_exposed_tools_are_present(self, agents_tools):
         """Test that all exposed tools are in the list."""
         tools = get_mcp_tools()
         tool_names = [t.name for t in tools]
@@ -63,7 +63,7 @@ class TestGetMCPTools:
         for expected in EXPOSED_TOOLS:
             assert expected in tool_names, f"Expected tool '{expected}' not found"
 
-    def test_tools_have_required_fields(self, memory_tools, agents_tools):
+    def test_tools_have_required_fields(self, agents_tools):
         """Test that each tool has name, description, and inputSchema."""
         tools = get_mcp_tools()
 
@@ -73,7 +73,7 @@ class TestGetMCPTools:
             assert tool.inputSchema, f"Tool {tool.name} missing inputSchema"
             assert "type" in tool.inputSchema, f"Tool {tool.name} schema missing type"
 
-    def test_input_schema_structure(self, memory_tools, agents_tools):
+    def test_input_schema_structure(self, agents_tools):
         """Test that inputSchema has proper structure."""
         tools = get_mcp_tools()
 
@@ -95,7 +95,7 @@ class TestExecuteTool:
         assert "error" in result[0].text
 
     @pytest.mark.asyncio
-    async def test_execute_list_agents(self, memory_tools, agents_tools, tmp_path, monkeypatch):
+    async def test_execute_list_agents(self, agents_tools, tmp_path, monkeypatch):
         """Test executing list_agents tool."""
         monkeypatch.chdir(tmp_path)
         result = await execute_tool("list_agents", {})
@@ -128,7 +128,7 @@ class TestCLIServeCommand:
         result = self.runner.invoke(app, ["serve", "mcp", "--info"])
         assert result.exit_code == 0
         assert "Tsugite MCP Server" in result.stdout
-        assert "memory_store" in result.stdout
+        assert "spawn_agent" in result.stdout
 
 
 class TestExposedTools:
@@ -137,20 +137,6 @@ class TestExposedTools:
     def test_exposed_tools_not_empty(self):
         """Test that EXPOSED_TOOLS is not empty."""
         assert len(EXPOSED_TOOLS) > 0
-
-    def test_exposed_tools_contains_memory_tools(self):
-        """Test that memory tools are exposed."""
-        memory_tools = [
-            "memory_store",
-            "memory_search",
-            "memory_list",
-            "memory_get",
-            "memory_update",
-            "memory_delete",
-            "memory_count",
-        ]
-        for tool in memory_tools:
-            assert tool in EXPOSED_TOOLS
 
     def test_exposed_tools_contains_agent_tools(self):
         """Test that agent tools are exposed."""

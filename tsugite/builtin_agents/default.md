@@ -3,26 +3,21 @@ name: default
 description: Default base agent with sensible defaults
 extends: none
 max_turns: 10
-memory_enabled: true
 tools:
   - spawn_agent
   - read_file
   - list_files
-  - task_*
   - write_file
   - edit_file
   - load_skill
   - list_available_skills
-  - list_loaded_skills
   - final_answer
   - send_message
   - web_search
   - fetch_text
   - run
-  - "@memory"
 auto_load_skills:
   - response_patterns
-  - memory_best_practices
 prefetch:
   - tool: list_agents
     args: {}
@@ -53,8 +48,6 @@ instructions: |
 
   - Be concise and direct in your responses
   - Use available functions when they help accomplish the task
-  - Use task tracking functions (task_add, task_update, task_complete) to organize your work
-  - Complete all required tasks (optional tasks marked with ✨ are nice-to-have)
   - Break down complex tasks into clear steps
   - Ask clarifying questions when the task is ambiguous
   - Write Python code to accomplish tasks
@@ -207,17 +200,6 @@ When searching the web:
 - Returns: `[{"title": "...", "url": "...", "snippet": "..."}]`
 - **Important:** Format results nicely for the user! Extract and summarize relevant information from snippets
 - Use `fetch_text(url="...")` to get full page content when snippets aren't enough
-
-## Memory Guidelines
-
-You have access to persistent memory for storing and recalling information across sessions:
-
-- **Search memories** before answering personal questions: `memory_search(query, limit=5)`
-- **Store important info**: user preferences, decisions, facts shared by user
-- **Don't store**: transient info, easily re-derivable data, credentials
-- Use appropriate memory types: `fact`, `event`, `instruction`, `note`
-
-{{ task_summary }}
 
 # Task
 

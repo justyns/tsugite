@@ -105,15 +105,12 @@ class BaseAdapter(ABC):
             self._workspace = None
 
         # Build workspace attachments once at startup
-        from tsugite.daemon.memory import get_workspace_attachments
-        from tsugite.utils import resolve_attachments
+        from tsugite.workspace.context import build_workspace_attachments
 
-        workspace_files = get_workspace_attachments(
-            workspace_dir=agent_config.workspace_dir,
-            memory_enabled=agent_config.memory_enabled,
-            inject_days=agent_config.memory_inject_days,
-        )
-        self.workspace_attachments = resolve_attachments(workspace_files) if workspace_files else []
+        if self._workspace:
+            self.workspace_attachments = build_workspace_attachments(self._workspace)
+        else:
+            self.workspace_attachments = []
 
     @abstractmethod
     async def start(self) -> None:
@@ -220,22 +217,6 @@ class BaseAdapter(ABC):
         if hasattr(result, "token_usage") and result.token_usage:
             self.session_manager.update_token_count(user_id, result.token_usage.total_tokens)
 
-        session_info = self.session_manager.sessions.get(user_id)
-        if (
-            session_info
-            and self.agent_config.memory_enabled
-            and session_info.message_count % self.agent_config.memory_extraction_interval == 0
-        ):
-            # Run memory extraction in background (don't await)
-            memory_agent_path = self.agent_config.workspace_dir / "memory_extraction.md"
-            if memory_agent_path.exists():
-                from tsugite.daemon.memory import extract_memories
-                from tsugite.history import get_history_dir, reconstruct_messages
-
-                session_path = get_history_dir() / f"{conv_id}.jsonl"
-                messages = reconstruct_messages(session_path)
-                asyncio.create_task(extract_memories(messages, self.agent_config.workspace_dir, memory_agent_path))
-
         return str(result)
 
     async def _compact_session(self, user_id: str) -> None:
@@ -243,13 +224,12 @@ class BaseAdapter(ABC):
 
         1. Load session and reconstruct messages
         2. Summarize conversation
-        3. Extract memories (background agent)
-        4. Create new session with compaction summary
+        3. Create new session with compaction summary
 
         Args:
             user_id: Platform user ID
         """
-        from tsugite.daemon.memory import extract_memories, summarize_session
+        from tsugite.daemon.memory import summarize_session
         from tsugite.history import SessionStorage, get_history_dir, reconstruct_messages
 
         old_conv_id = self.session_manager.sessions[user_id].conversation_id
@@ -258,11 +238,6 @@ class BaseAdapter(ABC):
 
         messages = reconstruct_messages(old_session_path)
         summary = await summarize_session(messages)
-
-        if self.agent_config.memory_enabled:
-            memory_agent_path = self.agent_config.workspace_dir / "memory_extraction.md"
-            if memory_agent_path.exists():
-                await extract_memories(messages, self.agent_config.workspace_dir, memory_agent_path)
 
         new_conv_id = self.session_manager.compact_session(user_id)
 

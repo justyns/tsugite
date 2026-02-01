@@ -5,8 +5,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-# Import task tools to ensure they're registered
-import tsugite.tools.tasks  # noqa: F401
 from tsugite.agent_runner import run_agent_async, run_multistep_agent_async
 from tsugite.md_agents import AgentConfig
 
@@ -29,7 +27,7 @@ def mock_agent_runner():
 
 
 @pytest.mark.asyncio
-async def test_is_interactive_flag_true_in_tty(temp_dir, monkeypatch, mock_agent_runner, task_tools):
+async def test_is_interactive_flag_true_in_tty(temp_dir, monkeypatch, mock_agent_runner):
     """Test that is_interactive flag is True when running in a TTY."""
     # Mock TTY check to return True
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
@@ -65,7 +63,7 @@ Task: {{ user_prompt }}
 
 
 @pytest.mark.asyncio
-async def test_is_interactive_flag_false_in_non_tty(temp_dir, monkeypatch, mock_agent_runner, task_tools):
+async def test_is_interactive_flag_false_in_non_tty(temp_dir, monkeypatch, mock_agent_runner):
     """Test that is_interactive flag is False when not running in a TTY."""
     # Mock TTY check to return False
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
@@ -101,7 +99,7 @@ Task: {{ user_prompt }}
 
 
 @pytest.mark.asyncio
-async def test_multistep_agent_receives_interactive_flag(temp_dir, monkeypatch, mock_agent_runner, task_tools):
+async def test_multistep_agent_receives_interactive_flag(temp_dir, monkeypatch, mock_agent_runner):
     """Test that multi-step agents receive the is_interactive flag."""
     # Mock TTY check
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
@@ -143,7 +141,7 @@ Task: {{ user_prompt }}
 
 
 @pytest.mark.asyncio
-async def test_interactive_flag_available_in_templates(temp_dir, monkeypatch, mock_agent_runner, task_tools):
+async def test_interactive_flag_available_in_templates(temp_dir, monkeypatch, mock_agent_runner):
     """Test that is_interactive can be used in template conditionals."""
     # Mock TTY check
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
@@ -183,7 +181,7 @@ Task: {{ user_prompt }}
     assert "Running in headless mode" not in captured_prompts[0]
 
 
-def test_ask_user_tool_not_available_in_headless(monkeypatch, task_tools, file_tools, interactive_tools):
+def test_ask_user_tool_not_available_in_headless(monkeypatch,file_tools, interactive_tools):
     """Test that ask_user tool is filtered out in non-interactive mode."""
     # Mock TTY check to return False (headless)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
@@ -229,7 +227,7 @@ def test_ask_user_tool_not_available_in_headless(monkeypatch, task_tools, file_t
     assert "write_file" in captured_tools  # Other tools should still be there
 
 
-def test_ask_user_tool_available_in_interactive(monkeypatch, task_tools, file_tools, interactive_tools):
+def test_ask_user_tool_available_in_interactive(monkeypatch,file_tools, interactive_tools):
     """Test that ask_user tool is available in interactive mode."""
     # Mock TTY check to return True (interactive)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)

@@ -5,7 +5,6 @@ from pathlib import Path
 from tsugite.agent_inheritance import find_agent_file, get_builtin_agents_path
 from tsugite.agent_utils import list_local_agents
 from tsugite.md_agents import parse_agent_file
-from tsugite.renderer import AgentRenderer
 
 
 class TestBuiltinAgents:
@@ -229,20 +228,6 @@ class TestBuiltinDefaultAutoDiscovery:
 
         assert "run" in agent.config.tools
 
-    def test_builtin_default_has_memory_tools(self):
-        """Test that default agent includes @memory tools."""
-        builtin_path = get_builtin_agents_path() / "default.md"
-        agent = parse_agent_file(builtin_path)
-
-        assert "@memory" in agent.config.tools
-
-    def test_builtin_default_memory_enabled(self):
-        """Test that default agent has memory enabled."""
-        builtin_path = get_builtin_agents_path() / "default.md"
-        agent = parse_agent_file(builtin_path)
-
-        assert agent.config.memory_enabled is True
-
     def test_builtin_default_has_web_search_guidelines(self):
         """Test that default agent has web search guidelines."""
         builtin_path = get_builtin_agents_path() / "default.md"
@@ -250,11 +235,3 @@ class TestBuiltinDefaultAutoDiscovery:
 
         assert "Web Search Guidelines" in agent.content
         assert "web_search(query=" in agent.content
-
-    def test_builtin_default_has_memory_guidelines(self):
-        """Test that default agent has memory guidelines."""
-        builtin_path = get_builtin_agents_path() / "default.md"
-        agent = parse_agent_file(builtin_path)
-
-        assert "Memory Guidelines" in agent.content
-        assert "memory_search" in agent.content
