@@ -90,6 +90,24 @@ class Workspace:
 
         return files
 
+    def needs_onboarding(self) -> bool:
+        """Check if workspace needs onboarding (unfilled identity).
+
+        Returns:
+            True if IDENTITY.md doesn't exist or has no name filled in
+        """
+        identity_path = self.path / "IDENTITY.md"
+        if not identity_path.exists():
+            return True
+
+        content = identity_path.read_text()
+        # Check if name field is empty - template has "- **Name:**" with nothing meaningful after
+        for line in content.splitlines():
+            if line.startswith("- **Name:**"):
+                name_value = line.replace("- **Name:**", "").strip()
+                return not name_value
+        return True
+
     @classmethod
     def load(cls, path: Path) -> "Workspace":
         """Load workspace from path (no config.yaml required).

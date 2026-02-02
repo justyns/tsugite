@@ -181,6 +181,7 @@ class BaseAdapter(ABC):
                         return_token_usage=True,
                     ),
                     path_context=path_context,
+                    custom_logger=custom_logger,
                 )
             finally:
                 os.chdir(original_cwd)

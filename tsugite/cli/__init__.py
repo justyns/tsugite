@@ -91,6 +91,34 @@ def _build_workspace_attachments(workspace) -> List[str]:
     return [str(att.source) for att in attachment_objects]
 
 
+def _check_and_run_onboarding(
+    workspace, workspace_ref: str, model: Optional[str], interactive: bool = True
+) -> Optional[Any]:
+    """Check if workspace needs onboarding and run it if user confirms.
+
+    Args:
+        workspace: Workspace object
+        workspace_ref: Original workspace reference (name or path) for reloading
+        model: Model override for onboarding agent
+        interactive: Whether to prompt user (False in non-interactive mode)
+
+    Returns:
+        Reloaded workspace if onboarding ran, otherwise original workspace
+    """
+    if not workspace.needs_onboarding() or not interactive:
+        return workspace
+
+    from rich.prompt import Confirm
+
+    if Confirm.ask("This looks like a new workspace. Run setup?", default=True):
+        from tsugite.cli.workspace import onboard_workspace
+
+        onboard_workspace(workspace.name, model=model)
+        return _resolve_workspace(workspace_ref)
+
+    return workspace
+
+
 def _build_docker_command(
     args: List[str],
     docker_opts: DockerOptions,
@@ -497,6 +525,9 @@ def run(
     # Add workspace files to attachment list
     workspace_attachments = []
     if resolved_workspace:
+        resolved_workspace = _check_and_run_onboarding(
+            resolved_workspace, workspace_to_use, model, interactive=not ui_opts.non_interactive
+        )
         workspace_attachments = _build_workspace_attachments(resolved_workspace)
 
     # Combine workspace attachments with CLI attachments
@@ -1104,6 +1135,7 @@ def chat(
     # Build workspace attachments
     workspace_attachments = []
     if resolved_workspace:
+        resolved_workspace = _check_and_run_onboarding(resolved_workspace, workspace_to_use, model)
         workspace_attachments = _build_workspace_attachments(resolved_workspace)
 
     with workspace_directory_context(resolved_workspace, root, console) as path_context:

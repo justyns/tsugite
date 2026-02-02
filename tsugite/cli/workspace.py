@@ -63,6 +63,7 @@ def init_workspace(
     user: Optional[str] = typer.Option(None, "--user", "-u", help="Your name"),
     path: Optional[str] = typer.Option(None, "--path", help="Custom workspace path"),
     git: Optional[bool] = typer.Option(None, "--git/--no-git", help="Initialize git repository"),
+    onboard: bool = typer.Option(False, "--onboard", help="Run interactive onboarding after creation"),
 ):
     """Create a new workspace."""
     manager = WorkspaceManager()
@@ -102,9 +103,58 @@ def init_workspace(
 
         console.print(f'\nRun with: tsu run <agent> --workspace {name} "<prompt>"')
 
+        # Run onboarding if requested
+        if onboard:
+            console.print()
+            onboard_workspace(name, model=None)
+
     except ValueError as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1)
+
+
+@workspace_app.command("onboard")
+def onboard_workspace(
+    name: str = typer.Argument(..., help="Workspace name"),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="Override model"),
+):
+    """Run interactive onboarding for a workspace."""
+    from tsugite.cli.helpers import PathContext, load_and_validate_agent
+    from tsugite.options import ExecutionOptions, HistoryOptions
+    from tsugite.ui.repl_chat import run_repl_chat
+    from tsugite.workspace.context import build_workspace_attachments
+
+    manager = WorkspaceManager()
+    workspace = _load_workspace_or_exit(manager, name)
+
+    console.print(f"[dim]Starting onboarding for workspace '{name}'...[/dim]\n")
+
+    # Load the onboard builtin agent
+    _, agent_path, _ = load_and_validate_agent("onboard", console)
+
+    # Build workspace attachments
+    workspace_attachments = [str(att.source) for att in build_workspace_attachments(workspace)]
+
+    # Run as REPL chat session (multi-turn conversation)
+    exec_opts = ExecutionOptions(model_override=model, stream=True)
+    history_opts = HistoryOptions(enabled=False)
+
+    path_context = PathContext(
+        original_cwd=Path.cwd(),
+        agent_cwd=workspace.path,
+        workspace=workspace,
+    )
+
+    run_repl_chat(
+        agent_path=agent_path,
+        exec_options=exec_opts,
+        history_options=history_opts,
+        resume_turns=None,
+        path_context=path_context,
+        workspace_attachments=workspace_attachments,
+    )
+
+    console.print(f"\n[green]✓[/green] Workspace '{name}' onboarding complete")
 
 
 @workspace_app.command("info")

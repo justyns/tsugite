@@ -37,18 +37,34 @@ def _handle_task_exception(task: asyncio.Task, context: str = "") -> None:
         traceback.print_exc()
 
 
+def _handle_future_exception(future: asyncio.Future, context: str = "") -> None:
+    """Handle exceptions from futures (used with run_coroutine_threadsafe)."""
+    try:
+        future.result()
+    except asyncio.CancelledError:
+        pass
+    except Exception as e:
+        import traceback
+
+        prefix = f"[{context}] " if context else ""
+        print(f"{prefix}Future error: {e}")
+        traceback.print_exc()
+
+
 class DiscordProgressHandler:
     """Lightweight handler for Discord progress updates."""
 
     MAX_DISPLAY_STEPS = 10  # Show last N steps if too many
 
-    def __init__(self, channel: discord.abc.Messageable):
+    def __init__(self, channel: discord.abc.Messageable, loop: asyncio.AbstractEventLoop):
         """Initialize progress handler.
 
         Args:
             channel: Discord channel to send progress updates to
+            loop: Discord bot's event loop (for thread-safe scheduling)
         """
         self.channel = channel
+        self.loop = loop
         self.progress_msg: Optional[discord.Message] = None
         self.updates: list[ProgressStep] = []
         self.update_lock = asyncio.Lock()
@@ -59,10 +75,11 @@ class DiscordProgressHandler:
     def handle_event(self, event: BaseEvent) -> None:
         """Handle EventBus events and update Discord message.
 
-        This is called synchronously by EventBus, so we schedule async work.
+        This is called from a different thread (executor), so we use
+        run_coroutine_threadsafe to schedule work on the Discord event loop.
         """
-        task = asyncio.create_task(self._handle_event_async(event))
-        task.add_done_callback(lambda t: _handle_task_exception(t, "progress"))
+        future = asyncio.run_coroutine_threadsafe(self._handle_event_async(event), self.loop)
+        future.add_done_callback(lambda f: _handle_future_exception(f, "progress"))
 
     async def _handle_event_async(self, event: BaseEvent) -> None:
         """Async implementation of event handling."""
@@ -290,7 +307,7 @@ class DiscordAdapter(BaseAdapter):
             },
         )
 
-        progress = DiscordProgressHandler(message.channel)
+        progress = DiscordProgressHandler(message.channel, asyncio.get_running_loop())
         custom_logger = SimpleNamespace(ui_handler=progress)
 
         await progress.start_typing_loop()

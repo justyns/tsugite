@@ -81,7 +81,7 @@ class MockMessage:
 async def test_progress_handler_tool_calls():
     """Test progress handler with tool calls."""
     channel = MockChannel()
-    handler = DiscordProgressHandler(channel)
+    handler = DiscordProgressHandler(channel, asyncio.get_running_loop())
 
     # First tool call (use _handle_event_async directly for testing)
     await handler._handle_event_async(ToolCallEvent(tool="read_file", args={"path": "test.txt"}))
@@ -105,7 +105,7 @@ async def test_progress_handler_tool_calls():
 async def test_progress_handler_reasoning():
     """Test progress handler with reasoning events."""
     channel = MockChannel()
-    handler = DiscordProgressHandler(channel)
+    handler = DiscordProgressHandler(channel, asyncio.get_running_loop())
 
     # Reasoning event (use _handle_event_async directly for testing)
     await handler._handle_event_async(ReasoningContentEvent(content="Thinking about the problem..."))
@@ -117,7 +117,7 @@ async def test_progress_handler_reasoning():
 @pytest.mark.asyncio
 async def test_progress_handler_emoji_mapping():
     """Test emoji mapping for different tool types."""
-    handler = DiscordProgressHandler(MockChannel())
+    handler = DiscordProgressHandler(MockChannel(), asyncio.get_running_loop())
 
     assert handler._get_tool_emoji("search_web") == "🔍"
     assert handler._get_tool_emoji("read_file") == "📖"
@@ -130,7 +130,7 @@ async def test_progress_handler_emoji_mapping():
 async def test_progress_handler_truncation():
     """Test progress handler truncates long tool lists."""
     channel = MockChannel()
-    handler = DiscordProgressHandler(channel)
+    handler = DiscordProgressHandler(channel, asyncio.get_running_loop())
 
     # Add 15 tool calls (more than MAX_DISPLAY_STEPS)
     for i in range(15):
@@ -147,7 +147,7 @@ async def test_progress_handler_truncation():
 async def test_progress_handler_typing_loop():
     """Test typing loop keeps indicator active."""
     channel = MockChannel()
-    handler = DiscordProgressHandler(channel)
+    handler = DiscordProgressHandler(channel, asyncio.get_running_loop())
 
     # Start typing loop
     await handler.start_typing_loop()
@@ -169,7 +169,7 @@ async def test_progress_handler_typing_loop():
 async def test_progress_handler_error_state():
     """Test progress handler shows error state."""
     channel = MockChannel()
-    handler = DiscordProgressHandler(channel)
+    handler = DiscordProgressHandler(channel, asyncio.get_running_loop())
 
     # Add a tool call
     await handler._handle_event_async(ToolCallEvent(tool="failing_tool", args={}))
@@ -186,7 +186,7 @@ async def test_progress_handler_error_state():
 async def test_progress_handler_summary():
     """Test progress handler summary counts tools correctly."""
     channel = MockChannel()
-    handler = DiscordProgressHandler(channel)
+    handler = DiscordProgressHandler(channel, asyncio.get_running_loop())
 
     # Add multiple tool calls (some repeated)
     await handler._handle_event_async(ToolCallEvent(tool="read_file", args={}))
