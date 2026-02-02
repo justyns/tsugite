@@ -16,7 +16,7 @@ sys.modules["discord"] = MagicMock()
 sys.modules["discord.ext"] = MagicMock()
 sys.modules["discord.ext.commands"] = MagicMock()
 
-from tsugite.daemon.adapters.discord import DiscordProgressHandler  # noqa: E402
+from tsugite.daemon.adapters.discord import DiscordAdapter, DiscordProgressHandler  # noqa: E402
 from tsugite.events import FinalAnswerEvent, ReasoningContentEvent, ToolCallEvent  # noqa: E402
 
 
@@ -202,3 +202,83 @@ async def test_progress_handler_summary():
     assert "✅ Done" in content
     assert "4 steps" in content  # Total count
     assert "read_file ×3" in content  # Most used tool with count
+
+
+class TestCodeBlockChunking:
+    """Tests for code block aware message chunking."""
+
+    @pytest.fixture
+    def adapter(self):
+        """Create adapter instance for testing chunking method."""
+        adapter = object.__new__(DiscordAdapter)
+        return adapter
+
+    def test_short_message_no_split(self, adapter):
+        """Short message should not be split."""
+        text = "Hello world"
+        chunks = adapter._split_respecting_code_blocks(text, 2000)
+        assert chunks == ["Hello world"]
+
+    def test_long_text_splits_on_newlines(self, adapter):
+        """Long text without code blocks splits on newlines."""
+        lines = ["Line " + str(i) for i in range(100)]
+        text = "\n".join(lines)
+        chunks = adapter._split_respecting_code_blocks(text, 200)
+        assert len(chunks) > 1
+        for chunk in chunks:
+            assert len(chunk) <= 200
+
+    def test_code_block_kept_whole(self, adapter):
+        """Code block that fits should not be split."""
+        text = "Before\n```python\ndef foo():\n    pass\n```\nAfter"
+        chunks = adapter._split_respecting_code_blocks(text, 2000)
+        assert len(chunks) == 1
+        assert "```python" in chunks[0]
+        assert "```" in chunks[0]
+
+    def test_code_block_starts_new_chunk(self, adapter):
+        """Code block that doesn't fit with text starts new chunk."""
+        prefix = "x" * 100
+        code = "```python\ndef foo():\n    pass\n```"
+        text = prefix + "\n" + code
+        # limit=120 means: prefix (100) fits, but prefix+code (135) doesn't
+        # code alone (35) fits, so code should start new chunk
+        chunks = adapter._split_respecting_code_blocks(text, 120)
+        assert len(chunks) >= 2
+        code_chunk = [c for c in chunks if "```python" in c][0]
+        assert code_chunk.startswith("```python")
+        assert code_chunk.endswith("```")
+
+    def test_long_code_block_split_with_continuation(self, adapter):
+        """Code block exceeding limit gets split with continuation markers."""
+        lines = [f"    line{i} = {i}" for i in range(50)]
+        code = "```python\n" + "\n".join(lines) + "\n```"
+        chunks = adapter._split_respecting_code_blocks(code, 300)
+        assert len(chunks) > 1
+        for chunk in chunks:
+            assert chunk.startswith("```python")
+            assert chunk.endswith("```")
+            assert len(chunk) <= 300
+
+    def test_language_identifier_preserved(self, adapter):
+        """Language identifier preserved when splitting code blocks."""
+        lines = [f"const x{i} = {i};" for i in range(50)]
+        code = "```javascript\n" + "\n".join(lines) + "\n```"
+        chunks = adapter._split_respecting_code_blocks(code, 300)
+        for chunk in chunks:
+            assert chunk.startswith("```javascript")
+
+    def test_multiple_code_blocks(self, adapter):
+        """Multiple code blocks handled correctly."""
+        text = "Text1\n```python\ncode1\n```\nText2\n```bash\ncode2\n```\nText3"
+        chunks = adapter._split_respecting_code_blocks(text, 2000)
+        assert len(chunks) == 1
+        assert "```python" in chunks[0]
+        assert "```bash" in chunks[0]
+
+    def test_empty_chunks_skipped(self, adapter):
+        """Empty chunks should not appear in output."""
+        text = "\n\n\nHello\n\n\n"
+        chunks = adapter._split_respecting_code_blocks(text, 2000)
+        for chunk in chunks:
+            assert chunk.strip()

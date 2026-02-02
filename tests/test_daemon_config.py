@@ -13,11 +13,11 @@ def test_agent_config():
     """Test AgentConfig model."""
     config = AgentConfig(
         workspace_dir=Path("/tmp/workspace"),
-        agent_file="assistant.md",
+        agent_file="default",
         context_limit=128000,
     )
     assert config.workspace_dir == Path("/tmp/workspace")
-    assert config.agent_file == "assistant.md"
+    assert config.agent_file == "default"
     assert config.context_limit == 128000
 
 
@@ -47,7 +47,7 @@ def test_daemon_config():
         agents={
             "test": AgentConfig(
                 workspace_dir=Path("/tmp/workspace"),
-                agent_file="assistant.md",
+                agent_file="default",
             )
         },
         discord_bots=[DiscordBotConfig(name="bot", token="token", agent="test")],
@@ -69,7 +69,7 @@ def test_load_daemon_config(tmp_path):
         "agents": {
             "test": {
                 "workspace_dir": str(tmp_path / "workspace"),
-                "agent_file": "assistant.md",
+                "agent_file": "default",
                 "context_limit": 100000,
             }
         },
@@ -85,7 +85,7 @@ def test_load_daemon_config(tmp_path):
     assert config.log_level == "debug"
     assert "test" in config.agents
     assert config.agents["test"].workspace_dir == tmp_path / "workspace"
-    assert config.agents["test"].agent_file == "assistant.md"
+    assert config.agents["test"].agent_file == "default"
     assert len(config.discord_bots) == 1
     assert config.discord_bots[0].name == "test-bot"
 
@@ -98,7 +98,7 @@ def test_load_daemon_config_env_expansion(tmp_path):
     os.environ["TEST_TOKEN"] = "secret-token"
 
     config_data = {
-        "agents": {"test": {"workspace_dir": str(tmp_path / "workspace"), "agent_file": "assistant.md"}},
+        "agents": {"test": {"workspace_dir": str(tmp_path / "workspace"), "agent_file": "default"}},
         "discord_bots": [{"name": "test-bot", "token": "${TEST_TOKEN}", "agent": "test"}],
     }
 
@@ -121,7 +121,7 @@ def test_load_daemon_config_not_found():
 
 def test_agent_config_defaults():
     """Test AgentConfig default values."""
-    config = AgentConfig(workspace_dir=Path("/tmp/workspace"), agent_file="assistant.md")
+    config = AgentConfig(workspace_dir=Path("/tmp/workspace"), agent_file="default")
     assert config.context_limit == 128000  # default
 
 

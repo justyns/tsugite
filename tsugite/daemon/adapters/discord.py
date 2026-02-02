@@ -1,6 +1,7 @@
 """Discord bot adapter."""
 
 import asyncio
+import re
 from types import SimpleNamespace
 from typing import NamedTuple, Optional
 
@@ -320,32 +321,98 @@ class DiscordAdapter(BaseAdapter):
         print(f"[{bot_name}] -> {message.author}: {response[:100]}{'...' if len(response) > 100 else ''}")
         await self._send_chunked(message.channel, response)
 
+    def _split_respecting_code_blocks(self, text: str, limit: int) -> list[str]:
+        """Split text into chunks respecting code block boundaries.
+
+        Args:
+            text: Text to split
+            limit: Maximum chunk size
+
+        Returns:
+            List of chunks
+        """
+        code_block_pattern = re.compile(r"```(\w*)\n([\s\S]*?)```")
+        closing_fence_len = 4  # "\n```"
+
+        chunks: list[str] = []
+        current = ""
+
+        def flush_current() -> None:
+            nonlocal current
+            if current.strip():
+                chunks.append(current.rstrip("\n"))
+            current = ""
+
+        def add_text_lines(text_content: str) -> None:
+            nonlocal current
+            for line in text_content.split("\n"):
+                if len(current) + len(line) + 1 <= limit:
+                    current += line + "\n"
+                else:
+                    flush_current()
+                    current = line + "\n"
+
+        def add_code_block(full_block: str, lang: str, inner: str) -> None:
+            nonlocal current
+
+            if len(current) + len(full_block) <= limit:
+                current += full_block
+                return
+
+            if len(full_block) <= limit:
+                flush_current()
+                current = full_block
+                return
+
+            flush_current()
+            header = f"```{lang}\n"
+            code_chunk = header
+
+            for line in inner.split("\n"):
+                line_with_newline = line + "\n"
+                if len(code_chunk) + len(line_with_newline) + closing_fence_len <= limit:
+                    code_chunk += line_with_newline
+                else:
+                    chunks.append(code_chunk.rstrip("\n") + "\n```")
+                    code_chunk = header + line_with_newline
+
+            if code_chunk != header:
+                current = code_chunk.rstrip("\n") + "\n```"
+
+        last_end = 0
+        for match in code_block_pattern.finditer(text):
+            if match.start() > last_end:
+                add_text_lines(text[last_end : match.start()])
+
+            lang = match.group(1)
+            inner = match.group(2).strip("\n")
+            full_block = f"```{lang}\n{inner}\n```"
+            add_code_block(full_block, lang, inner)
+            last_end = match.end()
+
+        if last_end < len(text):
+            add_text_lines(text[last_end:])
+
+        flush_current()
+        return chunks
+
     async def _send_chunked(self, channel, text: str):
-        """Send message, splitting if longer than 2000 chars.
+        """Send message, splitting if longer than 2000 chars while respecting code blocks.
 
         Args:
             channel: Discord channel to send to
             text: Message text to send
         """
-        if len(text) <= 2000:
+        limit = 2000
+
+        if len(text) <= limit:
             await channel.send(text)
             return
 
-        # Split on newlines to avoid breaking mid-sentence
-        chunks = []
-        current = ""
-        for line in text.split("\n"):
-            if len(current) + len(line) + 1 <= 2000:
-                current += line + "\n"
-            else:
-                if current:
-                    chunks.append(current)
-                current = line + "\n"
-        if current:
-            chunks.append(current)
-
+        chunks = self._split_respecting_code_blocks(text, limit)
         for chunk in chunks:
-            await channel.send(chunk)
+            if chunk.strip():
+                await channel.send(chunk)
 
     async def start(self):
         """Start Discord bot."""
