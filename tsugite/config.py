@@ -253,5 +253,3 @@ def get_chat_theme(path: Optional[Path] = None) -> str:
     """
     config = load_config(path)
     return config.chat_theme
-
-

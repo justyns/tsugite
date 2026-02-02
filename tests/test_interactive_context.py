@@ -181,7 +181,7 @@ Task: {{ user_prompt }}
     assert "Running in headless mode" not in captured_prompts[0]
 
 
-def test_ask_user_tool_not_available_in_headless(monkeypatch,file_tools, interactive_tools):
+def test_ask_user_tool_not_available_in_headless(monkeypatch, file_tools, interactive_tools):
     """Test that ask_user tool is filtered out in non-interactive mode."""
     # Mock TTY check to return False (headless)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
@@ -227,7 +227,7 @@ def test_ask_user_tool_not_available_in_headless(monkeypatch,file_tools, interac
     assert "write_file" in captured_tools  # Other tools should still be there
 
 
-def test_ask_user_tool_available_in_interactive(monkeypatch,file_tools, interactive_tools):
+def test_ask_user_tool_available_in_interactive(monkeypatch, file_tools, interactive_tools):
     """Test that ask_user tool is available in interactive mode."""
     # Mock TTY check to return True (interactive)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)

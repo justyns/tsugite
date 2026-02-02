@@ -328,11 +328,11 @@ class TestBuiltinAgentRendering:
         mock_call_tool,
         file_tools,
         agents_tools,
-                skill_tools,
+        skill_tools,
         interactive_tools,
         http_tools,
         shell_tools,
-                mock_default_agent_prefetch,
+        mock_default_agent_prefetch,
     ):
         """Test rendering default with + prefix."""
         # Mock prefetch tools (list_agents and get_skills_for_template)
@@ -352,11 +352,11 @@ class TestBuiltinAgentRendering:
         mock_call_tool,
         file_tools,
         agents_tools,
-                skill_tools,
+        skill_tools,
         interactive_tools,
         http_tools,
         shell_tools,
-                mock_default_agent_prefetch,
+        mock_default_agent_prefetch,
     ):
         """Test that builtin agent prefetch tools are executed."""
         # default has list_agents and get_skills_for_template in prefetch

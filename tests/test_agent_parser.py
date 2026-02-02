@@ -342,5 +342,3 @@ def test_parse_docs_example_agent():
 
     directives = extract_directives(agent.content)
     assert len(directives) >= 1
-
-

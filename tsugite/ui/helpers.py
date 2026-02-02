@@ -78,25 +78,3 @@ def create_plain_logger() -> CustomUILogger:
     """
     plain_handler = PlainUIHandler()
     return CustomUILogger(plain_handler, plain_handler.console)
-
-
-def create_live_template_logger(interactive: bool = True) -> CustomUILogger:
-    """Create logger using Live Template handler with Tree and interactive prompts.
-
-    Returns a logger using LiveTemplateHandler with Rich Live Display.
-    Features:
-    - Live Display with multi-panel layout
-    - Tree visualization of execution steps
-    - Interactive prompts (optional)
-    - Real-time updates without scrolling
-
-    Args:
-        interactive: Enable interactive prompts during execution
-
-    Returns:
-        CustomUILogger with LiveTemplateHandler
-    """
-    from tsugite.ui.live_template import LiveTemplateHandler
-
-    handler = LiveTemplateHandler(interactive=interactive)
-    return CustomUILogger(handler, handler.console)

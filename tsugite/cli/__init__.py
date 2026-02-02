@@ -151,30 +151,28 @@ def _build_docker_command(
     return cmd
 
 
-def _resolve_ui_mode(ui_mode: Optional[str], ui_opts: UIOptions, console: Console) -> tuple[UIOptions, bool]:
-    """Resolve UI mode flag and return updated UIOptions with live_ui flag.
+def _resolve_ui_mode(ui_mode: Optional[str], ui_opts: UIOptions, console: Console) -> UIOptions:
+    """Resolve UI mode flag and return updated UIOptions.
 
     Args:
-        ui_mode: UI mode string (plain, headless, live)
+        ui_mode: UI mode string (plain, headless)
         ui_opts: Current UI options
         console: Console for error output
 
     Returns:
-        Tuple of (updated UIOptions, live_ui flag)
+        Updated UIOptions
 
     Raises:
         typer.Exit: If invalid UI mode or conflicting flags
     """
-    live_ui = False
-
     if not ui_mode:
-        return ui_opts, live_ui
+        return ui_opts
 
     if ui_opts.plain or ui_opts.headless:
         console.print("[red]Error: --ui cannot be used with --plain or --headless[/red]")
         raise typer.Exit(1)
 
-    ui_modes = {"plain", "headless", "live"}
+    ui_modes = {"plain", "headless"}
     ui_lower = ui_mode.lower()
     if ui_lower not in ui_modes:
         console.print(f"[red]Error: Invalid UI mode '{ui_mode}'. Choose from: {', '.join(ui_modes)}[/red]")
@@ -184,10 +182,8 @@ def _resolve_ui_mode(ui_mode: Optional[str], ui_opts: UIOptions, console: Consol
         ui_opts.plain = True
     elif ui_lower == "headless":
         ui_opts.headless = True
-    elif ui_lower == "live":
-        live_ui = True
 
-    return ui_opts, live_ui
+    return ui_opts
 
 
 def _build_executor_kwargs(
@@ -283,11 +279,10 @@ def _execute_agent_with_ui(
     executor,
     executor_kwargs: Dict[str, Any],
     ui_opts: UIOptions,
-    live_ui: bool,
     use_plain_output: bool,
 ):
     """Execute agent with appropriate UI mode."""
-    from tsugite.ui import create_live_template_logger, create_plain_logger, custom_agent_ui
+    from tsugite.ui import create_plain_logger, custom_agent_ui
 
     if ui_opts.headless or ui_opts.final_only:
         stderr_console = get_error_console(True, console)
@@ -304,12 +299,6 @@ def _execute_agent_with_ui(
             show_panels=False,
             show_debug_messages=ui_opts.verbose,
         ) as custom_logger:
-            executor_kwargs["custom_logger"] = custom_logger
-            return executor(**executor_kwargs)
-
-    if live_ui:
-        custom_logger = create_live_template_logger(interactive=not ui_opts.non_interactive)
-        with custom_logger.ui_handler.progress_context():
             executor_kwargs["custom_logger"] = custom_logger
             return executor(**executor_kwargs)
 
@@ -532,14 +521,14 @@ def run(
         console.no_color = True
 
     # Resolve UI mode to update ui_opts
-    ui_opts, live_ui = _resolve_ui_mode(ui, ui_opts, console)
+    ui_opts = _resolve_ui_mode(ui, ui_opts, console)
 
     # Handle subagent mode - override incompatible settings
     if subagent_mode:
         import os
 
-        if ui_opts.plain or ui_opts.headless or live_ui:
-            console.print("[red]Error: --subagent-mode cannot be combined with --plain, --headless, or --live[/red]")
+        if ui_opts.plain or ui_opts.headless:
+            console.print("[red]Error: --subagent-mode cannot be combined with --plain or --headless[/red]")
             raise typer.Exit(1)
 
         ui_opts.non_interactive = True
@@ -795,7 +784,6 @@ def run(
                 executor,
                 executor_kwargs,
                 ui_opts,
-                live_ui,
                 use_plain_output,
             )
 

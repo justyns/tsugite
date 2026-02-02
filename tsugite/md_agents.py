@@ -78,7 +78,6 @@ class AgentConfig(BaseModel):
         return v
 
 
-
 @dataclass
 class Agent:
     """Parsed agent with config and content."""

@@ -258,6 +258,60 @@ def get_file_info(path: str) -> Dict[str, Any]:
         raise RuntimeError(f"Failed to get info for file {path}: {e}") from e
 
 
+def _detect_line_ending(content: str) -> str:
+    """Detect line ending style in content."""
+    return "\r\n" if "\r\n" in content else "\n"
+
+
+def _preserve_line_ending(original_content: str, modified_content: str) -> str:
+    """Preserve original line endings in modified content."""
+    original_ending = _detect_line_ending(original_content)
+    if original_ending == "\r\n" and "\r\n" not in modified_content:
+        return modified_content.replace("\n", "\r\n")
+    if original_ending == "\n" and "\r\n" in modified_content:
+        return modified_content.replace("\r\n", "\n")
+    return modified_content
+
+
+def _apply_exact_replacement(
+    content: str, search: str, replace: str, expected_count: int
+) -> tuple[str, int, str | None]:
+    """Apply exact string replacement.
+
+    Returns:
+        Tuple of (new_content, match_count, error_message)
+        error_message is None on success
+    """
+    if not search:
+        return content, 0, "Search string cannot be empty"
+
+    if search == replace:
+        return content, 0, "Search and replace strings must be different"
+
+    match_count = content.count(search)
+
+    if match_count == 0:
+        return (
+            content,
+            0,
+            "No matches found. Ensure old_string matches file content exactly (including whitespace/indentation). "
+            "Use read_file to verify.",
+        )
+
+    if match_count != expected_count:
+        if expected_count == 1:
+            error = (
+                f"Found {match_count} matches but expected 1. "
+                "Either add more context to make the match unique or use expected_replacements parameter."
+            )
+        else:
+            error = f"Found {match_count} matches but expected {expected_count}."
+        return content, match_count, error
+
+    new_content = content.replace(search, replace)
+    return new_content, match_count, None
+
+
 @tool
 def edit_file(
     path: str,
@@ -266,13 +320,12 @@ def edit_file(
     expected_replacements: int = 1,
     edits: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
-    """Edit a file with single or multiple replacements.
+    """Edit a file with single or multiple exact string replacements.
 
     Two modes of operation:
 
     **Single edit mode** - Use old_string and new_string:
-    - Applies one replacement with smart matching strategies
-    - Strategies: exact, line-trimmed, block-anchor, whitespace-normalized, indentation-flexible
+    - Applies one exact string replacement
 
     **Batch edit mode** - Use edits parameter:
     - Apply multiple edits sequentially
@@ -304,9 +357,6 @@ def edit_file(
         ValueError: If parameters are invalid or conflicting
         RuntimeError: If edits fail
     """
-    from .edit_strategies import apply_replacement, preserve_line_ending
-
-    # Validate mode selection
     single_mode = old_string is not None
     batch_mode = edits is not None
 
@@ -318,7 +368,6 @@ def edit_file(
     if single_mode and new_string is None:
         raise ValueError("new_string is required when using old_string")
 
-    # Validate file
     file_path = Path(path)
 
     if not file_path.exists():
@@ -328,18 +377,14 @@ def edit_file(
         raise IsADirectoryError(f"Path is a directory: {path}")
 
     try:
-        # Read original content
         original_content = file_path.read_text(encoding="utf-8")
-
-        # Normalize to \n for processing
         current_content = original_content.replace("\r\n", "\n")
 
         if single_mode:
-            # Single edit mode
             normalized_old = old_string.replace("\r\n", "\n")
             normalized_new = new_string.replace("\r\n", "\n")
 
-            new_content, match_count, error = apply_replacement(
+            new_content, match_count, error = _apply_exact_replacement(
                 current_content, normalized_old, normalized_new, expected_replacements
             )
 
@@ -350,7 +395,6 @@ def edit_file(
             total_replacements = match_count
 
         else:
-            # Batch edit mode
             if not edits:
                 raise ValueError("edits list cannot be empty")
 
@@ -363,7 +407,9 @@ def edit_file(
                 new_str = edit["new_string"].replace("\r\n", "\n")
                 expected = edit.get("expected_replacements", 1)
 
-                current_content, match_count, error = apply_replacement(current_content, old_str, new_str, expected)
+                current_content, match_count, error = _apply_exact_replacement(
+                    current_content, old_str, new_str, expected
+                )
 
                 if error:
                     raise RuntimeError(f"Edit #{i} failed: {error}")
@@ -373,13 +419,8 @@ def edit_file(
             new_content = current_content
             total_edits = len(edits)
 
-        # Restore original line endings
-        final_content = preserve_line_ending(original_content, new_content)
-
-        # Create parent directories if needed
+        final_content = _preserve_line_ending(original_content, new_content)
         file_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Write updated content
         file_path.write_text(final_content, encoding="utf-8")
 
         if batch_mode:

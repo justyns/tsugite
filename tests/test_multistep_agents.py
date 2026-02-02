@@ -894,4 +894,3 @@ Progress: {{ iteration }}/{{ max_iterations }}
         assert "{{ iteration }}" in steps[0].content
         assert "{{ max_iterations }}" in steps[0].content
         assert "{% if is_looping_step %}" in steps[0].content
-

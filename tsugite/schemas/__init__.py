@@ -73,8 +73,7 @@ def generate_agent_schema() -> Dict[str, Any]:
 
     if "extends" in properties:
         properties["extends"]["description"] = (
-            "Parent agent to inherit from. Use 'none' to opt out of default inheritance. "
-            "Examples: 'default', 'none'"
+            "Parent agent to inherit from. Use 'none' to opt out of default inheritance. Examples: 'default', 'none'"
         )
         properties["extends"]["examples"] = ["default", "none"]
 

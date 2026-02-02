@@ -467,5 +467,3 @@ def test_default_max_turns_inheritance():
 
     # Child's default 5 should not override parent's explicit 10
     assert merged.max_turns == 10
-
-

@@ -293,7 +293,7 @@ class TestHistoryLoadedOnContinue:
         agent_config = AgentConfig(
             workspace_dir=workspace,
             agent_file="test.md",
-                    )
+        )
 
         class TestAdapter(BaseAdapter):
             async def start(self):
@@ -337,7 +337,7 @@ class TestHistorySaveErrorHandling:
         agent_config = AgentConfig(
             workspace_dir=workspace,
             agent_file="test.md",
-                    )
+        )
 
         class TestAdapter(BaseAdapter):
             async def start(self):
@@ -389,7 +389,7 @@ class TestDaemonMetadataInHistory:
         agent_config = AgentConfig(
             workspace_dir=workspace,
             agent_file="test.md",
-                    )
+        )
 
         class TestAdapter(BaseAdapter):
             async def start(self):

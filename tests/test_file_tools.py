@@ -425,25 +425,6 @@ def goodbye():
     assert 'print("Goodbye")' in new_content
 
 
-def test_edit_file_line_trimmed_strategy(temp_dir, file_tools):
-    """Test edit_file with line-trimmed matching."""
-    test_file = temp_dir / "edit.txt"
-    original = "  def foo():\n      return 42\n  "
-    test_file.write_text(original)
-
-    # Search with different whitespace should still match
-    result = call_tool(
-        "edit_file",
-        path=str(test_file),
-        old_string="def foo():\n    return 42",
-        new_string="def foo():\n    return 100",
-    )
-
-    assert "Successfully edited" in result
-    new_content = test_file.read_text()
-    assert "return 100" in new_content
-
-
 @pytest.mark.skip(reason="Line ending preservation needs investigation - known limitation")
 def test_edit_file_preserves_line_endings(temp_dir, file_tools):
     """Test that edit_file preserves original line endings.
