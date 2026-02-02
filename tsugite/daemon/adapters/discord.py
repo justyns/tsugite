@@ -11,14 +11,22 @@ from discord.ext import commands
 from tsugite.daemon.adapters.base import BaseAdapter, ChannelContext
 from tsugite.daemon.config import AgentConfig, DiscordBotConfig
 from tsugite.daemon.session import SessionManager
-from tsugite.events import FinalAnswerEvent, ReasoningContentEvent, ToolCallEvent
+from tsugite.events import (
+    CodeExecutionEvent,
+    ErrorEvent,
+    FinalAnswerEvent,
+    ObservationEvent,
+    ReasoningContentEvent,
+    StepStartEvent,
+    WarningEvent,
+)
 from tsugite.events.base import BaseEvent
 
 
 class ProgressStep(NamedTuple):
-    """Progress update step with tool info."""
+    """Progress update step."""
 
-    tool_name: str
+    label: str
     completed: bool
     emoji: str
 
@@ -71,6 +79,8 @@ class DiscordProgressHandler:
         self.typing_task: Optional[asyncio.Task] = None
         self.done = False
         self._thinking_shown = False
+        self._current_turn = 0
+        self._max_turns = 10
 
     def handle_event(self, event: BaseEvent) -> None:
         """Handle EventBus events and update Discord message.
@@ -84,14 +94,27 @@ class DiscordProgressHandler:
     async def _handle_event_async(self, event: BaseEvent) -> None:
         """Async implementation of event handling."""
         async with self.update_lock:
-            if isinstance(event, ToolCallEvent):
+            if isinstance(event, StepStartEvent):
+                self._current_turn = event.step
+                self._max_turns = event.max_turns
                 if self.updates:
-                    prev_step = self.updates[-1]
-                    self.updates[-1] = ProgressStep(prev_step.tool_name, True, prev_step.emoji)
-
-                tool_emoji = self._get_tool_emoji(event.tool)
-                self.updates.append(ProgressStep(event.tool, False, tool_emoji))
+                    prev = self.updates[-1]
+                    self.updates[-1] = ProgressStep(prev.label, True, prev.emoji)
+                self.updates.append(ProgressStep(f"Turn {event.step}/{event.max_turns}", False, "🤔"))
                 await self._update_progress()
+
+            elif isinstance(event, CodeExecutionEvent):
+                if self.updates:
+                    prev = self.updates[-1]
+                    self.updates[-1] = ProgressStep(prev.label, True, prev.emoji)
+                self.updates.append(ProgressStep("Executing", False, "⚙️"))
+                await self._update_progress()
+
+            elif isinstance(event, ObservationEvent):
+                if self.updates and not self.updates[-1].completed:
+                    prev = self.updates[-1]
+                    self.updates[-1] = ProgressStep(prev.label, True, prev.emoji)
+                    await self._update_progress()
 
             elif isinstance(event, ReasoningContentEvent):
                 if not self._thinking_shown:
@@ -99,28 +122,19 @@ class DiscordProgressHandler:
                     self.updates.append(ProgressStep("Thinking", False, "💭"))
                     await self._update_progress()
 
+            elif isinstance(event, WarningEvent):
+                self.updates.append(ProgressStep("Retrying", False, "⚠️"))
+                await self._update_progress()
+
+            elif isinstance(event, ErrorEvent):
+                self.updates.append(ProgressStep("Error", False, "❌"))
+                await self._update_progress()
+
             elif isinstance(event, FinalAnswerEvent):
                 if self.updates and not self.updates[-1].completed:
-                    last_step = self.updates[-1]
-                    self.updates[-1] = ProgressStep(last_step.tool_name, True, last_step.emoji)
+                    last = self.updates[-1]
+                    self.updates[-1] = ProgressStep(last.label, True, last.emoji)
                 await self._collapse_to_summary()
-
-    def _get_tool_emoji(self, tool_name: str) -> str:
-        """Get emoji for tool name."""
-        emoji_map = {
-            "search": "🔍",
-            "web": "🌐",
-            "read": "📖",
-            "write": "✍️",
-            "edit": "📝",
-            "execute": "⚙️",
-            "code": "💻",
-            "file": "📄",
-        }
-        for key, emoji in emoji_map.items():
-            if key in tool_name.lower():
-                return emoji
-        return "🔧"
 
     async def _update_progress(self):
         """Update or create progress message."""
@@ -139,7 +153,7 @@ class DiscordProgressHandler:
             is_last = i == len(display_updates) - 1
             prefix = "└─" if is_last else "├─"
             suffix = " ✓" if step.completed else ""
-            lines.append(f"{prefix} {step.emoji} `{step.tool_name}`{suffix}")
+            lines.append(f"{prefix} {step.emoji} {step.label}{suffix}")
 
         text = "\n".join(lines)
 
@@ -161,20 +175,11 @@ class DiscordProgressHandler:
         if not self.progress_msg or not self.updates:
             return
 
-        tool_steps = [u for u in self.updates if u.tool_name != "Thinking"]
-        tool_counts = {}
-        for step in tool_steps:
-            tool_counts[step.tool_name] = tool_counts.get(step.tool_name, 0) + 1
+        turn_count = sum(1 for u in self.updates if u.label.startswith("Turn "))
+        if turn_count == 0:
+            turn_count = self._current_turn or 1
 
-        if tool_counts:
-            top_tools = sorted(tool_counts.items(), key=lambda x: x[1], reverse=True)[:3]
-            tool_summary = ", ".join(f"{name} ×{count}" for name, count in top_tools)
-            if len(tool_counts) > 3:
-                tool_summary += ", ..."
-        else:
-            tool_summary = "none"
-
-        summary = f"✅ Done ({len(tool_steps)} steps: {tool_summary})"
+        summary = f"✅ Done ({turn_count} turn{'s' if turn_count != 1 else ''})"
 
         try:
             await self.progress_msg.edit(content=summary)
@@ -212,10 +217,10 @@ class DiscordProgressHandler:
 
         if self.progress_msg and not success:
             try:
-                failed_step = self.updates[-1].tool_name if self.updates else "unknown"
-                await self.progress_msg.edit(
-                    content=f"❌ Error after {len(self.updates)} steps\n└─ `{failed_step}` failed"
-                )
+                turn_count = sum(1 for u in self.updates if u.label.startswith("Turn "))
+                if turn_count == 0:
+                    turn_count = self._current_turn or 1
+                await self.progress_msg.edit(content=f"❌ Error after {turn_count} turn{'s' if turn_count != 1 else ''}")
             except discord.errors.HTTPException:
                 pass
         elif success and self.updates and self.progress_msg:

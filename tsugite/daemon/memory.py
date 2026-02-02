@@ -8,12 +8,14 @@ async def summarize_session(conversation_history: List[dict], model: str = "open
 
     Args:
         conversation_history: List of {role, content} dicts
-        model: Model to use for summarization
+        model: Model to use for summarization (Tsugite format: provider:model)
 
     Returns:
         Concise summary of conversation
     """
     from litellm import acompletion
+
+    from tsugite.models import get_model_params
 
     messages = [
         {
@@ -25,5 +27,6 @@ async def summarize_session(conversation_history: List[dict], model: str = "open
     convo_text = "\n\n".join([f"{msg['role'].upper()}: {msg['content']}" for msg in conversation_history])
     messages.append({"role": "user", "content": convo_text})
 
-    response = await acompletion(model=model, messages=messages)
+    params = get_model_params(model, messages=messages)
+    response = await acompletion(**params)
     return response.choices[0].message.content

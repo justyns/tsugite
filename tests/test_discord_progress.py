@@ -17,7 +17,15 @@ sys.modules["discord.ext"] = MagicMock()
 sys.modules["discord.ext.commands"] = MagicMock()
 
 from tsugite.daemon.adapters.discord import DiscordAdapter, DiscordProgressHandler  # noqa: E402
-from tsugite.events import FinalAnswerEvent, ReasoningContentEvent, ToolCallEvent  # noqa: E402
+from tsugite.events import (  # noqa: E402
+    CodeExecutionEvent,
+    ErrorEvent,
+    FinalAnswerEvent,
+    ObservationEvent,
+    ReasoningContentEvent,
+    StepStartEvent,
+    WarningEvent,
+)  # noqa: E402
 
 
 @pytest.fixture(autouse=True, scope="module")
@@ -78,26 +86,33 @@ class MockMessage:
 
 
 @pytest.mark.asyncio
-async def test_progress_handler_tool_calls():
-    """Test progress handler with tool calls."""
+async def test_progress_handler_turns():
+    """Test progress handler with turn and execution events."""
     channel = MockChannel()
     handler = DiscordProgressHandler(channel, asyncio.get_running_loop())
 
-    # First tool call (use _handle_event_async directly for testing)
-    await handler._handle_event_async(ToolCallEvent(tool="read_file", args={"path": "test.txt"}))
+    # First turn (use _handle_event_async directly for testing)
+    await handler._handle_event_async(StepStartEvent(step=1, max_turns=10))
     assert len(channel.messages) == 1
-    assert "read_file" in channel.messages[0].content
+    assert "Turn 1/10" in channel.messages[0].content
     assert "🤔 Working..." in channel.messages[0].content
 
-    # Second tool call (marks previous as complete)
-    await handler._handle_event_async(ToolCallEvent(tool="write_file", args={"path": "out.txt", "content": "test"}))
-    assert len(channel.messages[0].edit_history) >= 2
-    assert "✓" in channel.messages[0].content  # Previous tool marked complete
-    assert "write_file" in channel.messages[0].content
+    # Code execution
+    await handler._handle_event_async(CodeExecutionEvent(code="print('hello')"))
+    assert "Executing" in channel.messages[0].content
+    assert "⚙️" in channel.messages[0].content
+
+    # Observation marks previous complete
+    await handler._handle_event_async(ObservationEvent(observation="hello", success=True))
+    assert "✓" in channel.messages[0].content
+
+    # Second turn (marks previous as complete)
+    await handler._handle_event_async(StepStartEvent(step=2, max_turns=10))
+    assert "Turn 2/10" in channel.messages[0].content
 
     # Final answer
     await handler._handle_event_async(FinalAnswerEvent(answer="Done!", turns=2, tokens=100, cost=0.01))
-    assert "✅ Done" in channel.messages[0].content
+    assert "✅ Done (2 turns)" in channel.messages[0].content
     assert handler.done
 
 
@@ -115,32 +130,35 @@ async def test_progress_handler_reasoning():
 
 
 @pytest.mark.asyncio
-async def test_progress_handler_emoji_mapping():
-    """Test emoji mapping for different tool types."""
-    handler = DiscordProgressHandler(MockChannel(), asyncio.get_running_loop())
+async def test_progress_handler_warning_and_error():
+    """Test progress handler with warning and error events."""
+    channel = MockChannel()
+    handler = DiscordProgressHandler(channel, asyncio.get_running_loop())
 
-    assert handler._get_tool_emoji("search_web") == "🔍"
-    assert handler._get_tool_emoji("read_file") == "📖"
-    assert handler._get_tool_emoji("write_file") == "✍️"
-    assert handler._get_tool_emoji("execute_code") == "⚙️"
-    assert handler._get_tool_emoji("unknown_tool") == "🔧"
+    await handler._handle_event_async(StepStartEvent(step=1, max_turns=10))
+    await handler._handle_event_async(WarningEvent(message="Rate limited"))
+    assert "⚠️" in channel.messages[0].content
+    assert "Retrying" in channel.messages[0].content
+
+    await handler._handle_event_async(ErrorEvent(error="Fatal error"))
+    assert "❌" in channel.messages[0].content
 
 
 @pytest.mark.asyncio
 async def test_progress_handler_truncation():
-    """Test progress handler truncates long tool lists."""
+    """Test progress handler truncates long step lists."""
     channel = MockChannel()
     handler = DiscordProgressHandler(channel, asyncio.get_running_loop())
 
-    # Add 15 tool calls (more than MAX_DISPLAY_STEPS)
-    for i in range(15):
-        await handler._handle_event_async(ToolCallEvent(tool=f"tool_{i}", args={}))
+    # Add 15 turns (more than MAX_DISPLAY_STEPS)
+    for i in range(1, 16):
+        await handler._handle_event_async(StepStartEvent(step=i, max_turns=20))
 
     # Check that only recent steps are shown
     content = channel.messages[0].content
     assert "earlier steps" in content
-    assert "tool_14" in content  # Last tool
-    assert "tool_0" not in content  # First tool should be truncated
+    assert "Turn 15/20" in content  # Last turn
+    assert "Turn 1/20" not in content  # First turn should be truncated
 
 
 @pytest.mark.asyncio
@@ -171,37 +189,37 @@ async def test_progress_handler_error_state():
     channel = MockChannel()
     handler = DiscordProgressHandler(channel, asyncio.get_running_loop())
 
-    # Add a tool call
-    await handler._handle_event_async(ToolCallEvent(tool="failing_tool", args={}))
+    # Add a turn
+    await handler._handle_event_async(StepStartEvent(step=1, max_turns=10))
 
     # Cleanup with failure
     await handler.cleanup(success=False)
 
     # Check error state
-    assert "❌ Error" in channel.messages[0].content
-    assert "failing_tool" in channel.messages[0].content
+    assert "❌ Error after 1 turn" in channel.messages[0].content
 
 
 @pytest.mark.asyncio
 async def test_progress_handler_summary():
-    """Test progress handler summary counts tools correctly."""
+    """Test progress handler summary counts turns correctly."""
     channel = MockChannel()
     handler = DiscordProgressHandler(channel, asyncio.get_running_loop())
 
-    # Add multiple tool calls (some repeated)
-    await handler._handle_event_async(ToolCallEvent(tool="read_file", args={}))
-    await handler._handle_event_async(ToolCallEvent(tool="read_file", args={}))
-    await handler._handle_event_async(ToolCallEvent(tool="write_file", args={}))
-    await handler._handle_event_async(ToolCallEvent(tool="read_file", args={}))
+    # Add multiple turns
+    await handler._handle_event_async(StepStartEvent(step=1, max_turns=10))
+    await handler._handle_event_async(CodeExecutionEvent(code="x = 1"))
+    await handler._handle_event_async(ObservationEvent(observation="done", success=True))
+    await handler._handle_event_async(StepStartEvent(step=2, max_turns=10))
+    await handler._handle_event_async(CodeExecutionEvent(code="x = 2"))
+    await handler._handle_event_async(ObservationEvent(observation="done", success=True))
+    await handler._handle_event_async(StepStartEvent(step=3, max_turns=10))
 
     # Final answer
-    await handler._handle_event_async(FinalAnswerEvent(answer="Done!", turns=1, tokens=50, cost=0.005))
+    await handler._handle_event_async(FinalAnswerEvent(answer="Done!", turns=3, tokens=50, cost=0.005))
 
-    # Check summary shows counts
+    # Check summary shows turn count
     content = channel.messages[0].content
-    assert "✅ Done" in content
-    assert "4 steps" in content  # Total count
-    assert "read_file ×3" in content  # Most used tool with count
+    assert "✅ Done (3 turns)" in content
 
 
 class TestCodeBlockChunking:
