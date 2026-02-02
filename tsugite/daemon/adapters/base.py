@@ -237,8 +237,10 @@ class BaseAdapter(ABC):
         session_info = self.session_manager.sessions[user_id]
         old_session_path = get_history_dir() / f"{old_conv_id}.jsonl"
 
+        print(f"[{self.agent_name}] Compacting session ({session_info.message_count} messages)...")
         messages = reconstruct_messages(old_session_path)
         summary = await summarize_session(messages)
+        print(f"[{self.agent_name}] Session compacted")
 
         new_conv_id = self.session_manager.compact_session(user_id)
 
