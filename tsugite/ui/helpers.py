@@ -17,8 +17,6 @@ def custom_agent_ui(
     show_observations: bool = True,
     show_progress: bool = True,
     show_llm_messages: bool = False,
-    show_execution_results: bool = True,
-    show_execution_logs: bool = True,
     show_panels: bool = True,
     show_debug_messages: bool = False,
 ) -> Generator[CustomUILogger, None, None]:
@@ -30,8 +28,6 @@ def custom_agent_ui(
         show_observations: Whether to display tool observations
         show_progress: Whether to show progress spinner
         show_llm_messages: Whether to show LLM reasoning messages
-        show_execution_results: Whether to show code execution results
-        show_execution_logs: Whether to show execution logs
         show_panels: Whether to show Rich panels (borders and decorations)
         show_debug_messages: Whether to show debug messages (requires --verbose)
 
@@ -43,8 +39,6 @@ def custom_agent_ui(
         show_code=show_code,
         show_observations=show_observations,
         show_llm_messages=show_llm_messages,
-        show_execution_results=show_execution_results,
-        show_execution_logs=show_execution_logs,
         show_panels=show_panels,
         show_debug_messages=show_debug_messages,
     )

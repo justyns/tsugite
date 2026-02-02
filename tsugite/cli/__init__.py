@@ -322,8 +322,6 @@ def _execute_agent_with_ui(
             show_observations=show_progress_items,
             show_progress=False,
             show_llm_messages=show_progress_items,
-            show_execution_results=show_progress_items,
-            show_execution_logs=show_progress_items,
             show_panels=False,
             show_debug_messages=ui_opts.verbose,
         ) as custom_logger:
@@ -343,8 +341,6 @@ def _execute_agent_with_ui(
         show_observations=not ui_opts.non_interactive,
         show_progress=not ui_opts.no_color,
         show_llm_messages=ui_opts.show_reasoning,
-        show_execution_results=True,
-        show_execution_logs=ui_opts.verbose,
         show_panels=False,
         show_debug_messages=ui_opts.verbose,
     ) as custom_logger:

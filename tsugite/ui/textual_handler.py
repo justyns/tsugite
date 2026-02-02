@@ -6,7 +6,6 @@ from tsugite.events import (
     BaseEvent,
     CodeExecutionEvent,
     ErrorEvent,
-    ExecutionResultEvent,
     FinalAnswerEvent,
     LLMMessageEvent,
     ObservationEvent,
@@ -14,7 +13,6 @@ from tsugite.events import (
     StreamChunkEvent,
     StreamCompleteEvent,
     TaskStartEvent,
-    ToolCallEvent,
 )
 from tsugite.ui.base import CustomUIHandler
 
@@ -72,8 +70,6 @@ class TextualUIHandler(CustomUIHandler):
                 self._handle_step_start(event)
             elif isinstance(event, CodeExecutionEvent):
                 self._handle_code_execution(event)
-            elif isinstance(event, ToolCallEvent):
-                self._handle_tool_call(event)
             elif isinstance(event, ObservationEvent):
                 self._handle_observation(event)
             elif isinstance(event, FinalAnswerEvent):
@@ -86,8 +82,6 @@ class TextualUIHandler(CustomUIHandler):
                 self._handle_stream_chunk(event)
             elif isinstance(event, StreamCompleteEvent):
                 self._handle_stream_complete(event)
-            elif isinstance(event, ExecutionResultEvent):
-                self._handle_execution_result(event)
 
     def _update_status(self, new_status: str) -> None:
         """Update status with thread safety.
@@ -136,19 +130,6 @@ class TextualUIHandler(CustomUIHandler):
         # Log to thought log instead of chat
         if self.on_thought_log:
             self.on_thought_log("code_execution", code)
-
-    def _handle_tool_call(self, event: ToolCallEvent) -> None:
-        """Handle tool call."""
-        tool_name = event.tool
-        self.current_tools.append(tool_name)
-
-        self._update_status(f"Using tool: {tool_name}")
-        if self.on_tool_call:
-            self.on_tool_call(tool_name)
-
-        # Log to thought log instead of chat
-        if self.on_thought_log:
-            self.on_thought_log("tool_call", tool_name)
 
     def _handle_observation(self, event: ObservationEvent) -> None:
         """Handle observation."""
@@ -214,25 +195,3 @@ class TextualUIHandler(CustomUIHandler):
         """Clear tools list for new turn."""
         self.current_tools = []
 
-    def _handle_execution_result(self, event: ExecutionResultEvent) -> None:
-        """Handle execution result."""
-        content = event.result
-
-        if self.on_thought_log and content.strip():
-            # Parse execution result content
-            lines = content.split("\n")
-            output_lines = []
-
-            # Extract meaningful output
-            for line in lines:
-                if line.startswith("Out:"):
-                    output_lines.append(line[4:].strip())
-                elif not line.startswith("Execution logs:") and line.strip():
-                    output_lines.append(line.strip())
-
-            if output_lines:
-                result_text = "\n".join(output_lines)
-                # Truncate if too long
-                if len(result_text) > 200:
-                    result_text = result_text[:200] + "..."
-                self.on_thought_log("execution_result", result_text)

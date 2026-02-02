@@ -12,7 +12,6 @@ from tsugite.events import (
     StreamChunkEvent,
     StreamCompleteEvent,
     TaskStartEvent,
-    ToolCallEvent,
 )
 from tsugite.ui.repl_handler import ReplUIHandler
 
@@ -56,19 +55,6 @@ def test_handle_step_start():
         # Should create status spinner
         mock_status.assert_called_once()
         mock_status_obj.start.assert_called_once()
-
-
-def test_handle_tool_call():
-    """Test tool call event."""
-    console = Console()
-    handler = ReplUIHandler(console, compact=True)
-
-    event = ToolCallEvent(tool="Tool: test_tool")
-
-    with patch.object(console, "print") as mock_print:
-        handler.handle_event(event)
-        # Should print tool name in compact mode
-        assert mock_print.called
 
 
 def test_handle_final_answer():

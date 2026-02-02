@@ -2,15 +2,13 @@
 
 import re
 from contextlib import contextmanager
-from typing import Any, Generator
+from typing import Generator
 
 from tsugite.console import get_stderr_console
 from tsugite.events import (
     CodeExecutionEvent,
     CostSummaryEvent,
     ErrorEvent,
-    ExecutionLogsEvent,
-    ExecutionResultEvent,
     FileReadEvent,
     FinalAnswerEvent,
     LLMMessageEvent,
@@ -19,7 +17,6 @@ from tsugite.events import (
     ReasoningTokensEvent,
     StepStartEvent,
     TaskStartEvent,
-    ToolCallEvent,
 )
 from tsugite.ui.base import CustomUIHandler
 from tsugite.ui_context import clear_ui_context, set_ui_context
@@ -42,8 +39,6 @@ class PlainUIHandler(CustomUIHandler):
             show_code=True,
             show_observations=True,
             show_llm_messages=False,
-            show_execution_results=True,
-            show_execution_logs=True,
             show_panels=False,
         )
 
@@ -147,16 +142,6 @@ class PlainUIHandler(CustomUIHandler):
             self.console.print(self.state.code_being_executed)
             self.console.rule(style="dim")
             self.console.print()
-
-    def _handle_tool_call(self, event: ToolCallEvent) -> None:
-        """Handle tool call event with plain text output."""
-        content = event.tool
-
-        self.console.print("Calling tool...")
-
-        # Add to current step history
-        if self.state.steps_history:
-            self.state.steps_history[-1]["actions"].append({"type": "tool_call", "content": content})
 
     def _handle_observation(self, event: ObservationEvent) -> None:
         """Handle observation event with plain text output."""
@@ -318,52 +303,6 @@ class PlainUIHandler(CustomUIHandler):
         else:
             self.console.print(f"\n{summary_text}\n")
 
-    def _handle_execution_result(self, event: ExecutionResultEvent) -> None:
-        """Handle code execution result event with plain text output."""
-        if not self.show_execution_results:
-            return
-
-        self.console.print("Processing execution results...")
-
-        # Display execution logs if present
-        if event.logs:
-            logs_text = "\n".join(event.logs)
-            if logs_text.strip():
-                self.console.print(f"Logs: {logs_text}")
-
-        # Display output if present and meaningful
-        if event.output:
-            output_text = event.output
-            if output_text.strip():
-                contains_error = self._contains_error(output_text)
-                is_final_answer = self._is_final_answer(output_text)
-
-                # Always show errors, filter non-meaningful outputs otherwise
-                if contains_error:
-                    self.console.print()
-                    self.console.rule("ERROR IN OUTPUT", style="dim")
-                    self.console.print(output_text)
-                    self.console.rule(style="dim")
-                    self.console.print()
-                elif is_final_answer:
-                    # Skip displaying final answer here - it will be displayed by _handle_final_answer event
-                    pass
-                elif output_text.strip() and output_text.strip().lower() not in ("none", "null", ""):
-                    self.console.print(f"Output: {output_text}")
-
-    def _handle_execution_logs(self, event: ExecutionLogsEvent) -> None:
-        """Handle execution logs event with plain text output."""
-        if not self.show_execution_logs:
-            return
-
-        content = event.logs
-
-        if content.strip() and "Execution logs:" in content:
-            # Extract just the log content
-            logs = content.replace("Execution logs:", "").strip()
-            if logs:
-                self.console.print(f"Logs: {logs}")
-
     def _handle_file_read(self, event: FileReadEvent) -> None:
         """Handle file read event with plain text output."""
         byte_count = event.byte_count
@@ -375,24 +314,6 @@ class PlainUIHandler(CustomUIHandler):
             size_str = f"{byte_count / (1024 * 1024):.1f} MB"
 
         self.console.print(f"Read {event.path} ({event.line_count} lines, {size_str})")
-
-    def _handle_subagent_start(self, event: Any) -> None:
-        """Handle subagent start event with plain text output."""
-        agent_name = getattr(event, "agent_name", "unknown")
-
-        self.console.print(f"Spawning {agent_name}...")
-        self.console.print()
-        self.console.rule(f"{agent_name} agent")
-        self.console.print()
-
-    def _handle_subagent_end(self, event: Any) -> None:
-        """Handle subagent end event with plain text output."""
-        agent_name = getattr(event, "agent_name", "unknown")
-
-        self.console.print()
-        self.console.rule()
-        self.console.print(f"{agent_name} completed")
-        self.console.print()
 
     @contextmanager
     def progress_context(self) -> Generator[None, None, None]:

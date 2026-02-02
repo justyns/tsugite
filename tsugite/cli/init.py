@@ -278,8 +278,6 @@ def test_setup(model: str, skip_test: bool = False) -> bool:
             show_observations=False,
             show_progress=False,
             show_llm_messages=False,
-            show_execution_results=False,
-            show_execution_logs=False,
             show_panels=False,
         ) as logger:
             from tsugite.options import ExecutionOptions

@@ -6,11 +6,7 @@ Error Handling Patterns:
    - Success: ObservationEvent(success=True, observation="result", tool="tool_name")
    - Failure: ObservationEvent(success=False, error="error msg", tool="tool_name")
 
-2. Code Execution (ExecutionResultEvent):
-   - Success: ExecutionResultEvent(success=True, logs=[...], output="result")
-   - Failure: ExecutionResultEvent(success=False, error="error msg")
-
-3. General/Fatal Errors (ErrorEvent):
+2. General/Fatal Errors (ErrorEvent):
    - ErrorEvent(error="error msg", error_type="Error Type", step=N)
    - Used for: Format errors, max turns exceeded, critical failures
 """
@@ -57,14 +53,6 @@ class CodeExecutionEvent(BaseEvent):
     language: str = "python"
 
 
-class ToolCallEvent(BaseEvent):
-    """Tool invocation."""
-
-    event_type: EventType = Field(default=EventType.TOOL_CALL, frozen=True)
-    tool: str
-    args: Dict[str, Any] = Field(default_factory=dict)
-
-
 class ObservationEvent(BaseEvent):
     """Observation from tool execution or code execution.
 
@@ -72,9 +60,6 @@ class ObservationEvent(BaseEvent):
     - Tool success: ObservationEvent(success=True, observation="result", tool="tool_name")
     - Tool failure: ObservationEvent(success=False, error="error", tool="tool_name")
     - Code execution: ObservationEvent(observation="output", tool=None)
-
-    Note: For code execution, tool is None and ExecutionResultEvent may be emitted
-    separately with structured logs/output.
     """
 
     event_type: EventType = Field(default=EventType.OBSERVATION, frozen=True)
@@ -129,23 +114,6 @@ class LLMMessageEvent(BaseEvent):
     content: str
     title: Optional[str] = None
     step: Optional[int] = Field(default=None, ge=1)
-
-
-class ExecutionResultEvent(BaseEvent):
-    """Code execution result with structured logs and output."""
-
-    event_type: EventType = Field(default=EventType.EXECUTION_RESULT, frozen=True)
-    logs: list[str] = Field(default_factory=list)
-    output: Optional[str] = None
-    success: bool = True
-    error: Optional[str] = None
-
-
-class ExecutionLogsEvent(BaseEvent):
-    """Execution logs."""
-
-    event_type: EventType = Field(default=EventType.EXECUTION_LOGS, frozen=True)
-    logs: str
 
 
 class ReasoningContentEvent(BaseEvent):

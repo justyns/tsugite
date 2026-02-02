@@ -17,8 +17,6 @@ from tsugite.events import (
     CostSummaryEvent,
     DebugMessageEvent,
     ErrorEvent,
-    ExecutionLogsEvent,
-    ExecutionResultEvent,
     FileReadEvent,
     FinalAnswerEvent,
     InfoEvent,
@@ -34,7 +32,6 @@ from tsugite.events import (
     StreamChunkEvent,
     StreamCompleteEvent,
     TaskStartEvent,
-    ToolCallEvent,
     WarningEvent,
 )
 from tsugite.ui_context import clear_ui_context, set_ui_context
@@ -84,8 +81,6 @@ class CustomUIHandler:
         show_code: bool = True,
         show_observations: bool = True,
         show_llm_messages: bool = False,
-        show_execution_results: bool = True,
-        show_execution_logs: bool = True,
         show_panels: bool = True,
         show_debug_messages: bool = False,
     ):
@@ -94,8 +89,6 @@ class CustomUIHandler:
         self.show_code = show_code
         self.show_observations = show_observations
         self.show_llm_messages = show_llm_messages
-        self.show_execution_results = show_execution_results
-        self.show_execution_logs = show_execution_logs
         self.show_panels = show_panels
         self.show_debug_messages = show_debug_messages
         self.progress = None
@@ -130,8 +123,6 @@ class CustomUIHandler:
                 self._handle_step_start(event)
             elif isinstance(event, CodeExecutionEvent):
                 self._handle_code_execution(event)
-            elif isinstance(event, ToolCallEvent):
-                self._handle_tool_call(event)
             elif isinstance(event, ObservationEvent):
                 self._handle_observation(event)
             elif isinstance(event, FinalAnswerEvent):
@@ -140,10 +131,6 @@ class CustomUIHandler:
                 self._handle_error(event)
             elif isinstance(event, LLMMessageEvent):
                 self._handle_llm_message(event)
-            elif isinstance(event, ExecutionResultEvent):
-                self._handle_execution_result(event)
-            elif isinstance(event, ExecutionLogsEvent):
-                self._handle_execution_logs(event)
             elif isinstance(event, ReasoningContentEvent):
                 self._handle_reasoning_content(event)
             elif isinstance(event, ReasoningTokensEvent):
@@ -248,24 +235,6 @@ class CustomUIHandler:
         elif not self.show_code:
             # Code display disabled - just show indicator
             self._print("[dim yellow]⚡ Executing code...[/dim yellow]")
-
-    def _handle_tool_call(self, event: ToolCallEvent) -> None:
-        """Handle tool call event."""
-        content = event.tool
-
-        prefix = self._get_display_prefix()
-        # Update progress
-        self.update_progress(f"{prefix}🔧 Calling tool...")
-
-        # In minimal mode, show lightweight indicator with tool name
-        if not self.show_panels and content:
-            # Parse tool name from content (format: "Tool: tool_name")
-            tool_name = content.replace("Tool: ", "").strip() if "Tool: " in content else content
-            self._print(f"[dim cyan]🔧 Called: {tool_name}[/dim cyan]")
-
-        # Add to current step history
-        if self.state.steps_history:
-            self.state.steps_history[-1]["actions"].append({"type": "tool_call", "content": content})
 
     def _handle_observation(self, event: ObservationEvent) -> None:
         """Handle observation event."""
@@ -499,53 +468,6 @@ class CustomUIHandler:
                 self._print(Text(summary_text, style="dim cyan"))
             else:
                 self._print(f"[dim cyan]{summary_text}[/dim cyan]")
-
-    def _handle_execution_result(self, event: ExecutionResultEvent) -> None:
-        """Handle code execution result event."""
-        if not self.show_execution_results:
-            return
-
-        prefix = self._get_display_prefix()
-        # Update progress
-        self.update_progress(f"{prefix}📊 Processing execution results...")
-
-        # Display execution logs if present (always show with execution results)
-        if event.logs:
-            logs_text = "\n".join(event.logs)
-            if logs_text.strip():
-                self._print(f"[dim]📝 {logs_text}[/dim]")
-
-        # Display output if present and meaningful
-        if event.output:
-            output_text = event.output
-            contains_error = self._contains_error(output_text)
-
-            # Check if this is a final answer
-            is_final_answer = "__FINAL_ANSWER__:" in output_text
-
-            # Always show errors, filter non-meaningful outputs otherwise
-            if contains_error:
-                # Show errors prominently
-                self._print(f"[red]📤 Output (Error): {output_text}[/red]")
-            elif is_final_answer:
-                # Skip displaying final answer here - it will be displayed by _handle_final_answer event
-                pass
-            elif output_text.strip() and output_text.strip().lower() not in ("none", "null", ""):
-                # Show normal meaningful output
-                self._print(f"[bold cyan]📤 Output:[/bold cyan] {output_text}")
-
-    def _handle_execution_logs(self, event: ExecutionLogsEvent) -> None:
-        """Handle execution logs event."""
-        if not self.show_execution_logs:
-            return
-
-        content = event.logs
-
-        if content.strip() and "Execution logs:" in content:
-            # Extract just the log content
-            logs = content.replace("Execution logs:", "").strip()
-            if logs:
-                self._print(f"[dim]📝 {logs}[/dim]")
 
     def _handle_stream_chunk(self, event: StreamChunkEvent) -> None:
         """Handle streaming chunk event."""

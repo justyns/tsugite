@@ -464,8 +464,6 @@ class TestHeadlessMode:
         assert call_kwargs["show_observations"] is False
         assert call_kwargs["show_progress"] is False
         assert call_kwargs["show_llm_messages"] is False
-        assert call_kwargs["show_execution_results"] is False
-        assert call_kwargs["show_execution_logs"] is False
         assert call_kwargs["show_panels"] is False
 
     @patch("tsugite.ui.custom_agent_ui")
@@ -483,8 +481,6 @@ class TestHeadlessMode:
         assert call_kwargs["show_code"] is True
         assert call_kwargs["show_observations"] is True
         assert call_kwargs["show_llm_messages"] is True
-        assert call_kwargs["show_execution_results"] is True
-        assert call_kwargs["show_execution_logs"] is True
         # Progress and panels should still be disabled in headless
         assert call_kwargs["show_progress"] is False
         assert call_kwargs["show_panels"] is False

@@ -7,7 +7,6 @@ from tsugite.events import (
     BaseEvent,
     CodeExecutionEvent,
     ErrorEvent,
-    ExecutionResultEvent,
     FileReadEvent,
     FinalAnswerEvent,
     InfoEvent,
@@ -18,7 +17,6 @@ from tsugite.events import (
     SkillUnloadedEvent,
     StepStartEvent,
     TaskStartEvent,
-    ToolCallEvent,
 )
 
 
@@ -37,9 +35,7 @@ class JSONLUIHandler:
     - StepStartEvent      → {"type": "turn_start", "turn": int}
     - LLMMessageEvent     → {"type": "thought", "content": str}
     - CodeExecutionEvent  → {"type": "code", "content": str}
-    - ToolCallEvent       → {"type": "tool_call", "tool": str, "args": dict}
     - ObservationEvent    → {"type": "tool_result", "tool": str, "success": bool, "output"?: str, "error"?: str}
-    - ExecutionResultEvent→ {"type": "tool_result", "tool": "code_execution", "success": bool, "output"?: str, "error"?: str}
     - FinalAnswerEvent    → {"type": "final_result", "result": str, "turns": int, "tokens": int, "cost": float}
     - ErrorEvent          → {"type": "error", "error": str, "step": int}
     - FileReadEvent       → {"type": "file_read", "path": str, "line_count": int, "byte_count": int, "operation": str}
@@ -50,8 +46,6 @@ class JSONLUIHandler:
     Success/Failure Patterns:
     - Successful tool: {"type": "tool_result", "tool": "read_file", "success": true, "output": "..."}
     - Failed tool: {"type": "tool_result", "tool": "read_file", "success": false, "error": "..."}
-    - Code execution success: {"type": "tool_result", "tool": "code_execution", "success": true, "output": "logs\\nresult"}
-    - Code execution failure: {"type": "tool_result", "tool": "code_execution", "success": false, "error": "..."}
     """
 
     def handle_event(self, event: BaseEvent) -> None:
@@ -74,9 +68,6 @@ class JSONLUIHandler:
             if event.code:
                 self._emit("code", {"content": event.code})
 
-        elif isinstance(event, ToolCallEvent):
-            self._emit("tool_call", {"tool": event.tool, "args": event.args})
-
         elif isinstance(event, ObservationEvent):
             if event.success:
                 self._emit(
@@ -87,17 +78,6 @@ class JSONLUIHandler:
                     "tool_result",
                     {"tool": event.tool or "unknown", "success": False, "error": event.error or event.observation},
                 )
-
-        elif isinstance(event, ExecutionResultEvent):
-            if event.success:
-                # Combine logs and output for backward compatibility
-                output = event.output or ""
-                if event.logs:
-                    logs_str = "\n".join(event.logs)
-                    output = f"{logs_str}\n{output}" if output else logs_str
-                self._emit("tool_result", {"tool": "code_execution", "success": True, "output": output})
-            else:
-                self._emit("tool_result", {"tool": "code_execution", "success": False, "error": event.error or ""})
 
         elif isinstance(event, FinalAnswerEvent):
             self._emit(

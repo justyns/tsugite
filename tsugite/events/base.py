@@ -13,7 +13,6 @@ class EventType(IntEnum):
     TASK_START = 1
     STEP_START = 2
     CODE_EXECUTION = 3
-    TOOL_CALL = 4
     OBSERVATION = 5
     SKILL_LOADED = 6
     SKILL_UNLOADED = 7
@@ -23,8 +22,6 @@ class EventType(IntEnum):
 
     # LLM events
     LLM_MESSAGE = 11
-    EXECUTION_RESULT = 12
-    EXECUTION_LOGS = 13
     REASONING_CONTENT = 14
     REASONING_TOKENS = 15
 
@@ -34,7 +31,7 @@ class EventType(IntEnum):
     STREAM_COMPLETE = 18
     INFO = 20
 
-    # New progress events
+    # Progress events
     DEBUG_MESSAGE = 21
     WARNING = 22
     STEP_PROGRESS = 23

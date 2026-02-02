@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from tsugite.agent_runner.history_integration import (
-    _extract_tool_calls,
+    _extract_functions_called,
     save_run_to_history,
 )
 
@@ -235,52 +235,52 @@ class TestSaveRunToHistory:
 
 
 class TestExtractToolCalls:
-    """Tests for _extract_tool_calls helper function."""
+    """Tests for _extract_functions_called helper function."""
 
-    def test_extract_tool_calls_with_steps(self):
+    def test_extract_functions_called_with_steps(self):
         """Test extracting tool calls from execution steps."""
         step1 = MagicMock()
         step1.tools_called = ["read_file", "write_file"]
         step2 = MagicMock()
         step2.tools_called = ["web_search"]
 
-        tools = _extract_tool_calls([step1, step2])
+        tools = _extract_functions_called([step1, step2])
 
         # Should return sorted, unique list
         assert tools == ["read_file", "web_search", "write_file"]
 
-    def test_extract_tool_calls_empty_steps(self):
+    def test_extract_functions_called_empty_steps(self):
         """Test with empty step list."""
-        tools = _extract_tool_calls([])
+        tools = _extract_functions_called([])
         assert tools == []
 
-    def test_extract_tool_calls_no_tools(self):
+    def test_extract_functions_called_no_tools(self):
         """Test with steps that have no tools_called attribute."""
         step1 = MagicMock(spec=[])  # No tools_called attribute
         step2 = MagicMock()
         step2.tools_called = []
 
-        tools = _extract_tool_calls([step1, step2])
+        tools = _extract_functions_called([step1, step2])
         assert tools == []
 
-    def test_extract_tool_calls_duplicate_tools(self):
+    def test_extract_functions_called_duplicate_tools(self):
         """Test that duplicate tool names are deduplicated."""
         step1 = MagicMock()
         step1.tools_called = ["read_file", "write_file"]
         step2 = MagicMock()
         step2.tools_called = ["read_file", "web_search"]  # Duplicate "read_file"
 
-        tools = _extract_tool_calls([step1, step2])
+        tools = _extract_functions_called([step1, step2])
 
         # Should only have unique tools
         assert tools == ["read_file", "web_search", "write_file"]
 
-    def test_extract_tool_calls_preserves_order(self):
+    def test_extract_functions_called_preserves_order(self):
         """Test that tools are returned in sorted order."""
         step = MagicMock()
         step.tools_called = ["zebra", "aardvark", "monkey"]
 
-        tools = _extract_tool_calls([step])
+        tools = _extract_functions_called([step])
 
         # Should be alphabetically sorted
         assert tools == ["aardvark", "monkey", "zebra"]

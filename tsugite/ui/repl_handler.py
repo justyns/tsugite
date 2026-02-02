@@ -16,8 +16,6 @@ from tsugite.events import (
     CostSummaryEvent,
     DebugMessageEvent,
     ErrorEvent,
-    ExecutionLogsEvent,
-    ExecutionResultEvent,
     FinalAnswerEvent,
     InfoEvent,
     LLMMessageEvent,
@@ -29,7 +27,6 @@ from tsugite.events import (
     StreamChunkEvent,
     StreamCompleteEvent,
     TaskStartEvent,
-    ToolCallEvent,
     WarningEvent,
 )
 
@@ -86,8 +83,6 @@ class ReplUIHandler:
                 self._handle_step_start(event)
             elif isinstance(event, CodeExecutionEvent):
                 self._handle_code_execution(event)
-            elif isinstance(event, ToolCallEvent):
-                self._handle_tool_call(event)
             elif isinstance(event, ObservationEvent):
                 self._handle_observation(event)
             elif isinstance(event, FinalAnswerEvent):
@@ -96,10 +91,6 @@ class ReplUIHandler:
                 self._handle_error(event)
             elif isinstance(event, LLMMessageEvent):
                 self._handle_llm_message(event)
-            elif isinstance(event, ExecutionResultEvent):
-                self._handle_execution_result(event)
-            elif isinstance(event, ExecutionLogsEvent):
-                self._handle_execution_logs(event)
             elif isinstance(event, ReasoningContentEvent):
                 self._handle_reasoning_content(event)
             elif isinstance(event, ReasoningTokensEvent):
@@ -154,17 +145,6 @@ class ReplUIHandler:
         elif self.compact:
             # Just show a minimal indicator
             pass  # Spinner already shows activity
-
-    def _handle_tool_call(self, event: ToolCallEvent) -> None:
-        """Handle tool call - show compact tool name with running indicator."""
-        if self.compact:
-            import time
-
-            tool_name = event.tool.replace("Tool: ", "").strip() if event.tool else "unknown"
-            # Track start time for this tool
-            self.active_tools[tool_name] = time.time()
-            # Show tool is running
-            self.console.print(f"[dim cyan]🔧 {tool_name} (running...)[/dim cyan]")
 
     def _handle_observation(self, event: ObservationEvent) -> None:
         """Handle observation - show if enabled and update tool progress."""
@@ -253,42 +233,6 @@ class ReplUIHandler:
                 self.current_status = None
 
             self.console.print(Markdown(content))
-
-    def _handle_execution_result(self, event: ExecutionResultEvent) -> None:
-        """Handle execution result."""
-        # Stop status spinner
-        if self.current_status:
-            self.current_status.stop()
-            self.current_status = None
-
-        # Show logs if present
-        if event.logs:
-            logs_text = "\n".join(event.logs)
-            if logs_text.strip():
-                self.console.print(f"[dim]📝 {logs_text}[/dim]")
-
-        # Show output if meaningful
-        if event.output:
-            output_text = event.output.strip()
-            if "__FINAL_ANSWER__:" in output_text:
-                return  # Skip, handled by final answer event
-
-            is_error = self._contains_error(output_text)
-            if is_error:
-                self.console.print(f"[red]📤 {output_text}[/red]")
-            elif output_text and output_text.lower() not in ("none", "null", ""):
-                self.console.print(f"[cyan]📤 {output_text}[/cyan]")
-
-    def _handle_execution_logs(self, event: ExecutionLogsEvent) -> None:
-        """Handle execution logs."""
-        if not event.logs:
-            return
-
-        content = event.logs.strip()
-        if "Execution logs:" in content:
-            logs = content.replace("Execution logs:", "").strip()
-            if logs:
-                self.console.print(f"[dim]📝 {logs}[/dim]")
 
     def _handle_reasoning_content(self, event: ReasoningContentEvent) -> None:
         """Handle reasoning content from models that expose it."""

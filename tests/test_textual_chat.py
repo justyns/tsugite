@@ -5,7 +5,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from tsugite.events import StreamChunkEvent, StreamCompleteEvent, TaskStartEvent, ToolCallEvent
+from tsugite.events import StreamChunkEvent, StreamCompleteEvent, TaskStartEvent
 from tsugite.ui.textual_handler import TextualUIHandler
 from tsugite.ui.widgets import MessageList
 
@@ -42,29 +42,6 @@ class TestTextualUIHandler:
         # Tools should be reset
         assert handler.current_tools == []
         status_callback.assert_called_once_with("Starting task...")
-
-    def test_tool_call_tracking(self):
-        """Test that tool calls are tracked."""
-        tool_callback = Mock()
-        handler = TextualUIHandler(on_tool_call=tool_callback)
-
-        # Handle tool call
-        event = ToolCallEvent(tool="read_file", args={})
-        handler.handle_event(event)
-
-        # Tool should be added
-        assert "read_file" in handler.current_tools
-        tool_callback.assert_called_once_with("read_file")
-
-    def test_multiple_tool_calls(self):
-        """Test that multiple tool calls are all tracked."""
-        handler = TextualUIHandler()
-
-        handler.handle_event(ToolCallEvent(tool="read_file", args={}))
-        handler.handle_event(ToolCallEvent(tool="write_file", args={}))
-        handler.handle_event(ToolCallEvent(tool="web_search", args={}))
-
-        assert handler.current_tools == ["read_file", "write_file", "web_search"]
 
     def test_clear_tools(self):
         """Test clearing tools list."""

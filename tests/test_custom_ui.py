@@ -7,7 +7,6 @@ from rich.console import Console
 
 from tsugite.events import (
     CodeExecutionEvent,
-    ExecutionResultEvent,
     FinalAnswerEvent,
     LLMMessageEvent,
     ObservationEvent,
@@ -216,42 +215,6 @@ class TestCustomUIHandler:
         output = console.file.getvalue()
         # Panels removed, so only content is displayed
         assert "Second step reasoning" in output
-
-    def test_handle_execution_result(self):
-        """Test handling execution result event."""
-        console = Console(file=StringIO())
-        handler = CustomUIHandler(console, show_execution_results=True)
-
-        event = ExecutionResultEvent(logs=["print statement output"], output="Hello World", success=True)
-        handler.handle_event(event)
-
-        output = console.file.getvalue()
-        assert "Hello World" in output or "Output:" in output
-
-    def test_handle_execution_result_filters_none(self):
-        """Test that None outputs are filtered out."""
-        console = Console(file=StringIO())
-        handler = CustomUIHandler(console, show_execution_results=True)
-
-        event = ExecutionResultEvent(output="None", success=True)
-        handler.handle_event(event)
-
-        output = console.file.getvalue()
-        # Should NOT contain "Output: None"
-        assert "Output:" not in output
-        assert "None" not in output
-
-    def test_handle_execution_result_filters_null(self):
-        """Test that null outputs are filtered out."""
-        console = Console(file=StringIO())
-        handler = CustomUIHandler(console, show_execution_results=True)
-
-        event = ExecutionResultEvent(output="null", success=True)
-        handler.handle_event(event)
-
-        output = console.file.getvalue()
-        # Should NOT contain "Output: null"
-        assert "Output:" not in output
 
     def test_progress_context(self):
         """Test progress context manager."""

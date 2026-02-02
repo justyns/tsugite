@@ -10,7 +10,6 @@ from tsugite.events import (
     ObservationEvent,
     StepStartEvent,
     TaskStartEvent,
-    ToolCallEvent,
 )
 from tsugite.ui.jsonl import JSONLUIHandler
 
@@ -74,22 +73,6 @@ def test_jsonl_code_execution(capsys):
     event = json.loads(lines[0])
     assert event["type"] == "code"
     assert event["content"] == "print('hello')"
-
-
-def test_jsonl_tool_call(capsys):
-    """Test TOOL_CALL event emits tool_call JSONL."""
-    handler = JSONLUIHandler()
-    event = ToolCallEvent(tool="read_file", args={"path": "test.txt"})
-    handler.handle_event(event)
-
-    output = capsys.readouterr().out
-    lines = output.strip().split("\n")
-
-    assert len(lines) == 1
-    event = json.loads(lines[0])
-    assert event["type"] == "tool_call"
-    assert event["tool"] == "read_file"
-    assert event["args"] == {"path": "test.txt"}
 
 
 def test_jsonl_observation_success(capsys):
@@ -167,15 +150,13 @@ def test_jsonl_multiple_events(capsys):
     handler.handle_event(TaskStartEvent(task="test", model="gpt-4"))
     handler.handle_event(StepStartEvent(step=1))
     handler.handle_event(LLMMessageEvent(content="Thinking..."))
-    handler.handle_event(ToolCallEvent(tool="read_file", args={}))
     handler.handle_event(FinalAnswerEvent(answer="Done"))
 
     output = capsys.readouterr().out
     lines = output.strip().split("\n")
 
-    assert len(lines) == 5
+    assert len(lines) == 4
     assert json.loads(lines[0])["type"] == "init"
     assert json.loads(lines[1])["type"] == "turn_start"
     assert json.loads(lines[2])["type"] == "thought"
-    assert json.loads(lines[3])["type"] == "tool_call"
-    assert json.loads(lines[4])["type"] == "final_result"
+    assert json.loads(lines[3])["type"] == "final_result"

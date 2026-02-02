@@ -7,7 +7,6 @@ from tsugite.events import (
     ErrorEvent,
     EventBus,
     EventType,
-    ExecutionResultEvent,
     ObservationEvent,
     TaskStartEvent,
 )
@@ -16,26 +15,6 @@ from tsugite.ui.jsonl import JSONLUIHandler
 
 class TestEventStructure:
     """Test event creation with structured data."""
-
-    def test_execution_result_with_logs_and_output(self):
-        """Test ExecutionResultEvent with structured logs and output."""
-        event = ExecutionResultEvent(
-            logs=["print statement 1", "print statement 2"], output="Final result", success=True
-        )
-
-        assert event.logs == ["print statement 1", "print statement 2"]
-        assert event.output == "Final result"
-        assert event.success is True
-        assert event.error is None
-
-    def test_execution_result_with_error(self):
-        """Test ExecutionResultEvent with error."""
-        event = ExecutionResultEvent(success=False, error="Division by zero")
-
-        assert event.success is False
-        assert event.error == "Division by zero"
-        assert event.logs == []
-        assert event.output is None
 
     def test_observation_success(self):
         """Test ObservationEvent for successful tool execution."""
@@ -130,39 +109,6 @@ class TestEventBus:
 class TestJSONLSerialization:
     """Test JSONL handler with new event structures."""
 
-    def test_jsonl_execution_result_success(self, capsys):
-        """Test JSONL serialization of successful ExecutionResultEvent."""
-        handler = JSONLUIHandler()
-
-        event = ExecutionResultEvent(logs=["Log line 1", "Log line 2"], output="Final output", success=True)
-
-        handler.handle_event(event)
-
-        captured = capsys.readouterr()
-        data = json.loads(captured.out.strip())
-
-        assert data["type"] == "tool_result"
-        assert data["tool"] == "code_execution"
-        assert data["success"] is True
-        assert "Log line 1" in data["output"]
-        assert "Final output" in data["output"]
-
-    def test_jsonl_execution_result_failure(self, capsys):
-        """Test JSONL serialization of failed ExecutionResultEvent."""
-        handler = JSONLUIHandler()
-
-        event = ExecutionResultEvent(success=False, error="Execution error")
-
-        handler.handle_event(event)
-
-        captured = capsys.readouterr()
-        data = json.loads(captured.out.strip())
-
-        assert data["type"] == "tool_result"
-        assert data["tool"] == "code_execution"
-        assert data["success"] is False
-        assert data["error"] == "Execution error"
-
     def test_jsonl_observation_success(self, capsys):
         """Test JSONL serialization of successful ObservationEvent."""
         handler = JSONLUIHandler()
@@ -222,14 +168,6 @@ class TestErrorConsolidation:
         assert event.error == "File not found: test.txt"
         assert event.tool == "read_file"
         assert event.event_type == EventType.OBSERVATION
-
-    def test_execution_error_uses_execution_result_event(self):
-        """Execution errors should use ExecutionResultEvent with success=False."""
-        event = ExecutionResultEvent(success=False, error="ZeroDivisionError: division by zero")
-
-        assert event.success is False
-        assert event.error == "ZeroDivisionError: division by zero"
-        assert event.event_type == EventType.EXECUTION_RESULT
 
     def test_general_error_uses_error_event(self):
         """General/fatal errors should use ErrorEvent."""
