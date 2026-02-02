@@ -1,10 +1,8 @@
 """Initialization command for first-time setup."""
 
 import logging
-import shutil
 import subprocess
 from contextlib import contextmanager
-from pathlib import Path
 from typing import List, Optional
 
 import typer
@@ -248,23 +246,6 @@ def prompt_for_model(providers: dict[str, int], skip_prompt: bool = False, defau
             return selected_model
 
 
-def copy_template_agent(config_dir: Path) -> Path:
-    """Copy template assistant agent to config directory."""
-    agents_dir = config_dir / "agents"
-    agents_dir.mkdir(parents=True, exist_ok=True)
-
-    template_path = Path(__file__).parent.parent / "templates" / "assistant.md"
-    destination = agents_dir / "assistant.md"
-
-    if not destination.exists():
-        shutil.copy(template_path, destination)
-        console.print(f"[green]✓[/green] Created default agent: {destination}")
-    else:
-        console.print(f"[dim]Agent already exists: {destination}[/dim]")
-
-    return destination
-
-
 def test_setup(model: str, skip_test: bool = False) -> bool:
     """Run a quick test to verify setup works."""
     if skip_test:
@@ -280,18 +261,14 @@ def test_setup(model: str, skip_test: bool = False) -> bool:
 
         from rich.console import Console as RichConsole
 
+        # Use the builtin default agent
+        from tsugite.agent_inheritance import resolve_agent_path
         from tsugite.agent_runner import run_agent
         from tsugite.ui import custom_agent_ui
 
-        # Find the assistant agent
-        config_dir = get_config_path().parent
-        agent_path = config_dir / "agents" / "assistant.md"
+        agent_path = resolve_agent_path("default")
 
-        if not agent_path.exists():
-            console.print("[yellow]Warning: Assistant agent not found, skipping test[/yellow]")
-            return False
-
-        console.print("[dim]Running: tsugite run +assistant 'say hello'[/dim]")
+        console.print("[dim]Running: tsugite run +default 'say hello'[/dim]")
 
         # Create a quiet logger that doesn't output anything
         quiet_console = RichConsole(file=StringIO())
@@ -373,21 +350,16 @@ def init(
     console.print(f"[green]✓[/green] Configuration saved to: [dim]{config_path}[/dim]")
     console.print(f"[green]✓[/green] Default model: [cyan]{selected_model}[/cyan]")
 
-    # Copy template agent
-    console.print("\n[bold cyan]Setting Up Default Agent[/bold cyan]")
-    config_dir = config_path.parent
-    agent_path = copy_template_agent(config_dir)
-
     # Show next steps
     console.print("\n" + "=" * 60)
     console.print("[bold green]Setup Complete![/bold green]")
     console.print("=" * 60)
 
     console.print("\n[bold]Next Steps:[/bold]")
-    console.print("  1. Run the assistant: [cyan]tsugite run +assistant 'your task'[/cyan]")
+    console.print("  1. Run the default agent: [cyan]tsugite run +default 'your task'[/cyan]")
     console.print("  2. View configuration: [cyan]tsugite config show[/cyan]")
-    console.print("  3. Explore examples: [cyan]tsugite agents list[/cyan]")
-    console.print(f"  4. Customize your agent: [cyan]{agent_path}[/cyan]")
+    console.print("  3. Explore agents: [cyan]tsugite agents list[/cyan]")
+    console.print("  4. Create a workspace: [cyan]tsugite workspace init my-workspace[/cyan]")
 
     console.print("\n[bold]Documentation:[/bold]")
     console.print("  • Quick start: See README.md")

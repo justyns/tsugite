@@ -171,14 +171,37 @@ Thumbs.db
 """
         (path / ".gitignore").write_text(gitignore_content)
 
+        # Copy AGENTS.md template (operating instructions)
+        templates_dir = Path(__file__).parent.parent / "templates"
+        agents_template = templates_dir / "AGENTS.md"
+        if agents_template.exists():
+            import shutil
+
+            shutil.copy(agents_template, path / "AGENTS.md")
+
+        # Copy USER.md template (user profile)
+        user_template = templates_dir / "USER.md"
+        if user_template.exists():
+            user_content = user_template.read_text()
+            if user_name:
+                user_content = user_content.replace("- **Name:**", f"- **Name:** {user_name}")
+            (path / "USER.md").write_text(user_content)
+
+        # Copy MEMORY.md template (long-term memory)
+        memory_template = templates_dir / "MEMORY.md"
+        if memory_template.exists():
+            shutil.copy(memory_template, path / "MEMORY.md")
+
+        # Copy IDENTITY.md template (agent identity)
+        identity_template = templates_dir / "IDENTITY.md"
+        if identity_template.exists():
+            shutil.copy(identity_template, path / "IDENTITY.md")
+
         if persona_template:
             from .templates import load_persona_template
 
             persona_content = load_persona_template(persona_template, user_name=user_name)
             (path / "PERSONA.md").write_text(persona_content)
-
-        if user_name:
-            (path / "USER.md").write_text(f"# {user_name}\n\n")
 
         # Initialize git repository if requested
         if init_git:
