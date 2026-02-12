@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tsugite Chat</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  [data-theme="latte"] {
+    --ctp-base: #eff1f5; --ctp-mantle: #e6e9ef; --ctp-crust: #dce0e8;
+    --ctp-surface0: #ccd0da; --ctp-surface1: #bcc0cc; --ctp-surface2: #acb0be;
+    --ctp-overlay0: #9ca0b0; --ctp-overlay1: #8c8fa1; --ctp-overlay2: #7c7f93;
+    --ctp-text: #4c4f69; --ctp-subtext0: #6c6f85; --ctp-subtext1: #5c5f77;
+    --ctp-blue: #1e66f5; --ctp-lavender: #7287fd; --ctp-sapphire: #209fb5;
+    --ctp-green: #40a02b; --ctp-red: #d20f39; --ctp-peach: #fe640b;
+    --ctp-yellow: #df8e1d; --ctp-mauve: #8839ef; --ctp-pink: #ea76cb;
+    --ctp-flamingo: #dd7878; --ctp-rosewater: #dc8a78;
+  }
+  [data-theme="frappe"] {
+    --ctp-base: #303446; --ctp-mantle: #292c3c; --ctp-crust: #232634;
+    --ctp-surface0: #414559; --ctp-surface1: #51576d; --ctp-surface2: #626880;
+    --ctp-overlay0: #737994; --ctp-overlay1: #838ba7; --ctp-overlay2: #949cbb;
+    --ctp-text: #c6d0f5; --ctp-subtext0: #a5adce; --ctp-subtext1: #b5bfe2;
+    --ctp-blue: #8caaee; --ctp-lavender: #babbf1; --ctp-sapphire: #85c1dc;
+    --ctp-green: #a6d189; --ctp-red: #e78284; --ctp-peach: #ef9f76;
+    --ctp-yellow: #e5c890; --ctp-mauve: #ca9ee6; --ctp-pink: #f4b8e4;
+    --ctp-flamingo: #eebebe; --ctp-rosewater: #f2d5cf;
+  }
+  [data-theme="macchiato"] {
+    --ctp-base: #24273a; --ctp-mantle: #1e2030; --ctp-crust: #181926;
+    --ctp-surface0: #363a4f; --ctp-surface1: #494d64; --ctp-surface2: #5b6078;
+    --ctp-overlay0: #6e738d; --ctp-overlay1: #8087a2; --ctp-overlay2: #939ab7;
+    --ctp-text: #cad3f5; --ctp-subtext0: #a5adcb; --ctp-subtext1: #b8c0e0;
+    --ctp-blue: #8aadf4; --ctp-lavender: #b7bdf8; --ctp-sapphire: #7dc4e4;
+    --ctp-green: #a6da95; --ctp-red: #ed8796; --ctp-peach: #f5a97f;
+    --ctp-yellow: #eed49f; --ctp-mauve: #c6a0f6; --ctp-pink: #f5bde6;
+    --ctp-flamingo: #f0c6c6; --ctp-rosewater: #f4dbd6;
+  }
+  [data-theme="mocha"] {
+    --ctp-base: #1e1e2e; --ctp-mantle: #181825; --ctp-crust: #11111b;
+    --ctp-surface0: #313244; --ctp-surface1: #45475a; --ctp-surface2: #585b70;
+    --ctp-overlay0: #6c7086; --ctp-overlay1: #7f849c; --ctp-overlay2: #9399b2;
+    --ctp-text: #cdd6f4; --ctp-subtext0: #a6adc8; --ctp-subtext1: #bac2de;
+    --ctp-blue: #89b4fa; --ctp-lavender: #b4befe; --ctp-sapphire: #74c7ec;
+    --ctp-green: #a6e3a1; --ctp-red: #f38ba8; --ctp-peach: #fab387;
+    --ctp-yellow: #f9e2af; --ctp-mauve: #cba6f7; --ctp-pink: #f5c2e7;
+    --ctp-flamingo: #f2cdcd; --ctp-rosewater: #f5e0dc;
+  }
+
+  [data-theme] {
+    --bg: var(--ctp-base); --surface: var(--ctp-mantle); --border: var(--ctp-surface1);
+    --text: var(--ctp-text); --muted: var(--ctp-overlay1); --accent: var(--ctp-blue);
+    --user-bg: var(--ctp-surface0); --agent-bg: var(--ctp-mantle); --error: var(--ctp-red);
+    --code-bg: var(--ctp-crust); --ok: var(--ctp-green); --btn-text: var(--ctp-crust);
+  }
+  body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; }
+  header { display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: var(--surface); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  header h1 { font-size: 16px; font-weight: 600; }
+  #agent-select, #session-select { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 14px; }
+  .spacer { flex: 1; }
+  #settings-btn { background: none; border: 1px solid var(--border); color: var(--muted); border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 13px; }
+  #settings-btn:hover { color: var(--text); border-color: var(--text); }
+
+  #messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  .msg { max-width: 80%; padding: 10px 14px; border-radius: 10px; font-size: 14px; line-height: 1.6; word-wrap: break-word; }
+  .msg h1, .msg h2, .msg h3, .msg h4 { margin: 12px 0 6px; font-size: 15px; }
+  .msg h1 { font-size: 18px; } .msg h2 { font-size: 16px; }
+  .msg p { margin: 6px 0; }
+  .msg ul, .msg ol { margin: 6px 0; padding-left: 20px; }
+  .msg blockquote { border-left: 3px solid var(--border); padding-left: 10px; color: var(--muted); margin: 6px 0; }
+  .msg hr { border: none; border-top: 1px solid var(--border); margin: 10px 0; }
+  .msg a { color: var(--accent); text-decoration: none; }
+  .msg a:hover { text-decoration: underline; }
+  .msg.user { background: var(--user-bg); align-self: flex-end; border-bottom-right-radius: 2px; }
+  .msg.agent { background: var(--agent-bg); align-self: flex-start; border-bottom-left-radius: 2px; }
+  .msg.error { background: transparent; border: 1px solid var(--error); color: var(--error); align-self: center; font-size: 13px; }
+  .msg.progress { background: transparent; color: var(--muted); align-self: flex-start; font-size: 13px; padding: 4px 14px; }
+  .msg code { background: var(--code-bg); padding: 2px 5px; border-radius: 3px; font-size: 13px; }
+  .msg pre { background: var(--code-bg); padding: 10px; border-radius: 6px; overflow-x: auto; margin: 6px 0; }
+  .msg pre code { background: none; padding: 0; }
+
+  .tool-steps { list-style: none; font-size: 12px; color: var(--muted); margin: 0; padding: 0; }
+  .tool-steps li { padding: 1px 0; }
+  .tool-steps .ok { color: var(--ok); }
+  .tool-steps .err { color: var(--error); }
+  .tool-steps details { margin: 2px 0; }
+  .tool-steps summary { cursor: pointer; }
+  .tool-steps pre { font-size: 11px; max-height: 150px; overflow: auto; margin: 4px 0; }
+  .tool-summary { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--muted); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: middle; margin-right: 6px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .history-sep { text-align: center; color: var(--muted); font-size: 12px; padding: 8px; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
+  .history-sep .msg { text-align: left; }
+
+  #status-bar { padding: 4px 16px; background: var(--surface); border-top: 1px solid var(--border); display: flex; gap: 16px; align-items: center; font-size: 12px; color: var(--muted); flex-shrink: 0; }
+  #status-bar:empty { display: none; }
+  #status-bar span { white-space: nowrap; }
+  #status-bar .status-label { color: var(--overlay2, var(--muted)); }
+
+  #input-area { padding: 12px 16px; background: var(--surface); border-top: 1px solid var(--border); display: flex; gap: 10px; flex-shrink: 0; }
+  #message-input { flex: 1; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; font-size: 14px; font-family: inherit; resize: none; min-height: 42px; max-height: 150px; }
+  #message-input:focus { outline: none; border-color: var(--accent); }
+  #send-btn { background: var(--accent); color: var(--btn-text); border: none; border-radius: 8px; padding: 10px 20px; font-size: 14px; font-weight: 600; cursor: pointer; align-self: flex-end; }
+  #send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  #send-btn:hover:not(:disabled) { filter: brightness(1.1); }
+
+  .compaction-body { max-width: 100%; font-size: 12px; }
+
+  #settings-modal { display: none; position: fixed; inset: 0; background: var(--overlay-backdrop, rgba(0,0,0,0.6)); z-index: 10; align-items: center; justify-content: center; }
+  #settings-modal.open { display: flex; }
+  .modal-content { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; width: 90%; max-width: 400px; }
+  .modal-content h2 { font-size: 16px; margin-bottom: 16px; }
+  .modal-content label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+  .modal-content input, .modal-content select { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-size: 14px; margin-bottom: 16px; }
+  .modal-content input:focus, .modal-content select:focus { outline: none; border-color: var(--accent); }
+  .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+  .modal-actions button { padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer; font-size: 13px; }
+  .btn-save { background: var(--accent); color: var(--btn-text); font-weight: 600; }
+  .btn-cancel { background: var(--border); color: var(--text); }
+
+  #attachments-modal { display: none; position: fixed; inset: 0; background: var(--overlay-backdrop, rgba(0,0,0,0.6)); z-index: 10; align-items: center; justify-content: center; }
+  #attachments-modal.open { display: flex; }
+  #attachments-modal .modal-content { max-width: 700px; max-height: 80vh; overflow-y: auto; }
+  .att-item { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 12px; overflow: hidden; }
+  .att-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: var(--bg); cursor: pointer; font-size: 13px; }
+  .att-header .att-name { font-weight: 600; }
+  .att-header .att-type { color: var(--muted); font-size: 12px; }
+  .att-body { padding: 10px 12px; font-size: 12px; display: none; }
+  .att-item.open .att-body { display: block; }
+  .att-body pre { background: var(--code-bg); padding: 10px; border-radius: 6px; overflow-x: auto; white-space: pre-wrap; word-break: break-word; max-height: 300px; overflow-y: auto; font-size: 11px; }
+  #status-bar .att-link { cursor: pointer; text-decoration: underline; text-decoration-style: dotted; }
+  #status-bar .att-link:hover { color: var(--text); }
+</style>
+</head>
+<body data-theme="frappe">
+
+<header>
+  <h1>Tsugite Web Chat</h1>
+  <select id="agent-select"><option value="">Loading...</option></select>
+  <select id="session-select"><option value="">No sessions</option></select>
+  <span class="spacer"></span>
+  <button id="settings-btn">Settings</button>
+</header>
+
+<div id="messages"></div>
+
+<div id="status-bar"></div>
+
+<div id="input-area">
+  <textarea id="message-input" rows="1" placeholder="Send a message..." autofocus></textarea>
+  <button id="send-btn">Send</button>
+</div>
+
+<div id="settings-modal">
+  <div class="modal-content">
+    <h2>Settings</h2>
+    <label for="token-input">API Token</label>
+    <input id="token-input" type="password" placeholder="Bearer token (leave empty if no auth)">
+    <label for="userid-input">User ID</label>
+    <input id="userid-input" type="text" placeholder="web-user-1">
+    <label for="theme-select">Theme</label>
+    <select id="theme-select">
+      <option value="latte">Latte</option>
+      <option value="frappe" selected>Frappé</option>
+      <option value="macchiato">Macchiato</option>
+      <option value="mocha">Mocha</option>
+    </select>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeSettings()">Cancel</button>
+      <button class="btn-save" onclick="saveSettings()">Save</button>
+    </div>
+  </div>
+</div>
+
+<div id="attachments-modal">
+  <div class="modal-content">
+    <h2>Attachments</h2>
+    <div id="attachments-list"></div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeAttachments()">Close</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const messagesEl = document.getElementById('messages');
+const input = document.getElementById('message-input');
+const sendBtn = document.getElementById('send-btn');
+const agentSelect = document.getElementById('agent-select');
+const sessionSelect = document.getElementById('session-select');
+const settingsBtn = document.getElementById('settings-btn');
+const settingsModal = document.getElementById('settings-modal');
+const tokenInput = document.getElementById('token-input');
+const userIdInput = document.getElementById('userid-input');
+const themeSelect = document.getElementById('theme-select');
+
+let sending = false;
+const statusBar = document.getElementById('status-bar');
+
+function updateStatusBar(info) {
+  const parts = [];
+  if (info.model) parts.push(`<span class="status-label">Model:</span> <span>${escapeHtml(info.model)}</span>`);
+  if (info.tokens != null && info.context_limit) {
+    const tk = (info.tokens / 1000).toFixed(1);
+    const lk = (info.context_limit / 1000).toFixed(0);
+    const pct = ((info.tokens / info.context_limit) * 100).toFixed(0);
+    parts.push(`<span class="status-label">Context:</span> <span>${tk}k / ${lk}k (${pct}%)</span>`);
+  }
+  if (info.message_count != null) parts.push(`<span class="status-label">Messages:</span> <span>${info.message_count}</span>`);
+  if (info.attachments && info.attachments.length) {
+    const count = info.attachments.length;
+    parts.push(`<span class="status-label">Attachments:</span> <span class="att-link" onclick="openAttachments()">${count} file${count > 1 ? 's' : ''}</span>`);
+  }
+  statusBar.innerHTML = parts.join('<span style="opacity:0.3">|</span>');
+}
+
+function getToken() { return localStorage.getItem('tsugite_token') || ''; }
+function getDefaultUserId() { return localStorage.getItem('tsugite_user_id') || 'web-user-1'; }
+function getUserId() { return sessionSelect.value || getDefaultUserId(); }
+
+// Theme (live preview, reverted on cancel)
+const savedTheme = localStorage.getItem('tsugite_theme') || 'frappe';
+document.body.dataset.theme = savedTheme;
+themeSelect.value = savedTheme;
+let themeBeforeOpen = savedTheme;
+themeSelect.addEventListener('change', () => {
+  document.body.dataset.theme = themeSelect.value;
+});
+
+function authHeaders() {
+  const t = getToken();
+  return t ? { 'Authorization': `Bearer ${t}` } : {};
+}
+
+function openSettings() {
+  themeBeforeOpen = document.body.dataset.theme;
+  tokenInput.value = getToken();
+  userIdInput.value = getUserId();
+  themeSelect.value = document.body.dataset.theme;
+  settingsModal.classList.add('open');
+}
+function closeSettings() {
+  document.body.dataset.theme = themeBeforeOpen;
+  themeSelect.value = themeBeforeOpen;
+  settingsModal.classList.remove('open');
+}
+function saveSettings() {
+  const t = tokenInput.value.trim();
+  if (t) localStorage.setItem('tsugite_token', t);
+  else localStorage.removeItem('tsugite_token');
+  const u = userIdInput.value.trim() || 'web-user-1';
+  localStorage.setItem('tsugite_user_id', u);
+  themeBeforeOpen = themeSelect.value;
+  localStorage.setItem('tsugite_theme', themeSelect.value);
+  document.body.dataset.theme = themeSelect.value;
+  closeSettings();
+  loadAgents();
+}
+settingsBtn.onclick = openSettings;
+settingsModal.onclick = e => { if (e.target === settingsModal) closeSettings(); };
+
+function scrollToBottom() {
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function addMessage(text, cls) {
+  const div = document.createElement('div');
+  div.className = `msg ${cls}`;
+  div.innerHTML = renderMarkdown(text);
+  messagesEl.appendChild(div);
+  scrollToBottom();
+  return div;
+}
+
+function escapeHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function renderMarkdown(text) {
+  // Extract fenced code blocks first, replace with placeholders
+  const codeBlocks = [];
+  text = text.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
+    codeBlocks.push(`<pre><code>${escapeHtml(code.trimEnd())}</code></pre>`);
+    return `\x00CB${codeBlocks.length - 1}\x00`;
+  });
+
+  // Escape HTML in the remaining text
+  text = escapeHtml(text);
+
+  // Inline code (on escaped text, so content is already safe)
+  text = text.replace(/`([^`]+)`/g, '<code>$1</code>');
+
+  // Bold and italic
+  text = text.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+  text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  text = text.replace(/\*(.+?)\*/g, '<em>$1</em>');
+
+  // Headers (must be at line start)
+  text = text.replace(/^#### (.+)$/gm, '<h4>$1</h4>');
+  text = text.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+  text = text.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+  text = text.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+
+  // Horizontal rules
+  text = text.replace(/^(?:---|\*\*\*|___)\s*$/gm, '<hr>');
+
+  // Links [text](url) - url is already escaped, unescape &amp; back for href
+  text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, label, url) =>
+    `<a href="${url.replace(/&amp;/g, '&')}" target="_blank" rel="noopener">${label}</a>`
+  );
+
+  // Blockquotes (consecutive > lines grouped)
+  text = text.replace(/^(?:&gt; .+\n?)+/gm, match => {
+    const inner = match.replace(/^&gt; /gm, '').trim();
+    return `<blockquote>${inner}</blockquote>`;
+  });
+
+  // Unordered lists (consecutive - or * lines)
+  text = text.replace(/^(?:[-*] .+\n?)+/gm, match => {
+    const items = match.trim().split('\n').map(l => `<li>${l.replace(/^[-*] /, '')}</li>`).join('');
+    return `<ul>${items}</ul>`;
+  });
+
+  // Ordered lists (consecutive 1. 2. lines)
+  text = text.replace(/^(?:\d+\. .+\n?)+/gm, match => {
+    const items = match.trim().split('\n').map(l => `<li>${l.replace(/^\d+\. /, '')}</li>`).join('');
+    return `<ol>${items}</ol>`;
+  });
+
+  // Paragraphs: split by double newlines, wrap bare text in <p>
+  text = text.split(/\n{2,}/).map(block => {
+    block = block.trim();
+    if (!block) return '';
+    if (/^<(h[1-4]|p|ul|ol|pre|blockquote|hr|div)/.test(block)) return block;
+    return `<p>${block.replace(/\n/g, '<br>')}</p>`;
+  }).join('\n');
+
+  // Restore code blocks
+  text = text.replace(/\x00CB(\d+)\x00/g, (_, i) => codeBlocks[i]);
+
+  return text;
+}
+
+// --- History loading ---
+
+async function loadHistory() {
+  const agent = agentSelect.value;
+  if (!agent) return;
+  try {
+    const resp = await fetch(`/api/agents/${agent}/history?user_id=${encodeURIComponent(getUserId())}`, { headers: authHeaders() });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    if (!data.turns || data.turns.length === 0) return;
+
+    let msgCount = 0;
+    for (const turn of data.turns) {
+      if (turn.type === 'compaction') {
+        const marker = document.createElement('div');
+        marker.className = 'history-sep';
+        if (turn.summary) {
+          const details = document.createElement('details');
+          const summary = document.createElement('summary');
+          summary.textContent = 'session compacted';
+          details.appendChild(summary);
+          const body = document.createElement('div');
+          body.className = 'msg agent compaction-body';
+          body.innerHTML = renderMarkdown(turn.summary);
+          details.appendChild(body);
+          marker.appendChild(details);
+        } else {
+          marker.textContent = 'session compacted';
+        }
+        messagesEl.appendChild(marker);
+        continue;
+      }
+      if (turn.user) addMessage(turn.user, 'user');
+      if (turn.assistant) addMessage(turn.assistant, 'agent');
+      msgCount++;
+    }
+
+    const sep = document.createElement('div');
+    sep.className = 'history-sep';
+    sep.textContent = `${msgCount} earlier turn${msgCount !== 1 ? 's' : ''} restored`;
+    messagesEl.appendChild(sep);
+  } catch { /* ignore history load errors */ }
+}
+
+async function loadSessions() {
+  const agent = agentSelect.value;
+  if (!agent) return;
+  try {
+    const resp = await fetch(`/api/agents/${agent}/sessions`, { headers: authHeaders() });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    sessionSelect.innerHTML = '';
+    const defaultId = getDefaultUserId();
+    let hasDefault = false;
+    for (const s of data.sessions) {
+      const opt = document.createElement('option');
+      opt.value = s.user_id;
+      opt.textContent = s.label;
+      sessionSelect.appendChild(opt);
+      if (s.user_id === defaultId) hasDefault = true;
+    }
+    // Add an option for the default user ID if no session exists yet
+    if (!hasDefault) {
+      const opt = document.createElement('option');
+      opt.value = defaultId;
+      opt.textContent = `Web: ${defaultId} (new)`;
+      sessionSelect.prepend(opt);
+    }
+    sessionSelect.value = defaultId;
+  } catch { /* ignore */ }
+}
+
+function refreshSession() {
+  loadHistory();
+  loadStatus();
+}
+
+sessionSelect.addEventListener('change', () => {
+  messagesEl.innerHTML = '';
+  refreshSession();
+});
+
+agentSelect.addEventListener('change', () => {
+  messagesEl.innerHTML = '';
+  statusBar.innerHTML = '';
+  loadSessions().then(refreshSession);
+});
+
+// --- Status + Attachments ---
+
+async function loadStatus() {
+  const agent = agentSelect.value;
+  if (!agent) return;
+  try {
+    const resp = await fetch(`/api/agents/${agent}/status?user_id=${encodeURIComponent(getUserId())}`, { headers: authHeaders() });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    updateStatusBar(data);
+  } catch { /* ignore */ }
+}
+
+const attachmentsModal = document.getElementById('attachments-modal');
+const attachmentsList = document.getElementById('attachments-list');
+
+async function openAttachments() {
+  const agent = agentSelect.value;
+  if (!agent) return;
+  attachmentsList.innerHTML = '<p style="color:var(--muted);font-size:13px">Loading...</p>';
+  attachmentsModal.classList.add('open');
+  try {
+    const resp = await fetch(`/api/agents/${agent}/attachments`, { headers: authHeaders() });
+    if (!resp.ok) { attachmentsList.innerHTML = '<p style="color:var(--error)">Failed to load</p>'; return; }
+    const data = await resp.json();
+    if (!data.attachments.length) { attachmentsList.innerHTML = '<p style="color:var(--muted);font-size:13px">No attachments</p>'; return; }
+    attachmentsList.innerHTML = '';
+    for (const att of data.attachments) {
+      const item = document.createElement('div');
+      item.className = 'att-item';
+      const header = document.createElement('div');
+      header.className = 'att-header';
+      header.innerHTML = `<span class="att-name">${escapeHtml(att.name)}</span><span class="att-type">${escapeHtml(att.content_type)} · ${escapeHtml(att.mime_type)}</span>`;
+      header.onclick = () => item.classList.toggle('open');
+      item.appendChild(header);
+      const body = document.createElement('div');
+      body.className = 'att-body';
+      if (att.content != null) {
+        const pre = document.createElement('pre');
+        pre.textContent = att.content;
+        body.appendChild(pre);
+      } else {
+        body.innerHTML = `<span style="color:var(--muted)">${att.size_bytes != null ? att.size_bytes + ' bytes (binary)' : 'No content preview'}</span>`;
+      }
+      item.appendChild(body);
+      attachmentsList.appendChild(item);
+    }
+  } catch {
+    attachmentsList.innerHTML = '<p style="color:var(--error)">Connection error</p>';
+  }
+}
+
+function closeAttachments() { attachmentsModal.classList.remove('open'); }
+attachmentsModal.onclick = e => { if (e.target === attachmentsModal) closeAttachments(); };
+
+// --- Agent loading ---
+
+async function loadAgents() {
+  try {
+    const resp = await fetch('/api/agents', { headers: authHeaders() });
+    if (!resp.ok) {
+      agentSelect.innerHTML = '<option value="">Auth required</option>';
+      return;
+    }
+    const data = await resp.json();
+    agentSelect.innerHTML = '';
+    for (const a of data.agents) {
+      const opt = document.createElement('option');
+      opt.value = a.name;
+      opt.textContent = a.name;
+      agentSelect.appendChild(opt);
+    }
+    await loadSessions();
+    refreshSession();
+  } catch {
+    agentSelect.innerHTML = '<option value="">Connection error</option>';
+  }
+}
+
+// --- Progress tracking during SSE ---
+
+class ProgressTracker {
+  constructor() {
+    this.el = null;       // the progress msg div
+    this.list = null;     // ul for tool steps
+    this.turnCount = 0;
+    this.toolCount = 0;
+  }
+
+  ensure() {
+    if (!this.el) {
+      this.el = document.createElement('div');
+      this.el.className = 'msg progress';
+      this.el.innerHTML = '<span class="spinner"></span>';
+      this.statusText = document.createTextNode(' Working...');
+      this.el.appendChild(this.statusText);
+      this.list = document.createElement('ul');
+      this.list.className = 'tool-steps';
+      this.el.appendChild(this.list);
+      messagesEl.appendChild(this.el);
+      scrollToBottom();
+    }
+  }
+
+  setStatus(text) {
+    this.ensure();
+    this.statusText.textContent = ' ' + text;
+  }
+
+  addStep(html) {
+    this.ensure();
+    const li = document.createElement('li');
+    li.innerHTML = html;
+    this.list.appendChild(li);
+    scrollToBottom();
+  }
+
+  handleEvent(event) {
+    if (event.type === 'turn_start') {
+      this.turnCount++;
+      this.setStatus(`Turn ${event.turn}...`);
+    } else if (event.type === 'thought') {
+      this.setStatus('Thinking...');
+    } else if (event.type === 'init') {
+      this.setStatus(`Agent: ${event.agent}`);
+      if (event.model) updateStatusBar({ model: event.model });
+    } else if (event.type === 'code') {
+      this.addStep(`<details><summary><code>code</code></summary><pre><code>${escapeHtml(event.content || '')}</code></pre></details>`);
+    } else if (event.type === 'tool_result') {
+      const isCodeResult = event.tool === 'unknown';
+      if (!isCodeResult) this.toolCount++;
+      const cls = event.success ? 'ok' : 'err';
+      const status = event.success ? 'ok' : 'err';
+      const label = isCodeResult ? 'output' : event.tool;
+      const output = event.output || event.error || '';
+      if (output) {
+        this.addStep(`<details><summary><code>${escapeHtml(label)}</code> <span class="${cls}">${status}</span></summary><pre><code>${escapeHtml(output)}</code></pre></details>`);
+      } else {
+        this.addStep(`<code>${escapeHtml(label)}</code> <span class="${cls}">${status}</span>`);
+      }
+    } else if (event.type === 'file_read') {
+      this.addStep(`<code>${escapeHtml(event.path)}</code> read`);
+    } else if (event.type === 'warning') {
+      this.addStep(`<span class="err">${escapeHtml(event.message)}</span>`);
+    } else if (event.type === 'info') {
+      this.addStep(escapeHtml(event.message));
+    }
+  }
+
+  finish() {
+    if (!this.el) return;
+    const steps = this.list ? this.list.children.length : 0;
+    if (steps > 0) {
+      const summary = [];
+      if (this.turnCount) summary.push(`${this.turnCount} turn${this.turnCount > 1 ? 's' : ''}`);
+      if (this.toolCount) summary.push(`${this.toolCount} tool${this.toolCount > 1 ? 's' : ''}`);
+      const details = document.createElement('details');
+      const summaryEl = document.createElement('summary');
+      summaryEl.className = 'tool-summary';
+      summaryEl.textContent = summary.join(', ') || 'trace';
+      details.appendChild(summaryEl);
+      details.appendChild(this.list);
+      this.el.innerHTML = '';
+      this.el.appendChild(details);
+    } else {
+      this.el.remove();
+    }
+  }
+
+  remove() {
+    if (this.el) this.el.remove();
+    this.el = null;
+    this.list = null;
+  }
+}
+
+// --- Send message ---
+
+async function sendMessage() {
+  const msg = input.value.trim();
+  const agent = agentSelect.value;
+  if (!msg || !agent || sending) return;
+
+  sending = true;
+  sendBtn.disabled = true;
+  input.value = '';
+  input.style.height = 'auto';
+
+  addMessage(msg, 'user');
+  const progress = new ProgressTracker();
+  progress.ensure();
+  let agentEl = null;
+
+  try {
+    const resp = await fetch(`/api/agents/${agent}/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ message: msg, user_id: getUserId() }),
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ error: resp.statusText }));
+      progress.remove();
+      addMessage(err.error || 'Request failed', 'error');
+      return;
+    }
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let streamDone = false;
+
+    while (!streamDone) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        let event;
+        try { event = JSON.parse(line.slice(6)); } catch { continue; }
+
+        if (event.type === 'done') {
+          streamDone = true;
+          break;
+        } else if (event.type === 'final_result') {
+          progress.finish();
+          agentEl = addMessage(event.result, 'agent');
+        } else if (event.type === 'session_info') {
+          updateStatusBar(event);
+        } else if (event.type === 'error') {
+          progress.remove();
+          addMessage(event.error, 'error');
+        } else {
+          progress.handleEvent(event);
+        }
+      }
+    }
+
+    reader.cancel().catch(() => {});
+
+    if (!agentEl) {
+      progress.finish();
+    }
+
+  } catch (e) {
+    progress.remove();
+    addMessage(`Connection error: ${e.message}`, 'error');
+  } finally {
+    sending = false;
+    sendBtn.disabled = false;
+    input.focus();
+  }
+}
+
+sendBtn.onclick = sendMessage;
+input.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+});
+input.addEventListener('input', () => {
+  input.style.height = 'auto';
+  input.style.height = Math.min(input.scrollHeight, 150) + 'px';
+});
+
+loadAgents();
+</script>
+</body>
+</html>

@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from tsugite.daemon.adapters.base import BaseAdapter, resolve_agent_path
-from tsugite.daemon.config import DaemonConfig, load_daemon_config
+from tsugite.daemon.config import AgentConfig, DaemonConfig, load_daemon_config
 from tsugite.daemon.session import SessionManager
 
 
@@ -13,18 +13,14 @@ class Gateway:
     """Main daemon gateway routing messages between platform adapters and agents."""
 
     def __init__(self, config: DaemonConfig):
-        """Initialize gateway.
-
-        Args:
-            config: Daemon configuration
-        """
         self.config = config
         self.adapters: List[BaseAdapter] = []
+        self._http_server = None
 
     async def start(self):
         """Start all enabled adapters."""
+        tasks = []
 
-        # Start Discord bots (one adapter per bot)
         if self.config.discord_bots:
             try:
                 from tsugite.daemon.adapters.discord import DiscordAdapter
@@ -39,16 +35,7 @@ class Gateway:
                     raise ValueError(f"Discord bot '{bot_config.name}' references unknown agent '{agent_name}'")
 
                 agent_config = self.config.agents[agent_name]
-
-                # Validate agent file exists at startup
-                from tsugite.workspace import Workspace, WorkspaceNotFoundError
-
-                try:
-                    workspace = Workspace.load(agent_config.workspace_dir)
-                except WorkspaceNotFoundError:
-                    workspace = None
-
-                agent_path = resolve_agent_path(agent_config.agent_file, agent_config.workspace_dir, workspace)
+                agent_path = resolve_agent_path(agent_config.agent_file, agent_config.workspace_dir)
                 if not agent_path:
                     raise ValueError(
                         f"Agent file '{agent_config.agent_file}' not found for bot '{bot_config.name}'. "
@@ -59,21 +46,52 @@ class Gateway:
                 session_manager = SessionManager(
                     agent_name, agent_config.workspace_dir, context_limit=agent_config.context_limit
                 )
-
-                discord_adapter = DiscordAdapter(
-                    bot_config=bot_config,
-                    agent_name=agent_name,
-                    agent_config=agent_config,
-                    session_manager=session_manager,
+                self.adapters.append(
+                    DiscordAdapter(
+                        bot_config=bot_config,
+                        agent_name=agent_name,
+                        agent_config=agent_config,
+                        session_manager=session_manager,
+                    )
                 )
-                self.adapters.append(discord_adapter)
 
-        if not self.adapters:
+        if self.config.http and self.config.http.enabled:
+            try:
+                from tsugite.daemon.adapters.http import HTTPAgentAdapter, HTTPServer
+            except ImportError as e:
+                raise ImportError(
+                    "HTTP support requires starlette and uvicorn. Install with: pip install tsugite-cli[daemon]"
+                ) from e
+
+            http_adapters = {}
+            for agent_name, agent_config in self.config.agents.items():
+                agent_path = resolve_agent_path(agent_config.agent_file, agent_config.workspace_dir)
+                if not agent_path:
+                    print(f"  ⚠ Skipping HTTP agent '{agent_name}': agent file not found")
+                    continue
+                print(f"  ✓ HTTP agent '{agent_name}' using agent: {agent_path}")
+
+                session_manager = SessionManager(
+                    agent_name, agent_config.workspace_dir, context_limit=agent_config.context_limit
+                )
+                http_adapters[agent_name] = HTTPAgentAdapter(agent_name, agent_config, session_manager)
+
+            if http_adapters:
+                self._http_server = HTTPServer(
+                    self.config.http, http_adapters, self.config.webhooks, self.config.agents
+                )
+                tasks.append(self._http_server.start())
+
+        # Collect adapter start tasks
+        tasks.extend(adapter.start() for adapter in self.adapters)
+
+        if not tasks:
             raise ValueError("No adapters enabled in config")
 
-        print(f"Starting {len(self.adapters)} adapter(s)...")
+        adapter_count = len(self.adapters) + (1 if self._http_server else 0)
+        print(f"Starting {adapter_count} adapter(s)...")
         try:
-            await asyncio.gather(*[adapter.start() for adapter in self.adapters])
+            await asyncio.gather(*tasks)
         except KeyboardInterrupt:
             print("\nShutting down...")
         finally:
@@ -87,13 +105,15 @@ class Gateway:
             except Exception as e:
                 print(f"Error stopping adapter: {e}")
 
+        if self._http_server:
+            try:
+                await self._http_server.stop()
+            except Exception as e:
+                print(f"Error stopping HTTP server: {e}")
+
 
 async def run_daemon(config_path: Optional[Path] = None):
-    """Main daemon entry point.
-
-    Args:
-        config_path: Path to daemon config file
-    """
+    """Main daemon entry point."""
     config = load_daemon_config(config_path)
     gateway = Gateway(config)
     await gateway.start()

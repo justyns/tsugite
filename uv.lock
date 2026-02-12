@@ -2759,6 +2759,8 @@ dependencies = [
 daemon = [
     { name = "apscheduler" },
     { name = "discord-py" },
+    { name = "starlette" },
+    { name = "uvicorn" },
 ]
 
 [package.dev-dependencies]
@@ -2792,9 +2794,11 @@ requires-dist = [
     { name = "questionary", specifier = ">=2.1.1" },
     { name = "rich", specifier = ">=13.0" },
     { name = "ruff", specifier = ">=0.13.2" },
+    { name = "starlette", marker = "extra == 'daemon'", specifier = ">=0.36" },
     { name = "textual", specifier = ">=6.2.1" },
     { name = "textual-autocomplete", specifier = ">=4.0.6" },
     { name = "typer", specifier = ">=0.12" },
+    { name = "uvicorn", marker = "extra == 'daemon'", specifier = ">=0.25" },
     { name = "youtube-transcript-api", specifier = ">=0.6.0" },
 ]
 provides-extras = ["daemon"]

@@ -112,6 +112,22 @@ class BaseAdapter(ABC):
         else:
             self.workspace_attachments = []
 
+    def resolve_model(self) -> str:
+        """Resolve the model name from the agent file, returning 'unknown' on failure."""
+        from tsugite.agent_runner.validation import get_agent_info
+
+        agent_path = resolve_agent_path(
+            self.agent_config.agent_file,
+            self.agent_config.workspace_dir,
+            self._workspace,
+        )
+        if not agent_path:
+            return "unknown"
+        try:
+            return get_agent_info(agent_path).get("model", "unknown")
+        except Exception:
+            return "unknown"
+
     @abstractmethod
     async def start(self) -> None:
         """Start the adapter."""
@@ -143,6 +159,16 @@ class BaseAdapter(ABC):
 
         metadata = channel_context.to_dict()
         metadata["daemon_agent"] = self.agent_name
+
+        from tsugite.attachments.base import Attachment, AttachmentContentType
+
+        platform_attachment = Attachment(
+            name="platform_context",
+            content=f"This message was sent from the {channel_context.source} interface.",
+            content_type=AttachmentContentType.TEXT,
+            mime_type="text/plain",
+        )
+        all_attachments = [*self.workspace_attachments, platform_attachment]
 
         agent_path = resolve_agent_path(
             self.agent_config.agent_file,
@@ -176,7 +202,7 @@ class BaseAdapter(ABC):
                     agent_path=agent_path,
                     prompt=message,
                     continue_conversation_id=conv_id,
-                    attachments=self.workspace_attachments,
+                    attachments=all_attachments,
                     exec_options=ExecutionOptions(
                         return_token_usage=True,
                     ),
@@ -215,8 +241,8 @@ class BaseAdapter(ABC):
 
             print(f"Warning: Failed to save daemon history: {e}", file=sys.stderr)
 
-        if hasattr(result, "token_usage") and result.token_usage:
-            self.session_manager.update_token_count(user_id, result.token_usage.total_tokens)
+        if result.token_count:
+            self.session_manager.update_token_count(user_id, result.token_count)
 
         return str(result)
 

@@ -34,13 +34,32 @@ class DiscordBotConfig(BaseModel):
     allow_from: List[str] = Field(default_factory=list)
 
 
+class HTTPConfig(BaseModel):
+    """Configuration for the HTTP API server."""
+
+    enabled: bool = False
+    host: str = "127.0.0.1"
+    port: int = 8374
+    auth_tokens: List[str] = Field(default_factory=list)
+
+
+class WebhookConfig(BaseModel):
+    """Configuration for a webhook inbox entry."""
+
+    token: str
+    agent: str
+    source: str
+
+
 class DaemonConfig(BaseModel):
     """Main daemon configuration."""
 
-    state_dir: Path = Field(default_factory=lambda: _get_default_state_dir())
+    state_dir: Path = Field(default_factory=_get_default_state_dir)
     log_level: str = "info"
     agents: Dict[str, AgentConfig]
     discord_bots: List[DiscordBotConfig] = Field(default_factory=list)
+    http: Optional[HTTPConfig] = None
+    webhooks: List[WebhookConfig] = Field(default_factory=list)
 
 
 def load_daemon_config(path: Optional[Path] = None) -> DaemonConfig:
@@ -70,6 +89,11 @@ def load_daemon_config(path: Optional[Path] = None) -> DaemonConfig:
     for bot in data.get("discord_bots", []):
         if "token" in bot:
             bot["token"] = os.path.expandvars(bot["token"])
+
+    # Expand environment variables in HTTP auth tokens
+    http_data = data.get("http")
+    if http_data and "auth_tokens" in http_data:
+        http_data["auth_tokens"] = [os.path.expandvars(t) for t in http_data["auth_tokens"]]
 
     # Expand workspace_dir paths
     for agent_name, agent_data in data.get("agents", {}).items():
@@ -123,6 +147,19 @@ def save_daemon_config(config: DaemonConfig, path: Optional[Path] = None) -> Pat
             for bot in config.discord_bots
         ],
     }
+
+    if config.http:
+        config_data["http"] = {
+            "enabled": config.http.enabled,
+            "host": config.http.host,
+            "port": config.http.port,
+            "auth_tokens": config.http.auth_tokens,
+        }
+
+    if config.webhooks:
+        config_data["webhooks"] = [
+            {"token": w.token, "agent": w.agent, "source": w.source} for w in config.webhooks
+        ]
 
     with open(path, "w", encoding="utf-8") as f:
         yaml.safe_dump(config_data, f, default_flow_style=False, sort_keys=False)

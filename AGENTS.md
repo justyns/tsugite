@@ -341,3 +341,8 @@ tsu run -f image1.jpg -f image2.jpg "Compare these images"
 4. **Don't hardcode paths**: Use XDG utilities (`get_xdg_config_path()`, etc.)
 5. **Don't use blocking IO in async**: Use `asyncio.to_thread()` for sync tools
 6. **Test both sync and async paths**: Many tools support both execution modes
+
+## Code Review Policy
+
+- **Always run the `code-simplifier` agent** after implementing large changes (3+ files or 50+ lines modified), or when finishing a plan. This catches duplication, unnecessary complexity, and keeps the codebase DRY.
+- When making implementation plans, include a final "simplify/review" step that uses the code-simplifier agent on all modified files.

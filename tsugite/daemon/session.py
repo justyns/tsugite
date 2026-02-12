@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional
 
-from tsugite.history import SessionStorage, generate_session_id, get_history_dir
+from tsugite.history import SessionStorage, Turn, generate_session_id, get_history_dir
 
 
 @dataclass
@@ -79,7 +79,9 @@ class SessionManager:
                 return 0, 0
 
             storage = SessionStorage.load(session_path)
-            return storage.total_tokens, storage.turn_count
+            turns = [r for r in storage.load_records() if isinstance(r, Turn)]
+            last_tokens = turns[-1].tokens if turns and turns[-1].tokens else 0
+            return last_tokens, storage.turn_count
         except Exception:
             return 0, 0
 
@@ -124,7 +126,7 @@ class SessionManager:
             tokens_used: Number of tokens used in this turn
         """
         if user_id in self.sessions:
-            self.sessions[user_id].cumulative_tokens += tokens_used
+            self.sessions[user_id].cumulative_tokens = max(self.sessions[user_id].cumulative_tokens, tokens_used)
             self.sessions[user_id].message_count += 1
 
     def needs_compaction(self, user_id: str) -> bool:

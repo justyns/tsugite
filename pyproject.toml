@@ -33,6 +33,8 @@ dependencies = [
 daemon = [
   "discord.py>=2.3.2",
   "APScheduler>=3.10.4",
+  "starlette>=0.36",
+  "uvicorn>=0.25",
 ]
 
 [project.scripts]
