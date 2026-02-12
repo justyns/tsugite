@@ -1,7 +1,7 @@
 """Daemon management CLI commands."""
 
 from pathlib import Path
-from typing import List, Optional
+from typing import Optional
 
 import typer
 from rich.console import Console
@@ -84,7 +84,7 @@ def _prompt_dm_policy(style) -> str:
     )  # Extract just "allowlist" or "open"
 
 
-def _prompt_allowed_users(style) -> List[str]:
+def _prompt_allowed_users(style) -> list[str]:
     """Prompt for allowed Discord user IDs."""
     import questionary
 
@@ -361,6 +361,75 @@ def init_daemon(
     console.print(f"[green]✓[/green] Configuration saved to: {config_path}")
 
     _show_next_steps(token_env_var, bot_name)
+
+
+def _daemon_request(
+    method: str, host: str, port: int, path: str, token: Optional[str] = None, **kwargs
+):
+    """Make an HTTP request to the daemon, handling connection errors and non-200 responses.
+
+    Returns the parsed JSON response body on success, or exits on failure.
+    """
+    import httpx
+
+    url = f"http://{host}:{port}{path}"
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+
+    try:
+        resp = httpx.request(method, url, headers=headers, timeout=kwargs.pop("timeout", 10), **kwargs)
+    except httpx.ConnectError:
+        console.print(f"[red]Could not connect to daemon at {host}:{port}[/red]")
+        raise typer.Exit(1)
+
+    if resp.status_code != 200:
+        console.print(f"[red]Error ({resp.status_code}):[/red] {resp.json().get('error', resp.text)}")
+        raise typer.Exit(1)
+
+    return resp.json()
+
+
+@daemon_app.command("sessions")
+def list_sessions(
+    agent: str = typer.Argument(help="Agent name"),
+    host: str = typer.Option("127.0.0.1", "--host", help="Daemon HTTP host"),
+    port: int = typer.Option(8321, "--port", "-p", help="Daemon HTTP port"),
+    token: Optional[str] = typer.Option(None, "--token", "-t", help="Auth token"),
+):
+    """List active sessions for a daemon agent."""
+    data = _daemon_request("GET", host, port, f"/api/agents/{agent}/sessions", token)
+
+    sessions = data.get("sessions", [])
+    if not sessions:
+        console.print(f"No sessions for [cyan]{agent}[/cyan]")
+        return
+
+    console.print(f"[bold]Sessions for {agent}:[/bold]\n")
+    for s in sessions:
+        label = s.get("label", s["user_id"])
+        conv_id = s.get("conversation_id", "")
+        created = s.get("created_at", "")
+        console.print(f"  [cyan]{s['user_id']}[/cyan] ({label})")
+        console.print(f"    conversation: {conv_id}")
+        if created:
+            console.print(f"    created: {created}")
+
+
+@daemon_app.command("compact")
+def compact_session(
+    agent: str = typer.Argument(help="Agent name"),
+    user_id: str = typer.Option("web-anonymous", "--user", "-u", help="User ID to compact"),
+    host: str = typer.Option("127.0.0.1", "--host", help="Daemon HTTP host"),
+    port: int = typer.Option(8321, "--port", "-p", help="Daemon HTTP port"),
+    token: Optional[str] = typer.Option(None, "--token", "-t", help="Auth token"),
+):
+    """Force compact a daemon session."""
+    data = _daemon_request(
+        "POST", host, port, f"/api/agents/{agent}/compact", token,
+        json={"user_id": user_id}, timeout=120,
+    )
+    console.print(f"[green]✓[/green] Session compacted for [cyan]{agent}[/cyan] user [cyan]{user_id}[/cyan]")
+    console.print(f"  old: {data['old_conversation_id']}")
+    console.print(f"  new: {data['new_conversation_id']}")
 
 
 @daemon_app.callback(invoke_without_command=True)

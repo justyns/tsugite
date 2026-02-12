@@ -134,6 +134,7 @@ class HTTPServer:
             Route("/api/agents/{agent}/status", self._status, methods=["GET"]),
             Route("/api/agents/{agent}/attachments", self._attachments, methods=["GET"]),
             Route("/api/agents/{agent}/history", self._history, methods=["GET"]),
+            Route("/api/agents/{agent}/compact", self._compact, methods=["POST"]),
             Route("/webhook/{token}", self._webhook, methods=["POST"]),
             Route("/", self._serve_ui, methods=["GET"]),
         ]
@@ -291,6 +292,37 @@ class HTTPServer:
             })
 
         return JSONResponse({"conversation_id": conversation_id, "turns": result_turns})
+
+    async def _compact(self, request: Request) -> JSONResponse:
+        adapter, err = self._get_adapter(request)
+        if err:
+            return err
+
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+
+        user_id = body.get("user_id", "web-anonymous")
+
+        adapter.session_manager.get_or_create_session(user_id)
+        session = adapter.session_manager.sessions.get(user_id)
+
+        if not session or session.message_count == 0:
+            return JSONResponse({"error": "no session to compact"}, status_code=404)
+
+        old_conv_id = session.conversation_id
+        try:
+            await adapter._compact_session(user_id)
+        except Exception as e:
+            return JSONResponse({"error": f"compaction failed: {e}"}, status_code=500)
+
+        new_session = adapter.session_manager.sessions.get(user_id)
+        return JSONResponse({
+            "status": "compacted",
+            "old_conversation_id": old_conv_id,
+            "new_conversation_id": new_session.conversation_id if new_session else None,
+        })
 
     async def _chat(self, request: Request) -> Response:
         adapter, err = self._get_adapter(request)

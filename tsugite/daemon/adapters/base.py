@@ -219,7 +219,6 @@ class BaseAdapter(ABC):
         with concurrent.futures.ThreadPoolExecutor() as executor:
             result = await loop.run_in_executor(executor, run_in_workspace)
 
-        # Save conversation history (daemon was missing this, unlike CLI)
         try:
             from tsugite.agent_runner.history_integration import save_run_to_history
             from tsugite.agent_runner.validation import get_agent_info
@@ -231,18 +230,18 @@ class BaseAdapter(ABC):
                 prompt=message,
                 result=str(result),
                 model=agent_info.get("model", "unknown"),
-                token_count=result.token_count if hasattr(result, "token_count") else None,
-                cost=result.cost if hasattr(result, "cost") else None,
-                execution_steps=result.execution_steps if hasattr(result, "execution_steps") else None,
+                token_count=getattr(result, "token_count", None),
+                cost=getattr(result, "cost", None),
+                execution_steps=getattr(result, "execution_steps", None),
                 continue_conversation_id=conv_id,
-                system_prompt=result.system_message if hasattr(result, "system_message") else None,
-                attachments=result.attachments if hasattr(result, "attachments") else None,
+                system_prompt=getattr(result, "system_message", None),
+                attachments=getattr(result, "attachments", None),
                 channel_metadata=metadata,
             )
         except Exception as e:
-            import sys
+            import logging
 
-            print(f"Warning: Failed to save daemon history: {e}", file=sys.stderr)
+            logging.getLogger(__name__).warning("Failed to save daemon history: %s", e)
 
         if result.token_count:
             self.session_manager.update_token_count(user_id, result.token_count)
@@ -262,8 +261,8 @@ class BaseAdapter(ABC):
         from tsugite.daemon.memory import summarize_session
         from tsugite.history import SessionStorage, get_history_dir, reconstruct_messages
 
-        old_conv_id = self.session_manager.sessions[user_id].conversation_id
         session_info = self.session_manager.sessions[user_id]
+        old_conv_id = session_info.conversation_id
         old_session_path = get_history_dir() / f"{old_conv_id}.jsonl"
 
         print(f"[{self.agent_name}] Compacting session ({session_info.message_count} messages)...")
