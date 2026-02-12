@@ -1,5 +1,6 @@
 """Daemon management CLI commands."""
 
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -366,7 +367,7 @@ def init_daemon(
 def _daemon_request(
     method: str, host: str, port: int, path: str, token: Optional[str] = None, **kwargs
 ):
-    """Make an HTTP request to the daemon, handling connection errors and non-200 responses.
+    """Make an HTTP request to the daemon, handling connection errors and non-2xx responses.
 
     Returns the parsed JSON response body on success, or exits on failure.
     """
@@ -381,8 +382,12 @@ def _daemon_request(
         console.print(f"[red]Could not connect to daemon at {host}:{port}[/red]")
         raise typer.Exit(1)
 
-    if resp.status_code != 200:
-        console.print(f"[red]Error ({resp.status_code}):[/red] {resp.json().get('error', resp.text)}")
+    if resp.status_code >= 400:
+        try:
+            msg = resp.json().get("error", resp.text)
+        except Exception:
+            msg = resp.text
+        console.print(f"[red]Error ({resp.status_code}):[/red] {msg}")
         raise typer.Exit(1)
 
     return resp.json()
@@ -430,6 +435,184 @@ def compact_session(
     console.print(f"[green]✓[/green] Session compacted for [cyan]{agent}[/cyan] user [cyan]{user_id}[/cyan]")
     console.print(f"  old: {data['old_conversation_id']}")
     console.print(f"  new: {data['new_conversation_id']}")
+
+
+schedule_app = typer.Typer(help="Manage daemon schedules")
+daemon_app.add_typer(schedule_app, name="schedule")
+
+
+def _parse_every_to_cron(every: str) -> str:
+    """Convert --every shorthand (e.g., '2h', '30m', '1d') to cron expression."""
+    m = re.match(r"^(\d+)([mhd])$", every.strip())
+    if not m:
+        raise typer.BadParameter(f"Invalid --every format '{every}'. Use e.g. 30m, 2h, 1d")
+    value, unit = int(m.group(1)), m.group(2)
+    if unit == "m":
+        if value < 1 or value > 59:
+            raise typer.BadParameter("Minutes must be 1-59")
+        return f"*/{value} * * * *"
+    elif unit == "h":
+        if value < 1 or value > 23:
+            raise typer.BadParameter("Hours must be 1-23")
+        return f"0 */{value} * * *"
+    else:  # d
+        if value != 1:
+            raise typer.BadParameter("Only --every 1d is supported (use --cron for other day intervals)")
+        return "0 0 * * *"
+
+
+@schedule_app.command("list")
+def schedule_list(
+    host: str = typer.Option("127.0.0.1", "--host", help="Daemon HTTP host"),
+    port: int = typer.Option(8321, "--port", "-p", help="Daemon HTTP port"),
+    token: Optional[str] = typer.Option(None, "--token", "-t", help="Auth token"),
+):
+    """List all schedules."""
+    from rich.table import Table
+
+    data = _daemon_request("GET", host, port, "/api/schedules", token)
+    schedules = data.get("schedules", [])
+    if not schedules:
+        console.print("No schedules configured")
+        return
+
+    table = Table(title="Schedules")
+    table.add_column("ID", style="cyan")
+    table.add_column("Agent")
+    table.add_column("Type")
+    table.add_column("Schedule")
+    table.add_column("Enabled")
+    table.add_column("Next Run")
+    table.add_column("Last Status")
+
+    for s in schedules:
+        sched_str = s.get("cron_expr") or s.get("run_at") or ""
+        enabled = "[green]yes[/green]" if s.get("enabled") else "[red]no[/red]"
+        status = s.get("last_status") or "-"
+        if status == "error":
+            status = f"[red]{status}[/red]"
+        elif status == "success":
+            status = f"[green]{status}[/green]"
+        next_run = s.get("next_run") or "-"
+        table.add_row(s["id"], s["agent"], s["schedule_type"], sched_str, enabled, next_run, status)
+
+    console.print(table)
+
+
+@schedule_app.command("add")
+def schedule_add(
+    schedule_id: str = typer.Argument(help="Unique schedule name"),
+    agent: str = typer.Option(..., "--agent", "-a", help="Agent name"),
+    prompt: str = typer.Option(..., "--prompt", "-p", help="Prompt to send"),
+    cron: Optional[str] = typer.Option(None, "--cron", help="Cron expression (5 fields)"),
+    at: Optional[str] = typer.Option(None, "--at", help="ISO datetime for one-off task"),
+    every: Optional[str] = typer.Option(None, "--every", help="Simple interval (e.g., 30m, 2h, 1d)"),
+    tz: str = typer.Option("UTC", "--timezone", "--tz", help="IANA timezone"),
+    host: str = typer.Option("127.0.0.1", "--host", help="Daemon HTTP host"),
+    port: int = typer.Option(8321, "--port", help="Daemon HTTP port"),
+    token: Optional[str] = typer.Option(None, "--token", "-t", help="Auth token"),
+):
+    """Add a new schedule."""
+    spec_count = sum(1 for x in (cron, at, every) if x is not None)
+    if spec_count != 1:
+        console.print("[red]Specify exactly one of --cron, --at, or --every[/red]")
+        raise typer.Exit(1)
+
+    if every:
+        cron = _parse_every_to_cron(every)
+
+    body = {
+        "id": schedule_id,
+        "agent": agent,
+        "prompt": prompt,
+        "schedule_type": "once" if at else "cron",
+        "timezone": tz,
+    }
+    if cron:
+        body["cron_expr"] = cron
+    if at:
+        body["run_at"] = at
+
+    data = _daemon_request("POST", host, port, "/api/schedules", token, json=body)
+    console.print(f"[green]✓[/green] Schedule [cyan]{schedule_id}[/cyan] created")
+    if data.get("next_run"):
+        console.print(f"  next run: {data['next_run']}")
+
+
+@schedule_app.command("remove")
+def schedule_remove(
+    schedule_id: str = typer.Argument(help="Schedule ID to remove"),
+    host: str = typer.Option("127.0.0.1", "--host", help="Daemon HTTP host"),
+    port: int = typer.Option(8321, "--port", "-p", help="Daemon HTTP port"),
+    token: Optional[str] = typer.Option(None, "--token", "-t", help="Auth token"),
+):
+    """Remove a schedule."""
+    _daemon_request("DELETE", host, port, f"/api/schedules/{schedule_id}", token)
+    console.print(f"[green]✓[/green] Schedule [cyan]{schedule_id}[/cyan] removed")
+
+
+@schedule_app.command("enable")
+def schedule_enable(
+    schedule_id: str = typer.Argument(help="Schedule ID"),
+    host: str = typer.Option("127.0.0.1", "--host", help="Daemon HTTP host"),
+    port: int = typer.Option(8321, "--port", "-p", help="Daemon HTTP port"),
+    token: Optional[str] = typer.Option(None, "--token", "-t", help="Auth token"),
+):
+    """Enable a schedule."""
+    _daemon_request("POST", host, port, f"/api/schedules/{schedule_id}/enable", token)
+    console.print(f"[green]✓[/green] Schedule [cyan]{schedule_id}[/cyan] enabled")
+
+
+@schedule_app.command("disable")
+def schedule_disable(
+    schedule_id: str = typer.Argument(help="Schedule ID"),
+    host: str = typer.Option("127.0.0.1", "--host", help="Daemon HTTP host"),
+    port: int = typer.Option(8321, "--port", "-p", help="Daemon HTTP port"),
+    token: Optional[str] = typer.Option(None, "--token", "-t", help="Auth token"),
+):
+    """Disable a schedule."""
+    _daemon_request("POST", host, port, f"/api/schedules/{schedule_id}/disable", token)
+    console.print(f"[green]✓[/green] Schedule [cyan]{schedule_id}[/cyan] disabled")
+
+
+@schedule_app.command("run")
+def schedule_run(
+    schedule_id: str = typer.Argument(help="Schedule ID to trigger now"),
+    host: str = typer.Option("127.0.0.1", "--host", help="Daemon HTTP host"),
+    port: int = typer.Option(8321, "--port", "-p", help="Daemon HTTP port"),
+    token: Optional[str] = typer.Option(None, "--token", "-t", help="Auth token"),
+):
+    """Trigger a schedule immediately."""
+    _daemon_request("POST", host, port, f"/api/schedules/{schedule_id}/run", token)
+    console.print(f"[green]✓[/green] Schedule [cyan]{schedule_id}[/cyan] triggered")
+
+
+@schedule_app.command("show")
+def schedule_show(
+    schedule_id: str = typer.Argument(help="Schedule ID"),
+    host: str = typer.Option("127.0.0.1", "--host", help="Daemon HTTP host"),
+    port: int = typer.Option(8321, "--port", "-p", help="Daemon HTTP port"),
+    token: Optional[str] = typer.Option(None, "--token", "-t", help="Auth token"),
+):
+    """Show schedule details."""
+    data = _daemon_request("GET", host, port, f"/api/schedules/{schedule_id}", token)
+
+    console.print(f"[bold]{data['id']}[/bold]")
+    console.print(f"  agent:    {data['agent']}")
+    console.print(f"  prompt:   {data['prompt']}")
+    console.print(f"  type:     {data['schedule_type']}")
+    if data.get("cron_expr"):
+        console.print(f"  cron:     {data['cron_expr']}")
+    if data.get("run_at"):
+        console.print(f"  run at:   {data['run_at']}")
+    console.print(f"  timezone: {data['timezone']}")
+    console.print(f"  enabled:  {'[green]yes[/green]' if data['enabled'] else '[red]no[/red]'}")
+    console.print(f"  next run: {data.get('next_run') or '-'}")
+    console.print(f"  last run: {data.get('last_run') or '-'}")
+    if data.get("last_status"):
+        console.print(f"  status:   {data['last_status']}")
+    if data.get("last_error"):
+        console.print(f"  error:    [red]{data['last_error']}[/red]")
 
 
 @daemon_app.callback(invoke_without_command=True)

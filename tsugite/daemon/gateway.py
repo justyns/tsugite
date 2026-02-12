@@ -2,10 +2,10 @@
 
 import asyncio
 from pathlib import Path
-from typing import List, Optional
+from typing import Optional
 
 from tsugite.daemon.adapters.base import BaseAdapter, resolve_agent_path
-from tsugite.daemon.config import AgentConfig, DaemonConfig, load_daemon_config
+from tsugite.daemon.config import DaemonConfig, load_daemon_config
 from tsugite.daemon.session import SessionManager
 
 
@@ -14,12 +14,14 @@ class Gateway:
 
     def __init__(self, config: DaemonConfig):
         self.config = config
-        self.adapters: List[BaseAdapter] = []
+        self.adapters: list[BaseAdapter] = []
         self._http_server = None
+        self._scheduler_adapter = None
 
     async def start(self):
         """Start all enabled adapters."""
         tasks = []
+        http_adapters = {}
 
         if self.config.discord_bots:
             try:
@@ -63,7 +65,6 @@ class Gateway:
                     "HTTP support requires starlette and uvicorn. Install with: pip install tsugite-cli[daemon]"
                 ) from e
 
-            http_adapters = {}
             for agent_name, agent_config in self.config.agents.items():
                 agent_path = resolve_agent_path(agent_config.agent_file, agent_config.workspace_dir)
                 if not agent_path:
@@ -85,6 +86,17 @@ class Gateway:
         # Collect adapter start tasks
         tasks.extend(adapter.start() for adapter in self.adapters)
 
+        # Start scheduler (requires HTTP adapters to execute agents)
+        if http_adapters:
+            from tsugite.daemon.adapters.scheduler_adapter import SchedulerAdapter
+
+            schedules_path = self.config.state_dir / "schedules.json"
+            self._scheduler_adapter = SchedulerAdapter(http_adapters, schedules_path)
+            tasks.append(self._scheduler_adapter.start())
+            if self._http_server:
+                self._http_server.scheduler = self._scheduler_adapter.scheduler
+            print(f"  ✓ Scheduler enabled (schedules: {schedules_path})")
+
         if not tasks:
             raise ValueError("No adapters enabled in config")
 
@@ -99,17 +111,18 @@ class Gateway:
 
     async def _shutdown(self):
         """Graceful shutdown of all adapters."""
-        for adapter in self.adapters:
+        components = [
+            *((a, "adapter") for a in self.adapters),
+            *((c, label) for c, label in [
+                (self._scheduler_adapter, "scheduler"),
+                (self._http_server, "HTTP server"),
+            ] if c),
+        ]
+        for component, label in components:
             try:
-                await adapter.stop()
+                await component.stop()
             except Exception as e:
-                print(f"Error stopping adapter: {e}")
-
-        if self._http_server:
-            try:
-                await self._http_server.stop()
-            except Exception as e:
-                print(f"Error stopping HTTP server: {e}")
+                print(f"Error stopping {label}: {e}")
 
 
 async def run_daemon(config_path: Optional[Path] = None):

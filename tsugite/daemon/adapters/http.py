@@ -3,10 +3,11 @@
 import asyncio
 import json
 import logging
+from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from starlette.applications import Starlette
 from starlette.requests import Request
@@ -15,6 +16,7 @@ from starlette.routing import Route
 
 from tsugite.daemon.adapters.base import BaseAdapter, ChannelContext
 from tsugite.daemon.config import AgentConfig, HTTPConfig, WebhookConfig
+from tsugite.daemon.scheduler import ScheduleEntry
 from tsugite.events.base import BaseEvent
 from tsugite.history.models import CompactionSummary, Turn
 from tsugite.history.storage import SessionStorage, get_history_dir
@@ -41,7 +43,7 @@ class SSEProgressHandler(JSONLUIHandler):
         """Handle event from agent thread — schedule onto the event loop."""
         super().handle_event(event)
 
-    def _emit(self, event_type: str, data: Dict[str, Any]) -> None:
+    def _emit(self, event_type: str, data: dict[str, Any]) -> None:
         if event_type == "final_result":
             self.has_final = True
         payload = {"type": event_type, **data}
@@ -91,9 +93,9 @@ class HTTPServer:
     def __init__(
         self,
         config: HTTPConfig,
-        adapters: Dict[str, HTTPAgentAdapter],
+        adapters: dict[str, HTTPAgentAdapter],
         webhooks: list[WebhookConfig],
-        agent_configs: Dict[str, AgentConfig],
+        agent_configs: dict[str, AgentConfig],
     ):
         self.config = config
         self.adapters = adapters
@@ -101,6 +103,7 @@ class HTTPServer:
         self.agent_configs = agent_configs
         self._auth_tokens = set(config.auth_tokens)
         self._server = None
+        self.scheduler = None  # Set by Gateway after SchedulerAdapter is created
         self.app = self._build_app()
 
     def _check_auth(self, request: Request) -> Optional[JSONResponse]:
@@ -135,6 +138,13 @@ class HTTPServer:
             Route("/api/agents/{agent}/attachments", self._attachments, methods=["GET"]),
             Route("/api/agents/{agent}/history", self._history, methods=["GET"]),
             Route("/api/agents/{agent}/compact", self._compact, methods=["POST"]),
+            Route("/api/schedules", self._list_schedules, methods=["GET"]),
+            Route("/api/schedules", self._create_schedule, methods=["POST"]),
+            Route("/api/schedules/{schedule_id}", self._get_schedule, methods=["GET"]),
+            Route("/api/schedules/{schedule_id}", self._delete_schedule, methods=["DELETE"]),
+            Route("/api/schedules/{schedule_id}/enable", self._enable_schedule, methods=["POST"]),
+            Route("/api/schedules/{schedule_id}/disable", self._disable_schedule, methods=["POST"]),
+            Route("/api/schedules/{schedule_id}/run", self._run_schedule, methods=["POST"]),
             Route("/webhook/{token}", self._webhook, methods=["POST"]),
             Route("/", self._serve_ui, methods=["GET"]),
         ]
@@ -394,6 +404,85 @@ class HTTPServer:
                 "X-Accel-Buffering": "no",
             },
         )
+
+    def _require_auth_and_scheduler(self, request: Request) -> Optional[JSONResponse]:
+        """Check auth and scheduler availability. Returns error response or None."""
+        auth_err = self._check_auth(request)
+        if auth_err:
+            return auth_err
+        if not self.scheduler:
+            return JSONResponse({"error": "scheduler not available"}, status_code=503)
+        return None
+
+    def _schedule_action(self, schedule_id: str, action: str, status_label: str) -> JSONResponse:
+        """Run a scheduler action (enable/disable/remove) with standard error handling."""
+        try:
+            getattr(self.scheduler, action)(schedule_id)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+        return JSONResponse({"status": status_label})
+
+    async def _list_schedules(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_scheduler(request):
+            return err
+        return JSONResponse({"schedules": [asdict(e) for e in self.scheduler.list()]})
+
+    async def _create_schedule(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_scheduler(request):
+            return err
+
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+
+        required = {"id", "agent", "prompt", "schedule_type"}
+        missing = required - set(body.keys())
+        if missing:
+            return JSONResponse({"error": f"missing fields: {', '.join(missing)}"}, status_code=400)
+
+        try:
+            entry = ScheduleEntry(**{k: v for k, v in body.items() if k in ScheduleEntry.__dataclass_fields__})
+            entry = self.scheduler.add(entry)
+        except (ValueError, TypeError) as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+
+        return JSONResponse(asdict(entry), status_code=201)
+
+    async def _get_schedule(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_scheduler(request):
+            return err
+        try:
+            entry = self.scheduler.get(request.path_params["schedule_id"])
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+        return JSONResponse(asdict(entry))
+
+    async def _delete_schedule(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_scheduler(request):
+            return err
+        return self._schedule_action(request.path_params["schedule_id"], "remove", "removed")
+
+    async def _enable_schedule(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_scheduler(request):
+            return err
+        return self._schedule_action(request.path_params["schedule_id"], "enable", "enabled")
+
+    async def _disable_schedule(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_scheduler(request):
+            return err
+        return self._schedule_action(request.path_params["schedule_id"], "disable", "disabled")
+
+    async def _run_schedule(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_scheduler(request):
+            return err
+        schedule_id = request.path_params["schedule_id"]
+        try:
+            entry = self.scheduler.get(schedule_id)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+        asyncio.create_task(self.scheduler._fire_schedule(entry))
+        return JSONResponse({"status": "triggered", "schedule_id": schedule_id})
 
     async def _webhook(self, request: Request) -> JSONResponse:
         token = request.path_params["token"]
