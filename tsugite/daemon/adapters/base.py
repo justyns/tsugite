@@ -138,6 +138,22 @@ class BaseAdapter(ABC):
         """Stop the adapter."""
         pass
 
+    def _build_message_context(self, message: str, channel_context: ChannelContext) -> str:
+        """Prepend per-message dynamic context to the user prompt.
+
+        Keeps dynamic metadata in the user message turn (not the cached
+        attachment context turn) for better cache efficiency.
+        """
+        timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
+        return f"""<message_context>
+  <datetime>{timestamp}</datetime>
+  <working_directory>{self.agent_config.workspace_dir}</working_directory>
+  <source>{channel_context.source}</source>
+  <user_id>{channel_context.user_id}</user_id>
+</message_context>
+
+{message}"""
+
     async def handle_message(
         self, user_id: str, message: str, channel_context: ChannelContext, custom_logger: Optional[HasUIHandler] = None
     ) -> str:
@@ -160,16 +176,6 @@ class BaseAdapter(ABC):
         metadata = channel_context.to_dict()
         metadata["daemon_agent"] = self.agent_name
 
-        from tsugite.attachments.base import Attachment, AttachmentContentType
-
-        platform_attachment = Attachment(
-            name="platform_context",
-            content=f"This message was sent from the {channel_context.source} interface.",
-            content_type=AttachmentContentType.TEXT,
-            mime_type="text/plain",
-        )
-        all_attachments = [*self.workspace_attachments, platform_attachment]
-
         agent_path = resolve_agent_path(
             self.agent_config.agent_file,
             self.agent_config.workspace_dir,
@@ -178,12 +184,13 @@ class BaseAdapter(ABC):
         if not agent_path:
             raise ValueError(f"Agent not found: {self.agent_config.agent_file}")
 
-        # Run agent in thread pool to isolate from Discord's event loop
+        enriched_prompt = self._build_message_context(message, channel_context)
+
         import concurrent.futures
+        import os
 
         from tsugite.cli.helpers import PathContext
 
-        # Set up path context so agent knows its workspace
         workspace_dir = self.agent_config.workspace_dir
         path_context = PathContext(
             invoked_from=workspace_dir,
@@ -193,19 +200,15 @@ class BaseAdapter(ABC):
 
         def run_in_workspace():
             """Run agent in workspace directory (thread-safe via executor isolation)."""
-            import os
-
             original_cwd = os.getcwd()
             try:
                 os.chdir(str(workspace_dir))
                 return run_agent(
                     agent_path=agent_path,
-                    prompt=message,
+                    prompt=enriched_prompt,
                     continue_conversation_id=conv_id,
-                    attachments=all_attachments,
-                    exec_options=ExecutionOptions(
-                        return_token_usage=True,
-                    ),
+                    attachments=self.workspace_attachments,
+                    exec_options=ExecutionOptions(return_token_usage=True),
                     path_context=path_context,
                     custom_logger=custom_logger,
                 )
