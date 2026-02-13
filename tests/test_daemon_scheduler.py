@@ -163,7 +163,7 @@ class TestSchedulerExecution:
         scheduler.add(entry)
         await scheduler._fire_schedule(scheduler.get("job1"))
 
-        run_callback.assert_awaited_once_with("bot", "hi")
+        run_callback.assert_awaited_once_with("bot", "hi", "job1")
         stored = scheduler.get("job1")
         assert stored.last_status == "success"
         assert stored.last_run is not None

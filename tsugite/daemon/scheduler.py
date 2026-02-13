@@ -43,7 +43,7 @@ class ScheduleEntry:
             raise ValueError("run_at required for one-off schedules")
 
 
-RunCallback = Callable[[str, str], Coroutine[None, None, str]]
+RunCallback = Callable[[str, str, str], Coroutine[None, None, str]]
 
 
 class Scheduler:
@@ -99,6 +99,7 @@ class Scheduler:
                     break
 
             self._fire_due_schedules()
+            await asyncio.sleep(0)  # Yield to event loop
 
     def _find_next_fire_time(self) -> datetime | None:
         earliest = None
@@ -127,6 +128,12 @@ class Scheduler:
                 self._save()
                 continue
 
+            # Update next_run IMMEDIATELY so the main loop doesn't busy-spin
+            if entry.schedule_type == "once":
+                entry.next_run = None
+            else:
+                entry.next_run = self._compute_next_run_iso(entry)
+
             task = asyncio.create_task(self._fire_schedule(entry))
             self._active_tasks.add(task)
             task.add_done_callback(self._active_tasks.discard)
@@ -140,7 +147,7 @@ class Scheduler:
         async with lock:
             logger.info("Firing schedule '%s' (agent=%s)", entry.id, entry.agent)
             try:
-                await self._run_callback(entry.agent, entry.prompt)
+                await self._run_callback(entry.agent, entry.prompt, entry.id)
                 entry.last_status = "success"
                 entry.last_error = None
             except Exception as e:
@@ -149,13 +156,9 @@ class Scheduler:
                 entry.last_error = str(e)
 
             entry.last_run = datetime.now(timezone.utc).isoformat()
-
             if entry.schedule_type == "once":
                 entry.enabled = False
                 entry.next_run = None
-            else:
-                entry.next_run = self._compute_next_run_iso(entry)
-
             self._save()
 
     def _compute_next_run_iso(self, entry: ScheduleEntry) -> str | None:
@@ -229,6 +232,25 @@ class Scheduler:
         if schedule_id not in self._schedules:
             raise ValueError(f"Schedule '{schedule_id}' not found")
         return self._schedules[schedule_id]
+
+    def update(self, schedule_id: str, **fields) -> ScheduleEntry:
+        entry = self.get(schedule_id)
+        for key, value in fields.items():
+            if key in ("id", "created_at"):
+                continue
+            if not hasattr(entry, key):
+                raise ValueError(f"Unknown field '{key}'")
+            setattr(entry, key, value)
+        if "cron_expr" in fields and entry.cron_expr:
+            try:
+                CronSim(entry.cron_expr, datetime.now(timezone.utc))
+            except (ValueError, KeyError, CronSimError) as e:
+                raise ValueError(f"Invalid cron expression '{entry.cron_expr}': {e}") from e
+        entry.next_run = self._compute_next_run_iso(entry)
+        self._save()
+        self._wakeup.set()
+        logger.info("Updated schedule '%s'", schedule_id)
+        return entry
 
     # Persistence
 

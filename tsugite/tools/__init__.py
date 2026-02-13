@@ -18,14 +18,16 @@ class ToolInfo:
 # Global tool registry
 _tools: Dict[str, ToolInfo] = {}
 
+# Daemon-only tools: registered only when daemon mode is active
+_daemon_tools: Dict[str, Callable] = {}
+_daemon_mode = False
 
-def tool(func: Callable) -> Callable:
-    """Register a function as a tool."""
-    # Extract function signature and docstring
+
+def _register_tool(func: Callable) -> None:
+    """Register a function into the tool registry."""
     sig = inspect.signature(func)
     doc = func.__doc__ or "No description available"
 
-    # Extract parameter info
     parameters = {}
     for param_name, param in sig.parameters.items():
         parameters[param_name] = {
@@ -34,15 +36,47 @@ def tool(func: Callable) -> Callable:
             "required": param.default == inspect.Parameter.empty,
         }
 
-    tool_info = ToolInfo(
+    _tools[func.__name__] = ToolInfo(
         name=func.__name__,
         func=func,
-        description=doc.split("\n")[0].strip(),  # First line of docstring
+        description=doc.split("\n")[0].strip(),
         parameters=parameters,
     )
 
-    _tools[func.__name__] = tool_info
-    return func
+
+def tool(func=None, *, require_daemon=False):
+    """Register a function as a tool.
+
+    Args:
+        require_daemon: Only register when running in daemon mode.
+    """
+    def decorator(fn):
+        if require_daemon:
+            _daemon_tools[fn.__name__] = fn
+            if _daemon_mode:
+                _register_tool(fn)
+        else:
+            _register_tool(fn)
+        return fn
+
+    if func is not None:
+        return decorator(func)
+    return decorator
+
+
+def set_daemon_mode(enabled: bool):
+    """Enable/disable daemon mode. Registers/unregisters daemon-only tools."""
+    global _daemon_mode
+    # Load tool modules first (before changing mode) so decorators
+    # don't double-register when they see _daemon_mode=True during import.
+    _ensure_tools_loaded()
+    _daemon_mode = enabled
+    if enabled:
+        for fn in _daemon_tools.values():
+            _register_tool(fn)
+    else:
+        for name in _daemon_tools:
+            _tools.pop(name, None)
 
 
 def get_tool(name: str) -> ToolInfo:
@@ -113,6 +147,9 @@ def get_tools_by_category(category: str) -> List[str]:
     return sorted(category_tools)
 
 
+_OPTIONAL_CATEGORIES = {"schedule"}
+
+
 def _expand_single_spec(spec: str, strict: bool = True) -> List[str]:
     """Expand a single tool specification to tool names.
 
@@ -129,7 +166,7 @@ def _expand_single_spec(spec: str, strict: bool = True) -> List[str]:
         # Category reference: @fs, @http, etc.
         category = spec[1:]
         category_tools = get_tools_by_category(category)
-        if not category_tools and strict:
+        if not category_tools and strict and category not in _OPTIONAL_CATEGORIES:
             raise ValueError(f"Invalid tool category '{category}': not found or empty")
         return category_tools
     elif "*" in spec or "?" in spec or "[" in spec:
