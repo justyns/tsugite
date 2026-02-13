@@ -147,7 +147,7 @@ def get_tools_by_category(category: str) -> List[str]:
     return sorted(category_tools)
 
 
-_OPTIONAL_CATEGORIES = {"schedule"}
+_OPTIONAL_CATEGORIES = {"schedule", "notify"}
 
 
 def _expand_single_spec(spec: str, strict: bool = True) -> List[str]:
@@ -307,6 +307,7 @@ def _ensure_tools_loaded():
     from . import history as history  # noqa: E402, F401
     from . import http as http  # noqa: E402, F401
     from . import interactive as interactive  # noqa: E402, F401
+    from . import notify as notify  # noqa: E402, F401
     from . import schedule as schedule  # noqa: E402, F401
     from . import shell as shell  # noqa: E402, F401
     from . import skills as skills  # noqa: E402, F401

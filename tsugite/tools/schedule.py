@@ -11,13 +11,15 @@ from . import tool
 
 _scheduler = None
 _loop = None
+_channel_names: set[str] = set()
 
 
-def set_scheduler(scheduler, loop=None):
+def set_scheduler(scheduler, loop=None, channel_names=None):
     """Called by the daemon to set/clear the scheduler reference."""
-    global _scheduler, _loop
+    global _scheduler, _loop, _channel_names
     _scheduler = scheduler
     _loop = loop
+    _channel_names = channel_names or set()
 
 
 def _call(fn, *args):
@@ -29,9 +31,6 @@ def _call(fn, *args):
     return future.result(timeout=10)
 
 
-def _entry_to_dict(entry) -> dict:
-    return asdict(entry)
-
 
 @tool(require_daemon=True)
 def schedule_create(
@@ -41,6 +40,8 @@ def schedule_create(
     cron: Optional[str] = None,
     run_at: Optional[str] = None,
     timezone: str = "UTC",
+    notify: Optional[list[str]] = None,
+    notify_tool: bool = False,
 ) -> dict:
     """Create a recurring (cron) or one-off schedule to run an agent.
 
@@ -55,6 +56,8 @@ def schedule_create(
         cron: Cron expression for recurring (e.g., "0 9 * * *" = daily at 9am). Mutually exclusive with run_at.
         run_at: ISO datetime for one-off execution (e.g., "2026-02-13T14:00:00-06:00"). Mutually exclusive with cron.
         timezone: IANA timezone (default: UTC)
+        notify: List of notification channel names to deliver results to on completion.
+        notify_tool: If true, gives the agent the notify_user tool so it can send messages during execution. Requires notify to be set.
 
     Returns:
         Created schedule details including computed next_run
@@ -63,6 +66,13 @@ def schedule_create(
         raise ValueError("Provide either 'cron' or 'run_at'")
     if cron and run_at:
         raise ValueError("Provide 'cron' or 'run_at', not both")
+
+    if notify_tool and not notify:
+        raise ValueError("notify_tool=True requires a non-empty 'notify' list")
+    if notify:
+        unknown = set(notify) - _channel_names
+        if unknown:
+            raise ValueError(f"Unknown notification channel(s): {', '.join(sorted(unknown))}")
 
     if agent is None:
         from tsugite.agent_runner.helpers import get_current_agent
@@ -78,10 +88,12 @@ def schedule_create(
         schedule_type="once" if run_at else "cron",
         cron_expr=cron,
         run_at=run_at,
+        notify=notify or [],
+        notify_tool=notify_tool,
         timezone=timezone,
     )
     result = _call(_scheduler.add, entry)
-    return _entry_to_dict(result)
+    return asdict(result)
 
 
 @tool(require_daemon=True)
@@ -92,7 +104,7 @@ def schedule_list() -> list:
         List of schedules with id, agent, type, enabled, next_run, last_status
     """
     entries = _call(_scheduler.list)
-    return [_entry_to_dict(e) for e in entries]
+    return [asdict(e) for e in entries]
 
 
 @tool(require_daemon=True)
@@ -109,13 +121,6 @@ def schedule_remove(id: str) -> dict:
     return {"status": "removed", "id": id}
 
 
-def _toggle_schedule(id: str, action: str) -> dict:
-    """Enable or disable a schedule and return its updated state."""
-    _call(getattr(_scheduler, action), id)
-    entry = _call(_scheduler.get, id)
-    return _entry_to_dict(entry)
-
-
 @tool(require_daemon=True)
 def schedule_enable(id: str) -> dict:
     """Enable a disabled schedule.
@@ -126,7 +131,8 @@ def schedule_enable(id: str) -> dict:
     Returns:
         Confirmation with updated schedule details
     """
-    return _toggle_schedule(id, "enable")
+    _call(_scheduler.enable, id)
+    return asdict(_call(_scheduler.get, id))
 
 
 @tool(require_daemon=True)
@@ -139,7 +145,8 @@ def schedule_disable(id: str) -> dict:
     Returns:
         Confirmation with updated schedule details
     """
-    return _toggle_schedule(id, "disable")
+    _call(_scheduler.disable, id)
+    return asdict(_call(_scheduler.get, id))
 
 
 @tool(require_daemon=True)
@@ -149,6 +156,8 @@ def schedule_update(
     cron: Optional[str] = None,
     run_at: Optional[str] = None,
     timezone: Optional[str] = None,
+    notify: Optional[list[str]] = None,
+    notify_tool: Optional[bool] = None,
 ) -> dict:
     """Update fields on an existing schedule.
 
@@ -158,6 +167,8 @@ def schedule_update(
         cron: New cron expression (optional)
         run_at: New run_at ISO datetime (optional)
         timezone: New IANA timezone (optional)
+        notify: New notification channel list (optional)
+        notify_tool: Enable/disable notify_user tool (optional)
 
     Returns:
         Updated schedule details
@@ -171,9 +182,20 @@ def schedule_update(
         fields["run_at"] = run_at
     if timezone is not None:
         fields["timezone"] = timezone
+    if notify is not None:
+        unknown = set(notify) - _channel_names
+        if unknown:
+            raise ValueError(f"Unknown notification channel(s): {', '.join(sorted(unknown))}")
+        fields["notify"] = notify
+    if notify_tool is not None:
+        if notify_tool:
+            effective_notify = notify if notify is not None else _call(_scheduler.get, id).notify
+            if not effective_notify:
+                raise ValueError("notify_tool=True requires a non-empty 'notify' list")
+        fields["notify_tool"] = notify_tool
 
     if not fields:
         raise ValueError("No fields to update")
 
     result = _call(_scheduler.update, id, **fields)
-    return _entry_to_dict(result)
+    return asdict(result)

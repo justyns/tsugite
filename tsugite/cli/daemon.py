@@ -609,6 +609,10 @@ def schedule_show(
     console.print(f"  enabled:  {'[green]yes[/green]' if data['enabled'] else '[red]no[/red]'}")
     console.print(f"  next run: {data.get('next_run') or '-'}")
     console.print(f"  last run: {data.get('last_run') or '-'}")
+    if data.get("notify"):
+        console.print(f"  notify:   {', '.join(data['notify'])}")
+    if data.get("notify_tool"):
+        console.print("  notify_tool: [green]yes[/green]")
     if data.get("last_status"):
         console.print(f"  status:   {data['last_status']}")
     if data.get("last_error"):

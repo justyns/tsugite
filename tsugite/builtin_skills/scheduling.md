@@ -77,6 +77,8 @@ schedule_create(
 - `cron` — Standard 5-field cron expression (mutually exclusive with `run_at`)
 - `run_at` — ISO 8601 datetime for one-off tasks (mutually exclusive with `cron`)
 - `timezone` — IANA timezone name (default: `UTC`)
+- `notify` — *(optional)* List of notification channel names. The final result is automatically sent to these channels when the task completes.
+- `notify_tool` — *(optional, default: false)* When `true`, the agent gets the `notify_user` tool so it can send messages during execution. Requires `notify` to be set.
 
 ## Cron Expression Reference
 
@@ -156,6 +158,56 @@ print(result)
 ```
 
 6. Confirm to the user with the `next_run` from the result.
+
+## Notifications
+
+Scheduled tasks can send notifications to the user via configured channels (Discord DMs, webhooks, etc.). Channels are defined in `daemon.yaml` under `notification_channels`.
+
+### Auto-Notify (deliver result on completion)
+
+Set `notify` to automatically send the final result when the task finishes:
+
+```python
+schedule_create(
+    id="daily-report",
+    prompt="Generate a daily status report",
+    cron="0 9 * * *",
+    notify=["my-discord", "alerts"]
+)
+```
+
+### LLM-Driven Notifications (send messages during execution)
+
+Set both `notify` and `notify_tool=True` to give the agent the `notify_user` tool. The agent can send progress updates, alerts, or findings at any point during execution:
+
+```python
+schedule_create(
+    id="monitoring",
+    prompt="Check server health and notify if any issues are found",
+    cron="*/30 * * * *",
+    notify=["alerts"],
+    notify_tool=True
+)
+```
+
+### Both (auto-notify + tool)
+
+```python
+schedule_create(
+    id="full-check",
+    prompt="Run security audit and report findings",
+    cron="0 9 * * *",
+    notify=["my-discord"],
+    notify_tool=True
+)
+```
+
+The agent can send intermediate alerts during execution, and the final result is also delivered automatically on completion.
+
+**Rules:**
+- `notify_tool=True` requires `notify` to be set (the tool needs channels to send to)
+- Channel names must match entries in the daemon's `notification_channels` config
+- Failed notifications are logged but do not affect the schedule's status
 
 ## Error Handling
 

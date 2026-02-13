@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 import os
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Coroutine
@@ -29,6 +29,8 @@ class ScheduleEntry:
     next_run: str | None = None  # computed
     last_status: str | None = None  # "success" | "error"
     last_error: str | None = None
+    notify: list[str] = field(default_factory=list)
+    notify_tool: bool = False
     misfire_grace_seconds: int = 300
     timezone: str = "UTC"
 
@@ -43,7 +45,7 @@ class ScheduleEntry:
             raise ValueError("run_at required for one-off schedules")
 
 
-RunCallback = Callable[[str, str, str], Coroutine[None, None, str]]
+RunCallback = Callable[["ScheduleEntry"], Coroutine[None, None, str]]
 
 
 class Scheduler:
@@ -147,7 +149,7 @@ class Scheduler:
         async with lock:
             logger.info("Firing schedule '%s' (agent=%s)", entry.id, entry.agent)
             try:
-                await self._run_callback(entry.agent, entry.prompt, entry.id)
+                await self._run_callback(entry)
                 entry.last_status = "success"
                 entry.last_error = None
             except Exception as e:

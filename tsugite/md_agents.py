@@ -643,6 +643,7 @@ def build_validation_test_context(agent, include_prefetch: bool = True) -> dict[
         "is_daemon": False,
         "is_scheduled": False,
         "schedule_id": "",
+        "has_notify_tool": False,
         "tools": agent.config.tools or [],
         "is_subagent": False,
         "parent_agent": None,

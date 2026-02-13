@@ -73,9 +73,12 @@ instructions: |
 **Scheduled Task** (schedule: {{ schedule_id }}): This task is running unattended in the background — no user is present.
 - Complete the task fully and autonomously, then stop.
 - Do NOT ask follow-up questions, offer choices, or suggest next steps — no one will respond.
-- Do NOT perform destructive actions (deleting files, force-pushing, modifying infrastructure, sending messages to external services).
+- Do NOT perform destructive actions (deleting files, force-pushing, modifying infrastructure).
 - Do NOT spawn subagents unless the task explicitly requires delegation.
 - If you cannot complete the task safely, explain why in your response and stop.
+{% if has_notify_tool %}
+- You have the `notify_user` tool available. Use it to send important findings, alerts, or progress updates to the user during execution. This is the ONLY approved way to send external messages in this scheduled task.
+{% endif %}
 {% endif %}
 {% elif is_interactive %}
 **Interactive Mode**: You are currently in an interactive session with the user, you can ask questions to clarify the task.

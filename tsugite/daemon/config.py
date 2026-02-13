@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Dict, List, Literal, Optional
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 def _get_default_state_dir() -> Path:
@@ -34,6 +34,30 @@ class DiscordBotConfig(BaseModel):
     allow_from: List[str] = Field(default_factory=list)
 
 
+class NotificationChannelConfig(BaseModel):
+    """Configuration for a notification channel (discord DM or webhook)."""
+
+    type: Literal["discord", "webhook"]
+    # Discord fields
+    user_id: Optional[str] = None
+    bot: Optional[str] = None
+    # Webhook fields
+    url: Optional[str] = None
+    method: str = "POST"
+    headers: Dict[str, str] = Field(default_factory=dict)
+    body_template: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _validate_required_fields(self):
+        if self.type == "discord":
+            if not self.user_id or not self.bot:
+                raise ValueError("Discord notification channels require 'user_id' and 'bot'")
+        elif self.type == "webhook":
+            if not self.url:
+                raise ValueError("Webhook notification channels require 'url'")
+        return self
+
+
 class HTTPConfig(BaseModel):
     """Configuration for the HTTP API server."""
 
@@ -51,6 +75,7 @@ class DaemonConfig(BaseModel):
     agents: Dict[str, AgentConfig]
     discord_bots: List[DiscordBotConfig] = Field(default_factory=list)
     http: Optional[HTTPConfig] = None
+    notification_channels: Dict[str, NotificationChannelConfig] = Field(default_factory=dict)
 
 
 def load_daemon_config(path: Optional[Path] = None) -> DaemonConfig:
@@ -90,6 +115,14 @@ def load_daemon_config(path: Optional[Path] = None) -> DaemonConfig:
     for agent_name, agent_data in data.get("agents", {}).items():
         if "workspace_dir" in agent_data:
             agent_data["workspace_dir"] = Path(agent_data["workspace_dir"]).expanduser()
+
+    for channel in data.get("notification_channels", {}).values():
+        if "url" in channel:
+            channel["url"] = os.path.expandvars(channel["url"])
+        if "headers" in channel:
+            channel["headers"] = {k: os.path.expandvars(v) for k, v in channel["headers"].items()}
+        if "body_template" in channel:
+            channel["body_template"] = os.path.expandvars(channel["body_template"])
 
     # Expand state_dir
     if "state_dir" in data:
@@ -145,6 +178,12 @@ def save_daemon_config(config: DaemonConfig, path: Optional[Path] = None) -> Pat
             "host": config.http.host,
             "port": config.http.port,
             "auth_tokens": config.http.auth_tokens,
+        }
+
+    if config.notification_channels:
+        config_data["notification_channels"] = {
+            name: ch.model_dump(exclude_none=True, exclude_defaults=True) | {"type": ch.type}
+            for name, ch in config.notification_channels.items()
         }
 
     with open(path, "w", encoding="utf-8") as f:
