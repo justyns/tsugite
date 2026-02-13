@@ -7,7 +7,8 @@ import pytest
 from starlette.testclient import TestClient
 
 from tsugite.daemon.adapters.http import HTTPAgentAdapter, HTTPServer, SSEProgressHandler
-from tsugite.daemon.config import AgentConfig, HTTPConfig, WebhookConfig
+from tsugite.daemon.config import AgentConfig, HTTPConfig
+from tsugite.daemon.webhook_store import WebhookStore
 
 
 @pytest.fixture
@@ -51,26 +52,28 @@ def mock_adapter(agent_config):
 
 
 @pytest.fixture
-def webhook_config():
-    return WebhookConfig(token="whk_test", agent="test-agent", source="forgejo")
+def webhook_store(tmp_path):
+    store = WebhookStore(tmp_path / "webhooks.json")
+    store.add(agent="test-agent", source="forgejo", token="whk_test")
+    return store
 
 
 @pytest.fixture
-def server(http_config, mock_adapter, webhook_config, agent_config):
+def server(http_config, mock_adapter, webhook_store, agent_config):
     return HTTPServer(
         config=http_config,
         adapters={"test-agent": mock_adapter},
-        webhooks=[webhook_config],
+        webhook_store=webhook_store,
         agent_configs={"test-agent": agent_config},
     )
 
 
 @pytest.fixture
-def server_no_auth(http_config_no_auth, mock_adapter, webhook_config, agent_config):
+def server_no_auth(http_config_no_auth, mock_adapter, webhook_store, agent_config):
     return HTTPServer(
         config=http_config_no_auth,
         adapters={"test-agent": mock_adapter},
-        webhooks=[webhook_config],
+        webhook_store=webhook_store,
         agent_configs={"test-agent": agent_config},
     )
 
@@ -240,8 +243,10 @@ class TestHTTPConfig:
         assert config.port == 8374
         assert config.auth_tokens == []
 
-    def test_webhook_config(self):
-        wh = WebhookConfig(token="whk_test", agent="myagent", source="github")
+    def test_webhook_entry(self):
+        from tsugite.daemon.webhook_store import WebhookEntry
+
+        wh = WebhookEntry(token="whk_test", agent="myagent", source="github")
         assert wh.token == "whk_test"
         assert wh.agent == "myagent"
         assert wh.source == "github"

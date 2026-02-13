@@ -158,8 +158,6 @@ class AgentPreparer:
         prefetch_context = {}
         if agent_config.prefetch:
             try:
-                from tsugite.agent_runner import execute_prefetch
-
                 prefetch_context = execute_prefetch(agent_config.prefetch)
             except Exception:
                 # Silently continue if prefetch fails
@@ -190,7 +188,11 @@ class AgentPreparer:
             **prefetch_context,
             **tool_context,
             "user_prompt": prompt,
+            "agent_name": agent_config.name,
             "is_interactive": interactive_mode,
+            "is_daemon": context.get("is_daemon", False),
+            "is_scheduled": context.get("is_scheduled", False),
+            "schedule_id": context.get("schedule_id", ""),
             "tools": agent_config.tools,
             # Subagent context
             "is_subagent": context.get("is_subagent", False),

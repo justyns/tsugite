@@ -1,10 +1,13 @@
 """Base adapter for platform integrations."""
 
 import asyncio
+import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Protocol
+
+logger = logging.getLogger(__name__)
 
 from tsugite.agent_inheritance import find_agent_file
 from tsugite.agent_runner import run_agent
@@ -138,6 +141,14 @@ class BaseAdapter(ABC):
         """Stop the adapter."""
         pass
 
+    def _build_agent_context(self, channel_context: ChannelContext) -> Dict[str, Any]:
+        """Build context dict for agent template rendering."""
+        ctx: Dict[str, Any] = {"is_daemon": True, "is_scheduled": False, "schedule_id": ""}
+        if channel_context.source == "scheduler":
+            ctx["is_scheduled"] = True
+            ctx["schedule_id"] = (channel_context.metadata or {}).get("schedule_id", "")
+        return ctx
+
     def _build_message_context(self, message: str, channel_context: ChannelContext) -> str:
         """Prepend per-message dynamic context to the user prompt.
 
@@ -169,7 +180,11 @@ class BaseAdapter(ABC):
             Agent's response
         """
         if self.session_manager.needs_compaction(user_id):
+            if custom_logger and hasattr(custom_logger, "ui_handler"):
+                custom_logger.ui_handler._emit("compacting", {})
             await self._compact_session(user_id)
+            if custom_logger and hasattr(custom_logger, "ui_handler"):
+                custom_logger.ui_handler._emit("compacted", {})
 
         conv_id = self.session_manager.get_or_create_session(user_id)
 
@@ -186,7 +201,6 @@ class BaseAdapter(ABC):
 
         enriched_prompt = self._build_message_context(message, channel_context)
 
-        import concurrent.futures
         import os
 
         from tsugite.cli.helpers import PathContext
@@ -211,13 +225,12 @@ class BaseAdapter(ABC):
                     exec_options=ExecutionOptions(return_token_usage=True),
                     path_context=path_context,
                     custom_logger=custom_logger,
+                    context=self._build_agent_context(channel_context),
                 )
             finally:
                 os.chdir(original_cwd)
 
-        loop = asyncio.get_event_loop()
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            result = await loop.run_in_executor(executor, run_in_workspace)
+        result = await asyncio.to_thread(run_in_workspace)
 
         try:
             from tsugite.agent_runner.history_integration import save_run_to_history
@@ -239,9 +252,7 @@ class BaseAdapter(ABC):
                 channel_metadata=metadata,
             )
         except Exception as e:
-            import logging
-
-            logging.getLogger(__name__).warning("Failed to save daemon history: %s", e)
+            logger.warning("Failed to save daemon history: %s", e)
 
         if result.token_count:
             self.session_manager.update_token_count(user_id, result.token_count)
@@ -265,10 +276,10 @@ class BaseAdapter(ABC):
         old_conv_id = session_info.conversation_id
         old_session_path = get_history_dir() / f"{old_conv_id}.jsonl"
 
-        print(f"[{self.agent_name}] Compacting session ({session_info.message_count} messages)...")
+        logger.info("[%s] Compacting session (%d messages)...", self.agent_name, session_info.message_count)
         messages = reconstruct_messages(old_session_path)
         summary = await summarize_session(messages)
-        print(f"[{self.agent_name}] Session compacted")
+        logger.info("[%s] Session compacted", self.agent_name)
 
         new_conv_id = self.session_manager.compact_session(user_id)
 

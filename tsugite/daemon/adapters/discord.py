@@ -1,12 +1,15 @@
 """Discord bot adapter."""
 
 import asyncio
+import logging
 import re
 from types import SimpleNamespace
 from typing import NamedTuple, Optional
 
 import discord
 from discord.ext import commands
+
+logger = logging.getLogger(__name__)
 
 from tsugite.daemon.adapters.base import BaseAdapter, ChannelContext
 from tsugite.daemon.config import AgentConfig, DiscordBotConfig
@@ -31,32 +34,15 @@ class ProgressStep(NamedTuple):
     emoji: str
 
 
-def _handle_task_exception(task: asyncio.Task, context: str = "") -> None:
-    """Handle exceptions from background tasks to prevent crashes."""
+def _handle_async_exception(future_or_task, context: str = "") -> None:
+    """Handle exceptions from Tasks or Futures to prevent silent crashes."""
     try:
-        task.result()
+        future_or_task.result()
     except asyncio.CancelledError:
         pass
     except Exception as e:
-        import traceback
-
         prefix = f"[{context}] " if context else ""
-        print(f"{prefix}Background task error: {e}")
-        traceback.print_exc()
-
-
-def _handle_future_exception(future: asyncio.Future, context: str = "") -> None:
-    """Handle exceptions from futures (used with run_coroutine_threadsafe)."""
-    try:
-        future.result()
-    except asyncio.CancelledError:
-        pass
-    except Exception as e:
-        import traceback
-
-        prefix = f"[{context}] " if context else ""
-        print(f"{prefix}Future error: {e}")
-        traceback.print_exc()
+        logger.error("%sAsync error: %s", prefix, e, exc_info=True)
 
 
 class DiscordProgressHandler:
@@ -89,7 +75,7 @@ class DiscordProgressHandler:
         run_coroutine_threadsafe to schedule work on the Discord event loop.
         """
         future = asyncio.run_coroutine_threadsafe(self._handle_event_async(event), self.loop)
-        future.add_done_callback(lambda f: _handle_future_exception(f, "progress"))
+        future.add_done_callback(lambda f: _handle_async_exception(f, "progress"))
 
     async def _handle_event_async(self, event: BaseEvent) -> None:
         """Async implementation of event handling."""
@@ -200,7 +186,7 @@ class DiscordProgressHandler:
             except asyncio.CancelledError:
                 pass
             except Exception as e:
-                print(f"Typing loop error: {e}")
+                logger.debug("Typing loop error: %s", e)
 
         self.typing_task = asyncio.create_task(typing_loop())
 
@@ -252,14 +238,11 @@ class DiscordAdapter(BaseAdapter):
 
         @self.bot.event
         async def on_ready():
-            print(f"Discord bot '{bot_config.name}' logged in as {self.bot.user} (agent: {agent_name})")
+            logger.info("Discord bot '%s' logged in as %s (agent: %s)", bot_config.name, self.bot.user, agent_name)
 
         @self.bot.event
         async def on_error(event_method, *args, **kwargs):
-            import traceback
-
-            print(f"[{bot_config.name}] Discord event error in {event_method}:")
-            traceback.print_exc()
+            logger.error("[%s] Discord event error in %s", bot_config.name, event_method, exc_info=True)
 
         @self.bot.event
         async def on_message(message):
@@ -289,15 +272,12 @@ class DiscordAdapter(BaseAdapter):
             if not user_msg:
                 return
 
-            # Log incoming message
             channel_type = "DM" if is_dm else "channel"
-            print(
-                f"[{bot_config.name}] <- {message.author} ({channel_type}): {user_msg[:100]}{'...' if len(user_msg) > 100 else ''}"
-            )
+            logger.info("[%s] <- %s (%s): %s", bot_config.name, message.author, channel_type, user_msg[:100])
 
             # Process message in isolated task to prevent crashes from affecting the bot
             task = asyncio.create_task(self._process_message(message, user_msg, bot_config.name))
-            task.add_done_callback(lambda t: _handle_task_exception(t, bot_config.name))
+            task.add_done_callback(lambda t: _handle_async_exception(t, bot_config.name))
 
     async def _process_message(self, message, user_msg: str, bot_name: str):
         """Process a message in an isolated task."""
@@ -328,19 +308,15 @@ class DiscordAdapter(BaseAdapter):
             await progress.cleanup(success=True)
 
         except Exception as e:
-            import traceback
-
             await progress.cleanup(success=False)
             response = f"Error processing message: {e}"
-            print(f"[{bot_name}] ERROR: {e}")
-            traceback.print_exc()
+            logger.error("[%s] %s", bot_name, e, exc_info=True)
         finally:
             # Remove from active handlers after cleanup
             if progress in self.active_progress_handlers:
                 self.active_progress_handlers.remove(progress)
 
-        # Log outgoing response
-        print(f"[{bot_name}] -> {message.author}: {response[:100]}{'...' if len(response) > 100 else ''}")
+        logger.info("[%s] -> %s: %s", bot_name, message.author, response[:100])
         await self._send_chunked(message.channel, response)
 
     def _split_respecting_code_blocks(self, text: str, limit: int) -> list[str]:

@@ -43,14 +43,6 @@ class HTTPConfig(BaseModel):
     auth_tokens: List[str] = Field(default_factory=list)
 
 
-class WebhookConfig(BaseModel):
-    """Configuration for a webhook inbox entry."""
-
-    token: str
-    agent: str
-    source: str
-
-
 class DaemonConfig(BaseModel):
     """Main daemon configuration."""
 
@@ -59,7 +51,6 @@ class DaemonConfig(BaseModel):
     agents: Dict[str, AgentConfig]
     discord_bots: List[DiscordBotConfig] = Field(default_factory=list)
     http: Optional[HTTPConfig] = None
-    webhooks: List[WebhookConfig] = Field(default_factory=list)
 
 
 def load_daemon_config(path: Optional[Path] = None) -> DaemonConfig:
@@ -155,11 +146,6 @@ def save_daemon_config(config: DaemonConfig, path: Optional[Path] = None) -> Pat
             "port": config.http.port,
             "auth_tokens": config.http.auth_tokens,
         }
-
-    if config.webhooks:
-        config_data["webhooks"] = [
-            {"token": w.token, "agent": w.agent, "source": w.source} for w in config.webhooks
-        ]
 
     with open(path, "w", encoding="utf-8") as f:
         yaml.safe_dump(config_data, f, default_flow_style=False, sort_keys=False)

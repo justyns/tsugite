@@ -341,6 +341,7 @@ tsu run -f image1.jpg -f image2.jpg "Compare these images"
 4. **Don't hardcode paths**: Use XDG utilities (`get_xdg_config_path()`, etc.)
 5. **Don't use blocking IO in async**: Use `asyncio.to_thread()` for sync tools
 6. **Test both sync and async paths**: Many tools support both execution modes
+7. **Don't embed prompts in adapters/code**: Use context variables + conditional blocks in `default.md` instead. Add new context vars in `_build_agent_context()` (base adapter) and default them in `agent_preparation.py`, then use `{% if var %}` in the agent template. This keeps all prompt content in one place and leverages the existing rendering pipeline.
 
 ## Code Review Policy
 

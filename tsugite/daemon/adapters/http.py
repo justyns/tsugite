@@ -12,11 +12,13 @@ from typing import Any, Optional
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
-from starlette.routing import Route
+from starlette.routing import Mount, Route
+from starlette.staticfiles import StaticFiles
 
 from tsugite.daemon.adapters.base import BaseAdapter, ChannelContext
-from tsugite.daemon.config import AgentConfig, HTTPConfig, WebhookConfig
+from tsugite.daemon.config import AgentConfig, HTTPConfig
 from tsugite.daemon.scheduler import ScheduleEntry
+from tsugite.daemon.webhook_store import WebhookStore
 from tsugite.events.base import BaseEvent
 from tsugite.history.models import CompactionSummary, Turn
 from tsugite.history.storage import SessionStorage, get_history_dir
@@ -94,12 +96,12 @@ class HTTPServer:
         self,
         config: HTTPConfig,
         adapters: dict[str, HTTPAgentAdapter],
-        webhooks: list[WebhookConfig],
+        webhook_store: WebhookStore,
         agent_configs: dict[str, AgentConfig],
     ):
         self.config = config
         self.adapters = adapters
-        self.webhooks = {w.token: w for w in webhooks}
+        self.webhook_store = webhook_store
         self.agent_configs = agent_configs
         self._auth_tokens = set(config.auth_tokens)
         self._server = None
@@ -141,11 +143,16 @@ class HTTPServer:
             Route("/api/schedules", self._list_schedules, methods=["GET"]),
             Route("/api/schedules", self._create_schedule, methods=["POST"]),
             Route("/api/schedules/{schedule_id}", self._get_schedule, methods=["GET"]),
+            Route("/api/schedules/{schedule_id}", self._update_schedule, methods=["PATCH"]),
             Route("/api/schedules/{schedule_id}", self._delete_schedule, methods=["DELETE"]),
             Route("/api/schedules/{schedule_id}/enable", self._enable_schedule, methods=["POST"]),
             Route("/api/schedules/{schedule_id}/disable", self._disable_schedule, methods=["POST"]),
             Route("/api/schedules/{schedule_id}/run", self._run_schedule, methods=["POST"]),
+            Route("/api/webhooks", self._list_webhooks, methods=["GET"]),
+            Route("/api/webhooks", self._create_webhook, methods=["POST"]),
+            Route("/api/webhooks/{token}", self._delete_webhook, methods=["DELETE"]),
             Route("/webhook/{token}", self._webhook, methods=["POST"]),
+            Mount("/static", app=StaticFiles(directory=str(WEB_DIR)), name="static"),
             Route("/", self._serve_ui, methods=["GET"]),
         ]
         return Starlette(routes=routes)
@@ -154,9 +161,8 @@ class HTTPServer:
         return JSONResponse({"status": "ok", "agents": list(self.adapters.keys())})
 
     async def _list_agents(self, request: Request) -> JSONResponse:
-        auth_err = self._check_auth(request)
-        if auth_err:
-            return auth_err
+        if err := self._check_auth(request):
+            return err
         agents = [
             {
                 "name": name,
@@ -276,6 +282,7 @@ class HTTPServer:
             return err
 
         user_id = request.query_params.get("user_id", "web-anonymous")
+        detail = request.query_params.get("detail", "false").lower() == "true"
         conversation_id = adapter.session_manager.get_or_create_session(user_id)
 
         turns = self._collect_turns(conversation_id)
@@ -294,12 +301,15 @@ class HTTPServer:
                     content = msg.get("content", "")
                     user_msg = content if isinstance(content, str) else str(content)
                     break
-            result_turns.append({
+            turn_data = {
                 "user": user_msg,
                 "assistant": item.final_answer or "",
                 "timestamp": item.timestamp.isoformat() if item.timestamp else None,
                 "tools_used": item.functions_called or [],
-            })
+            }
+            if detail:
+                turn_data["messages"] = item.messages
+            result_turns.append(turn_data)
 
         return JSONResponse({"conversation_id": conversation_id, "turns": result_turns})
 
@@ -349,6 +359,8 @@ class HTTPServer:
             return JSONResponse({"error": "message is required"}, status_code=400)
 
         user_id = body.get("user_id", "web-anonymous")
+        agent_name = request.path_params["agent"]
+        logger.info("[%s] <- %s (http): %s", agent_name, user_id, message[:100])
 
         channel_context = ChannelContext(
             source="http",
@@ -373,6 +385,7 @@ class HTTPServer:
                 # Only emit final_result if the EventBus didn't already
                 # (FinalAnswerEvent fires during handle_message for normal completions,
                 # but not for max_turns/error cases)
+                logger.info("[%s] -> %s (http): %s", adapter.agent_name, user_id, (response or "")[:100])
                 if not progress.has_final:
                     progress._emit("final_result", {"result": response})
 
@@ -458,6 +471,26 @@ class HTTPServer:
             return JSONResponse({"error": str(e)}, status_code=404)
         return JSONResponse(asdict(entry))
 
+    async def _update_schedule(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_scheduler(request):
+            return err
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+
+        schedule_id = request.path_params["schedule_id"]
+        allowed = {"prompt", "cron_expr", "run_at", "timezone", "agent", "schedule_type"}
+        fields = {k: v for k, v in body.items() if k in allowed}
+        if not fields:
+            return JSONResponse({"error": "no updatable fields provided"}, status_code=400)
+
+        try:
+            entry = self.scheduler.update(schedule_id, **fields)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        return JSONResponse(asdict(entry))
+
     async def _delete_schedule(self, request: Request) -> JSONResponse:
         if err := self._require_auth_and_scheduler(request):
             return err
@@ -484,9 +517,52 @@ class HTTPServer:
         asyncio.create_task(self.scheduler._fire_schedule(entry))
         return JSONResponse({"status": "triggered", "schedule_id": schedule_id})
 
+    async def _list_webhooks(self, request: Request) -> JSONResponse:
+        if err := self._check_auth(request):
+            return err
+        webhooks = [
+            {"token": w.token, "agent": w.agent, "source": w.source, "created_at": w.created_at}
+            for w in self.webhook_store.list()
+        ]
+        return JSONResponse({"webhooks": webhooks})
+
+    async def _create_webhook(self, request: Request) -> JSONResponse:
+        if err := self._check_auth(request):
+            return err
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+
+        agent = body.get("agent", "")
+        source = body.get("source", "")
+        if not agent or not source:
+            return JSONResponse({"error": "agent and source are required"}, status_code=400)
+        if agent not in self.agent_configs:
+            return JSONResponse({"error": f"unknown agent: {agent}"}, status_code=400)
+
+        try:
+            entry = self.webhook_store.add(agent=agent, source=source, token=body.get("token"))
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+
+        return JSONResponse({
+            "token": entry.token, "agent": entry.agent, "source": entry.source, "created_at": entry.created_at,
+        }, status_code=201)
+
+    async def _delete_webhook(self, request: Request) -> JSONResponse:
+        if err := self._check_auth(request):
+            return err
+        token = request.path_params["token"]
+        try:
+            self.webhook_store.remove(token)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+        return JSONResponse({"status": "removed"})
+
     async def _webhook(self, request: Request) -> JSONResponse:
         token = request.path_params["token"]
-        webhook = self.webhooks.get(token)
+        webhook = self.webhook_store.get(token)
         if not webhook:
             return JSONResponse({"error": "invalid webhook token"}, status_code=404)
 
@@ -534,6 +610,7 @@ class HTTPServer:
             host=self.config.host,
             port=self.config.port,
             log_level="info",
+            log_config=None,
         )
         self._server = uvicorn.Server(config)
         logger.info("HTTP API listening on http://%s:%d", self.config.host, self.config.port)

@@ -1,12 +1,16 @@
 """Main daemon gateway coordinating all adapters."""
 
 import asyncio
+import logging
+import signal
 from pathlib import Path
 from typing import Optional
 
 from tsugite.daemon.adapters.base import BaseAdapter, resolve_agent_path
 from tsugite.daemon.config import DaemonConfig, load_daemon_config
 from tsugite.daemon.session import SessionManager
+
+logger = logging.getLogger(__name__)
 
 
 class Gateway:
@@ -20,6 +24,14 @@ class Gateway:
 
     async def start(self):
         """Start all enabled adapters."""
+        from tsugite.tools import set_daemon_mode
+
+        set_daemon_mode(True)
+
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig, lambda: asyncio.create_task(self._shutdown()))
+
         tasks = []
         http_adapters = {}
 
@@ -43,7 +55,7 @@ class Gateway:
                         f"Agent file '{agent_config.agent_file}' not found for bot '{bot_config.name}'. "
                         f"Searched in workspace '{agent_config.workspace_dir}' and standard paths."
                     )
-                print(f"  ✓ Bot '{bot_config.name}' using agent: {agent_path}")
+                logger.info("Bot '%s' using agent: %s", bot_config.name, agent_path)
 
                 session_manager = SessionManager(
                     agent_name, agent_config.workspace_dir, context_limit=agent_config.context_limit
@@ -68,9 +80,9 @@ class Gateway:
             for agent_name, agent_config in self.config.agents.items():
                 agent_path = resolve_agent_path(agent_config.agent_file, agent_config.workspace_dir)
                 if not agent_path:
-                    print(f"  ⚠ Skipping HTTP agent '{agent_name}': agent file not found")
+                    logger.warning("Skipping HTTP agent '%s': agent file not found", agent_name)
                     continue
-                print(f"  ✓ HTTP agent '{agent_name}' using agent: {agent_path}")
+                logger.info("HTTP agent '%s' using agent: %s", agent_name, agent_path)
 
                 session_manager = SessionManager(
                     agent_name, agent_config.workspace_dir, context_limit=agent_config.context_limit
@@ -78,8 +90,12 @@ class Gateway:
                 http_adapters[agent_name] = HTTPAgentAdapter(agent_name, agent_config, session_manager)
 
             if http_adapters:
+                from tsugite.daemon.webhook_store import WebhookStore
+
+                webhook_store = WebhookStore(self.config.state_dir / "webhooks.json")
+
                 self._http_server = HTTPServer(
-                    self.config.http, http_adapters, self.config.webhooks, self.config.agents
+                    self.config.http, http_adapters, webhook_store, self.config.agents
                 )
                 tasks.append(self._http_server.start())
 
@@ -95,38 +111,59 @@ class Gateway:
             tasks.append(self._scheduler_adapter.start())
             if self._http_server:
                 self._http_server.scheduler = self._scheduler_adapter.scheduler
-            print(f"  ✓ Scheduler enabled (schedules: {schedules_path})")
+
+            # Give schedule tools direct access to the scheduler
+            from tsugite.tools.schedule import set_scheduler
+
+            set_scheduler(self._scheduler_adapter.scheduler, asyncio.get_running_loop())
+
+            logger.info("Scheduler enabled (schedules: %s)", schedules_path)
 
         if not tasks:
             raise ValueError("No adapters enabled in config")
 
         adapter_count = len(self.adapters) + (1 if self._http_server else 0)
-        print(f"Starting {adapter_count} adapter(s)...")
+        logger.info("Starting %d adapter(s)...", adapter_count)
         try:
             await asyncio.gather(*tasks)
         except KeyboardInterrupt:
-            print("\nShutting down...")
+            logger.info("Shutting down...")
         finally:
             await self._shutdown()
 
     async def _shutdown(self):
         """Graceful shutdown of all adapters."""
+        from tsugite.tools import set_daemon_mode
+        from tsugite.tools.schedule import set_scheduler
+
+        set_scheduler(None)
+        set_daemon_mode(False)
+
         components = [
-            *((a, "adapter") for a in self.adapters),
-            *((c, label) for c, label in [
-                (self._scheduler_adapter, "scheduler"),
-                (self._http_server, "HTTP server"),
-            ] if c),
+            (a, "adapter") for a in self.adapters
         ]
+        if self._scheduler_adapter:
+            components.append((self._scheduler_adapter, "scheduler"))
+        if self._http_server:
+            components.append((self._http_server, "HTTP server"))
+
         for component, label in components:
             try:
                 await component.stop()
             except Exception as e:
-                print(f"Error stopping {label}: {e}")
+                logger.error("Error stopping %s: %s", label, e)
 
 
 async def run_daemon(config_path: Optional[Path] = None):
     """Main daemon entry point."""
     config = load_daemon_config(config_path)
+
+    logging.basicConfig(
+        level=getattr(logging, config.log_level.upper(), logging.INFO),
+        format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+        datefmt="%H:%M:%S",
+        force=True,
+    )
+
     gateway = Gateway(config)
     await gateway.start()
