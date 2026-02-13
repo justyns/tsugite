@@ -632,7 +632,9 @@ def daemon_main(
 
     try:
         asyncio.run(run_daemon(config))
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, SystemExit):
+        pass
+    finally:
         console.print("\n[yellow]Daemon stopped[/yellow]")
 
 

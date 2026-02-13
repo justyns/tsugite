@@ -39,9 +39,9 @@ class JSONLUIHandler:
     - FinalAnswerEvent    → {"type": "final_result", "result": str, "turns": int, "tokens": int, "cost": float}
     - ErrorEvent          → {"type": "error", "error": str, "step": int}
     - FileReadEvent       → {"type": "file_read", "path": str, "line_count": int, "byte_count": int, "operation": str}
-    - SkillLoadedEvent    → {"type": "info", "message": "Loaded skill: {name} ({description})"}
+    - SkillLoadedEvent    → {"type": "skill_loaded", "name": str, "description": str}
     - SkillLoadFailedEvent→ {"type": "warning", "message": "Failed to load skill '{name}': {error}"}
-    - SkillUnloadedEvent  → {"type": "info", "message": "Unloaded skill: {name}"}
+    - SkillUnloadedEvent  → {"type": "skill_unloaded", "name": str}
 
     Success/Failure Patterns:
     - Successful tool: {"type": "tool_result", "tool": "read_file", "success": true, "output": "..."}
@@ -94,17 +94,13 @@ class JSONLUIHandler:
             self._emit("error", {"error": event.error, "step": event.step})
 
         elif isinstance(event, SkillLoadedEvent):
-            info_msg = f"Loaded skill: {event.skill_name}"
-            if event.description:
-                info_msg += f" ({event.description})"
-            self._emit("info", {"message": info_msg})
+            self._emit("skill_loaded", {"name": event.skill_name, "description": event.description or ""})
 
         elif isinstance(event, SkillLoadFailedEvent):
-            warning_msg = f"Failed to load skill '{event.skill_name}': {event.error_message}"
-            self._emit("warning", {"message": warning_msg})
+            self._emit("warning", {"message": f"Failed to load skill '{event.skill_name}': {event.error_message}"})
 
         elif isinstance(event, SkillUnloadedEvent):
-            self._emit("info", {"message": f"Unloaded skill: {event.skill_name}"})
+            self._emit("skill_unloaded", {"name": event.skill_name})
 
         elif isinstance(event, FileReadEvent):
             self._emit(

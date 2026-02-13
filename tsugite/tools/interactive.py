@@ -7,7 +7,6 @@ import time
 from contextlib import contextmanager
 from typing import List, Optional
 
-import nest_asyncio
 import questionary
 from questionary import Style
 from rich.console import Console
@@ -17,8 +16,21 @@ from ..tools import tool
 from ..ui_context import paused_progress
 from ..utils import is_interactive
 
-# Allow nested event loops (needed for questionary in async contexts)
-nest_asyncio.apply()
+_nest_asyncio_applied = False
+
+
+def _ensure_nest_asyncio():
+    """Apply nest_asyncio lazily, only when interactive tools actually need it."""
+    global _nest_asyncio_applied
+    if not _nest_asyncio_applied:
+        from tsugite.tools import _daemon_mode
+
+        if _daemon_mode:
+            raise RuntimeError("nest_asyncio cannot be applied in daemon mode")
+        import nest_asyncio
+
+        nest_asyncio.apply()
+        _nest_asyncio_applied = True
 
 # Custom style for questionary to match Rich theme
 QUESTIONARY_STYLE = Style(
@@ -343,6 +355,7 @@ def ask_choice_question(question: str, options: List[str], console: Console, flu
     Raises:
         KeyboardInterrupt: If user cancels with Ctrl+C
     """
+    _ensure_nest_asyncio()
     console.print()  # Add blank line for spacing
     flush_fn()
 
