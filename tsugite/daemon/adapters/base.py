@@ -1,6 +1,7 @@
 """Base adapter for platform integrations."""
 
 import asyncio
+import contextvars
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -232,7 +233,8 @@ class BaseAdapter(ABC):
             finally:
                 os.chdir(original_cwd)
 
-        result = await asyncio.to_thread(run_in_workspace)
+        ctx = contextvars.copy_context()
+        result = await asyncio.to_thread(ctx.run, run_in_workspace)
 
         try:
             from tsugite.agent_runner.history_integration import save_run_to_history

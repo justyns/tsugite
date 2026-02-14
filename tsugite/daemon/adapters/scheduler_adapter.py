@@ -64,6 +64,10 @@ class SchedulerAdapter:
 
         resolved_channels = self._resolve_channels(entry.notify) if entry.notify else []
 
+        from tsugite.interaction import NonInteractiveBackend, set_interaction_backend
+
+        set_interaction_backend(NonInteractiveBackend())
+
         ctx = notify_context(resolved_channels) if (entry.notify_tool and resolved_channels) else nullcontext()
         with ctx:
             result = await adapter.handle_message(

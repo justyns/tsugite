@@ -149,6 +149,17 @@ main { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
 .tool-call-name, .tool-result-name { font-size: 12px; cursor: pointer; color: var(--muted); }
 .tool-call-args { font-size: 11px; background: var(--code-bg); padding: 8px; border-radius: 6px; overflow-x: auto; white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow-y: auto; margin: 4px 0; }
 
+/* Ask user forms */
+.ask-user-form { border: 1px solid var(--accent); }
+.ask-buttons { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.ask-buttons button { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 16px; cursor: pointer; font-size: 13px; }
+.ask-buttons button:hover { border-color: var(--accent); background: var(--accent); color: var(--btn-text); }
+.ask-text { display: flex; gap: 8px; margin-top: 8px; }
+.ask-text input { flex: 1; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 13px; }
+.ask-text input:focus { outline: none; border-color: var(--accent); }
+.ask-text button { background: var(--accent); color: var(--btn-text); border: none; border-radius: 6px; padding: 6px 16px; cursor: pointer; font-size: 13px; font-weight: 600; }
+.ask-answered { color: var(--ok); font-size: 13px; margin-top: 4px; }
+
 /* Token display */
 .token-masked { font-family: monospace; font-size: 13px; letter-spacing: 1px; }
 .token-reveal { cursor: pointer; color: var(--accent); font-size: 12px; margin-left: 8px; }

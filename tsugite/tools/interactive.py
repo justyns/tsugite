@@ -162,12 +162,6 @@ def ask_user(question: str, question_type: str = "text", options: Optional[List[
         ValueError: If not in interactive mode or invalid parameters
         RuntimeError: If user interaction fails
     """
-    if not is_interactive():
-        raise RuntimeError(
-            "Cannot use ask_user tool in non-interactive mode. "
-            "This tool requires a terminal with user input capability."
-        )
-
     # Validate question type
     valid_types = ["text", "yes_no", "choice"]
     if question_type not in valid_types:
@@ -177,6 +171,20 @@ def ask_user(question: str, question_type: str = "text", options: Optional[List[
     if question_type == "choice":
         if not options or len(options) < 2:
             raise ValueError(f"Invalid options {options}: must provide at least 2 options for choice type questions")
+
+    # Dispatch through interaction backend if one is set
+    from tsugite.interaction import get_interaction_backend
+
+    backend = get_interaction_backend()
+    if backend is not None:
+        return backend.ask_user(question, question_type, options)
+
+    # Fall back to TTY behavior
+    if not is_interactive():
+        raise RuntimeError(
+            "Cannot use ask_user tool in non-interactive mode. "
+            "This tool requires a terminal with user input capability."
+        )
 
     try:
         with terminal_context() as console:
@@ -228,12 +236,6 @@ def ask_user_batch(questions: List[dict]) -> dict:
         ])
         # Returns: {"what_is_your_name": "Alice", "save_to_file": "yes", "choose_format": "json"}
     """
-    if not is_interactive():
-        raise RuntimeError(
-            "Cannot use ask_user_batch tool in non-interactive mode. "
-            "This tool requires a terminal with user input capability."
-        )
-
     # Validate questions list
     if not questions or not isinstance(questions, list):
         raise ValueError(f"Invalid questions {questions}: must be a non-empty list of question dictionaries")
@@ -241,6 +243,23 @@ def ask_user_batch(questions: List[dict]) -> dict:
     # Validate each question structure and auto-generate IDs if needed
     valid_types = ["text", "yes_no", "choice"]
     validate_batch_questions(questions, valid_types)
+
+    # Dispatch through interaction backend if one is set
+    from tsugite.interaction import get_interaction_backend
+
+    backend = get_interaction_backend()
+    if backend is not None:
+        responses = {}
+        for q in questions:
+            responses[q["id"]] = backend.ask_user(q["question"], q["type"], q.get("options"))
+        return responses
+
+    # Fall back to TTY behavior
+    if not is_interactive():
+        raise RuntimeError(
+            "Cannot use ask_user_batch tool in non-interactive mode. "
+            "This tool requires a terminal with user input capability."
+        )
 
     # Collect responses
     responses = {}

@@ -128,6 +128,33 @@
               </details>
             </div>
           </template>
+          <template x-if="msg.type === 'ask_user'">
+            <div class="msg agent ask-user-form">
+              <p><strong x-text="msg.question"></strong></p>
+              <template x-if="msg.answered">
+                <p class="ask-answered">Answered: <em x-text="msg.answer"></em></p>
+              </template>
+              <template x-if="!msg.answered && msg.questionType === 'yes_no'">
+                <div class="ask-buttons">
+                  <button @click="submitAskUser(i, 'yes')">Yes</button>
+                  <button @click="submitAskUser(i, 'no')">No</button>
+                </div>
+              </template>
+              <template x-if="!msg.answered && msg.questionType === 'choice'">
+                <div class="ask-buttons">
+                  <template x-for="opt in msg.options" :key="opt">
+                    <button @click="submitAskUser(i, opt)" x-text="opt"></button>
+                  </template>
+                </div>
+              </template>
+              <template x-if="!msg.answered && msg.questionType === 'text'">
+                <form class="ask-text" @submit.prevent="submitAskUser(i, msg.inputValue || '')">
+                  <input type="text" x-model="msg.inputValue" placeholder="Type your answer..." autofocus>
+                  <button type="submit">Send</button>
+                </form>
+              </template>
+            </div>
+          </template>
         </div>
       </template>
     </div>

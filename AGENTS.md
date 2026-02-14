@@ -317,8 +317,10 @@ tsu run -f image1.jpg -f image2.jpg "Compare these images"
 
 ## Testing Strategy
 
+- **TDD preferred**: Write tests first when building new features. Tests don't need to be elaborate — simple tests that verify the expected behavior are enough. This creates a fast feedback loop and catches integration issues early (e.g., contextvar propagation, tool registration) before manual testing.
 - **Unit tests**: Individual functions and classes
-- **Integration tests**: Agent execution end-to-end
+- **Pipeline tests**: Mock only `TsugiteAgent`/`litellm.acompletion` but exercise the full pipeline (parsing → rendering → preparation → tool expansion → execution). Most tests in the suite are this style.
+- **Smoke tests**: `tests/smoke_test.sh` hits a real LLM API (requires `OPENAI_API_KEY`, not run in CI)
 - **Fixtures**: `conftest.py` provides shared test data
 - **Mocking**: Use `@pytest.fixture` for LLM responses
 - **Async tests**: Mark with `@pytest.mark.asyncio`

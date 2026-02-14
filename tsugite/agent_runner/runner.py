@@ -504,6 +504,12 @@ async def _execute_agent_with_prompt(
         # Set event_bus in context so tools can access it during execution
         _setup_event_context(event_bus)
 
+        # Set default interaction backend for CLI if none is set
+        from tsugite.interaction import TerminalInteractionBackend, get_interaction_backend, set_interaction_backend
+
+        if get_interaction_backend() is None and is_interactive():
+            set_interaction_backend(TerminalInteractionBackend())
+
         # Run agent
         result = await agent.run(
             prepared.rendered_prompt,

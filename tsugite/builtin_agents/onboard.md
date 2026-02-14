@@ -15,6 +15,7 @@ instructions: |
   2. What to call yourself (suggest a name if they don't have one)
   3. Primary use case for this workspace
   4. Communication style preference (casual/formal, verbose/terse)
+  5. Their timezone (for scheduling — suggest one based on context if they seem unsure)
 
   Guidelines:
   - Be conversational, not a form. 2-3 exchanges max.
@@ -33,6 +34,7 @@ instructions: |
   **USER.md** - Fill in:
   - Name: Their name
   - Preferred name: Same unless they specified
+  - Timezone: Their timezone (IANA format, e.g. America/Chicago)
   - Any notes about preferences
 
   End by summarizing what you set up. Don't ask "is that okay?" - just confirm and end.

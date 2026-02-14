@@ -154,7 +154,11 @@ class TsugiteAgent:
 
         if loop is not None:
             # We're inside an async context - run in a thread with its own event loop
-            # to avoid issues with nest_asyncio and coroutine reuse
+            # to avoid issues with nest_asyncio and coroutine reuse.
+            # Copy current context so contextvars (interaction backend, etc.) propagate.
+            import contextvars
+
+            ctx = contextvars.copy_context()
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
 
                 def run_coro():
@@ -166,7 +170,7 @@ class TsugiteAgent:
                     finally:
                         new_loop.close()
 
-                future = executor.submit(run_coro)
+                future = executor.submit(ctx.run, run_coro)
                 return future.result()
         else:
             # No running loop - we can use asyncio.run directly

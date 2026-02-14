@@ -235,9 +235,18 @@ class AgentPreparer:
             if "spawn_agent" not in expanded_tools:
                 expanded_tools.append("spawn_agent")
 
-            # Filter out interactive tools in non-interactive mode
-            if not interactive_mode and "ask_user" in expanded_tools:
-                expanded_tools.remove("ask_user")
+            # Auto-inject or filter interactive tools based on interaction capability.
+            from tsugite.interaction import get_interaction_backend
+            from tsugite.tools import _tools
+
+            interactive_tool_names = ["ask_user", "ask_user_batch"]
+            has_interaction = interactive_mode or get_interaction_backend() is not None or full_context.get("is_daemon", False)
+            if has_interaction:
+                for name in interactive_tool_names:
+                    if name not in expanded_tools and name in _tools:
+                        expanded_tools.append(name)
+            else:
+                expanded_tools = [t for t in expanded_tools if t not in interactive_tool_names]
 
             # Convert to Tool objects
             tools = [create_tool_from_tsugite(name) for name in expanded_tools]

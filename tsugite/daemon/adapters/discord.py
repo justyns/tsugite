@@ -213,6 +213,182 @@ class DiscordProgressHandler:
             await self._collapse_to_summary()
 
 
+class _YesNoView(discord.ui.View):
+    """Discord button view for yes/no questions."""
+
+    def __init__(self, question: str, user_id: str, timeout: float = 300):
+        super().__init__(timeout=timeout)
+        self.value: Optional[str] = None
+        self.question = question
+        self._user_id = user_id
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if str(interaction.user.id) != self._user_id:
+            await interaction.response.send_message("This question isn't for you.", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="Yes", style=discord.ButtonStyle.green)
+    async def yes_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.value = "yes"
+        await interaction.response.edit_message(content=f"**Q:** {self.question}\n**A:** Yes", view=None)
+        self.stop()
+
+    @discord.ui.button(label="No", style=discord.ButtonStyle.red)
+    async def no_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.value = "no"
+        await interaction.response.edit_message(content=f"**Q:** {self.question}\n**A:** No", view=None)
+        self.stop()
+
+
+class _ChoiceView(discord.ui.View):
+    """Discord button/select view for choice questions."""
+
+    def __init__(self, question: str, options: list[str], user_id: str, timeout: float = 300):
+        super().__init__(timeout=timeout)
+        self.value: Optional[str] = None
+        self.question = question
+        self._user_id = user_id
+
+        if len(options) <= 5:
+            for opt in options:
+                self.add_item(_ChoiceButton(opt, self))
+        else:
+            self.add_item(_ChoiceSelect(options, self))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if str(interaction.user.id) != self._user_id:
+            await interaction.response.send_message("This question isn't for you.", ephemeral=True)
+            return False
+        return True
+
+
+class _ChoiceButton(discord.ui.Button):
+    def __init__(self, label: str, parent_view: _ChoiceView):
+        super().__init__(label=label, style=discord.ButtonStyle.primary)
+        self._parent_view = parent_view
+
+    async def callback(self, interaction: discord.Interaction):
+        self._parent_view.value = self.label
+        await interaction.response.edit_message(
+            content=f"**Q:** {self._parent_view.question}\n**A:** {self.label}", view=None
+        )
+        self._parent_view.stop()
+
+
+class _ChoiceSelect(discord.ui.Select):
+    def __init__(self, options: list[str], parent_view: _ChoiceView):
+        super().__init__(
+            placeholder="Select an option...",
+            options=[discord.SelectOption(label=opt) for opt in options[:25]],
+        )
+        self._parent_view = parent_view
+
+    async def callback(self, interaction: discord.Interaction):
+        self._parent_view.value = self.values[0]
+        await interaction.response.edit_message(
+            content=f"**Q:** {self._parent_view.question}\n**A:** {self.values[0]}", view=None
+        )
+        self._parent_view.stop()
+
+
+class _TextInputModal(discord.ui.Modal):
+    """Discord modal for freeform text input."""
+
+    def __init__(self, question: str, timeout: float = 300):
+        super().__init__(title="Question", timeout=timeout)
+        self.value: Optional[str] = None
+        self._question = question
+        self.answer = discord.ui.TextInput(
+            label=question[:45],  # Discord label limit is 45 chars
+            placeholder="Type your answer...",
+            style=discord.TextStyle.paragraph,
+            required=True,
+        )
+        self.add_item(self.answer)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        self.value = self.answer.value
+        await interaction.response.defer()
+        self.stop()
+
+
+class _TextInputView(discord.ui.View):
+    """View with a Reply button that opens a text input modal."""
+
+    def __init__(self, question: str, user_id: str, timeout: float = 300):
+        super().__init__(timeout=timeout)
+        self.question = question
+        self._user_id = user_id
+        self._timeout = timeout
+        self.modal: Optional[_TextInputModal] = None
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if str(interaction.user.id) != self._user_id:
+            await interaction.response.send_message("This question isn't for you.", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="Reply", style=discord.ButtonStyle.primary, emoji="\u270f\ufe0f")
+    async def reply_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.modal = _TextInputModal(self.question, timeout=self._timeout)
+        await interaction.response.send_modal(self.modal)
+        # Wait for the modal to complete
+        timed_out = await self.modal.wait()
+        if not timed_out and self.modal.value is not None:
+            self.stop()
+
+
+class DiscordInteractionBackend:
+    """Interaction backend for Discord — uses views/modals for questions."""
+
+    TIMEOUT = 300
+
+    def __init__(self, bot: commands.Bot, channel: discord.abc.Messageable, user_id: str, loop: asyncio.AbstractEventLoop):
+        self._bot = bot
+        self._channel = channel
+        self._user_id = user_id
+        self._loop = loop
+
+    def ask_user(self, question: str, question_type: str = "text", options: Optional[list[str]] = None) -> str:
+        future = asyncio.run_coroutine_threadsafe(
+            self._ask_async(question, question_type, options), self._loop
+        )
+        try:
+            return future.result(timeout=self.TIMEOUT)
+        except asyncio.CancelledError:
+            raise RuntimeError("Interaction cancelled (Discord bot shutting down)")
+        except TimeoutError:
+            raise RuntimeError("Timed out waiting for user response (Discord)")
+
+    async def _ask_async(self, question: str, question_type: str, options: Optional[list[str]]) -> str:
+        if question_type == "yes_no":
+            view = _YesNoView(question, user_id=self._user_id, timeout=self.TIMEOUT)
+            await self._channel.send(f"**Question:** {question}", view=view)
+            timed_out = await view.wait()
+            if timed_out or view.value is None:
+                raise RuntimeError("Timed out waiting for user response (Discord)")
+            return view.value
+
+        elif question_type == "choice" and options:
+            view = _ChoiceView(question, options, user_id=self._user_id, timeout=self.TIMEOUT)
+            await self._channel.send(f"**Question:** {question}", view=view)
+            timed_out = await view.wait()
+            if timed_out or view.value is None:
+                raise RuntimeError("Timed out waiting for user response (Discord)")
+            return view.value
+
+        else:  # text — use modal via button
+            view = _TextInputView(question, user_id=self._user_id, timeout=self.TIMEOUT)
+            msg = await self._channel.send(f"**Question:** {question}", view=view)
+            timed_out = await view.wait()
+            value = view.modal.value if view.modal else None
+            if timed_out or value is None:
+                raise RuntimeError("Timed out waiting for user response (Discord)")
+            await msg.edit(content=f"**Q:** {question}\n**A:** {value}", view=None)
+            return value
+
+
 class DiscordAdapter(BaseAdapter):
     """Discord bot adapter tied to a specific agent."""
 
@@ -292,8 +468,17 @@ class DiscordAdapter(BaseAdapter):
             },
         )
 
-        progress = DiscordProgressHandler(message.channel, asyncio.get_running_loop())
+        loop = asyncio.get_running_loop()
+        progress = DiscordProgressHandler(message.channel, loop)
         custom_logger = SimpleNamespace(ui_handler=progress)
+
+        from tsugite.interaction import set_interaction_backend
+
+        interaction_backend = DiscordInteractionBackend(
+            bot=self.bot, channel=message.channel,
+            user_id=str(message.author.id), loop=loop,
+        )
+        set_interaction_backend(interaction_backend)
 
         await progress.start_typing_loop()
         self.active_progress_handlers.append(progress)

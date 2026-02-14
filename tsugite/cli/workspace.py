@@ -140,9 +140,9 @@ def onboard_workspace(
     history_opts = HistoryOptions(enabled=False)
 
     path_context = PathContext(
-        original_cwd=Path.cwd(),
-        agent_cwd=workspace.path,
-        workspace=workspace,
+        invoked_from=Path.cwd(),
+        workspace_dir=workspace.path,
+        effective_cwd=workspace.path,
     )
 
     run_repl_chat(

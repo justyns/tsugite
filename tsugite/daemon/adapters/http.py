@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import threading
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -79,6 +80,33 @@ class SSEProgressHandler(JSONLUIHandler):
         yield 'data: {"type": "done"}\n\n'
 
 
+class HTTPInteractionBackend:
+    """Interaction backend for HTTP — emits SSE events, blocks until response."""
+
+    TIMEOUT = 300  # 5 minutes
+
+    def __init__(self, progress: SSEProgressHandler):
+        self._progress = progress
+        self._event = threading.Event()
+        self._response: Optional[str] = None
+
+    def ask_user(self, question: str, question_type: str = "text", options: Optional[list[str]] = None) -> str:
+        self._event.clear()
+        self._response = None
+        payload = {"question": question, "question_type": question_type}
+        if options:
+            payload["options"] = options
+        self._progress._emit("ask_user", payload)
+
+        if not self._event.wait(timeout=self.TIMEOUT):
+            raise RuntimeError("Timed out waiting for user response (HTTP)")
+        return self._response or ""
+
+    def submit_response(self, response: str) -> None:
+        self._response = response
+        self._event.set()
+
+
 class HTTPAgentAdapter(BaseAdapter):
     """Per-agent adapter for HTTP. Lifecycle managed by HTTPServer."""
 
@@ -106,6 +134,7 @@ class HTTPServer:
         self._auth_tokens = set(config.auth_tokens)
         self._server = None
         self.scheduler = None  # Set by Gateway after SchedulerAdapter is created
+        self._active_backends: dict[tuple[str, str], HTTPInteractionBackend] = {}
         self.app = self._build_app()
 
     def _check_auth(self, request: Request) -> Optional[JSONResponse]:
@@ -140,6 +169,7 @@ class HTTPServer:
             Route("/api/agents/{agent}/attachments", self._attachments, methods=["GET"]),
             Route("/api/agents/{agent}/history", self._history, methods=["GET"]),
             Route("/api/agents/{agent}/compact", self._compact, methods=["POST"]),
+            Route("/api/agents/{agent}/respond", self._respond, methods=["POST"]),
             Route("/api/schedules", self._list_schedules, methods=["GET"]),
             Route("/api/schedules", self._create_schedule, methods=["POST"]),
             Route("/api/schedules/{schedule_id}", self._get_schedule, methods=["GET"]),
@@ -344,6 +374,35 @@ class HTTPServer:
             "new_conversation_id": new_session.conversation_id if new_session else None,
         })
 
+    async def _respond(self, request: Request) -> JSONResponse:
+        """Submit a response to an active ask_user prompt."""
+        adapter, err = self._get_adapter(request)
+        if err:
+            return err
+
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+
+        response = body.get("response", "")
+        if not isinstance(response, str):
+            return JSONResponse({"error": "response must be a string"}, status_code=400)
+        if len(response) > 10_000:
+            return JSONResponse({"error": "response too long (max 10000 chars)"}, status_code=400)
+
+        user_id = body.get("user_id", "web-anonymous")
+        agent_name = request.path_params["agent"]
+        logger.info("[%s] respond from user_id=%s", agent_name, user_id)
+
+        key = (agent_name, user_id)
+        backend = self._active_backends.get(key)
+        if not backend:
+            return JSONResponse({"error": "no pending question for this agent/user"}, status_code=404)
+
+        backend.submit_response(response)
+        return JSONResponse({"status": "ok"})
+
     async def _chat(self, request: Request) -> Response:
         adapter, err = self._get_adapter(request)
         if err:
@@ -374,7 +433,14 @@ class HTTPServer:
         progress.set_loop(asyncio.get_running_loop())
         custom_logger = SimpleNamespace(ui_handler=progress)
 
+        interaction_backend = HTTPInteractionBackend(progress)
+        backend_key = (agent_name, user_id)
+        self._active_backends[backend_key] = interaction_backend
+
         async def run_agent():
+            from tsugite.interaction import set_interaction_backend
+
+            set_interaction_backend(interaction_backend)
             try:
                 response = await adapter.handle_message(
                     user_id=user_id,
@@ -404,6 +470,7 @@ class HTTPServer:
                 logger.exception("[%s] Chat error", adapter.agent_name)
                 progress._emit("error", {"error": str(e)})
             finally:
+                self._active_backends.pop(backend_key, None)
                 progress.signal_done()
 
         asyncio.create_task(run_agent())

@@ -141,6 +141,20 @@ export default () => ({
     }
   },
 
+  async submitAskUser(msgIndex, response) {
+    const agent = this.$store.app.selectedAgent;
+    if (!agent) return;
+    const msg = this.messages[msgIndex];
+    if (!msg || msg.answered) return;
+    msg.answered = true;
+    msg.answer = response;
+    try {
+      await post(`/api/agents/${agent}/respond`, { response, user_id: this.userId });
+    } catch (e) {
+      this.messages.push({ type: 'error', text: `Failed to submit answer: ${e.message}` });
+    }
+  },
+
   renderHtml(text) { return renderMarkdown(text); },
   escape(s) { return escapeHtml(s); },
 
@@ -193,6 +207,20 @@ export default () => ({
             }
           } else if (event.type === 'skill_unloaded') {
             this.loadedSkills = this.loadedSkills.filter(s => s.name !== event.name);
+          } else if (event.type === 'ask_user') {
+            this.messages.push({
+              type: 'ask_user',
+              question: event.question,
+              questionType: event.question_type || 'text',
+              options: event.options || [],
+              answered: false,
+              answer: '',
+              inputValue: '',
+            });
+            this.$nextTick(() => {
+              const el = this.$refs.messages;
+              if (el) scrollToBottom(el);
+            });
           } else if (event.type === 'final_result') {
             gotResult = true;
             this.messages.push({ type: 'agent', text: event.result });

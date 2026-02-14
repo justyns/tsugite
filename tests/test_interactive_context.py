@@ -143,10 +143,8 @@ Task: {{ user_prompt }}
 @pytest.mark.asyncio
 async def test_interactive_flag_available_in_templates(temp_dir, monkeypatch, mock_agent_runner):
     """Test that is_interactive can be used in template conditionals."""
-    # Mock TTY check
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
-    # Create an agent that uses conditional logic
     agent_content = """---
 name: test_conditional
 extends: none
@@ -169,30 +167,26 @@ Task: {{ user_prompt }}
     agent_file = temp_dir / "test_conditional.md"
     agent_file.write_text(agent_content)
 
-    # Use fixture to create mock
     mock_instance, captured_prompts = mock_agent_runner()
 
     with patch("tsugite.agent_runner.runner.TsugiteAgent", return_value=mock_instance):
         await run_agent_async(agent_file, "test prompt")
 
-    # Verify the conditional worked
     assert len(captured_prompts) > 0
     assert "You can use ask_user tool." in captured_prompts[0]
     assert "Running in headless mode" not in captured_prompts[0]
 
 
-def test_ask_user_tool_not_available_in_headless(monkeypatch, file_tools, interactive_tools):
-    """Test that ask_user tool is filtered out in non-interactive mode."""
-    # Mock TTY check to return False (headless)
-    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+# --- Helpers for tool injection tests ---
 
-    # Create an agent config that includes ask_user
-    agent_config = AgentConfig(
-        name="test_headless",
+
+def _make_agent_config(tools=None):
+    return AgentConfig(
+        name="test_agent",
         description="Test agent",
         model="openai:gpt-4o-mini",
         max_turns=1,
-        tools=["ask_user", "write_file"],  # ask_user should be filtered out
+        tools=tools or ["write_file"],
         prefetch=[],
         permissions_profile="default",
         context_budget={"tokens": 8000, "priority": ["system", "task"]},
@@ -201,7 +195,9 @@ def test_ask_user_tool_not_available_in_headless(monkeypatch, file_tools, intera
         extends=None,
     )
 
-    # Capture the tools list
+
+def _prepare_and_capture_tools(agent_config, context=None):
+    """Run AgentPreparer.prepare() and return the list of tool names created."""
     captured_tools = []
 
     def mock_create_tool(tool_name):
@@ -216,58 +212,103 @@ def test_ask_user_tool_not_available_in_headless(monkeypatch, file_tools, intera
         from tsugite.agent_preparation import AgentPreparer
         from tsugite.md_agents import Agent
 
-        # Create agent and use AgentPreparer to trigger tool creation
         agent = Agent(content="Test", config=agent_config, file_path=Path("<test>"))
         preparer = AgentPreparer()
-        preparer.prepare(agent=agent, prompt="Test prompt", context={})
+        preparer.prepare(agent=agent, prompt="Test prompt", context=context or {})
 
-    # Verify ask_user was filtered out
-    assert len(captured_tools) > 0
-    assert "ask_user" not in captured_tools
-    assert "write_file" in captured_tools  # Other tools should still be there
+    return captured_tools
+
+
+# --- Tool injection tests ---
+
+
+def test_ask_user_tool_not_available_in_headless(monkeypatch, file_tools, interactive_tools):
+    """Test that ask_user tool is filtered out in non-interactive mode."""
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+
+    config = _make_agent_config(tools=["ask_user", "write_file"])
+    tools = _prepare_and_capture_tools(config)
+
+    assert "ask_user" not in tools
+    assert "write_file" in tools
 
 
 def test_ask_user_tool_available_in_interactive(monkeypatch, file_tools, interactive_tools):
     """Test that ask_user tool is available in interactive mode."""
-    # Mock TTY check to return True (interactive)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
-    # Create an agent config that includes ask_user
-    agent_config = AgentConfig(
-        name="test_interactive",
-        description="Test agent",
-        model="openai:gpt-4o-mini",
-        max_turns=1,
-        tools=["ask_user", "write_file"],
-        prefetch=[],
-        permissions_profile="default",
-        context_budget={"tokens": 8000, "priority": ["system", "task"]},
-        instructions="",
-        mcp_servers={},
-        extends=None,
-    )
+    config = _make_agent_config(tools=["ask_user", "write_file"])
+    tools = _prepare_and_capture_tools(config)
 
-    # Capture the tools list
-    captured_tools = []
+    assert "ask_user" in tools
+    assert "write_file" in tools
 
-    def mock_create_tool(tool_name):
-        captured_tools.append(tool_name)
-        from tsugite.core.tools import Tool
 
-        return Tool(name=tool_name, description=f"Mock {tool_name}", function=lambda: None, parameters={})
+class TestDaemonModeInteractiveTools:
+    """Test that ask_user tools are auto-injected in daemon mode."""
 
-    with patch("tsugite.core.tools.create_tool_from_tsugite", side_effect=mock_create_tool):
-        from pathlib import Path
+    def test_daemon_mode_injects_interactive_tools(self, monkeypatch, file_tools, interactive_tools):
+        """In daemon mode (is_daemon=True), ask_user tools should be auto-injected."""
+        monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
 
-        from tsugite.agent_preparation import AgentPreparer
-        from tsugite.md_agents import Agent
+        config = _make_agent_config(tools=["write_file"])
+        tools = _prepare_and_capture_tools(config, context={"is_daemon": True})
 
-        # Create agent and use AgentPreparer to trigger tool creation
-        agent = Agent(content="Test", config=agent_config, file_path=Path("<test>"))
-        preparer = AgentPreparer()
-        preparer.prepare(agent=agent, prompt="Test prompt", context={})
+        assert "ask_user" in tools
+        assert "ask_user_batch" in tools
+        assert "write_file" in tools
 
-    # Verify ask_user is still present in interactive mode
-    assert len(captured_tools) > 0
-    assert "ask_user" in captured_tools
-    assert "write_file" in captured_tools
+    def test_daemon_mode_no_duplicate_if_already_listed(self, monkeypatch, file_tools, interactive_tools):
+        """If agent already lists ask_user, daemon mode shouldn't duplicate it."""
+        monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+
+        config = _make_agent_config(tools=["ask_user", "write_file"])
+        tools = _prepare_and_capture_tools(config, context={"is_daemon": True})
+
+        assert tools.count("ask_user") == 1
+
+    def test_headless_no_daemon_removes_ask_user(self, monkeypatch, file_tools, interactive_tools):
+        """Without daemon mode and without TTY, ask_user should be removed."""
+        monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+
+        config = _make_agent_config(tools=["ask_user", "write_file"])
+        tools = _prepare_and_capture_tools(config, context={})
+
+        assert "ask_user" not in tools
+        assert "write_file" in tools
+
+    def test_headless_no_daemon_doesnt_inject(self, monkeypatch, file_tools, interactive_tools):
+        """Without daemon mode and without TTY, ask_user should NOT be auto-injected."""
+        monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+
+        config = _make_agent_config(tools=["write_file"])
+        tools = _prepare_and_capture_tools(config, context={})
+
+        assert "ask_user" not in tools
+        assert "ask_user_batch" not in tools
+
+    def test_interactive_tty_injects_ask_user(self, monkeypatch, file_tools, interactive_tools):
+        """With TTY available, ask_user should be auto-injected even if not listed."""
+        monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
+        config = _make_agent_config(tools=["write_file"])
+        tools = _prepare_and_capture_tools(config, context={})
+
+        assert "ask_user" in tools
+        assert "ask_user_batch" in tools
+
+    def test_interaction_backend_injects_ask_user(self, monkeypatch, file_tools, interactive_tools):
+        """When an interaction backend is set, ask_user should be auto-injected."""
+        monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+
+        from tsugite.interaction import NonInteractiveBackend, set_interaction_backend
+
+        set_interaction_backend(NonInteractiveBackend())
+        try:
+            config = _make_agent_config(tools=["write_file"])
+            tools = _prepare_and_capture_tools(config, context={})
+
+            assert "ask_user" in tools
+            assert "ask_user_batch" in tools
+        finally:
+            set_interaction_backend(None)
