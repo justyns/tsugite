@@ -110,6 +110,11 @@ class HTTPInteractionBackend:
 class HTTPAgentAdapter(BaseAdapter):
     """Per-agent adapter for HTTP. Lifecycle managed by HTTPServer."""
 
+    def resolve_http_user(self, user_id: str) -> str:
+        """Resolve an HTTP user_id to canonical identity (no channel context needed for HTTP DMs)."""
+        ctx = ChannelContext(source="http", channel_id=None, user_id=user_id, reply_to=f"http:{user_id}")
+        return self.resolve_user(user_id, ctx)
+
     async def start(self) -> None:
         pass
 
@@ -207,7 +212,7 @@ class HTTPServer:
         adapter, err = self._get_adapter(request)
         if err:
             return err
-        sessions_dir = adapter.agent_config.workspace_dir / "daemon_sessions"
+        sessions_dir = adapter.session_manager.sessions_dir
 
         sessions = []
         if sessions_dir.is_dir():
@@ -237,7 +242,7 @@ class HTTPServer:
         if err:
             return err
 
-        user_id = request.query_params.get("user_id", "web-anonymous")
+        user_id = adapter.resolve_http_user(request.query_params.get("user_id", "web-anonymous"))
         adapter.session_manager.get_or_create_session(user_id)
         session = adapter.session_manager.sessions.get(user_id)
 
@@ -311,7 +316,7 @@ class HTTPServer:
         if err:
             return err
 
-        user_id = request.query_params.get("user_id", "web-anonymous")
+        user_id = adapter.resolve_http_user(request.query_params.get("user_id", "web-anonymous"))
         detail = request.query_params.get("detail", "false").lower() == "true"
         conversation_id = adapter.session_manager.get_or_create_session(user_id)
 
@@ -353,7 +358,7 @@ class HTTPServer:
         except Exception:
             return JSONResponse({"error": "invalid JSON body"}, status_code=400)
 
-        user_id = body.get("user_id", "web-anonymous")
+        user_id = adapter.resolve_http_user(body.get("user_id", "web-anonymous"))
 
         adapter.session_manager.get_or_create_session(user_id)
         session = adapter.session_manager.sessions.get(user_id)
@@ -391,7 +396,7 @@ class HTTPServer:
         if len(response) > 10_000:
             return JSONResponse({"error": "response too long (max 10000 chars)"}, status_code=400)
 
-        user_id = body.get("user_id", "web-anonymous")
+        user_id = adapter.resolve_http_user(body.get("user_id", "web-anonymous"))
         agent_name = request.path_params["agent"]
         logger.info("[%s] respond from user_id=%s", agent_name, user_id)
 
@@ -417,15 +422,16 @@ class HTTPServer:
         if not message:
             return JSONResponse({"error": "message is required"}, status_code=400)
 
-        user_id = body.get("user_id", "web-anonymous")
+        raw_user_id = body.get("user_id", "web-anonymous")
         agent_name = request.path_params["agent"]
+        user_id = adapter.resolve_http_user(raw_user_id)
         logger.info("[%s] <- %s (http): %s", agent_name, user_id, message[:100])
 
         channel_context = ChannelContext(
             source="http",
             channel_id=None,
-            user_id=user_id,
-            reply_to=f"http:{user_id}",
+            user_id=raw_user_id,
+            reply_to=f"http:{raw_user_id}",
             metadata={"client_ip": request.client.host if request.client else "unknown"},
         )
 

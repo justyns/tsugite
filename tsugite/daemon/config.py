@@ -76,6 +76,7 @@ class DaemonConfig(BaseModel):
     discord_bots: List[DiscordBotConfig] = Field(default_factory=list)
     http: Optional[HTTPConfig] = None
     notification_channels: Dict[str, NotificationChannelConfig] = Field(default_factory=dict)
+    identity_links: Dict[str, List[str]] = Field(default_factory=dict)
 
 
 def load_daemon_config(path: Optional[Path] = None) -> DaemonConfig:
@@ -185,6 +186,9 @@ def save_daemon_config(config: DaemonConfig, path: Optional[Path] = None) -> Pat
             name: ch.model_dump(exclude_none=True, exclude_defaults=True) | {"type": ch.type}
             for name, ch in config.notification_channels.items()
         }
+
+    if config.identity_links:
+        config_data["identity_links"] = dict(config.identity_links)
 
     with open(path, "w", encoding="utf-8") as f:
         yaml.safe_dump(config_data, f, default_flow_style=False, sort_keys=False)

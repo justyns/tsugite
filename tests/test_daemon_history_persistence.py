@@ -6,6 +6,7 @@ These tests verify that:
 3. Multi-adapter sessions work (Discord + CLI share same conversation)
 """
 
+import asyncio
 import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -16,6 +17,16 @@ from tsugite.daemon.adapters.base import BaseAdapter, ChannelContext
 from tsugite.daemon.config import AgentConfig
 from tsugite.daemon.session import SessionManager
 from tsugite.history import SessionStorage, Turn
+
+
+class _StubAdapter(BaseAdapter):
+    """Minimal concrete adapter for testing."""
+
+    async def start(self):
+        pass
+
+    async def stop(self):
+        pass
 
 
 def create_mock_result(response: str = "Test response", token_count: int = 100) -> MagicMock:
@@ -126,22 +137,12 @@ class TestDaemonHistorySaving:
         # Get conversation ID that will be used
         conv_id = mock_session_manager.get_or_create_session("test_user")
 
-        # Create a minimal concrete adapter for testing
-        class TestAdapter(BaseAdapter):
-            async def start(self):
-                pass
-
-            async def stop(self):
-                pass
-
-        adapter = TestAdapter("test_agent", mock_agent_config, mock_session_manager)
+        adapter = _StubAdapter("test_agent", mock_agent_config, mock_session_manager)
 
         mock_result = create_mock_result("Test response", 100)
 
         with patch("tsugite.daemon.adapters.base.run_agent", return_value=mock_result):
             with patch("tsugite.daemon.adapters.base.resolve_agent_path", return_value=Path("/fake/agent.md")):
-                import asyncio
-
                 channel_context = ChannelContext(
                     source="test", channel_id="ch1", user_id="test_user", reply_to="test:ch1"
                 )
@@ -173,14 +174,7 @@ class TestDaemonHistorySaving:
 
         conv_id = mock_session_manager.get_or_create_session("test_user")
 
-        class TestAdapter(BaseAdapter):
-            async def start(self):
-                pass
-
-            async def stop(self):
-                pass
-
-        adapter = TestAdapter("test_agent", mock_agent_config, mock_session_manager)
+        adapter = _StubAdapter("test_agent", mock_agent_config, mock_session_manager)
 
         responses = ["Response 1", "Response 2", "Response 3"]
         response_iter = iter(responses)
@@ -190,8 +184,6 @@ class TestDaemonHistorySaving:
 
         with patch("tsugite.daemon.adapters.base.run_agent", side_effect=mock_run_agent):
             with patch("tsugite.daemon.adapters.base.resolve_agent_path", return_value=Path("/fake/agent.md")):
-                import asyncio
-
                 channel_context = ChannelContext(
                     source="test", channel_id="ch1", user_id="test_user", reply_to="test:ch1"
                 )
@@ -295,14 +287,7 @@ class TestHistoryLoadedOnContinue:
             agent_file="test.md",
         )
 
-        class TestAdapter(BaseAdapter):
-            async def start(self):
-                pass
-
-            async def stop(self):
-                pass
-
-        adapter = TestAdapter("test_agent", agent_config, sm)
+        adapter = _StubAdapter("test_agent", agent_config, sm)
 
         captured_kwargs = {}
 
@@ -312,8 +297,6 @@ class TestHistoryLoadedOnContinue:
 
         with patch("tsugite.daemon.adapters.base.run_agent", side_effect=capture_run_agent):
             with patch("tsugite.daemon.adapters.base.resolve_agent_path", return_value=Path("/fake/agent.md")):
-                import asyncio
-
                 channel_context = ChannelContext(
                     source="test", channel_id="ch1", user_id="test_user", reply_to="test:ch1"
                 )
@@ -339,26 +322,16 @@ class TestHistorySaveErrorHandling:
             agent_file="test.md",
         )
 
-        class TestAdapter(BaseAdapter):
-            async def start(self):
-                pass
-
-            async def stop(self):
-                pass
-
-        adapter = TestAdapter("test_agent", agent_config, sm)
+        adapter = _StubAdapter("test_agent", agent_config, sm)
 
         mock_result = create_mock_result("Success response", 100)
 
-        # Make history save raise an exception
         def failing_save(*args, **kwargs):
             raise RuntimeError("Simulated history save failure")
 
         with patch("tsugite.daemon.adapters.base.run_agent", return_value=mock_result):
             with patch("tsugite.daemon.adapters.base.resolve_agent_path", return_value=Path("/fake/agent.md")):
                 with patch("tsugite.agent_runner.history_integration.save_run_to_history", side_effect=failing_save):
-                    import asyncio
-
                     channel_context = ChannelContext(
                         source="test", channel_id="ch1", user_id="test_user", reply_to="test:ch1"
                     )
@@ -384,27 +357,17 @@ class TestDaemonMetadataInHistory:
         workspace.mkdir()
 
         sm = SessionManager("test_agent", workspace)
-        conv_id = sm.get_or_create_session("test_user")
 
         agent_config = AgentConfig(
             workspace_dir=workspace,
             agent_file="test.md",
         )
 
-        class TestAdapter(BaseAdapter):
-            async def start(self):
-                pass
-
-            async def stop(self):
-                pass
-
-        adapter = TestAdapter("test_agent", agent_config, sm)
+        adapter = _StubAdapter("test_agent", agent_config, sm)
         mock_result = create_mock_result("Response", 50)
 
         with patch("tsugite.daemon.adapters.base.run_agent", return_value=mock_result):
             with patch("tsugite.daemon.adapters.base.resolve_agent_path", return_value=Path("/fake/agent.md")):
-                import asyncio
-
                 channel_context = ChannelContext(
                     source="discord",
                     channel_id="channel123",
@@ -414,6 +377,10 @@ class TestDaemonMetadataInHistory:
                 )
 
                 asyncio.run(adapter.handle_message("test_user", "Hello", channel_context))
+
+        # Group chat resolves to composite key: "discord:channel123:test_user"
+        resolved_user = adapter.resolve_user("test_user", channel_context)
+        conv_id = sm.get_or_create_session(resolved_user)
 
         # Verify metadata in saved turn using V2 API
         storage = SessionStorage.load(history_dir / f"{conv_id}.jsonl")

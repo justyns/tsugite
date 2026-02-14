@@ -83,6 +83,19 @@ class Gateway:
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(sig, lambda: asyncio.create_task(self._shutdown()))
 
+        # Build reverse identity map: "discord:123456789" -> "justyn"
+        identity_map: dict[str, str] = {}
+        for canonical, platform_ids in self.config.identity_links.items():
+            for pid in platform_ids:
+                identity_map[pid] = canonical
+
+        # One SessionManager per agent, shared across adapters
+        agent_session_managers: dict[str, SessionManager] = {}
+        for agent_name, agent_config in self.config.agents.items():
+            agent_session_managers[agent_name] = SessionManager(
+                agent_name, agent_config.workspace_dir, context_limit=agent_config.context_limit
+            )
+
         tasks = []
         http_adapters = {}
 
@@ -108,15 +121,13 @@ class Gateway:
                     )
                 logger.info("Bot '%s' using agent: %s", bot_config.name, agent_path)
 
-                session_manager = SessionManager(
-                    agent_name, agent_config.workspace_dir, context_limit=agent_config.context_limit
-                )
                 self.adapters.append(
                     DiscordAdapter(
                         bot_config=bot_config,
                         agent_name=agent_name,
                         agent_config=agent_config,
-                        session_manager=session_manager,
+                        session_manager=agent_session_managers[agent_name],
+                        identity_map=identity_map,
                     )
                 )
 
@@ -135,10 +146,9 @@ class Gateway:
                     continue
                 logger.info("HTTP agent '%s' using agent: %s", agent_name, agent_path)
 
-                session_manager = SessionManager(
-                    agent_name, agent_config.workspace_dir, context_limit=agent_config.context_limit
+                http_adapters[agent_name] = HTTPAgentAdapter(
+                    agent_name, agent_config, agent_session_managers[agent_name], identity_map=identity_map
                 )
-                http_adapters[agent_name] = HTTPAgentAdapter(agent_name, agent_config, session_manager)
 
             if http_adapters:
                 from tsugite.daemon.webhook_store import WebhookStore

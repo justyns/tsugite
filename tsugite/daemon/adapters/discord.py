@@ -393,17 +393,14 @@ class DiscordAdapter(BaseAdapter):
     """Discord bot adapter tied to a specific agent."""
 
     def __init__(
-        self, bot_config: DiscordBotConfig, agent_name: str, agent_config: AgentConfig, session_manager: SessionManager
+        self,
+        bot_config: DiscordBotConfig,
+        agent_name: str,
+        agent_config: AgentConfig,
+        session_manager: SessionManager,
+        identity_map: dict[str, str] | None = None,
     ):
-        """Initialize Discord adapter.
-
-        Args:
-            bot_config: Discord bot configuration
-            agent_name: Name of the agent
-            agent_config: Agent configuration
-            session_manager: Session manager for this agent
-        """
-        super().__init__(agent_name, agent_config, session_manager)
+        super().__init__(agent_name, agent_config, session_manager, identity_map=identity_map)
         self.bot_config = bot_config
         self.active_progress_handlers: list[DiscordProgressHandler] = []
 

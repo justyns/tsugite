@@ -3,6 +3,7 @@
 import asyncio
 import contextvars
 import logging
+import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -88,17 +89,25 @@ class BaseAdapter(ABC):
     Each adapter instance is tied to a specific agent.
     """
 
-    def __init__(self, agent_name: str, agent_config: AgentConfig, session_manager: SessionManager):
+    def __init__(
+        self,
+        agent_name: str,
+        agent_config: AgentConfig,
+        session_manager: SessionManager,
+        identity_map: Optional[Dict[str, str]] = None,
+    ):
         """Initialize base adapter.
 
         Args:
             agent_name: Name of the agent this adapter is for
             agent_config: Agent configuration
             session_manager: Session manager for this agent
+            identity_map: Reverse lookup from "source:platform_id" to canonical name
         """
         self.agent_name = agent_name
         self.agent_config = agent_config
         self.session_manager = session_manager
+        self._identity_map = identity_map or {}
 
         # Load workspace for agent resolution
         from tsugite.workspace import Workspace, WorkspaceNotFoundError
@@ -168,6 +177,17 @@ class BaseAdapter(ABC):
 
 {message}"""
 
+    def resolve_user(self, user_id: str, channel_context: ChannelContext) -> str:
+        """Resolve platform user ID to canonical identity.
+
+        Group chats stay isolated (keyed by source:channel:user). DMs resolve
+        via identity_map, falling back to bare user_id for backward compat.
+        """
+        is_group = channel_context.metadata and channel_context.metadata.get("guild_id")
+        if is_group:
+            return f"{channel_context.source}:{channel_context.channel_id}:{user_id}"
+        return self._identity_map.get(f"{channel_context.source}:{user_id}", user_id)
+
     async def handle_message(
         self, user_id: str, message: str, channel_context: ChannelContext, custom_logger: Optional[HasUIHandler] = None
     ) -> str:
@@ -182,6 +202,8 @@ class BaseAdapter(ABC):
         Returns:
             Agent's response
         """
+        user_id = self.resolve_user(user_id, channel_context)
+
         if self.session_manager.needs_compaction(user_id):
             if custom_logger and hasattr(custom_logger, "ui_handler"):
                 custom_logger.ui_handler._emit("compacting", {})
@@ -203,8 +225,6 @@ class BaseAdapter(ABC):
             raise ValueError(f"Agent not found: {self.agent_config.agent_file}")
 
         enriched_prompt = self._build_message_context(message, channel_context)
-
-        import os
 
         from tsugite.cli.helpers import PathContext
 
