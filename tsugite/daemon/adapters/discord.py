@@ -77,6 +77,18 @@ class DiscordProgressHandler:
         future = asyncio.run_coroutine_threadsafe(self._handle_event_async(event), self.loop)
         future.add_done_callback(lambda f: _handle_async_exception(f, "progress"))
 
+    def _emit(self, event_type: str, data: dict) -> None:
+        """Handle progress events from the base adapter (e.g. compacting/compacted)."""
+        if event_type == "compacting":
+            self.updates.append(ProgressStep("Compacting history", False, "📦"))
+        elif event_type == "compacted":
+            if self.updates and self.updates[-1].label == "Compacting history":
+                self.updates[-1] = ProgressStep("Compacting history", True, "📦")
+        else:
+            return
+        future = asyncio.run_coroutine_threadsafe(self._update_progress(), self.loop)
+        future.add_done_callback(lambda f: _handle_async_exception(f, "emit"))
+
     async def _handle_event_async(self, event: BaseEvent) -> None:
         """Async implementation of event handling."""
         async with self.update_lock:

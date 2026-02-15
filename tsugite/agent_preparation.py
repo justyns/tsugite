@@ -248,6 +248,11 @@ class AgentPreparer:
             else:
                 expanded_tools = [t for t in expanded_tools if t not in interactive_tool_names]
 
+            # Auto-inject notify_user when has_notify_tool is set (scheduled tasks)
+            if full_context.get("has_notify_tool", False):
+                if "notify_user" not in expanded_tools and "notify_user" in _tools:
+                    expanded_tools.append("notify_user")
+
             # Convert to Tool objects
             tools = [create_tool_from_tsugite(name) for name in expanded_tools]
         except Exception as e:

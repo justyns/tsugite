@@ -230,7 +230,7 @@ tools: []
     original_cwd = os.getcwd()
     try:
         os.chdir(temp_dir)
-        result = cli_runner.invoke(app, ["run", "agent.md", "test prompt"])
+        result = cli_runner.invoke(app, ["run", "--no-workspace", "agent.md", "test prompt"])
     finally:
         os.chdir(original_cwd)
     assert result.exit_code == 0
