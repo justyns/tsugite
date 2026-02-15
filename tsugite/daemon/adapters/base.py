@@ -7,15 +7,16 @@ import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, Optional, Protocol
-
-logger = logging.getLogger(__name__)
 
 from tsugite.agent_inheritance import find_agent_file
 from tsugite.agent_runner import run_agent
 from tsugite.daemon.config import AgentConfig
 from tsugite.daemon.session import SessionManager
 from tsugite.options import ExecutionOptions
+
+logger = logging.getLogger(__name__)
 
 
 class HasUIHandler(Protocol):
@@ -24,7 +25,7 @@ class HasUIHandler(Protocol):
     ui_handler: Any
 
 
-def resolve_agent_path(agent_file: str, workspace_dir, workspace=None):
+def resolve_agent_path(agent_file: str, workspace_dir: Path, workspace: Any = None) -> Optional[Path]:
     """Resolve agent file reference to absolute path.
 
     Args:
@@ -109,31 +110,29 @@ class BaseAdapter(ABC):
         self.session_manager = session_manager
         self._identity_map = identity_map or {}
 
-        # Load workspace for agent resolution
         from tsugite.workspace import Workspace, WorkspaceNotFoundError
+        from tsugite.workspace.context import build_workspace_attachments
 
         try:
             self._workspace = Workspace.load(agent_config.workspace_dir)
         except WorkspaceNotFoundError:
             self._workspace = None
 
-        # Build workspace attachments once at startup
-        from tsugite.workspace.context import build_workspace_attachments
+        self.workspace_attachments = build_workspace_attachments(self._workspace) if self._workspace else []
 
-        if self._workspace:
-            self.workspace_attachments = build_workspace_attachments(self._workspace)
-        else:
-            self.workspace_attachments = []
+    def _resolve_agent_path(self) -> Optional[Path]:
+        """Resolve the configured agent file to an absolute path."""
+        return resolve_agent_path(
+            self.agent_config.agent_file,
+            self.agent_config.workspace_dir,
+            self._workspace,
+        )
 
     def resolve_model(self) -> str:
         """Resolve the model name from the agent file, returning 'unknown' on failure."""
         from tsugite.agent_runner.validation import get_agent_info
 
-        agent_path = resolve_agent_path(
-            self.agent_config.agent_file,
-            self.agent_config.workspace_dir,
-            self._workspace,
-        )
+        agent_path = self._resolve_agent_path()
         if not agent_path:
             return "unknown"
         try:
@@ -144,12 +143,16 @@ class BaseAdapter(ABC):
     @abstractmethod
     async def start(self) -> None:
         """Start the adapter."""
-        pass
 
     @abstractmethod
     async def stop(self) -> None:
         """Stop the adapter."""
-        pass
+
+    @staticmethod
+    def _emit_ui(custom_logger: Optional[HasUIHandler], event_type: str) -> None:
+        """Emit a UI event if a custom logger with ui_handler is available."""
+        if custom_logger and hasattr(custom_logger, "ui_handler"):
+            custom_logger.ui_handler._emit(event_type, {})
 
     def _build_agent_context(self, channel_context: ChannelContext) -> Dict[str, Any]:
         """Build context dict for agent template rendering."""
@@ -167,7 +170,7 @@ class BaseAdapter(ABC):
         Keeps dynamic metadata in the user message turn (not the cached
         attachment context turn) for better cache efficiency.
         """
-        timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         return f"""<message_context>
   <datetime>{timestamp}</datetime>
   <working_directory>{self.agent_config.workspace_dir}</working_directory>
@@ -205,22 +208,16 @@ class BaseAdapter(ABC):
         user_id = self.resolve_user(user_id, channel_context)
 
         if self.session_manager.needs_compaction(user_id):
-            if custom_logger and hasattr(custom_logger, "ui_handler"):
-                custom_logger.ui_handler._emit("compacting", {})
+            self._emit_ui(custom_logger, "compacting")
             await self._compact_session(user_id)
-            if custom_logger and hasattr(custom_logger, "ui_handler"):
-                custom_logger.ui_handler._emit("compacted", {})
+            self._emit_ui(custom_logger, "compacted")
 
         conv_id = self.session_manager.get_or_create_session(user_id)
 
         metadata = channel_context.to_dict()
         metadata["daemon_agent"] = self.agent_name
 
-        agent_path = resolve_agent_path(
-            self.agent_config.agent_file,
-            self.agent_config.workspace_dir,
-            self._workspace,
-        )
+        agent_path = self._resolve_agent_path()
         if not agent_path:
             raise ValueError(f"Agent not found: {self.agent_config.agent_file}")
 
@@ -293,8 +290,10 @@ class BaseAdapter(ABC):
         Args:
             user_id: Platform user ID
         """
-        from tsugite.daemon.memory import summarize_session
+        from tsugite.daemon.memory import infer_compaction_model, summarize_session
         from tsugite.history import SessionStorage, get_history_dir, reconstruct_messages
+
+        model = self.agent_config.compaction_model or infer_compaction_model(self.resolve_model())
 
         session_info = self.session_manager.sessions[user_id]
         old_conv_id = session_info.conversation_id
@@ -302,7 +301,7 @@ class BaseAdapter(ABC):
 
         logger.info("[%s] Compacting session (%d messages)...", self.agent_name, session_info.message_count)
         messages = reconstruct_messages(old_session_path)
-        summary = await summarize_session(messages)
+        summary = await summarize_session(messages, model=model)
         logger.info("[%s] Session compacted", self.agent_name)
 
         new_conv_id = self.session_manager.compact_session(user_id)

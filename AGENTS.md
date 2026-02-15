@@ -347,5 +347,5 @@ tsu run -f image1.jpg -f image2.jpg "Compare these images"
 
 ## Code Review Policy
 
-- **Always run the `code-simplifier` agent** after implementing large changes (3+ files or 50+ lines modified), or when finishing a plan. This catches duplication, unnecessary complexity, and keeps the codebase DRY.
+- **Automatically run the `code-simplifier:code-simplifier` agent** (via the Task tool) after implementing any changes, without waiting for the user to ask. This catches duplication, unnecessary complexity, and keeps the codebase DRY.
 - When making implementation plans, include a final "simplify/review" step that uses the code-simplifier agent on all modified files.

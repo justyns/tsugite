@@ -21,6 +21,7 @@ class AgentConfig(BaseModel):
     workspace_dir: Path
     agent_file: str
     context_limit: int = 128000  # Model's context window (tokens)
+    compaction_model: Optional[str] = None
 
 
 class DiscordBotConfig(BaseModel):
@@ -79,6 +80,13 @@ class DaemonConfig(BaseModel):
     identity_links: Dict[str, List[str]] = Field(default_factory=dict)
 
 
+def _expand_env_vars(data: dict, *keys: str) -> None:
+    """Expand environment variables in the specified string-valued keys in-place."""
+    for key in keys:
+        if key in data and isinstance(data[key], str):
+            data[key] = os.path.expandvars(data[key])
+
+
 def load_daemon_config(path: Optional[Path] = None) -> DaemonConfig:
     """Load daemon config from YAML.
 
@@ -102,30 +110,22 @@ def load_daemon_config(path: Optional[Path] = None) -> DaemonConfig:
     with open(path, encoding="utf-8") as f:
         data = yaml.safe_load(f)
 
-    # Expand environment variables in tokens
     for bot in data.get("discord_bots", []):
-        if "token" in bot:
-            bot["token"] = os.path.expandvars(bot["token"])
+        _expand_env_vars(bot, "token")
 
-    # Expand environment variables in HTTP auth tokens
     http_data = data.get("http")
     if http_data and "auth_tokens" in http_data:
         http_data["auth_tokens"] = [os.path.expandvars(t) for t in http_data["auth_tokens"]]
 
-    # Expand workspace_dir paths
-    for agent_name, agent_data in data.get("agents", {}).items():
+    for agent_data in data.get("agents", {}).values():
         if "workspace_dir" in agent_data:
             agent_data["workspace_dir"] = Path(agent_data["workspace_dir"]).expanduser()
 
     for channel in data.get("notification_channels", {}).values():
-        if "url" in channel:
-            channel["url"] = os.path.expandvars(channel["url"])
+        _expand_env_vars(channel, "url", "body_template")
         if "headers" in channel:
             channel["headers"] = {k: os.path.expandvars(v) for k, v in channel["headers"].items()}
-        if "body_template" in channel:
-            channel["body_template"] = os.path.expandvars(channel["body_template"])
 
-    # Expand state_dir
     if "state_dir" in data:
         data["state_dir"] = Path(data["state_dir"]).expanduser()
 
@@ -149,46 +149,8 @@ def save_daemon_config(config: DaemonConfig, path: Optional[Path] = None) -> Pat
 
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    config_data = {
-        "state_dir": str(config.state_dir),
-        "log_level": config.log_level,
-        "agents": {
-            name: {
-                "workspace_dir": str(agent_cfg.workspace_dir),
-                "agent_file": agent_cfg.agent_file,
-                "context_limit": agent_cfg.context_limit,
-            }
-            for name, agent_cfg in config.agents.items()
-        },
-        "discord_bots": [
-            {
-                "name": bot.name,
-                "token": bot.token,
-                "agent": bot.agent,
-                "command_prefix": bot.command_prefix,
-                "dm_policy": bot.dm_policy,
-                "allow_from": bot.allow_from,
-            }
-            for bot in config.discord_bots
-        ],
-    }
-
-    if config.http:
-        config_data["http"] = {
-            "enabled": config.http.enabled,
-            "host": config.http.host,
-            "port": config.http.port,
-            "auth_tokens": config.http.auth_tokens,
-        }
-
-    if config.notification_channels:
-        config_data["notification_channels"] = {
-            name: ch.model_dump(exclude_none=True, exclude_defaults=True) | {"type": ch.type}
-            for name, ch in config.notification_channels.items()
-        }
-
-    if config.identity_links:
-        config_data["identity_links"] = dict(config.identity_links)
+    # mode="json" ensures Path objects become strings
+    config_data = config.model_dump(exclude_none=True, mode="json")
 
     with open(path, "w", encoding="utf-8") as f:
         yaml.safe_dump(config_data, f, default_flow_style=False, sort_keys=False)
