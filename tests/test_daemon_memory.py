@@ -20,6 +20,9 @@ class TestInferCompactionModel:
     def test_ollama_uses_agent_model(self):
         assert infer_compaction_model("ollama:llama3:8b") == "ollama:llama3:8b"
 
+    def test_openrouter_agent(self):
+        assert infer_compaction_model("openrouter:openai/gpt-5.2") == "openrouter:openai/gpt-4o-mini"
+
     def test_unknown_provider_uses_agent_model(self):
         assert infer_compaction_model("bedrock:some-model") == "bedrock:some-model"
 

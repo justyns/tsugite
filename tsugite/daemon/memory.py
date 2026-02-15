@@ -8,6 +8,7 @@ PROVIDER_COMPACT_MODELS = {
     "openai": DEFAULT_COMPACT_MODEL,
     "anthropic": "anthropic:claude-3-haiku-20240307",
     "google": "google:gemini-2.0-flash-lite",
+    "openrouter": "openrouter:openai/gpt-4o-mini",
     "ollama": None,  # use agent model as-is
 }
 
