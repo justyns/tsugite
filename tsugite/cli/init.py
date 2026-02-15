@@ -3,6 +3,7 @@
 import logging
 import subprocess
 from contextlib import contextmanager
+from pathlib import Path
 from typing import List, Optional
 
 import typer
@@ -262,11 +263,11 @@ def test_setup(model: str, skip_test: bool = False) -> bool:
         from rich.console import Console as RichConsole
 
         # Use the builtin default agent
-        from tsugite.agent_inheritance import resolve_agent_path
+        from tsugite.agent_inheritance import find_agent_file
         from tsugite.agent_runner import run_agent
         from tsugite.ui import custom_agent_ui
 
-        agent_path = resolve_agent_path("default")
+        agent_path = find_agent_file("default", current_agent_dir=Path.cwd())
 
         console.print("[dim]Running: tsugite run +default 'say hello'[/dim]")
 

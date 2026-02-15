@@ -222,7 +222,7 @@ class TestMultiAdapterSessionContinuity:
         monkeypatch.setattr("tsugite.history.storage.get_machine_name", lambda: "test_machine")
 
         sm = SessionManager("shared_agent", tmp_path)
-        conv_id = sm.get_or_create_session("user123")
+        sm.get_or_create_session("user123")
 
         # Create storage and save turns using V2 API
         storage = SessionStorage.create(agent_name="shared_agent", model="test")

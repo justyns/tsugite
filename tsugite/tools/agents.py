@@ -44,7 +44,7 @@ def spawn_agent(
 
     if not agent_file.exists():
         # Try resolving as agent name (e.g., "default" -> builtin default.md)
-        resolved = find_agent_file(agent_path)
+        resolved = find_agent_file(agent_path, current_agent_dir=Path.cwd())
         if resolved:
             agent_file = resolved
         else:

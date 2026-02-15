@@ -50,6 +50,7 @@ def tool(func=None, *, require_daemon=False):
     Args:
         require_daemon: Only register when running in daemon mode.
     """
+
     def decorator(fn):
         if require_daemon:
             _daemon_tools[fn.__name__] = fn

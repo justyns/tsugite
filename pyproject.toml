@@ -1,6 +1,6 @@
 [project]
 name = "tsugite-cli"
-version = "0.4.0"
+version = "0.5.0"
 description = "Micro-agent runner for task automation using markdown definitions"
 authors = [{ name = "Justyn Shull" }]
 requires-python = ">=3.11"
@@ -57,8 +57,8 @@ line-length = 120
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W"]
 ignore = [
-    "E501",  # Line too long (handled by black)
-    "F821",  # Undefined name in string type annotations (forward refs)
+  "E501", # Line too long (handled by black)
+  "F821", # Undefined name in string type annotations (forward refs)
 ]
 
 [tool.black]

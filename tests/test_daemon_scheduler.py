@@ -3,7 +3,6 @@
 import asyncio
 import json
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
@@ -84,9 +83,7 @@ class TestSchedulerCRUD:
         assert scheduler.get("job1").enabled
 
     def test_invalid_cron_rejected(self, scheduler):
-        entry = ScheduleEntry(
-            id="bad", agent="bot", prompt="hi", schedule_type="cron", cron_expr="not-a-cron"
-        )
+        entry = ScheduleEntry(id="bad", agent="bot", prompt="hi", schedule_type="cron", cron_expr="not-a-cron")
         with pytest.raises(ValueError, match="Invalid cron"):
             scheduler.add(entry)
 
@@ -197,8 +194,12 @@ class TestSchedulerExecution:
     @pytest.mark.asyncio
     async def test_misfire_grace(self, scheduler):
         entry = ScheduleEntry(
-            id="job1", agent="bot", prompt="hi", schedule_type="cron",
-            cron_expr="* * * * *", misfire_grace_seconds=0,
+            id="job1",
+            agent="bot",
+            prompt="hi",
+            schedule_type="cron",
+            cron_expr="* * * * *",
+            misfire_grace_seconds=0,
         )
         scheduler.add(entry)
         # Set next_run far in the past

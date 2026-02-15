@@ -155,9 +155,7 @@ class Gateway:
 
                 webhook_store = WebhookStore(self.config.state_dir / "webhooks.json")
 
-                self._http_server = HTTPServer(
-                    self.config.http, http_adapters, webhook_store, self.config.agents
-                )
+                self._http_server = HTTPServer(self.config.http, http_adapters, webhook_store, self.config.agents)
                 tasks.append(self._http_server.start())
 
         # Collect adapter start tasks
@@ -168,9 +166,7 @@ class Gateway:
             from tsugite.daemon.adapters.scheduler_adapter import SchedulerAdapter
 
             schedules_path = self.config.state_dir / "schedules.json"
-            self._scheduler_adapter = SchedulerAdapter(
-                http_adapters, schedules_path, self.config.notification_channels
-            )
+            self._scheduler_adapter = SchedulerAdapter(http_adapters, schedules_path, self.config.notification_channels)
             tasks.append(self._scheduler_adapter.start())
             if self._http_server:
                 self._http_server.scheduler = self._scheduler_adapter.scheduler
@@ -214,9 +210,7 @@ class Gateway:
         set_scheduler(None)
         set_daemon_mode(False)
 
-        components = [
-            (a, "adapter") for a in self.adapters
-        ]
+        components = [(a, "adapter") for a in self.adapters]
         if self._scheduler_adapter:
             components.append((self._scheduler_adapter, "scheduler"))
         if self._http_server:

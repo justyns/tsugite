@@ -183,9 +183,7 @@ class TestHTTPInteractionBackend:
         t.join()
 
         assert result == "user said hello"
-        progress._emit.assert_called_once_with(
-            "ask_user", {"question": "What?", "question_type": "text"}
-        )
+        progress._emit.assert_called_once_with("ask_user", {"question": "What?", "question_type": "text"})
 
     def test_timeout_raises(self):
         from tsugite.daemon.adapters.http import HTTPInteractionBackend, SSEProgressHandler
@@ -203,7 +201,6 @@ class TestContextPropagationThroughThreads:
 
     def test_backend_propagates_through_tool_execution_thread(self):
         """Verify contextvar survives the ThreadPoolExecutor in _run_async_in_sync_context."""
-        import asyncio
         import concurrent.futures
         import contextvars
 
@@ -217,6 +214,7 @@ class TestContextPropagationThroughThreads:
         def run_in_thread():
             # This is what ask_user does inside the tool
             from tsugite.interaction import get_interaction_backend
+
             backend = get_interaction_backend()
             if backend is not None:
                 return backend.ask_user("test?", "text")
@@ -237,6 +235,7 @@ class TestContextPropagationThroughThreads:
 
         def run_in_thread():
             from tsugite.interaction import get_interaction_backend
+
             return get_interaction_backend()
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:

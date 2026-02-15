@@ -194,4 +194,3 @@ class TextualUIHandler(CustomUIHandler):
     def clear_tools(self):
         """Clear tools list for new turn."""
         self.current_tools = []
-

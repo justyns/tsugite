@@ -62,12 +62,12 @@ class TestGetLatestConversation:
 
     def test_get_latest_conversation_multiple(self, temp_history_dir):
         """Test getting latest conversation with multiple conversations."""
-        storage1 = SessionStorage.create(
+        SessionStorage.create(
             agent_name="agent1",
             model="model1",
             timestamp=datetime(2025, 10, 24, 10, 0, 0, tzinfo=timezone.utc),
         )
-        storage2 = SessionStorage.create(
+        SessionStorage.create(
             agent_name="agent2",
             model="model2",
             timestamp=datetime(2025, 10, 24, 11, 0, 0, tzinfo=timezone.utc),

@@ -32,6 +32,7 @@ def _ensure_nest_asyncio():
         nest_asyncio.apply()
         _nest_asyncio_applied = True
 
+
 # Custom style for questionary to match Rich theme
 QUESTIONARY_STYLE = Style(
     [

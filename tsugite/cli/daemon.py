@@ -364,9 +364,7 @@ def init_daemon(
     _show_next_steps(token_env_var, bot_name)
 
 
-def _daemon_request(
-    method: str, host: str, port: int, path: str, token: Optional[str] = None, **kwargs
-):
+def _daemon_request(method: str, host: str, port: int, path: str, token: Optional[str] = None, **kwargs):
     """Make an HTTP request to the daemon, handling connection errors and non-2xx responses.
 
     Returns the parsed JSON response body on success, or exits on failure.
@@ -429,8 +427,13 @@ def compact_session(
 ):
     """Force compact a daemon session."""
     data = _daemon_request(
-        "POST", host, port, f"/api/agents/{agent}/compact", token,
-        json={"user_id": user_id}, timeout=120,
+        "POST",
+        host,
+        port,
+        f"/api/agents/{agent}/compact",
+        token,
+        json={"user_id": user_id},
+        timeout=120,
     )
     console.print(f"[green]✓[/green] Session compacted for [cyan]{agent}[/cyan] user [cyan]{user_id}[/cyan]")
     console.print(f"  old: {data['old_conversation_id']}")

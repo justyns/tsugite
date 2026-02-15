@@ -1140,7 +1140,7 @@ def chat(
 
         if continue_ is not None:
             from tsugite.agent_runner.history_integration import get_latest_conversation
-            from tsugite.history import SessionStorage, get_history_dir, get_turns
+            from tsugite.history import get_history_dir, get_turns
 
             if continue_ == "" or continue_.lower() == "latest":
                 history_opts.continue_id = get_latest_conversation()

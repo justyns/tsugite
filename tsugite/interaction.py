@@ -49,7 +49,7 @@ class TerminalInteractionBackend:
     """Delegates to existing TTY-based interactive prompts."""
 
     def ask_user(self, question: str, question_type: str = "text", options: Optional[List[str]] = None) -> str:
-        from tsugite.tools.interactive import handle_question_by_type, terminal_context, _flush_input_buffer
+        from tsugite.tools.interactive import _flush_input_buffer, handle_question_by_type, terminal_context
 
         with terminal_context() as console:
             return handle_question_by_type(question_type, question, options, console, _flush_input_buffer)

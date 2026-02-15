@@ -240,7 +240,9 @@ class AgentPreparer:
             from tsugite.tools import _tools
 
             interactive_tool_names = ["ask_user", "ask_user_batch"]
-            has_interaction = interactive_mode or get_interaction_backend() is not None or full_context.get("is_daemon", False)
+            has_interaction = (
+                interactive_mode or get_interaction_backend() is not None or full_context.get("is_daemon", False)
+            )
             if has_interaction:
                 for name in interactive_tool_names:
                     if name not in expanded_tools and name in _tools:

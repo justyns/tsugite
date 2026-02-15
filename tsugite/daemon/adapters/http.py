@@ -5,6 +5,7 @@ import json
 import logging
 import threading
 from dataclasses import asdict
+from dataclasses import fields as dataclass_fields
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -228,12 +229,14 @@ class HTTPServer:
                     label = f"Web: {user_id}"
                 else:
                     label = user_id
-                sessions.append({
-                    "user_id": user_id,
-                    "label": label,
-                    "conversation_id": data.get("conversation_id", ""),
-                    "created_at": data.get("created_at", ""),
-                })
+                sessions.append(
+                    {
+                        "user_id": user_id,
+                        "label": label,
+                        "conversation_id": data.get("conversation_id", ""),
+                        "created_at": data.get("created_at", ""),
+                    }
+                )
 
         return JSONResponse({"sessions": sessions})
 
@@ -246,17 +249,19 @@ class HTTPServer:
         adapter.session_manager.get_or_create_session(user_id)
         session = adapter.session_manager.sessions.get(user_id)
 
-        return JSONResponse({
-            "model": adapter.resolve_model(),
-            "tokens": session.cumulative_tokens if session else 0,
-            "context_limit": adapter.session_manager.context_limit,
-            "threshold": adapter.session_manager.compaction_threshold,
-            "message_count": session.message_count if session else 0,
-            "attachments": [
-                {"name": a.name, "content_type": a.content_type.value, "mime_type": a.mime_type}
-                for a in adapter.workspace_attachments
-            ],
-        })
+        return JSONResponse(
+            {
+                "model": adapter.resolve_model(),
+                "tokens": session.cumulative_tokens if session else 0,
+                "context_limit": adapter.session_manager.context_limit,
+                "threshold": adapter.session_manager.compaction_threshold,
+                "message_count": session.message_count if session else 0,
+                "attachments": [
+                    {"name": a.name, "content_type": a.content_type.value, "mime_type": a.mime_type}
+                    for a in adapter.workspace_attachments
+                ],
+            }
+        )
 
     async def _attachments(self, request: Request) -> JSONResponse:
         adapter, err = self._get_adapter(request)
@@ -373,11 +378,13 @@ class HTTPServer:
             return JSONResponse({"error": f"compaction failed: {e}"}, status_code=500)
 
         new_session = adapter.session_manager.sessions.get(user_id)
-        return JSONResponse({
-            "status": "compacted",
-            "old_conversation_id": old_conv_id,
-            "new_conversation_id": new_session.conversation_id if new_session else None,
-        })
+        return JSONResponse(
+            {
+                "status": "compacted",
+                "old_conversation_id": old_conv_id,
+                "new_conversation_id": new_session.conversation_id if new_session else None,
+            }
+        )
 
     async def _respond(self, request: Request) -> JSONResponse:
         """Submit a response to an active ask_user prompt."""
@@ -464,14 +471,17 @@ class HTTPServer:
                 # Emit session info for the web UI status bar
                 session = adapter.session_manager.sessions.get(user_id)
                 if session:
-                    progress._emit("session_info", {
-                        "tokens": session.cumulative_tokens,
-                        "context_limit": adapter.session_manager.context_limit,
-                        "threshold": adapter.session_manager.compaction_threshold,
-                        "message_count": session.message_count,
-                        "model": adapter.resolve_model(),
-                        "attachments": [a.name for a in adapter.workspace_attachments],
-                    })
+                    progress._emit(
+                        "session_info",
+                        {
+                            "tokens": session.cumulative_tokens,
+                            "context_limit": adapter.session_manager.context_limit,
+                            "threshold": adapter.session_manager.compaction_threshold,
+                            "message_count": session.message_count,
+                            "model": adapter.resolve_model(),
+                            "attachments": [a.name for a in adapter.workspace_attachments],
+                        },
+                    )
             except Exception as e:
                 logger.exception("[%s] Chat error", adapter.agent_name)
                 progress._emit("error", {"error": str(e)})
@@ -528,7 +538,8 @@ class HTTPServer:
             return JSONResponse({"error": f"missing fields: {', '.join(missing)}"}, status_code=400)
 
         try:
-            entry = ScheduleEntry(**{k: v for k, v in body.items() if k in ScheduleEntry.__dataclass_fields__})
+            valid_fields = {f.name for f in dataclass_fields(ScheduleEntry)}
+            entry = ScheduleEntry(**{k: v for k, v in body.items() if k in valid_fields})
             entry = self.scheduler.add(entry)
         except (ValueError, TypeError) as e:
             return JSONResponse({"error": str(e)}, status_code=400)
@@ -619,9 +630,15 @@ class HTTPServer:
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
 
-        return JSONResponse({
-            "token": entry.token, "agent": entry.agent, "source": entry.source, "created_at": entry.created_at,
-        }, status_code=201)
+        return JSONResponse(
+            {
+                "token": entry.token,
+                "agent": entry.agent,
+                "source": entry.source,
+                "created_at": entry.created_at,
+            },
+            status_code=201,
+        )
 
     async def _delete_webhook(self, request: Request) -> JSONResponse:
         if err := self._check_auth(request):

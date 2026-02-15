@@ -9,8 +9,6 @@ from typing import NamedTuple, Optional
 import discord
 from discord.ext import commands
 
-logger = logging.getLogger(__name__)
-
 from tsugite.daemon.adapters.base import BaseAdapter, ChannelContext
 from tsugite.daemon.config import AgentConfig, DiscordBotConfig
 from tsugite.daemon.session import SessionManager
@@ -24,6 +22,8 @@ from tsugite.events import (
     WarningEvent,
 )
 from tsugite.events.base import BaseEvent
+
+logger = logging.getLogger(__name__)
 
 
 class ProgressStep(NamedTuple):
@@ -218,7 +218,9 @@ class DiscordProgressHandler:
                 turn_count = sum(1 for u in self.updates if u.label.startswith("Turn "))
                 if turn_count == 0:
                     turn_count = self._current_turn or 1
-                await self.progress_msg.edit(content=f"❌ Error after {turn_count} turn{'s' if turn_count != 1 else ''}")
+                await self.progress_msg.edit(
+                    content=f"❌ Error after {turn_count} turn{'s' if turn_count != 1 else ''}"
+                )
             except discord.errors.HTTPException:
                 pass
         elif success and self.updates and self.progress_msg:
@@ -356,16 +358,16 @@ class DiscordInteractionBackend:
 
     TIMEOUT = 300
 
-    def __init__(self, bot: commands.Bot, channel: discord.abc.Messageable, user_id: str, loop: asyncio.AbstractEventLoop):
+    def __init__(
+        self, bot: commands.Bot, channel: discord.abc.Messageable, user_id: str, loop: asyncio.AbstractEventLoop
+    ):
         self._bot = bot
         self._channel = channel
         self._user_id = user_id
         self._loop = loop
 
     def ask_user(self, question: str, question_type: str = "text", options: Optional[list[str]] = None) -> str:
-        future = asyncio.run_coroutine_threadsafe(
-            self._ask_async(question, question_type, options), self._loop
-        )
+        future = asyncio.run_coroutine_threadsafe(self._ask_async(question, question_type, options), self._loop)
         try:
             return future.result(timeout=self.TIMEOUT)
         except asyncio.CancelledError:
@@ -484,8 +486,10 @@ class DiscordAdapter(BaseAdapter):
         from tsugite.interaction import set_interaction_backend
 
         interaction_backend = DiscordInteractionBackend(
-            bot=self.bot, channel=message.channel,
-            user_id=str(message.author.id), loop=loop,
+            bot=self.bot,
+            channel=message.channel,
+            user_id=str(message.author.id),
+            loop=loop,
         )
         set_interaction_backend(interaction_backend)
 
