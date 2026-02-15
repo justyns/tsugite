@@ -24,6 +24,7 @@ class ExecutionOptions:
     """Controls how the agent executes."""
 
     model_override: Optional[str] = None
+    max_turns_override: Optional[int] = None
     debug: bool = False
     stream: bool = False
     trust_mcp_code: bool = False

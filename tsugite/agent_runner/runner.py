@@ -491,7 +491,7 @@ async def _execute_agent_with_prompt(
             model_string=model_string,
             tools=tools,
             instructions=combined_instructions or "",
-            max_turns=agent_config.max_turns,
+            max_turns=exec_options.max_turns_override or agent_config.max_turns,
             executor=executor,
             model_kwargs=final_model_kwargs,
             event_bus=event_bus,
