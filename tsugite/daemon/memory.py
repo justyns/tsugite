@@ -18,14 +18,16 @@ PROVIDER_COMPACT_MODELS = {
 logger = logging.getLogger(__name__)
 
 SUMMARIZE_SYSTEM_PROMPT = (
-    "Summarize this conversation concisely. Focus on: decisions made, "
-    "important facts learned, user preferences, action items. Keep it under 500 words."
+    "Summarize this conversation concisely. Focus on: what is currently being worked on, "
+    "decisions made, important facts learned, user preferences, action items, "
+    "and next steps. Keep it under 500 words."
 )
 
 COMBINE_SYSTEM_PROMPT = (
     "You are given multiple summaries of consecutive conversation chunks. "
-    "Combine them into a single coherent summary. Focus on: decisions made, "
-    "important facts learned, user preferences, action items. Keep it under 500 words."
+    "Combine them into a single coherent summary. Focus on: what is currently being worked on, "
+    "decisions made, important facts learned, user preferences, action items, "
+    "and next steps. Keep it under 500 words."
 )
 
 
