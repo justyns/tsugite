@@ -22,10 +22,10 @@ def set_scheduler(scheduler, loop=None, channel_names=None):
     _channel_names = channel_names or set()
 
 
-def _call(fn, *args):
+def _call(fn, *args, **kwargs):
     """Call a scheduler method on the event loop thread (thread-safe)."""
     async def _wrapper():
-        return fn(*args)
+        return fn(*args, **kwargs)
 
     future = asyncio.run_coroutine_threadsafe(_wrapper(), _loop)
     return future.result(timeout=10)

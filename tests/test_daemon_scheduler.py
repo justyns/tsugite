@@ -210,3 +210,59 @@ class TestSchedulerExecution:
         stored = scheduler.get("job1")
         next_dt = datetime.fromisoformat(stored.next_run)
         assert next_dt > datetime.now(timezone.utc)
+
+
+class TestSchedulerUpdate:
+    def test_update_prompt(self, scheduler):
+        entry = ScheduleEntry(id="job1", agent="bot", prompt="old", schedule_type="cron", cron_expr="0 9 * * *")
+        scheduler.add(entry)
+        scheduler.update("job1", prompt="new prompt")
+        assert scheduler.get("job1").prompt == "new prompt"
+
+    def test_update_cron_expr(self, scheduler):
+        entry = ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
+        scheduler.add(entry)
+        scheduler.update("job1", cron_expr="30 8 * * *")
+        assert scheduler.get("job1").cron_expr == "30 8 * * *"
+
+    def test_update_notify_tool(self, scheduler):
+        entry = ScheduleEntry(
+            id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *", notify=["discord"]
+        )
+        scheduler.add(entry)
+        scheduler.update("job1", notify_tool=True)
+        assert scheduler.get("job1").notify_tool is True
+
+
+class TestCallHelper:
+    """Test the _call helper in schedule tools forwards kwargs."""
+
+    def test_call_forwards_kwargs(self):
+        """Regression: _call must forward **kwargs to the target function."""
+        from threading import Thread
+        from unittest.mock import MagicMock
+
+        from tsugite.tools.schedule import _call, set_scheduler
+
+        loop = asyncio.new_event_loop()
+        t = Thread(target=loop.run_forever, daemon=True)
+        t.start()
+
+        try:
+            captured = {}
+
+            def fake_update(id, **fields):
+                captured.update({"id": id, **fields})
+                return id
+
+            mock_sched = MagicMock()
+            set_scheduler(mock_sched, loop)
+
+            result = _call(fake_update, "job1", prompt="new", cron_expr="0 8 * * *")
+            assert result == "job1"
+            assert captured == {"id": "job1", "prompt": "new", "cron_expr": "0 8 * * *"}
+        finally:
+            loop.call_soon_threadsafe(loop.stop)
+            t.join(timeout=2)
+            loop.close()
+            set_scheduler(None)
