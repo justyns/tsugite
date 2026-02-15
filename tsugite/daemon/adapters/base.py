@@ -242,7 +242,10 @@ class BaseAdapter(ABC):
                     prompt=enriched_prompt,
                     continue_conversation_id=conv_id,
                     attachments=self.workspace_attachments,
-                    exec_options=ExecutionOptions(return_token_usage=True),
+                    exec_options=ExecutionOptions(
+                        return_token_usage=True,
+                        model_override=self.agent_config.model,
+                    ),
                     path_context=path_context,
                     custom_logger=custom_logger,
                     context=self._build_agent_context(channel_context),

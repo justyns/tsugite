@@ -21,6 +21,7 @@ class AgentConfig(BaseModel):
     workspace_dir: Path
     agent_file: str
     context_limit: int = 128000  # Model's context window (tokens)
+    model: Optional[str] = None
     compaction_model: Optional[str] = None
 
 
