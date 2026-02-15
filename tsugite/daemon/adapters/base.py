@@ -304,7 +304,7 @@ class BaseAdapter(ABC):
 
         logger.info("[%s] Compacting session (%d messages)...", self.agent_name, session_info.message_count)
         messages = reconstruct_messages(old_session_path)
-        summary = await summarize_session(messages, model=model)
+        summary = await summarize_session(messages, model=model, max_context_tokens=self.agent_config.context_limit)
         logger.info("[%s] Session compacted", self.agent_name)
 
         new_conv_id = self.session_manager.compact_session(user_id)
