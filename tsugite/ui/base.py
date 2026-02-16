@@ -9,7 +9,6 @@ from rich.console import Console
 from rich.markdown import Markdown
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.syntax import Syntax
-from rich.text import Text
 
 from tsugite.events import (
     BaseEvent,
@@ -277,11 +276,7 @@ class CustomUIHandler:
         answer = event.answer
 
         prefix = self._get_display_prefix()
-        # Update progress
         self.update_progress(f"{prefix}✅ Finalizing answer...")
-
-        # Render the answer as markdown
-        from rich.markdown import Markdown
 
         self._print(Markdown(str(answer)))
 
@@ -455,19 +450,10 @@ class CustomUIHandler:
         if cache_read_tokens and cache_read_tokens > 0:
             cache_parts.append(f"📖 Cache read: {cache_read_tokens:,} tokens")
 
+        self._print(f"[dim cyan]{summary_text}[/dim cyan]")
         if cache_parts:
             cache_summary = " | ".join(cache_parts)
-            if self.show_panels:
-                self._print(Text(summary_text, style="dim cyan"))
-                self._print(Text(cache_summary, style="dim green"))
-            else:
-                self._print(f"[dim cyan]{summary_text}[/dim cyan]")
-                self._print(f"[dim green]{cache_summary}[/dim green]")
-        else:
-            if self.show_panels:
-                self._print(Text(summary_text, style="dim cyan"))
-            else:
-                self._print(f"[dim cyan]{summary_text}[/dim cyan]")
+            self._print(f"[dim green]{cache_summary}[/dim green]")
 
     def _handle_stream_chunk(self, event: StreamChunkEvent) -> None:
         """Handle streaming chunk event."""
@@ -549,14 +535,9 @@ class CustomUIHandler:
             self.file_read_buffer.append(event)
             return
 
-        byte_count = event.byte_count
-        if byte_count < 1024:
-            size_str = f"{byte_count} bytes"
-        elif byte_count < 1024 * 1024:
-            size_str = f"{byte_count / 1024:.1f} KB"
-        else:
-            size_str = f"{byte_count / (1024 * 1024):.1f} MB"
+        from tsugite.utils import format_file_size
 
+        size_str = format_file_size(event.byte_count)
         self._print(f"[dim]Read {event.path} ({event.line_count} lines, {size_str})[/dim]")
 
     def _update_display(self) -> None:

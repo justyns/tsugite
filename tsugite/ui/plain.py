@@ -305,14 +305,9 @@ class PlainUIHandler(CustomUIHandler):
 
     def _handle_file_read(self, event: FileReadEvent) -> None:
         """Handle file read event with plain text output."""
-        byte_count = event.byte_count
-        if byte_count < 1024:
-            size_str = f"{byte_count} bytes"
-        elif byte_count < 1024 * 1024:
-            size_str = f"{byte_count / 1024:.1f} KB"
-        else:
-            size_str = f"{byte_count / (1024 * 1024):.1f} MB"
+        from tsugite.utils import format_file_size
 
+        size_str = format_file_size(event.byte_count)
         self.console.print(f"Read {event.path} ({event.line_count} lines, {size_str})")
 
     @contextmanager

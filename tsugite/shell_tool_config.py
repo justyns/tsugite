@@ -1,7 +1,7 @@
 """Configuration loader for custom shell tools."""
 
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import yaml
 
@@ -14,6 +14,71 @@ def get_custom_tools_config_path() -> Path:
     return get_xdg_config_path("custom_tools.yaml")
 
 
+def _parse_parameter(param_name: str, param_config: Any) -> ShellToolParameter:
+    """Parse a single parameter config into a ShellToolParameter.
+
+    Handles multiple input formats:
+    - dict: Full config with type, description, required, default, flag
+    - str: Type name (str/int/bool/float) or default string value
+    - None: String parameter with no default
+    - bool/int/float: Infer type from value, use as default
+    """
+    if isinstance(param_config, dict):
+        param_type = param_config.get("type", "str")
+        description = param_config.get("description", "")
+        required = param_config.get("required", False)
+        default = param_config.get("default")
+        flag = param_config.get("flag")
+    elif isinstance(param_config, str):
+        # If it looks like a type name, use it as type; otherwise it's a default value
+        if param_config in ("str", "int", "bool", "float"):
+            param_type = param_config
+            default = None
+        else:
+            param_type = "str"
+            default = param_config
+        description = ""
+        required = False
+        flag = None
+    elif param_config is None:
+        param_type = "str"
+        description = ""
+        required = False
+        default = None
+        flag = None
+    else:
+        # Value provided - infer type and use as default
+        if isinstance(param_config, bool):
+            param_type = "bool"
+            default = param_config
+        elif isinstance(param_config, int):
+            param_type = "int"
+            default = param_config
+        elif isinstance(param_config, float):
+            param_type = "float"
+            default = param_config
+        else:
+            param_type = "str"
+            default = str(param_config)
+        description = ""
+        required = False
+        flag = None
+
+    return ShellToolParameter(
+        name=param_name,
+        type=param_type,
+        description=description,
+        required=required,
+        default=default,
+        flag=flag,
+    )
+
+
+def _parse_parameters(raw_params: Dict) -> Dict[str, ShellToolParameter]:
+    """Parse a parameters dict into ShellToolParameter objects."""
+    return {name: _parse_parameter(name, config) for name, config in raw_params.items()}
+
+
 def load_custom_tools_config(path: Optional[Path] = None) -> List[ShellToolDefinition]:
     """Load custom tool definitions from YAML config.
 
@@ -22,22 +87,6 @@ def load_custom_tools_config(path: Optional[Path] = None) -> List[ShellToolDefin
 
     Returns:
         List of ShellToolDefinition objects
-
-    Example YAML:
-        tools:
-          - name: file_search
-            description: Search files with ripgrep
-            command: "rg {pattern} {path}"
-            timeout: 30
-            parameters:
-              pattern:
-                type: str
-                description: Search pattern
-                required: true
-              path:
-                type: str
-                description: Directory to search
-                default: "."
     """
     if path is None:
         path = get_custom_tools_config_path()
@@ -54,69 +103,15 @@ def load_custom_tools_config(path: Optional[Path] = None) -> List[ShellToolDefin
 
         definitions = []
         for tool_def in config["tools"]:
-            # Parse parameters
-            parameters = {}
-            for param_name, param_config in tool_def.get("parameters", {}).items():
-                # Handle multiple formats
-                if isinstance(param_config, dict):
-                    # Full dict format
-                    param_type = param_config.get("type", "str")
-                    description = param_config.get("description", "")
-                    required = param_config.get("required", False)
-                    default = param_config.get("default")
-                    flag = param_config.get("flag")
-                elif isinstance(param_config, str):
-                    # Simple string format - assume it's the type
-                    param_type = param_config if param_config else "str"
-                    description = ""
-                    required = False
-                    default = None
-                    flag = None
-                elif param_config is None:
-                    # Just parameter name, no config
-                    param_type = "str"
-                    description = ""
-                    required = False
-                    default = None
-                    flag = None
-                else:
-                    # Value provided - infer type and use as default
-                    if isinstance(param_config, bool):
-                        param_type = "bool"
-                        default = param_config
-                    elif isinstance(param_config, int):
-                        param_type = "int"
-                        default = param_config
-                    elif isinstance(param_config, float):
-                        param_type = "float"
-                        default = param_config
-                    else:
-                        param_type = "str"
-                        default = str(param_config)
-                    description = ""
-                    required = False
-                    flag = None
-
-                parameters[param_name] = ShellToolParameter(
-                    name=param_name,
-                    type=param_type,
-                    description=description,
-                    required=required,
-                    default=default,
-                    flag=flag,
-                )
-
-            # Create definition
             definition = ShellToolDefinition(
                 name=tool_def["name"],
                 description=tool_def.get("description", ""),
                 command=tool_def["command"],
-                parameters=parameters,
+                parameters=_parse_parameters(tool_def.get("parameters", {})),
                 timeout=tool_def.get("timeout", 30),
                 safe_mode=tool_def.get("safe_mode", True),
                 shell=tool_def.get("shell", True),
             )
-
             definitions.append(definition)
 
         return definitions
@@ -137,10 +132,8 @@ def save_custom_tools_config(definitions: List[ShellToolDefinition], path: Optio
     if path is None:
         path = get_custom_tools_config_path()
 
-    # Ensure parent directory exists
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Convert definitions to YAML-friendly format
     tools_config = []
     for definition in definitions:
         tool_dict = {
@@ -153,7 +146,6 @@ def save_custom_tools_config(definitions: List[ShellToolDefinition], path: Optio
             "parameters": {},
         }
 
-        # Convert parameters
         for param_name, param_def in definition.parameters.items():
             tool_dict["parameters"][param_name] = {
                 "type": param_def.type,
@@ -183,82 +175,12 @@ def parse_tool_definition_from_dict(tool_dict: Dict) -> ShellToolDefinition:
 
     Returns:
         ShellToolDefinition object
-
-    Example:
-        {
-            "name": "file_search",
-            "command": "rg {pattern} {path}",
-            "parameters": {
-                "pattern": {"type": "str", "required": true},
-                "path": ".",  # Infer type from default value
-                "recursive": true  # Infer bool from value
-            }
-        }
     """
-    parameters = {}
-    for param_name, param_config in tool_dict.get("parameters", {}).items():
-        if isinstance(param_config, dict):
-            # Full dict format
-            param_type = param_config.get("type", "str")
-            description = param_config.get("description", "")
-            required = param_config.get("required", False)
-            default = param_config.get("default")
-            flag = param_config.get("flag")
-        elif isinstance(param_config, str):
-            # String - assume it's either type name or default value
-            # If it looks like a type name (str, int, bool, float), use it as type
-            if param_config in ("str", "int", "bool", "float"):
-                param_type = param_config
-                description = ""
-                required = False
-                default = None
-                flag = None
-            else:
-                # Otherwise it's a default value
-                param_type = "str"
-                description = ""
-                required = False
-                default = param_config
-                flag = None
-        elif param_config is None:
-            # Just parameter name
-            param_type = "str"
-            description = ""
-            required = False
-            default = None
-            flag = None
-        else:
-            # Value provided - infer type and use as default
-            if isinstance(param_config, bool):
-                param_type = "bool"
-                default = param_config
-            elif isinstance(param_config, int):
-                param_type = "int"
-                default = param_config
-            elif isinstance(param_config, float):
-                param_type = "float"
-                default = param_config
-            else:
-                param_type = "str"
-                default = str(param_config)
-            description = ""
-            required = False
-            flag = None
-
-        parameters[param_name] = ShellToolParameter(
-            name=param_name,
-            type=param_type,
-            description=description,
-            required=required,
-            default=default,
-            flag=flag,
-        )
-
     return ShellToolDefinition(
         name=tool_dict["name"],
         description=tool_dict.get("description", ""),
         command=tool_dict["command"],
-        parameters=parameters,
+        parameters=_parse_parameters(tool_dict.get("parameters", {})),
         timeout=tool_dict.get("timeout", 30),
         safe_mode=tool_dict.get("safe_mode", True),
         shell=tool_dict.get("shell", True),
