@@ -7,19 +7,18 @@ Tsugite is a micro-agent CLI: agents are Markdown + YAML frontmatter, rendered v
 **Flow:** `Agent.md` (YAML + Jinja2) → `renderer.py` → `TsugiteAgent` → LiteLLM → Tools
 
 **Key Modules:**
-- `cli/__init__.py` - Typer CLI (run, chat, render, config, mcp, tools, agents, attachments, cache, benchmark)
+- `cli/__init__.py` - Typer CLI (run, chat, render, config, mcp, tools, agents, attachments, cache)
 - `md_agents.py` - Parse frontmatter + agent resolution + directives
 - `builtin_agents/` - File-based built-in agent definitions (default.md, chat-assistant.md)
 - `agent_inheritance.py` - Agent resolution pipeline + inheritance chain
 - `chat.py` - Chat session management with history
-- `ui/textual_chat.py` - Textual TUI for interactive chat
 - `agent_runner.py` - Execution orchestration, prefetch, tool wiring, multi-step
 - `core/agent.py` - LiteLLM agent loop + streaming
 - `renderer.py` - Jinja2 rendering + helpers (now, today, slugify, env, file_exists, read_text, is_file, is_dir)
 - `tools/` - Tool registry + implementations
 - `shell_tool_config.py` + `tools/shell_tools.py` - Custom shell command wrappers
 - `models.py` - Model string parsing + provider dispatch
-- `config.py` - Configuration (default_model, model_aliases, default_base_agent, chat_theme)
+- `config.py` - Configuration (default_model, model_aliases, default_base_agent)
 
 **Development:**
 ```bash
@@ -72,8 +71,7 @@ File-based agents distributed with the package in `tsugite/builtin_agents/` dire
 
 **Components:**
 - `chat.py:ChatManager` - Session management, history (max_history), turn execution
-- `ui/textual_chat.py:ChatApp` - Textual TUI
-- `ui/widgets/` - MessageList, ThoughtLog
+- `ui/repl_chat.py` - REPL chat interface
 
 **Default Agent:** `default`. Override with `.tsugite/default.md`.
 

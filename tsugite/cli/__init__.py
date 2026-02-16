@@ -12,7 +12,6 @@ from rich.traceback import install
 from tsugite.console import get_error_console
 from tsugite.options import (
     AttachmentOptions,
-    DockerOptions,
     ExecutionOptions,
     HistoryOptions,
     UIOptions,
@@ -58,7 +57,7 @@ def _resolve_workspace(workspace_ref: Optional[str]) -> Optional[Any]:
     if not workspace_ref:
         return None
 
-    from tsugite.workspace import Workspace, WorkspaceManager, WorkspaceNotFoundError
+    from tsugite.workspace import Workspace, WorkspaceNotFoundError
 
     # Check if it's a path (contains "/" or starts with ".")
     if "/" in workspace_ref or workspace_ref.startswith(".") or workspace_ref.startswith("~"):
@@ -69,9 +68,8 @@ def _resolve_workspace(workspace_ref: Optional[str]) -> Optional[Any]:
             return None
 
     # Lookup by name
-    manager = WorkspaceManager()
     try:
-        return manager.load_workspace(workspace_ref)
+        return Workspace.load_by_name(workspace_ref)
     except WorkspaceNotFoundError:
         return None
 
@@ -117,66 +115,6 @@ def _check_and_run_onboarding(
         return _resolve_workspace(workspace_ref)
 
     return workspace
-
-
-def _build_docker_command(
-    args: List[str],
-    docker_opts: DockerOptions,
-    exec_opts: ExecutionOptions,
-    ui_opts: UIOptions,
-    attach_opts: AttachmentOptions,
-    history_opts: HistoryOptions,
-    root: Optional[str],
-    ui_mode: Optional[str],
-) -> List[str]:
-    """Build Docker wrapper command with all flags."""
-    cmd = ["tsugite-docker"]
-
-    if docker_opts.network != "host":
-        cmd.extend(["--network", docker_opts.network])
-    if docker_opts.keep:
-        cmd.append("--keep")
-    if docker_opts.container:
-        cmd.extend(["--container", docker_opts.container])
-
-    cmd.append("run")
-    cmd.extend(args)
-
-    if exec_opts.model_override:
-        cmd.extend(["--model", exec_opts.model_override])
-    if root:
-        cmd.extend(["--root", str(root)])
-    if history_opts.storage_dir:
-        cmd.extend(["--history-dir", str(history_opts.storage_dir)])
-    if ui_mode:
-        cmd.extend(["--ui", ui_mode])
-    if exec_opts.debug:
-        cmd.append("--debug")
-    if ui_opts.verbose:
-        cmd.append("--verbose")
-    if ui_opts.headless:
-        cmd.append("--headless")
-    if ui_opts.plain:
-        cmd.append("--plain")
-    if ui_opts.show_reasoning:
-        cmd.append("--show-reasoning")
-    if ui_opts.no_color:
-        cmd.append("--no-color")
-    if ui_opts.final_only:
-        cmd.append("--final-only")
-    if ui_opts.log_json:
-        cmd.append("--log-json")
-    if ui_opts.non_interactive:
-        cmd.append("--non-interactive")
-    if exec_opts.trust_mcp_code:
-        cmd.append("--trust-mcp-code")
-    if attach_opts.sources:
-        for att in attach_opts.sources:
-            cmd.extend(["--attachment", att])
-    if attach_opts.refresh_cache:
-        cmd.append("--refresh-cache")
-
-    return cmd
 
 
 def _resolve_ui_mode(ui_mode: Optional[str], ui_opts: UIOptions, console: Console) -> UIOptions:
@@ -244,32 +182,6 @@ def _build_executor_kwargs(
             return_token_usage=True,
         )
     return kwargs
-
-
-def _handle_docker_execution(
-    args: List[str],
-    docker_opts: DockerOptions,
-    exec_opts: ExecutionOptions,
-    ui_opts: UIOptions,
-    attach_opts: AttachmentOptions,
-    history_opts: HistoryOptions,
-    root: Optional[str],
-    ui_mode: Optional[str],
-) -> None:
-    """Handle Docker container execution and exit."""
-    import shutil
-    import subprocess
-
-    wrapper_path = shutil.which("tsugite-docker")
-    if not wrapper_path:
-        console.print("[red]Error: tsugite-docker wrapper not found in PATH[/red]")
-        console.print("[yellow]Install it by adding tsugite/bin/ to your PATH[/yellow]")
-        console.print("[dim]See bin/README.md for installation instructions[/dim]")
-        raise typer.Exit(1)
-
-    cmd = _build_docker_command(args, docker_opts, exec_opts, ui_opts, attach_opts, history_opts, root, ui_mode)
-    result = subprocess.run(cmd, check=False)
-    raise typer.Exit(result.returncode)
 
 
 def _resolve_conversation_continuation(continue_conversation: bool, conversation_id: Optional[str]) -> Optional[str]:
@@ -417,10 +329,6 @@ def run(
         "--auto-context/--no-auto-context",
         help="Enable/disable auto-context attachments (overrides config/agent)",
     ),
-    docker: bool = typer.Option(False, "--docker", help="Run in Docker container (delegates to tsugite-docker)"),
-    keep: bool = typer.Option(False, "--keep", help="Keep Docker container running (use with --docker)"),
-    container: Optional[str] = typer.Option(None, "--container", help="Use existing Docker container"),
-    network: str = typer.Option("host", "--network", help="Docker network mode (use with --docker)"),
     no_history: bool = typer.Option(False, "--no-history", help="Disable conversation history persistence"),
     continue_conversation: bool = typer.Option(False, "--continue", "-c", help="Continue previous conversation"),
     conversation_id: Optional[str] = typer.Option(
@@ -534,13 +442,6 @@ def run(
         refresh_cache=refresh_cache,
         auto_context=auto_context,
     )
-    docker_opts = DockerOptions(
-        enabled=docker,
-        keep=keep,
-        container=container,
-        network=network,
-    )
-
     if history_opts.storage_dir:
         history_opts.storage_dir.mkdir(parents=True, exist_ok=True)
 
@@ -561,9 +462,6 @@ def run(
         ui_opts.non_interactive = True
         history_opts.enabled = False
         os.environ["TSUGITE_SUBAGENT_MODE"] = "1"
-
-    if docker_opts.enabled or docker_opts.container:
-        _handle_docker_execution(args, docker_opts, exec_opts, ui_opts, attach_opts, history_opts, root, ui)
 
     # Handle daemon mode
     daemon_metadata = None
@@ -1096,7 +994,6 @@ def chat(
     continue_: Optional[str] = typer.Option(
         None, "--continue", "-c", help="Resume conversation by ID, or latest if no ID given"
     ),
-    ui: str = typer.Option("repl", "--ui", help="UI mode: 'repl' (default) or 'tui'"),
     root: Optional[str] = typer.Option(None, "--root", help="Working directory"),
     workspace: Optional[str] = typer.Option(
         None, "--workspace", "-w", help="Workspace directory (auto-loads PERSONA.md, USER.md, MEMORY.md)"
@@ -1166,41 +1063,25 @@ def chat(
         agent_to_load = agent if agent else "default"
         _, primary_agent_path, _ = load_and_validate_agent(agent_to_load, console)
 
-        if ui.lower() == "tui":
-            from tsugite.ui.textual_chat import run_textual_chat
+        from tsugite.ui.repl_chat import run_repl_chat
 
-            run_textual_chat(
-                agent_path=primary_agent_path,
-                exec_options=exec_opts,
-                history_options=history_opts,
-                resume_turns=resume_turns,
-                path_context=path_context,
-                workspace_attachments=workspace_attachments,
-            )
-        elif ui.lower() == "repl":
-            from tsugite.ui.repl_chat import run_repl_chat
+        # REPL defaults to streaming for better UX
+        exec_opts.stream = exec_opts.stream or True
 
-            # REPL defaults to streaming for better UX
-            exec_opts.stream = exec_opts.stream or True
-
-            run_repl_chat(
-                agent_path=primary_agent_path,
-                exec_options=exec_opts,
-                history_options=history_opts,
-                resume_turns=resume_turns,
-                path_context=path_context,
-                workspace_attachments=workspace_attachments,
-            )
-        else:
-            console.print(f"[red]Unknown UI mode: {ui}. Use 'repl' or 'tui'.[/red]")
-            raise typer.Exit(1)
+        run_repl_chat(
+            agent_path=primary_agent_path,
+            exec_options=exec_opts,
+            history_options=history_opts,
+            resume_turns=resume_turns,
+            path_context=path_context,
+            workspace_attachments=workspace_attachments,
+        )
 
 
 # Register subcommands from separate modules
 # These imports are fast now because each module uses lazy loading internally
 from .agents import agents_app  # noqa: E402
 from .attachments import attachments_app  # noqa: E402
-from .benchmark import benchmark_command  # noqa: E402
 from .cache import cache_app  # noqa: E402
 from .config import config_app  # noqa: E402
 from .daemon import daemon_app  # noqa: E402
@@ -1222,6 +1103,5 @@ app.add_typer(cache_app, name="cache")
 app.add_typer(tools_app, name="tools")
 app.add_typer(history_app, name="history")
 app.add_typer(workspace_app, name="workspace")
-app.command("benchmark")(benchmark_command)
 app.command("init")(init)
 app.command("validate")(validate_command)

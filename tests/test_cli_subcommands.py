@@ -169,22 +169,6 @@ class TestCacheSubcommands:
             mock_clear.assert_called_once_with()
 
 
-class TestBenchmarkCommand:
-    """Test benchmark CLI command."""
-
-    def test_benchmark_help(self):
-        """Test benchmark --help works."""
-        result = runner.invoke(app, ["benchmark", "--help"])
-        assert result.exit_code == 0
-        assert "benchmark" in result.stdout.lower()
-
-    def test_benchmark_run_no_models(self):
-        """Test benchmark run without --models flag."""
-        result = runner.invoke(app, ["benchmark", "run"])
-        assert result.exit_code == 1
-        assert "--models is required" in result.stdout
-
-
 class TestChatCommand:
     """Test chat CLI command."""
 

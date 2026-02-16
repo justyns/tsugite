@@ -54,7 +54,7 @@ Tsugite is an agentic CLI that executes AI agents defined as markdown files with
 1. **CLI Entry** (`tsugite/cli/__init__.py`)
    - Typer-based CLI with subcommands
    - Main commands: `run` (single-shot), `chat` (interactive), `render` (preview)
-   - Additional: `daemon`, `workspace`, `init`, `validate`, `benchmark`, `mcp`, `serve`, `agents`, `config`, `attachments`, `cache`, `tools`, `history`
+   - Additional: `daemon`, `workspace`, `init`, `validate`, `mcp`, `serve`, `agents`, `config`, `attachments`, `cache`, `tools`, `history`
 
 2. **Agent Resolution & Inheritance** (`tsugite/agent_inheritance.py`)
    - Resolves agent names to file paths using search order:
@@ -117,9 +117,9 @@ Tsugite is an agentic CLI that executes AI agents defined as markdown files with
 
 9. **Event System** (`tsugite/events/`)
    - Event-driven architecture for UI decoupling
-   - 24 event types: execution, LLM, meta, progress, skills
+   - 20 event types: execution, LLM, meta, progress, skills
    - `EventBus` dispatches to multiple handlers
-   - Handlers: Rich console, plain text, JSONL, Textual TUI, chat, REPL
+   - Handlers: Rich console, plain text, JSONL, chat, REPL
 
 10. **History System** (`tsugite/history/`)
     - JSONL-based conversation history (one `.jsonl` file per conversation)
@@ -195,7 +195,6 @@ All UI output goes through the event system:
 - `base.py` - UIHandler interface
 - `plain.py` - Plain text (no colors, copy-paste friendly)
 - `jsonl.py` - JSONL protocol (for subprocess subagents)
-- `textual_chat.py` - Textual TUI for chat mode
 - `chat.py`, `repl_handler.py` - Interactive chat/REPL modes
 
 ### Agent Spawning (Multi-Agent)
