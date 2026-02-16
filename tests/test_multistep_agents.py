@@ -128,8 +128,7 @@ class TestMultiStepExecution:
     def test_multistep_agent_file(self, tmp_path):
         """Test running a basic multi-step agent."""
         agent_file = tmp_path / "multistep.md"
-        agent_file.write_text(
-            """---
+        agent_file.write_text("""---
 name: test_multistep
 model: ollama:qwen2.5-coder:7b
 tools: []
@@ -141,8 +140,7 @@ Return the text "Step 1 complete"
 <!-- tsu:step name="step2" -->
 Previous result was: {{ result1 }}
 Now return "Step 2 complete"
-"""
-        )
+""")
 
         from tsugite.agent_runner import run_multistep_agent
 
@@ -158,23 +156,19 @@ Now return "Step 2 complete"
         from tsugite.md_agents import has_step_directives
 
         multistep_agent = tmp_path / "multi.md"
-        multistep_agent.write_text(
-            """---
+        multistep_agent.write_text("""---
 name: multi
 ---
 <!-- tsu:step name="test" -->
 Content
-"""
-        )
+""")
 
         regular_agent = tmp_path / "regular.md"
-        regular_agent.write_text(
-            """---
+        regular_agent.write_text("""---
 name: regular
 ---
 Regular content
-"""
-        )
+""")
 
         assert has_step_directives(multistep_agent.read_text()) is True
         assert has_step_directives(regular_agent.read_text()) is False
@@ -184,8 +178,7 @@ Regular content
         from tsugite.agent_runner import run_multistep_agent
 
         agent_file = tmp_path / "duplicate.md"
-        agent_file.write_text(
-            """---
+        agent_file.write_text("""---
 name: duplicate_steps
 model: ollama:qwen2.5-coder:7b
 ---
@@ -194,8 +187,7 @@ First occurrence
 
 <!-- tsu:step name="step1" -->
 Duplicate name
-"""
-        )
+""")
 
         with pytest.raises(ValueError, match="Duplicate step names"):
             run_multistep_agent(agent_file, "test")
@@ -203,8 +195,7 @@ Duplicate name
     def test_step_with_prefetch(self, tmp_path):
         """Test that prefetch works with multi-step agents."""
         agent_file = tmp_path / "with_prefetch.md"
-        agent_file.write_text(
-            """---
+        agent_file.write_text("""---
 name: prefetch_test
 model: ollama:qwen2.5-coder:7b
 prefetch:
@@ -215,8 +206,7 @@ prefetch:
 ---
 <!-- tsu:step name="use_prefetch" -->
 File content was: {{ file_content }}
-"""
-        )
+""")
 
         # Create the test file for prefetch
         test_file = tmp_path / "test.txt"
@@ -235,14 +225,12 @@ class TestStepValidation:
         from tsugite.agent_runner import run_multistep_agent
 
         agent_file = tmp_path / "regular.md"
-        agent_file.write_text(
-            """---
+        agent_file.write_text("""---
 name: regular
 model: ollama:qwen2.5-coder:7b
 ---
 Regular agent content without steps
-"""
-        )
+""")
 
         with pytest.raises(ValueError, match="does not contain step directives"):
             run_multistep_agent(agent_file, "test")
@@ -266,8 +254,7 @@ Second step"""
         from tsugite.md_agents import validate_agent_execution
 
         agent_file = tmp_path / "multistep.md"
-        agent_file.write_text(
-            """---
+        agent_file.write_text("""---
 name: test_multistep
 model: ollama:qwen2.5-coder:7b
 tools: []
@@ -281,8 +268,7 @@ Use {{ result1 }} in step 2
 
 <!-- tsu:step name="step3" -->
 Use {{ result1 }} and {{ result2 }} in step 3
-"""
-        )
+""")
 
         is_valid, message = validate_agent_execution(agent_file)
         assert is_valid, f"Validation should pass but failed: {message}"
@@ -292,8 +278,7 @@ Use {{ result1 }} and {{ result2 }} in step 3
         from tsugite.md_agents import validate_agent_execution
 
         agent_file = tmp_path / "typo.md"
-        agent_file.write_text(
-            """---
+        agent_file.write_text("""---
 name: typo_test
 model: ollama:qwen2.5-coder:7b
 ---
@@ -303,8 +288,7 @@ Do something
 
 <!-- tsu:step name="step2" -->
 Use {{ daat }} instead of {{ data }} (typo!)
-"""
-        )
+""")
 
         is_valid, message = validate_agent_execution(agent_file)
         assert not is_valid
@@ -315,8 +299,7 @@ Use {{ daat }} instead of {{ data }} (typo!)
         from tsugite.md_agents import validate_agent_execution
 
         agent_file = tmp_path / "no_assign.md"
-        agent_file.write_text(
-            """---
+        agent_file.write_text("""---
 name: no_assignments
 model: ollama:qwen2.5-coder:7b
 ---
@@ -326,8 +309,7 @@ Just do step 1
 
 <!-- tsu:step name="step2" -->
 Just do step 2 with {{ user_prompt }}
-"""
-        )
+""")
 
         is_valid, message = validate_agent_execution(agent_file)
         assert is_valid, f"Validation should pass: {message}"
@@ -338,8 +320,7 @@ Just do step 2 with {{ user_prompt }}
 
         # This is similar to multistep_simple.md which was failing
         agent_file = tmp_path / "analyze_plan_execute.md"
-        agent_file.write_text(
-            """---
+        agent_file.write_text("""---
 name: multistep_simple
 model: ollama:qwen2.5-coder:7b
 max_turns: 5
@@ -365,8 +346,7 @@ Execute the plan and provide the result.
 {{ plan }}
 **Original Analysis:**
 {{ analysis }}
-"""
-        )
+""")
 
         is_valid, message = validate_agent_execution(agent_file)
         assert is_valid, f"Should pass validation (was failing before fix): {message}"
@@ -456,8 +436,7 @@ Do the task"""
     def test_multistep_simple_example_includes_preamble(self, tmp_path):
         """Test that multistep_simple.md style agents work with preamble."""
         agent_file = tmp_path / "with_header.md"
-        agent_file.write_text(
-            """---
+        agent_file.write_text("""---
 name: test_preamble
 model: ollama:qwen2.5-coder:7b
 ---
@@ -473,8 +452,7 @@ Do step 1
 <!-- tsu:step name="step2" -->
 ## Step 2
 Use {{ result1 }}
-"""
-        )
+""")
 
         from tsugite.md_agents import parse_agent
 
@@ -501,8 +479,7 @@ class TestMultiStepContextVariables:
         from tsugite.md_agents import extract_step_directives
 
         agent_file = tmp_path / "step_vars.md"
-        agent_file.write_text(
-            """---
+        agent_file.write_text("""---
 name: step_vars_test
 ---
 
@@ -514,8 +491,7 @@ Currently in step {{ step_number }}/{{ total_steps }}: {{ step_name }}
 
 <!-- tsu:step name="third" -->
 {% if step_number == 3 %}Final step!{% endif %}
-"""
-        )
+""")
 
         # Verify templates can reference these variables
         preamble, steps = extract_step_directives(agent_file.read_text())
@@ -716,8 +692,7 @@ class TestVariableInjection:
     def test_multistep_with_variable_injection_structure(self, tmp_path):
         """Test that multi-step agent structure supports variable injection."""
         agent_file = tmp_path / "var_injection.md"
-        agent_file.write_text(
-            """---
+        agent_file.write_text("""---
 name: var_injection_test
 model: ollama:qwen2.5-coder:7b
 max_turns: 5
@@ -729,8 +704,7 @@ Return JSON data: {"score": 87, "name": "Alice"}
 <!-- tsu:step name="process" -->
 The variable `data` should be available in Python.
 Parse it and use it.
-"""
-        )
+""")
 
         from tsugite.md_agents import parse_agent
 

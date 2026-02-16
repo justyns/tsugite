@@ -570,14 +570,12 @@ class TestAutoDiscovery:
         agents_dir = tmp_path / "agents"
         agents_dir.mkdir()
         test_agent = agents_dir / "helper.md"
-        test_agent.write_text(
-            """---
+        test_agent.write_text("""---
 name: helper
 description: Helps with tasks
 ---
 Content
-"""
-        )
+""")
 
         mock_validate.return_value = (True, "Agent is valid")
         mock_run.return_value = "Task completed"
@@ -748,8 +746,7 @@ class TestRunCommandHistory:
         """Test that multi-step agents save to history (without metadata)."""
         # Create a multi-step agent
         multistep_agent = tmp_path / "multistep.md"
-        multistep_agent.write_text(
-            """---
+        multistep_agent.write_text("""---
 name: multistep_test
 model: openai:gpt-4o-mini
 tools: []
@@ -761,8 +758,7 @@ Step 1
 
 <!-- tsu:step name="step2" -->
 Step 2
-"""
-        )
+""")
 
         with (
             patch("tsugite.agent_runner.run_multistep_agent") as mock_run_multistep,

@@ -65,16 +65,14 @@ class TestBuiltinInheritance:
 
         # Create an agent without explicit extends
         agent_file = tmp_path / "test.md"
-        agent_file.write_text(
-            """---
+        agent_file.write_text("""---
 name: test_agent
 tools: [read_file]
 ---
 
 # Test Agent
 Task: {{ user_prompt }}
-"""
-        )
+""")
 
         agent = parse_agent_file(agent_file)
 
@@ -90,26 +88,22 @@ Task: {{ user_prompt }}
         tsugite_dir = tmp_path / ".tsugite"
         tsugite_dir.mkdir()
         default_file = tsugite_dir / "default.md"
-        default_file.write_text(
-            """---
+        default_file.write_text("""---
 name: default
 instructions: Custom user instructions
 ---
 
 # User Default
-"""
-        )
+""")
 
         # Create agent
         agent_file = tmp_path / "test.md"
-        agent_file.write_text(
-            """---
+        agent_file.write_text("""---
 name: test_agent
 ---
 
 # Test Agent
-"""
-        )
+""")
 
         agent = parse_agent_file(agent_file)
 
@@ -122,16 +116,14 @@ name: test_agent
         from tsugite.md_agents import parse_agent_file
 
         agent_file = tmp_path / "standalone.md"
-        agent_file.write_text(
-            """---
+        agent_file.write_text("""---
 name: standalone
 extends: none
 ---
 
 # Standalone Agent
 Task: {{ user_prompt }}
-"""
-        )
+""")
 
         agent = parse_agent_file(agent_file)
 

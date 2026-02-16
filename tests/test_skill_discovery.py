@@ -90,16 +90,14 @@ class TestScanSkills:
 
         # Create a skill file
         skill_file = skill_dirs["project_local"] / "test_skill.md"
-        skill_file.write_text(
-            """---
+        skill_file.write_text("""---
 name: test_skill
 description: A test skill for testing
 ---
 
 # Test Skill Content
 This is a test skill.
-"""
-        )
+""")
 
         skills = scan_skills()
 
@@ -119,24 +117,20 @@ This is a test skill.
 
         # Create skills in different directories
         skill1 = skill_dirs["project_local"] / "skill1.md"
-        skill1.write_text(
-            """---
+        skill1.write_text("""---
 name: skill1
 description: First skill
 ---
 Content
-"""
-        )
+""")
 
         skill2 = skill_dirs["project_conv"] / "skill2.md"
-        skill2.write_text(
-            """---
+        skill2.write_text("""---
 name: skill2
 description: Second skill
 ---
 Content
-"""
-        )
+""")
 
         skills = scan_skills()
         skill_names = [s.name for s in skills]
@@ -152,25 +146,21 @@ Content
         # Create same-named skill in different directories
         # Higher priority (project_local)
         skill_high = skill_dirs["project_local"] / "duplicate.md"
-        skill_high.write_text(
-            """---
+        skill_high.write_text("""---
 name: duplicate
 description: High priority version
 ---
 Content
-"""
-        )
+""")
 
         # Lower priority (project_conv)
         skill_low = skill_dirs["project_conv"] / "duplicate.md"
-        skill_low.write_text(
-            """---
+        skill_low.write_text("""---
 name: duplicate
 description: Low priority version
 ---
 Content
-"""
-        )
+""")
 
         skills = scan_skills()
         duplicate_skills = [s for s in skills if s.name == "duplicate"]
@@ -187,14 +177,12 @@ Content
 
         # Create skill with invalid YAML
         invalid_skill = skill_dirs["project_local"] / "invalid.md"
-        invalid_skill.write_text(
-            """---
+        invalid_skill.write_text("""---
 name: invalid
 invalid: yaml: structure: bad
 ---
 Content
-"""
-        )
+""")
 
         # Should not raise, just skip invalid skills
         skills = scan_skills()
@@ -208,13 +196,11 @@ Content
 
         # Create skill without name
         no_name = skill_dirs["project_local"] / "no_name.md"
-        no_name.write_text(
-            """---
+        no_name.write_text("""---
 description: No name field
 ---
 Content
-"""
-        )
+""")
 
         skills = scan_skills()
         # Should be skipped (no name to match)
@@ -243,14 +229,12 @@ Content
         nested.mkdir(parents=True)
 
         nested_skill = nested / "nested_skill.md"
-        nested_skill.write_text(
-            """---
+        nested_skill.write_text("""---
 name: nested_skill
 description: A nested skill
 ---
 Content
-"""
-        )
+""")
 
         skills = scan_skills()
         nested_skills = [s for s in skills if s.name == "nested_skill"]

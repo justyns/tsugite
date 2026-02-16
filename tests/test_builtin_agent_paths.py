@@ -94,14 +94,12 @@ class TestBuiltinVsRegularAgents:
     def test_validate_regular_agent_file(self, tmp_path):
         """Test that regular agent files still work."""
         agent_file = tmp_path / "regular.md"
-        agent_file.write_text(
-            """---
+        agent_file.write_text("""---
 name: regular
 ---
 # Regular Agent
 {{ user_prompt }}
-"""
-        )
+""")
 
         is_valid, message = validate_agent_file(agent_file)
         assert is_valid is True
@@ -110,15 +108,13 @@ name: regular
         """Test get_agent_info works for both regular and builtin agents."""
         # Create regular agent
         agent_file = tmp_path / "regular.md"
-        agent_file.write_text(
-            """---
+        agent_file.write_text("""---
 name: regular
 description: A regular agent
 tools: [read_file]
 ---
 Content
-"""
-        )
+""")
 
         builtin_path = get_builtin_agents_path() / "default.md"
         regular_info = get_agent_info(agent_file)

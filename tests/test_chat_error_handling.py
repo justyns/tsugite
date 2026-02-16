@@ -9,15 +9,13 @@ def test_run_turn_catches_and_returns_errors(tmp_path):
     """Test that run_turn catches exceptions and returns error messages."""
     # Create a minimal agent file
     agent_file = tmp_path / "test_agent.md"
-    agent_file.write_text(
-        """---
+    agent_file.write_text("""---
 name: test-agent
 extends: none
 ---
 
 Test agent
-"""
-    )
+""")
 
     manager = ChatManager(
         agent_path=agent_file,
@@ -41,15 +39,13 @@ Test agent
 def test_error_message_added_to_history(tmp_path):
     """Test that error messages are added to conversation history."""
     agent_file = tmp_path / "test_agent.md"
-    agent_file.write_text(
-        """---
+    agent_file.write_text("""---
 name: test-agent
 extends: none
 ---
 
 Test agent
-"""
-    )
+""")
 
     manager = ChatManager(
         agent_path=agent_file,

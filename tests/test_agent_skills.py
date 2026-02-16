@@ -15,8 +15,7 @@ class TestAgentConfigSkillsField:
     def test_agent_with_auto_load_skills(self, tmp_path):
         """Test parsing agent with auto_load_skills field."""
         agent_file = tmp_path / "agent.md"
-        agent_file.write_text(
-            """---
+        agent_file.write_text("""---
 name: test_agent
 extends: none
 auto_load_skills:
@@ -27,8 +26,7 @@ auto_load_skills:
 
 # Test Agent
 {{ user_prompt }}
-"""
-        )
+""")
 
         agent = parse_agent_file(agent_file)
 
@@ -38,16 +36,14 @@ auto_load_skills:
     def test_agent_without_auto_load_skills(self, tmp_path):
         """Test parsing agent without auto_load_skills field."""
         agent_file = tmp_path / "agent.md"
-        agent_file.write_text(
-            """---
+        agent_file.write_text("""---
 name: test_agent
 extends: none
 ---
 
 # Test Agent
 {{ user_prompt }}
-"""
-        )
+""")
 
         agent = parse_agent_file(agent_file)
 
@@ -57,8 +53,7 @@ extends: none
     def test_agent_with_empty_auto_load_skills(self, tmp_path):
         """Test parsing agent with empty auto_load_skills."""
         agent_file = tmp_path / "agent.md"
-        agent_file.write_text(
-            """---
+        agent_file.write_text("""---
 name: test_agent
 extends: none
 auto_load_skills: []
@@ -66,8 +61,7 @@ auto_load_skills: []
 
 # Test Agent
 {{ user_prompt }}
-"""
-        )
+""")
 
         agent = parse_agent_file(agent_file)
 
@@ -84,28 +78,24 @@ class TestAgentPreparationWithSkills:
         skills_dir.mkdir()
 
         skill1 = skills_dir / "skill1.md"
-        skill1.write_text(
-            """---
+        skill1.write_text("""---
 name: skill1
 description: First skill
 ---
 
 # Skill 1
 This is the first skill content.
-"""
-        )
+""")
 
         skill2 = skills_dir / "skill2.md"
-        skill2.write_text(
-            """---
+        skill2.write_text("""---
 name: skill2
 description: Second skill
 ---
 
 # Skill 2
 This is the second skill content.
-"""
-        )
+""")
 
         return {"skill1": skill1, "skill2": skill2, "dir": skills_dir}
 
@@ -113,8 +103,7 @@ This is the second skill content.
     def agent_with_skills(self, tmp_path):
         """Create agent file with auto_load_skills."""
         agent_file = tmp_path / "agent.md"
-        agent_file.write_text(
-            """---
+        agent_file.write_text("""---
 name: test_agent
 extends: none
 auto_load_skills:
@@ -125,8 +114,7 @@ tools: []
 
 # Test Agent
 {{ user_prompt }}
-"""
-        )
+""")
         return agent_file
 
     def test_prepare_agent_loads_skills(self, agent_with_skills, skill_files, monkeypatch):
@@ -157,21 +145,18 @@ tools: []
 
         # Create skill with template
         template_skill = skill_files["dir"] / "template_skill.md"
-        template_skill.write_text(
-            """---
+        template_skill.write_text("""---
 name: template_skill
 description: Template skill
 ---
 
 # Template Skill
 Current date: {{ today() }}
-"""
-        )
+""")
 
         # Update agent to load template skill
         agent_file = agent_with_skills.parent / "template_agent.md"
-        agent_file.write_text(
-            """---
+        agent_file.write_text("""---
 name: template_agent
 extends: none
 auto_load_skills:
@@ -181,8 +166,7 @@ tools: []
 
 # Template Agent
 {{ user_prompt }}
-"""
-        )
+""")
 
         agent = parse_agent_file(agent_file)
         preparer = AgentPreparer()
@@ -208,8 +192,7 @@ tools: []
     def test_prepare_agent_without_skills(self, tmp_path):
         """Test preparing agent without any skills."""
         agent_file = tmp_path / "agent.md"
-        agent_file.write_text(
-            """---
+        agent_file.write_text("""---
 name: simple_agent
 extends: none
 tools: []
@@ -217,8 +200,7 @@ tools: []
 
 # Simple Agent
 {{ user_prompt }}
-"""
-        )
+""")
 
         agent = parse_agent_file(agent_file)
         preparer = AgentPreparer()
@@ -238,8 +220,7 @@ tools: []
         monkeypatch.chdir(tmp_path)
 
         agent_file = tmp_path / "agent.md"
-        agent_file.write_text(
-            """---
+        agent_file.write_text("""---
 name: test_agent
 extends: none
 auto_load_skills:
@@ -249,8 +230,7 @@ tools: []
 
 # Test Agent
 {{ user_prompt }}
-"""
-        )
+""")
 
         agent = parse_agent_file(agent_file)
         preparer = AgentPreparer()
@@ -381,8 +361,7 @@ class TestSkillLoadErrorHandling:
         monkeypatch.chdir(tmp_path)
 
         agent_file = tmp_path / "agent.md"
-        agent_file.write_text(
-            """---
+        agent_file.write_text("""---
 name: test_agent
 extends: none
 auto_load_skills:
@@ -392,8 +371,7 @@ tools: []
 
 # Test Agent
 {{ user_prompt }}
-"""
-        )
+""")
 
         agent = parse_agent_file(agent_file)
 
@@ -429,8 +407,7 @@ tools: []
         monkeypatch.chdir(tmp_path)
 
         agent_file = tmp_path / "agent.md"
-        agent_file.write_text(
-            """---
+        agent_file.write_text("""---
 name: test_agent
 extends: none
 auto_load_skills:
@@ -442,8 +419,7 @@ tools: []
 
 # Test Agent
 {{ user_prompt }}
-"""
-        )
+""")
 
         agent = parse_agent_file(agent_file)
 
@@ -482,20 +458,17 @@ tools: []
         skills_dir.mkdir()
 
         valid_skill = skills_dir / "valid_skill.md"
-        valid_skill.write_text(
-            """---
+        valid_skill.write_text("""---
 name: valid_skill
 description: Valid skill
 ---
 
 # Valid Skill
 This skill loads successfully.
-"""
-        )
+""")
 
         agent_file = tmp_path / "agent.md"
-        agent_file.write_text(
-            """---
+        agent_file.write_text("""---
 name: test_agent
 extends: none
 auto_load_skills:
@@ -506,8 +479,7 @@ tools: []
 
 # Test Agent
 {{ user_prompt }}
-"""
-        )
+""")
 
         agent = parse_agent_file(agent_file)
 
@@ -542,8 +514,7 @@ tools: []
         monkeypatch.chdir(tmp_path)
 
         agent_file = tmp_path / "agent.md"
-        agent_file.write_text(
-            """---
+        agent_file.write_text("""---
 name: test_agent
 extends: none
 auto_load_skills:
@@ -554,8 +525,7 @@ tools: []
 # Test Agent
 This agent should still work despite skill load failure.
 {{ user_prompt }}
-"""
-        )
+""")
 
         agent = parse_agent_file(agent_file)
 
@@ -580,8 +550,7 @@ This agent should still work despite skill load failure.
         monkeypatch.chdir(tmp_path)
 
         agent_file = tmp_path / "agent.md"
-        agent_file.write_text(
-            """---
+        agent_file.write_text("""---
 name: test_agent
 extends: none
 auto_load_skills:
@@ -591,8 +560,7 @@ tools: []
 
 # Test Agent
 {{ user_prompt }}
-"""
-        )
+""")
 
         agent = parse_agent_file(agent_file)
         preparer = AgentPreparer()

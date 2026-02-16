@@ -40,14 +40,12 @@ async def test_agent_simple_calculation(mock_litellm_response):
 
     # Mock litellm.acompletion to return a response with final_answer
     with patch("litellm.acompletion", new_callable=AsyncMock) as mock_acompletion:
-        mock_acompletion.return_value = mock_litellm_response(
-            """Thought: I'll calculate 5 + 3 using Python.
+        mock_acompletion.return_value = mock_litellm_response("""Thought: I'll calculate 5 + 3 using Python.
 
 ```python
 result = 5 + 3
 final_answer(result)
-```"""
-        )
+```""")
 
         agent = TsugiteAgent(
             model_string="openai:gpt-4o-mini",
@@ -77,24 +75,20 @@ async def test_agent_multi_step_reasoning(mock_litellm_response):
 
         if call_count == 1:
             # First step: Set a variable
-            return mock_litellm_response(
-                """Thought: I'll start by setting x to 5.
+            return mock_litellm_response("""Thought: I'll start by setting x to 5.
 
 ```python
 x = 5
 print(f"x = {x}")
-```"""
-            )
+```""")
         elif call_count == 2:
             # Second step: Use the variable and call final_answer
-            return mock_litellm_response(
-                """Thought: Now I'll multiply x by 2 and return the result.
+            return mock_litellm_response("""Thought: Now I'll multiply x by 2 and return the result.
 
 ```python
 result = x * 2
 final_answer(result)
-```"""
-            )
+```""")
 
     with patch("litellm.acompletion", new=mock_acompletion):
         agent = TsugiteAgent(
@@ -131,14 +125,12 @@ async def test_agent_with_tools(mock_litellm_response):
     tool = create_tool_from_function(multiply)
 
     with patch("litellm.acompletion", new_callable=AsyncMock) as mock_acompletion:
-        mock_acompletion.return_value = mock_litellm_response(
-            """Thought: I'll use the multiply tool.
+        mock_acompletion.return_value = mock_litellm_response("""Thought: I'll use the multiply tool.
 
 ```python
 result = multiply(5, 3)
 final_answer(result)
-```"""
-        )
+```""")
 
         agent = TsugiteAgent(
             model_string="openai:gpt-4o-mini",
@@ -162,14 +154,12 @@ async def test_agent_max_turns_reached(mock_litellm_response):
 
     with patch("litellm.acompletion", new_callable=AsyncMock) as mock_acompletion:
         # Always return code without final_answer
-        mock_acompletion.return_value = mock_litellm_response(
-            """Thought: Still working...
+        mock_acompletion.return_value = mock_litellm_response("""Thought: Still working...
 
 ```python
 x = 1
 print(x)
-```"""
-        )
+```""")
 
         agent = TsugiteAgent(
             model_string="openai:gpt-4o-mini",
@@ -191,13 +181,11 @@ async def test_agent_return_full_result(mock_litellm_response):
     """Test agent can return full result with metadata."""
 
     with patch("litellm.acompletion", new_callable=AsyncMock) as mock_acompletion:
-        mock_acompletion.return_value = mock_litellm_response(
-            """Thought: Calculate the answer.
+        mock_acompletion.return_value = mock_litellm_response("""Thought: Calculate the answer.
 
 ```python
 final_answer(42)
-```"""
-        )
+```""")
 
         agent = TsugiteAgent(
             model_string="openai:gpt-4o-mini",
@@ -254,13 +242,11 @@ async def test_agent_model_kwargs_passed_to_litellm(mock_litellm_response):
     """Test that model_kwargs are passed to litellm.acompletion."""
 
     with patch("litellm.acompletion", new_callable=AsyncMock) as mock_acompletion:
-        mock_acompletion.return_value = mock_litellm_response(
-            """Thought: Done.
+        mock_acompletion.return_value = mock_litellm_response("""Thought: Done.
 
 ```python
 final_answer("test")
-```"""
-        )
+```""")
 
         agent = TsugiteAgent(
             model_string="openai:gpt-4o-mini",
@@ -295,24 +281,20 @@ async def test_agent_error_handling(mock_litellm_response):
 
         if call_count == 1:
             # First step: Code with error
-            return mock_litellm_response(
-                """Thought: Try to divide by zero.
+            return mock_litellm_response("""Thought: Try to divide by zero.
 
 ```python
 result = 1 / 0
 print(result)
-```"""
-            )
+```""")
         elif call_count == 2:
             # Second step: Fix the error
-            return mock_litellm_response(
-                """Thought: That failed. Let me try a different approach.
+            return mock_litellm_response("""Thought: That failed. Let me try a different approach.
 
 ```python
 result = 1 / 1
 final_answer(result)
-```"""
-            )
+```""")
 
     with patch("litellm.acompletion", new=mock_acompletion):
         agent = TsugiteAgent(
@@ -523,17 +505,11 @@ async def test_agent_custom_executor():
 
     with patch("litellm.acompletion", new_callable=AsyncMock) as mock_acompletion:
         mock_acompletion.return_value = MagicMock(
-            choices=[
-                MagicMock(
-                    message=MagicMock(
-                        content="""Thought: Test.
+            choices=[MagicMock(message=MagicMock(content="""Thought: Test.
 
 ```python
 final_answer(42)
-```"""
-                    )
-                )
-            ],
+```"""))],
             usage=MagicMock(total_tokens=50),
         )
 
@@ -618,9 +594,9 @@ def test_tool_execution_no_task_warnings():
     )
 
     assert "Task pending" not in filtered_stderr, f"Unexpected Task pending warning:\n{stderr_output}"
-    assert "Task exception was never retrieved" not in filtered_stderr, (
-        f"Unexpected Task exception warning:\n{stderr_output}"
-    )
+    assert (
+        "Task exception was never retrieved" not in filtered_stderr
+    ), f"Unexpected Task exception warning:\n{stderr_output}"
 
 
 def test_tool_exception_propagation_from_async():
@@ -682,6 +658,6 @@ def test_tool_exception_propagation_from_async():
         line for line in stderr_output.split("\n") if "failing_tool" in line or "never retrieved" in line
     )
 
-    assert "exception was never retrieved" not in filtered_stderr.lower(), (
-        f"Exception handling broken:\n{stderr_output}"
-    )
+    assert (
+        "exception was never retrieved" not in filtered_stderr.lower()
+    ), f"Exception handling broken:\n{stderr_output}"

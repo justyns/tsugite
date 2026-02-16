@@ -23,13 +23,11 @@ class TestPrefetchListAgents:
         agents_dir = tmp_path / "agents"
         agents_dir.mkdir()
         agent_file = agents_dir / "test.md"
-        agent_file.write_text(
-            """---
+        agent_file.write_text("""---
 name: test
 description: Test agent
 ---
-"""
-        )
+""")
 
         # Configure prefetch like default does
         prefetch_config = [{"tool": "list_agents", "args": {}, "assign": "available_agents"}]
@@ -75,8 +73,7 @@ class TestAutoDiscoveryWorkflow:
         agents_dir.mkdir()
 
         code_review = agents_dir / "code_review.md"
-        code_review.write_text(
-            """---
+        code_review.write_text("""---
 name: code_review
 description: Reviews code for security and best practices
 tools: [read_file]
@@ -84,13 +81,11 @@ tools: [read_file]
 # Code Review Agent
 Task: {{ user_prompt }}
 Review the code.
-"""
-        )
+""")
 
         # Create a research agent
         research = agents_dir / "research.md"
-        research.write_text(
-            """---
+        research.write_text("""---
 name: research
 description: Researches topics and gathers information
 tools: [web_search]
@@ -98,8 +93,7 @@ tools: [web_search]
 # Research Agent
 Task: {{ user_prompt }}
 Research the topic.
-"""
-        )
+""")
 
         return {"code_review": code_review, "research": research}
 
@@ -191,13 +185,11 @@ class TestBuiltinDefaultIntegration:
         agents_dir = tmp_path / "agents"
         agents_dir.mkdir()
         test_agent = agents_dir / "helper.md"
-        test_agent.write_text(
-            """---
+        test_agent.write_text("""---
 name: helper
 description: Helps with tasks
 ---
-"""
-        )
+""")
 
         # Get default agent
         default_path = get_builtin_agents_path() / "default.md"

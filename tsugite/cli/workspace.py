@@ -7,28 +7,17 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from tsugite.workspace import Workspace, WorkspaceManager, WorkspaceNotFoundError, WorkspaceSession
+from tsugite.workspace import Workspace, WorkspaceNotFoundError, WorkspaceSession
 from tsugite.workspace.templates import list_persona_templates
 
 workspace_app = typer.Typer(help="Manage workspaces")
 console = Console()
 
 
-def _load_workspace_or_exit(manager: WorkspaceManager, name: str) -> Workspace:
-    """Load workspace or exit with error message.
-
-    Args:
-        manager: WorkspaceManager instance
-        name: Workspace name
-
-    Returns:
-        Loaded workspace
-
-    Raises:
-        typer.Exit: If workspace not found
-    """
+def _load_workspace_or_exit(name: str) -> Workspace:
+    """Load workspace or exit with error message."""
     try:
-        return manager.load_workspace(name)
+        return Workspace.load_by_name(name)
     except WorkspaceNotFoundError as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1)
@@ -37,8 +26,7 @@ def _load_workspace_or_exit(manager: WorkspaceManager, name: str) -> Workspace:
 @workspace_app.command("list")
 def list_workspaces():
     """List available workspaces."""
-    manager = WorkspaceManager()
-    workspaces = manager.list_workspaces()
+    workspaces = Workspace.list_workspaces()
 
     if not workspaces:
         console.print("[yellow]No workspaces found.[/yellow]")
@@ -50,7 +38,7 @@ def list_workspaces():
     table.add_column("Path", style="dim")
 
     for name in workspaces:
-        path = manager.find_workspace_path(name)
+        path = Workspace.find_workspace_path(name)
         table.add_row(name, str(path))
 
     console.print(table)
@@ -66,8 +54,6 @@ def init_workspace(
     onboard: bool = typer.Option(False, "--onboard", help="Run interactive onboarding after creation"),
 ):
     """Create a new workspace."""
-    manager = WorkspaceManager()
-
     # Validate persona template if provided
     if persona:
         available_templates = list_persona_templates()
@@ -81,12 +67,20 @@ def init_workspace(
     if git is None:
         init_git = typer.confirm("Initialize git repository?", default=True)
 
-    workspace_path = Path(path).expanduser() if path else None
+    if path:
+        workspace_path = Path(path).expanduser()
+    else:
+        from tsugite.config import get_xdg_data_path
+
+        workspace_path = get_xdg_data_path("workspaces") / name
+
+    if workspace_path.exists():
+        console.print(f"[red]Error:[/red] Workspace already exists: {workspace_path}")
+        raise typer.Exit(1)
 
     try:
-        workspace = manager.create_workspace(
-            name=name,
-            path=workspace_path,
+        workspace = Workspace.create(
+            workspace_path,
             persona_template=persona,
             user_name=user,
             init_git=init_git,
@@ -124,8 +118,7 @@ def onboard_workspace(
     from tsugite.ui.repl_chat import run_repl_chat
     from tsugite.workspace.context import build_workspace_attachments
 
-    manager = WorkspaceManager()
-    workspace = _load_workspace_or_exit(manager, name)
+    workspace = _load_workspace_or_exit(name)
 
     console.print(f"[dim]Starting onboarding for workspace '{name}'...[/dim]\n")
 
@@ -162,8 +155,7 @@ def show_info(
     name: str = typer.Argument(..., help="Workspace name"),
 ):
     """Show workspace information."""
-    manager = WorkspaceManager()
-    workspace = _load_workspace_or_exit(manager, name)
+    workspace = _load_workspace_or_exit(name)
 
     console.print(f"[bold]Workspace: {workspace.name}[/bold]")
     console.print(f"Path: {workspace.path}")
@@ -219,8 +211,7 @@ def manage_session(
     history: bool = typer.Option(False, "--history", help="List archived sessions"),
 ):
     """Manage workspace session."""
-    manager = WorkspaceManager()
-    workspace = _load_workspace_or_exit(manager, name)
+    workspace = _load_workspace_or_exit(name)
 
     session = WorkspaceSession(workspace)
 

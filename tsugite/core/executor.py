@@ -10,7 +10,6 @@ import ast
 import io
 import pprint
 import sys
-from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -111,37 +110,7 @@ def _summarize_variable(value: Any) -> str:
     return t
 
 
-class CodeExecutor(ABC):
-    """Abstract interface for code execution.
-
-    Defines the contract for code executors used by agents.
-    """
-
-    @abstractmethod
-    async def execute(self, code: str) -> ExecutionResult:
-        """Execute Python code and return results.
-
-        Args:
-            code: Python code to execute
-
-        Returns:
-            ExecutionResult with output, errors, etc.
-        """
-        pass
-
-    @abstractmethod
-    async def send_variables(self, variables: Dict[str, Any]):
-        """Inject variables into execution namespace.
-
-        This is used for multi-step agents to pass results between steps.
-
-        Args:
-            variables: Dict of {name: value} to make available in code
-        """
-        pass
-
-
-class LocalExecutor(CodeExecutor):
+class LocalExecutor:
     """Simple local code executor using Python's exec().
 
     WARNING: This is NOT secure! Only use for development.

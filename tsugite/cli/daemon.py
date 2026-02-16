@@ -114,10 +114,9 @@ def _prompt_workspace_setup(style) -> tuple[str, Path, str]:
     """
     import questionary
 
-    from tsugite.workspace import WorkspaceManager
+    from tsugite.workspace import Workspace
 
-    manager = WorkspaceManager()
-    workspaces = manager.list_workspaces()
+    workspaces = Workspace.list_workspaces()
 
     if workspaces:
         console.print("\n[bold]Workspace Setup:[/bold]")
@@ -131,7 +130,7 @@ def _prompt_workspace_setup(style) -> tuple[str, Path, str]:
 
         if choice and choice.startswith("Use existing:"):
             workspace_name = choice.split(": ")[1]
-            workspace_path = manager.find_workspace_path(workspace_name)
+            workspace_path = Workspace.find_workspace_path(workspace_name)
             console.print(f"[dim]Using workspace at: {workspace_path}[/dim]")
         else:
             workspace_name, workspace_path = _create_new_workspace(style)
@@ -157,9 +156,7 @@ def _create_new_workspace(style) -> tuple[str, Path]:
     """
     import questionary
 
-    from tsugite.workspace import WorkspaceManager
-
-    manager = WorkspaceManager()
+    from tsugite.workspace import Workspace
 
     workspace_name = questionary.text(
         "Workspace name:",
@@ -178,9 +175,8 @@ def _create_new_workspace(style) -> tuple[str, Path]:
 
     console.print(f"\n[dim]Creating workspace at: {workspace_path}[/dim]")
 
-    workspace = manager.create_workspace(
-        name=workspace_name,
-        path=workspace_path,
+    workspace = Workspace.create(
+        workspace_path,
         init_git=False,
     )
 

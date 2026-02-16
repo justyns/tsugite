@@ -16,8 +16,7 @@ class TestLoadSkillTool:
         skills_dir.mkdir()
 
         skill = skills_dir / "test_skill.md"
-        skill.write_text(
-            """---
+        skill.write_text("""---
 name: test_skill
 description: A test skill
 ---
@@ -28,8 +27,7 @@ This skill provides test capabilities.
 
 ## Usage
 Use this skill for testing.
-"""
-        )
+""")
         return skill
 
     @pytest.fixture
@@ -109,8 +107,7 @@ Use this skill for testing.
         """Test that skill content is rendered with Jinja2."""
         # Create skill with template variables
         skill_with_template = skill_file.parent / "template_skill.md"
-        skill_with_template.write_text(
-            """---
+        skill_with_template.write_text("""---
 name: template_skill
 description: Skill with template
 ---
@@ -119,8 +116,7 @@ description: Skill with template
 
 Today's date: {{ today() }}
 User prompt: {{ user_prompt }}
-"""
-        )
+""")
 
         from tsugite.skill_discovery import SkillMeta
 
@@ -235,14 +231,12 @@ class TestSkillManagerEvents:
 
         # Create a test skill file
         skill_file = tmp_path / "test_skill.md"
-        skill_file.write_text(
-            """---
+        skill_file.write_text("""---
 name: test_skill
 description: A test skill
 ---
 Content
-"""
-        )
+""")
 
         # Create event bus and track emitted events
         event_bus = EventBus()
@@ -320,14 +314,12 @@ Content
 
         # Create a test skill file
         skill_file = tmp_path / "test_skill.md"
-        skill_file.write_text(
-            """---
+        skill_file.write_text("""---
 name: test_skill
 description: A test skill
 ---
 Content
-"""
-        )
+""")
 
         # Ensure no event bus is set in ui_context
         ui_context._event_bus_var.set(None)

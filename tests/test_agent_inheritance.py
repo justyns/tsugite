@@ -285,8 +285,7 @@ def test_resolve_agent_inheritance_with_parent(tmp_path):
     tsugite_dir.mkdir()
 
     parent_file = tsugite_dir / "base.md"
-    parent_file.write_text(
-        """---
+    parent_file.write_text("""---
 name: base
 extends: none
 model: ollama:base-model
@@ -294,21 +293,18 @@ tools: [read_file, write_file]
 instructions: Base instructions.
 ---
 Base content
-"""
-    )
+""")
 
     # Create child agent
     child_file = tmp_path / "child.md"
-    child_file.write_text(
-        """---
+    child_file.write_text("""---
 name: child
 extends: base
 tools: [web_search]
 instructions: Child instructions.
 ---
 Child content
-"""
-    )
+""")
 
     # Parse and resolve child
     child_agent = parse_agent(child_file.read_text(), child_file)
@@ -333,47 +329,39 @@ def test_resolve_agent_inheritance_chain(tmp_path):
 
     # Create a test default that opts out (to prevent global default from being used)
     default_file = tsugite_dir / "default.md"
-    default_file.write_text(
-        """---
+    default_file.write_text("""---
 name: default
 extends: none
 tools: []
 ---
-"""
-    )
+""")
 
     # Grandparent
     grandparent_file = tsugite_dir / "grandparent.md"
-    grandparent_file.write_text(
-        """---
+    grandparent_file.write_text("""---
 name: grandparent
 extends: none
 tools: [tool1]
 ---
-"""
-    )
+""")
 
     # Parent extends grandparent (also opts out of default to keep test focused)
     parent_file = tsugite_dir / "parent.md"
-    parent_file.write_text(
-        """---
+    parent_file.write_text("""---
 name: parent
 extends: grandparent
 tools: [tool2]
 ---
-"""
-    )
+""")
 
     # Child extends parent (uses grandparent's opt-out implicitly)
     child_file = tmp_path / "child.md"
-    child_file.write_text(
-        """---
+    child_file.write_text("""---
 name: child
 extends: parent
 tools: [tool3]
 ---
-"""
-    )
+""")
 
     child_agent = parse_agent(child_file.read_text(), child_file)
     resolved = resolve_agent_inheritance(child_agent, child_file)
@@ -389,23 +377,19 @@ def test_circular_inheritance_error(tmp_path):
 
     # Agent A extends B
     agent_a = tsugite_dir / "a.md"
-    agent_a.write_text(
-        """---
+    agent_a.write_text("""---
 name: a
 extends: b
 ---
-"""
-    )
+""")
 
     # Agent B extends A (circular)
     agent_b = tsugite_dir / "b.md"
-    agent_b.write_text(
-        """---
+    agent_b.write_text("""---
 name: b
 extends: a
 ---
-"""
-    )
+""")
 
     # Try to resolve A
     a_agent = parse_agent(agent_a.read_text(), agent_a)
@@ -417,13 +401,11 @@ extends: a
 def test_missing_parent_error(tmp_path):
     """Test that missing parent agent raises error."""
     child_file = tmp_path / "child.md"
-    child_file.write_text(
-        """---
+    child_file.write_text("""---
 name: child
 extends: nonexistent
 ---
-"""
-    )
+""")
 
     child_agent = parse_agent(child_file.read_text(), child_file)
 

@@ -28,7 +28,7 @@ from tsugite.events import (
 )
 from tsugite.skill_discovery import Skill
 
-from .executor import CodeExecutor, LocalExecutor
+from .executor import LocalExecutor
 from .memory import AgentMemory, StepResult
 from .tools import Tool
 
@@ -89,7 +89,7 @@ class TsugiteAgent:
         tools: List[Tool],
         instructions: str = "",
         max_turns: int = DEFAULT_MAX_TURNS,
-        executor: CodeExecutor = None,
+        executor: LocalExecutor = None,
         model_kwargs: dict = None,
         event_bus: EventBus = None,
         model_name: str = None,
@@ -540,8 +540,8 @@ class TsugiteAgent:
         if self.event_bus:
             self.event_bus.emit(ErrorEvent(error=error_msg, error_type="RuntimeError"))
 
-        # For benchmark/testing use cases that need execution trace even on error,
-        # return AgentResult with error field set instead of raising
+        # When full result is requested, return AgentResult with error field
+        # so callers can inspect execution steps even on failure
         if return_full_result:
             return AgentResult(
                 output=None,
@@ -550,9 +550,8 @@ class TsugiteAgent:
                 steps=self.memory.steps,
                 error=error_msg,
             )
-        else:
-            # Backward compatibility: raise exception for non-benchmark usage
-            raise RuntimeError(error_msg)
+
+        raise RuntimeError(error_msg)
 
     def _format_attachment(self, attachment: Attachment) -> Optional[Dict]:
         """Format an attachment for LiteLLM based on its content type.

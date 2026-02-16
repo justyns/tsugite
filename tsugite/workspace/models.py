@@ -108,6 +108,56 @@ class Workspace:
                 return not name_value
         return True
 
+    @staticmethod
+    def get_workspace_dirs() -> List[Path]:
+        """Get workspace search directories."""
+        from tsugite.config import get_xdg_data_path
+
+        return [
+            get_xdg_data_path("workspaces"),
+            Path.cwd() / ".tsugite" / "workspaces",
+        ]
+
+    @staticmethod
+    def list_workspaces() -> List[str]:
+        """List available workspaces."""
+        workspaces = set()
+        for workspace_dir in Workspace.get_workspace_dirs():
+            if not workspace_dir.exists():
+                continue
+            for path in workspace_dir.iterdir():
+                if path.is_dir():
+                    workspaces.add(path.name)
+        return sorted(workspaces)
+
+    @staticmethod
+    def find_workspace_path(name: str) -> Optional[Path]:
+        """Find workspace directory by name."""
+        for workspace_dir in Workspace.get_workspace_dirs():
+            path = workspace_dir / name
+            if path.exists() and path.is_dir():
+                return path
+        return None
+
+    @classmethod
+    def load_by_name(cls, name: str) -> "Workspace":
+        """Load workspace by name.
+
+        Args:
+            name: Workspace name
+
+        Returns:
+            Loaded workspace
+
+        Raises:
+            WorkspaceNotFoundError: If workspace not found
+        """
+        path = cls.find_workspace_path(name)
+        if not path:
+            available = cls.list_workspaces()
+            raise WorkspaceNotFoundError(f"Workspace '{name}' not found. Available: {', '.join(available) or 'none'}")
+        return cls.load(path)
+
     @classmethod
     def load(cls, path: Path) -> "Workspace":
         """Load workspace from path (no config.yaml required).

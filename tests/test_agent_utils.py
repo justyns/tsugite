@@ -6,13 +6,11 @@ from tsugite.agent_utils import build_inheritance_chain, list_local_agents
 def test_build_inheritance_chain_no_extends(tmp_path):
     """Test inheritance chain for agent with no extends."""
     agent_file = tmp_path / "simple.md"
-    agent_file.write_text(
-        """---
+    agent_file.write_text("""---
 name: simple
 extends: none
 ---
-"""
-    )
+""")
 
     chain = build_inheritance_chain(agent_file)
 
@@ -27,23 +25,19 @@ def test_build_inheritance_chain_with_parent(tmp_path):
 
     # Parent
     parent_file = tsugite_dir / "parent.md"
-    parent_file.write_text(
-        """---
+    parent_file.write_text("""---
 name: parent
 extends: none
 ---
-"""
-    )
+""")
 
     # Child
     child_file = tmp_path / "child.md"
-    child_file.write_text(
-        """---
+    child_file.write_text("""---
 name: child
 extends: parent
 ---
-"""
-    )
+""")
 
     chain = build_inheritance_chain(child_file)
 
@@ -59,43 +53,35 @@ def test_build_inheritance_chain_three_levels(tmp_path):
 
     # Create empty default to prevent global default
     default_file = tsugite_dir / "default.md"
-    default_file.write_text(
-        """---
+    default_file.write_text("""---
 name: default
 extends: none
 ---
-"""
-    )
+""")
 
     # Grandparent
     grandparent_file = tsugite_dir / "grandparent.md"
-    grandparent_file.write_text(
-        """---
+    grandparent_file.write_text("""---
 name: grandparent
 extends: none
 ---
-"""
-    )
+""")
 
     # Parent
     parent_file = tsugite_dir / "parent.md"
-    parent_file.write_text(
-        """---
+    parent_file.write_text("""---
 name: parent
 extends: grandparent
 ---
-"""
-    )
+""")
 
     # Child
     child_file = tmp_path / "child.md"
-    child_file.write_text(
-        """---
+    child_file.write_text("""---
 name: child
 extends: parent
 ---
-"""
-    )
+""")
 
     chain = build_inheritance_chain(child_file)
 
@@ -112,22 +98,18 @@ def test_build_inheritance_chain_auto_default(tmp_path):
 
     # Default agent
     default_file = tsugite_dir / "default.md"
-    default_file.write_text(
-        """---
+    default_file.write_text("""---
 name: default
 extends: none
 ---
-"""
-    )
+""")
 
     # Agent with no extends (should auto-inherit default)
     agent_file = tmp_path / "auto.md"
-    agent_file.write_text(
-        """---
+    agent_file.write_text("""---
 name: auto
 ---
-"""
-    )
+""")
 
     chain = build_inheritance_chain(agent_file)
 
@@ -151,21 +133,17 @@ def test_list_local_agents_current_dir(tmp_path):
     """Test listing agents in current directory."""
     # Valid agent
     agent1 = tmp_path / "agent1.md"
-    agent1.write_text(
-        """---
+    agent1.write_text("""---
 name: agent1
 ---
-"""
-    )
+""")
 
     # Another valid agent
     agent2 = tmp_path / "agent2.md"
-    agent2.write_text(
-        """---
+    agent2.write_text("""---
 name: agent2
 ---
-"""
-    )
+""")
 
     # Not an agent (no frontmatter)
     readme = tmp_path / "README.md"
@@ -187,12 +165,10 @@ def test_list_local_agents_tsugite_dir(tmp_path):
     tsugite_dir.mkdir()
 
     agent = tsugite_dir / "base.md"
-    agent.write_text(
-        """---
+    agent.write_text("""---
 name: base
 ---
-"""
-    )
+""")
 
     result = list_local_agents(tmp_path)
 
@@ -207,12 +183,10 @@ def test_list_local_agents_agents_dir(tmp_path):
     agents_dir.mkdir()
 
     agent = agents_dir / "custom.md"
-    agent.write_text(
-        """---
+    agent.write_text("""---
 name: custom
 ---
-"""
-    )
+""")
 
     result = list_local_agents(tmp_path)
 

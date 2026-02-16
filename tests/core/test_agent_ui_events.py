@@ -36,13 +36,11 @@ async def test_ui_event_task_start(event_bus_with_handler, mock_litellm_response
     event_bus, mock_ui_handler = event_bus_with_handler
 
     with patch("litellm.acompletion", new_callable=AsyncMock) as mock_acompletion:
-        mock_acompletion.return_value = mock_litellm_response(
-            """Thought: Calculate the answer.
+        mock_acompletion.return_value = mock_litellm_response("""Thought: Calculate the answer.
 
 ```python
 final_answer(42)
-```"""
-        )
+```""")
 
         agent = TsugiteAgent(
             model_string="openai:gpt-4o-mini",
@@ -74,22 +72,18 @@ async def test_ui_event_step_start(event_bus_with_handler, mock_litellm_response
         call_count += 1
 
         if call_count == 1:
-            return mock_litellm_response(
-                """Thought: First step.
+            return mock_litellm_response("""Thought: First step.
 
 ```python
 x = 5
 print(x)
-```"""
-            )
+```""")
         elif call_count == 2:
-            return mock_litellm_response(
-                """Thought: Second step.
+            return mock_litellm_response("""Thought: Second step.
 
 ```python
 final_answer(x * 2)
-```"""
-            )
+```""")
 
     with patch("litellm.acompletion", new=mock_acompletion):
         agent = TsugiteAgent(
@@ -115,14 +109,12 @@ async def test_ui_event_code_execution(event_bus_with_handler, mock_litellm_resp
     """Test that CODE_EXECUTION event is triggered before code execution."""
 
     with patch("litellm.acompletion", new_callable=AsyncMock) as mock_acompletion:
-        mock_acompletion.return_value = mock_litellm_response(
-            """Thought: Execute code.
+        mock_acompletion.return_value = mock_litellm_response("""Thought: Execute code.
 
 ```python
 result = 5 + 3
 final_answer(result)
-```"""
-        )
+```""")
 
         agent = TsugiteAgent(
             model_string="openai:gpt-4o-mini",
@@ -147,14 +139,12 @@ async def test_ui_event_observation(event_bus_with_handler, mock_litellm_respons
     """Test that OBSERVATION event is triggered after code execution."""
 
     with patch("litellm.acompletion", new_callable=AsyncMock) as mock_acompletion:
-        mock_acompletion.return_value = mock_litellm_response(
-            """Thought: Print something.
+        mock_acompletion.return_value = mock_litellm_response("""Thought: Print something.
 
 ```python
 print("Hello, World!")
 final_answer("done")
-```"""
-        )
+```""")
 
         agent = TsugiteAgent(
             model_string="openai:gpt-4o-mini",
@@ -178,13 +168,11 @@ async def test_ui_event_final_answer(event_bus_with_handler, mock_litellm_respon
     """Test that FINAL_ANSWER event is triggered when agent completes."""
 
     with patch("litellm.acompletion", new_callable=AsyncMock) as mock_acompletion:
-        mock_acompletion.return_value = mock_litellm_response(
-            """Thought: Return the answer.
+        mock_acompletion.return_value = mock_litellm_response("""Thought: Return the answer.
 
 ```python
 final_answer("The answer is 42")
-```"""
-        )
+```""")
 
         agent = TsugiteAgent(
             model_string="openai:gpt-4o-mini",
@@ -216,21 +204,17 @@ async def test_ui_event_error_on_execution_failure(event_bus_with_handler, mock_
         call_count += 1
 
         if call_count == 1:
-            return mock_litellm_response(
-                """Thought: Try to divide by zero.
+            return mock_litellm_response("""Thought: Try to divide by zero.
 
 ```python
 result = 1 / 0
-```"""
-            )
+```""")
         else:
-            return mock_litellm_response(
-                """Thought: Fix the error.
+            return mock_litellm_response("""Thought: Fix the error.
 
 ```python
 final_answer(1)
-```"""
-            )
+```""")
 
     with patch("litellm.acompletion", new=mock_acompletion):
         agent = TsugiteAgent(
@@ -257,14 +241,12 @@ async def test_ui_event_error_on_max_turns(event_bus_with_handler, mock_litellm_
 
     with patch("litellm.acompletion", new_callable=AsyncMock) as mock_acompletion:
         # Always return code without final_answer
-        mock_acompletion.return_value = mock_litellm_response(
-            """Thought: Still working...
+        mock_acompletion.return_value = mock_litellm_response("""Thought: Still working...
 
 ```python
 x = 1
 print(x)
-```"""
-        )
+```""")
 
         agent = TsugiteAgent(
             model_string="openai:gpt-4o-mini",
@@ -321,13 +303,11 @@ async def test_ui_event_reasoning_tokens(event_bus_with_handler, mock_litellm_re
     event_bus, mock_ui_handler = event_bus_with_handler
     """Test that REASONING_TOKENS event is triggered for o1/o3 models."""
 
-    response = mock_litellm_response(
-        """Thought: Solve this.
+    response = mock_litellm_response("""Thought: Solve this.
 
 ```python
 final_answer(100)
-```"""
-    )
+```""")
     # Add reasoning token details (o1/o3 format)
     response.usage.completion_tokens_details = MagicMock()
     response.usage.completion_tokens_details.reasoning_tokens = 256
@@ -357,13 +337,11 @@ async def test_agent_without_ui_handler(mock_litellm_response):
     """Test that agent works correctly without a UI handler."""
 
     with patch("litellm.acompletion", new_callable=AsyncMock) as mock_acompletion:
-        mock_acompletion.return_value = mock_litellm_response(
-            """Thought: Calculate.
+        mock_acompletion.return_value = mock_litellm_response("""Thought: Calculate.
 
 ```python
 final_answer(42)
-```"""
-        )
+```""")
 
         # Create agent without ui_handler
         agent = TsugiteAgent(
@@ -385,14 +363,12 @@ async def test_ui_event_order(event_bus_with_handler, mock_litellm_response):
     """Test that UI events are triggered in the correct order."""
 
     with patch("litellm.acompletion", new_callable=AsyncMock) as mock_acompletion:
-        mock_acompletion.return_value = mock_litellm_response(
-            """Thought: Calculate.
+        mock_acompletion.return_value = mock_litellm_response("""Thought: Calculate.
 
 ```python
 print("Hello")
 final_answer(42)
-```"""
-        )
+```""")
 
         agent = TsugiteAgent(
             model_string="openai:gpt-4o-mini",
@@ -434,13 +410,11 @@ async def test_ui_event_error_on_no_code_generation(event_bus_with_handler, mock
                 """Thought: I'm thinking about this problem and how to solve it, but I'm not providing any code."""
             )
         else:
-            return mock_litellm_response(
-                """Thought: Now I'll provide code.
+            return mock_litellm_response("""Thought: Now I'll provide code.
 
 ```python
 final_answer(42)
-```"""
-            )
+```""")
 
     with patch("litellm.acompletion", new=mock_acompletion):
         agent = TsugiteAgent(
