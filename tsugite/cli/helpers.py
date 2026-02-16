@@ -377,10 +377,6 @@ def _validate_common_option_placement(args: List[str]) -> None:
         "--log-json",
         "--dry-run",
         "--refresh-cache",
-        "--docker",
-        "--keep",
-        "--container",
-        "--network",
     ]
 
     misplaced_options = [arg for arg in args if arg in common_options]

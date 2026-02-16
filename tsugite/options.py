@@ -49,13 +49,3 @@ class AttachmentOptions:
     sources: List[str] = field(default_factory=list)
     refresh_cache: bool = False
     auto_context: Optional[bool] = None
-
-
-@dataclass
-class DockerOptions:
-    """Controls Docker execution."""
-
-    enabled: bool = False
-    keep: bool = False
-    container: Optional[str] = None
-    network: str = "host"
