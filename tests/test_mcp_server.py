@@ -6,44 +6,9 @@ from typer.testing import CliRunner
 from tsugite.cli import app
 from tsugite.mcp_server import (
     EXPOSED_TOOLS,
-    _python_type_to_json_schema,
     execute_tool,
     get_mcp_tools,
 )
-
-
-class TestTypeConversion:
-    """Tests for Python type to JSON schema conversion."""
-
-    def test_string_type(self):
-        """Test string type conversion."""
-        result = _python_type_to_json_schema(str)
-        assert result == {"type": "string"}
-
-    def test_int_type(self):
-        """Test int type conversion."""
-        result = _python_type_to_json_schema(int)
-        assert result == {"type": "integer"}
-
-    def test_float_type(self):
-        """Test float type conversion."""
-        result = _python_type_to_json_schema(float)
-        assert result == {"type": "number"}
-
-    def test_bool_type(self):
-        """Test bool type conversion."""
-        result = _python_type_to_json_schema(bool)
-        assert result == {"type": "boolean"}
-
-    def test_list_type(self):
-        """Test list type conversion."""
-        result = _python_type_to_json_schema(list)
-        assert result == {"type": "array"}
-
-    def test_dict_type(self):
-        """Test dict type conversion."""
-        result = _python_type_to_json_schema(dict)
-        assert result == {"type": "object"}
 
 
 class TestGetMCPTools:
