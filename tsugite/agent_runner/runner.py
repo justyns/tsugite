@@ -529,7 +529,7 @@ async def _execute_agent_with_prompt(
                 steps_list = result.steps if result.steps else []
 
                 # If result has error, raise it AFTER we've already extracted the steps
-                # The exception will be caught by the benchmark, but steps are already available
+                # The exception will be caught by the caller, but steps are already available
                 if result.error:
                     # Create custom exception that includes execution details
                     raise AgentExecutionError(
