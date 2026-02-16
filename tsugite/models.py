@@ -165,7 +165,7 @@ def build_ollama_params(model_name: str, variant: str | None, params: dict) -> d
         Updated parameters dict
     """
     full_model_name = f"{model_name}:{variant}" if variant else model_name
-    params["model"] = full_model_name
+    params["model"] = f"openai/{full_model_name}"
     params.setdefault("api_base", os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1"))
     params.setdefault("api_key", "ollama")
     return params
