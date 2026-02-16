@@ -23,14 +23,13 @@ def test_parse_valid_agent_file(sample_agent_file):
     assert agent.config.max_turns == 5
     assert "read_file" in agent.config.tools
     assert "write_file" in agent.config.tools
-    assert agent.config.permissions_profile == "test_safe"
     assert "Provide concise" in agent.config.instructions
 
     # Check prefetch configuration
     assert len(agent.config.prefetch) == 1
     prefetch = agent.config.prefetch[0]
-    assert prefetch["tool"] == "search_memory"
-    assert prefetch["assign"] == "memories"
+    assert prefetch["tool"] == "list_files"
+    assert prefetch["assign"] == "file_listing"
 
     # Check content
     assert "You are a test agent." in agent.content
@@ -117,8 +116,6 @@ def test_agent_config_defaults():
     assert config.max_turns == 5
     assert config.tools == []
     assert config.prefetch == []
-    assert config.permissions_profile == "default"
-    assert config.context_budget == {"tokens": 8000, "priority": ["system", "task"]}
     assert config.instructions == ""
 
 
@@ -288,21 +285,13 @@ tools:
   - write_file
   - fetch_json
 prefetch:
-  - tool: search_memory
+  - tool: list_files
     args:
-      query: "test query"
-      top_k: 5
-    assign: memories
+      path: "."
+      recursive: true
+    assign: file_listing
   - tool: git_status
     assign: git_info
-permissions_profile: automation_safe
-context_budget:
-  tokens: 16000
-  priority:
-    - system
-    - task
-    - memories
-  strategy: simple_truncate
 ---
 
 # Complex Agent
@@ -322,11 +311,8 @@ This agent has a complex configuration.
 
     # Check nested structure
     first_prefetch = agent.config.prefetch[0]
-    assert first_prefetch["args"]["query"] == "test query"
-    assert first_prefetch["args"]["top_k"] == 5
-
-    assert agent.config.context_budget["strategy"] == "simple_truncate"
-    assert len(agent.config.context_budget["priority"]) == 3
+    assert first_prefetch["args"]["path"] == "."
+    assert first_prefetch["args"]["recursive"] is True
 
 
 def test_parse_docs_example_agent():

@@ -8,10 +8,6 @@ prefetch:
   - tool: search_memory
     args: { query: "monitoring thresholds alerts" }
     assign: thresholds
-permissions_profile: monitor_safe
-context_budget:
-  tokens: 8000
-  priority: [system, task, thresholds]
 instructions: |
   Summarize findings as a concise operations report with clear alerts and recommended follow-up actions.
 ---

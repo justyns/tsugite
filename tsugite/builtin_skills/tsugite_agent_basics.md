@@ -86,7 +86,7 @@ Agents automatically inherit from a base agent unless you opt out. This enables:
 - Child entry overrides parent if same name
 
 **Dicts (objects):** Deep merge
-- `mcp_servers`, `context_budget`
+- `mcp_servers`
 - Child keys override parent keys
 - New keys added
 

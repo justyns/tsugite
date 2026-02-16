@@ -29,9 +29,9 @@ def generate_agent_schema() -> Dict[str, Any]:
     properties = schema.get("properties", {})
 
     if "name" in properties:
-        properties["name"]["description"] = (
-            "Agent identifier. Used for referencing with +name syntax. Example: 'researcher', 'code-reviewer'"
-        )
+        properties["name"][
+            "description"
+        ] = "Agent identifier. Used for referencing with +name syntax. Example: 'researcher', 'code-reviewer'"
         properties["name"]["examples"] = ["researcher", "code-reviewer", "my_agent"]
 
     if "model" in properties:
@@ -72,9 +72,9 @@ def generate_agent_schema() -> Dict[str, Any]:
         ]
 
     if "extends" in properties:
-        properties["extends"]["description"] = (
-            "Parent agent to inherit from. Use 'none' to opt out of default inheritance. Examples: 'default', 'none'"
-        )
+        properties["extends"][
+            "description"
+        ] = "Parent agent to inherit from. Use 'none' to opt out of default inheritance. Examples: 'default', 'none'"
         properties["extends"]["examples"] = ["default", "none"]
 
     return schema

@@ -137,13 +137,7 @@ def should_use_plain_output() -> bool:
     Returns:
         True if plain output should be used, False otherwise
     """
-    if os.environ.get("NO_COLOR"):
-        return True
-
-    if not sys.stdout.isatty():
-        return True
-
-    return False
+    return bool(os.environ.get("NO_COLOR")) or not sys.stdout.isatty()
 
 
 def ensure_file_exists(path: Path, context: str = "File") -> Path:
@@ -166,24 +160,14 @@ def ensure_file_exists(path: Path, context: str = "File") -> Path:
     return path.resolve()
 
 
-def ensure_dir_exists(path: Path, context: str = "Directory") -> Path:
-    """Ensure a directory exists and return its resolved path.
-
-    Args:
-        path: Path to validate
-        context: Context for error message (e.g., "Working directory", "Cache directory")
-
-    Returns:
-        Resolved absolute path
-
-    Raises:
-        ValueError: If path doesn't exist or is not a directory
-    """
-    if not path.exists():
-        raise ValueError(f"{context} not found: {path}")
-    if not path.is_dir():
-        raise ValueError(f"{context} is not a directory: {path}")
-    return path.resolve()
+def format_file_size(byte_count: int) -> str:
+    """Format a byte count as a human-readable size string."""
+    if byte_count < 1024:
+        return f"{byte_count} bytes"
+    elif byte_count < 1024 * 1024:
+        return f"{byte_count / 1024:.1f} KB"
+    else:
+        return f"{byte_count / (1024 * 1024):.1f} MB"
 
 
 def resolve_attachments(attachment_refs: List[str], refresh_cache: bool = False) -> List["Attachment"]:

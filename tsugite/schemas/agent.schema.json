@@ -84,16 +84,6 @@
       "title": "Auto Load Skills",
       "type": "array"
     },
-    "permissions_profile": {
-      "default": "default",
-      "title": "Permissions Profile",
-      "type": "string"
-    },
-    "context_budget": {
-      "additionalProperties": true,
-      "title": "Context Budget",
-      "type": "object"
-    },
     "instructions": {
       "default": "",
       "title": "Instructions",

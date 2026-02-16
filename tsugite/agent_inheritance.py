@@ -172,7 +172,7 @@ def merge_agent_configs(parent, child):
     - Lists (tools, attachments): merge and deduplicate
     - Lists (prefetch): concatenate (parent first, no deduplication)
     - Lists of dicts (custom_tools): merge and deduplicate by "name" field
-    - Dicts (mcp_servers, context_budget): merge, child keys override
+    - Dicts (mcp_servers): merge, child keys override
     - Strings (instructions): concatenate with newline
     """
     from .md_agents import AgentConfig
@@ -282,9 +282,6 @@ def merge_scalar_fields(parent, child) -> Dict[str, Any]:
         "description": child.description if child.description else parent.description,
         "model": child.model if child.model else parent.model,
         "max_turns": child.max_turns if child.max_turns != 5 else parent.max_turns,
-        "permissions_profile": (
-            child.permissions_profile if child.permissions_profile != "default" else parent.permissions_profile
-        ),
         "reasoning_effort": child.reasoning_effort if child.reasoning_effort else parent.reasoning_effort,
     }
 
@@ -304,34 +301,23 @@ def merge_list_fields(parent, child) -> Dict[str, List]:
     Returns:
         Dict of merged list fields
     """
-    # Simple lists - merge and deduplicate while preserving order
-    parent_tools = parent.tools if parent.tools else []
-    child_tools = child.tools if child.tools else []
-    merged_tools = list(dict.fromkeys(parent_tools + child_tools))
 
-    parent_attachments = parent.attachments if parent.attachments else []
-    child_attachments = child.attachments if child.attachments else []
-    merged_attachments = list(dict.fromkeys(parent_attachments + child_attachments))
+    def _merge_dedup(parent_list, child_list):
+        return list(dict.fromkeys((parent_list or []) + (child_list or [])))
 
-    parent_skills = parent.auto_load_skills if parent.auto_load_skills else []
-    child_skills = child.auto_load_skills if child.auto_load_skills else []
-    merged_skills = list(dict.fromkeys(parent_skills + child_skills))
-
-    # Lists that concatenate without deduplication
-    parent_prefetch = parent.prefetch if parent.prefetch else []
-    child_prefetch = child.prefetch if child.prefetch else []
+    merged_tools = _merge_dedup(parent.tools, child.tools)
+    merged_attachments = _merge_dedup(parent.attachments, child.attachments)
+    merged_skills = _merge_dedup(parent.auto_load_skills, child.auto_load_skills)
 
     # Custom tools - deduplicate by "name" field (child overrides parent)
-    parent_custom = parent.custom_tools if parent.custom_tools else []
-    child_custom = child.custom_tools if child.custom_tools else []
     custom_tool_dict = {}
-    for tool in parent_custom + child_custom:
+    for tool in (parent.custom_tools or []) + (child.custom_tools or []):
         custom_tool_dict[tool["name"]] = tool
 
     return {
         "tools": merged_tools,
         "attachments": merged_attachments,
-        "prefetch": parent_prefetch + child_prefetch,
+        "prefetch": (parent.prefetch or []) + (child.prefetch or []),
         "custom_tools": list(custom_tool_dict.values()),
         "auto_load_skills": merged_skills,
     }
@@ -349,19 +335,8 @@ def merge_dict_fields(parent, child) -> Dict[str, Any]:
     Returns:
         Dict of merged dict fields
     """
-    # MCP servers
-    parent_mcp = parent.mcp_servers if parent.mcp_servers else {}
-    child_mcp = child.mcp_servers if child.mcp_servers else {}
-    merged_mcp = {**parent_mcp, **child_mcp}
-
-    # Context budget
-    parent_context = parent.context_budget if parent.context_budget else {}
-    child_context = child.context_budget if child.context_budget else {}
-    merged_context = {**parent_context, **child_context}
-
     return {
-        "mcp_servers": merged_mcp,
-        "context_budget": merged_context,
+        "mcp_servers": {**(parent.mcp_servers or {}), **(child.mcp_servers or {})},
     }
 
 
@@ -377,17 +352,8 @@ def merge_instructions(parent, child) -> str:
     Returns:
         Merged instructions string
     """
-    parent_instructions = parent.instructions if parent.instructions else ""
-    child_instructions = child.instructions if child.instructions else ""
-
-    if parent_instructions and child_instructions:
-        return f"{parent_instructions}\n\n{child_instructions}"
-    elif parent_instructions:
-        return parent_instructions
-    elif child_instructions:
-        return child_instructions
-    else:
-        return ""
+    parts = [s for s in (parent.instructions, child.instructions) if s]
+    return "\n\n".join(parts)
 
 
 def load_default_base_agent(

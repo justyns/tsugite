@@ -52,16 +52,15 @@ def get_agent_info(agent_path: Path) -> Dict[str, Any]:
 
         return {
             "name": agent_config.name,
-            "description": getattr(agent_config, "description", "No description"),
+            "description": agent_config.description or "No description",
             "model": model_display,
             "max_turns": agent_config.max_turns,
             "tools": agent_config.tools,
             "prefetch_count": (len(agent_config.prefetch) if agent_config.prefetch else 0),
             "attachments": agent_config.attachments,
-            "auto_context": getattr(agent_config, "auto_context", None),
-            "permissions_profile": getattr(agent_config, "permissions_profile", None),
+            "auto_context": agent_config.auto_context,
             "valid": validate_agent_file(agent_path)[0],
-            "instructions": getattr(agent_config, "instructions", ""),
+            "instructions": agent_config.instructions,
         }
     except Exception as e:
         return {

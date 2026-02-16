@@ -28,8 +28,6 @@ def test_generate_schema_has_all_fields():
         "tools",
         "prefetch",
         "attachments",
-        "permissions_profile",
-        "context_budget",
         "instructions",
         "mcp_servers",
         "extends",
@@ -78,8 +76,7 @@ def test_schema_has_examples():
 def test_valid_agent_frontmatter(tmp_path):
     """Test that valid agent frontmatter parses successfully."""
     agent_file = tmp_path / "test_agent.md"
-    agent_file.write_text(
-        """---
+    agent_file.write_text("""---
 name: test_agent
 model: ollama:qwen2.5-coder:7b
 max_turns: 10
@@ -88,8 +85,7 @@ visibility: public
 ---
 
 Test agent prompt
-"""
-    )
+""")
 
     # Should parse without errors
     agent = parse_agent(agent_file.read_text(), agent_file)
@@ -102,15 +98,13 @@ Test agent prompt
 def test_invalid_field_name(tmp_path):
     """Test that invalid field names are caught."""
     agent_file = tmp_path / "test_agent.md"
-    agent_file.write_text(
-        """---
+    agent_file.write_text("""---
 name: test_agent
 invalid_field: "this should fail"
 ---
 
 Test agent
-"""
-    )
+""")
 
     # Should raise ValidationError
     with pytest.raises(ValidationError) as exc_info:
@@ -124,15 +118,13 @@ Test agent
 def test_invalid_visibility_value(tmp_path):
     """Test that invalid visibility values are caught."""
     agent_file = tmp_path / "test_agent.md"
-    agent_file.write_text(
-        """---
+    agent_file.write_text("""---
 name: test_agent
 visibility: invalid_value
 ---
 
 Test agent
-"""
-    )
+""")
 
     # Should raise ValidationError
     with pytest.raises(ValidationError) as exc_info:
@@ -145,15 +137,13 @@ Test agent
 def test_invalid_field_type(tmp_path):
     """Test that invalid field types are caught."""
     agent_file = tmp_path / "test_agent.md"
-    agent_file.write_text(
-        """---
+    agent_file.write_text("""---
 name: test_agent
 max_turns: "not_an_integer"
 ---
 
 Test agent
-"""
-    )
+""")
 
     # Should raise ValidationError
     with pytest.raises(ValidationError) as exc_info:
@@ -166,14 +156,12 @@ Test agent
 def test_missing_required_field(tmp_path):
     """Test that missing required fields are caught."""
     agent_file = tmp_path / "test_agent.md"
-    agent_file.write_text(
-        """---
+    agent_file.write_text("""---
 model: ollama:qwen2.5-coder:7b
 ---
 
 Test agent without name
-"""
-    )
+""")
 
     # Should raise ValidationError
     with pytest.raises(ValidationError) as exc_info:

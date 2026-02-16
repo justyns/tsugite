@@ -91,15 +91,11 @@ model: openai:gpt-4o-mini
 max_turns: 5
 tools: [read_file, write_file]
 prefetch:
-  - tool: search_memory
-    args: { query: "test" }
-    assign: memories
-permissions_profile: test_safe
+  - tool: list_files
+    args: { path: "." }
+    assign: file_listing
 instructions: |
     Provide concise, evidence-backed responses and note any assumptions.
-context_budget:
-  tokens: 8000
-  priority: [system, task]
 ---
 
 # System
@@ -107,7 +103,7 @@ You are a test agent.
 
 # Context
 - Time: {{ now() }}
-- Memories: {{ memories }}
+- Files: {{ file_listing }}
 
 # Task
 {{ user_prompt }}
