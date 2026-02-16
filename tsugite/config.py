@@ -107,7 +107,6 @@ class Config(BaseModel):
     model_aliases: Dict[str, str] = Field(default_factory=dict)
     default_base_agent: Optional[str] = None
     default_workspace: Optional[str] = None
-    chat_theme: str = "gruvbox"
     history_enabled: bool = True
     history_dir: Optional[Path] = None
     machine_name: Optional[str] = None
@@ -202,8 +201,6 @@ def update_config(path: Optional[Path], updater: Callable[[Config], None]) -> No
         # Add model alias
         update_config(None, lambda cfg: cfg.model_aliases.update({"cheap": "openai:gpt-4o-mini"}))
 
-        # Set chat theme
-        update_config(None, lambda cfg: setattr(cfg, "chat_theme", "nord"))
     """
     config = load_config(path)
     updater(config)
@@ -240,16 +237,3 @@ def get_model_alias(alias: str, path: Optional[Path] = None) -> Optional[str]:
     """
     config = load_config(path)
     return config.model_aliases.get(alias)
-
-
-def get_chat_theme(path: Optional[Path] = None) -> str:
-    """Get the chat UI theme from configuration.
-
-    Args:
-        path: Path to config.json file. If None, uses default path
-
-    Returns:
-        Theme name (defaults to "gruvbox")
-    """
-    config = load_config(path)
-    return config.chat_theme

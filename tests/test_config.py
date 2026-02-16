@@ -100,7 +100,6 @@ def test_config_with_empty_values(tmp_path):
 
     # Fields with default values will always be saved
     assert data == {
-        "chat_theme": "gruvbox",
         "history_enabled": True,
         "auto_context_enabled": True,
         "auto_context_files": [".tsugite/CONTEXT.md", "AGENTS.md", "CLAUDE.md"],

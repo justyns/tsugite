@@ -35,8 +35,6 @@ def config_show():
     else:
         console.print("[yellow]No default workspace set[/yellow]\n")
 
-    console.print(f"[bold]Chat Theme:[/bold] {config.chat_theme}\n")
-
     # Auto-context settings
     status = "[green]enabled[/green]" if config.auto_context_enabled else "[red]disabled[/red]"
     console.print(f"[bold]Auto-Context:[/bold] {status}")
@@ -199,66 +197,6 @@ def config_set_default_workspace(
     except Exception as e:
         console.print(f"[red]Failed to set default workspace: {e}[/red]")
         raise typer.Exit(1)
-
-
-def _get_available_themes() -> list[str]:
-    """Get list of available themes from Textual."""
-    from textual.app import App
-
-    app = App()
-    return sorted(app.available_themes.keys())
-
-
-@config_app.command("set-theme")
-def config_set_theme(
-    theme: str = typer.Argument(help="Theme name (e.g., 'gruvbox', 'nord', 'tokyo-night')"),
-):
-    """Set the chat UI theme."""
-    from tsugite.config import get_config_path, update_config
-
-    # Get available themes from Textual
-    available_themes = _get_available_themes()
-
-    # Validate theme name
-    if theme not in available_themes:
-        console.print(f"[red]Unknown theme: {theme}[/red]")
-        console.print("\nAvailable themes:")
-        for t in available_themes:
-            console.print(f"  • {t}")
-        console.print("\nUse [cyan]tsugite config list-themes[/cyan] to see all themes")
-        raise typer.Exit(1)
-
-    try:
-        update_config(None, lambda cfg: setattr(cfg, "chat_theme", theme))
-        config_path = get_config_path()
-        console.print(f"[green]✓ Chat theme set to:[/green] {theme}")
-        console.print(f"[dim]Saved to: {config_path}[/dim]")
-    except Exception as e:
-        console.print(f"[red]Failed to set theme: {e}[/red]")
-        raise typer.Exit(1)
-
-
-@config_app.command("list-themes")
-def config_list_themes():
-    """List all available chat UI themes."""
-    from tsugite.config import load_config
-
-    config = load_config()
-    current_theme = config.chat_theme
-
-    # Get available themes from Textual
-    available_themes = _get_available_themes()
-
-    console.print("[cyan]Available Textual Themes:[/cyan]\n")
-
-    for theme in available_themes:
-        if theme == current_theme:
-            console.print(f"  [bold green]• {theme}[/bold green] [dim](current)[/dim]")
-        else:
-            console.print(f"  • {theme}")
-
-    console.print(f"\n[dim]Current theme: {current_theme}[/dim]")
-    console.print("[dim]Change with: tsugite config set-theme <theme>[/dim]")
 
 
 @config_app.command("set")
