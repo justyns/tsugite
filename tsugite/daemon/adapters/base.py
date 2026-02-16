@@ -164,18 +164,23 @@ class BaseAdapter(ABC):
             ctx["has_notify_tool"] = meta.get("notify_tool", False)
         return ctx
 
-    def _build_message_context(self, message: str, channel_context: ChannelContext) -> str:
+    def _build_message_context(self, message: str, channel_context: ChannelContext, user_id: str) -> str:
         """Prepend per-message dynamic context to the user prompt.
 
         Keeps dynamic metadata in the user message turn (not the cached
         attachment context turn) for better cache efficiency.
         """
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        session = self.session_manager.sessions.get(user_id)
+        tokens_used = session.cumulative_tokens if session else 0
+
         return f"""<message_context>
   <datetime>{timestamp}</datetime>
   <working_directory>{self.agent_config.workspace_dir}</working_directory>
   <source>{channel_context.source}</source>
   <user_id>{channel_context.user_id}</user_id>
+  <context_tokens_used>{tokens_used}</context_tokens_used>
+  <context_limit>{self.agent_config.context_limit}</context_limit>
 </message_context>
 
 {message}"""
@@ -221,7 +226,7 @@ class BaseAdapter(ABC):
         if not agent_path:
             raise ValueError(f"Agent not found: {self.agent_config.agent_file}")
 
-        enriched_prompt = self._build_message_context(message, channel_context)
+        enriched_prompt = self._build_message_context(message, channel_context, user_id)
 
         from tsugite.cli.helpers import PathContext
 
