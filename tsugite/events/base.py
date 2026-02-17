@@ -37,6 +37,10 @@ class EventType(IntEnum):
     STEP_PROGRESS = 23
     FILE_READ = 24
 
+    # Audit events
+    TOOL_CALL = 25
+    TOOL_RESULT = 26
+
 
 class BaseEvent(BaseModel):
     """Base class for all UI events."""

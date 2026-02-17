@@ -22,6 +22,8 @@ from .events import (
     StreamChunkEvent,
     StreamCompleteEvent,
     TaskStartEvent,
+    ToolCallEvent,
+    ToolResultEvent,
     WarningEvent,
 )
 
@@ -51,6 +53,9 @@ __all__ = [
     "WarningEvent",
     "StepProgressEvent",
     "FileReadEvent",
+    # Audit
+    "ToolCallEvent",
+    "ToolResultEvent",
     # Skills
     "SkillLoadedEvent",
     "SkillLoadFailedEvent",

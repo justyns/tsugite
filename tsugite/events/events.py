@@ -249,3 +249,28 @@ class FileReadEvent(BaseEvent):
     line_count: int = Field(ge=0)
     byte_count: int = Field(ge=0)
     operation: str  # "prefetch", "attachment", "tool_call", "auto_context"
+
+
+# ============================================================================
+# Audit Events
+# ============================================================================
+
+
+class ToolCallEvent(BaseEvent):
+    """Tool invocation started (audit trail)."""
+
+    event_type: EventType = Field(default=EventType.TOOL_CALL, frozen=True)
+    tool_name: str
+    arguments: Dict[str, Any] = Field(default_factory=dict)
+    step: Optional[int] = Field(default=None, ge=1)
+
+
+class ToolResultEvent(BaseEvent):
+    """Tool invocation completed (audit trail)."""
+
+    event_type: EventType = Field(default=EventType.TOOL_RESULT, frozen=True)
+    tool_name: str
+    success: bool = True
+    result_summary: str = ""
+    duration_ms: Optional[int] = Field(default=None, ge=0)
+    step: Optional[int] = Field(default=None, ge=1)

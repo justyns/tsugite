@@ -276,10 +276,7 @@ def reset_skill_manager():
 
 @pytest.fixture(autouse=True)
 def spawn_agent_tool(reset_tool_registry, request):
-    """Register spawn_agent tool for testing.
-
-    Autouse fixture because spawn_agent is automatically added to all agents
-    in agent_preparation.py.
+    """Register spawn_agent tool in the registry for tests that need it.
 
     Skips registration for test_tool_registry.py tests that need an empty registry.
     """

@@ -13,6 +13,7 @@ class ToolInfo:
     func: Callable
     description: str
     parameters: Dict[str, Any]
+    parent_only: bool = False
 
 
 # Global tool registry
@@ -23,7 +24,7 @@ _daemon_tools: Dict[str, Callable] = {}
 _daemon_mode = False
 
 
-def _register_tool(func: Callable) -> None:
+def _register_tool(func: Callable, parent_only: bool = False) -> None:
     """Register a function into the tool registry."""
     sig = inspect.signature(func)
     doc = func.__doc__ or "No description available"
@@ -41,23 +42,27 @@ def _register_tool(func: Callable) -> None:
         func=func,
         description=doc.split("\n")[0].strip(),
         parameters=parameters,
+        parent_only=parent_only,
     )
 
 
-def tool(func=None, *, require_daemon=False):
+def tool(func=None, *, require_daemon=False, parent_only=False):
     """Register a function as a tool.
 
     Args:
         require_daemon: Only register when running in daemon mode.
+        parent_only: If True, tool must run in parent process (not in sandbox).
+            Used for tools that need direct user interaction or spawn subprocesses.
     """
 
     def decorator(fn):
+        fn._parent_only = parent_only
         if require_daemon:
             _daemon_tools[fn.__name__] = fn
             if _daemon_mode:
-                _register_tool(fn)
+                _register_tool(fn, parent_only=parent_only)
         else:
-            _register_tool(fn)
+            _register_tool(fn, parent_only=parent_only)
         return fn
 
     if func is not None:
@@ -74,7 +79,7 @@ def set_daemon_mode(enabled: bool):
     _daemon_mode = enabled
     if enabled:
         for fn in _daemon_tools.values():
-            _register_tool(fn)
+            _register_tool(fn, parent_only=getattr(fn, "_parent_only", False))
     else:
         for name in _daemon_tools:
             _tools.pop(name, None)

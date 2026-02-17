@@ -231,10 +231,6 @@ class AgentPreparer:
             # Expand tool specifications (categories, globs, regular names)
             expanded_tools = expand_tool_specs(agent_config.tools) if agent_config.tools else []
 
-            # Add spawn_agent (only if not already present)
-            if "spawn_agent" not in expanded_tools:
-                expanded_tools.append("spawn_agent")
-
             # Auto-inject or filter interactive tools based on interaction capability.
             from tsugite.interaction import get_interaction_backend
             from tsugite.tools import _tools

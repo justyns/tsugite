@@ -109,7 +109,6 @@ def load_custom_tools_config(path: Optional[Path] = None) -> List[ShellToolDefin
                 command=tool_def["command"],
                 parameters=_parse_parameters(tool_def.get("parameters", {})),
                 timeout=tool_def.get("timeout", 30),
-                safe_mode=tool_def.get("safe_mode", True),
                 shell=tool_def.get("shell", True),
             )
             definitions.append(definition)
@@ -141,7 +140,6 @@ def save_custom_tools_config(definitions: List[ShellToolDefinition], path: Optio
             "description": definition.description,
             "command": definition.command,
             "timeout": definition.timeout,
-            "safe_mode": definition.safe_mode,
             "shell": definition.shell,
             "parameters": {},
         }
@@ -182,6 +180,5 @@ def parse_tool_definition_from_dict(tool_dict: Dict) -> ShellToolDefinition:
         command=tool_dict["command"],
         parameters=_parse_parameters(tool_dict.get("parameters", {})),
         timeout=tool_dict.get("timeout", 30),
-        safe_mode=tool_dict.get("safe_mode", True),
         shell=tool_dict.get("shell", True),
     )

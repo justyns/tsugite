@@ -17,6 +17,8 @@ from tsugite.events import (
     SkillUnloadedEvent,
     StepStartEvent,
     TaskStartEvent,
+    ToolCallEvent,
+    ToolResultEvent,
 )
 
 
@@ -110,6 +112,21 @@ class JSONLUIHandler:
                     "line_count": event.line_count,
                     "byte_count": event.byte_count,
                     "operation": event.operation,
+                },
+            )
+
+        elif isinstance(event, ToolCallEvent):
+            self._emit("tool_call", {"tool": event.tool_name, "arguments": event.arguments, "step": event.step})
+
+        elif isinstance(event, ToolResultEvent):
+            self._emit(
+                "tool_result_audit",
+                {
+                    "tool": event.tool_name,
+                    "success": event.success,
+                    "duration_ms": event.duration_ms,
+                    "summary": event.result_summary,
+                    "step": event.step,
                 },
             )
 

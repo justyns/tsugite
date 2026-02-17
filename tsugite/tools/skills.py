@@ -203,7 +203,7 @@ def set_skill_manager(manager: SkillManager):
     _default_skill_manager = manager
 
 
-@tool
+@tool(parent_only=True)
 def load_skill(skill_name: str) -> str:
     """Load a skill to gain additional capabilities.
 

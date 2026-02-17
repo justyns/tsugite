@@ -141,7 +141,7 @@ def send_message(message: str) -> str:
     return f"Message sent: {message}"
 
 
-@tool
+@tool(parent_only=True)
 def ask_user(question: str, question_type: str = "text", options: Optional[List[str]] = None) -> str:
     """Ask the user a question interactively.
 
@@ -196,7 +196,7 @@ def ask_user(question: str, question_type: str = "text", options: Optional[List[
         raise RuntimeError(f"Failed to get user input: {e}")
 
 
-@tool
+@tool(parent_only=True)
 def ask_user_batch(questions: List[dict]) -> dict:
     """Ask the user multiple questions at once and collect all responses.
 

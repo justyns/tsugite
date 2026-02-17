@@ -24,6 +24,8 @@ from tsugite.events import (
     StreamChunkEvent,
     StreamCompleteEvent,
     TaskStartEvent,
+    ToolCallEvent,
+    ToolResultEvent,
     WarningEvent,
 )
 from tsugite.skill_discovery import Skill
@@ -229,8 +231,35 @@ class TsugiteAgent:
                         self.executor._tools_called.append(tool_obj.name)
 
                     self._convert_positional_to_kwargs(tool_obj, args, kwargs)
-                    result = self._run_async_in_sync_context(tool_obj.execute(**kwargs))
-                    return result
+
+                    # Emit audit events
+                    if self.event_bus:
+                        self.event_bus.emit(ToolCallEvent(tool_name=tool_obj.name, arguments=kwargs))
+
+                    t0 = time.perf_counter()
+                    try:
+                        result = self._run_async_in_sync_context(tool_obj.execute(**kwargs))
+                        duration_ms = int((time.perf_counter() - t0) * 1000)
+                        if self.event_bus:
+                            summary = str(result)[:200] if result is not None else ""
+                            self.event_bus.emit(
+                                ToolResultEvent(
+                                    tool_name=tool_obj.name, success=True, result_summary=summary, duration_ms=duration_ms
+                                )
+                            )
+                        return result
+                    except Exception as exc:
+                        duration_ms = int((time.perf_counter() - t0) * 1000)
+                        if self.event_bus:
+                            self.event_bus.emit(
+                                ToolResultEvent(
+                                    tool_name=tool_obj.name,
+                                    success=False,
+                                    result_summary=str(exc)[:200],
+                                    duration_ms=duration_ms,
+                                )
+                            )
+                        raise
 
                 tool_wrapper.__name__ = tool_obj.name
                 tool_wrapper.__doc__ = tool_obj.description

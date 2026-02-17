@@ -390,7 +390,7 @@ read_file(path="src/main.py", start_line=1, end_line=50)
 
 **Avoid reading everything - be selective!**
 
-### Shell Commands (run/run_safe)
+### Shell Commands (run)
 **Best for:** Quick directory listings, file counts, specialized commands
 
 ```python
@@ -409,7 +409,6 @@ run("git log --oneline -10")
 run("git branch --show-current")
 ```
 
-**Use `run_safe` for more restrictive execution** (blocks potentially dangerous commands).
 
 ## Structured Report Format
 

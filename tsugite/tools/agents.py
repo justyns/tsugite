@@ -7,7 +7,7 @@ from ..tools import tool
 from ..utils import parse_yaml_frontmatter
 
 
-@tool
+@tool(parent_only=True)
 def spawn_agent(
     agent_path: str,
     prompt: str,

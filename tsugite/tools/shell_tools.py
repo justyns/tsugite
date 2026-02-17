@@ -68,7 +68,6 @@ class ShellToolDefinition(BaseModel):
     command: str  # Template string with {param} placeholders
     parameters: Dict[str, ShellToolParameter] = Field(default_factory=dict)
     timeout: int = 30
-    safe_mode: bool = True  # Use run_safe vs run
     shell: bool = True  # Execute via shell
 
 
