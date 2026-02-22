@@ -31,6 +31,7 @@ class ScheduleEntry:
     last_error: str | None = None
     notify: list[str] = field(default_factory=list)
     notify_tool: bool = False
+    inject_history: bool = True
     misfire_grace_seconds: int = 300
     timezone: str = "UTC"
 

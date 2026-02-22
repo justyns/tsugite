@@ -12,6 +12,8 @@ from tsugite.tools.notify import notify_context, send_notification
 
 logger = logging.getLogger(__name__)
 
+_MAX_RESULT_CHARS = 4000
+
 
 class SchedulerAdapter:
     """Integrates the Scheduler with the daemon, executing agents via existing adapters."""
@@ -21,9 +23,11 @@ class SchedulerAdapter:
         adapters: dict[str, BaseAdapter],
         schedules_path: Path,
         notification_channels: dict[str, NotificationChannelConfig] | None = None,
+        identity_map: dict[str, str] | None = None,
     ):
         self._adapters = adapters
         self._notification_channels = notification_channels or {}
+        self._identity_map = identity_map or {}
         self.scheduler = Scheduler(schedules_path, self._run_agent)
 
     async def start(self):
@@ -79,10 +83,63 @@ class SchedulerAdapter:
         logger.info("Schedule '%s' agent '%s' completed", entry.id, entry.agent)
 
         if resolved_channels:
+            truncated = result[:_MAX_RESULT_CHARS]
             try:
-                notification = f"**Schedule `{entry.id}` completed:**\n\n{result[:4000]}"
+                notification = f"**Schedule `{entry.id}` completed:**\n\n{truncated}"
                 await asyncio.to_thread(send_notification, notification, resolved_channels)
             except Exception as e:
                 logger.error("Auto-notify for schedule '%s' failed: %s", entry.id, e)
 
+            if entry.inject_history:
+                await self._inject_into_user_sessions(adapter, entry, truncated, resolved_channels)
+
         return result
+
+    async def _inject_into_user_sessions(
+        self,
+        adapter: BaseAdapter,
+        entry: ScheduleEntry,
+        truncated_result: str,
+        resolved_channels: list[tuple[str, NotificationChannelConfig]],
+    ) -> None:
+        """Inject a synthetic turn into each notified user's main chat session."""
+        for _name, config in resolved_channels:
+            if config.type != "discord":
+                continue
+
+            canonical = self._identity_map.get(f"discord:{config.user_id}", config.user_id)
+
+            try:
+                await asyncio.to_thread(self._record_synthetic_turn, adapter, canonical, entry, truncated_result)
+            except Exception as e:
+                logger.error("Failed to inject history for schedule '%s' user '%s': %s", entry.id, canonical, e)
+
+    @staticmethod
+    def _record_synthetic_turn(adapter: BaseAdapter, user_id: str, entry: ScheduleEntry, result: str) -> None:
+        """Write a synthetic turn into the user's session JSONL."""
+        from tsugite.history import SessionStorage, get_history_dir
+
+        session_id = adapter.session_manager.get_or_create_session(user_id)
+        session_path = get_history_dir() / f"{session_id}.jsonl"
+        storage = SessionStorage.get_or_create(
+            session_id, adapter.agent_name, adapter.resolve_model(), session_path=session_path
+        )
+
+        messages = [
+            {
+                "role": "user",
+                "content": (
+                    f'<scheduled_task id="{entry.id}">\n'
+                    "This task ran in the background and the result "
+                    "was sent as a notification to the user.\n"
+                    "</scheduled_task>"
+                ),
+            },
+            {"role": "assistant", "content": result},
+        ]
+
+        storage.record_turn(
+            messages=messages,
+            final_answer=result,
+            metadata={"synthetic": True, "schedule_id": entry.id},
+        )

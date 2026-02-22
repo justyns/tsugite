@@ -166,7 +166,9 @@ class Gateway:
             from tsugite.daemon.adapters.scheduler_adapter import SchedulerAdapter
 
             schedules_path = self.config.state_dir / "schedules.json"
-            self._scheduler_adapter = SchedulerAdapter(http_adapters, schedules_path, self.config.notification_channels)
+            self._scheduler_adapter = SchedulerAdapter(
+                http_adapters, schedules_path, self.config.notification_channels, identity_map
+            )
             tasks.append(self._scheduler_adapter.start())
             if self._http_server:
                 self._http_server.scheduler = self._scheduler_adapter.scheduler

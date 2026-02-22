@@ -42,6 +42,7 @@ def schedule_create(
     timezone: str = "UTC",
     notify: Optional[list[str]] = None,
     notify_tool: bool = False,
+    inject_history: bool = True,
 ) -> dict:
     """Create a recurring (cron) or one-off schedule to run an agent.
 
@@ -58,6 +59,7 @@ def schedule_create(
         timezone: IANA timezone (default: UTC)
         notify: List of notification channel names to deliver results to on completion.
         notify_tool: If true, gives the agent the notify_user tool so it can send messages during execution. Requires notify to be set.
+        inject_history: If true (default), injects the task result into notified users' chat sessions so the agent has context when they reply.
 
     Returns:
         Created schedule details including computed next_run
@@ -90,6 +92,7 @@ def schedule_create(
         run_at=run_at,
         notify=notify or [],
         notify_tool=notify_tool,
+        inject_history=inject_history,
         timezone=timezone,
     )
     result = _call(_scheduler.add, entry)
@@ -158,6 +161,7 @@ def schedule_update(
     timezone: Optional[str] = None,
     notify: Optional[list[str]] = None,
     notify_tool: Optional[bool] = None,
+    inject_history: Optional[bool] = None,
 ) -> dict:
     """Update fields on an existing schedule.
 
@@ -169,6 +173,7 @@ def schedule_update(
         timezone: New IANA timezone (optional)
         notify: New notification channel list (optional)
         notify_tool: Enable/disable notify_user tool (optional)
+        inject_history: Enable/disable result injection into user chat sessions (optional)
 
     Returns:
         Updated schedule details
@@ -193,6 +198,8 @@ def schedule_update(
             if not effective_notify:
                 raise ValueError("notify_tool=True requires a non-empty 'notify' list")
         fields["notify_tool"] = notify_tool
+    if inject_history is not None:
+        fields["inject_history"] = inject_history
 
     if not fields:
         raise ValueError("No fields to update")

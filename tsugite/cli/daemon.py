@@ -507,6 +507,7 @@ def schedule_add(
     at: Optional[str] = typer.Option(None, "--at", help="ISO datetime for one-off task"),
     every: Optional[str] = typer.Option(None, "--every", help="Simple interval (e.g., 30m, 2h, 1d)"),
     tz: str = typer.Option("UTC", "--timezone", "--tz", help="IANA timezone"),
+    no_inject_history: bool = typer.Option(False, "--no-inject-history", help="Don't inject result into user chat sessions"),
     host: str = typer.Option("127.0.0.1", "--host", help="Daemon HTTP host"),
     port: int = typer.Option(8321, "--port", help="Daemon HTTP port"),
     token: Optional[str] = typer.Option(None, "--token", "-t", help="Auth token"),
@@ -526,6 +527,7 @@ def schedule_add(
         "prompt": prompt,
         "schedule_type": "once" if at else "cron",
         "timezone": tz,
+        "inject_history": not no_inject_history,
     }
     if cron:
         body["cron_expr"] = cron
