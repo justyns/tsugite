@@ -212,10 +212,18 @@ class TsugiteAgent:
         Creates wrapper functions for each tool that call the tool's execute() method.
         The LLM sees tools as Python functions and calls them directly in generated code.
 
+        For SubprocessExecutor, tools are registered via set_tools() instead of
+        namespace injection — the child process handles tool dispatch via IPC.
+
         Note: final_answer is registered as a tool for documentation purposes but is NOT
         injected here - the executor has its own built-in final_answer that properly
         signals completion. We skip it to avoid overriding the executor's version.
         """
+        from .subprocess_executor import SubprocessExecutor
+
+        if isinstance(self.executor, SubprocessExecutor):
+            self.executor.set_tools(self.tools, event_bus=self.event_bus)
+            return
         tool_functions = {}
 
         for tool in self.tools:

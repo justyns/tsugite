@@ -144,22 +144,7 @@ def _build_step_error_message(
     max_attempts: int,
     debug_tips: List[str],
 ) -> str:
-    """Build detailed error message for step failures.
-
-    Args:
-        error_type: Type of error (e.g., "Template Rendering Failed", "Step Execution Failed")
-        step_name: Name of the failed step
-        step_number: Current step number (1-indexed)
-        total_steps: Total number of steps
-        errors: List of error messages from all attempts
-        available_vars: List of available variable names
-        previous_step: Name of the previous step
-        max_attempts: Maximum number of retry attempts
-        debug_tips: List of debugging suggestions
-
-    Returns:
-        Formatted error message string
-    """
+    """Build detailed error message for step failures."""
     error_lines = [
         "",
         f"Step {error_type}",
@@ -479,7 +464,30 @@ async def _execute_agent_with_prompt(
 
     # Create executor with workspace directory and event bus
     workspace_dir = workspace.path if workspace else None
-    executor = LocalExecutor(workspace_dir=workspace_dir, event_bus=event_bus, path_context=path_context)
+
+    if exec_options.sandbox:
+        from tsugite.core.sandbox import BubblewrapSandbox, SandboxConfig
+        from tsugite.core.subprocess_executor import SubprocessExecutor
+
+        if not BubblewrapSandbox.check_available():
+            raise RuntimeError("bwrap not found. Install bubblewrap or use --no-sandbox.")
+
+        allowed_domains = list(exec_options.allow_domains)
+        if agent_config.network:
+            allowed_domains += agent_config.network.get("domains", [])
+
+        sandbox_config = SandboxConfig(
+            allowed_domains=allowed_domains,
+            no_network=exec_options.no_network,
+        )
+        executor = SubprocessExecutor(
+            workspace_dir=workspace_dir,
+            event_bus=event_bus,
+            path_context=path_context,
+            sandbox_config=sandbox_config,
+        )
+    else:
+        executor = LocalExecutor(workspace_dir=workspace_dir, event_bus=event_bus, path_context=path_context)
 
     # Inject variables into executor (for multi-step agents)
     if injectable_vars:
@@ -585,6 +593,13 @@ async def _execute_agent_with_prompt(
         else:
             raise RuntimeError(f"Agent execution failed: {e}")
     finally:
+        # Clean up subprocess executor temp files
+        if hasattr(executor, "cleanup"):
+            try:
+                executor.cleanup()
+            except Exception:
+                pass
+
         # Clean up MCP client connections
         for client in mcp_clients:
             try:

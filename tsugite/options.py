@@ -30,6 +30,9 @@ class ExecutionOptions:
     trust_mcp_code: bool = False
     dry_run: bool = False
     return_token_usage: bool = False
+    sandbox: bool = False
+    allow_domains: List[str] = field(default_factory=list)
+    no_network: bool = False
 
 
 @dataclass

@@ -234,7 +234,8 @@ class LocalExecutor:
             return pprint.pformat(value, width=PPRINT_WIDTH, compact=False)
         return repr(value)
 
-    def _check_code_safety(self, code: str) -> Optional[str]:
+    @staticmethod
+    def _check_code_safety(code: str) -> Optional[str]:
         """Check code for anti-patterns before execution.
 
         Detects common mistakes where LLMs use built-in Python functions
@@ -298,7 +299,7 @@ Example:
         skill_manager = get_skill_manager()
         skill_manager.set_executor(self)
 
-        safety_error = self._check_code_safety(code)
+        safety_error = LocalExecutor._check_code_safety(code)
         if safety_error:
             return ExecutionResult(
                 output="",

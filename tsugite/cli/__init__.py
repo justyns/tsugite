@@ -45,15 +45,24 @@ app = typer.Typer(
 console = Console()
 
 
-def _resolve_workspace(workspace_ref: Optional[str]) -> Optional[Any]:
-    """Resolve workspace from name or path.
+def _resolve_effective_workspace(
+    workspace: Optional[str], no_workspace: bool
+) -> tuple[Optional[str], Optional[Any]]:
+    """Determine and resolve which workspace to use (explicit > no-workspace > config default).
 
-    Args:
-        workspace_ref: Workspace name or path
-
-    Returns:
-        Workspace object or None
+    Returns (workspace_ref, workspace_object) — either may be None.
     """
+    from tsugite.config import load_config
+
+    config = load_config()
+    workspace_to_use = workspace
+    if not workspace and not no_workspace and config.default_workspace:
+        workspace_to_use = config.default_workspace
+    return workspace_to_use, _resolve_workspace(workspace_to_use)
+
+
+def _resolve_workspace(workspace_ref: Optional[str]) -> Optional[Any]:
+    """Resolve workspace from name or path."""
     if not workspace_ref:
         return None
 
@@ -173,14 +182,9 @@ def _build_executor_kwargs(
         "path_context": path_context,
     }
     if history_opts.enabled and executor == run_agent:
-        kwargs["exec_options"] = ExecutionOptions(
-            model_override=exec_opts.model_override,
-            debug=exec_opts.debug,
-            stream=exec_opts.stream,
-            trust_mcp_code=exec_opts.trust_mcp_code,
-            dry_run=exec_opts.dry_run,
-            return_token_usage=True,
-        )
+        from dataclasses import replace
+
+        kwargs["exec_options"] = replace(exec_opts, return_token_usage=True)
     return kwargs
 
 
@@ -345,6 +349,12 @@ def run(
     daemon_agent: Optional[str] = typer.Option(
         None, "--daemon", "-d", help="Join active daemon session for specified agent"
     ),
+    sandbox: bool = typer.Option(False, "--sandbox", help="Run agent code in bubblewrap sandbox"),
+    no_sandbox: bool = typer.Option(False, "--no-sandbox", help="Disable sandbox (overrides config)"),
+    allow_domain: Optional[List[str]] = typer.Option(
+        None, "--allow-domain", help="Domain(s) allowed in sandbox, with optional port (e.g. github.com, *.example.com:8080). Default ports: 80, 443"
+    ),
+    no_network: bool = typer.Option(False, "--no-network", help="Sandbox with no network access at all"),
 ):
     """Run an agent with the given prompt.
 
@@ -383,15 +393,7 @@ def run(
         log_json=log_json,
     )
 
-    # Load config to check for default workspace
-    from tsugite.config import load_config
-
-    config = load_config()
-
-    # Determine which workspace to use: explicit > no-workspace > default from config
-    workspace_to_use = workspace
-    if not workspace and not no_workspace and config.default_workspace:
-        workspace_to_use = config.default_workspace
+    workspace_to_use, resolved_workspace = _resolve_effective_workspace(workspace, no_workspace)
 
     if new_session and not workspace_to_use:
         console.print("[yellow]Warning: --new-session has no effect without a workspace[/yellow]")
@@ -401,14 +403,15 @@ def run(
         stream=stream,
         trust_mcp_code=trust_mcp_code,
         dry_run=dry_run,
+        sandbox=sandbox and not no_sandbox,
+        allow_domains=list(allow_domain) if allow_domain else [],
+        no_network=no_network,
     )
     history_opts = HistoryOptions(
         enabled=not no_history,
         continue_id=conversation_id if continue_conversation else None,
         storage_dir=Path(history_dir) if history_dir else None,
     )
-    # Resolve workspace (name or path)
-    resolved_workspace = _resolve_workspace(workspace_to_use)
     if workspace_to_use and not resolved_workspace:
         console.print(f"[yellow]Warning: Workspace '{workspace_to_use}' not found[/yellow]")
 
@@ -451,10 +454,10 @@ def run(
     # Resolve UI mode to update ui_opts
     ui_opts = _resolve_ui_mode(ui, ui_opts, console)
 
-    # Handle subagent mode - override incompatible settings
-    if subagent_mode:
-        import os
+    # Handle subagent mode and daemon mode (both need os)
+    import os
 
+    if subagent_mode:
         if ui_opts.plain or ui_opts.headless:
             console.print("[red]Error: --subagent-mode cannot be combined with --plain or --headless[/red]")
             raise typer.Exit(1)
@@ -463,7 +466,6 @@ def run(
         history_opts.enabled = False
         os.environ["TSUGITE_SUBAGENT_MODE"] = "1"
 
-    # Handle daemon mode
     daemon_metadata = None
     if daemon_agent:
         from tsugite.history import SessionStorage, get_history_dir, list_session_files
@@ -606,7 +608,7 @@ def run(
 
         # Print deferred workspace status messages
         if not ui_opts.headless and not ui_opts.final_only:
-            if workspace_to_use and config.default_workspace == workspace_to_use and not workspace:
+            if workspace_to_use and not workspace:
                 stderr_console.print(f"[dim]Using default workspace: {workspace_to_use}[/dim]")
             if workspace_session_continued:
                 stderr_console.print(f"[dim]Continuing workspace session: {history_opts.continue_id[:8]}...[/dim]")
@@ -1010,18 +1012,7 @@ def chat(
     exec_opts = ExecutionOptions(model_override=model, stream=stream)
     history_opts = HistoryOptions(enabled=not no_history, max_turns=max_history)
 
-    # Load config to check for default workspace
-    from tsugite.config import load_config
-
-    config = load_config()
-
-    # Determine which workspace to use: explicit > no-workspace > default from config
-    workspace_to_use = workspace
-    if not workspace and not no_workspace and config.default_workspace:
-        workspace_to_use = config.default_workspace
-
-    # Resolve workspace (name or path)
-    resolved_workspace = _resolve_workspace(workspace_to_use)
+    workspace_to_use, resolved_workspace = _resolve_effective_workspace(workspace, no_workspace)
     if workspace_to_use and not resolved_workspace:
         console.print(f"[yellow]Warning: Workspace '{workspace_to_use}' not found[/yellow]")
 

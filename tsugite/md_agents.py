@@ -1,9 +1,12 @@
 """Agent markdown parser and template renderer."""
 
+import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -17,18 +20,7 @@ def _parse_directive_attribute(
     converter: Optional[Callable[[str], Any]] = None,
     default: Any = None,
 ) -> Any:
-    """Parse an attribute from directive arguments using regex.
-
-    Args:
-        args: The directive arguments string
-        attr_name: Name of the attribute to extract
-        value_pattern: Regex pattern for the value (default: any non-quote chars)
-        converter: Optional function to convert the string value (e.g., int, float)
-        default: Default value if attribute not found
-
-    Returns:
-        Parsed and converted value, or default if not found
-    """
+    """Parse an attribute from directive arguments using regex."""
     pattern = rf'{attr_name}=(["\']?)({value_pattern})\1'
     match = re.search(pattern, args)
     if not match:
@@ -65,6 +57,7 @@ class AgentConfig(BaseModel):
     auto_context: Optional[bool] = None  # Auto-load context files (None = use config default)
     visibility: str = "public"  # Agent visibility: public, private, internal
     spawnable: bool = True  # Whether this agent can be spawned by other agents
+    network: Optional[Dict[str, Any]] = None  # Network hints for sandbox proxy allowlist
 
     @field_validator("visibility", mode="after")
     @classmethod
@@ -343,14 +336,7 @@ def extract_step_directives(content: str, include_preamble: bool = True) -> tupl
 
 
 def has_step_directives(content: str) -> bool:
-    """Check if markdown content contains step directives.
-
-    Args:
-        content: Raw markdown content
-
-    Returns:
-        True if content has at least one step directive
-    """
+    """Check if markdown content contains step directives."""
     pattern = r"<!--\s*tsu:step\s+"
     return bool(re.search(pattern, content))
 
@@ -668,14 +654,7 @@ def build_validation_test_context(agent, include_prefetch: bool = True) -> dict[
 
 
 def add_mock_step_variables(test_context: dict[str, Any], agent_content: str) -> None:
-    """Add mock variables for step assignments to test context.
-
-    Modifies test_context in place.
-
-    Args:
-        test_context: Context dict to modify
-        agent_content: Agent content to extract steps from
-    """
+    """Add mock variables for step assignments to test context. Modifies test_context in place."""
     if has_step_directives(agent_content):
         try:
             preamble, steps = extract_step_directives(agent_content)
@@ -683,27 +662,18 @@ def add_mock_step_variables(test_context: dict[str, Any], agent_content: str) ->
                 if step.assign_var:
                     test_context[step.assign_var] = "mock_step_result"
         except Exception:
-            # If step parsing fails, let it be caught by normal validation
-            pass
+            logger.debug("Failed to parse step directives for mock variables", exc_info=True)
 
 
 def add_mock_tool_variables(test_context: dict[str, Any], agent_content: str) -> None:
-    """Add mock variables for tool directive assignments to test context.
-
-    Modifies test_context in place.
-
-    Args:
-        test_context: Context dict to modify
-        agent_content: Agent content to extract tool directives from
-    """
+    """Add mock variables for tool directive assignments to test context. Modifies test_context in place."""
     try:
         directives = extract_tool_directives(agent_content)
         for directive in directives:
             if directive.assign_var:
                 test_context[directive.assign_var] = "mock_tool_result"
     except Exception:
-        # If tool directive parsing fails, let it be caught by normal validation
-        pass
+        logger.debug("Failed to parse tool directives for mock variables", exc_info=True)
 
 
 def validate_model_string(model: str) -> tuple[bool, Optional[str]]:
