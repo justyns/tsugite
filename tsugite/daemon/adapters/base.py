@@ -129,7 +129,13 @@ class BaseAdapter(ABC):
         )
 
     def resolve_model(self) -> str:
-        """Resolve the model name from the agent file, returning 'unknown' on failure."""
+        """Resolve the effective model name, returning 'unknown' on failure.
+
+        Prefers daemon config model override, then falls back to the agent file's model.
+        """
+        if self.agent_config.model:
+            return self.agent_config.model
+
         from tsugite.agent_runner.validation import get_agent_info
 
         agent_path = self._resolve_agent_path()
