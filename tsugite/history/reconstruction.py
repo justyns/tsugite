@@ -53,7 +53,13 @@ def reconstruct_messages(session_path: Path) -> List[Dict[str, Any]]:
         messages.append(
             {
                 "role": "user",
-                "content": f"<previous_conversation>\n{compaction_summary.summary}\n</previous_conversation>",
+                "content": (
+                    "<previous_conversation>\n"
+                    "The following is a summary of our earlier conversation, "
+                    "which was compacted to save context space.\n\n"
+                    f"{compaction_summary.summary}\n"
+                    "</previous_conversation>"
+                ),
             }
         )
         messages.append({"role": "assistant", "content": "I've reviewed our previous conversation."})
