@@ -57,6 +57,8 @@ class SchedulerAdapter:
         metadata = {"schedule_id": entry.id}
         if entry.notify_tool:
             metadata["notify_tool"] = True
+        if entry.model:
+            metadata["model_override"] = entry.model
 
         channel_context = ChannelContext(
             source="scheduler",

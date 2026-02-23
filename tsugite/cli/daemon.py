@@ -507,6 +507,7 @@ def schedule_add(
     at: Optional[str] = typer.Option(None, "--at", help="ISO datetime for one-off task"),
     every: Optional[str] = typer.Option(None, "--every", help="Simple interval (e.g., 30m, 2h, 1d)"),
     tz: str = typer.Option("UTC", "--timezone", "--tz", help="IANA timezone"),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="Model override for this schedule"),
     no_inject_history: bool = typer.Option(False, "--no-inject-history", help="Don't inject result into user chat sessions"),
     host: str = typer.Option("127.0.0.1", "--host", help="Daemon HTTP host"),
     port: int = typer.Option(8321, "--port", help="Daemon HTTP port"),
@@ -533,11 +534,30 @@ def schedule_add(
         body["cron_expr"] = cron
     if at:
         body["run_at"] = at
+    if model:
+        body["model"] = model
 
     data = _daemon_request("POST", host, port, "/api/schedules", token, json=body)
     console.print(f"[green]✓[/green] Schedule [cyan]{schedule_id}[/cyan] created")
     if data.get("next_run"):
         console.print(f"  next run: {data['next_run']}")
+
+
+@schedule_app.command("cleanup")
+def schedule_cleanup(
+    host: str = typer.Option("127.0.0.1", "--host", help="Daemon HTTP host"),
+    port: int = typer.Option(8321, "--port", help="Daemon HTTP port"),
+    token: Optional[str] = typer.Option(None, "--token", "-t", help="Auth token"),
+):
+    """Remove all orphaned one-off schedules (disabled, already fired)."""
+    data = _daemon_request("POST", host, port, "/api/schedules/cleanup", token)
+    removed = data.get("removed", [])
+    if not removed:
+        console.print("Nothing to clean up")
+        return
+    for sid in removed:
+        console.print(f"  removed: [cyan]{sid}[/cyan]")
+    console.print(f"[green]✓[/green] Cleaned up {len(removed)} orphaned schedule(s)")
 
 
 @schedule_app.command("remove")

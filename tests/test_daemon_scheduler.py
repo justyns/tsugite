@@ -235,6 +235,69 @@ class TestSchedulerUpdate:
         assert scheduler.get("job1").notify_tool is True
 
 
+class TestSchedulerCleanup:
+    def test_cleanup_removes_disabled_once(self, scheduler):
+        future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+        entry = ScheduleEntry(id="oneshot", agent="bot", prompt="hi", schedule_type="once", run_at=future)
+        scheduler.add(entry)
+        # Simulate fired: disable + clear next_run
+        scheduler.get("oneshot").enabled = False
+        scheduler.get("oneshot").next_run = None
+        scheduler._save()
+
+        removed = scheduler.cleanup()
+        assert removed == ["oneshot"]
+        assert len(scheduler.list()) == 0
+
+    def test_cleanup_skips_cron(self, scheduler):
+        entry = ScheduleEntry(id="cron1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
+        scheduler.add(entry)
+        scheduler.disable("cron1")
+
+        removed = scheduler.cleanup()
+        assert removed == []
+        assert len(scheduler.list()) == 1
+
+    def test_cleanup_skips_enabled_once(self, scheduler):
+        future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+        entry = ScheduleEntry(id="pending", agent="bot", prompt="hi", schedule_type="once", run_at=future)
+        scheduler.add(entry)
+
+        removed = scheduler.cleanup()
+        assert removed == []
+        assert len(scheduler.list()) == 1
+
+    def test_cleanup_empty(self, scheduler):
+        removed = scheduler.cleanup()
+        assert removed == []
+
+
+class TestModelField:
+    def test_model_defaults_none(self):
+        entry = ScheduleEntry(id="test", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
+        assert entry.model is None
+
+    def test_model_serialization_roundtrip(self, schedules_path, run_callback):
+        sched1 = Scheduler(schedules_path, run_callback)
+        entry = ScheduleEntry(
+            id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *", model="openai:gpt-4o-mini"
+        )
+        sched1.add(entry)
+
+        sched2 = Scheduler(schedules_path, run_callback)
+        sched2._load()
+        assert sched2.get("job1").model == "openai:gpt-4o-mini"
+
+    def test_model_none_serialization_roundtrip(self, schedules_path, run_callback):
+        sched1 = Scheduler(schedules_path, run_callback)
+        entry = ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
+        sched1.add(entry)
+
+        sched2 = Scheduler(schedules_path, run_callback)
+        sched2._load()
+        assert sched2.get("job1").model is None
+
+
 class TestCallHelper:
     """Test the _call helper in schedule tools forwards kwargs."""
 

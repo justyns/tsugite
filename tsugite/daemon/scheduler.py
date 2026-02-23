@@ -1,5 +1,8 @@
 """Cron-like scheduler for recurring and one-off agent tasks."""
 
+# Required: Scheduler.list() shadows builtin list, breaking list[str] annotations
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
@@ -32,6 +35,7 @@ class ScheduleEntry:
     notify: list[str] = field(default_factory=list)
     notify_tool: bool = False
     inject_history: bool = True
+    model: str | None = None
     misfire_grace_seconds: int = 300
     timezone: str = "UTC"
 
@@ -254,6 +258,21 @@ class Scheduler:
         self._wakeup.set()
         logger.info("Updated schedule '%s'", schedule_id)
         return entry
+
+    def cleanup(self) -> list[str]:
+        """Remove all disabled one-off schedules (orphaned after firing)."""
+        to_remove = [
+            sid
+            for sid, entry in self._schedules.items()
+            if entry.schedule_type == "once" and not entry.enabled
+        ]
+        for sid in to_remove:
+            del self._schedules[sid]
+            self._entry_locks.pop(sid, None)
+        if to_remove:
+            self._save()
+            logger.info("Cleaned up %d orphaned schedule(s)", len(to_remove))
+        return to_remove
 
     # Persistence
 

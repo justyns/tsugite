@@ -251,7 +251,8 @@ class BaseAdapter(ABC):
                     # (sandbox, allow_domains, no_network) — see ROADMAP.md
                     exec_options=ExecutionOptions(
                         return_token_usage=True,
-                        model_override=self.agent_config.model,
+                        model_override=(channel_context.metadata or {}).get("model_override")
+                        or self.agent_config.model,
                         max_turns_override=self.agent_config.max_turns,
                     ),
                     path_context=path_context,

@@ -43,6 +43,7 @@ def schedule_create(
     notify: Optional[list[str]] = None,
     notify_tool: bool = False,
     inject_history: bool = True,
+    model: Optional[str] = None,
 ) -> dict:
     """Create a recurring (cron) or one-off schedule to run an agent.
 
@@ -60,6 +61,7 @@ def schedule_create(
         notify: List of notification channel names to deliver results to on completion.
         notify_tool: If true, gives the agent the notify_user tool so it can send messages during execution. Requires notify to be set.
         inject_history: If true (default), injects the task result into notified users' chat sessions so the agent has context when they reply.
+        model: Optional model override (e.g., "openai:gpt-4o-mini"). When set, this schedule uses this model instead of the agent's default.
 
     Returns:
         Created schedule details including computed next_run
@@ -93,6 +95,7 @@ def schedule_create(
         notify=notify or [],
         notify_tool=notify_tool,
         inject_history=inject_history,
+        model=model,
         timezone=timezone,
     )
     result = _call(_scheduler.add, entry)
@@ -162,6 +165,7 @@ def schedule_update(
     notify: Optional[list[str]] = None,
     notify_tool: Optional[bool] = None,
     inject_history: Optional[bool] = None,
+    model: Optional[str] = None,
 ) -> dict:
     """Update fields on an existing schedule.
 
@@ -174,19 +178,16 @@ def schedule_update(
         notify: New notification channel list (optional)
         notify_tool: Enable/disable notify_user tool (optional)
         inject_history: Enable/disable result injection into user chat sessions (optional)
+        model: Model override for this schedule (optional). Set to empty string to clear.
 
     Returns:
         Updated schedule details
     """
-    fields = {}
-    if prompt is not None:
-        fields["prompt"] = prompt
-    if cron is not None:
-        fields["cron_expr"] = cron
-    if run_at is not None:
-        fields["run_at"] = run_at
-    if timezone is not None:
-        fields["timezone"] = timezone
+    # Build fields dict from simple params (rename cron → cron_expr)
+    simple = {"prompt": prompt, "cron_expr": cron, "run_at": run_at, "timezone": timezone,
+              "inject_history": inject_history}
+    fields = {k: v for k, v in simple.items() if v is not None}
+
     if notify is not None:
         unknown = set(notify) - _channel_names
         if unknown:
@@ -198,11 +199,22 @@ def schedule_update(
             if not effective_notify:
                 raise ValueError("notify_tool=True requires a non-empty 'notify' list")
         fields["notify_tool"] = notify_tool
-    if inject_history is not None:
-        fields["inject_history"] = inject_history
+    if model is not None:
+        fields["model"] = model or None  # empty string → clear
 
     if not fields:
         raise ValueError("No fields to update")
 
     result = _call(_scheduler.update, id, **fields)
     return asdict(result)
+
+
+@tool(require_daemon=True)
+def schedule_cleanup() -> dict:
+    """Remove all orphaned one-off schedules (disabled, already fired).
+
+    Returns:
+        Dict with removed schedule IDs and count
+    """
+    removed = _call(_scheduler.cleanup)
+    return {"removed": removed, "count": len(removed)}

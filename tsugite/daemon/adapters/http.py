@@ -178,6 +178,7 @@ class HTTPServer:
             Route("/api/agents/{agent}/respond", self._respond, methods=["POST"]),
             Route("/api/schedules", self._list_schedules, methods=["GET"]),
             Route("/api/schedules", self._create_schedule, methods=["POST"]),
+            Route("/api/schedules/cleanup", self._cleanup_schedules, methods=["POST"]),
             Route("/api/schedules/{schedule_id}", self._get_schedule, methods=["GET"]),
             Route("/api/schedules/{schedule_id}", self._update_schedule, methods=["PATCH"]),
             Route("/api/schedules/{schedule_id}", self._delete_schedule, methods=["DELETE"]),
@@ -564,7 +565,7 @@ class HTTPServer:
             return JSONResponse({"error": "invalid JSON body"}, status_code=400)
 
         schedule_id = request.path_params["schedule_id"]
-        allowed = {"prompt", "cron_expr", "run_at", "timezone", "agent", "schedule_type"}
+        allowed = {"prompt", "cron_expr", "run_at", "timezone", "agent", "schedule_type", "model"}
         fields = {k: v for k, v in body.items() if k in allowed}
         if not fields:
             return JSONResponse({"error": "no updatable fields provided"}, status_code=400)
@@ -600,6 +601,12 @@ class HTTPServer:
             return JSONResponse({"error": str(e)}, status_code=404)
         asyncio.create_task(self.scheduler._fire_schedule(entry))
         return JSONResponse({"status": "triggered", "schedule_id": schedule_id})
+
+    async def _cleanup_schedules(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_scheduler(request):
+            return err
+        removed = self.scheduler.cleanup()
+        return JSONResponse({"removed": removed, "count": len(removed)})
 
     async def _list_webhooks(self, request: Request) -> JSONResponse:
         if err := self._check_auth(request):
