@@ -91,9 +91,21 @@ class Gateway:
 
         # One SessionManager per agent, shared across adapters
         agent_session_managers: dict[str, SessionManager] = {}
+        default_context_limit = 128000
         for agent_name, agent_config in self.config.agents.items():
+            if agent_config.context_limit:
+                context_limit = agent_config.context_limit
+            elif agent_config.model:
+                from tsugite.daemon.memory import _get_context_limit
+
+                context_limit = _get_context_limit(agent_config.model, fallback=default_context_limit)
+                logger.info("[%s] Auto-detected context limit: %d tokens", agent_name, context_limit)
+            else:
+                context_limit = default_context_limit
+
+            agent_config.context_limit = context_limit
             agent_session_managers[agent_name] = SessionManager(
-                agent_name, agent_config.workspace_dir, context_limit=agent_config.context_limit
+                agent_name, agent_config.workspace_dir, context_limit=context_limit
             )
 
         tasks = []

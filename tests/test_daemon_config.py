@@ -122,7 +122,7 @@ def test_load_daemon_config_not_found():
 def test_agent_config_defaults():
     """Test AgentConfig default values."""
     config = AgentConfig(workspace_dir=Path("/tmp/workspace"), agent_file="default")
-    assert config.context_limit == 128000  # default
+    assert config.context_limit is None  # auto-detected at startup
 
 
 def test_discord_bot_config_defaults():

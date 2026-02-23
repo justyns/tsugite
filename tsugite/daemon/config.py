@@ -20,7 +20,7 @@ class AgentConfig(BaseModel):
 
     workspace_dir: Path
     agent_file: str
-    context_limit: int = 128000  # Model's context window (tokens)
+    context_limit: Optional[int] = None  # Explicit override; auto-detected from model if unset
     model: Optional[str] = None
     compaction_model: Optional[str] = None
     max_turns: Optional[int] = None
