@@ -47,6 +47,10 @@ class SchedulerAdapter:
                 logger.warning("Notification channel '%s' not found in config, skipping", name)
         return resolved
 
+    def _resolve_canonical_user(self, config: NotificationChannelConfig) -> str:
+        """Resolve a notification channel's user to their canonical identity."""
+        return self._identity_map.get(f"discord:{config.user_id}", config.user_id)
+
     async def _run_agent(self, entry: ScheduleEntry) -> str:
         adapter = self._adapters.get(entry.agent)
         if not adapter:
@@ -86,16 +90,68 @@ class SchedulerAdapter:
 
         if resolved_channels:
             truncated = result[:_MAX_RESULT_CHARS]
-            try:
-                notification = f"**Schedule `{entry.id}` completed:**\n\n{truncated}"
-                await asyncio.to_thread(send_notification, notification, resolved_channels)
-            except Exception as e:
-                logger.error("Auto-notify for schedule '%s' failed: %s", entry.id, e)
 
-            if entry.inject_history:
-                await self._inject_into_user_sessions(adapter, entry, truncated, resolved_channels)
+            if entry.auto_reply:
+                await self._auto_reply(adapter, entry, truncated, resolved_channels)
+            else:
+                try:
+                    notification = f"**Schedule `{entry.id}` completed:**\n\n{truncated}"
+                    await asyncio.to_thread(send_notification, notification, resolved_channels)
+                except Exception as e:
+                    logger.error("Auto-notify for schedule '%s' failed: %s", entry.id, e)
+
+                if entry.inject_history:
+                    await self._inject_into_user_sessions(adapter, entry, truncated, resolved_channels)
 
         return result
+
+    async def _auto_reply(
+        self,
+        adapter: BaseAdapter,
+        entry: ScheduleEntry,
+        truncated_result: str,
+        resolved_channels: list[tuple[str, NotificationChannelConfig]],
+    ) -> None:
+        """Process background task result on the user's session and send a response."""
+        for _name, config in resolved_channels:
+            if config.type != "discord":
+                continue
+
+            canonical = self._resolve_canonical_user(config)
+
+            synthetic_message = (
+                f'<background_task id="{entry.id}">\n'
+                "This task ran in the background. Process the result and provide a "
+                "concise, human-friendly summary to the user.\n\n"
+                f"Original prompt: {entry.prompt}\n\n"
+                f"Result:\n{truncated_result}\n"
+                "</background_task>"
+            )
+
+            channel_context = ChannelContext(
+                source="background_task",
+                channel_id=None,
+                user_id=canonical,
+                reply_to=canonical,
+                metadata={"schedule_id": entry.id, "background_task": True},
+            )
+
+            try:
+                response = await adapter.handle_message(
+                    user_id=canonical,
+                    message=synthetic_message,
+                    channel_context=channel_context,
+                )
+                notification = f"**Background task `{entry.id}` result:**\n\n{response[:_MAX_RESULT_CHARS]}"
+                await asyncio.to_thread(send_notification, notification, [(_name, config)])
+            except Exception as e:
+                logger.error("Auto-reply for schedule '%s' user '%s' failed: %s", entry.id, canonical, e)
+                # Fall back to raw notification
+                try:
+                    notification = f"**Background task `{entry.id}` completed:**\n\n{truncated_result}"
+                    await asyncio.to_thread(send_notification, notification, [(_name, config)])
+                except Exception as e2:
+                    logger.error("Fallback notification for '%s' also failed: %s", entry.id, e2)
 
     async def _inject_into_user_sessions(
         self,
@@ -109,7 +165,7 @@ class SchedulerAdapter:
             if config.type != "discord":
                 continue
 
-            canonical = self._identity_map.get(f"discord:{config.user_id}", config.user_id)
+            canonical = self._resolve_canonical_user(config)
 
             try:
                 await asyncio.to_thread(self._record_synthetic_turn, adapter, canonical, entry, truncated_result)

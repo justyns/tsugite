@@ -35,6 +35,7 @@ class ScheduleEntry:
     notify: list[str] = field(default_factory=list)
     notify_tool: bool = False
     inject_history: bool = True
+    auto_reply: bool = False
     model: str | None = None
     misfire_grace_seconds: int = 300
     timezone: str = "UTC"
@@ -273,6 +274,15 @@ class Scheduler:
             self._save()
             logger.info("Cleaned up %d orphaned schedule(s)", len(to_remove))
         return to_remove
+
+    def fire_now(self, schedule_id: str) -> None:
+        """Fire a schedule immediately in the background."""
+        entry = self.get(schedule_id)
+        if not entry.enabled:
+            raise ValueError(f"Schedule '{schedule_id}' is disabled")
+        task = asyncio.create_task(self._fire_schedule(entry))
+        self._active_tasks.add(task)
+        task.add_done_callback(self._active_tasks.discard)
 
     # Persistence
 

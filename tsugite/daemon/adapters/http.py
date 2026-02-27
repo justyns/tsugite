@@ -599,7 +599,7 @@ class HTTPServer:
             entry = self.scheduler.get(schedule_id)
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=404)
-        asyncio.create_task(self.scheduler._fire_schedule(entry))
+        self.scheduler.fire_now(schedule_id)
         return JSONResponse({"status": "triggered", "schedule_id": schedule_id})
 
     async def _cleanup_schedules(self, request: Request) -> JSONResponse:

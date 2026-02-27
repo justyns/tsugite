@@ -6,6 +6,7 @@ Tools use @tool(require_daemon=True) so they only appear in daemon mode.
 import asyncio
 from dataclasses import asdict
 from typing import Optional
+from uuid import uuid4
 
 from . import tool
 
@@ -30,6 +31,25 @@ def _call(fn, *args, **kwargs):
 
     future = asyncio.run_coroutine_threadsafe(_wrapper(), _loop)
     return future.result(timeout=10)
+
+
+def _validate_notify(notify: Optional[list[str]], notify_tool: bool) -> None:
+    """Validate notification channels and notify_tool requirement."""
+    if notify_tool and not notify:
+        raise ValueError("notify_tool=True requires a non-empty 'notify' list")
+    if notify:
+        unknown = set(notify) - _channel_names
+        if unknown:
+            raise ValueError(f"Unknown notification channel(s): {', '.join(sorted(unknown))}")
+
+
+def _resolve_agent(agent: Optional[str]) -> str:
+    """Resolve agent name, falling back to the current agent or 'default'."""
+    if agent is not None:
+        return agent
+    from tsugite.agent_runner.helpers import get_current_agent
+
+    return get_current_agent() or "default"
 
 
 @tool(require_daemon=True)
@@ -71,17 +91,8 @@ def schedule_create(
     if cron and run_at:
         raise ValueError("Provide 'cron' or 'run_at', not both")
 
-    if notify_tool and not notify:
-        raise ValueError("notify_tool=True requires a non-empty 'notify' list")
-    if notify:
-        unknown = set(notify) - _channel_names
-        if unknown:
-            raise ValueError(f"Unknown notification channel(s): {', '.join(sorted(unknown))}")
-
-    if agent is None:
-        from tsugite.agent_runner.helpers import get_current_agent
-
-        agent = get_current_agent() or "default"
+    _validate_notify(notify, notify_tool)
+    agent = _resolve_agent(agent)
 
     from tsugite.daemon.scheduler import ScheduleEntry
 
@@ -189,9 +200,7 @@ def schedule_update(
     fields = {k: v for k, v in simple.items() if v is not None}
 
     if notify is not None:
-        unknown = set(notify) - _channel_names
-        if unknown:
-            raise ValueError(f"Unknown notification channel(s): {', '.join(sorted(unknown))}")
+        _validate_notify(notify, False)
         fields["notify"] = notify
     if notify_tool is not None:
         if notify_tool:
@@ -218,3 +227,77 @@ def schedule_cleanup() -> dict:
     """
     removed = _call(_scheduler.cleanup)
     return {"removed": removed, "count": len(removed)}
+
+
+@tool(require_daemon=True)
+def schedule_run(id: str) -> dict:
+    """Fire an existing schedule immediately in the background.
+
+    The schedule runs asynchronously — this tool returns immediately.
+    Results are delivered via the schedule's configured notification channels.
+
+    Args:
+        id: Schedule ID to fire
+
+    Returns:
+        Confirmation that the schedule was triggered
+    """
+    _call(_scheduler.fire_now, id)
+    return {"status": "triggered", "id": id}
+
+
+@tool(require_daemon=True)
+def background_task(
+    prompt: str,
+    agent: Optional[str] = None,
+    notify: Optional[list[str]] = None,
+    notify_tool: bool = False,
+    inject_history: bool = False,
+    model: Optional[str] = None,
+) -> dict:
+    """Launch a background task that auto-replies with results when complete.
+
+    Creates a one-off schedule and fires it immediately. When the task finishes,
+    results are automatically processed on the user's conversation session and
+    delivered as a human-friendly response via notification channels.
+
+    Use this for tasks that may take a while (research, long-running commands, etc.)
+    so the user doesn't have to wait.
+
+    IMPORTANT: Always confirm with the user before launching background tasks.
+
+    Args:
+        prompt: Clear, self-contained instruction for the background agent.
+        agent: Agent name to run. Defaults to the current agent.
+        notify: Notification channels for result delivery. Required for auto-reply.
+        notify_tool: If true, gives the background agent the notify_user tool.
+        inject_history: If true, inject raw result into user session (in addition to auto-reply).
+        model: Optional model override (e.g., "openai:gpt-4o-mini").
+
+    Returns:
+        Dict with status and generated task ID
+    """
+    _validate_notify(notify, notify_tool)
+    agent = _resolve_agent(agent)
+
+    from tsugite.daemon.scheduler import ScheduleEntry
+
+    task_id = f"bg-{uuid4().hex[:8]}"
+    # run_at in the past so it's immediately eligible
+    run_at = "2000-01-01T00:00:00Z"
+
+    entry = ScheduleEntry(
+        id=task_id,
+        agent=agent,
+        prompt=prompt,
+        schedule_type="once",
+        run_at=run_at,
+        notify=notify or [],
+        notify_tool=notify_tool,
+        inject_history=inject_history,
+        auto_reply=bool(notify),
+        model=model,
+    )
+    _call(_scheduler.add, entry)
+    _call(_scheduler.fire_now, task_id)
+    return {"status": "started", "id": task_id}
