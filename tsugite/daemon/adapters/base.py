@@ -229,6 +229,10 @@ class BaseAdapter(ABC):
         metadata["daemon_agent"] = self.agent_name
 
         agent_path = self._resolve_agent_path()
+        if channel_context.metadata and channel_context.metadata.get("agent_file_override"):
+            override = Path(channel_context.metadata["agent_file_override"])
+            if override.exists():
+                agent_path = override
         if not agent_path:
             raise ValueError(f"Agent not found: {self.agent_config.agent_file}")
 

@@ -64,6 +64,14 @@ class SchedulerAdapter:
         if entry.model:
             metadata["model_override"] = entry.model
 
+        if entry.agent_file:
+            resolved = Path(entry.agent_file)
+            if not resolved.is_absolute():
+                resolved = adapter.agent_config.workspace_dir / resolved
+            if not resolved.exists():
+                raise FileNotFoundError(f"Agent file not found: {resolved}")
+            metadata["agent_file_override"] = str(resolved)
+
         channel_context = ChannelContext(
             source="scheduler",
             channel_id=None,

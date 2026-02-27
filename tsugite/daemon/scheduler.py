@@ -39,6 +39,7 @@ class ScheduleEntry:
     model: str | None = None
     misfire_grace_seconds: int = 300
     timezone: str = "UTC"
+    agent_file: str | None = None
 
     def __post_init__(self):
         if not self.created_at:

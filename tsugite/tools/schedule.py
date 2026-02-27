@@ -55,7 +55,7 @@ def _resolve_agent(agent: Optional[str]) -> str:
 @tool(require_daemon=True)
 def schedule_create(
     id: str,
-    prompt: str,
+    prompt: str = "",
     agent: Optional[str] = None,
     cron: Optional[str] = None,
     run_at: Optional[str] = None,
@@ -64,6 +64,7 @@ def schedule_create(
     notify_tool: bool = False,
     inject_history: bool = True,
     model: Optional[str] = None,
+    agent_file: Optional[str] = None,
 ) -> dict:
     """Create a recurring (cron) or one-off schedule to run an agent.
 
@@ -73,7 +74,7 @@ def schedule_create(
 
     Args:
         id: Unique schedule name (e.g., "daily-backup")
-        prompt: Clear, direct instruction for the agent. Do NOT copy the user's words verbatim — interpret their intent and write a self-contained instruction the agent can execute autonomously.
+        prompt: Clear, direct instruction for the agent. Do NOT copy the user's words verbatim — interpret their intent and write a self-contained instruction the agent can execute autonomously. Can be empty when agent_file is set.
         agent: Agent name configured in daemon. Defaults to the current agent if omitted.
         cron: Cron expression for recurring (e.g., "0 9 * * *" = daily at 9am). Mutually exclusive with run_at.
         run_at: ISO datetime for one-off execution (e.g., "2026-02-13T14:00:00-06:00"). Mutually exclusive with cron.
@@ -82,6 +83,7 @@ def schedule_create(
         notify_tool: If true, gives the agent the notify_user tool so it can send messages during execution. Requires notify to be set.
         inject_history: If true (default), injects the task result into notified users' chat sessions so the agent has context when they reply.
         model: Optional model override (e.g., "openai:gpt-4o-mini"). When set, this schedule uses this model instead of the agent's default.
+        agent_file: Path to a tsugite agent .md file. The agent file is hot-loaded on each run — edit the file and the next execution picks up changes.
 
     Returns:
         Created schedule details including computed next_run
@@ -90,6 +92,8 @@ def schedule_create(
         raise ValueError("Provide either 'cron' or 'run_at'")
     if cron and run_at:
         raise ValueError("Provide 'cron' or 'run_at', not both")
+    if not prompt and not agent_file:
+        raise ValueError("Provide at least one of 'prompt' or 'agent_file'")
 
     _validate_notify(notify, notify_tool)
     agent = _resolve_agent(agent)
@@ -108,6 +112,7 @@ def schedule_create(
         inject_history=inject_history,
         model=model,
         timezone=timezone,
+        agent_file=agent_file,
     )
     result = _call(_scheduler.add, entry)
     return asdict(result)
@@ -177,6 +182,7 @@ def schedule_update(
     notify_tool: Optional[bool] = None,
     inject_history: Optional[bool] = None,
     model: Optional[str] = None,
+    agent_file: Optional[str] = None,
 ) -> dict:
     """Update fields on an existing schedule.
 
@@ -190,11 +196,12 @@ def schedule_update(
         notify_tool: Enable/disable notify_user tool (optional)
         inject_history: Enable/disable result injection into user chat sessions (optional)
         model: Model override for this schedule (optional). Set to empty string to clear.
+        agent_file: Path to a tsugite agent .md file (optional). Set to empty string to clear.
 
     Returns:
         Updated schedule details
     """
-    # Build fields dict from simple params (rename cron → cron_expr)
+    # Build fields dict from provided params (rename cron → cron_expr)
     simple = {"prompt": prompt, "cron_expr": cron, "run_at": run_at, "timezone": timezone,
               "inject_history": inject_history}
     fields = {k: v for k, v in simple.items() if v is not None}
@@ -208,8 +215,11 @@ def schedule_update(
             if not effective_notify:
                 raise ValueError("notify_tool=True requires a non-empty 'notify' list")
         fields["notify_tool"] = notify_tool
-    if model is not None:
-        fields["model"] = model or None  # empty string → clear
+
+    # Clearable fields: empty/falsy value → None (clears the field)
+    for param_name, value in [("model", model), ("agent_file", agent_file)]:
+        if value is not None:
+            fields[param_name] = value or None
 
     if not fields:
         raise ValueError("No fields to update")
