@@ -6,9 +6,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from tsugite.daemon.adapters.base import BaseAdapter, ChannelContext
+from tsugite.daemon.adapters.base import BaseAdapter, ChannelContext, resolve_agent_path
 from tsugite.daemon.adapters.scheduler_adapter import SchedulerAdapter
-from tsugite.daemon.scheduler import ScheduleEntry, Scheduler
+from tsugite.daemon.scheduler import ScheduleEntry
 
 
 def _get_channel_context(mock):
@@ -57,6 +57,12 @@ class TestRunAgentWithAgentFile:
         adapter.agent_config = MagicMock()
         adapter.agent_config.workspace_dir = Path("/workspace")
         adapter.handle_message = AsyncMock(return_value="result")
+        adapter._workspace = None
+        adapter._resolve_agent_path = lambda agent_file=None: resolve_agent_path(
+            agent_file or adapter.agent_config.agent_file,
+            adapter.agent_config.workspace_dir,
+            adapter._workspace,
+        )
         return adapter
 
     @pytest.fixture

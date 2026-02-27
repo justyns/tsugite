@@ -120,10 +120,14 @@ class BaseAdapter(ABC):
 
         self.workspace_attachments = build_workspace_attachments(self._workspace) if self._workspace else []
 
-    def _resolve_agent_path(self) -> Optional[Path]:
-        """Resolve the configured agent file to an absolute path."""
+    def _resolve_agent_path(self, agent_file: Optional[str] = None) -> Optional[Path]:
+        """Resolve an agent file to an absolute path.
+
+        Args:
+            agent_file: Agent file to resolve. Defaults to the configured agent_file.
+        """
         return resolve_agent_path(
-            self.agent_config.agent_file,
+            agent_file or self.agent_config.agent_file,
             self.agent_config.workspace_dir,
             self._workspace,
         )
