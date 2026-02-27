@@ -281,28 +281,28 @@ def test_empty_file_handling(temp_dir, file_tools):
     assert call_tool("file_exists", path=str(empty_file)) is True
 
 
-# Tests for new file editing tools
+# Tests for read_file line range and line numbers
 
 
-def test_read_file_lines_full_file(temp_dir, file_tools):
-    """Test reading all lines from a file with line numbers."""
+@pytest.fixture
+def five_line_file(temp_dir):
+    """Create a 5-line test file used by multiple read_file tests."""
     test_file = temp_dir / "lines.txt"
-    content = "Line 1\nLine 2\nLine 3\nLine 4\nLine 5"
-    test_file.write_text(content)
+    test_file.write_text("Line 1\nLine 2\nLine 3\nLine 4\nLine 5")
+    return test_file
 
-    result = call_tool("read_file", path=str(test_file), start_line=1)
+
+def test_read_file_ranged_all_lines(five_line_file, file_tools):
+    """Test ranged read covering all lines with line numbers."""
+    result = call_tool("read_file", path=str(five_line_file), start_line=1, line_numbers=True)
     assert "1: Line 1" in result
     assert "2: Line 2" in result
     assert "5: Line 5" in result
 
 
-def test_read_file_lines_range(temp_dir, file_tools):
+def test_read_file_ranged_subset(five_line_file, file_tools):
     """Test reading a specific range of lines."""
-    test_file = temp_dir / "lines.txt"
-    content = "Line 1\nLine 2\nLine 3\nLine 4\nLine 5"
-    test_file.write_text(content)
-
-    result = call_tool("read_file", path=str(test_file), start_line=2, end_line=4)
+    result = call_tool("read_file", path=str(five_line_file), start_line=2, end_line=4, line_numbers=True)
     assert "2: Line 2" in result
     assert "3: Line 3" in result
     assert "4: Line 4" in result
@@ -310,21 +310,17 @@ def test_read_file_lines_range(temp_dir, file_tools):
     assert "5: Line 5" not in result
 
 
-def test_read_file_lines_from_start(temp_dir, file_tools):
-    """Test reading from a specific line to end."""
-    test_file = temp_dir / "lines.txt"
-    content = "Line 1\nLine 2\nLine 3\nLine 4\nLine 5"
-    test_file.write_text(content)
-
-    result = call_tool("read_file", path=str(test_file), start_line=3)
+def test_read_file_ranged_to_end(five_line_file, file_tools):
+    """Test reading from a specific line to end of file."""
+    result = call_tool("read_file", path=str(five_line_file), start_line=3, line_numbers=True)
     assert "3: Line 3" in result
     assert "4: Line 4" in result
     assert "5: Line 5" in result
     assert "1: Line 1" not in result
 
 
-def test_read_file_lines_invalid_range(temp_dir, file_tools):
-    """Test read_file with invalid line range."""
+def test_read_file_invalid_range(temp_dir, file_tools):
+    """Test read_file with end_line < start_line raises ValueError."""
     test_file = temp_dir / "lines.txt"
     test_file.write_text("Line 1\nLine 2")
 
@@ -332,16 +328,37 @@ def test_read_file_lines_invalid_range(temp_dir, file_tools):
         call_tool("read_file", path=str(test_file), start_line=5, end_line=2)
 
 
-def test_read_file_lines_zero_based_index(temp_dir, file_tools):
-    """Test read_file accepts start_line=0 (treats as 1)."""
+def test_read_file_zero_start_line(temp_dir, file_tools):
+    """Test that start_line=0 is treated as start_line=1."""
     test_file = temp_dir / "lines.txt"
     test_file.write_text("Line 1\nLine 2\nLine 3")
 
-    # start_line=0 should be treated as start_line=1
-    result = call_tool("read_file", path=str(test_file), start_line=0, end_line=2)
+    result = call_tool("read_file", path=str(test_file), start_line=0, end_line=2, line_numbers=True)
     assert "1: Line 1" in result
     assert "2: Line 2" in result
     assert "Line 3" not in result
+
+
+def test_read_file_full_with_line_numbers(temp_dir, file_tools):
+    """Test full file read (no start_line) with line_numbers=True."""
+    test_file = temp_dir / "lines.txt"
+    test_file.write_text("alpha\nbeta\ngamma")
+
+    result = call_tool("read_file", path=str(test_file), line_numbers=True)
+    assert result == "1: alpha\n2: beta\n3: gamma"
+
+
+def test_read_file_ranged_without_line_numbers(five_line_file, file_tools):
+    """Test ranged read without line numbers returns plain lines."""
+    result = call_tool("read_file", path=str(five_line_file), start_line=2, end_line=4)
+    assert result == "Line 2\nLine 3\nLine 4"
+    assert "2:" not in result
+
+
+def test_read_file_ranged_with_line_numbers(five_line_file, file_tools):
+    """Test ranged read with line_numbers=True returns numbered lines."""
+    result = call_tool("read_file", path=str(five_line_file), start_line=2, end_line=4, line_numbers=True)
+    assert result == "2: Line 2\n3: Line 3\n4: Line 4"
 
 
 def test_get_file_info_existing(temp_dir, file_tools):

@@ -8,18 +8,30 @@ import pathspec
 from ..tools import tool
 
 
+def _format_lines(lines: list[str], start_line: int, line_numbers: bool) -> str:
+    """Join lines, optionally prefixing each with its 1-indexed line number."""
+    if line_numbers:
+        return "\n".join(f"{i + start_line}: {line}" for i, line in enumerate(lines))
+    return "\n".join(lines)
+
+
 @tool
-def read_file(path: str, start_line: Optional[int] = None, end_line: Optional[int] = None) -> str:
-    """Read content from a file, optionally with line range.
+def read_file(
+    path: str,
+    start_line: Optional[int] = None,
+    end_line: Optional[int] = None,
+    line_numbers: bool = False,
+) -> str:
+    """Read content from a file, optionally with line range and line numbers.
 
     Args:
         path: Path to the file to read
-        start_line: Starting line number (1-indexed, 0 also accepted). If provided, returns numbered lines.
+        start_line: Starting line number (1-indexed, 0 also accepted).
         end_line: Ending line number (1-indexed, inclusive). Defaults to end of file.
+        line_numbers: If True, prefix each line with its line number in "NUM: content" format.
 
     Returns:
-        If start_line is None: Full file content as plain text
-        If start_line is provided: Numbered lines in format "LINE_NUM: content"
+        File content, optionally with line numbers prefixed.
     """
     file_path = Path(path)
 
@@ -29,54 +41,40 @@ def read_file(path: str, start_line: Optional[int] = None, end_line: Optional[in
     if file_path.is_dir():
         raise IsADirectoryError(f"Path is a directory: {path}")
 
+    if start_line is not None:
+        if start_line < 0:
+            raise ValueError("start_line must be >= 0")
+        if start_line == 0:
+            start_line = 1
+        if end_line is not None and end_line < start_line:
+            raise ValueError(f"end_line ({end_line}) must be >= start_line ({start_line})")
+
     try:
-        if start_line is not None:
-            # Accept 0-based indexing (treat 0 as 1 for convenience)
-            if start_line < 0:
-                raise ValueError("start_line must be >= 0")
-            if start_line == 0:
-                start_line = 1
-
-            if end_line is not None and end_line < start_line:
-                raise ValueError(f"end_line ({end_line}) must be >= start_line ({start_line})")
-
         content = file_path.read_text(encoding="utf-8")
-
-        from tsugite.events.helpers import emit_file_read_event
-
-        emit_file_read_event(str(file_path), content, "tool_call")
-
-        # If no line range specified, return entire file (backward compatible)
-        if start_line is None:
-            return content
-
-        lines = content.splitlines()
-        total_lines = len(lines)
-
-        # Adjust end_line if not specified or beyond file length
-        if end_line is None:
-            end_line = total_lines
-        else:
-            end_line = min(end_line, total_lines)
-
-        # Extract requested range (convert to 0-indexed)
-        start_idx = start_line - 1
-        end_idx = end_line
-
-        if start_idx >= total_lines:
-            return f"File only has {total_lines} lines, but start_line is {start_line}"
-
-        selected_lines = lines[start_idx:end_idx]
-
-        # Format with line numbers
-        formatted_lines = [f"{i + start_line}: {line}" for i, line in enumerate(selected_lines)]
-
-        return "\n".join(formatted_lines)
-
     except Exception as e:
-        if isinstance(e, (FileNotFoundError, IsADirectoryError, ValueError)):
-            raise
         raise RuntimeError(f"Failed to read file {path}: {e}") from e
+
+    from tsugite.events.helpers import emit_file_read_event
+
+    emit_file_read_event(str(file_path), content, "tool_call")
+
+    if start_line is None and not line_numbers:
+        return content
+
+    lines = content.splitlines()
+    total_lines = len(lines)
+
+    if start_line is None:
+        return _format_lines(lines, 1, line_numbers)
+
+    start_idx = start_line - 1
+    if start_idx >= total_lines:
+        return f"File only has {total_lines} lines, but start_line is {start_line}"
+
+    effective_end = min(end_line, total_lines) if end_line is not None else total_lines
+    selected = lines[start_idx:effective_end]
+
+    return _format_lines(selected, start_line, line_numbers)
 
 
 @tool
