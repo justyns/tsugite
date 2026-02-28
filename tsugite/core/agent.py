@@ -65,6 +65,7 @@ class AgentResult:
     cost: Optional[float] = None
     steps: Optional[List[StepResult]] = None
     error: Optional[str] = None
+    claude_code_session_id: Optional[str] = None
 
 
 class TsugiteAgent:
@@ -98,6 +99,7 @@ class TsugiteAgent:
         attachments: List[Attachment] = None,
         skills: List[Skill] = None,
         previous_messages: List[Dict] = None,
+        resume_session: str = None,
     ):
         """Initialize the agent.
 
@@ -113,6 +115,7 @@ class TsugiteAgent:
             attachments: List of Attachment objects for multi-modal inputs
             skills: List of Skill objects for loaded skills
             previous_messages: List of previous conversation messages (user/assistant pairs)
+            resume_session: Claude Code session ID to resume (only used with claude_code provider)
         """
         from tsugite.models import get_model_params
 
@@ -127,11 +130,9 @@ class TsugiteAgent:
         self.attachments = attachments or []
         self.skills = skills or []
         self.previous_messages = previous_messages or []
+        self._resume_session = resume_session
 
-        # Track cumulative cost across all steps
         self.total_cost = 0.0
-
-        # Track if previous turn had error (for recovery UX)
         self._previous_turn_had_error = False
 
         self.tool_map = {tool.name: tool for tool in tools}
@@ -139,6 +140,11 @@ class TsugiteAgent:
         self._inject_tools_into_executor()
 
         self.litellm_params = get_model_params(model_string, **(model_kwargs or {}))
+
+        # Detect claude_code provider
+        self._is_claude_code = self.litellm_params.get("_provider") == "claude_code"
+        self._claude_code_model = self.litellm_params.get("model") if self._is_claude_code else None
+        self._claude_code_session_id: Optional[str] = None
 
     def _run_async_in_sync_context(self, coro):
         """Run async coroutine in synchronous context, handling event loop properly.
@@ -298,9 +304,6 @@ class TsugiteAgent:
         Raises:
             RuntimeError: If agent reaches max_turns without finishing
         """
-        # Lazy load litellm only when actually running an agent
-        import litellm
-
         # Track execution time
         start_time = time.time()
 
@@ -311,6 +314,17 @@ class TsugiteAgent:
         if self.event_bus:
             self.event_bus.emit(TaskStartEvent(task=task, model=self.model_name))
 
+        # Start claude_code subprocess if needed
+        claude_process = None
+        if self._is_claude_code:
+            from .claude_code import ClaudeCodeProcess
+
+            claude_process = ClaudeCodeProcess()
+            await claude_process.start(
+                model=self._claude_code_model,
+                system_prompt=self._build_system_prompt(),
+                resume_session=self._resume_session,
+            )
         # Main agent loop
         for turn_num in range(self.max_turns):
             # Trigger turn start event
@@ -326,92 +340,17 @@ class TsugiteAgent:
             # Build conversation messages from memory
             messages = self._build_messages()
 
-            # Set sniffio context explicitly to avoid detection issues with anyio
-            # This prevents "unknown async library" errors when litellm uses run_in_executor
-            import sniffio
-
-            sniffio.current_async_library_cvar.set("asyncio")
-
-            # Call LiteLLM directly with pre-computed params
-            # Parameters are filtered for reasoning models (o1/o3/Claude)
-            if stream:
-                # Streaming mode: accumulate chunks and emit events
-                accumulated_content = ""
-                response = None
-
-                # Add stream parameter to litellm params
-                stream_params = {**self.litellm_params, "stream": True}
-
-                # Get the streaming response generator
-                stream_response = await litellm.acompletion(messages=messages, **stream_params)
-
-                async for chunk in stream_response:
-                    # Extract content from chunk
-                    if hasattr(chunk, "choices") and len(chunk.choices) > 0:
-                        delta = chunk.choices[0].delta
-                        if hasattr(delta, "content") and delta.content:
-                            chunk_text = delta.content
-                            accumulated_content += chunk_text
-
-                            # Emit stream chunk event
-                            if self.event_bus:
-                                self.event_bus.emit(StreamChunkEvent(chunk=chunk_text))
-
-                    # Save the last chunk as response for usage/cost tracking
-                    response = chunk
-
-                # Emit stream complete event
-                if self.event_bus:
-                    self.event_bus.emit(StreamCompleteEvent())
-
-                # Parse accumulated content
-                thought, code, _ = self._parse_response_from_text(accumulated_content)
+            response = None
+            if self._is_claude_code:
+                # Claude Code subprocess path
+                thought, code, step_cost = await self._claude_code_turn(
+                    claude_process, messages, turn_num, stream
+                )
             else:
-                # Non-streaming mode: get complete response
-                response = await litellm.acompletion(messages=messages, **self.litellm_params)
-
-                # Parse LLM response
-                # Response should contain: Thought + Code OR final_answer()
-                thought, code, _ = self._parse_response(response)
-
-            # Track cost from this response
-            step_cost = 0.0
-            if hasattr(response, "_hidden_params") and "response_cost" in response._hidden_params:
-                step_cost = response._hidden_params["response_cost"]
-
-            # Add to total if we got a cost
-            if step_cost is not None:
-                self.total_cost += step_cost
-
-            # Extract reasoning content if present (for o1/o3/Claude thinking)
-            reasoning_content = self._extract_reasoning_content(response)
-            if reasoning_content:
-                self.memory.add_reasoning(reasoning_content)
-                # Trigger reasoning content event
-                if self.event_bus:
-                    self.event_bus.emit(ReasoningContentEvent(content=reasoning_content, step=turn_num + 1))
-
-            # Check for reasoning tokens (o1/o3 models)
-            if response.usage and hasattr(response.usage, "completion_tokens_details"):
-                details = response.usage.completion_tokens_details
-                if hasattr(details, "reasoning_tokens") and details.reasoning_tokens:
-                    if self.event_bus:
-                        self.event_bus.emit(ReasoningTokensEvent(tokens=details.reasoning_tokens, step=turn_num + 1))
-
-            # Show LLM's thought/reasoning (always show what the LLM is saying)
-            # Skip this if streaming (already shown via STREAM_CHUNK events)
-            # Skip if text mode with no code (thought will be shown as final answer)
-            if self.event_bus and not stream:
-                # If we parsed a thought, show it. Otherwise show the raw response
-                # (this helps debug when LLM doesn't follow the expected format)
-                display_content = thought if thought else response.choices[0].message.content
-
-                if display_content and display_content.strip():
-                    self.event_bus.emit(
-                        LLMMessageEvent(
-                            content=display_content, title=f"Turn {turn_num + 1} Reasoning", step=turn_num + 1
-                        )
-                    )
+                # LiteLLM path
+                thought, code, step_cost, response = await self._litellm_turn(
+                    messages, turn_num, stream
+                )
 
             # Only execute code if the LLM actually generated some
             if code and code.strip():
@@ -526,25 +465,27 @@ class TsugiteAgent:
                 self.memory.add_final_answer(exec_result.final_answer)
 
                 # Trigger final answer event
+                total_tokens = None
+                if response and response.usage:
+                    total_tokens = response.usage.total_tokens
+
                 if self.event_bus:
                     self.event_bus.emit(
                         FinalAnswerEvent(
                             answer=str(exec_result.final_answer),
                             turns=turn_num + 1,
-                            tokens=response.usage.total_tokens if response.usage else None,
+                            tokens=total_tokens,
                             cost=self.total_cost if self.total_cost > 0 else None,
                         )
                     )
 
-                    # Trigger cost summary event
-                    total_tokens = response.usage.total_tokens if response.usage else None
                     duration = time.time() - start_time
 
                     # Extract cache-related fields (supported by OpenAI, Anthropic, Bedrock, Deepseek)
                     cached_tokens = None
                     cache_creation_tokens = None
                     cache_read_tokens = None
-                    if response.usage:
+                    if response and response.usage:
                         cached_tokens = getattr(response.usage, "cached_tokens", None)
                         cache_creation_tokens = getattr(response.usage, "cache_creation_input_tokens", None)
                         cache_read_tokens = getattr(response.usage, "cache_read_input_tokens", None)
@@ -561,24 +502,32 @@ class TsugiteAgent:
                         )
                     )
 
+                # Stop claude_code process on completion
+                if claude_process:
+                    self._claude_code_session_id = claude_process.session_id
+                    await claude_process.stop()
+
                 if return_full_result:
                     return AgentResult(
                         output=exec_result.final_answer,
-                        token_usage=response.usage.total_tokens if response.usage else None,
+                        token_usage=total_tokens,
                         cost=self.total_cost if self.total_cost > 0 else None,
                         steps=self.memory.steps,
+                        claude_code_session_id=self._claude_code_session_id,
                     )
                 return exec_result.final_answer
 
             # Continue loop (LLM will see the observation in next iteration)
 
         # If we get here, we hit max_turns
+        if claude_process:
+            self._claude_code_session_id = claude_process.session_id
+            await claude_process.stop()
+
         error_msg = f"Agent reached max_turns ({self.max_turns}) without completing task"
         if self.event_bus:
             self.event_bus.emit(ErrorEvent(error=error_msg, error_type="RuntimeError"))
 
-        # When full result is requested, return AgentResult with error field
-        # so callers can inspect execution steps even on failure
         if return_full_result:
             return AgentResult(
                 output=None,
@@ -586,9 +535,115 @@ class TsugiteAgent:
                 cost=self.total_cost,
                 steps=self.memory.steps,
                 error=error_msg,
+                claude_code_session_id=self._claude_code_session_id,
             )
 
         raise RuntimeError(error_msg)
+
+    async def _claude_code_turn(self, process, messages, turn_num, stream) -> tuple:
+        """Execute one turn via Claude Code subprocess.
+
+        Returns:
+            (thought, code, step_cost)
+        """
+        # Build user content for this turn
+        if turn_num == 0:
+            # First turn: include previous conversation context (for --continue)
+            user_content = self._build_claude_code_first_message()
+        else:
+            # Subsequent turns: subprocess has context, just send the new observation
+            user_content = messages[-1]["content"] if messages else ""
+
+        accumulated = ""
+        step_cost = 0.0
+
+        async for event in process.send_message(user_content):
+            if event["type"] == "text_delta":
+                accumulated += event["text"]
+                if stream and self.event_bus:
+                    self.event_bus.emit(StreamChunkEvent(chunk=event["text"]))
+            elif event["type"] == "result":
+                if not accumulated:
+                    accumulated = event.get("text", "")
+                step_cost = event.get("cost_usd") or 0.0
+                self.total_cost += step_cost
+                self._claude_code_session_id = event.get("session_id", self._claude_code_session_id)
+
+        if stream and self.event_bus:
+            self.event_bus.emit(StreamCompleteEvent())
+
+        thought, code, _ = self._parse_response_from_text(accumulated)
+
+        if self.event_bus and not stream and thought.strip():
+            self.event_bus.emit(
+                LLMMessageEvent(content=thought, title=f"Turn {turn_num + 1} Reasoning", step=turn_num + 1)
+            )
+
+        return thought, code, step_cost
+
+    async def _litellm_turn(self, messages, turn_num, stream) -> tuple:
+        """Execute one turn via LiteLLM.
+
+        Returns:
+            (thought, code, step_cost, response)
+        """
+        import litellm
+        import sniffio
+
+        sniffio.current_async_library_cvar.set("asyncio")
+
+        if stream:
+            accumulated_content = ""
+            response = None
+            stream_params = {**self.litellm_params, "stream": True}
+            stream_response = await litellm.acompletion(messages=messages, **stream_params)
+
+            async for chunk in stream_response:
+                if hasattr(chunk, "choices") and len(chunk.choices) > 0:
+                    delta = chunk.choices[0].delta
+                    if hasattr(delta, "content") and delta.content:
+                        chunk_text = delta.content
+                        accumulated_content += chunk_text
+                        if self.event_bus:
+                            self.event_bus.emit(StreamChunkEvent(chunk=chunk_text))
+                response = chunk
+
+            if self.event_bus:
+                self.event_bus.emit(StreamCompleteEvent())
+
+            thought, code, _ = self._parse_response_from_text(accumulated_content)
+        else:
+            response = await litellm.acompletion(messages=messages, **self.litellm_params)
+            thought, code, _ = self._parse_response(response)
+
+        # Track cost
+        step_cost = 0.0
+        if hasattr(response, "_hidden_params") and "response_cost" in response._hidden_params:
+            step_cost = response._hidden_params["response_cost"]
+        if step_cost is not None:
+            self.total_cost += step_cost
+
+        # Extract reasoning content
+        reasoning_content = self._extract_reasoning_content(response)
+        if reasoning_content:
+            self.memory.add_reasoning(reasoning_content)
+            if self.event_bus:
+                self.event_bus.emit(ReasoningContentEvent(content=reasoning_content, step=turn_num + 1))
+
+        if response.usage and hasattr(response.usage, "completion_tokens_details"):
+            details = response.usage.completion_tokens_details
+            if hasattr(details, "reasoning_tokens") and details.reasoning_tokens:
+                if self.event_bus:
+                    self.event_bus.emit(ReasoningTokensEvent(tokens=details.reasoning_tokens, step=turn_num + 1))
+
+        if self.event_bus and not stream:
+            display_content = thought if thought else response.choices[0].message.content
+            if display_content and display_content.strip():
+                self.event_bus.emit(
+                    LLMMessageEvent(content=display_content, title=f"Turn {turn_num + 1} Reasoning", step=turn_num + 1)
+                )
+
+        return thought, code, step_cost, response
 
     def _format_attachment(self, attachment: Attachment) -> Optional[Dict]:
         """Format an attachment for LiteLLM based on its content type.
@@ -784,6 +839,26 @@ class TsugiteAgent:
             messages.append({"role": "user", "content": self._build_observation(step)})
 
         return messages
+
+    def _build_claude_code_first_message(self) -> str:
+        """Build first message for claude_code subprocess, including conversation history.
+
+        For --continue runs, includes previous conversation as context so the
+        subprocess can recall earlier messages without relying on --resume.
+        """
+        parts = []
+
+        # Include previous conversation history if continuing
+        if self.previous_messages:
+            history_lines = [
+                f"{msg.get('role', 'unknown').capitalize()}: {msg.get('content', '')}"
+                for msg in self.previous_messages
+            ]
+            parts.append("<conversation_history>\n" + "\n\n".join(history_lines) + "\n</conversation_history>\n")
+
+        # Add the current task
+        parts.append(self.memory.task)
+        return "\n".join(parts)
 
     def _build_system_prompt(self) -> str:
         """Build system prompt that teaches LLM how to solve tasks."""

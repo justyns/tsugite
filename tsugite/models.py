@@ -124,6 +124,8 @@ def get_model_params(model_string: str, **kwargs) -> dict:
         return build_google_params(model_name, params)
     elif provider == "github_copilot":
         return build_github_copilot_params(model_name, params)
+    elif provider == "claude_code":
+        return build_claude_code_params(model_name, params)
     else:
         return build_fallback_params(provider, model_name, params)
 
@@ -239,6 +241,21 @@ def build_github_copilot_params(model_name: str, params: dict) -> dict:
         extra_headers["Copilot-Integration-Id"] = "vscode-chat"
     params["extra_headers"] = extra_headers
 
+    return params
+
+
+def build_claude_code_params(model_name: str, params: dict) -> dict:
+    """Build parameters for Claude Code CLI provider.
+
+    Args:
+        model_name: The model name (sonnet, opus, haiku, or full model ID)
+        params: Base parameters dict
+
+    Returns:
+        Updated parameters dict with _provider marker
+    """
+    params["model"] = model_name
+    params["_provider"] = "claude_code"
     return params
 
 
