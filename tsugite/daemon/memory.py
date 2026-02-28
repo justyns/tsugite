@@ -48,6 +48,18 @@ def infer_compaction_model(agent_model: str) -> str:
     return compact if compact is not None else resolved
 
 
+def _resolve_litellm_model(model: str) -> str:
+    """Resolve a tsugite model string to the litellm-compatible model ID.
+
+    For claude_code provider, maps short names (sonnet, opus) to full model IDs
+    that litellm recognizes. For other providers, returns the model ID as-is.
+    """
+    from tsugite.models import get_model_params
+
+    params = get_model_params(model)
+    return params.get("_litellm_model", params["model"])
+
+
 def _get_context_limit(model: str, fallback: int | None = None) -> int:
     """Get context limit for a model via litellm.
 
@@ -55,9 +67,7 @@ def _get_context_limit(model: str, fallback: int | None = None) -> int:
     """
     from litellm import get_model_info
 
-    from tsugite.models import get_model_params
-
-    litellm_model = get_model_params(model)["model"]
+    litellm_model = _resolve_litellm_model(model)
     try:
         info = get_model_info(litellm_model)
         limit = info.get("max_input_tokens")
@@ -73,10 +83,7 @@ def _count_tokens(text: str, model: str) -> int:
     try:
         from litellm import token_counter
 
-        from tsugite.models import get_model_params
-
-        litellm_model = get_model_params(model)["model"]
-        return token_counter(model=litellm_model, text=text)
+        return token_counter(model=_resolve_litellm_model(model), text=text)
     except Exception:
         return len(text) // 4
 

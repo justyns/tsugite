@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from tsugite.models import get_model_params, parse_model_string
+from tsugite.models import _CLAUDE_CODE_MODEL_MAP, get_model_params, parse_model_string
 
 
 # ── Model parsing tests ──
@@ -48,6 +48,15 @@ class TestClaudeCodeModelParams:
         params = get_model_params("claude_code:claude-sonnet-4-6")
         assert params["model"] == "claude-sonnet-4-6"
         assert params["_provider"] == "claude_code"
+
+    def test_litellm_model_mapping_short_names(self):
+        for short, full in _CLAUDE_CODE_MODEL_MAP.items():
+            params = get_model_params(f"claude_code:{short}")
+            assert params["_litellm_model"] == full
+
+    def test_litellm_model_mapping_full_id_passthrough(self):
+        params = get_model_params("claude_code:claude-sonnet-4-6")
+        assert params["_litellm_model"] == "claude-sonnet-4-6"
 
 
 # ── ClaudeCodeProcess tests ──
@@ -155,7 +164,7 @@ class TestClaudeCodeProcess:
     async def test_send_message_parses_assistant_event(self, process):
         """Test parsing the real claude CLI format: assistant event with full text."""
         events = [
-            json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "Hello world"}]}, "session_id": "s1"}),
+            json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "Hello world"}], "usage": {"input_tokens": 100, "output_tokens": 50}}, "session_id": "s1"}),
             json.dumps({"type": "result", "subtype": "success", "result": "Hello world", "total_cost_usd": 0.015, "duration_ms": 1200, "session_id": "s1"}),
         ]
         process._process = self._mock_proc(events)
@@ -173,6 +182,8 @@ class TestClaudeCodeProcess:
         assert len(results) == 1
         assert results[0]["text"] == "Hello world"
         assert results[0]["cost_usd"] == 0.015
+        assert results[0]["input_tokens"] == 100
+        assert results[0]["output_tokens"] == 50
 
     @pytest.mark.asyncio
     async def test_send_message_parses_content_block_deltas(self, process):
@@ -295,7 +306,7 @@ class TestClaudeCodeAgentIntegration:
         async def mock_send(*args, **kwargs):
             events = [
                 {"type": "text_delta", "text": "Thought: simple\n```python\nfinal_answer('42')\n```"},
-                {"type": "result", "text": "Thought: simple\n```python\nfinal_answer('42')\n```", "cost_usd": 0.001, "session_id": "test-session"},
+                {"type": "result", "text": "Thought: simple\n```python\nfinal_answer('42')\n```", "cost_usd": 0.001, "session_id": "test-session", "input_tokens": 500, "output_tokens": 100},
             ]
             for e in events:
                 yield e
@@ -308,8 +319,47 @@ class TestClaudeCodeAgentIntegration:
             result = await agent.run("what is 6*7")
 
         assert result == "42"
+        assert agent._claude_code_last_turn_tokens == 600
         mock_process.start.assert_called_once()
         mock_process.stop.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_agent_run_emits_tokens_in_final_answer(self):
+        from tsugite.core.agent import TsugiteAgent
+        from tsugite.events import EventBus, FinalAnswerEvent
+
+        bus = EventBus()
+        captured_events = []
+        bus.subscribe(lambda e: captured_events.append(e) if isinstance(e, FinalAnswerEvent) else None)
+
+        agent = TsugiteAgent(
+            model_string="claude_code:sonnet",
+            tools=[],
+            instructions="test",
+            max_turns=2,
+            event_bus=bus,
+        )
+
+        mock_process = AsyncMock()
+        mock_process.session_id = "test-session"
+
+        async def mock_send(*args, **kwargs):
+            events = [
+                {"type": "text_delta", "text": "Thought: done\n```python\nfinal_answer('hi')\n```"},
+                {"type": "result", "text": "", "cost_usd": 0.01, "session_id": "test-session", "input_tokens": 1000, "output_tokens": 200},
+            ]
+            for e in events:
+                yield e
+
+        mock_process.send_message = mock_send
+        mock_process.start = AsyncMock()
+        mock_process.stop = AsyncMock()
+
+        with patch("tsugite.core.claude_code.ClaudeCodeProcess", return_value=mock_process):
+            await agent.run("hello")
+
+        assert len(captured_events) == 1
+        assert captured_events[0].tokens == 1200
 
 
 # ── Session ID passthrough tests ──
@@ -339,3 +389,24 @@ class TestSessionIdPassthrough:
 
         result = AgentExecutionResult(response="test")
         assert result.claude_code_session_id is None
+
+
+# ── Context limit resolution tests ──
+
+
+class TestClaudeCodeContextLimit:
+    def test_context_limit_uses_litellm_model(self):
+        from tsugite.daemon.memory import _get_context_limit
+
+        with patch("litellm.get_model_info") as mock_info:
+            mock_info.return_value = {"max_input_tokens": 200_000}
+            limit = _get_context_limit("claude_code:opus")
+            mock_info.assert_called_with("claude-opus-4-6")
+            assert limit == 200_000
+
+    def test_context_limit_fallback_on_error(self):
+        from tsugite.daemon.memory import _get_context_limit
+
+        with patch("litellm.get_model_info", side_effect=Exception("unknown")):
+            limit = _get_context_limit("claude_code:opus", fallback=150_000)
+            assert limit == 150_000

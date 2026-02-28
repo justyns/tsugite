@@ -244,6 +244,13 @@ def build_github_copilot_params(model_name: str, params: dict) -> dict:
     return params
 
 
+_CLAUDE_CODE_MODEL_MAP = {
+    "opus": "claude-opus-4-6",
+    "sonnet": "claude-sonnet-4-6",
+    "haiku": "claude-haiku-4-5-20251001",
+}
+
+
 def build_claude_code_params(model_name: str, params: dict) -> dict:
     """Build parameters for Claude Code CLI provider.
 
@@ -256,6 +263,7 @@ def build_claude_code_params(model_name: str, params: dict) -> dict:
     """
     params["model"] = model_name
     params["_provider"] = "claude_code"
+    params["_litellm_model"] = _CLAUDE_CODE_MODEL_MAP.get(model_name, model_name)
     return params
 
 

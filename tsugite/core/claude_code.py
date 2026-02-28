@@ -33,6 +33,7 @@ class ClaudeCodeProcess:
         self._system_prompt_file: str | None = None
         self._stderr_lines: list[str] = []
         self._stderr_task: asyncio.Task | None = None
+        self._last_usage: dict = {}
 
     @property
     def session_id(self) -> str | None:
@@ -155,9 +156,12 @@ class ClaudeCodeProcess:
                 if delta.get("type") == "text_delta":
                     yield {"type": "text_delta", "text": delta["text"]}
 
-            # Full assistant message — extract text from content blocks
+            # Full assistant message — extract text and usage from content blocks
             elif event_type == "assistant":
                 message = event.get("message", {})
+                usage = message.get("usage", {})
+                if usage:
+                    self._last_usage = usage
                 content_blocks = message.get("content", [])
                 text = "".join(
                     block.get("text", "") for block in content_blocks if block.get("type") == "text"
@@ -177,6 +181,8 @@ class ClaudeCodeProcess:
                     "cost_usd": cost,
                     "duration_ms": duration,
                     "session_id": event.get("session_id", self._session_id),
+                    "input_tokens": self._last_usage.get("input_tokens"),
+                    "output_tokens": self._last_usage.get("output_tokens"),
                 }
                 return
 

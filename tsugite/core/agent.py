@@ -148,6 +148,7 @@ class TsugiteAgent:
         self._is_claude_code = self.litellm_params.get("_provider") == "claude_code"
         self._claude_code_model = self.litellm_params.get("model") if self._is_claude_code else None
         self._claude_code_session_id: Optional[str] = None
+        self._claude_code_last_turn_tokens: int = 0
 
     def _run_async_in_sync_context(self, coro):
         """Run async coroutine in synchronous context, handling event loop properly.
@@ -472,9 +473,12 @@ class TsugiteAgent:
                 self.memory.add_final_answer(exec_result.final_answer)
 
                 # Trigger final answer event
-                total_tokens = None
                 if response and response.usage:
                     total_tokens = response.usage.total_tokens
+                elif self._is_claude_code and self._claude_code_last_turn_tokens:
+                    total_tokens = self._claude_code_last_turn_tokens
+                else:
+                    total_tokens = None
 
                 if self.event_bus:
                     self.event_bus.emit(
@@ -575,6 +579,9 @@ class TsugiteAgent:
                 step_cost = event.get("cost_usd") or 0.0
                 self.total_cost += step_cost
                 self._claude_code_session_id = event.get("session_id", self._claude_code_session_id)
+                input_tokens = event.get("input_tokens") or 0
+                output_tokens = event.get("output_tokens") or 0
+                self._claude_code_last_turn_tokens = input_tokens + output_tokens
 
         if stream and self.event_bus:
             self.event_bus.emit(StreamCompleteEvent())
