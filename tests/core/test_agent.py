@@ -528,6 +528,86 @@ final_answer(42)
         assert result == 42
 
 
+def test_build_budget_tag():
+    """Test budget tag includes turn and token info."""
+    agent = TsugiteAgent(
+        model_string="openai:gpt-4o-mini",
+        tools=[],
+        instructions="",
+        max_turns=10,
+    )
+
+    # No tokens used yet
+    tag = agent._build_budget_tag(0)
+    assert '<tsugite_budget turn="1" max_turns="10" />' in tag
+    assert "tokens_used" not in tag
+    assert "warning" not in tag
+
+    # With tokens
+    agent.total_tokens = 5000
+    tag = agent._build_budget_tag(4)
+    assert 'turn="5"' in tag
+    assert 'max_turns="10"' in tag
+    assert 'tokens_used="5000"' in tag
+    assert "warning" not in tag
+
+    # Near the limit (1 turn remaining)
+    tag = agent._build_budget_tag(8)
+    assert 'turn="9"' in tag
+    assert 'warning="approaching turn limit, wrap up soon"' in tag
+
+    # Last turn (0 remaining)
+    tag = agent._build_budget_tag(9)
+    assert 'turn="10"' in tag
+    assert "warning=" in tag
+
+
+@pytest.mark.asyncio
+async def test_budget_tag_in_observations(mock_litellm_response):
+    """Test that observations include the budget tag with accumulated tokens."""
+    call_count = 0
+
+    async def mock_acompletion(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+
+        if call_count == 1:
+            return mock_litellm_response("""Thought: Step 1.
+
+```python
+x = 42
+print(x)
+```""")
+        else:
+            return mock_litellm_response("""Thought: Done.
+
+```python
+final_answer(x)
+```""")
+
+    with patch("litellm.acompletion", new=mock_acompletion):
+        agent = TsugiteAgent(
+            model_string="openai:gpt-4o-mini",
+            tools=[],
+            instructions="",
+            max_turns=5,
+        )
+
+        result = await agent.run("Test task")
+        assert result == 42
+
+        # First step observation should contain budget tag
+        step1_output = agent.memory.steps[0].output
+        assert "<tsugite_budget" in step1_output
+        assert 'turn="1"' in step1_output
+        assert 'max_turns="5"' in step1_output
+        # Mock returns 100 tokens per call
+        assert 'tokens_used="100"' in step1_output
+
+        # Token accumulation should work
+        assert agent.total_tokens == 200  # 100 per call * 2 calls
+
+
 def test_tool_execution_no_task_warnings():
     """Test that calling async tools from sync context doesn't produce Task warnings.
 

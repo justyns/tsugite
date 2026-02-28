@@ -136,6 +136,7 @@ class TsugiteAgent:
         self._resume_session = resume_session
 
         self.total_cost = 0.0
+        self.total_tokens = 0
         self._previous_turn_had_error = False
 
         self.tool_map = {tool.name: tool for tool in tools}
@@ -456,6 +457,9 @@ class TsugiteAgent:
                     "or ask_user() if you need input from the user.)"
                 )
 
+            # Append turn/token budget tag so the LLM knows its resource limits
+            step_output += self._build_budget_tag(turn_num)
+
             # Add this step to memory (only for successful executions or text mode)
             self.memory.add_step(
                 thought=thought,
@@ -582,6 +586,7 @@ class TsugiteAgent:
                 input_tokens = event.get("input_tokens") or 0
                 output_tokens = event.get("output_tokens") or 0
                 self._claude_code_last_turn_tokens = input_tokens + output_tokens
+                self.total_tokens += input_tokens + output_tokens
 
         if stream and self.event_bus:
             self.event_bus.emit(StreamCompleteEvent())
@@ -636,6 +641,10 @@ class TsugiteAgent:
             step_cost = response._hidden_params["response_cost"]
         if step_cost is not None:
             self.total_cost += step_cost
+
+        # Track cumulative tokens
+        if response and response.usage:
+            self.total_tokens += getattr(response.usage, "total_tokens", 0) or 0
 
         # Extract reasoning content
         reasoning_content = self._extract_reasoning_content(response)
@@ -877,6 +886,16 @@ class TsugiteAgent:
     def _build_system_prompt(self) -> str:
         """Build system prompt that teaches LLM how to solve tasks."""
         return build_system_prompt(self.tools, self.instructions)
+
+    def _build_budget_tag(self, turn_num: int) -> str:
+        """Build XML budget tag showing turn and token usage for the LLM."""
+        turn = turn_num + 1
+        parts = [f'turn="{turn}"', f'max_turns="{self.max_turns}"']
+        if self.total_tokens > 0:
+            parts.append(f'tokens_used="{self.total_tokens}"')
+        if self.max_turns - turn <= 1:
+            parts.append('warning="approaching turn limit, wrap up soon"')
+        return f'\n<tsugite_budget {" ".join(parts)} />'
 
     def _parse_response(self, response) -> tuple[str, str, Optional[str]]:
         """Parse LLM response into thought, code, and final_answer.
