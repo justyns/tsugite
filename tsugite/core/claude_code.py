@@ -6,11 +6,14 @@ enabling Claude Max subscription auth. Text-only, no multimodal support.
 
 import asyncio
 import json
+import logging
 import os
 import shutil
 import tempfile
 import uuid
 from collections.abc import AsyncIterator
+
+logger = logging.getLogger(__name__)
 
 # Env vars that must be unset to avoid "nested session" detection
 _CLAUDE_ENV_VARS = {"CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "ANTHROPIC_API_KEY"}
@@ -100,6 +103,7 @@ class ClaudeCodeProcess:
 
         # Start draining stderr in background to prevent pipe buffer deadlock
         self._stderr_task = asyncio.create_task(self._drain_stderr())
+        logger.info("Claude Code subprocess started (pid=%d, model=%s)", self._process.pid, model)
 
     async def send_message(self, content: str) -> AsyncIterator[dict]:
         """Write user message to stdin and yield streaming events from stdout.
@@ -120,6 +124,7 @@ class ClaudeCodeProcess:
         }
         self._process.stdin.write((json.dumps(msg) + "\n").encode())
         await self._process.stdin.drain()
+        logger.debug("Sent message (%.200s)", content)
 
         while True:
             line = await self._process.stdout.readline()
@@ -141,6 +146,7 @@ class ClaudeCodeProcess:
             # Init event — capture session_id (arrives after first user message)
             if event_type == "system" and event.get("subtype") == "init":
                 self._session_id = event.get("session_id")
+                logger.debug("Init event received (session=%s)", self._session_id)
                 continue
 
             # Content block delta (streaming with --include-partial-messages)
@@ -161,11 +167,15 @@ class ClaudeCodeProcess:
 
             # Final result
             elif event_type == "result":
+                result_text = event.get("result", "")
+                cost = event.get("total_cost_usd")
+                duration = event.get("duration_ms")
+                logger.debug("Result received (cost=$%s, %sms): %.200s", cost, duration, result_text)
                 yield {
                     "type": "result",
-                    "text": event.get("result", ""),
-                    "cost_usd": event.get("total_cost_usd"),
-                    "duration_ms": event.get("duration_ms"),
+                    "text": result_text,
+                    "cost_usd": cost,
+                    "duration_ms": duration,
                     "session_id": event.get("session_id", self._session_id),
                 }
                 return

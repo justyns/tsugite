@@ -5,9 +5,12 @@ model parameters and reasoning model support.
 """
 
 import asyncio
+import logging
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 from tsugite.attachments.base import Attachment, AttachmentContentType
 from tsugite.events import (
@@ -339,6 +342,8 @@ class TsugiteAgent:
 
             # Build conversation messages from memory
             messages = self._build_messages()
+            last_msg = messages[-1]["content"] if messages else ""
+            logger.debug("Turn %d sending %d messages (last: %.200s)", turn_num + 1, len(messages), last_msg)
 
             response = None
             if self._is_claude_code:
@@ -351,6 +356,8 @@ class TsugiteAgent:
                 thought, code, step_cost, response = await self._litellm_turn(
                     messages, turn_num, stream
                 )
+
+            logger.debug("Turn %d response (cost=%.4f): %.200s", turn_num + 1, step_cost, (thought or "")[:200])
 
             # Only execute code if the LLM actually generated some
             if code and code.strip():
