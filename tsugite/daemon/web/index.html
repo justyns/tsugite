@@ -13,7 +13,7 @@
 <nav>
   <h1>Tsugite</h1>
   <div class="tab-bar">
-    <template x-for="tab in ['dashboard','chat','schedules','history','webhooks']" :key="tab">
+    <template x-for="tab in ['dashboard','chat','agents','schedules','history','webhooks']" :key="tab">
       <button @click="$store.app.view = tab; location.hash = tab"
               :class="{ active: $store.app.view === tab }"
               x-text="tab[0].toUpperCase() + tab.slice(1)"></button>
@@ -44,7 +44,12 @@
           <div class="card-grid">
             <template x-for="card in agentCards" :key="card.name">
               <div class="card">
-                <h3 x-text="card.name"></h3>
+                <h3>
+                  <span x-text="card.name"></span>
+                  <template x-if="card.running_tasks > 0">
+                    <span class="badge badge-accent" style="margin-left:8px;font-size:11px"><span class="spinner" style="width:10px;height:10px;margin-right:4px"></span> running</span>
+                  </template>
+                </h3>
                 <div class="card-meta">
                   <div>Model: <span x-text="card.model || 'unknown'"></span></div>
                   <div>Context: <span x-text="contextDisplay(card)"></span></div>
@@ -239,6 +244,74 @@
     </div>
   </div>
 
+  <!-- Agent Files -->
+  <div class="view" x-show="$store.app.view === 'agents'" x-data="agentFileView" x-cloak>
+    <div class="view-scroll" style="display:flex;gap:16px">
+      <!-- File list -->
+      <div style="width:280px;flex-shrink:0">
+        <div class="section-header">
+          <h2>Agent Files</h2>
+          <select x-model="filter" style="font-size:12px;padding:2px 4px">
+            <option value="all">All</option>
+            <option value="project">Project</option>
+            <option value="builtin">Builtin</option>
+            <option value="global">Global</option>
+          </select>
+        </div>
+        <template x-if="loading">
+          <div class="empty-state"><span class="spinner"></span></div>
+        </template>
+        <template x-if="!loading && filteredFiles.length === 0">
+          <div class="empty-state">No agent files found</div>
+        </template>
+        <div class="turn-list">
+          <template x-for="file in filteredFiles" :key="file.path">
+            <div class="turn-item" :class="{ active: selectedFile?.path === file.path }"
+                 @click="selectFile(file)">
+              <div>
+                <span x-text="file.name"></span>
+                <template x-if="file.readonly">
+                  <span class="badge" style="font-size:10px;margin-left:4px">readonly</span>
+                </template>
+              </div>
+              <div class="turn-meta" x-text="file.source + (file.description ? ' · ' + file.description : '')"></div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- Editor -->
+      <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+        <template x-if="!selectedFile">
+          <div class="empty-state">Select an agent file to view</div>
+        </template>
+        <template x-if="selectedFile">
+          <div style="display:flex;flex-direction:column;flex:1;min-height:0">
+            <div class="section-header">
+              <h2>
+                <span x-text="selectedFile.name"></span>
+                <template x-if="isDirty">
+                  <span style="color:var(--accent);font-size:12px;margin-left:8px">unsaved</span>
+                </template>
+              </h2>
+              <template x-if="!selectedFile.readonly">
+                <button class="btn-sm" @click="save()" :disabled="saving || !isDirty"
+                        x-text="saving ? 'Saving...' : 'Save'"></button>
+              </template>
+            </div>
+            <div style="font-size:11px;color:var(--muted);margin-bottom:8px" x-text="selectedFile.path"></div>
+            <template x-if="error">
+              <div class="msg error" x-text="error" style="margin-bottom:8px"></div>
+            </template>
+            <textarea x-model="content"
+                      :readonly="selectedFile.readonly"
+                      style="flex:1;min-height:300px;font-family:monospace;font-size:13px;resize:vertical;background:var(--surface0);color:var(--text);border:1px solid var(--surface2);border-radius:6px;padding:12px;tab-size:2"></textarea>
+          </div>
+        </template>
+      </div>
+    </div>
+  </div>
+
   <!-- Schedules -->
   <div class="view" x-show="$store.app.view === 'schedules'" x-data="scheduleView" x-cloak>
     <div class="view-scroll">
@@ -273,6 +346,16 @@
           <div class="form-group">
             <label>Prompt</label>
             <textarea x-model="form.prompt" rows="2" placeholder="Task for the agent..." style="resize:vertical"></textarea>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Model</label>
+              <input x-model="form.model" placeholder="e.g. openai:gpt-4o-mini">
+            </div>
+            <div class="form-group">
+              <label>Agent File</label>
+              <input x-model="form.agent_file" placeholder="e.g. my-agent.md">
+            </div>
           </div>
           <div class="form-row">
             <div class="form-group">
@@ -312,12 +395,14 @@
 
       <template x-if="!loading && schedules.length > 0">
         <table class="data-table">
-          <thead><tr><th>ID</th><th>Agent</th><th>Type</th><th>Status</th><th>Next Run</th><th>Last Run</th><th>Actions</th></tr></thead>
+          <thead><tr><th>ID</th><th>Agent</th><th>Model</th><th>Agent File</th><th>Type</th><th>Status</th><th>Next Run</th><th>Last Run</th><th>Actions</th></tr></thead>
           <tbody>
             <template x-for="s in schedules" :key="s.id">
               <tr>
                 <td x-text="s.id"></td>
                 <td x-text="s.agent"></td>
+                <td x-text="s.model || '—'"></td>
+                <td x-text="s.agent_file || '—'"></td>
                 <td x-text="s.schedule_type"></td>
                 <td><span class="badge" :class="statusBadge(s)" x-text="statusLabel(s)"></span></td>
                 <td x-text="formatDate(s.next_run)"></td>

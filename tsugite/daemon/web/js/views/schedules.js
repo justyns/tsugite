@@ -1,7 +1,7 @@
 import { get, post, patch, del } from '../api.js';
 import { formatDate } from '../utils.js';
 
-const emptyForm = () => ({ id: '', agent: '', prompt: '', schedule_type: 'cron', cron_expr: '', run_at: '', timezone: 'UTC' });
+const emptyForm = () => ({ id: '', agent: '', prompt: '', schedule_type: 'cron', cron_expr: '', run_at: '', timezone: 'UTC', model: '', agent_file: '' });
 
 export default () => ({
   schedules: [],
@@ -64,6 +64,8 @@ export default () => ({
       cron_expr: s.cron_expr || '',
       run_at: s.run_at || '',
       timezone: s.timezone || 'UTC',
+      model: s.model || '',
+      agent_file: s.agent_file || '',
     };
     this.showForm = true;
   },
@@ -82,6 +84,8 @@ export default () => ({
       if (this.form.schedule_type === 'cron' && this.form.cron_expr) body.cron_expr = this.form.cron_expr;
       if (this.form.schedule_type === 'once' && this.form.run_at) body.run_at = this.form.run_at;
       if (this.form.timezone) body.timezone = this.form.timezone;
+      if (this.form.model) body.model = this.form.model;
+      if (this.form.agent_file) body.agent_file = this.form.agent_file;
       try {
         await patch(`/api/schedules/${this.editingId}`, body);
         this.cancelForm();
