@@ -1,6 +1,6 @@
 [project]
 name = "tsugite-cli"
-version = "0.5.0"
+version = "0.6.0"
 description = "Micro-agent runner for task automation using markdown definitions"
 authors = [{ name = "Justyn Shull" }]
 requires-python = ">=3.11"
