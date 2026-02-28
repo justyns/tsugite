@@ -17,6 +17,7 @@ from starlette.responses import HTMLResponse, JSONResponse, Response, StreamingR
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
+from tsugite.agent_inheritance import get_builtin_agents_path, get_global_agents_paths
 from tsugite.daemon.adapters.base import BaseAdapter, ChannelContext
 from tsugite.daemon.config import AgentConfig, HTTPConfig
 from tsugite.daemon.scheduler import ScheduleEntry
@@ -25,6 +26,7 @@ from tsugite.events.base import BaseEvent
 from tsugite.history.models import CompactionSummary, Turn
 from tsugite.history.storage import SessionStorage, get_history_dir
 from tsugite.ui.jsonl import JSONLUIHandler
+from tsugite.utils import parse_yaml_frontmatter
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
@@ -189,6 +191,9 @@ class HTTPServer:
             Route("/api/webhooks", self._create_webhook, methods=["POST"]),
             Route("/api/webhooks/{token}", self._delete_webhook, methods=["DELETE"]),
             Route("/webhook/{token}", self._webhook, methods=["POST"]),
+            Route("/api/agent-files", self._list_agent_files, methods=["GET"]),
+            Route("/api/agent-files/content", self._read_agent_file, methods=["GET"]),
+            Route("/api/agent-files/content", self._save_agent_file, methods=["PUT"]),
             Mount("/static", app=StaticFiles(directory=str(WEB_DIR)), name="static"),
             Route("/", self._serve_ui, methods=["GET"]),
         ]
@@ -200,11 +205,15 @@ class HTTPServer:
     async def _list_agents(self, request: Request) -> JSONResponse:
         if err := self._check_auth(request):
             return err
+        running_by_agent: dict[str, list[str]] = {}
+        for (agent_name, user_id) in self._active_backends:
+            running_by_agent.setdefault(agent_name, []).append(user_id)
         agents = [
             {
                 "name": name,
                 "agent_file": adapter.agent_config.agent_file,
                 "workspace_dir": str(adapter.agent_config.workspace_dir),
+                "running_tasks": len(running_by_agent.get(name, [])),
             }
             for name, adapter in self.adapters.items()
         ]
@@ -565,7 +574,7 @@ class HTTPServer:
             return JSONResponse({"error": "invalid JSON body"}, status_code=400)
 
         schedule_id = request.path_params["schedule_id"]
-        allowed = {"prompt", "cron_expr", "run_at", "timezone", "agent", "schedule_type", "model"}
+        allowed = {"prompt", "cron_expr", "run_at", "timezone", "agent", "schedule_type", "model", "agent_file"}
         fields = {k: v for k, v in body.items() if k in allowed}
         if not fields:
             return JSONResponse({"error": "no updatable fields provided"}, status_code=400)
@@ -692,6 +701,110 @@ class HTTPServer:
         (inbox_dir / filename).write_text(json.dumps(envelope, indent=2, default=str))
 
         return JSONResponse({"status": "accepted", "file": filename}, status_code=202)
+
+    def _get_allowed_agent_dirs(self) -> list[tuple[Path, str, bool]]:
+        """Return (directory, source_label, is_readonly) for all agent directories."""
+        dirs: list[tuple[Path, str, bool]] = [(get_builtin_agents_path(), "builtin", True)]
+        seen: set[Path] = set()
+        for cfg in self.agent_configs.values():
+            for subdir in [cfg.workspace_dir / ".tsugite", cfg.workspace_dir / "agents"]:
+                resolved = subdir.resolve()
+                if resolved not in seen:
+                    seen.add(resolved)
+                    dirs.append((subdir, "project", False))
+        for gpath in get_global_agents_paths():
+            dirs.append((gpath, "global", False))
+        return dirs
+
+    def _validate_agent_path(self, path_str: str) -> tuple[Path, bool, Optional[JSONResponse]]:
+        """Validate an agent file path is within allowed directories.
+
+        Returns (resolved_path, is_readonly, error_response_or_none).
+        """
+        try:
+            resolved = Path(path_str).resolve()
+        except (ValueError, OSError):
+            return Path(), False, JSONResponse({"error": "invalid path"}, status_code=400)
+        if resolved.suffix != ".md":
+            return Path(), False, JSONResponse({"error": "only .md files allowed"}, status_code=400)
+        for dir_path, _, readonly in self._get_allowed_agent_dirs():
+            try:
+                resolved.relative_to(dir_path.resolve())
+                return resolved, readonly, None
+            except ValueError:
+                continue
+        return Path(), False, JSONResponse({"error": "path not in allowed directories"}, status_code=403)
+
+    async def _list_agent_files(self, request: Request) -> JSONResponse:
+        if err := self._check_auth(request):
+            return err
+        files = []
+        seen_paths: set[Path] = set()
+        for dir_path, source, readonly in self._get_allowed_agent_dirs():
+            if not dir_path.is_dir():
+                continue
+            for agent_file in sorted(dir_path.glob("*.md")):
+                resolved = agent_file.resolve()
+                if resolved in seen_paths:
+                    continue
+                seen_paths.add(resolved)
+                name, description = agent_file.stem, ""
+                try:
+                    content = agent_file.read_text(encoding="utf-8")
+                    fm, _ = parse_yaml_frontmatter(content, str(agent_file))
+                    name = fm.get("name", agent_file.stem)
+                    description = fm.get("description", "")
+                except Exception as e:
+                    logger.debug("Failed to parse agent frontmatter %s: %s", agent_file, e)
+                files.append({
+                    "path": str(resolved),
+                    "name": name,
+                    "source": source,
+                    "readonly": readonly,
+                    "description": description,
+                })
+        return JSONResponse({"files": files})
+
+    async def _read_agent_file(self, request: Request) -> JSONResponse:
+        if err := self._check_auth(request):
+            return err
+        path_str = request.query_params.get("path", "")
+        if not path_str:
+            return JSONResponse({"error": "path parameter required"}, status_code=400)
+        resolved, readonly, err = self._validate_agent_path(path_str)
+        if err:
+            return err
+        if not resolved.exists():
+            return JSONResponse({"error": "file not found"}, status_code=404)
+        try:
+            content = resolved.read_text(encoding="utf-8")
+        except OSError as e:
+            return JSONResponse({"error": f"read failed: {e}"}, status_code=500)
+        return JSONResponse({"path": str(resolved), "content": content, "readonly": readonly})
+
+    async def _save_agent_file(self, request: Request) -> JSONResponse:
+        if err := self._check_auth(request):
+            return err
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+        path_str = body.get("path", "")
+        content = body.get("content")
+        if not path_str or content is None:
+            return JSONResponse({"error": "path and content required"}, status_code=400)
+        resolved, readonly, err = self._validate_agent_path(path_str)
+        if err:
+            return err
+        if readonly:
+            return JSONResponse({"error": "file is read-only (builtin)"}, status_code=403)
+        if not resolved.exists():
+            return JSONResponse({"error": "file not found"}, status_code=404)
+        try:
+            resolved.write_text(content, encoding="utf-8")
+        except OSError as e:
+            return JSONResponse({"error": f"write failed: {e}"}, status_code=500)
+        return JSONResponse({"status": "saved"})
 
     async def _serve_ui(self, request: Request) -> Response:
         ui_path = WEB_DIR / "index.html"

@@ -23,6 +23,7 @@ async function request(method, path, body, raw = false) {
 
 export function get(path) { return request('GET', path); }
 export function post(path, body) { return request('POST', path, body); }
+export function put(path, body) { return request('PUT', path, body); }
 export function patch(path, body) { return request('PATCH', path, body); }
 
 // `del` is exported as a function name (keyword-safe via export syntax)
