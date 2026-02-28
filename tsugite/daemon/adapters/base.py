@@ -167,11 +167,12 @@ class BaseAdapter(ABC):
     def _build_agent_context(self, channel_context: ChannelContext) -> Dict[str, Any]:
         """Build context dict for agent template rendering."""
         ctx: Dict[str, Any] = {"is_daemon": True, "is_scheduled": False, "schedule_id": "", "has_notify_tool": False}
+        meta = channel_context.metadata or {}
         if channel_context.source == "scheduler":
             ctx["is_scheduled"] = True
-            meta = channel_context.metadata or {}
             ctx["schedule_id"] = meta.get("schedule_id", "")
             ctx["has_notify_tool"] = meta.get("notify_tool", False)
+        ctx["running_tasks"] = meta.get("running_tasks", [])
         return ctx
 
     def _build_message_context(self, message: str, channel_context: ChannelContext, user_id: str) -> str:

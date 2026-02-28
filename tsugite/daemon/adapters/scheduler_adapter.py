@@ -58,7 +58,7 @@ class SchedulerAdapter:
         logger.info("Schedule '%s' executing agent '%s': %s", entry.id, entry.agent, entry.prompt[:100])
 
         user_id = f"scheduler:{entry.agent}"
-        metadata = {"schedule_id": entry.id}
+        metadata = {"schedule_id": entry.id, "running_tasks": self.scheduler.get_running_ids()}
         if entry.notify_tool:
             metadata["notify_tool"] = True
         if entry.model:
