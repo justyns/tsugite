@@ -31,6 +31,7 @@ class AgentExecutionResult(BaseModel):
     attachments: List[Any] = Field(
         default_factory=list
     )  # List of Attachment objects (using Any for Pydantic compatibility)
+    claude_code_session_id: Optional[str] = None
 
     def __str__(self) -> str:
         """Allow result to be used as string for backward compatibility.

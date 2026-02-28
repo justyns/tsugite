@@ -75,6 +75,7 @@ def save_run_to_history(
     attachments: Optional[List[Attachment]] = None,
     channel_metadata: Optional[dict] = None,
     duration_ms: Optional[int] = None,
+    claude_code_session_id: Optional[str] = None,
 ) -> Optional[str]:
     """Save a single agent run to history.
 
@@ -92,6 +93,7 @@ def save_run_to_history(
         attachments: List of Attachment objects
         channel_metadata: Optional channel routing metadata
         duration_ms: Execution duration in milliseconds
+        claude_code_session_id: Claude Code session ID to store in turn metadata
 
     Returns:
         Session ID if saved, None if history disabled or failed
@@ -141,6 +143,11 @@ def save_run_to_history(
 
         functions_called = _extract_functions_called(execution_steps) if execution_steps else []
 
+        # Merge claude_code_session_id into metadata if present
+        metadata = dict(channel_metadata) if channel_metadata else {}
+        if claude_code_session_id:
+            metadata["claude_code_session_id"] = claude_code_session_id
+
         storage.record_turn(
             messages=messages,
             final_answer=result,
@@ -149,7 +156,7 @@ def save_run_to_history(
             model=model,
             duration_ms=duration_ms,
             functions_called=functions_called,
-            metadata=channel_metadata,
+            metadata=metadata or None,
         )
 
         return storage.session_id
@@ -192,6 +199,37 @@ def _extract_functions_called(execution_steps: list) -> List[str]:
         if hasattr(step, "tools_called") and step.tools_called:
             functions.update(step.tools_called)
     return sorted(list(functions))
+
+
+def get_claude_code_session_id(conversation_id: str) -> Optional[str]:
+    """Get the Claude Code session ID from a conversation's history metadata.
+
+    Args:
+        conversation_id: Session/conversation ID to look up
+
+    Returns:
+        Claude Code session ID if found, None otherwise
+    """
+    try:
+        from tsugite.history import SessionStorage, Turn
+
+        session_path = get_history_dir() / f"{conversation_id}.jsonl"
+        if not session_path.exists():
+            return None
+
+        storage = SessionStorage.load(session_path)
+        records = storage.load_records()
+
+        # Search turns in reverse for the most recent session ID
+        for record in reversed(records):
+            if isinstance(record, Turn) and record.metadata:
+                session_id = record.metadata.get("claude_code_session_id")
+                if session_id:
+                    return session_id
+
+        return None
+    except Exception:
+        return None
 
 
 def get_latest_conversation() -> Optional[str]:
