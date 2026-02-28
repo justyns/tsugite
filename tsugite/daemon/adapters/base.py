@@ -29,14 +29,14 @@ def resolve_agent_path(agent_file: str, workspace_dir: Path, workspace: Any = No
     """Resolve agent file reference to absolute path.
 
     Args:
-        agent_file: Agent file name or path (e.g., "default", "default.md", "path/to/agent.md")
+        agent_file: Agent file name or path (e.g., "default", "+default", "default.md", "path/to/agent.md")
         workspace_dir: Workspace directory for search context
         workspace: Optional Workspace object for workspace-aware resolution
 
     Returns:
         Resolved path to agent file, or None if not found
     """
-    agent_ref = agent_file
+    agent_ref = agent_file.lstrip("+")
     if agent_ref.endswith(".md") and "/" not in agent_ref:
         agent_ref = agent_ref[:-3]
 

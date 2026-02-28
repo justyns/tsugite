@@ -83,7 +83,7 @@ def schedule_create(
         notify_tool: If true, gives the agent the notify_user tool so it can send messages during execution. Requires notify to be set.
         inject_history: If true (default), injects the task result into notified users' chat sessions so the agent has context when they reply.
         model: Optional model override (e.g., "openai:gpt-4o-mini"). When set, this schedule uses this model instead of the agent's default.
-        agent_file: Path to a tsugite agent .md file. The agent file is hot-loaded on each run — edit the file and the next execution picks up changes.
+        agent_file: Agent name (e.g., "+reporter") or path to a tsugite agent .md file. Hot-loaded on each run — edit the file and the next execution picks up changes.
 
     Returns:
         Created schedule details including computed next_run
@@ -196,7 +196,7 @@ def schedule_update(
         notify_tool: Enable/disable notify_user tool (optional)
         inject_history: Enable/disable result injection into user chat sessions (optional)
         model: Model override for this schedule (optional). Set to empty string to clear.
-        agent_file: Path to a tsugite agent .md file (optional). Set to empty string to clear.
+        agent_file: Agent name (e.g., "+reporter") or path to agent .md file (optional). Set to empty string to clear.
 
     Returns:
         Updated schedule details

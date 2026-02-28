@@ -89,6 +89,24 @@ class TestRunAgentWithAgentFile:
         assert ctx.metadata["agent_file_override"] == str(agent_file)
 
     @pytest.mark.asyncio
+    async def test_plus_prefix_resolved(self, adapter, scheduler_adapter, tmp_path):
+        adapter.agent_config.workspace_dir = tmp_path
+        agent_file = tmp_path / "agents" / "custom.md"
+        agent_file.parent.mkdir(parents=True, exist_ok=True)
+        agent_file.write_text("---\nname: custom\n---\nHello")
+
+        entry = ScheduleEntry(
+            id="t", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *",
+            agent_file="+custom",
+        )
+
+        with patch("tsugite.daemon.adapters.scheduler_adapter.send_notification"):
+            await scheduler_adapter._run_agent(entry)
+
+        ctx = _get_channel_context(adapter.handle_message)
+        assert ctx.metadata["agent_file_override"] == str(agent_file.resolve())
+
+    @pytest.mark.asyncio
     async def test_relative_path_resolved_against_workspace(self, adapter, scheduler_adapter, tmp_path):
         adapter.agent_config.workspace_dir = tmp_path
         agent_file = tmp_path / "agents" / "custom.md"
