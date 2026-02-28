@@ -10,11 +10,19 @@ export default () => ({
 
   init() {
     this.load();
-    this._interval = setInterval(() => this.load(), 30000);
+    this._pollMs = 30000;
+    this._interval = setInterval(() => this.load(), this._pollMs);
   },
 
   destroy() {
     if (this._interval) clearInterval(this._interval);
+  },
+
+  _setPollRate(ms) {
+    if (ms === this._pollMs) return;
+    this._pollMs = ms;
+    clearInterval(this._interval);
+    this._interval = setInterval(() => this.load(), ms);
   },
 
   async load() {
@@ -36,6 +44,9 @@ export default () => ({
         }
       }
       this.agentCards = cards;
+
+      const anyRunning = cards.some(c => c.running_tasks > 0);
+      this._setPollRate(anyRunning ? 5000 : 30000);
 
       // Sort schedules by next_run, take first 5
       const schedules = (schedulesData.schedules || [])
