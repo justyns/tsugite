@@ -1,7 +1,7 @@
 import { get, post, patch, del } from '../api.js';
 import { formatDate } from '../utils.js';
 
-const emptyForm = () => ({ id: '', agent: '', prompt: '', schedule_type: 'cron', cron_expr: '', run_at: '', timezone: 'UTC', model: '', agent_file: '' });
+const emptyForm = () => ({ id: '', agent: '', prompt: '', schedule_type: 'cron', cron_expr: '', run_at: '', timezone: 'UTC', model: '', agent_file: '', max_turns: '' });
 
 export default () => ({
   schedules: [],
@@ -66,6 +66,7 @@ export default () => ({
       timezone: s.timezone || 'UTC',
       model: s.model || '',
       agent_file: s.agent_file || '',
+      max_turns: s.max_turns || '',
     };
     this.showForm = true;
   },
@@ -86,6 +87,7 @@ export default () => ({
       if (this.form.timezone) body.timezone = this.form.timezone;
       if (this.form.model) body.model = this.form.model;
       if (this.form.agent_file) body.agent_file = this.form.agent_file;
+      if (this.form.max_turns) body.max_turns = parseInt(this.form.max_turns, 10);
       try {
         await patch(`/api/schedules/${this.editingId}`, body);
         this.cancelForm();
@@ -100,6 +102,10 @@ export default () => ({
       } else {
         delete body.cron_expr;
       }
+      if (!body.model) delete body.model;
+      if (!body.agent_file) delete body.agent_file;
+      if (body.max_turns) body.max_turns = parseInt(body.max_turns, 10);
+      else delete body.max_turns;
       try {
         await post('/api/schedules', body);
         this.cancelForm();

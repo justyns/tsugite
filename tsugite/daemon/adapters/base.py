@@ -268,7 +268,8 @@ class BaseAdapter(ABC):
                         return_token_usage=True,
                         model_override=(channel_context.metadata or {}).get("model_override")
                         or self.agent_config.model,
-                        max_turns_override=self.agent_config.max_turns,
+                        max_turns_override=(channel_context.metadata or {}).get("max_turns_override")
+                        or self.agent_config.max_turns,
                     ),
                     path_context=path_context,
                     custom_logger=custom_logger,

@@ -574,7 +574,7 @@ class HTTPServer:
             return JSONResponse({"error": "invalid JSON body"}, status_code=400)
 
         schedule_id = request.path_params["schedule_id"]
-        allowed = {"prompt", "cron_expr", "run_at", "timezone", "agent", "schedule_type", "model", "agent_file"}
+        allowed = {"prompt", "cron_expr", "run_at", "timezone", "agent", "schedule_type", "model", "agent_file", "max_turns"}
         fields = {k: v for k, v in body.items() if k in allowed}
         if not fields:
             return JSONResponse({"error": "no updatable fields provided"}, status_code=400)

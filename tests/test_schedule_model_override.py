@@ -1,4 +1,4 @@
-"""Tests for per-schedule model override pipeline."""
+"""Tests for per-schedule model and max_turns override pipeline."""
 
 from unittest.mock import AsyncMock, MagicMock
 
@@ -24,6 +24,11 @@ def _make_scheduler_adapter(agent_name="bot"):
 def _resolve_model_override(metadata, fallback="anthropic:claude-3-sonnet"):
     """Replicate the model_override resolution logic from BaseAdapter.handle_message."""
     return (metadata or {}).get("model_override") or fallback
+
+
+def _resolve_max_turns_override(metadata, fallback=50):
+    """Replicate the max_turns_override resolution logic from BaseAdapter.handle_message."""
+    return (metadata or {}).get("max_turns_override") or fallback
 
 
 class TestSchedulerAdapterMetadata:
@@ -63,3 +68,42 @@ class TestBaseAdapterModelOverride:
 
     def test_fallback_when_no_metadata(self):
         assert _resolve_model_override(None) == "anthropic:claude-3-sonnet"
+
+
+class TestSchedulerAdapterMaxTurnsMetadata:
+    """Test that SchedulerAdapter sets max_turns_override in metadata."""
+
+    @pytest.mark.asyncio
+    async def test_max_turns_set_in_metadata(self):
+        sa, adapter_mock = _make_scheduler_adapter()
+
+        entry = ScheduleEntry(
+            id="test", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *", max_turns=40
+        )
+        await sa._run_agent(entry)
+
+        ctx = adapter_mock.handle_message.call_args[1]["channel_context"]
+        assert ctx.metadata["max_turns_override"] == 40
+
+    @pytest.mark.asyncio
+    async def test_max_turns_absent_when_none(self):
+        sa, adapter_mock = _make_scheduler_adapter()
+
+        entry = ScheduleEntry(id="test", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
+        await sa._run_agent(entry)
+
+        ctx = adapter_mock.handle_message.call_args[1]["channel_context"]
+        assert "max_turns_override" not in ctx.metadata
+
+
+class TestBaseAdapterMaxTurnsOverride:
+    """Test the max_turns_override resolution logic used in handle_message."""
+
+    def test_max_turns_from_metadata(self):
+        assert _resolve_max_turns_override({"max_turns_override": 40}) == 40
+
+    def test_fallback_to_agent_max_turns(self):
+        assert _resolve_max_turns_override({"schedule_id": "test"}) == 50
+
+    def test_fallback_when_no_metadata(self):
+        assert _resolve_max_turns_override(None) == 50

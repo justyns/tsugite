@@ -63,6 +63,8 @@ class SchedulerAdapter:
             metadata["notify_tool"] = True
         if entry.model:
             metadata["model_override"] = entry.model
+        if entry.max_turns is not None:
+            metadata["max_turns_override"] = entry.max_turns
 
         if entry.agent_file:
             resolved = adapter._resolve_agent_path(entry.agent_file)
