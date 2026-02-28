@@ -234,6 +234,9 @@ class Scheduler:
         entry.enabled = False
         self._save()
 
+    def get_running_ids(self) -> list[str]:
+        return [sid for sid, lock in self._entry_locks.items() if lock.locked()]
+
     def list(self) -> list[ScheduleEntry]:
         return list(self._schedules.values())
 
