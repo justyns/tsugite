@@ -257,6 +257,50 @@ def schedule_run(id: str) -> dict:
 
 
 @tool(require_daemon=True)
+def schedule_status(id: str) -> dict:
+    """Get the current status of a schedule, including whether it's running.
+
+    Args:
+        id: Schedule ID to check
+
+    Returns:
+        Dict with schedule state including is_running flag
+    """
+    entry = _call(_scheduler.get, id)
+    running_ids = _call(_scheduler.get_running_ids)
+    return {
+        "id": entry.id,
+        "agent": entry.agent,
+        "is_running": entry.id in running_ids,
+        "last_status": entry.last_status,
+        "last_run": entry.last_run,
+        "last_error": entry.last_error,
+        "next_run": entry.next_run,
+        "enabled": entry.enabled,
+    }
+
+
+def _get_running_tasks_snapshot():
+    """Collect running task details in a single scheduler-thread call."""
+    running_ids = _scheduler.get_running_ids()
+    return [
+        {"id": e.id, "agent": e.agent, "prompt": e.prompt[:200]}
+        for rid in running_ids
+        if (e := _scheduler.get(rid))
+    ]
+
+
+@tool(require_daemon=True)
+def list_running_tasks() -> list:
+    """List all currently running schedule tasks.
+
+    Returns:
+        List of dicts with id, agent, and prompt (truncated) for each running task
+    """
+    return _call(_get_running_tasks_snapshot)
+
+
+@tool(require_daemon=True)
 def background_task(
     prompt: str,
     agent: Optional[str] = None,
