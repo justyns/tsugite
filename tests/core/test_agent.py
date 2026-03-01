@@ -596,13 +596,18 @@ final_answer(x)
         result = await agent.run("Test task")
         assert result == 42
 
-        # First step observation should contain budget tag
+        # First step observation should contain budget tag in both output and xml_observation
         step1_output = agent.memory.steps[0].output
         assert "<tsugite_budget" in step1_output
         assert 'turn="1"' in step1_output
         assert 'max_turns="5"' in step1_output
         # Mock returns 100 tokens per call
         assert 'tokens_used="100"' in step1_output
+
+        # Budget tag must also be in xml_observation (what the LLM actually sees)
+        step1_xml = agent.memory.steps[0].xml_observation
+        assert "<tsugite_budget" in step1_xml
+        assert 'turn="1"' in step1_xml
 
         # Token accumulation should work
         assert agent.total_tokens == 200  # 100 per call * 2 calls

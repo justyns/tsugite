@@ -462,7 +462,9 @@ class TsugiteAgent:
                 )
 
             # Append turn/token budget tag so the LLM knows its resource limits
-            step_output += self._build_budget_tag(turn_num)
+            budget_tag = self._build_budget_tag(turn_num)
+            step_output += budget_tag
+            xml_observation += budget_tag
 
             # Add this step to memory (only for successful executions or text mode)
             self.memory.add_step(
