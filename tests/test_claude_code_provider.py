@@ -440,16 +440,16 @@ class TestSessionIdPassthrough:
 
 class TestClaudeCodeContextLimit:
     def test_context_limit_uses_claude_code_override(self):
-        from tsugite.daemon.memory import _CLAUDE_CODE_CONTEXT_LIMIT, _get_context_limit
+        from tsugite.daemon.memory import _CLAUDE_CODE_CONTEXT_LIMIT, get_context_limit
 
-        limit = _get_context_limit("claude_code:opus")
+        limit = get_context_limit("claude_code:opus")
         assert limit == _CLAUDE_CODE_CONTEXT_LIMIT
 
     def test_context_limit_claude_code_ignores_litellm(self):
-        from tsugite.daemon.memory import _CLAUDE_CODE_CONTEXT_LIMIT, _get_context_limit
+        from tsugite.daemon.memory import _CLAUDE_CODE_CONTEXT_LIMIT, get_context_limit
 
         with patch("litellm.get_model_info", side_effect=Exception("should not be called")):
-            limit = _get_context_limit("claude_code:opus")
+            limit = get_context_limit("claude_code:opus")
             assert limit == _CLAUDE_CODE_CONTEXT_LIMIT
 
     @pytest.mark.asyncio

@@ -16,7 +16,8 @@ import pytest
 from tsugite.daemon.adapters.base import BaseAdapter, ChannelContext
 from tsugite.daemon.config import AgentConfig
 from tsugite.daemon.session import SessionManager
-from tsugite.history import SessionStorage, Turn
+from tsugite.history import CompactionSummary, SessionStorage, Turn
+from tsugite.history.reconstruction import reconstruct_messages
 
 
 class _StubAdapter(BaseAdapter):
@@ -395,3 +396,125 @@ class TestDaemonMetadataInHistory:
         assert metadata.get("source") == "discord"
         assert metadata.get("channel_id") == "channel123"
         assert metadata.get("daemon_agent") == "test_agent"
+
+
+class TestCompactionWithRetainedTurns:
+    """Integration test: compaction keeps recent turns verbatim."""
+
+    def test_compact_creates_summary_plus_retained_turns(self, tmp_path, monkeypatch):
+        """After compaction, new session should have summary + retained turns."""
+        history_dir = tmp_path / "history"
+        history_dir.mkdir()
+        monkeypatch.setattr("tsugite.history.storage.get_history_dir", lambda: history_dir)
+        monkeypatch.setattr("tsugite.history.storage.get_machine_name", lambda: "test_machine")
+
+        storage = SessionStorage.create(
+            agent_name="test_agent",
+            model="openai:gpt-4o",
+            session_path=history_dir / "old_session.jsonl",
+        )
+
+        for i in range(5):
+            storage.record_turn(
+                messages=[
+                    {"role": "user", "content": f"Message {i}"},
+                    {"role": "assistant", "content": f"Reply {i}"},
+                ],
+                final_answer=f"Reply {i}",
+                tokens=50,
+            )
+
+        # Now simulate what _compact_session does: split, summarize, write
+        from tsugite.daemon.memory import split_turns_for_compaction
+
+        all_turns = [r for r in storage.load_records() if isinstance(r, Turn)]
+        assert len(all_turns) == 5
+
+        with patch("tsugite.daemon.memory._count_tokens", side_effect=lambda text, model: len(text) // 4):
+            old_turns, recent_turns = split_turns_for_compaction(
+                all_turns, "openai:gpt-4o-mini", retention_budget_tokens=100_000
+            )
+
+        # With huge budget, all fit -> no old turns
+        assert old_turns == []
+        assert recent_turns == all_turns
+
+        # Now with tiny budget to force a split
+        with patch("tsugite.daemon.memory._count_tokens", side_effect=lambda text, model: len(text) // 4):
+            old_turns, recent_turns = split_turns_for_compaction(
+                all_turns, "openai:gpt-4o-mini", retention_budget_tokens=1
+            )
+
+        assert len(old_turns) > 0
+        assert len(recent_turns) >= 2
+
+        # Create new session with summary + retained turns
+        new_storage = SessionStorage.create(
+            agent_name="test_agent",
+            model="openai:gpt-4o",
+            compacted_from="old_session",
+            session_path=history_dir / "new_session.jsonl",
+        )
+        new_storage.record_compaction_summary(
+            "## Current Task\nDiscussing messages",
+            previous_turns=len(old_turns),
+            retained_turns=len(recent_turns),
+        )
+        new_storage.write_turns(recent_turns)
+
+        # Verify new session structure
+        records = new_storage.load_records()
+        summaries = [r for r in records if isinstance(r, CompactionSummary)]
+        turns = [r for r in records if isinstance(r, Turn)]
+
+        assert len(summaries) == 1
+        assert summaries[0].retained_turns == len(recent_turns)
+        assert len(turns) == len(recent_turns)
+
+    def test_reconstruct_messages_with_retained_turns(self, tmp_path, monkeypatch):
+        """reconstruct_messages should produce summary + retained turn messages in order."""
+        history_dir = tmp_path / "history"
+        history_dir.mkdir()
+        monkeypatch.setattr("tsugite.history.storage.get_history_dir", lambda: history_dir)
+        monkeypatch.setattr("tsugite.history.storage.get_machine_name", lambda: "test_machine")
+
+        session_path = history_dir / "compacted.jsonl"
+        storage = SessionStorage.create(
+            agent_name="test_agent",
+            model="openai:gpt-4o",
+            compacted_from="prev_session",
+            session_path=session_path,
+        )
+
+        storage.record_compaction_summary("## Current Task\nWorking on feature X", previous_turns=8, retained_turns=2)
+
+        storage.record_turn(
+            messages=[
+                {"role": "user", "content": "Recent question"},
+                {"role": "assistant", "content": "Recent answer"},
+            ],
+            final_answer="Recent answer",
+        )
+        storage.record_turn(
+            messages=[
+                {"role": "user", "content": "Latest question"},
+                {"role": "assistant", "content": "Latest answer"},
+            ],
+            final_answer="Latest answer",
+        )
+
+        messages = reconstruct_messages(session_path)
+
+        # Should have: summary user/assistant pair + 2 turns (2 msgs each) = 6 messages
+        assert len(messages) == 6
+
+        # First pair is the compaction summary
+        assert "previous_conversation" in messages[0]["content"]
+        assert "feature X" in messages[0]["content"]
+        assert messages[1]["role"] == "assistant"
+
+        # Then the retained turns
+        assert messages[2]["content"] == "Recent question"
+        assert messages[3]["content"] == "Recent answer"
+        assert messages[4]["content"] == "Latest question"
+        assert messages[5]["content"] == "Latest answer"

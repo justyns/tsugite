@@ -1,20 +1,32 @@
 """Tests for daemon memory helpers."""
 
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from tsugite.daemon.memory import (
     DEFAULT_CONTEXT_LIMIT,
+    MIN_RETAINED_TURNS,
     _chunk_messages,
     _combine_summaries,
     _count_tokens,
-    _get_context_limit,
+    _estimate_turn_tokens,
+    get_context_limit,
     _message_text,
     _summarize_chunk,
     infer_compaction_model,
+    split_turns_for_compaction,
     summarize_session,
 )
+from tsugite.history.models import Turn
+
+
+@pytest.fixture
+def predictable_tokens():
+    """Mock _count_tokens to return len//4 for predictable tests."""
+    with patch("tsugite.daemon.memory._count_tokens", side_effect=lambda text, model: len(text) // 4):
+        yield
 
 
 class TestInferCompactionModel:
@@ -91,29 +103,27 @@ class TestCountTokens:
 class TestGetContextLimit:
     def test_returns_litellm_value(self):
         with patch("litellm.get_model_info", return_value={"max_input_tokens": 200_000}):
-            assert _get_context_limit("openai:gpt-4o-mini") == 200_000
+            assert get_context_limit("openai:gpt-4o-mini") == 200_000
 
     def test_fallback_on_error(self):
         with patch("litellm.get_model_info", side_effect=Exception("unknown")):
-            assert _get_context_limit("ollama:llama3:8b", fallback=32_000) == 32_000
+            assert get_context_limit("ollama:llama3:8b", fallback=32_000) == 32_000
 
     def test_fallback_to_default(self):
         with patch("litellm.get_model_info", side_effect=Exception("unknown")):
-            assert _get_context_limit("ollama:llama3:8b") == DEFAULT_CONTEXT_LIMIT
+            assert get_context_limit("ollama:llama3:8b") == DEFAULT_CONTEXT_LIMIT
 
     def test_fallback_when_no_max_input_tokens(self):
         with patch("litellm.get_model_info", return_value={}):
-            assert _get_context_limit("openai:gpt-4o-mini", fallback=64_000) == 64_000
+            assert get_context_limit("openai:gpt-4o-mini", fallback=64_000) == 64_000
 
 
 class TestChunkMessages:
     """Test message chunking with mocked token counting."""
 
     @pytest.fixture(autouse=True)
-    def mock_token_counter(self):
-        """Mock _count_tokens to return len//4 for predictable tests."""
-        with patch("tsugite.daemon.memory._count_tokens", side_effect=lambda text, model: len(text) // 4):
-            yield
+    def _mock_tokens(self, predictable_tokens):
+        pass
 
     def test_empty_input(self):
         assert _chunk_messages([], 1000, "openai:gpt-4o-mini") == []
@@ -169,7 +179,7 @@ async def test_summarize_session_passes_model():
     messages = [{"role": "user", "content": "hello"}]
 
     with (
-        patch("tsugite.daemon.memory._get_context_limit", return_value=128_000),
+        patch("tsugite.daemon.memory.get_context_limit", return_value=128_000),
         patch(
             "litellm.acompletion", new_callable=AsyncMock, return_value=_mock_llm_response("Summary of conversation")
         ) as mock_llm,
@@ -186,7 +196,7 @@ async def test_summarize_session_default_model():
     messages = [{"role": "user", "content": "hello"}]
 
     with (
-        patch("tsugite.daemon.memory._get_context_limit", return_value=128_000),
+        patch("tsugite.daemon.memory.get_context_limit", return_value=128_000),
         patch("litellm.acompletion", new_callable=AsyncMock, return_value=_mock_llm_response()) as mock_llm,
     ):
         await summarize_session(messages)
@@ -207,7 +217,7 @@ async def test_summarize_session_single_chunk():
     messages = [{"role": "user", "content": "hi"}]
 
     with (
-        patch("tsugite.daemon.memory._get_context_limit", return_value=128_000),
+        patch("tsugite.daemon.memory.get_context_limit", return_value=128_000),
         patch("tsugite.daemon.memory._count_tokens", return_value=10),
         patch("litellm.acompletion", new_callable=AsyncMock, return_value=_mock_llm_response("Single")) as mock_llm,
     ):
@@ -223,7 +233,7 @@ async def test_summarize_session_multiple_chunks():
     messages = [{"role": "user", "content": "x" * 400} for _ in range(3)]
 
     with (
-        patch("tsugite.daemon.memory._get_context_limit", return_value=160),
+        patch("tsugite.daemon.memory.get_context_limit", return_value=160),
         patch("tsugite.daemon.memory._count_tokens", return_value=100),
         patch("litellm.acompletion", new_callable=AsyncMock, return_value=_mock_llm_response()) as mock_llm,
     ):
@@ -239,7 +249,7 @@ async def test_summarize_session_backward_compatible():
     messages = [{"role": "user", "content": "hello"}]
 
     with (
-        patch("tsugite.daemon.memory._get_context_limit", return_value=128_000),
+        patch("tsugite.daemon.memory.get_context_limit", return_value=128_000),
         patch("litellm.acompletion", new_callable=AsyncMock, return_value=_mock_llm_response("OK")),
     ):
         result = await summarize_session(messages, model="openai:gpt-4o-mini")
@@ -253,10 +263,86 @@ async def test_summarize_session_passes_max_context_tokens():
     messages = [{"role": "user", "content": "hello"}]
 
     with (
-        patch("tsugite.daemon.memory._get_context_limit", return_value=32_000) as mock_limit,
+        patch("tsugite.daemon.memory.get_context_limit", return_value=32_000) as mock_limit,
         patch("tsugite.daemon.memory._count_tokens", return_value=5),
         patch("litellm.acompletion", new_callable=AsyncMock, return_value=_mock_llm_response("OK")),
     ):
         await summarize_session(messages, model="ollama:llama3:8b", max_context_tokens=32_000)
 
     mock_limit.assert_called_once_with("ollama:llama3:8b", fallback=32_000)
+
+
+def _make_turn(content: str) -> Turn:
+    """Helper to create a Turn with a simple user+assistant exchange."""
+    return Turn(
+        timestamp=datetime.now(timezone.utc),
+        messages=[
+            {"role": "user", "content": content},
+            {"role": "assistant", "content": f"reply to {content}"},
+        ],
+    )
+
+
+class TestEstimateTurnTokens:
+    @pytest.fixture(autouse=True)
+    def _mock_tokens(self, predictable_tokens):
+        pass
+
+    def test_basic(self):
+        turn = _make_turn("hello world")
+        tokens = _estimate_turn_tokens(turn, "openai:gpt-4o-mini")
+        assert tokens > 0
+
+    def test_empty_messages(self):
+        turn = Turn(timestamp=datetime.now(timezone.utc), messages=[])
+        assert _estimate_turn_tokens(turn, "openai:gpt-4o-mini") == 0
+
+
+class TestSplitTurnsForCompaction:
+    @pytest.fixture(autouse=True)
+    def _mock_tokens(self, predictable_tokens):
+        pass
+
+    def test_empty_turns(self):
+        old, recent = split_turns_for_compaction([], "openai:gpt-4o-mini", 1000)
+        assert old == []
+        assert recent == []
+
+    def test_single_turn_kept(self):
+        turns = [_make_turn("hello")]
+        old, recent = split_turns_for_compaction(turns, "openai:gpt-4o-mini", 1000)
+        assert old == []
+        assert recent == turns
+
+    def test_all_fit_in_budget(self):
+        turns = [_make_turn(f"msg {i}") for i in range(3)]
+        old, recent = split_turns_for_compaction(turns, "openai:gpt-4o-mini", 100_000)
+        assert old == []
+        assert recent == turns
+
+    def test_partial_split(self):
+        turns = [_make_turn("x" * 200) for _ in range(10)]
+        # Small budget forces split — only a few recent turns kept
+        old, recent = split_turns_for_compaction(turns, "openai:gpt-4o-mini", 50)
+        assert len(old) > 0
+        assert len(recent) >= MIN_RETAINED_TURNS
+        assert old + recent == turns
+
+    def test_min_retained_respected(self):
+        turns = [_make_turn("x" * 200) for _ in range(5)]
+        # Budget of 1 token — can't fit anything, but min_retained forces keeping 2
+        old, recent = split_turns_for_compaction(turns, "openai:gpt-4o-mini", 1)
+        assert len(recent) >= 2
+        assert old + recent == turns
+
+    def test_custom_min_retained(self):
+        turns = [_make_turn("x" * 200) for _ in range(5)]
+        old, recent = split_turns_for_compaction(turns, "openai:gpt-4o-mini", 1, min_retained=3)
+        assert len(recent) >= 3
+        assert old + recent == turns
+
+    def test_two_turns_always_kept(self):
+        turns = [_make_turn("a"), _make_turn("b")]
+        old, recent = split_turns_for_compaction(turns, "openai:gpt-4o-mini", 1)
+        assert old == []
+        assert recent == turns

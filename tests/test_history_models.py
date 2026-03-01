@@ -425,6 +425,31 @@ class TestCompactionSummary:
         restored = CompactionSummary.model_validate(data)
         assert restored.summary == summary.summary
 
+    def test_compaction_summary_with_retained_turns(self):
+        """Test compaction summary with retained_turns field."""
+        summary = CompactionSummary(
+            summary="Summary text",
+            previous_turns=20,
+            retained_turns=3,
+        )
+        assert summary.retained_turns == 3
+
+        data = summary.model_dump(mode="json")
+        assert data["retained_turns"] == 3
+
+        restored = CompactionSummary.model_validate(data)
+        assert restored.retained_turns == 3
+
+    def test_compaction_summary_backward_compat(self):
+        """Old records without retained_turns should default to 0."""
+        data = {
+            "type": "compaction_summary",
+            "summary": "Old summary",
+            "previous_turns": 10,
+        }
+        summary = CompactionSummary.model_validate(data)
+        assert summary.retained_turns == 0
+
 
 class TestDatetimeHandling:
     """Tests for datetime parsing across all models."""
