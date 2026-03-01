@@ -288,12 +288,23 @@ export default () => ({
         prog.steps.push({ html: `<code>${escapeHtml(label)}</code> <span class="${cls}">${status}</span>` });
       }
     } else if (event.type === 'file_read') {
-      prog.steps.push({ html: `<code>${escapeHtml(event.path)}</code> read` });
+      const readSize = this._formatFileSize(event.byte_count);
+      prog.steps.push({ html: `<code>${escapeHtml(event.path)}</code> read (${readSize})` });
+    } else if (event.type === 'file_write') {
+      const writeSize = this._formatFileSize(event.byte_count);
+      prog.steps.push({ html: `<code>${escapeHtml(event.path)}</code> written (${writeSize})` });
     } else if (event.type === 'warning') {
       prog.steps.push({ html: `<span class="err">${escapeHtml(event.message)}</span>` });
     } else if (event.type === 'info') {
       prog.steps.push({ html: escapeHtml(event.message) });
     }
+  },
+
+  _formatFileSize(bytes) {
+    if (bytes == null) return '';
+    if (bytes < 1024) return `${bytes} bytes`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   },
 
   progressSummaryText(msg) {

@@ -7,6 +7,7 @@ from tsugite.events import (
     ErrorEvent,
     EventBus,
     EventType,
+    FileWriteEvent,
     ObservationEvent,
     TaskStartEvent,
 )
@@ -41,6 +42,16 @@ class TestEventStructure:
         assert event.observation == "Code output"
         assert event.tool is None
         assert event.success is True
+
+    def test_file_write_event(self):
+        """Test FileWriteEvent construction."""
+        event = FileWriteEvent(path="/tmp/test.txt", line_count=5, byte_count=42, operation="tool_call")
+
+        assert event.event_type == EventType.FILE_WRITE
+        assert event.path == "/tmp/test.txt"
+        assert event.line_count == 5
+        assert event.byte_count == 42
+        assert event.operation == "tool_call"
 
 
 class TestEventBus:
@@ -155,6 +166,22 @@ class TestJSONLSerialization:
         assert data["type"] == "error"
         assert data["error"] == "Critical error"
         assert data["step"] == 3
+
+    def test_jsonl_file_write_event(self, capsys):
+        """Test JSONL serialization of FileWriteEvent."""
+        handler = JSONLUIHandler()
+
+        event = FileWriteEvent(path="/tmp/out.txt", line_count=10, byte_count=256, operation="tool_call")
+        handler.handle_event(event)
+
+        captured = capsys.readouterr()
+        data = json.loads(captured.out.strip())
+
+        assert data["type"] == "file_write"
+        assert data["path"] == "/tmp/out.txt"
+        assert data["line_count"] == 10
+        assert data["byte_count"] == 256
+        assert data["operation"] == "tool_call"
 
 
 class TestErrorConsolidation:

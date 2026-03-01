@@ -251,6 +251,16 @@ class FileReadEvent(BaseEvent):
     operation: str  # "prefetch", "attachment", "tool_call", "auto_context"
 
 
+class FileWriteEvent(BaseEvent):
+    """File write notification with metadata."""
+
+    event_type: EventType = Field(default=EventType.FILE_WRITE, frozen=True)
+    path: str
+    line_count: int = Field(ge=0)
+    byte_count: int = Field(ge=0)
+    operation: str  # "tool_call"
+
+
 # ============================================================================
 # Audit Events
 # ============================================================================

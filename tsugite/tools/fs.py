@@ -90,9 +90,14 @@ def write_file(path: str, content: str) -> str:
 
     try:
         file_path.write_text(content, encoding="utf-8")
-        return f"Successfully wrote {len(content)} characters to {path}"
     except Exception as e:
         raise RuntimeError(f"Failed to write file {path}: {e}") from e
+
+    from tsugite.events.helpers import emit_file_write_event
+
+    emit_file_write_event(str(file_path), content, "tool_call")
+
+    return f"Successfully wrote {len(content)} characters to {path}"
 
 
 def _build_gitignore_matcher(base_path: Path) -> Optional[pathspec.PathSpec]:
@@ -420,6 +425,10 @@ def edit_file(
         final_content = _preserve_line_ending(original_content, new_content)
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(final_content, encoding="utf-8")
+
+        from tsugite.events.helpers import emit_file_write_event
+
+        emit_file_write_event(str(file_path), final_content, "tool_call")
 
         if batch_mode:
             return f"Successfully applied {total_edits} edit(s) to {path} ({total_replacements} total replacements)"

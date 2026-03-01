@@ -36,6 +36,7 @@ class EventType(IntEnum):
     WARNING = 22
     STEP_PROGRESS = 23
     FILE_READ = 24
+    FILE_WRITE = 27
 
     # Audit events
     TOOL_CALL = 25

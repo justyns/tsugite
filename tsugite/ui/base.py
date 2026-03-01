@@ -17,6 +17,7 @@ from tsugite.events import (
     DebugMessageEvent,
     ErrorEvent,
     FileReadEvent,
+    FileWriteEvent,
     FinalAnswerEvent,
     InfoEvent,
     LLMMessageEvent,
@@ -156,6 +157,8 @@ class CustomUIHandler:
                 self._handle_step_progress(event)
             elif isinstance(event, FileReadEvent):
                 self._handle_file_read(event)
+            elif isinstance(event, FileWriteEvent):
+                self._handle_file_write(event)
 
             self._update_display()
 
@@ -529,16 +532,25 @@ class CustomUIHandler:
             prefix = self._get_display_prefix()
             self._print(f"[cyan]{prefix}{message}[/cyan]")
 
+    @staticmethod
+    def _format_file_event(verb: str, event) -> str:
+        """Format a file read/write event as a display string."""
+        from tsugite.utils import format_file_size
+
+        size_str = format_file_size(event.byte_count)
+        return f"{verb} {event.path} ({event.line_count} lines, {size_str})"
+
     def _handle_file_read(self, event: FileReadEvent) -> None:
         """Handle file read event."""
         if self.buffer_active:
             self.file_read_buffer.append(event)
             return
 
-        from tsugite.utils import format_file_size
+        self._print(f"[dim]{self._format_file_event('Read', event)}[/dim]")
 
-        size_str = format_file_size(event.byte_count)
-        self._print(f"[dim]Read {event.path} ({event.line_count} lines, {size_str})[/dim]")
+    def _handle_file_write(self, event: FileWriteEvent) -> None:
+        """Handle file write event."""
+        self._print(f"[dim]{self._format_file_event('Wrote', event)}[/dim]")
 
     def _update_display(self) -> None:
         """Update the live display with current state."""

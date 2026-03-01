@@ -8,6 +8,7 @@ from tsugite.events import (
     CodeExecutionEvent,
     ErrorEvent,
     FileReadEvent,
+    FileWriteEvent,
     FinalAnswerEvent,
     InfoEvent,
     LLMMessageEvent,
@@ -20,6 +21,9 @@ from tsugite.events import (
     ToolCallEvent,
     ToolResultEvent,
 )
+
+# Event types that share the same file-io payload shape
+_FILE_IO_EVENTS = {FileReadEvent: "file_read", FileWriteEvent: "file_write"}
 
 
 class JSONLUIHandler:
@@ -41,6 +45,7 @@ class JSONLUIHandler:
     - FinalAnswerEvent    → {"type": "final_result", "result": str, "turns": int, "tokens": int, "cost": float}
     - ErrorEvent          → {"type": "error", "error": str, "step": int}
     - FileReadEvent       → {"type": "file_read", "path": str, "line_count": int, "byte_count": int, "operation": str}
+    - FileWriteEvent      → {"type": "file_write", "path": str, "line_count": int, "byte_count": int, "operation": str}
     - SkillLoadedEvent    → {"type": "skill_loaded", "name": str, "description": str}
     - SkillLoadFailedEvent→ {"type": "warning", "message": "Failed to load skill '{name}': {error}"}
     - SkillUnloadedEvent  → {"type": "skill_unloaded", "name": str}
@@ -104,9 +109,9 @@ class JSONLUIHandler:
         elif isinstance(event, SkillUnloadedEvent):
             self._emit("skill_unloaded", {"name": event.skill_name})
 
-        elif isinstance(event, FileReadEvent):
+        elif type(event) in _FILE_IO_EVENTS:
             self._emit(
-                "file_read",
+                _FILE_IO_EVENTS[type(event)],
                 {
                     "path": event.path,
                     "line_count": event.line_count,

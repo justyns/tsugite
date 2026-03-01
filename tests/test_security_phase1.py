@@ -34,10 +34,13 @@ class TestParentOnlyFlag:
 
     def test_parent_only_on_interactive_tools(self):
         """ask_user and ask_user_batch should be marked parent_only via function attribute."""
-        from tsugite.tools.interactive import ask_user, ask_user_batch
+        import importlib
 
-        assert getattr(ask_user, "_parent_only", False) is True
-        assert getattr(ask_user_batch, "_parent_only", False) is True
+        import tsugite.tools.interactive as interactive_mod
+
+        importlib.reload(interactive_mod)
+        assert getattr(interactive_mod.ask_user, "_parent_only", False) is True
+        assert getattr(interactive_mod.ask_user_batch, "_parent_only", False) is True
 
     def test_parent_only_on_spawn_agent(self):
         import importlib

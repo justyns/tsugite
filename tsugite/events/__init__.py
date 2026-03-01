@@ -8,6 +8,7 @@ from .events import (
     DebugMessageEvent,
     ErrorEvent,
     FileReadEvent,
+    FileWriteEvent,
     FinalAnswerEvent,
     InfoEvent,
     LLMMessageEvent,
@@ -53,6 +54,7 @@ __all__ = [
     "WarningEvent",
     "StepProgressEvent",
     "FileReadEvent",
+    "FileWriteEvent",
     # Audit
     "ToolCallEvent",
     "ToolResultEvent",

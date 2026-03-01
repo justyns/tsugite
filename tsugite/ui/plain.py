@@ -10,6 +10,7 @@ from tsugite.events import (
     CostSummaryEvent,
     ErrorEvent,
     FileReadEvent,
+    FileWriteEvent,
     FinalAnswerEvent,
     LLMMessageEvent,
     ObservationEvent,
@@ -305,10 +306,11 @@ class PlainUIHandler(CustomUIHandler):
 
     def _handle_file_read(self, event: FileReadEvent) -> None:
         """Handle file read event with plain text output."""
-        from tsugite.utils import format_file_size
+        self.console.print(self._format_file_event("Read", event))
 
-        size_str = format_file_size(event.byte_count)
-        self.console.print(f"Read {event.path} ({event.line_count} lines, {size_str})")
+    def _handle_file_write(self, event: FileWriteEvent) -> None:
+        """Handle file write event with plain text output."""
+        self.console.print(self._format_file_event("Wrote", event))
 
     @contextmanager
     def progress_context(self) -> Generator[None, None, None]:
