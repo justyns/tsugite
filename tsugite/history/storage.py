@@ -204,14 +204,21 @@ class SessionStorage:
 
     def _write_record(self, record: SessionRecord) -> None:
         """Append a record to the session file with locking."""
+        self._write_records([record])
+
+    def _write_records(self, records: List[SessionRecord]) -> None:
+        """Append multiple records in a single locked write."""
+        if not records:
+            return
         self.session_path.parent.mkdir(parents=True, exist_ok=True)
 
         try:
             with open(self.session_path, "a", encoding="utf-8") as f:
                 portalocker.lock(f, portalocker.LOCK_EX)
                 try:
-                    f.write(record.model_dump_json(exclude_none=True))
-                    f.write("\n")
+                    for record in records:
+                        f.write(record.model_dump_json(exclude_none=True))
+                        f.write("\n")
                     f.flush()
                 finally:
                     portalocker.unlock(f)
@@ -219,6 +226,17 @@ class SessionStorage:
             raise RuntimeError(f"Failed to acquire lock on {self.session_path}")
         except IOError as e:
             raise RuntimeError(f"Failed to write to {self.session_path}: {e}")
+
+    def write_turns(self, turns: List[Turn]) -> None:
+        """Write pre-existing Turn records (used for compaction retained turns).
+
+        Updates internal counters to match the written turns.
+        """
+        self._write_records(turns)
+        for turn in turns:
+            self._turn_count += 1
+            self._total_tokens += turn.tokens or 0
+            self._total_cost += turn.cost or 0.0
 
     def _replay_state(self) -> None:
         """Replay records to rebuild current state."""
@@ -462,14 +480,15 @@ class SessionStorage:
         self._total_tokens += tokens or 0
         self._total_cost += cost or 0.0
 
-    def record_compaction_summary(self, summary: str, previous_turns: int) -> None:
+    def record_compaction_summary(self, summary: str, previous_turns: int, retained_turns: int = 0) -> None:
         """Record compaction summary.
 
         Args:
             summary: LLM-generated summary of previous conversation
             previous_turns: Number of turns in compacted session
+            retained_turns: Number of recent turns kept verbatim
         """
-        record = CompactionSummary(summary=summary, previous_turns=previous_turns)
+        record = CompactionSummary(summary=summary, previous_turns=previous_turns, retained_turns=retained_turns)
         self._write_record(record)
 
     @property

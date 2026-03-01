@@ -140,6 +140,7 @@ class CompactionSummary(BaseModel):
     type: Literal["compaction_summary"] = "compaction_summary"
     summary: str = Field(..., description="LLM-generated summary of previous conversation")
     previous_turns: int = Field(..., description="Number of turns in the compacted session")
+    retained_turns: int = Field(default=0, description="Number of recent turns kept verbatim after compaction")
 
 
 # Type alias for any record type
