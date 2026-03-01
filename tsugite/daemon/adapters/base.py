@@ -303,6 +303,10 @@ class BaseAdapter(ABC):
         except Exception as e:
             logger.warning("Failed to save daemon history: %s", e)
 
+        if result.context_window:
+            self.session_manager.update_context_limit(result.context_window)
+            self.agent_config.context_limit = result.context_window
+
         if result.token_count:
             self.session_manager.update_token_count(user_id, result.token_count)
 

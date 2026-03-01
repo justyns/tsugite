@@ -69,6 +69,7 @@ class AgentResult:
     steps: Optional[List[StepResult]] = None
     error: Optional[str] = None
     claude_code_session_id: Optional[str] = None
+    context_window: Optional[int] = None
 
 
 class TsugiteAgent:
@@ -150,6 +151,9 @@ class TsugiteAgent:
         self._claude_code_model = self.litellm_params.get("model") if self._is_claude_code else None
         self._claude_code_session_id: Optional[str] = None
         self._claude_code_last_turn_tokens: int = 0
+        self._claude_code_context_window: Optional[int] = None
+        self._claude_code_cache_creation_tokens: int = 0
+        self._claude_code_cache_read_tokens: int = 0
 
     def _run_async_in_sync_context(self, coro):
         """Run async coroutine in synchronous context, handling event loop properly.
@@ -504,6 +508,9 @@ class TsugiteAgent:
                         cached_tokens = getattr(response.usage, "cached_tokens", None)
                         cache_creation_tokens = getattr(response.usage, "cache_creation_input_tokens", None)
                         cache_read_tokens = getattr(response.usage, "cache_read_input_tokens", None)
+                    elif self._is_claude_code:
+                        cache_creation_tokens = self._claude_code_cache_creation_tokens or None
+                        cache_read_tokens = self._claude_code_cache_read_tokens or None
 
                     self.event_bus.emit(
                         CostSummaryEvent(
@@ -529,6 +536,7 @@ class TsugiteAgent:
                         cost=self.total_cost if self.total_cost > 0 else None,
                         steps=self.memory.steps,
                         claude_code_session_id=self._claude_code_session_id,
+                        context_window=self._claude_code_context_window,
                     )
                 return exec_result.final_answer
 
@@ -551,6 +559,7 @@ class TsugiteAgent:
                 steps=self.memory.steps,
                 error=error_msg,
                 claude_code_session_id=self._claude_code_session_id,
+                context_window=self._claude_code_context_window,
             )
 
         raise RuntimeError(error_msg)
@@ -584,9 +593,16 @@ class TsugiteAgent:
                 self.total_cost += step_cost
                 self._claude_code_session_id = event.get("session_id", self._claude_code_session_id)
                 input_tokens = event.get("input_tokens") or 0
+                cache_creation = event.get("cache_creation_input_tokens") or 0
+                cache_read = event.get("cache_read_input_tokens") or 0
                 output_tokens = event.get("output_tokens") or 0
-                self._claude_code_last_turn_tokens = input_tokens + output_tokens
-                self.total_tokens += input_tokens + output_tokens
+                turn_total = input_tokens + cache_creation + cache_read + output_tokens
+                self._claude_code_last_turn_tokens = turn_total
+                self._claude_code_cache_creation_tokens += cache_creation
+                self._claude_code_cache_read_tokens += cache_read
+                self.total_tokens += turn_total
+                if event.get("context_window"):
+                    self._claude_code_context_window = event["context_window"]
 
         if stream and self.event_bus:
             self.event_bus.emit(StreamCompleteEvent())

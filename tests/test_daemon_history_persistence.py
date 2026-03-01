@@ -39,6 +39,7 @@ def create_mock_result(response: str = "Test response", token_count: int = 100) 
     mock_result.execution_steps = []
     mock_result.system_message = "System prompt"
     mock_result.attachments = []
+    mock_result.context_window = None
     # Prevent MagicMock auto-creating token_usage.total_tokens
     mock_result.token_usage = None
     return mock_result

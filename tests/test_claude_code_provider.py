@@ -361,6 +361,50 @@ class TestClaudeCodeAgentIntegration:
         assert len(captured_events) == 1
         assert captured_events[0].tokens == 1200
 
+    @pytest.mark.asyncio
+    async def test_agent_run_emits_cache_tokens_in_cost_summary(self):
+        from tsugite.core.agent import TsugiteAgent
+        from tsugite.events import CostSummaryEvent, EventBus
+
+        bus = EventBus()
+        captured_events = []
+        bus.subscribe(lambda e: captured_events.append(e) if isinstance(e, CostSummaryEvent) else None)
+
+        agent = TsugiteAgent(
+            model_string="claude_code:sonnet",
+            tools=[],
+            instructions="test",
+            max_turns=2,
+            event_bus=bus,
+        )
+
+        mock_process = AsyncMock()
+        mock_process.session_id = "test-session"
+
+        async def mock_send(*args, **kwargs):
+            events = [
+                {"type": "text_delta", "text": "Thought: done\n```python\nfinal_answer('hi')\n```"},
+                {
+                    "type": "result", "text": "", "cost_usd": 0.01,
+                    "session_id": "test-session",
+                    "input_tokens": 500, "output_tokens": 100,
+                    "cache_creation_input_tokens": 300, "cache_read_input_tokens": 200,
+                },
+            ]
+            for e in events:
+                yield e
+
+        mock_process.send_message = mock_send
+        mock_process.start = AsyncMock()
+        mock_process.stop = AsyncMock()
+
+        with patch("tsugite.core.claude_code.ClaudeCodeProcess", return_value=mock_process):
+            await agent.run("hello")
+
+        assert len(captured_events) == 1
+        assert captured_events[0].cache_creation_input_tokens == 300
+        assert captured_events[0].cache_read_input_tokens == 200
+
 
 # ── Session ID passthrough tests ──
 
@@ -395,18 +439,51 @@ class TestSessionIdPassthrough:
 
 
 class TestClaudeCodeContextLimit:
-    def test_context_limit_uses_litellm_model(self):
-        from tsugite.daemon.memory import _get_context_limit
+    def test_context_limit_uses_claude_code_override(self):
+        from tsugite.daemon.memory import _CLAUDE_CODE_CONTEXT_LIMIT, _get_context_limit
 
-        with patch("litellm.get_model_info") as mock_info:
-            mock_info.return_value = {"max_input_tokens": 200_000}
+        limit = _get_context_limit("claude_code:opus")
+        assert limit == _CLAUDE_CODE_CONTEXT_LIMIT
+
+    def test_context_limit_claude_code_ignores_litellm(self):
+        from tsugite.daemon.memory import _CLAUDE_CODE_CONTEXT_LIMIT, _get_context_limit
+
+        with patch("litellm.get_model_info", side_effect=Exception("should not be called")):
             limit = _get_context_limit("claude_code:opus")
-            mock_info.assert_called_with("claude-opus-4-6")
-            assert limit == 200_000
+            assert limit == _CLAUDE_CODE_CONTEXT_LIMIT
 
-    def test_context_limit_fallback_on_error(self):
-        from tsugite.daemon.memory import _get_context_limit
+    @pytest.mark.asyncio
+    async def test_context_window_flows_to_agent_result(self):
+        from tsugite.core.agent import TsugiteAgent
 
-        with patch("litellm.get_model_info", side_effect=Exception("unknown")):
-            limit = _get_context_limit("claude_code:opus", fallback=150_000)
-            assert limit == 150_000
+        agent = TsugiteAgent(
+            model_string="claude_code:sonnet",
+            tools=[],
+            instructions="test",
+            max_turns=2,
+        )
+
+        mock_process = AsyncMock()
+        mock_process.session_id = "test-session"
+
+        async def mock_send(*args, **kwargs):
+            events = [
+                {"type": "text_delta", "text": "Thought: done\n```python\nfinal_answer('ok')\n```"},
+                {
+                    "type": "result", "text": "", "cost_usd": 0.01,
+                    "session_id": "test-session",
+                    "input_tokens": 500, "output_tokens": 100,
+                    "context_window": 200000,
+                },
+            ]
+            for e in events:
+                yield e
+
+        mock_process.send_message = mock_send
+        mock_process.start = AsyncMock()
+        mock_process.stop = AsyncMock()
+
+        with patch("tsugite.core.claude_code.ClaudeCodeProcess", return_value=mock_process):
+            result = await agent.run("hello", return_full_result=True)
+
+        assert result.context_window == 200000

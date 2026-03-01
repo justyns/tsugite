@@ -122,6 +122,11 @@ class SessionManager:
             )
             return conv_id
 
+    def update_context_limit(self, limit: int) -> None:
+        """Update context limit and recalculate compaction threshold."""
+        self.context_limit = limit
+        self.compaction_threshold = int(limit * 0.8)
+
     def update_token_count(self, user_id: str, tokens_used: int) -> None:
         """Update cumulative token count for session.
 

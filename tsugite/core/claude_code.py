@@ -175,14 +175,22 @@ class ClaudeCodeProcess:
                 cost = event.get("total_cost_usd")
                 duration = event.get("duration_ms")
                 logger.debug("Result received (cost=$%s, %sms): %.200s", cost, duration, result_text)
+
+                # Prefer usage from result event, fall back to last assistant event
+                result_usage = event.get("usage") or self._last_usage
+                model_usage = event.get("modelUsage") or {}
+
                 yield {
                     "type": "result",
                     "text": result_text,
                     "cost_usd": cost,
                     "duration_ms": duration,
                     "session_id": event.get("session_id", self._session_id),
-                    "input_tokens": self._last_usage.get("input_tokens"),
-                    "output_tokens": self._last_usage.get("output_tokens"),
+                    "input_tokens": result_usage.get("input_tokens") or 0,
+                    "cache_creation_input_tokens": result_usage.get("cache_creation_input_tokens") or 0,
+                    "cache_read_input_tokens": result_usage.get("cache_read_input_tokens") or 0,
+                    "output_tokens": result_usage.get("output_tokens") or 0,
+                    "context_window": model_usage.get("contextWindow"),
                 }
                 return
 

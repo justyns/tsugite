@@ -60,14 +60,23 @@ def _resolve_litellm_model(model: str) -> str:
     return params.get("_litellm_model", params["model"])
 
 
+_CLAUDE_CODE_CONTEXT_LIMIT = 200_000
+
+
 def _get_context_limit(model: str, fallback: int | None = None) -> int:
     """Get context limit for a model via litellm.
 
-    Priority: litellm model info -> fallback param -> DEFAULT_CONTEXT_LIMIT.
+    Priority: claude_code provider override -> litellm model info -> fallback -> DEFAULT_CONTEXT_LIMIT.
     """
+    from tsugite.models import get_model_params
+
+    params = get_model_params(model)
+    if params.get("_provider") == "claude_code":
+        return _CLAUDE_CODE_CONTEXT_LIMIT
+
     from litellm import get_model_info
 
-    litellm_model = _resolve_litellm_model(model)
+    litellm_model = params.get("_litellm_model", params["model"])
     try:
         info = get_model_info(litellm_model)
         limit = info.get("max_input_tokens")

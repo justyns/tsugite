@@ -75,6 +75,7 @@ norecursedirs = [
   '{arch}',
   '*.egg',
   '_*',
+  'integration',
 ]
 
 [tool.coverage.run]
