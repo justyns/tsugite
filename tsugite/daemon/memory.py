@@ -6,6 +6,8 @@ import logging
 DEFAULT_COMPACT_MODEL = "openai:gpt-4o-mini"
 DEFAULT_CONTEXT_LIMIT = 128_000
 CONTEXT_RESERVE_RATIO = 0.25
+RETENTION_BUDGET_RATIO = 0.15
+MIN_RETAINED_TURNS = 2
 
 PROVIDER_COMPACT_MODELS = {
     "openai": DEFAULT_COMPACT_MODEL,
@@ -17,17 +19,33 @@ PROVIDER_COMPACT_MODELS = {
 
 logger = logging.getLogger(__name__)
 
+_SUMMARY_FORMAT = """\
+## Current Task
+What is actively being worked on or discussed right now.
+
+## Key Decisions
+Important decisions made during the conversation.
+
+## Facts & Preferences
+Facts learned about the user, project, or environment. User preferences and conventions.
+
+## Open Questions
+Unresolved questions or ambiguities that still need answers.
+
+## Action Items
+Concrete next steps or pending tasks."""
+
 SUMMARIZE_SYSTEM_PROMPT = (
-    "Summarize this conversation concisely. Focus on: what is currently being worked on, "
-    "decisions made, important facts learned, user preferences, action items, "
-    "and next steps. Keep it under 500 words."
+    "Summarize this conversation using the structured format below.\n"
+    "Keep the total summary under 800 words. Omit any section that has no content.\n\n"
+    f"{_SUMMARY_FORMAT}"
 )
 
 COMBINE_SYSTEM_PROMPT = (
-    "You are given multiple summaries of consecutive conversation chunks. "
-    "Combine them into a single coherent summary. Focus on: what is currently being worked on, "
-    "decisions made, important facts learned, user preferences, action items, "
-    "and next steps. Keep it under 500 words."
+    "You are given multiple summaries of consecutive conversation chunks.\n"
+    "Combine them into a single coherent summary using the structured format below.\n"
+    "Keep the total summary under 800 words. Omit any section that has no content.\n\n"
+    f"{_SUMMARY_FORMAT}"
 )
 
 
@@ -63,7 +81,7 @@ def _resolve_litellm_model(model: str) -> str:
 _CLAUDE_CODE_CONTEXT_LIMIT = 200_000
 
 
-def _get_context_limit(model: str, fallback: int | None = None) -> int:
+def get_context_limit(model: str, fallback: int | None = None) -> int:
     """Get context limit for a model via litellm.
 
     Priority: claude_code provider override -> litellm model info -> fallback -> DEFAULT_CONTEXT_LIMIT.
@@ -200,7 +218,7 @@ async def summarize_session(
     if model is None:
         model = DEFAULT_COMPACT_MODEL
 
-    context_limit = _get_context_limit(model, fallback=max_context_tokens)
+    context_limit = get_context_limit(model, fallback=max_context_tokens)
     usable_tokens = int(context_limit * (1 - CONTEXT_RESERVE_RATIO))
 
     chunks = _chunk_messages(conversation_history, usable_tokens, model)
@@ -213,3 +231,48 @@ async def summarize_session(
     logger.info("Summarizing %d chunks (context limit: %d, usable: %d)", len(chunks), context_limit, usable_tokens)
     chunk_summaries = await asyncio.gather(*[_summarize_chunk(chunk, model) for chunk in chunks])
     return await _combine_summaries(chunk_summaries, model)
+
+
+def _estimate_turn_tokens(turn: "Turn", model: str) -> int:
+    """Estimate token cost of a Turn by summing its messages."""
+    return sum(
+        _count_tokens(f"{msg.get('role', 'user').upper()}: {text}", model)
+        for msg in turn.messages
+        if (text := _message_text(msg))
+    )
+
+
+def split_turns_for_compaction(
+    turns: list["Turn"],
+    model: str,
+    retention_budget_tokens: int,
+    min_retained: int = MIN_RETAINED_TURNS,
+) -> tuple[list["Turn"], list["Turn"]]:
+    """Split turns into (old, recent) for compaction.
+
+    Walks backward keeping recent turns that fit within the retention budget.
+    Always keeps at least min_retained turns. If all turns fit, returns
+    empty old list so the caller can skip compaction.
+
+    Returns:
+        (old_turns, recent_turns) — old_turns may be empty.
+    """
+    if not turns:
+        return [], []
+
+    if len(turns) <= min_retained:
+        return [], list(turns)
+
+    kept: list["Turn"] = []
+    budget_remaining = retention_budget_tokens
+
+    for turn in reversed(turns):
+        cost = _estimate_turn_tokens(turn, model)
+        if len(kept) >= min_retained and budget_remaining < cost:
+            break
+        kept.append(turn)
+        budget_remaining -= cost
+
+    kept.reverse()
+    split_idx = len(turns) - len(kept)
+    return turns[:split_idx], turns[split_idx:]
