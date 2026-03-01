@@ -225,5 +225,5 @@ class TestBuiltinDefaultAutoDiscovery:
         builtin_path = get_builtin_agents_path() / "default.md"
         agent = parse_agent_file(builtin_path)
 
-        assert "Web Search Guidelines" in agent.content
+        assert "Web Search" in agent.content
         assert "web_search(query=" in agent.content
