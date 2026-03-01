@@ -96,9 +96,9 @@ class Gateway:
             if agent_config.context_limit:
                 context_limit = agent_config.context_limit
             elif agent_config.model:
-                from tsugite.daemon.memory import _get_context_limit
+                from tsugite.daemon.memory import get_context_limit
 
-                context_limit = _get_context_limit(agent_config.model, fallback=default_context_limit)
+                context_limit = get_context_limit(agent_config.model, fallback=default_context_limit)
                 logger.info("[%s] Auto-detected context limit: %d tokens", agent_name, context_limit)
             else:
                 context_limit = default_context_limit

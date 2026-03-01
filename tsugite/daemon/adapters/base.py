@@ -315,15 +315,20 @@ class BaseAdapter(ABC):
     async def _compact_session(self, user_id: str) -> None:
         """Compact session when approaching context limit.
 
-        1. Load session and reconstruct messages
-        2. Summarize conversation
-        3. Create new session with compaction summary
+        Uses a sliding window: recent turns are kept verbatim while older
+        turns are summarized. This preserves the active conversational thread.
 
         Args:
             user_id: Platform user ID
         """
-        from tsugite.daemon.memory import infer_compaction_model, summarize_session
-        from tsugite.history import SessionStorage, get_history_dir, reconstruct_messages
+        from tsugite.daemon.memory import (
+            RETENTION_BUDGET_RATIO,
+            get_context_limit,
+            infer_compaction_model,
+            split_turns_for_compaction,
+            summarize_session,
+        )
+        from tsugite.history import SessionStorage, Turn, get_history_dir
 
         model = self.agent_config.compaction_model or infer_compaction_model(self.resolve_model())
 
@@ -331,13 +336,28 @@ class BaseAdapter(ABC):
         old_conv_id = session_info.conversation_id
         old_session_path = get_history_dir() / f"{old_conv_id}.jsonl"
 
-        logger.info("[%s] Compacting session (%d messages)...", self.agent_name, session_info.message_count)
-        messages = reconstruct_messages(old_session_path)
-        summary = await summarize_session(messages, model=model, max_context_tokens=self.agent_config.context_limit)
-        logger.info("[%s] Session compacted", self.agent_name)
+        all_turns = [r for r in SessionStorage(old_session_path).load_records() if isinstance(r, Turn)]
+
+        context_limit = get_context_limit(model, fallback=self.agent_config.context_limit)
+        retention_budget = int(context_limit * RETENTION_BUDGET_RATIO)
+
+        old_turns, recent_turns = split_turns_for_compaction(all_turns, model, retention_budget)
+
+        if not old_turns:
+            logger.info("[%s] All turns fit in retention budget, skipping compaction", self.agent_name)
+            return
+
+        logger.info(
+            "[%s] Compacting session: %d old turns summarized, %d recent turns retained",
+            self.agent_name,
+            len(old_turns),
+            len(recent_turns),
+        )
+
+        old_messages = [msg for turn in old_turns for msg in turn.messages]
+        summary = await summarize_session(old_messages, model=model, max_context_tokens=self.agent_config.context_limit)
 
         new_conv_id = self.session_manager.compact_session(user_id)
-
         new_session_path = get_history_dir() / f"{new_conv_id}.jsonl"
         new_storage = SessionStorage.create(
             agent_name=self.agent_name,
@@ -346,4 +366,7 @@ class BaseAdapter(ABC):
             session_path=new_session_path,
         )
 
-        new_storage.record_compaction_summary(summary, session_info.message_count)
+        new_storage.record_compaction_summary(summary, len(old_turns), retained_turns=len(recent_turns))
+        new_storage.write_turns(recent_turns)
+
+        logger.info("[%s] Session compacted", self.agent_name)
