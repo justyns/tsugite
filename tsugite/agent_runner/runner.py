@@ -397,6 +397,17 @@ async def _execute_agent_with_prompt(
     if ui_handler:
         event_bus.subscribe(ui_handler.handle_event)
 
+    # Subscribe workspace hooks (if configured)
+    from tsugite.hooks import setup_hook_handler
+
+    if workspace:
+        hooks_dir = workspace.path
+    elif path_context:
+        hooks_dir = path_context.effective_cwd
+    else:
+        hooks_dir = Path.cwd()
+    setup_hook_handler(hooks_dir, event_bus)
+
     # Start with tools from prepared agent
     tools = list(prepared.tools)  # Make a copy
 
