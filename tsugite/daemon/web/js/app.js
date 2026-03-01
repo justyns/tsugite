@@ -6,6 +6,7 @@ import scheduleView from './views/schedules.js';
 import historyView from './views/history.js';
 import webhookView from './views/webhooks.js';
 import agentFileView from './views/agent-files.js';
+import skillFileView from './views/skills.js';
 
 window.Alpine = Alpine;
 
@@ -24,6 +25,7 @@ Alpine.data('scheduleView', scheduleView);
 Alpine.data('historyView', historyView);
 Alpine.data('webhookView', webhookView);
 Alpine.data('agentFileView', agentFileView);
+Alpine.data('skillFileView', skillFileView);
 
 window.addEventListener('hashchange', () => {
   const hash = location.hash.slice(1);
