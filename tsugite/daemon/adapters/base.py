@@ -258,6 +258,8 @@ class BaseAdapter(ABC):
 
         enriched_prompt = self._build_message_context(message, channel_context, user_id)
 
+        agent_context = self._build_agent_context(channel_context)
+
         from tsugite.cli.helpers import PathContext
 
         workspace_dir = self.agent_config.workspace_dir
@@ -288,7 +290,7 @@ class BaseAdapter(ABC):
                     ),
                     path_context=path_context,
                     custom_logger=custom_logger,
-                    context=self._build_agent_context(channel_context),
+                    context=agent_context,
                 )
             finally:
                 os.chdir(original_cwd)

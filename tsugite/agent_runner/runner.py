@@ -739,6 +739,15 @@ async def run_agent_async(
     if context is None:
         context = {}
 
+    from tsugite.hooks import fire_pre_message_hooks
+
+    hooks_dir = workspace.path if workspace else (path_context.effective_cwd if path_context else Path.cwd())
+    hook_vars = await fire_pre_message_hooks(
+        hooks_dir,
+        {"message": prompt, "agent_name": agent_path.stem},
+    )
+    context.update(hook_vars)
+
     # Load conversation history if continuing
     previous_messages = []
     claude_code_resume_session = None

@@ -7,7 +7,18 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from tsugite.events.events import ToolCallEvent, ToolResultEvent
-from tsugite.hooks import HookHandler, HooksConfig, HookRule, _execute_hook, fire_compact_hooks, load_hooks_config
+from tsugite.hooks import (
+    HookHandler,
+    HooksConfig,
+    HookRule,
+    _execute_hook,
+    _render_and_execute,
+    fire_compact_hooks,
+    fire_pre_message_hooks,
+    load_hooks_config,
+)
+
+import jinja2
 
 
 @pytest.fixture
@@ -309,3 +320,148 @@ class TestFireCompactHooks:
         with patch("tsugite.hooks.subprocess.run") as mock_run:
             await fire_compact_hooks(tmp_workspace, "pre_compact", {})
             mock_run.assert_not_called()
+
+
+class TestCaptureAs:
+    def test_capture_as_field_parsed(self):
+        rule = HookRule(run="echo hi", capture_as="my_var")
+        assert rule.capture_as == "my_var"
+
+    def test_capture_as_defaults_to_none(self):
+        rule = HookRule(run="echo hi")
+        assert rule.capture_as is None
+
+    def test_capture_as_parsed_from_yaml(self, tmp_workspace):
+        (tmp_workspace / ".tsugite" / "hooks.yaml").write_text(
+            "hooks:\n  pre_message:\n    - run: echo hello\n      capture_as: rag_context\n"
+        )
+        config = load_hooks_config(tmp_workspace)
+        assert config.pre_message[0].capture_as == "rag_context"
+
+
+class TestExecuteHookCapture:
+    def test_capture_returns_stdout(self, tmp_path):
+        mock_result = MagicMock(returncode=0, stdout=b"captured output\n")
+        with patch("tsugite.hooks.subprocess.run", return_value=mock_result):
+            output = _execute_hook("echo captured output", tmp_path, wait=False, capture=True)
+            assert output == "captured output"
+
+    def test_capture_returns_none_on_failure(self, tmp_path):
+        mock_result = MagicMock(returncode=1)
+        with patch("tsugite.hooks.subprocess.run", return_value=mock_result):
+            output = _execute_hook("exit 1", tmp_path, wait=False, capture=True)
+            assert output is None
+
+    def test_capture_implies_blocking(self, tmp_path):
+        mock_result = MagicMock(returncode=0, stdout=b"ok")
+        with patch("tsugite.hooks.subprocess.run", return_value=mock_result) as mock_run, \
+             patch("tsugite.hooks.subprocess.Popen") as mock_popen:
+            _execute_hook("echo ok", tmp_path, wait=False, capture=True)
+            mock_run.assert_called_once()
+            mock_popen.assert_not_called()
+
+    def test_no_capture_returns_none(self, tmp_path):
+        with patch("tsugite.hooks.subprocess.Popen"):
+            result = _execute_hook("echo hi", tmp_path, wait=False, capture=False)
+            assert result is None
+
+    def test_capture_timeout_returns_none(self, tmp_path):
+        with patch("tsugite.hooks.subprocess.run", side_effect=subprocess.TimeoutExpired("cmd", 300)):
+            result = _execute_hook("sleep 999", tmp_path, wait=False, capture=True)
+            assert result is None
+
+
+class TestRenderAndExecuteCapture:
+    _env = jinja2.Environment()
+
+    def test_captures_returned(self, tmp_path):
+        rules = [HookRule(run="echo hello", capture_as="greeting")]
+        mock_result = MagicMock(returncode=0, stdout=b"hello")
+        with patch("tsugite.hooks.subprocess.run", return_value=mock_result):
+            captured = _render_and_execute(self._env, rules, {}, tmp_path)
+            assert captured == {"greeting": "hello"}
+
+    def test_no_capture_returns_empty_dict(self, tmp_path):
+        rules = [HookRule(run="echo hello", wait=True)]
+        mock_result = MagicMock(returncode=0, stdout=b"hello")
+        with patch("tsugite.hooks.subprocess.run", return_value=mock_result):
+            captured = _render_and_execute(self._env, rules, {}, tmp_path)
+            assert captured == {}
+
+    def test_multiple_captures(self, tmp_path):
+        rules = [
+            HookRule(run="echo one", capture_as="var_a"),
+            HookRule(run="echo two", capture_as="var_b"),
+        ]
+        call_count = [0]
+        def mock_run_fn(*a, **kw):
+            call_count[0] += 1
+            return MagicMock(returncode=0, stdout=f"output_{call_count[0]}".encode())
+
+        with patch("tsugite.hooks.subprocess.run", side_effect=mock_run_fn):
+            captured = _render_and_execute(self._env, rules, {}, tmp_path)
+            assert captured == {"var_a": "output_1", "var_b": "output_2"}
+
+    def test_failed_capture_not_included(self, tmp_path):
+        rules = [HookRule(run="exit 1", capture_as="should_not_appear")]
+        with patch("tsugite.hooks.subprocess.run", return_value=MagicMock(returncode=1)):
+            captured = _render_and_execute(self._env, rules, {}, tmp_path)
+            assert captured == {}
+
+    def test_backward_compat_fire_and_forget(self, tmp_path):
+        rules = [HookRule(run="echo fire", tools=["*"])]
+        with patch("tsugite.hooks.subprocess.Popen"):
+            captured = _render_and_execute(self._env, rules, {}, tmp_path)
+            assert captured == {}
+
+
+@pytest.mark.asyncio
+class TestFirePreMessageHooks:
+    async def test_no_config_returns_empty(self, tmp_path):
+        result = await fire_pre_message_hooks(tmp_path, {})
+        assert result == {}
+
+    async def test_no_pre_message_rules_returns_empty(self, tmp_workspace):
+        (tmp_workspace / ".tsugite" / "hooks.yaml").write_text(
+            "hooks:\n  post_tool:\n    - tools: [write_file]\n      run: echo done\n"
+        )
+        result = await fire_pre_message_hooks(tmp_workspace, {})
+        assert result == {}
+
+    async def test_captures_returned(self, tmp_workspace):
+        (tmp_workspace / ".tsugite" / "hooks.yaml").write_text(
+            "hooks:\n  pre_message:\n    - run: echo rag results\n      capture_as: rag_context\n"
+        )
+        mock_result = MagicMock(returncode=0, stdout=b"rag results")
+        with patch("tsugite.hooks.subprocess.run", return_value=mock_result):
+            result = await fire_pre_message_hooks(tmp_workspace, {"message": "test"})
+            assert result == {"rag_context": "rag results"}
+
+    async def test_context_rendered_in_command(self, tmp_workspace):
+        (tmp_workspace / ".tsugite" / "hooks.yaml").write_text(
+            "hooks:\n  pre_message:\n"
+            "    - run: echo {{ message }}\n      capture_as: echo_msg\n"
+        )
+        mock_result = MagicMock(returncode=0, stdout=b"hello world")
+        with patch("tsugite.hooks.subprocess.run", return_value=mock_result) as mock_run:
+            await fire_pre_message_hooks(tmp_workspace, {"message": "hello world"})
+            assert "hello world" in mock_run.call_args[0][0]
+
+    async def test_match_filters_pre_message(self, tmp_workspace):
+        (tmp_workspace / ".tsugite" / "hooks.yaml").write_text(
+            "hooks:\n  pre_message:\n"
+            "    - run: echo hi\n      capture_as: x\n"
+            '      match: "{{ message | length > 100 }}"\n'
+        )
+        with patch("tsugite.hooks.subprocess.run") as mock_run:
+            result = await fire_pre_message_hooks(tmp_workspace, {"message": "short"})
+            mock_run.assert_not_called()
+            assert result == {}
+
+    async def test_pre_message_parsed_in_config(self, tmp_workspace):
+        (tmp_workspace / ".tsugite" / "hooks.yaml").write_text(
+            "hooks:\n  pre_message:\n    - run: echo hi\n      capture_as: var\n"
+        )
+        config = load_hooks_config(tmp_workspace)
+        assert len(config.pre_message) == 1
+        assert config.pre_message[0].capture_as == "var"
