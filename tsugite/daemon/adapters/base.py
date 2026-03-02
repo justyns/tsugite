@@ -2,13 +2,15 @@
 
 import asyncio
 import contextvars
+import json
 import logging
 import os
+import tempfile
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional, Protocol
+from typing import TYPE_CHECKING, Any, Dict, Optional, Protocol
 
 from tsugite.agent_inheritance import find_agent_file
 from tsugite.agent_runner import run_agent
@@ -16,7 +18,20 @@ from tsugite.daemon.config import AgentConfig
 from tsugite.daemon.session import SessionManager
 from tsugite.options import ExecutionOptions
 
+if TYPE_CHECKING:
+    from tsugite.history.models import Turn
+
 logger = logging.getLogger(__name__)
+
+
+def _write_turns_tempfile(turns: "list[Turn]") -> Path:
+    """Write turn messages to a temp JSONL file for hook consumption."""
+    fd, path = tempfile.mkstemp(suffix=".jsonl", prefix="tsugite_compact_")
+    with os.fdopen(fd, "w") as f:
+        for turn in turns:
+            for msg in turn.messages:
+                f.write(json.dumps(msg) + "\n")
+    return Path(path)
 
 
 class HasUIHandler(Protocol):
@@ -317,6 +332,7 @@ class BaseAdapter(ABC):
 
         Uses a sliding window: recent turns are kept verbatim while older
         turns are summarized. This preserves the active conversational thread.
+        Fires pre_compact/post_compact hooks if configured.
 
         Args:
             user_id: Platform user ID
@@ -329,6 +345,7 @@ class BaseAdapter(ABC):
             summarize_session,
         )
         from tsugite.history import SessionStorage, Turn, get_history_dir
+        from tsugite.hooks import fire_compact_hooks
 
         model = self.agent_config.compaction_model or infer_compaction_model(self.resolve_model())
 
@@ -354,6 +371,16 @@ class BaseAdapter(ABC):
             len(recent_turns),
         )
 
+        turns_file = _write_turns_tempfile(old_turns)
+        hook_context = {
+            "conversation_id": old_conv_id,
+            "user_id": user_id,
+            "agent_name": self.agent_name,
+            "turns_file": str(turns_file),
+            "turn_count": len(old_turns),
+        }
+        await fire_compact_hooks(self.agent_config.workspace_dir, "pre_compact", hook_context)
+
         old_messages = [msg for turn in old_turns for msg in turn.messages]
         summary = await summarize_session(old_messages, model=model, max_context_tokens=self.agent_config.context_limit)
 
@@ -369,4 +396,12 @@ class BaseAdapter(ABC):
         new_storage.record_compaction_summary(summary, len(old_turns), retained_turns=len(recent_turns))
         new_storage.write_turns(recent_turns)
 
+        await fire_compact_hooks(self.agent_config.workspace_dir, "post_compact", {
+            **hook_context,
+            "new_conversation_id": new_conv_id,
+            "turns_compacted": len(old_turns),
+            "turns_retained": len(recent_turns),
+        })
+
+        turns_file.unlink(missing_ok=True)
         logger.info("[%s] Session compacted", self.agent_name)

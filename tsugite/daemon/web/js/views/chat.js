@@ -227,8 +227,7 @@ export default () => ({
           } else if (event.type === 'session_info') {
             this.updateStatusFromEvent(event);
           } else if (event.type === 'error') {
-            this.messages.splice(progressIdx, 1);
-            this.messages.push({ type: 'error', text: event.error });
+            this._handleProgressEvent(progressIdx, event);
           } else {
             this._handleProgressEvent(progressIdx, event);
           }
@@ -270,6 +269,11 @@ export default () => ({
       prog.statusText = `Turn ${event.turn}...`;
     } else if (event.type === 'thought') {
       prog.statusText = 'Thinking...';
+      if (event.content) {
+        prog.steps.push({ html: `<details><summary>thought</summary><pre><code>${escapeHtml(event.content)}</code></pre></details>` });
+      }
+    } else if (event.type === 'error') {
+      prog.steps.push({ html: `<span class="err">${escapeHtml(event.error)}</span>` });
     } else if (event.type === 'init') {
       prog.statusText = `Agent: ${event.agent}`;
       if (event.model) this.statusInfo = { ...this.statusInfo, model: event.model };
