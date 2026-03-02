@@ -259,6 +259,7 @@ class BaseAdapter(ABC):
         enriched_prompt = self._build_message_context(message, channel_context, user_id)
 
         agent_context = self._build_agent_context(channel_context)
+        agent_context["raw_message"] = message
 
         from tsugite.cli.helpers import PathContext
 

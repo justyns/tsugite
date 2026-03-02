@@ -742,9 +742,10 @@ async def run_agent_async(
     from tsugite.hooks import fire_pre_message_hooks
 
     hooks_dir = workspace.path if workspace else (path_context.effective_cwd if path_context else Path.cwd())
+    hook_message = context.pop("raw_message", prompt)
     hook_vars = await fire_pre_message_hooks(
         hooks_dir,
-        {"message": prompt, "agent_name": agent_path.stem},
+        {"message": hook_message, "agent_name": agent_path.stem},
     )
     context.update(hook_vars)
 
