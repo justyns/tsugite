@@ -153,6 +153,12 @@ Skills may show bash commands. Translate to Python: `shell.run("kubectl get pods
 - Format results nicely for the user. Use `fetch_text(url="...")` for full page content when snippets aren't enough.
 </guidelines>
 
+{% if rag_context is defined and rag_context %}
+<relevant_context>
+{{ rag_context }}
+</relevant_context>
+{% endif %}
+
 <task>
 {{ user_prompt }}
 </task>

@@ -117,6 +117,38 @@ Extra bind mounts can be added programmatically via `SandboxConfig.extra_ro_bind
 | `*.github.com:8080` | port 8080 on subdomains |
 | `*:*` | all domains, all ports |
 
+## Hooks
+
+Hooks fire shell commands at lifecycle points. Configure in `.tsugite/hooks.yaml`:
+
+```yaml
+hooks:
+  post_tool:
+    - tools: [write_file]
+      run: git add {{ path }}
+      wait: true
+
+  pre_message:
+    - run: uridx search "{{ message }}" --limit 5
+      capture_as: rag_context
+    - run: cat memory/preferences.md
+      capture_as: user_preferences
+
+  pre_compact:
+    - run: ./scripts/extract-facts.sh {{ turns_file }}
+      wait: true
+
+  post_compact:
+    - run: echo "Compacted {{ turns_compacted }} turns"
+```
+
+**Hook fields:** `run` (Jinja2 shell command), `tools` (tool filter, `post_tool` only), `match` (Jinja2 condition), `wait` (block until done), `capture_as` (capture stdout into a template variable, implies `wait`).
+
+**Hook types:**
+- **`post_tool`** — After successful tool calls. Context: `tool`, plus tool arguments.
+- **`pre_message`** — Before agent execution. Context: `message`, `user_id`, `agent_name`. Use `capture_as` to inject results into agent templates as `{{ var_name }}`.
+- **`pre_compact`** / **`post_compact`** — Around session compaction. Context: `conversation_id`, `user_id`, `agent_name`, `turns_file`, `turn_count`.
+
 ## Development
 
 ```bash
