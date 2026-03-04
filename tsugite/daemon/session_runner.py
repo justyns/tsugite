@@ -34,10 +34,11 @@ class SessionReviewBackend:
 
     TIMEOUT = 3600  # 1 hour
 
-    def __init__(self, store: AgentSessionStore, session_id: str):
+    def __init__(self, store: AgentSessionStore, session_id: str, on_review_created=None):
         self._store = store
         self._session_id = session_id
         self._review_events: dict[str, threading.Event] = {}
+        self._on_review_created = on_review_created
 
     def ask_user(self, question: str, question_type: str = "text", options: Optional[list[str]] = None) -> str:
         return self._create_and_wait_for_review(question, question_type, options)
@@ -58,6 +59,9 @@ class SessionReviewBackend:
             context=context,
         )
         review = self._store.create_review(review)
+
+        if self._on_review_created:
+            self._on_review_created(review)
 
         event = threading.Event()
         self._review_events[review.id] = event
@@ -87,6 +91,7 @@ class LoggingProgressHandler:
 
 
 NotifyCallback = Callable[[AgentSession, str], Coroutine[Any, Any, None]]
+ReviewNotifyCallback = Callable[[AgentSession, ReviewGate], Coroutine[Any, Any, None]]
 
 
 class SessionRunner:
@@ -97,10 +102,12 @@ class SessionRunner:
         store: AgentSessionStore,
         adapters: dict,
         notify_callback: Optional[NotifyCallback] = None,
+        review_notify_callback: Optional[ReviewNotifyCallback] = None,
     ):
         self._store = store
         self._adapters = adapters
         self._notify_callback = notify_callback
+        self._review_notify_callback = review_notify_callback
         self._active_tasks: dict[str, asyncio.Task] = {}
         self._review_backends: dict[str, SessionReviewBackend] = {}
 
@@ -139,21 +146,30 @@ class SessionRunner:
         from tsugite.daemon.adapters.base import ChannelContext
         from tsugite.interaction import set_interaction_backend
 
-        review_backend = SessionReviewBackend(self._store, session.id)
+        def _on_review_created(review: ReviewGate):
+            if self._review_notify_callback:
+                loop = asyncio.get_event_loop()
+                loop.create_task(self._review_notify_callback(session, review))
+
+        review_backend = SessionReviewBackend(self._store, session.id, on_review_created=_on_review_created)
         self._review_backends[session.id] = review_backend
 
         progress = LoggingProgressHandler(self._store, session.id)
         custom_logger = SimpleNamespace(ui_handler=progress)
+
+        metadata = {
+            "session_id": session.id,
+            "model_override": session.model,
+        }
+        if session.agent_file:
+            metadata["agent_file_override"] = str(adapter._resolve_agent_path(session.agent_file) or session.agent_file)
 
         channel_context = ChannelContext(
             source="session",
             channel_id=None,
             user_id=f"session:{session.id}",
             reply_to=f"session:{session.id}",
-            metadata={
-                "session_id": session.id,
-                "model_override": session.model,
-            },
+            metadata=metadata,
         )
 
         _current_session_id.set(session.id)

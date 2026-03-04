@@ -201,7 +201,21 @@ class Gateway:
 
             sessions_path = self.config.state_dir / "sessions.json"
             session_store = AgentSessionStore(sessions_path)
-            self._session_runner = SessionRunner(session_store, http_adapters)
+            notification_channels = self.config.notification_channels or {}
+
+            async def _review_notify(session, review):
+                if not session.notify:
+                    return
+                from tsugite.tools.notify import send_notification
+
+                resolved = [
+                    (name, notification_channels[name]) for name in session.notify if name in notification_channels
+                ]
+                if resolved:
+                    msg = f"**Review requested** for session `{session.id}`:\n\n> {review.title}"
+                    await asyncio.to_thread(send_notification, msg, resolved)
+
+            self._session_runner = SessionRunner(session_store, http_adapters, review_notify_callback=_review_notify)
             if self._http_server:
                 self._http_server.session_runner = self._session_runner
             set_session_runner(self._session_runner, asyncio.get_running_loop())
