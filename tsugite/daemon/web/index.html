@@ -13,7 +13,7 @@
 <nav>
   <h1>Tsugite</h1>
   <div class="tab-bar">
-    <template x-for="tab in ['dashboard','chat','agents','skills','schedules','history','webhooks']" :key="tab">
+    <template x-for="tab in ['dashboard','chat','agents','skills','schedules','sessions','history','webhooks']" :key="tab">
       <button @click="$store.app.view = tab; location.hash = tab"
               :class="{ active: $store.app.view === tab }"
               x-text="tab[0].toUpperCase() + tab.slice(1)"></button>
@@ -489,6 +489,183 @@
             </template>
           </tbody>
         </table>
+      </template>
+    </div>
+  </div>
+
+  <!-- Sessions -->
+  <div class="view" x-show="$store.app.view === 'sessions'" x-data="sessionView" x-cloak>
+    <div class="view-scroll">
+      <div class="section-header">
+        <h2>Sessions</h2>
+        <button class="btn-sm" @click="showForm = !showForm" x-text="showForm ? 'Cancel' : '+ New'"></button>
+      </div>
+
+      <template x-if="error">
+        <div class="msg error" x-text="error" style="margin-bottom:16px"></div>
+      </template>
+
+      <!-- New session form -->
+      <template x-if="showForm">
+        <div class="card" style="margin-bottom:16px">
+          <h3>Start Session</h3>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Agent</label>
+              <select x-model="form.agent">
+                <option value="">Select agent...</option>
+                <template x-for="a in $store.app.agents" :key="a.name">
+                  <option :value="a.name" x-text="a.name"></option>
+                </template>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Model</label>
+              <input x-model="form.model" placeholder="Optional override">
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Prompt</label>
+            <textarea x-model="form.prompt" rows="3" placeholder="Task for the agent..." style="resize:vertical"></textarea>
+          </div>
+          <div class="modal-actions">
+            <button class="btn-cancel" @click="showForm = false">Cancel</button>
+            <button class="btn-primary" @click="startSession()">Start</button>
+          </div>
+        </div>
+      </template>
+
+      <!-- Pending reviews -->
+      <template x-if="reviews.length > 0">
+        <div style="margin-bottom:16px">
+          <div class="section-header"><h2>Pending Reviews</h2></div>
+          <template x-for="r in reviews" :key="r.id">
+            <div class="card" style="margin-bottom:8px;border-left:3px solid var(--yellow)" x-data="{ comment: '' }">
+              <h3 x-text="r.title"></h3>
+              <div class="card-meta">
+                <div>Session: <span x-text="r.session_id"></span></div>
+                <template x-if="r.description">
+                  <div x-text="r.description"></div>
+                </template>
+                <div>Created: <span x-text="formatDate(r.created_at)"></span></div>
+              </div>
+              <div style="margin-top:8px">
+                <input type="text" x-model="comment" placeholder="Comment (optional)" style="margin-bottom:4px;width:100%">
+                <div style="display:flex;gap:8px">
+                  <button class="btn-primary" @click="reviewComment = comment; resolveReview(r, 'approved')">Approve</button>
+                  <button class="btn-cancel" @click="reviewComment = comment; resolveReview(r, 'declined')">Decline</button>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+      </template>
+
+      <template x-if="loading">
+        <div class="empty-state"><span class="spinner"></span> Loading...</div>
+      </template>
+
+      <template x-if="!loading && sessions.length === 0">
+        <div class="empty-state">No sessions</div>
+      </template>
+
+      <!-- Sessions list + detail side by side -->
+      <template x-if="!loading && sessions.length > 0">
+        <div style="display:flex;gap:16px">
+          <div style="width:400px;flex-shrink:0">
+            <table class="data-table">
+              <thead><tr><th>ID</th><th>Agent</th><th>State</th><th>Created</th><th>Actions</th></tr></thead>
+              <tbody>
+                <template x-for="s in sessions" :key="s.id">
+                  <tr @click="selectSession(s)" style="cursor:pointer"
+                      :class="{ 'active': selectedSession?.id === s.id }">
+                    <td x-text="s.id" style="font-size:12px"></td>
+                    <td x-text="s.agent"></td>
+                    <td><span class="badge" :class="stateBadge(s.state)" x-text="s.state"></span></td>
+                    <td x-text="formatDate(s.created_at)" style="font-size:12px"></td>
+                    <td style="white-space:nowrap" @click.stop>
+                      <template x-if="canCancel(s)">
+                        <button class="btn-sm danger" @click="cancelSession(s)">Cancel</button>
+                      </template>
+                      <template x-if="canRestart(s)">
+                        <button class="btn-sm" @click="restartSession(s)">Restart</button>
+                      </template>
+                    </td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Detail panel -->
+          <div style="flex:1;min-width:0">
+            <template x-if="!selectedSession">
+              <div class="empty-state">Select a session to view details</div>
+            </template>
+            <template x-if="selectedSession">
+              <div>
+                <div class="card">
+                  <h3>Session: <span x-text="selectedSession.id"></span></h3>
+                  <div class="card-meta">
+                    <div>Agent: <span x-text="selectedSession.agent"></span></div>
+                    <div>State: <span class="badge" :class="stateBadge(selectedSession.state)" x-text="selectedSession.state"></span></div>
+                    <div>Prompt: <span x-text="selectedSession.prompt" style="font-size:12px"></span></div>
+                    <template x-if="selectedSession.model">
+                      <div>Model: <span x-text="selectedSession.model"></span></div>
+                    </template>
+                    <template x-if="selectedSession.error">
+                      <div style="color:var(--red)">Error: <span x-text="selectedSession.error"></span></div>
+                    </template>
+                    <template x-if="selectedSession.result">
+                      <div>Result: <span x-text="selectedSession.result" style="font-size:12px"></span></div>
+                    </template>
+                    <template x-if="selectedSession.event_count != null">
+                      <div>Events: <span x-text="selectedSession.event_count"></span></div>
+                    </template>
+                  </div>
+                </div>
+
+                <!-- Pending review for this session -->
+                <template x-if="selectedSession.pending_review">
+                  <div class="card" style="margin-top:8px;border-left:3px solid var(--yellow)" x-data="{ comment: '' }">
+                    <h3>Pending Review</h3>
+                    <p x-text="selectedSession.pending_review.title"></p>
+                    <template x-if="selectedSession.pending_review.description">
+                      <p style="font-size:12px" x-text="selectedSession.pending_review.description"></p>
+                    </template>
+                    <div style="margin-top:8px">
+                      <input type="text" x-model="comment" placeholder="Comment (optional)" style="margin-bottom:4px;width:100%">
+                      <div style="display:flex;gap:8px">
+                        <button class="btn-primary" @click="reviewComment = comment; resolveReview(selectedSession.pending_review, 'approved')">Approve</button>
+                        <button class="btn-cancel" @click="reviewComment = comment; resolveReview(selectedSession.pending_review, 'declined')">Decline</button>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+
+                <!-- Event log -->
+                <template x-if="events.length > 0">
+                  <div style="margin-top:8px">
+                    <details>
+                      <summary style="cursor:pointer;font-weight:600">Event Log (<span x-text="events.length"></span>)</summary>
+                      <div style="max-height:400px;overflow-y:auto;margin-top:8px">
+                        <template x-for="(ev, i) in events" :key="i">
+                          <div style="font-family:monospace;font-size:12px;padding:4px 8px;border-bottom:1px solid var(--surface1)">
+                            <span style="color:var(--muted)" x-text="ev.timestamp ? ev.timestamp.split('T')[1]?.slice(0,8) : ''"></span>
+                            <span class="badge badge-accent" style="font-size:10px" x-text="ev.type"></span>
+                            <template x-if="ev.error"><span style="color:var(--red)" x-text="ev.error"></span></template>
+                            <template x-if="ev.result_preview"><span x-text="ev.result_preview.slice(0, 100)"></span></template>
+                            <template x-if="ev.prompt"><span x-text="ev.prompt.slice(0, 100)"></span></template>
+                          </div>
+                        </template>
+                      </div>
+                    </details>
+                  </div>
+                </template>
+              </div>
+            </template>
+          </div>
+        </div>
       </template>
     </div>
   </div>

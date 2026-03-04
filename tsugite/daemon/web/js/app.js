@@ -3,6 +3,7 @@ import { get } from './api.js';
 import chatView from './views/chat.js';
 import dashboardView from './views/dashboard.js';
 import scheduleView from './views/schedules.js';
+import sessionView from './views/sessions.js';
 import historyView from './views/history.js';
 import webhookView from './views/webhooks.js';
 import agentFileView from './views/agent-files.js';
@@ -22,6 +23,7 @@ Alpine.store('app', {
 Alpine.data('chatView', chatView);
 Alpine.data('dashboardView', dashboardView);
 Alpine.data('scheduleView', scheduleView);
+Alpine.data('sessionView', sessionView);
 Alpine.data('historyView', historyView);
 Alpine.data('webhookView', webhookView);
 Alpine.data('agentFileView', agentFileView);
