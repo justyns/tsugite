@@ -7,7 +7,7 @@ model parameters and reasoning model support.
 import asyncio
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -33,6 +33,7 @@ from tsugite.events import (
 )
 from tsugite.skill_discovery import Skill
 
+from .content_blocks import extract_content_blocks
 from .executor import LocalExecutor
 from .memory import AgentMemory, StepResult
 from .tools import Tool
@@ -57,6 +58,26 @@ def build_system_prompt(tools: List[Tool], instructions: str = "") -> str:
     tools_section = build_tools_section(tools)
     has_tools = bool(tools)
     return build_standard_mode_prompt(tools_section, instructions, has_tools)
+
+
+@dataclass
+class ParsedResponse:
+    """Result from parsing an LLM response."""
+
+    thought: str
+    code: str
+    content_blocks: Dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class TurnResult:
+    """Result from a single agent turn (LLM call + parsing)."""
+
+    thought: str
+    code: str
+    step_cost: float
+    content_blocks: Dict[str, str] = field(default_factory=dict)
+    response: Optional[Any] = None  # LiteLLM response object (not set for claude_code path)
 
 
 @dataclass
@@ -267,7 +288,10 @@ class TsugiteAgent:
                             summary = str(result)[:200] if result is not None else ""
                             self.event_bus.emit(
                                 ToolResultEvent(
-                                    tool_name=tool_obj.name, success=True, result_summary=summary, duration_ms=duration_ms
+                                    tool_name=tool_obj.name,
+                                    success=True,
+                                    result_summary=summary,
+                                    duration_ms=duration_ms,
                                 )
                             )
                         return result
@@ -351,19 +375,17 @@ class TsugiteAgent:
             last_msg = messages[-1]["content"] if messages else ""
             logger.debug("Turn %d sending %d messages (last: %.200s)", turn_num + 1, len(messages), last_msg)
 
-            response = None
             if self._is_claude_code:
-                # Claude Code subprocess path
-                thought, code, step_cost = await self._claude_code_turn(
-                    claude_process, messages, turn_num, stream
-                )
+                turn = await self._claude_code_turn(claude_process, messages, turn_num, stream)
             else:
-                # LiteLLM path
-                thought, code, step_cost, response = await self._litellm_turn(
-                    messages, turn_num, stream
-                )
+                turn = await self._litellm_turn(messages, turn_num, stream)
 
-            logger.debug("Turn %d response (cost=%.4f): %.200s", turn_num + 1, step_cost, (thought or "")[:200])
+            thought, code, response = turn.thought, turn.code, turn.response
+            logger.debug("Turn %d response (cost=%.4f): %.200s", turn_num + 1, turn.step_cost, (thought or "")[:200])
+
+            # Inject content blocks into executor namespace
+            if turn.content_blocks:
+                await self.executor.inject_content_blocks(turn.content_blocks)
 
             # Only execute code if the LLM actually generated some
             if code and code.strip():
@@ -475,6 +497,7 @@ class TsugiteAgent:
                 tools_called=exec_result.tools_called,
                 loaded_skills=exec_result.loaded_skills,
                 xml_observation=xml_observation,
+                content_blocks=turn.content_blocks,
             )
 
             # Check if final_answer was called during execution
@@ -566,12 +589,8 @@ class TsugiteAgent:
 
         raise RuntimeError(error_msg)
 
-    async def _claude_code_turn(self, process, messages, turn_num, stream) -> tuple:
-        """Execute one turn via Claude Code subprocess.
-
-        Returns:
-            (thought, code, step_cost)
-        """
+    async def _claude_code_turn(self, process, messages, turn_num, stream) -> TurnResult:
+        """Execute one turn via Claude Code subprocess."""
         # Build user content for this turn
         if turn_num == 0:
             # First turn: include previous conversation context (for --continue)
@@ -609,21 +628,22 @@ class TsugiteAgent:
         if stream and self.event_bus:
             self.event_bus.emit(StreamCompleteEvent())
 
-        thought, code, _ = self._parse_response_from_text(accumulated)
+        parsed = self._parse_response_from_text(accumulated)
 
-        if self.event_bus and not stream and thought.strip():
+        if self.event_bus and not stream and parsed.thought.strip():
             self.event_bus.emit(
-                LLMMessageEvent(content=thought, title=f"Turn {turn_num + 1} Reasoning", step=turn_num + 1)
+                LLMMessageEvent(content=parsed.thought, title=f"Turn {turn_num + 1} Reasoning", step=turn_num + 1)
             )
 
-        return thought, code, step_cost
+        return TurnResult(
+            thought=parsed.thought,
+            code=parsed.code,
+            step_cost=step_cost,
+            content_blocks=parsed.content_blocks,
+        )
 
-    async def _litellm_turn(self, messages, turn_num, stream) -> tuple:
-        """Execute one turn via LiteLLM.
-
-        Returns:
-            (thought, code, step_cost, response)
-        """
+    async def _litellm_turn(self, messages, turn_num, stream) -> TurnResult:
+        """Execute one turn via LiteLLM."""
         import litellm
         import sniffio
 
@@ -648,10 +668,10 @@ class TsugiteAgent:
             if self.event_bus:
                 self.event_bus.emit(StreamCompleteEvent())
 
-            thought, code, _ = self._parse_response_from_text(accumulated_content)
+            parsed = self._parse_response_from_text(accumulated_content)
         else:
             response = await litellm.acompletion(messages=messages, **self.litellm_params)
-            thought, code, _ = self._parse_response(response)
+            parsed = self._parse_response(response)
 
         # Track cost
         step_cost = 0.0
@@ -678,13 +698,19 @@ class TsugiteAgent:
                     self.event_bus.emit(ReasoningTokensEvent(tokens=details.reasoning_tokens, step=turn_num + 1))
 
         if self.event_bus and not stream:
-            display_content = thought if thought else response.choices[0].message.content
+            display_content = parsed.thought if parsed.thought else response.choices[0].message.content
             if display_content and display_content.strip():
                 self.event_bus.emit(
                     LLMMessageEvent(content=display_content, title=f"Turn {turn_num + 1} Reasoning", step=turn_num + 1)
                 )
 
-        return thought, code, step_cost, response
+        return TurnResult(
+            thought=parsed.thought,
+            code=parsed.code,
+            step_cost=step_cost,
+            content_blocks=parsed.content_blocks,
+            response=response,
+        )
 
     def _format_attachment(self, attachment: Attachment) -> Optional[Dict]:
         """Format an attachment for LiteLLM based on its content type.
@@ -872,8 +898,10 @@ class TsugiteAgent:
 
         # 5. Previous steps (Code → Observation with embedded skills)
         for step in self.memory.steps:
-            # Assistant message is just code (comments can provide reasoning)
+            # Assistant message is code + any content blocks the LLM defined
             assistant_msg = f"```python\n{step.code}\n```"
+            for name, block_content in step.content_blocks.items():
+                assistant_msg += f'\n\n<content name="{name}">\n{block_content}\n</content>'
             messages.append({"role": "assistant", "content": assistant_msg})
 
             # Observation with loaded skills embedded
@@ -892,8 +920,7 @@ class TsugiteAgent:
         # Include previous conversation history if continuing
         if self.previous_messages:
             history_lines = [
-                f"{msg.get('role', 'unknown').capitalize()}: {msg.get('content', '')}"
-                for msg in self.previous_messages
+                f"{msg.get('role', 'unknown').capitalize()}: {msg.get('content', '')}" for msg in self.previous_messages
             ]
             parts.append("<conversation_history>\n" + "\n\n".join(history_lines) + "\n</conversation_history>\n")
 
@@ -915,46 +942,37 @@ class TsugiteAgent:
             parts.append('warning="approaching turn limit, wrap up soon"')
         return f'\n<tsugite_budget {" ".join(parts)} />'
 
-    def _parse_response(self, response) -> tuple[str, str, Optional[str]]:
-        """Parse LLM response into thought, code, and final_answer.
-
-        Returns:
-            (thought, code, final_answer)
-        """
+    def _parse_response(self, response) -> ParsedResponse:
+        """Parse LLM response into thought, code, and content blocks."""
         content = response.choices[0].message.content
         return self._parse_response_from_text(content)
 
-    def _parse_response_from_text(self, content: str) -> tuple[str, str, Optional[str]]:
-        """Parse text content into thought, code, and final_answer.
+    def _parse_response_from_text(self, content: str) -> ParsedResponse:
+        """Parse text content into thought, code, and content blocks."""
+        cleaned, content_blocks = extract_content_blocks(content)
 
-        Args:
-            content: The text content to parse
-
-        Returns:
-            (thought, code, final_answer)
-        """
         thought = ""
         code = ""
 
         # Extract thought (everything before code block)
-        thought_start = content.find("Thought:")
+        thought_start = cleaned.find("Thought:")
         if thought_start != -1:
             thought_start += len("Thought:")
-            code_block_start = content.find("```python", thought_start)
+            code_block_start = cleaned.find("```python", thought_start)
             if code_block_start != -1:
-                thought = content[thought_start:code_block_start].strip()
+                thought = cleaned[thought_start:code_block_start].strip()
             else:
-                thought = content[thought_start:].strip()
+                thought = cleaned[thought_start:].strip()
 
         # Extract code block
-        code_block_start = content.find("```python")
+        code_block_start = cleaned.find("```python")
         if code_block_start != -1:
             code_start = code_block_start + len("```python")
-            code_end = content.find("```", code_start)
+            code_end = cleaned.find("```", code_start)
             if code_end != -1:
-                code = content[code_start:code_end].strip()
+                code = cleaned[code_start:code_end].strip()
 
-        return thought, code, None
+        return ParsedResponse(thought=thought, code=code, content_blocks=content_blocks)
 
     def _extract_reasoning_content(self, response) -> Optional[str]:
         """Extract reasoning content from response (for o1/o3/Claude thinking).

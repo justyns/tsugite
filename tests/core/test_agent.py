@@ -371,12 +371,11 @@ x = 5 + 3
 print(x)
 ```"""
 
-    thought, code, final_answer = agent._parse_response(response)
+    parsed = agent._parse_response(response)
 
-    assert "calculate" in thought.lower()
-    assert "x = 5 + 3" in code
-    assert "print(x)" in code
-    assert final_answer is None
+    assert "calculate" in parsed.thought.lower()
+    assert "x = 5 + 3" in parsed.code
+    assert "print(x)" in parsed.code
 
     # Test parsing with final_answer
     response.choices[0].message.content = """Thought: Return the result.
@@ -385,11 +384,10 @@ print(x)
 final_answer(42)
 ```"""
 
-    thought, code, final_answer = agent._parse_response(response)
+    parsed = agent._parse_response(response)
 
-    assert "result" in thought.lower()
-    assert "final_answer(42)" in code
-    assert final_answer is None  # Will be extracted after execution
+    assert "result" in parsed.thought.lower()
+    assert "final_answer(42)" in parsed.code
 
 
 @pytest.mark.asyncio

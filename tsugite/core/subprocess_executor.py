@@ -276,6 +276,15 @@ namespace["final_answer"] = final_answer
 namespace["send_message"] = send_message
 {self._inject_tool_names_code()}
 
+# Load content blocks from files (consumed once per turn)
+_cb_manifest = os.path.join(os.path.dirname(STATE_PATH), "content_blocks.json")
+if os.path.exists(_cb_manifest):
+    with open(_cb_manifest, "r") as f:
+        for _cb_name, _cb_path in json.load(f).items():
+            with open(_cb_path, "r") as _cb_f:
+                namespace[_cb_name] = _cb_f.read()
+    os.remove(_cb_manifest)
+
 code = {code_escaped}
 
 # Capture stdout/stderr
@@ -555,9 +564,7 @@ with open(RESULT_PATH, "w") as f:
                 # Drain remaining messages
                 try:
                     while True:
-                        line = await asyncio.wait_for(
-                            loop.run_in_executor(None, req_file.readline), timeout=0.1
-                        )
+                        line = await asyncio.wait_for(loop.run_in_executor(None, req_file.readline), timeout=0.1)
                         if not line:
                             break
                         await self._handle_ipc_message(json.loads(line), resp_file)
@@ -566,9 +573,7 @@ with open(RESULT_PATH, "w") as f:
                 break
 
             try:
-                line = await asyncio.wait_for(
-                    loop.run_in_executor(None, req_file.readline), timeout=1.0
-                )
+                line = await asyncio.wait_for(loop.run_in_executor(None, req_file.readline), timeout=1.0)
             except asyncio.TimeoutError:
                 continue
 
@@ -681,6 +686,19 @@ with open(RESULT_PATH, "w") as f:
         state_path = os.path.join(self._tmpdir, "state.json")
         with open(state_path, "w") as f:
             json.dump(self._state, f)
+
+    async def inject_content_blocks(self, blocks: Dict[str, str]):
+        """Inject content block variables for the next turn.
+
+        Writes blocks to content-addressed temp files and a manifest
+        so the harness can load them into the subprocess namespace.
+        """
+        from .content_blocks import write_content_blocks_to_files
+
+        block_files = write_content_blocks_to_files(blocks, self._tmpdir)
+        manifest_path = os.path.join(self._tmpdir, "content_blocks.json")
+        with open(manifest_path, "w") as f:
+            json.dump(block_files, f)
 
     def register_loaded_skill(self, name: str, content: str):
         """Register a skill loaded during this execution turn."""

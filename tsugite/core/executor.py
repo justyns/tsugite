@@ -408,6 +408,10 @@ Example:
         """
         self.namespace.update(variables)
 
+    async def inject_content_blocks(self, blocks: Dict[str, str]):
+        """Inject content block variables into executor namespace."""
+        self.namespace.update(blocks)
+
     def register_loaded_skill(self, name: str, content: str):
         """Register a skill loaded during this execution turn.
 

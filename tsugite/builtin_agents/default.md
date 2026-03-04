@@ -151,6 +151,27 @@ Skills may show bash commands. Translate to Python: `shell.run("kubectl get pods
 
 - Use `web_search(query="...", max_results=5)` to get search results (returns title, url, snippet)
 - Format results nicely for the user. Use `fetch_text(url="...")` for full page content when snippets aren't enough.
+
+## Writing Files with Special Characters
+
+When writing content containing triple quotes (`"""`), backticks (` ``` `), or backslashes,
+define the content in a `<content>` block outside your code, then reference it as a variable:
+
+<content name="my_file">
+Raw content here — no escaping needed.
+Triple quotes """ and backticks ``` work fine.
+</content>
+
+```python
+write_file("output.py", content=my_file)
+edit_file("other.py", old_string=old_text, new_string=new_text)
+```
+
+If your content contains the literal string `</content>`, use `<tsu:content>` instead:
+
+<tsu:content name="my_file">
+Content with </content> inside is safe here.
+</tsu:content>
 </guidelines>
 
 {% if rag_context is defined and rag_context %}

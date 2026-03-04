@@ -19,6 +19,7 @@ class StepResult:
     tools_called: List[str] = field(default_factory=list)
     loaded_skills: Dict[str, str] = field(default_factory=dict)
     xml_observation: Optional[str] = None
+    content_blocks: Dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -50,6 +51,7 @@ class AgentMemory:
         tools_called: Optional[List[str]] = None,
         loaded_skills: Optional[Dict[str, str]] = None,
         xml_observation: Optional[str] = None,
+        content_blocks: Optional[Dict[str, str]] = None,
     ) -> None:
         """Add a step to history."""
         step = StepResult(
@@ -61,6 +63,7 @@ class AgentMemory:
             tools_called=tools_called or [],
             loaded_skills=loaded_skills or {},
             xml_observation=xml_observation,
+            content_blocks=content_blocks or {},
         )
         self.steps.append(step)
 
