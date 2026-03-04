@@ -298,6 +298,124 @@ class TestModelField:
         assert sched2.get("job1").model is None
 
 
+class TestScriptEntry:
+    def test_script_entry_creation(self):
+        entry = ScheduleEntry(
+            id="test", agent="bot", prompt="", schedule_type="cron",
+            cron_expr="0 * * * *", execution_type="script", command="echo hello",
+        )
+        assert entry.execution_type == "script"
+        assert entry.command == "echo hello"
+        assert entry.script_timeout == 60
+
+    def test_script_requires_command(self):
+        with pytest.raises(ValueError, match="command required"):
+            ScheduleEntry(
+                id="test", agent="bot", prompt="", schedule_type="cron",
+                cron_expr="0 * * * *", execution_type="script",
+            )
+
+    def test_invalid_execution_type(self):
+        with pytest.raises(ValueError, match="execution_type must be"):
+            ScheduleEntry(
+                id="test", agent="bot", prompt="hi", schedule_type="cron",
+                cron_expr="0 * * * *", execution_type="bad",
+            )
+
+    def test_agent_defaults(self):
+        entry = ScheduleEntry(id="test", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
+        assert entry.execution_type == "agent"
+        assert entry.command is None
+        assert entry.script_timeout == 60
+
+    def test_custom_script_timeout(self):
+        entry = ScheduleEntry(
+            id="test", agent="bot", prompt="", schedule_type="cron",
+            cron_expr="0 * * * *", execution_type="script", command="curl http://example.com",
+            script_timeout=120,
+        )
+        assert entry.script_timeout == 120
+
+
+class TestScriptDispatch:
+    @pytest.mark.asyncio
+    async def test_script_uses_script_callback(self, schedules_path):
+        run_cb = AsyncMock(return_value="agent result")
+        script_cb = AsyncMock(return_value="script result")
+        sched = Scheduler(schedules_path, run_cb, script_callback=script_cb)
+
+        entry = ScheduleEntry(
+            id="s1", agent="bot", prompt="", schedule_type="cron",
+            cron_expr="* * * * *", execution_type="script", command="echo hi",
+        )
+        sched.add(entry)
+        await sched._fire_schedule(sched.get("s1"))
+
+        script_cb.assert_awaited_once()
+        run_cb.assert_not_awaited()
+        assert sched.get("s1").last_status == "success"
+
+    @pytest.mark.asyncio
+    async def test_agent_uses_run_callback(self, schedules_path):
+        run_cb = AsyncMock(return_value="agent result")
+        script_cb = AsyncMock(return_value="script result")
+        sched = Scheduler(schedules_path, run_cb, script_callback=script_cb)
+
+        entry = ScheduleEntry(
+            id="a1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="* * * * *",
+        )
+        sched.add(entry)
+        await sched._fire_schedule(sched.get("a1"))
+
+        run_cb.assert_awaited_once()
+        script_cb.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_missing_script_callback_raises(self, schedules_path):
+        run_cb = AsyncMock(return_value="done")
+        sched = Scheduler(schedules_path, run_cb)  # no script_callback
+
+        entry = ScheduleEntry(
+            id="s1", agent="bot", prompt="", schedule_type="cron",
+            cron_expr="* * * * *", execution_type="script", command="echo hi",
+        )
+        sched.add(entry)
+        await sched._fire_schedule(sched.get("s1"))
+
+        assert sched.get("s1").last_status == "error"
+        assert "No script callback" in sched.get("s1").last_error
+
+
+class TestScriptPersistence:
+    def test_script_entry_roundtrip(self, schedules_path, run_callback):
+        sched1 = Scheduler(schedules_path, run_callback)
+        entry = ScheduleEntry(
+            id="script1", agent="bot", prompt="", schedule_type="cron",
+            cron_expr="0 * * * *", execution_type="script", command="df -h /",
+            script_timeout=30,
+        )
+        sched1.add(entry)
+
+        sched2 = Scheduler(schedules_path, run_callback)
+        sched2._load()
+        loaded = sched2.get("script1")
+        assert loaded.execution_type == "script"
+        assert loaded.command == "df -h /"
+        assert loaded.script_timeout == 30
+
+    def test_backward_compat_agent_entry(self, schedules_path, run_callback):
+        """Old entries without execution_type fields load fine with defaults."""
+        sched1 = Scheduler(schedules_path, run_callback)
+        entry = ScheduleEntry(id="old1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
+        sched1.add(entry)
+
+        sched2 = Scheduler(schedules_path, run_callback)
+        sched2._load()
+        loaded = sched2.get("old1")
+        assert loaded.execution_type == "agent"
+        assert loaded.command is None
+
+
 class TestCallHelper:
     """Test the _call helper in schedule tools forwards kwargs."""
 

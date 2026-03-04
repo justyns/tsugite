@@ -41,6 +41,9 @@ class ScheduleEntry:
     timezone: str = "UTC"
     agent_file: str | None = None
     max_turns: int | None = None
+    execution_type: str = "agent"  # "agent" | "script"
+    command: str | None = None
+    script_timeout: int = 60
 
     def __post_init__(self):
         if not self.created_at:
@@ -51,15 +54,20 @@ class ScheduleEntry:
             raise ValueError("cron_expr required for cron schedules")
         if self.schedule_type == "once" and not self.run_at:
             raise ValueError("run_at required for one-off schedules")
+        if self.execution_type not in ("agent", "script"):
+            raise ValueError(f"execution_type must be 'agent' or 'script', got '{self.execution_type}'")
+        if self.execution_type == "script" and not self.command:
+            raise ValueError("command required for script execution type")
 
 
 RunCallback = Callable[["ScheduleEntry"], Coroutine[None, None, str]]
 
 
 class Scheduler:
-    def __init__(self, schedules_path: Path, run_callback: RunCallback):
+    def __init__(self, schedules_path: Path, run_callback: RunCallback, script_callback: RunCallback | None = None):
         self._path = schedules_path
         self._run_callback = run_callback
+        self._script_callback = script_callback
         self._schedules: dict[str, ScheduleEntry] = {}
         self._wakeup = asyncio.Event()
         self._running = False
@@ -155,9 +163,14 @@ class Scheduler:
             return
 
         async with lock:
-            logger.info("Firing schedule '%s' (agent=%s)", entry.id, entry.agent)
+            logger.info("Firing schedule '%s' (type=%s, agent=%s)", entry.id, entry.execution_type, entry.agent)
             try:
-                await self._run_callback(entry)
+                if entry.execution_type == "script":
+                    if not self._script_callback:
+                        raise RuntimeError("No script callback configured — cannot run script schedules")
+                    await self._script_callback(entry)
+                else:
+                    await self._run_callback(entry)
                 entry.last_status = "success"
                 entry.last_error = None
             except Exception as e:

@@ -8,7 +8,7 @@ description: How to create, manage, and monitor scheduled agent tasks using Tsug
 Schedule tools let agents create recurring (cron) or one-off scheduled tasks that run on the daemon. These tools access the scheduler directly and are only available when running inside the daemon (`tsu daemon`). They won't appear in standalone `tsu run` mode.
 
 **IMPORTANT — Safety Rules:**
-- Only use `schedule_*` tools for scheduling. NEVER create shell scripts, cron jobs, or other workarounds.
+- Only use `schedule_*` tools for scheduling. Use `execution_type="script"` for deterministic shell commands — NEVER create standalone cron jobs or shell scripts outside tsugite.
 - If schedule tools are not available, tell the user the daemon isn't running and stop. Do not improvise alternatives.
 - **NEVER create a schedule without explicit user confirmation.** Always show the user the exact prompt, schedule, and timezone before calling `schedule_create`.
 - **NEVER schedule destructive or dangerous actions** (deleting files, dropping databases, force-pushing, modifying infrastructure, sending messages to external services, etc.). If the user asks for something potentially destructive, warn them and refuse unless they explicitly acknowledge the risk.
@@ -24,6 +24,57 @@ Schedule tools let agents create recurring (cron) or one-off scheduled tasks tha
 | `schedule_remove(id)` | Delete a schedule |
 | `schedule_enable(id)` | Re-enable a disabled schedule |
 | `schedule_disable(id)` | Disable without deleting |
+
+## Script vs Agent Execution
+
+Schedules support two execution types:
+
+| | `execution_type="agent"` (default) | `execution_type="script"` |
+|---|---|---|
+| **How it works** | Runs a full LLM agent loop | Runs a shell command directly |
+| **When to use** | Tasks needing reasoning, summarization, or multi-step logic | Deterministic commands with predictable output |
+| **Cost** | LLM tokens per run | Zero tokens |
+| **Latency** | Seconds to minutes | Sub-second to seconds |
+
+**Use `script` when the command is fully known ahead of time:**
+- `curl -s https://api.weather.gov/...` — fetch weather data
+- `df -h /` — check disk space
+- `curl -sf https://example.com/health` — health check ping
+- `docker ps --format '{{.Names}}: {{.Status}}'` — container status
+
+**Use `agent` when:**
+- The output needs interpretation or summarization
+- The task involves multiple steps or conditional logic
+- The task requires tool use (file editing, web search, etc.)
+
+### Script Examples
+
+```python
+# Recurring health check
+schedule_create(
+    id="health-ping",
+    cron="*/5 * * * *",
+    execution_type="script",
+    command="curl -sf https://example.com/health || echo 'DOWN'",
+    notify=["alerts"]
+)
+
+# Hourly disk space check
+schedule_create(
+    id="disk-check",
+    cron="0 * * * *",
+    execution_type="script",
+    command="df -h / | tail -1",
+    script_timeout=10,
+    notify=["my-discord"]
+)
+```
+
+**Script safety rules:**
+- Always set a reasonable `script_timeout` (default: 60s)
+- Never schedule destructive commands (`rm`, `drop`, `force-push`, etc.)
+- Prefer read-only commands that report status
+- Scripts run with the daemon's permissions — don't escalate privileges
 
 ## Crafting the Prompt
 

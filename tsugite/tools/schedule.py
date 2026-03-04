@@ -65,8 +65,11 @@ def schedule_create(
     inject_history: bool = True,
     model: Optional[str] = None,
     agent_file: Optional[str] = None,
+    execution_type: str = "agent",
+    command: Optional[str] = None,
+    script_timeout: int = 60,
 ) -> dict:
-    """Create a recurring (cron) or one-off schedule to run an agent.
+    """Create a recurring (cron) or one-off schedule to run an agent or script.
 
     IMPORTANT: Always confirm with the user before calling this tool. Show them the exact
     prompt, schedule, and timezone you plan to use and wait for approval. Never schedule
@@ -74,7 +77,7 @@ def schedule_create(
 
     Args:
         id: Unique schedule name (e.g., "daily-backup")
-        prompt: Clear, direct instruction for the agent. Do NOT copy the user's words verbatim — interpret their intent and write a self-contained instruction the agent can execute autonomously. Can be empty when agent_file is set.
+        prompt: Clear, direct instruction for the agent. Do NOT copy the user's words verbatim — interpret their intent and write a self-contained instruction the agent can execute autonomously. Can be empty when agent_file is set or execution_type is "script".
         agent: Agent name configured in daemon. Defaults to the current agent if omitted.
         cron: Cron expression for recurring (e.g., "0 9 * * *" = daily at 9am). Mutually exclusive with run_at.
         run_at: ISO datetime for one-off execution (e.g., "2026-02-13T14:00:00-06:00"). Mutually exclusive with cron.
@@ -84,6 +87,9 @@ def schedule_create(
         inject_history: If true (default), injects the task result into notified users' chat sessions so the agent has context when they reply.
         model: Optional model override (e.g., "openai:gpt-4o-mini"). When set, this schedule uses this model instead of the agent's default.
         agent_file: Agent name (e.g., "+reporter") or path to a tsugite agent .md file. Hot-loaded on each run — edit the file and the next execution picks up changes.
+        execution_type: "agent" (default) runs an LLM agent, "script" runs a shell command directly without LLM.
+        command: Shell command to execute when execution_type is "script". Required for script type.
+        script_timeout: Max seconds for script execution (default: 60). Only used when execution_type is "script".
 
     Returns:
         Created schedule details including computed next_run
@@ -92,8 +98,13 @@ def schedule_create(
         raise ValueError("Provide either 'cron' or 'run_at'")
     if cron and run_at:
         raise ValueError("Provide 'cron' or 'run_at', not both")
-    if not prompt and not agent_file:
-        raise ValueError("Provide at least one of 'prompt' or 'agent_file'")
+
+    if execution_type == "script":
+        if not command:
+            raise ValueError("'command' is required when execution_type is 'script'")
+    else:
+        if not prompt and not agent_file:
+            raise ValueError("Provide at least one of 'prompt' or 'agent_file'")
 
     _validate_notify(notify, notify_tool)
     agent = _resolve_agent(agent)
@@ -113,6 +124,9 @@ def schedule_create(
         model=model,
         timezone=timezone,
         agent_file=agent_file,
+        execution_type=execution_type,
+        command=command,
+        script_timeout=script_timeout,
     )
     result = _call(_scheduler.add, entry)
     return asdict(result)
@@ -183,6 +197,9 @@ def schedule_update(
     inject_history: Optional[bool] = None,
     model: Optional[str] = None,
     agent_file: Optional[str] = None,
+    execution_type: Optional[str] = None,
+    command: Optional[str] = None,
+    script_timeout: Optional[int] = None,
 ) -> dict:
     """Update fields on an existing schedule.
 
@@ -197,13 +214,17 @@ def schedule_update(
         inject_history: Enable/disable result injection into user chat sessions (optional)
         model: Model override for this schedule (optional). Set to empty string to clear.
         agent_file: Agent name (e.g., "+reporter") or path to agent .md file (optional). Set to empty string to clear.
+        execution_type: Change to "agent" or "script" (optional).
+        command: Shell command for script execution (optional). Set to empty string to clear.
+        script_timeout: Max seconds for script execution (optional).
 
     Returns:
         Updated schedule details
     """
     # Build fields dict from provided params (rename cron → cron_expr)
     simple = {"prompt": prompt, "cron_expr": cron, "run_at": run_at, "timezone": timezone,
-              "inject_history": inject_history}
+              "inject_history": inject_history, "execution_type": execution_type,
+              "script_timeout": script_timeout}
     fields = {k: v for k, v in simple.items() if v is not None}
 
     if notify is not None:
@@ -217,7 +238,7 @@ def schedule_update(
         fields["notify_tool"] = notify_tool
 
     # Clearable fields: empty/falsy value → None (clears the field)
-    for param_name, value in [("model", model), ("agent_file", agent_file)]:
+    for param_name, value in [("model", model), ("agent_file", agent_file), ("command", command)]:
         if value is not None:
             fields[param_name] = value or None
 
@@ -302,12 +323,15 @@ def list_running_tasks() -> list:
 
 @tool(require_daemon=True)
 def background_task(
-    prompt: str,
+    prompt: str = "",
     agent: Optional[str] = None,
     notify: Optional[list[str]] = None,
     notify_tool: bool = False,
     inject_history: bool = False,
     model: Optional[str] = None,
+    execution_type: str = "agent",
+    command: Optional[str] = None,
+    script_timeout: int = 60,
 ) -> dict:
     """Launch a background task that auto-replies with results when complete.
 
@@ -316,21 +340,32 @@ def background_task(
     delivered as a human-friendly response via notification channels.
 
     Use this for tasks that may take a while (research, long-running commands, etc.)
-    so the user doesn't have to wait.
+    so the user doesn't have to wait. For deterministic commands (curl, ping, df, etc.),
+    use execution_type="script" to skip the LLM entirely.
 
     IMPORTANT: Always confirm with the user before launching background tasks.
 
     Args:
-        prompt: Clear, self-contained instruction for the background agent.
+        prompt: Clear, self-contained instruction for the background agent. Optional when execution_type is "script".
         agent: Agent name to run. Defaults to the current agent.
         notify: Notification channels for result delivery. Required for auto-reply.
         notify_tool: If true, gives the background agent the notify_user tool.
         inject_history: If true, inject raw result into user session (in addition to auto-reply).
         model: Optional model override (e.g., "openai:gpt-4o-mini").
+        execution_type: "agent" (default) runs an LLM agent, "script" runs a shell command directly.
+        command: Shell command to execute when execution_type is "script".
+        script_timeout: Max seconds for script execution (default: 60).
 
     Returns:
         Dict with status and generated task ID
     """
+    if execution_type == "script":
+        if not command:
+            raise ValueError("'command' is required when execution_type is 'script'")
+    else:
+        if not prompt:
+            raise ValueError("'prompt' is required when execution_type is 'agent'")
+
     _validate_notify(notify, notify_tool)
     agent = _resolve_agent(agent)
 
@@ -351,6 +386,9 @@ def background_task(
         inject_history=inject_history,
         auto_reply=bool(notify),
         model=model,
+        execution_type=execution_type,
+        command=command,
+        script_timeout=script_timeout,
     )
     _call(_scheduler.add, entry)
     _call(_scheduler.fire_now, task_id)

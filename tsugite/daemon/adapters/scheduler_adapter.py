@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import subprocess
 from contextlib import nullcontext
 from pathlib import Path
 
@@ -28,7 +29,7 @@ class SchedulerAdapter:
         self._adapters = adapters
         self._notification_channels = notification_channels or {}
         self._identity_map = identity_map or {}
-        self.scheduler = Scheduler(schedules_path, self._run_agent)
+        self.scheduler = Scheduler(schedules_path, self._run_agent, script_callback=self._run_script)
 
     async def start(self):
         await self.scheduler.start()
@@ -50,6 +51,44 @@ class SchedulerAdapter:
     def _resolve_canonical_user(self, config: NotificationChannelConfig) -> str:
         """Resolve a notification channel's user to their canonical identity."""
         return self._identity_map.get(f"discord:{config.user_id}", config.user_id)
+
+    async def _run_script(self, entry: ScheduleEntry) -> str:
+        """Run a shell command directly (no LLM)."""
+        logger.info("Schedule '%s' executing script: %s", entry.id, entry.command[:100])
+
+        try:
+            proc = await asyncio.to_thread(
+                subprocess.run,
+                entry.command,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=entry.script_timeout,
+            )
+        except subprocess.TimeoutExpired as e:
+            raise RuntimeError(f"Script timed out after {entry.script_timeout}s") from e
+
+        if proc.returncode != 0:
+            output = (proc.stderr or proc.stdout or "")[:2000]
+            raise RuntimeError(f"Script exited with code {proc.returncode}: {output}")
+
+        result = proc.stdout[:_MAX_RESULT_CHARS]
+        logger.info("Schedule '%s' script completed (exit 0)", entry.id)
+
+        resolved_channels = self._resolve_channels(entry.notify) if entry.notify else []
+        if resolved_channels:
+            try:
+                notification = f"**Schedule `{entry.id}` (script) completed:**\n\n```\n{result}\n```"
+                await asyncio.to_thread(send_notification, notification, resolved_channels)
+            except Exception as e:
+                logger.error("Notification for script schedule '%s' failed: %s", entry.id, e)
+
+            if entry.inject_history:
+                adapter = next(iter(self._adapters.values()), None)
+                if adapter:
+                    await self._inject_into_user_sessions(adapter, entry, result, resolved_channels)
+
+        return result
 
     async def _run_agent(self, entry: ScheduleEntry) -> str:
         adapter = self._adapters.get(entry.agent)
