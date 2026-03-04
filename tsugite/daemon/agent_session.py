@@ -88,6 +88,7 @@ class AgentSessionStore:
         self._path = sessions_path
         self._sessions: dict[str, AgentSession] = {}
         self._reviews: dict[str, ReviewGate] = {}
+        self._events_dir_created = False
         self._load()
         self._recover_stale_sessions()
 
@@ -190,8 +191,9 @@ class AgentSessionStore:
         return self._events_dir() / f"{session_id}.jsonl"
 
     def append_event(self, session_id: str, event: dict) -> None:
-        events_dir = self._events_dir()
-        events_dir.mkdir(parents=True, exist_ok=True)
+        if not self._events_dir_created:
+            self._events_dir().mkdir(parents=True, exist_ok=True)
+            self._events_dir_created = True
         path = self._event_log_path(session_id)
         with open(path, "a") as f:
             f.write(json.dumps(event) + "\n")
@@ -214,7 +216,25 @@ class AgentSessionStore:
         path = self._event_log_path(session_id)
         if not path.exists():
             return 0
-        return sum(1 for line in path.read_text().splitlines() if line.strip())
+        count = 0
+        with open(path) as f:
+            for line in f:
+                if line.strip():
+                    count += 1
+        return count
+
+    def session_detail(self, session_id: str) -> dict:
+        """Get session as dict with event_count and pending_review attached."""
+        session = self.get_session(session_id)
+        result = asdict(session)
+        result["event_count"] = self.event_count(session_id)
+        if session.current_review_id:
+            try:
+                review = self.get_review(session.current_review_id)
+                result["pending_review"] = asdict(review)
+            except ValueError:
+                pass
+        return result
 
     # Persistence
 

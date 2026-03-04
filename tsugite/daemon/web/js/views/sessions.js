@@ -57,9 +57,11 @@ export default () => ({
     this.selectedSession = s;
     this.events = [];
     try {
-      const data = await get(`/api/sessions/${s.id}`);
+      const [data, evData] = await Promise.all([
+        get(`/api/sessions/${s.id}`),
+        get(`/api/sessions/${s.id}/events`),
+      ]);
       this.selectedSession = data;
-      const evData = await get(`/api/sessions/${s.id}/events`);
       this.events = evData.events || [];
     } catch (e) {
       this.error = e.message;

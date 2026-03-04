@@ -41,22 +41,18 @@ class SessionReviewBackend:
         self._on_review_created = on_review_created
 
     def ask_user(self, question: str, question_type: str = "text", options: Optional[list[str]] = None) -> str:
-        return self._create_and_wait_for_review(question, question_type, options)
-
-    def _create_and_wait_for_review(
-        self, title: str, question_type: str = "text", options: Optional[list[str]] = None
-    ) -> str:
         context = {}
         if question_type:
             context["question_type"] = question_type
         if options:
             context["options"] = options
+        review = self.create_and_wait(question, context=context)
+        return review.decision
 
+    def create_and_wait(self, title: str, description: str = "", context: Optional[dict] = None) -> ReviewGate:
+        """Create a review gate and block until resolved. Returns the resolved ReviewGate."""
         review = ReviewGate(
-            id="",  # auto-generated
-            session_id=self._session_id,
-            title=title,
-            context=context,
+            id="", session_id=self._session_id, title=title, description=description, context=context or {}
         )
         review = self._store.create_review(review)
 
@@ -71,11 +67,11 @@ class SessionReviewBackend:
         if not event.wait(timeout=self.TIMEOUT):
             logger.warning("Review '%s' timed out after %ds", review.id, self.TIMEOUT)
             self._store.resolve_review(review.id, ReviewDecision.DECLINED.value, "Timed out")
-            return "declined"
+            return self._store.get_review(review.id)
 
         resolved = self._store.get_review(review.id)
         self._review_events.pop(review.id, None)
-        return resolved.decision
+        return resolved
 
 
 class LoggingProgressHandler:
@@ -116,26 +112,20 @@ class SessionRunner:
         return self._store
 
     def start_session(self, session: AgentSession) -> AgentSession:
+        session.state = SessionState.RUNNING.value
         session = self._store.create_session(session)
-        self._store.update_session(session.id, state=SessionState.RUNNING.value)
-        self._store.append_event(
-            session.id,
-            {
-                "type": "session_start",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "agent": session.agent,
-                "prompt": session.prompt[:200],
-            },
-        )
+
+        progress = LoggingProgressHandler(self._store, session.id)
+        progress._emit("session_start", {"agent": session.agent, "prompt": session.prompt[:200]})
 
         loop = asyncio.get_event_loop()
-        task = loop.create_task(self._run_session(session))
+        task = loop.create_task(self._run_session(session, progress))
         self._active_tasks[session.id] = task
         task.add_done_callback(lambda t: self._active_tasks.pop(session.id, None))
 
-        return self._store.get_session(session.id)
+        return session
 
-    async def _run_session(self, session: AgentSession) -> None:
+    async def _run_session(self, session: AgentSession, progress: LoggingProgressHandler) -> None:
         adapter = self._adapters.get(session.agent)
         if not adapter:
             self._store.update_session(
@@ -154,7 +144,6 @@ class SessionRunner:
         review_backend = SessionReviewBackend(self._store, session.id, on_review_created=_on_review_created)
         self._review_backends[session.id] = review_backend
 
-        progress = LoggingProgressHandler(self._store, session.id)
         custom_logger = SimpleNamespace(ui_handler=progress)
 
         metadata = {
@@ -189,14 +178,7 @@ class SessionRunner:
                 completed_at=datetime.now(timezone.utc).isoformat(),
                 current_review_id=None,
             )
-            self._store.append_event(
-                session.id,
-                {
-                    "type": "session_complete",
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "result_preview": str(result)[:500],
-                },
-            )
+            progress._emit("session_complete", {"result_preview": str(result)[:500]})
             logger.info("Session '%s' completed", session.id)
 
             if self._notify_callback:
@@ -207,24 +189,11 @@ class SessionRunner:
 
         except asyncio.CancelledError:
             self._store.update_session(session.id, state=SessionState.CANCELLED.value)
-            self._store.append_event(
-                session.id,
-                {
-                    "type": "session_cancelled",
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                },
-            )
+            progress._emit("session_cancelled", {})
             logger.info("Session '%s' cancelled", session.id)
         except Exception as e:
             self._store.update_session(session.id, state=SessionState.FAILED.value, error=str(e))
-            self._store.append_event(
-                session.id,
-                {
-                    "type": "session_error",
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "error": str(e),
-                },
-            )
+            progress._emit("session_error", {"error": str(e)})
             logger.error("Session '%s' failed: %s", session.id, e)
         finally:
             self._review_backends.pop(session.id, None)
@@ -251,6 +220,15 @@ class SessionRunner:
                 event.set()
 
         return review
+
+    def create_review_for_session(
+        self, session_id: str, title: str, description: str = "", context: Optional[dict] = None
+    ) -> ReviewGate:
+        """Create a review gate within a session and block until resolved."""
+        backend = self._review_backends.get(session_id)
+        if not backend:
+            raise RuntimeError(f"No review backend for session '{session_id}'")
+        return backend.create_and_wait(title, description, context)
 
     def get_active_sessions(self) -> list[AgentSession]:
         active_states = {SessionState.RUNNING.value, SessionState.WAITING_FOR_REVIEW.value}

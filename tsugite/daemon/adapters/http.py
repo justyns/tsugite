@@ -651,17 +651,8 @@ class HTTPServer:
             return JSONResponse({"error": "session runner not available"}, status_code=503)
         return None
 
-    def _session_detail(self, session, session_id: str) -> dict:
-        """Build session detail dict with event count and pending review."""
-        result = asdict(session)
-        result["event_count"] = self.session_runner.store.event_count(session_id)
-        if session.current_review_id:
-            try:
-                review = self.session_runner.store.get_review(session.current_review_id)
-                result["pending_review"] = asdict(review)
-            except ValueError:
-                pass
-        return result
+    def _session_detail(self, session_id: str) -> dict:
+        return self.session_runner.store.session_detail(session_id)
 
     async def _api_list_sessions(self, request: Request) -> JSONResponse:
         if err := self._require_auth_and_sessions(request):
@@ -730,11 +721,9 @@ class HTTPServer:
             return err
         session_id = request.path_params["session_id"]
         try:
-            session = self.session_runner.store.get_session(session_id)
+            return JSONResponse(self._session_detail(session_id))
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=404)
-
-        return JSONResponse(self._session_detail(session, session_id))
 
     async def _api_cancel_session(self, request: Request) -> JSONResponse:
         if err := self._require_auth_and_sessions(request):

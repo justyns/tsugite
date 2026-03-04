@@ -6,7 +6,6 @@ Tools use @tool(require_daemon=True) so they only appear in daemon mode.
 import asyncio
 from dataclasses import asdict
 from typing import Optional
-from uuid import uuid4
 
 from . import tool
 
@@ -71,9 +70,8 @@ def start_session(
 
         agent = get_current_agent() or "default"
 
-    sid = session_id or f"session-{uuid4().hex[:8]}"
     session = AgentSession(
-        id=sid,
+        id=session_id or "",
         agent=agent,
         prompt=prompt,
         model=model,
@@ -118,18 +116,7 @@ def session_status(session_id: str) -> dict:
     Returns:
         Full session details including pending review if any
     """
-    session = _call(_session_runner.store.get_session, session_id)
-    result = asdict(session)
-    result["event_count"] = _call(_session_runner.store.event_count, session_id)
-
-    if session.current_review_id:
-        try:
-            review = _call(_session_runner.store.get_review, session.current_review_id)
-            result["pending_review"] = asdict(review)
-        except ValueError:
-            pass
-
-    return result
+    return _call(_session_runner.store.session_detail, session_id)
 
 
 @tool(require_daemon=True)
@@ -163,29 +150,11 @@ def create_review(title: str, description: str = "", context: Optional[dict] = N
     Returns:
         Dict with decision ('approved' or 'declined') and reviewer comment
     """
-    import threading
-
-    from tsugite.daemon.agent_session import ReviewDecision, ReviewGate
-    from tsugite.daemon.session_runner import SessionReviewBackend, get_current_session_id
+    from tsugite.daemon.session_runner import get_current_session_id
 
     session_id = get_current_session_id()
     if not session_id:
         raise RuntimeError("create_review can only be used within an agent session")
 
-    backend = _session_runner._review_backends.get(session_id)
-    if not backend:
-        raise RuntimeError("No review backend for this session")
-
-    review = ReviewGate(id="", session_id=session_id, title=title, description=description, context=context or {})
-    review = _call(_session_runner.store.create_review, review)
-
-    event = threading.Event()
-    backend._review_events[review.id] = event
-
-    if not event.wait(timeout=SessionReviewBackend.TIMEOUT):
-        _call(_session_runner.store.resolve_review, review.id, ReviewDecision.DECLINED.value, "Timed out")
-        return {"decision": ReviewDecision.DECLINED.value, "comment": "Timed out waiting for review"}
-
-    resolved = _call(_session_runner.store.get_review, review.id)
-    backend._review_events.pop(review.id, None)
-    return {"decision": resolved.decision, "comment": resolved.reviewer_comment}
+    review = _session_runner.create_review_for_session(session_id, title, description, context)
+    return {"decision": review.decision, "comment": review.reviewer_comment}
