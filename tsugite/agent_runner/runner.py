@@ -406,7 +406,7 @@ async def _execute_agent_with_prompt(
         hooks_dir = path_context.effective_cwd
     else:
         hooks_dir = Path.cwd()
-    setup_hook_handler(hooks_dir, event_bus)
+    setup_hook_handler(hooks_dir, event_bus, interactive=is_interactive())
 
     # Start with tools from prepared agent
     tools = list(prepared.tools)  # Make a copy
@@ -746,6 +746,7 @@ async def run_agent_async(
     hook_vars = await fire_pre_message_hooks(
         hooks_dir,
         {"message": hook_message, "agent_name": agent_path.stem},
+        interactive=is_interactive(),
     )
     context.update(hook_vars)
 

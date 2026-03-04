@@ -382,7 +382,7 @@ class BaseAdapter(ABC):
             "turns_file": str(turns_file),
             "turn_count": len(old_turns),
         }
-        await fire_compact_hooks(self.agent_config.workspace_dir, "pre_compact", hook_context)
+        await fire_compact_hooks(self.agent_config.workspace_dir, "pre_compact", hook_context, interactive=False)
 
         old_messages = [msg for turn in old_turns for msg in turn.messages]
         summary = await summarize_session(old_messages, model=model, max_context_tokens=self.agent_config.context_limit)
@@ -404,7 +404,7 @@ class BaseAdapter(ABC):
             "new_conversation_id": new_conv_id,
             "turns_compacted": len(old_turns),
             "turns_retained": len(recent_turns),
-        })
+        }, interactive=False)
 
         turns_file.unlink(missing_ok=True)
         logger.info("[%s] Session compacted", self.agent_name)

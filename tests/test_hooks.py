@@ -226,6 +226,10 @@ class TestHookRuleDefaults:
         rule = HookRule(tools=["write_file"], run="echo hi")
         assert rule.wait is False
 
+    def test_only_interactive_defaults_to_false(self):
+        rule = HookRule(run="echo hi")
+        assert rule.only_interactive is False
+
 
 class TestHooksConfigCompact:
     def test_pre_compact_parsed(self, tmp_workspace):
@@ -465,3 +469,43 @@ class TestFirePreMessageHooks:
         config = load_hooks_config(tmp_workspace)
         assert len(config.pre_message) == 1
         assert config.pre_message[0].capture_as == "var"
+
+
+class TestOnlyInteractive:
+    def test_only_interactive_parsed_from_yaml(self, tmp_workspace):
+        (tmp_workspace / ".tsugite" / "hooks.yaml").write_text(
+            "hooks:\n  pre_message:\n    - run: echo hi\n      only_interactive: true\n"
+        )
+        config = load_hooks_config(tmp_workspace)
+        assert config.pre_message[0].only_interactive is True
+
+    def test_skipped_when_not_interactive(self):
+        rules = [HookRule(run="echo hi", only_interactive=True)]
+        with patch("tsugite.hooks.subprocess.Popen") as mock_popen, \
+             patch("tsugite.hooks.subprocess.run") as mock_run:
+            _render_and_execute(jinja2.Environment(), rules, {}, Path("."), interactive=False)
+            mock_popen.assert_not_called()
+            mock_run.assert_not_called()
+
+    def test_fires_when_interactive(self):
+        rules = [HookRule(run="echo hi", only_interactive=True)]
+        with patch("tsugite.hooks.subprocess.Popen") as mock_popen:
+            _render_and_execute(jinja2.Environment(), rules, {}, Path("."), interactive=True)
+            mock_popen.assert_called_once()
+
+    def test_default_fires_regardless_of_interactive(self):
+        rules = [HookRule(run="echo hi")]
+        with patch("tsugite.hooks.subprocess.Popen") as mock_popen:
+            _render_and_execute(jinja2.Environment(), rules, {}, Path("."), interactive=False)
+            mock_popen.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_pre_message_respects_only_interactive(self, tmp_workspace):
+        (tmp_workspace / ".tsugite" / "hooks.yaml").write_text(
+            "hooks:\n  pre_message:\n"
+            "    - run: echo hi\n      capture_as: x\n      only_interactive: true\n"
+        )
+        with patch("tsugite.hooks.subprocess.run") as mock_run:
+            result = await fire_pre_message_hooks(tmp_workspace, {"message": "test"}, interactive=False)
+            mock_run.assert_not_called()
+            assert result == {}
