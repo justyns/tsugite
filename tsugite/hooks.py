@@ -31,6 +31,7 @@ class HookRule(BaseModel):
     run: str
     wait: bool = False
     capture_as: Optional[str] = None
+    only_interactive: bool = False
 
 
 class HooksConfig(BaseModel):
@@ -92,6 +93,7 @@ def _render_and_execute(
     rules: list[HookRule],
     context: dict[str, Any],
     cwd: Path,
+    interactive: bool = True,
 ) -> dict[str, str]:
     """Render and execute matching hook rules synchronously.
 
@@ -100,6 +102,8 @@ def _render_and_execute(
     """
     captured: dict[str, str] = {}
     for rule in rules:
+        if rule.only_interactive and not interactive:
+            continue
         if rule.match and not _match_passes(jinja_env, rule.match, context):
             continue
         try:
@@ -116,9 +120,10 @@ def _render_and_execute(
 class HookHandler:
     """Event handler that fires shell commands after successful tool calls."""
 
-    def __init__(self, config: HooksConfig, workspace_dir: Path):
+    def __init__(self, config: HooksConfig, workspace_dir: Path, interactive: bool = True):
         self.config = config
         self.workspace_dir = workspace_dir
+        self.interactive = interactive
         self._pending: Optional[tuple[str, dict[str, Any]]] = None
 
     def handle_event(self, event: BaseEvent) -> None:
@@ -142,20 +147,21 @@ class HookHandler:
             rule for rule in self.config.post_tool
             if tool_name in rule.tools or "*" in rule.tools
         ]
-        _render_and_execute(_jinja_env, tool_rules, context, self.workspace_dir)
+        _render_and_execute(_jinja_env, tool_rules, context, self.workspace_dir, interactive=self.interactive)
 
 
-def setup_hook_handler(workspace_dir: Path, event_bus: "EventBus") -> None:
+def setup_hook_handler(workspace_dir: Path, event_bus: "EventBus", interactive: bool = True) -> None:
     """Load hooks config and subscribe handler to event_bus if rules exist."""
     config = load_hooks_config(workspace_dir)
     if config and config.post_tool:
-        event_bus.subscribe(HookHandler(config, workspace_dir).handle_event)
+        event_bus.subscribe(HookHandler(config, workspace_dir, interactive=interactive).handle_event)
 
 
 async def _fire_hooks(
     workspace_dir: Path,
     phase: str,
     context: dict[str, Any],
+    interactive: bool = True,
 ) -> dict[str, str]:
     """Load config and fire hooks for the given phase.
 
@@ -170,20 +176,21 @@ async def _fire_hooks(
     if not rules:
         return {}
 
-    return await asyncio.to_thread(_render_and_execute, _jinja_env, rules, context, workspace_dir)
+    return await asyncio.to_thread(_render_and_execute, _jinja_env, rules, context, workspace_dir, interactive)
 
 
 async def fire_compact_hooks(
     workspace_dir: Path,
     phase: Literal["pre_compact", "post_compact"],
     context: dict[str, Any],
+    interactive: bool = True,
 ) -> None:
     """Fire pre_compact or post_compact hooks."""
-    await _fire_hooks(workspace_dir, phase, context)
+    await _fire_hooks(workspace_dir, phase, context, interactive=interactive)
 
 
 async def fire_pre_message_hooks(
-    workspace_dir: Path, context: dict[str, Any]
+    workspace_dir: Path, context: dict[str, Any], interactive: bool = True
 ) -> dict[str, str]:
     """Fire pre_message hooks, returning captured variables."""
-    return await _fire_hooks(workspace_dir, "pre_message", context)
+    return await _fire_hooks(workspace_dir, "pre_message", context, interactive=interactive)
