@@ -72,6 +72,7 @@ class Gateway:
         self.adapters: list[BaseAdapter] = []
         self._http_server = None
         self._scheduler_adapter = None
+        self._session_runner = None
 
     async def start(self):
         """Start all enabled adapters."""
@@ -193,6 +194,19 @@ class Gateway:
 
             logger.info("Scheduler enabled (schedules: %s)", schedules_path)
 
+            # Start session runner (requires HTTP adapters to execute agents)
+            from tsugite.daemon.agent_session import AgentSessionStore
+            from tsugite.daemon.session_runner import SessionRunner
+            from tsugite.tools.sessions import set_session_runner
+
+            sessions_path = self.config.state_dir / "sessions.json"
+            session_store = AgentSessionStore(sessions_path)
+            self._session_runner = SessionRunner(session_store, http_adapters)
+            if self._http_server:
+                self._http_server.session_runner = self._session_runner
+            set_session_runner(self._session_runner, asyncio.get_running_loop())
+            logger.info("Session runner enabled (sessions: %s)", sessions_path)
+
         # Set up notification callback if channels are configured
         if self.config.notification_channels:
             discord_adapters = {a.bot_config.name: a for a in self.adapters if hasattr(a, "bot_config")}
@@ -219,9 +233,11 @@ class Gateway:
         from tsugite.tools import set_daemon_mode
         from tsugite.tools.notify import set_notifier
         from tsugite.tools.schedule import set_scheduler
+        from tsugite.tools.sessions import set_session_runner
 
         set_notifier(None)
         set_scheduler(None)
+        set_session_runner(None)
         set_daemon_mode(False)
 
         components = [(a, "adapter") for a in self.adapters]

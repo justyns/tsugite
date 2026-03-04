@@ -18,7 +18,6 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
 from tsugite.agent_inheritance import get_builtin_agents_path, get_global_agents_paths
-from tsugite.skill_discovery import get_builtin_skills_path
 from tsugite.daemon.adapters.base import BaseAdapter, ChannelContext
 from tsugite.daemon.config import AgentConfig, HTTPConfig
 from tsugite.daemon.scheduler import ScheduleEntry
@@ -26,6 +25,7 @@ from tsugite.daemon.webhook_store import WebhookStore
 from tsugite.events.base import BaseEvent
 from tsugite.history.models import CompactionSummary, Turn
 from tsugite.history.storage import SessionStorage, get_history_dir
+from tsugite.skill_discovery import get_builtin_skills_path
 from tsugite.ui.jsonl import JSONLUIHandler
 from tsugite.utils import parse_yaml_frontmatter
 
@@ -143,6 +143,7 @@ class HTTPServer:
         self._auth_tokens = set(config.auth_tokens)
         self._server = None
         self.scheduler = None  # Set by Gateway after SchedulerAdapter is created
+        self.session_runner = None  # Set by Gateway after SessionRunner is created
         self._active_backends: dict[tuple[str, str], HTTPInteractionBackend] = {}
         self.app = self._build_app()
 
@@ -188,6 +189,15 @@ class HTTPServer:
             Route("/api/schedules/{schedule_id}/enable", self._enable_schedule, methods=["POST"]),
             Route("/api/schedules/{schedule_id}/disable", self._disable_schedule, methods=["POST"]),
             Route("/api/schedules/{schedule_id}/run", self._run_schedule, methods=["POST"]),
+            Route("/api/sessions", self._api_list_sessions, methods=["GET"]),
+            Route("/api/sessions", self._api_start_session, methods=["POST"]),
+            Route("/api/sessions/{session_id}", self._api_get_session, methods=["GET"]),
+            Route("/api/sessions/{session_id}/cancel", self._api_cancel_session, methods=["POST"]),
+            Route("/api/sessions/{session_id}/restart", self._api_restart_session, methods=["POST"]),
+            Route("/api/sessions/{session_id}/events", self._api_session_events, methods=["GET"]),
+            Route("/api/reviews", self._api_list_reviews, methods=["GET"]),
+            Route("/api/reviews/{review_id}", self._api_get_review, methods=["GET"]),
+            Route("/api/reviews/{review_id}/resolve", self._api_resolve_review, methods=["POST"]),
             Route("/api/webhooks", self._list_webhooks, methods=["GET"]),
             Route("/api/webhooks", self._create_webhook, methods=["POST"]),
             Route("/api/webhooks/{token}", self._delete_webhook, methods=["DELETE"]),
@@ -210,7 +220,7 @@ class HTTPServer:
         if err := self._check_auth(request):
             return err
         running_by_agent: dict[str, list[str]] = {}
-        for (agent_name, user_id) in self._active_backends:
+        for agent_name, user_id in self._active_backends:
             running_by_agent.setdefault(agent_name, []).append(user_id)
         agents = [
             {
@@ -578,7 +588,17 @@ class HTTPServer:
             return JSONResponse({"error": "invalid JSON body"}, status_code=400)
 
         schedule_id = request.path_params["schedule_id"]
-        allowed = {"prompt", "cron_expr", "run_at", "timezone", "agent", "schedule_type", "model", "agent_file", "max_turns"}
+        allowed = {
+            "prompt",
+            "cron_expr",
+            "run_at",
+            "timezone",
+            "agent",
+            "schedule_type",
+            "model",
+            "agent_file",
+            "max_turns",
+        }
         fields = {k: v for k, v in body.items() if k in allowed}
         if not fields:
             return JSONResponse({"error": "no updatable fields provided"}, status_code=400)
@@ -620,6 +640,198 @@ class HTTPServer:
             return err
         removed = self.scheduler.cleanup()
         return JSONResponse({"removed": removed, "count": len(removed)})
+
+    # ── Session / Review API ──
+
+    def _require_auth_and_sessions(self, request: Request) -> Optional[JSONResponse]:
+        auth_err = self._check_auth(request)
+        if auth_err:
+            return auth_err
+        if not self.session_runner:
+            return JSONResponse({"error": "session runner not available"}, status_code=503)
+        return None
+
+    def _session_detail(self, session, session_id: str) -> dict:
+        """Build session detail dict with event count and pending review."""
+        result = asdict(session)
+        result["event_count"] = self.session_runner.store.event_count(session_id)
+        if session.current_review_id:
+            try:
+                review = self.session_runner.store.get_review(session.current_review_id)
+                result["pending_review"] = asdict(review)
+            except ValueError:
+                pass
+        return result
+
+    async def _api_list_sessions(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_sessions(request):
+            return err
+        state = request.query_params.get("state")
+        sessions = self.session_runner.store.list_sessions(state=state)
+        return JSONResponse(
+            {
+                "sessions": [
+                    {
+                        "id": s.id,
+                        "agent": s.agent,
+                        "state": s.state,
+                        "prompt": s.prompt[:200],
+                        "created_at": s.created_at,
+                        "updated_at": s.updated_at,
+                        "error": s.error,
+                        "current_review_id": s.current_review_id,
+                    }
+                    for s in sessions
+                ]
+            }
+        )
+
+    async def _api_start_session(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_sessions(request):
+            return err
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+
+        prompt = body.get("prompt", "").strip()
+        agent = body.get("agent", "")
+        if not prompt or not agent:
+            return JSONResponse({"error": "prompt and agent are required"}, status_code=400)
+        if agent not in self.adapters:
+            return JSONResponse({"error": f"unknown agent: {agent}"}, status_code=400)
+
+        from tsugite.daemon.agent_session import AgentSession
+
+        session = AgentSession(
+            id=body.get("session_id", ""),
+            agent=agent,
+            prompt=prompt,
+            model=body.get("model"),
+            agent_file=body.get("agent_file"),
+            notify=body.get("notify", []),
+            sandbox=body.get("sandbox", False),
+            allow_domains=body.get("allow_domains", []),
+            no_network=body.get("no_network", False),
+        )
+
+        try:
+            result = self.session_runner.start_session(session)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+
+        return JSONResponse(
+            {"id": result.id, "state": result.state, "created_at": result.created_at},
+            status_code=201,
+        )
+
+    async def _api_get_session(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_sessions(request):
+            return err
+        session_id = request.path_params["session_id"]
+        try:
+            session = self.session_runner.store.get_session(session_id)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+
+        return JSONResponse(self._session_detail(session, session_id))
+
+    async def _api_cancel_session(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_sessions(request):
+            return err
+        session_id = request.path_params["session_id"]
+        try:
+            self.session_runner.cancel_session(session_id)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+        return JSONResponse({"status": "cancelled"})
+
+    async def _api_restart_session(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_sessions(request):
+            return err
+        session_id = request.path_params["session_id"]
+        try:
+            old = self.session_runner.store.get_session(session_id)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+
+        from tsugite.daemon.agent_session import SessionState
+
+        restartable = {SessionState.INTERRUPTED.value, SessionState.FAILED.value, SessionState.CANCELLED.value}
+        if old.state not in restartable:
+            return JSONResponse({"error": f"cannot restart session in '{old.state}' state"}, status_code=400)
+
+        from tsugite.daemon.agent_session import AgentSession
+
+        new_session = AgentSession(
+            id="",  # auto-generated
+            agent=old.agent,
+            prompt=old.prompt,
+            model=old.model,
+            agent_file=old.agent_file,
+            notify=old.notify,
+            sandbox=old.sandbox,
+            allow_domains=old.allow_domains,
+            no_network=old.no_network,
+        )
+        try:
+            result = self.session_runner.start_session(new_session)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        return JSONResponse(
+            {"id": result.id, "state": result.state, "restarted_from": session_id},
+            status_code=201,
+        )
+
+    async def _api_session_events(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_sessions(request):
+            return err
+        session_id = request.path_params["session_id"]
+        try:
+            self.session_runner.store.get_session(session_id)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+        events = self.session_runner.store.read_events(session_id)
+        return JSONResponse({"events": events})
+
+    async def _api_list_reviews(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_sessions(request):
+            return err
+        status = request.query_params.get("status")
+        reviews = self.session_runner.store.list_reviews(status=status)
+        return JSONResponse({"reviews": [asdict(r) for r in reviews]})
+
+    async def _api_get_review(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_sessions(request):
+            return err
+        review_id = request.path_params["review_id"]
+        try:
+            review = self.session_runner.store.get_review(review_id)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+        return JSONResponse(asdict(review))
+
+    async def _api_resolve_review(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_sessions(request):
+            return err
+        review_id = request.path_params["review_id"]
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+
+        from tsugite.daemon.agent_session import ReviewDecision
+
+        decision = body.get("decision", "")
+        if decision not in (ReviewDecision.APPROVED.value, ReviewDecision.DECLINED.value):
+            return JSONResponse({"error": "decision must be 'approved' or 'declined'"}, status_code=400)
+
+        comment = body.get("comment", "")
+        try:
+            self.session_runner.resolve_review(review_id, decision, comment)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        return JSONResponse({"status": "resolved", "decision": decision})
 
     async def _list_webhooks(self, request: Request) -> JSONResponse:
         if err := self._check_auth(request):
@@ -741,9 +953,7 @@ class HTTPServer:
                 continue
         return Path(), False, JSONResponse({"error": "path not in allowed directories"}, status_code=403)
 
-    def _collect_md_files(
-        self, allowed_dirs: list[tuple[Path, str, bool]], glob_pattern: str = "*.md"
-    ) -> list[dict]:
+    def _collect_md_files(self, allowed_dirs: list[tuple[Path, str, bool]], glob_pattern: str = "*.md") -> list[dict]:
         """Collect markdown files from allowed directories with frontmatter metadata."""
         files = []
         seen_paths: set[Path] = set()
@@ -763,13 +973,15 @@ class HTTPServer:
                     description = fm.get("description", "")
                 except Exception as e:
                     logger.debug("Failed to parse frontmatter %s: %s", md_file, e)
-                files.append({
-                    "path": str(resolved),
-                    "name": name,
-                    "source": source,
-                    "readonly": readonly,
-                    "description": description,
-                })
+                files.append(
+                    {
+                        "path": str(resolved),
+                        "name": name,
+                        "source": source,
+                        "readonly": readonly,
+                        "description": description,
+                    }
+                )
         return files
 
     async def _read_md_file(self, request: Request, allowed_dirs: list[tuple[Path, str, bool]]) -> JSONResponse:

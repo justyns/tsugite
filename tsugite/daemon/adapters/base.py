@@ -188,6 +188,11 @@ class BaseAdapter(ABC):
             ctx["schedule_id"] = meta.get("schedule_id", "")
             ctx["has_notify_tool"] = meta.get("notify_tool", False)
         ctx["running_tasks"] = meta.get("running_tasks", [])
+
+        # Session context
+        ctx["is_session"] = channel_context.source == "session"
+        ctx["session_id"] = meta.get("session_id", "") if ctx["is_session"] else ""
+        ctx["active_sessions"] = []
         return ctx
 
     def _build_message_context(self, message: str, channel_context: ChannelContext, user_id: str) -> str:
@@ -399,12 +404,16 @@ class BaseAdapter(ABC):
         new_storage.record_compaction_summary(summary, len(old_turns), retained_turns=len(recent_turns))
         new_storage.write_turns(recent_turns)
 
-        await fire_compact_hooks(self.agent_config.workspace_dir, "post_compact", {
-            **hook_context,
-            "new_conversation_id": new_conv_id,
-            "turns_compacted": len(old_turns),
-            "turns_retained": len(recent_turns),
-        })
+        await fire_compact_hooks(
+            self.agent_config.workspace_dir,
+            "post_compact",
+            {
+                **hook_context,
+                "new_conversation_id": new_conv_id,
+                "turns_compacted": len(old_turns),
+                "turns_retained": len(recent_turns),
+            },
+        )
 
         turns_file.unlink(missing_ok=True)
         logger.info("[%s] Session compacted", self.agent_name)
