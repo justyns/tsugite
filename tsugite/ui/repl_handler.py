@@ -74,41 +74,31 @@ class ReplUIHandler:
         # Tool execution tracking (for progress indicators)
         self.active_tools: dict[str, float] = {}  # tool_name -> start_time
 
+    _DISPATCH: dict[type, str] = {
+        TaskStartEvent: "_handle_task_start",
+        StepStartEvent: "_handle_step_start",
+        CodeExecutionEvent: "_handle_code_execution",
+        ObservationEvent: "_handle_observation",
+        FinalAnswerEvent: "_handle_final_answer",
+        ErrorEvent: "_handle_error",
+        LLMMessageEvent: "_handle_llm_message",
+        ReasoningContentEvent: "_handle_reasoning_content",
+        ReasoningTokensEvent: "_handle_reasoning_tokens",
+        CostSummaryEvent: "_handle_cost_summary",
+        StreamChunkEvent: "_handle_stream_chunk",
+        StreamCompleteEvent: "_handle_stream_complete",
+        InfoEvent: "_handle_info",
+        DebugMessageEvent: "_handle_debug_message",
+        WarningEvent: "_handle_warning",
+        StepProgressEvent: "_handle_step_progress",
+    }
+
     def handle_event(self, event: BaseEvent) -> None:
         """Handle a UI event and update the display."""
         with self._lock:
-            if isinstance(event, TaskStartEvent):
-                self._handle_task_start(event)
-            elif isinstance(event, StepStartEvent):
-                self._handle_step_start(event)
-            elif isinstance(event, CodeExecutionEvent):
-                self._handle_code_execution(event)
-            elif isinstance(event, ObservationEvent):
-                self._handle_observation(event)
-            elif isinstance(event, FinalAnswerEvent):
-                self._handle_final_answer(event)
-            elif isinstance(event, ErrorEvent):
-                self._handle_error(event)
-            elif isinstance(event, LLMMessageEvent):
-                self._handle_llm_message(event)
-            elif isinstance(event, ReasoningContentEvent):
-                self._handle_reasoning_content(event)
-            elif isinstance(event, ReasoningTokensEvent):
-                self._handle_reasoning_tokens(event)
-            elif isinstance(event, CostSummaryEvent):
-                self._handle_cost_summary(event)
-            elif isinstance(event, StreamChunkEvent):
-                self._handle_stream_chunk(event)
-            elif isinstance(event, StreamCompleteEvent):
-                self._handle_stream_complete(event)
-            elif isinstance(event, InfoEvent):
-                self._handle_info(event)
-            elif isinstance(event, DebugMessageEvent):
-                self._handle_debug_message(event)
-            elif isinstance(event, WarningEvent):
-                self._handle_warning(event)
-            elif isinstance(event, StepProgressEvent):
-                self._handle_step_progress(event)
+            handler_name = self._DISPATCH.get(type(event))
+            if handler_name:
+                getattr(self, handler_name)(event)
 
     def _handle_task_start(self, event: TaskStartEvent) -> None:
         """Handle task start - show model in compact mode."""
@@ -317,8 +307,6 @@ class ReplUIHandler:
                     usage_pct = (event.cumulative_tokens / context_limit) * 100
 
                     if usage_pct >= 90:
-                        from rich.panel import Panel
-
                         warning = (
                             f"[red bold]🚨 Context limit approaching: {usage_pct:.0f}% "
                             f"({event.cumulative_tokens:,}/{context_limit:,} tokens)[/red bold]\n"
@@ -326,8 +314,6 @@ class ReplUIHandler:
                         )
                         self.console.print(Panel(warning, border_style="red", padding=(0, 1)))
                     elif usage_pct >= 75:
-                        from rich.panel import Panel
-
                         warning = (
                             f"[yellow]⚠️  Context usage: {usage_pct:.0f}% "
                             f"({event.cumulative_tokens:,}/{context_limit:,} tokens)[/yellow]"

@@ -114,52 +114,36 @@ class CustomUIHandler:
         else:
             self.console.print(*args, **kwargs)
 
+    _DISPATCH: dict[type, str] = {
+        TaskStartEvent: "_handle_task_start",
+        StepStartEvent: "_handle_step_start",
+        CodeExecutionEvent: "_handle_code_execution",
+        ObservationEvent: "_handle_observation",
+        FinalAnswerEvent: "_handle_final_answer",
+        ErrorEvent: "_handle_error",
+        LLMMessageEvent: "_handle_llm_message",
+        ReasoningContentEvent: "_handle_reasoning_content",
+        ReasoningTokensEvent: "_handle_reasoning_tokens",
+        CostSummaryEvent: "_handle_cost_summary",
+        StreamChunkEvent: "_handle_stream_chunk",
+        StreamCompleteEvent: "_handle_stream_complete",
+        InfoEvent: "_handle_info",
+        SkillLoadedEvent: "_handle_skill_loaded",
+        SkillLoadFailedEvent: "_handle_skill_load_failed",
+        SkillUnloadedEvent: "_handle_skill_unloaded",
+        DebugMessageEvent: "_handle_debug_message",
+        WarningEvent: "_handle_warning",
+        StepProgressEvent: "_handle_step_progress",
+        FileReadEvent: "_handle_file_read",
+        FileWriteEvent: "_handle_file_write",
+    }
+
     def handle_event(self, event: BaseEvent) -> None:
         """Handle a UI event and update the display."""
         with self._lock:
-            if isinstance(event, TaskStartEvent):
-                self._handle_task_start(event)
-            elif isinstance(event, StepStartEvent):
-                self._handle_step_start(event)
-            elif isinstance(event, CodeExecutionEvent):
-                self._handle_code_execution(event)
-            elif isinstance(event, ObservationEvent):
-                self._handle_observation(event)
-            elif isinstance(event, FinalAnswerEvent):
-                self._handle_final_answer(event)
-            elif isinstance(event, ErrorEvent):
-                self._handle_error(event)
-            elif isinstance(event, LLMMessageEvent):
-                self._handle_llm_message(event)
-            elif isinstance(event, ReasoningContentEvent):
-                self._handle_reasoning_content(event)
-            elif isinstance(event, ReasoningTokensEvent):
-                self._handle_reasoning_tokens(event)
-            elif isinstance(event, CostSummaryEvent):
-                self._handle_cost_summary(event)
-            elif isinstance(event, StreamChunkEvent):
-                self._handle_stream_chunk(event)
-            elif isinstance(event, StreamCompleteEvent):
-                self._handle_stream_complete(event)
-            elif isinstance(event, InfoEvent):
-                self._handle_info(event)
-            elif isinstance(event, SkillLoadedEvent):
-                self._handle_skill_loaded(event)
-            elif isinstance(event, SkillLoadFailedEvent):
-                self._handle_skill_load_failed(event)
-            elif isinstance(event, SkillUnloadedEvent):
-                self._handle_skill_unloaded(event)
-            elif isinstance(event, DebugMessageEvent):
-                self._handle_debug_message(event)
-            elif isinstance(event, WarningEvent):
-                self._handle_warning(event)
-            elif isinstance(event, StepProgressEvent):
-                self._handle_step_progress(event)
-            elif isinstance(event, FileReadEvent):
-                self._handle_file_read(event)
-            elif isinstance(event, FileWriteEvent):
-                self._handle_file_write(event)
-
+            handler_name = self._DISPATCH.get(type(event))
+            if handler_name:
+                getattr(self, handler_name)(event)
             self._update_display()
 
     def _get_display_prefix(self) -> str:

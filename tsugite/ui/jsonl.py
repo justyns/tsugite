@@ -55,88 +55,99 @@ class JSONLUIHandler:
     - Failed tool: {"type": "tool_result", "tool": "read_file", "success": false, "error": "..."}
     """
 
+    _DISPATCH: dict[type, str] = {
+        TaskStartEvent: "_handle_task_start",
+        StepStartEvent: "_handle_step_start",
+        LLMMessageEvent: "_handle_llm_message",
+        CodeExecutionEvent: "_handle_code_execution",
+        ObservationEvent: "_handle_observation",
+        FinalAnswerEvent: "_handle_final_answer",
+        ErrorEvent: "_handle_error",
+        SkillLoadedEvent: "_handle_skill_loaded",
+        SkillLoadFailedEvent: "_handle_skill_load_failed",
+        SkillUnloadedEvent: "_handle_skill_unloaded",
+        FileReadEvent: "_handle_file_io",
+        FileWriteEvent: "_handle_file_io",
+        ToolCallEvent: "_handle_tool_call",
+        ToolResultEvent: "_handle_tool_result",
+        InfoEvent: "_handle_info",
+    }
+
     def handle_event(self, event: BaseEvent) -> None:
-        """Convert UI event to JSONL and print to stdout.
+        """Convert UI event to JSONL and print to stdout."""
+        handler_name = self._DISPATCH.get(type(event))
+        if handler_name:
+            getattr(self, handler_name)(event)
 
-        Args:
-            event: The Pydantic event
-        """
-        if isinstance(event, TaskStartEvent):
-            self._emit("init", {"agent": event.task, "model": event.model})
+    def _handle_task_start(self, event: TaskStartEvent) -> None:
+        self._emit("init", {"agent": event.task, "model": event.model})
 
-        elif isinstance(event, StepStartEvent):
-            self._emit("turn_start", {"turn": event.step})
+    def _handle_step_start(self, event: StepStartEvent) -> None:
+        self._emit("turn_start", {"turn": event.step})
 
-        elif isinstance(event, LLMMessageEvent):
-            if event.content.strip():
-                self._emit("thought", {"content": event.content})
+    def _handle_llm_message(self, event: LLMMessageEvent) -> None:
+        if event.content.strip():
+            self._emit("thought", {"content": event.content})
 
-        elif isinstance(event, CodeExecutionEvent):
-            if event.code:
-                self._emit("code", {"content": event.code})
+    def _handle_code_execution(self, event: CodeExecutionEvent) -> None:
+        if event.code:
+            self._emit("code", {"content": event.code})
 
-        elif isinstance(event, ObservationEvent):
-            if event.success:
-                self._emit(
-                    "tool_result", {"tool": event.tool or "unknown", "success": True, "output": event.observation}
-                )
-            else:
-                self._emit(
-                    "tool_result",
-                    {"tool": event.tool or "unknown", "success": False, "error": event.error or event.observation},
-                )
-
-        elif isinstance(event, FinalAnswerEvent):
+    def _handle_observation(self, event: ObservationEvent) -> None:
+        if event.success:
+            self._emit("tool_result", {"tool": event.tool or "unknown", "success": True, "output": event.observation})
+        else:
             self._emit(
-                "final_result",
-                {
-                    "result": event.answer,
-                    "turns": event.turns,
-                    "tokens": event.tokens,
-                    "cost": event.cost,
-                },
+                "tool_result",
+                {"tool": event.tool or "unknown", "success": False, "error": event.error or event.observation},
             )
 
-        elif isinstance(event, ErrorEvent):
-            self._emit("error", {"error": event.error, "step": event.step})
+    def _handle_final_answer(self, event: FinalAnswerEvent) -> None:
+        self._emit(
+            "final_result",
+            {"result": event.answer, "turns": event.turns, "tokens": event.tokens, "cost": event.cost},
+        )
 
-        elif isinstance(event, SkillLoadedEvent):
-            self._emit("skill_loaded", {"name": event.skill_name, "description": event.description or ""})
+    def _handle_error(self, event: ErrorEvent) -> None:
+        self._emit("error", {"error": event.error, "step": event.step})
 
-        elif isinstance(event, SkillLoadFailedEvent):
-            self._emit("warning", {"message": f"Failed to load skill '{event.skill_name}': {event.error_message}"})
+    def _handle_skill_loaded(self, event: SkillLoadedEvent) -> None:
+        self._emit("skill_loaded", {"name": event.skill_name, "description": event.description or ""})
 
-        elif isinstance(event, SkillUnloadedEvent):
-            self._emit("skill_unloaded", {"name": event.skill_name})
+    def _handle_skill_load_failed(self, event: SkillLoadFailedEvent) -> None:
+        self._emit("warning", {"message": f"Failed to load skill '{event.skill_name}': {event.error_message}"})
 
-        elif type(event) in _FILE_IO_EVENTS:
-            self._emit(
-                _FILE_IO_EVENTS[type(event)],
-                {
-                    "path": event.path,
-                    "line_count": event.line_count,
-                    "byte_count": event.byte_count,
-                    "operation": event.operation,
-                },
-            )
+    def _handle_skill_unloaded(self, event: SkillUnloadedEvent) -> None:
+        self._emit("skill_unloaded", {"name": event.skill_name})
 
-        elif isinstance(event, ToolCallEvent):
-            self._emit("tool_call", {"tool": event.tool_name, "arguments": event.arguments, "step": event.step})
+    def _handle_file_io(self, event) -> None:
+        self._emit(
+            _FILE_IO_EVENTS[type(event)],
+            {
+                "path": event.path,
+                "line_count": event.line_count,
+                "byte_count": event.byte_count,
+                "operation": event.operation,
+            },
+        )
 
-        elif isinstance(event, ToolResultEvent):
-            self._emit(
-                "tool_result_audit",
-                {
-                    "tool": event.tool_name,
-                    "success": event.success,
-                    "duration_ms": event.duration_ms,
-                    "summary": event.result_summary,
-                    "step": event.step,
-                },
-            )
+    def _handle_tool_call(self, event: ToolCallEvent) -> None:
+        self._emit("tool_call", {"tool": event.tool_name, "arguments": event.arguments, "step": event.step})
 
-        elif isinstance(event, InfoEvent):
-            self._emit("info", {"message": event.message})
+    def _handle_tool_result(self, event: ToolResultEvent) -> None:
+        self._emit(
+            "tool_result_audit",
+            {
+                "tool": event.tool_name,
+                "success": event.success,
+                "duration_ms": event.duration_ms,
+                "summary": event.result_summary,
+                "step": event.step,
+            },
+        )
+
+    def _handle_info(self, event: InfoEvent) -> None:
+        self._emit("info", {"message": event.message})
 
     def _emit(self, event_type: str, data: Dict[str, Any]) -> None:
         """Print JSONL event to stdout.
