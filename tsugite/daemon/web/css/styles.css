@@ -160,6 +160,18 @@ main { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
 .ask-text button { background: var(--accent); color: var(--btn-text); border: none; border-radius: 6px; padding: 6px 16px; cursor: pointer; font-size: 13px; font-weight: 600; }
 .ask-answered { color: var(--ok); font-size: 13px; margin-top: 4px; }
 
+/* File upload */
+.drag-overlay { position: absolute; inset: 0; background: var(--ctp-crust); opacity: 0.9; display: flex; align-items: center; justify-content: center; color: var(--text); font-size: 18px; font-weight: 600; z-index: 5; border: 3px dashed var(--accent); border-radius: 8px; pointer-events: none; }
+.pending-files { display: flex; gap: 8px; padding: 8px 16px 0; flex-wrap: wrap; }
+.pending-file { display: flex; align-items: center; gap: 6px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; font-size: 12px; }
+.file-thumb { width: 32px; height: 32px; object-fit: cover; border-radius: 4px; }
+.file-icon { font-size: 18px; }
+.file-name { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-remove { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 16px; padding: 0 2px; line-height: 1; }
+.file-remove:hover { color: var(--error); }
+.attach-btn { background: none; border: none; font-size: 20px; cursor: pointer; padding: 4px 8px; align-self: flex-end; color: var(--muted); }
+.attach-btn:hover { color: var(--text); }
+
 /* Token display */
 .token-masked { font-family: monospace; font-size: 13px; letter-spacing: 1px; }
 .token-reveal { cursor: pointer; color: var(--accent); font-size: 12px; margin-left: 8px; }

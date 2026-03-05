@@ -81,7 +81,10 @@
   </div>
 
   <!-- Chat -->
-  <div class="view" x-show="$store.app.view === 'chat'" x-data="chatView" x-cloak>
+  <div class="view" x-show="$store.app.view === 'chat'" x-data="chatView" x-cloak
+       @dragover.prevent @dragenter.prevent="onDragEnter($event)"
+       @dragleave="onDragLeave($event)" @drop.prevent="onDrop($event)"
+       style="position:relative">
     <div id="messages" x-ref="messages">
       <template x-for="(msg, i) in messages" :key="i">
         <div>
@@ -186,7 +189,28 @@
       <button class="btn-sm" x-show="!compacting" @click="compactSession()" :disabled="sending">Compact</button>
     </div>
 
+    <!-- Drag overlay -->
+    <div class="drag-overlay" x-show="isDragging" x-cloak>Drop files to attach</div>
+
+    <!-- Pending files strip -->
+    <div class="pending-files" x-show="pendingFiles.length > 0">
+      <template x-for="(pf, fi) in pendingFiles" :key="fi">
+        <div class="pending-file">
+          <template x-if="pf.previewUrl">
+            <img class="file-thumb" :src="pf.previewUrl" :alt="pf.name">
+          </template>
+          <template x-if="!pf.previewUrl">
+            <span class="file-icon">📄</span>
+          </template>
+          <span class="file-name" x-text="pf.name"></span>
+          <button class="file-remove" @click="removeFile(fi)">&times;</button>
+        </div>
+      </template>
+    </div>
+
     <div id="input-area">
+      <button class="attach-btn" @click="openFilePicker()" title="Attach files">📎</button>
+      <input type="file" multiple x-ref="fileInput" @change="onFileInputChange($event)" style="display:none">
       <textarea id="message-input" x-model="messageText" rows="1"
                 placeholder="Send a message..." autofocus
                 @keydown="onInputKeydown" @input="autoResize"></textarea>

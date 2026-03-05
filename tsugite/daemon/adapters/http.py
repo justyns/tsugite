@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import re
 import threading
 from dataclasses import asdict
 from dataclasses import fields as dataclass_fields
@@ -18,6 +19,8 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
 from tsugite.agent_inheritance import get_builtin_agents_path, get_global_agents_paths
+from tsugite.attachments.base import AttachmentContentType
+from tsugite.attachments.file import FileHandler
 from tsugite.daemon.adapters.base import BaseAdapter, ChannelContext
 from tsugite.daemon.config import AgentConfig, HTTPConfig
 from tsugite.daemon.scheduler import ScheduleEntry
@@ -31,7 +34,32 @@ from tsugite.utils import parse_yaml_frontmatter
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
+MAX_TEXT_ATTACH_SIZE = 50 * 1024  # 50KB — ~12K tokens
+MAX_BINARY_ATTACH_SIZE = 10 * 1024 * 1024  # 10MB
+MAX_UPLOAD_TOTAL = 100 * 1024 * 1024  # 100MB per request
+MAX_UPLOAD_FILES = 20
+
 logger = logging.getLogger(__name__)
+
+_file_handler = FileHandler()
+
+
+def _sanitize_filename(name: str) -> str:
+    """Strip path separators and dangerous characters from a filename."""
+    name = Path(name).name  # strip directory components
+    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name)
+    name = name.lstrip(".")
+    return name[:200] or "upload"
+
+
+def _should_context_attach(path: Path, size: int) -> bool:
+    """Determine if a file should be attached as LLM context."""
+    _, content_type = _file_handler._detect_content_type(path)
+    if content_type == AttachmentContentType.TEXT:
+        return size <= MAX_TEXT_ATTACH_SIZE
+    if path.suffix.lower() in FileHandler.BINARY_EXTENSIONS:
+        return size <= MAX_BINARY_ATTACH_SIZE
+    return False
 
 
 class SSEProgressHandler(JSONLUIHandler):
@@ -175,6 +203,7 @@ class HTTPServer:
             Route("/api/agents", self._list_agents, methods=["GET"]),
             Route("/api/agents/{agent}/sessions", self._list_sessions, methods=["GET"]),
             Route("/api/agents/{agent}/chat", self._chat, methods=["POST"]),
+            Route("/api/agents/{agent}/upload", self._upload, methods=["POST"]),
             Route("/api/agents/{agent}/status", self._status, methods=["GET"]),
             Route("/api/agents/{agent}/attachments", self._attachments, methods=["GET"]),
             Route("/api/agents/{agent}/history", self._history, methods=["GET"]),
@@ -439,6 +468,61 @@ class HTTPServer:
         backend.submit_response(response)
         return JSONResponse({"status": "ok"})
 
+    async def _upload(self, request: Request) -> JSONResponse:
+        adapter, err = self._get_adapter(request)
+        if err:
+            return err
+
+        uploads_dir = adapter.agent_config.workspace_dir / "uploads"
+        uploads_dir.mkdir(parents=True, exist_ok=True)
+
+        form = await request.form()
+        files = form.getlist("files")
+        if not files:
+            return JSONResponse({"error": "no files provided"}, status_code=400)
+        if len(files) > MAX_UPLOAD_FILES:
+            return JSONResponse({"error": f"too many files (max {MAX_UPLOAD_FILES})"}, status_code=400)
+
+        total_size = 0
+        results = []
+        written_paths = []
+        for upload in files:
+            content = await upload.read()
+            total_size += len(content)
+            if total_size > MAX_UPLOAD_TOTAL:
+                for p in written_paths:
+                    p.unlink(missing_ok=True)
+                return JSONResponse({"error": "total upload size exceeds 100MB"}, status_code=413)
+
+            name = _sanitize_filename(upload.filename or "upload")
+            dest = uploads_dir / name
+            if not dest.resolve().is_relative_to(uploads_dir.resolve()):
+                continue
+            # Deduplicate on collision
+            if dest.exists():
+                stem, suffix = dest.stem, dest.suffix
+                counter = 1
+                while dest.exists():
+                    dest = uploads_dir / f"{stem}_{counter}{suffix}"
+                    counter += 1
+
+            dest.write_bytes(content)
+            written_paths.append(dest)
+            file_size = len(content)
+            mime_type, content_type = _file_handler._detect_content_type(dest)
+            context_attach = _should_context_attach(dest, file_size)
+
+            results.append({
+                "name": dest.name,
+                "content_type": content_type.value,
+                "mime_type": mime_type,
+                "size": file_size,
+                "context_attach": context_attach,
+            })
+
+        await form.close()
+        return JSONResponse({"files": results})
+
     async def _chat(self, request: Request) -> Response:
         adapter, err = self._get_adapter(request)
         if err:
@@ -450,20 +534,55 @@ class HTTPServer:
             return JSONResponse({"error": "invalid JSON body"}, status_code=400)
 
         message = body.get("message", "").strip()
-        if not message:
-            return JSONResponse({"error": "message is required"}, status_code=400)
+        uploaded_files = body.get("uploaded_files", [])
+        if not isinstance(uploaded_files, list):
+            uploaded_files = []
+
+        if not message and not uploaded_files:
+            return JSONResponse({"error": "message or uploaded_files is required"}, status_code=400)
 
         raw_user_id = body.get("user_id", "web-anonymous")
         agent_name = request.path_params["agent"]
         user_id = adapter.resolve_http_user(raw_user_id)
         logger.info("[%s] <- %s (http): %s", agent_name, user_id, message[:100])
 
+        # Process uploaded files — only accept filenames, resolve against uploads dir
+        uploaded_attachments = []
+        workspace_only_files = []
+        uploads_dir = adapter.agent_config.workspace_dir / "uploads"
+
+        for file_info in uploaded_files:
+            if not isinstance(file_info, dict):
+                continue
+            filename = _sanitize_filename(file_info.get("name", ""))
+            file_path = (uploads_dir / filename).resolve()
+            if not file_path.is_relative_to(uploads_dir.resolve()) or not file_path.exists():
+                continue
+
+            if _should_context_attach(file_path, file_path.stat().st_size):
+                try:
+                    attachment = _file_handler.fetch(str(file_path))
+                    uploaded_attachments.append(attachment)
+                except Exception as e:
+                    logger.warning("Failed to create attachment for %s: %s", file_path, e)
+                    workspace_only_files.append(filename)
+            else:
+                workspace_only_files.append(filename)
+
+        if workspace_only_files:
+            names = ", ".join(workspace_only_files)
+            message += f"\n\n[Uploaded files available in workspace: {names}]"
+
+        metadata = {"client_ip": request.client.host if request.client else "unknown"}
+        if uploaded_attachments:
+            metadata["uploaded_attachments"] = uploaded_attachments
+
         channel_context = ChannelContext(
             source="http",
             channel_id=None,
             user_id=raw_user_id,
             reply_to=f"http:{raw_user_id}",
-            metadata={"client_ip": request.client.host if request.client else "unknown"},
+            metadata=metadata,
         )
 
         progress = SSEProgressHandler()

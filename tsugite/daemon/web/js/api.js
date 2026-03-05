@@ -31,3 +31,14 @@ const del_ = (path) => request('DELETE', path);
 export { del_ as del };
 
 export function streamPost(path, body) { return request('POST', path, body, true); }
+
+export async function uploadFiles(path, files) {
+  const form = new FormData();
+  for (const f of files) form.append('files', f);
+  const resp = await fetch(path, { method: 'POST', headers: authHeaders(), body: form });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ error: resp.statusText }));
+    throw new Error(err.error || resp.statusText);
+  }
+  return resp.json();
+}
