@@ -68,19 +68,22 @@ def _match_passes(jinja_env: jinja2.Environment, match_expr: str, context: dict[
         return False
 
 
-def _execute_hook(cmd: str, cwd: Path, wait: bool, capture: bool = False) -> Optional[str]:
+def _execute_hook(cmd: str, cwd: Path, capture: bool = False) -> Optional[str]:
     """Run a shell command. Returns stdout if capture=True."""
     try:
         logger.info("Hook fired: %s", cmd)
-        if wait or capture:
-            result = subprocess.run(cmd, shell=True, cwd=str(cwd), capture_output=True, timeout=HOOK_TIMEOUT)
-            if result.returncode != 0:
-                logger.warning("Hook failed (exit %d): %s", result.returncode, cmd)
-                return None
-            if capture:
-                return result.stdout.decode().strip()
-        else:
-            subprocess.Popen(cmd, shell=True, cwd=str(cwd), stdout=subprocess.DEVNULL)
+        result = subprocess.run(
+            cmd, shell=True, cwd=str(cwd), capture_output=True, text=True, errors="replace", timeout=HOOK_TIMEOUT
+        )
+        if result.returncode != 0:
+            logger.warning("Hook failed (exit %d): %s", result.returncode, cmd)
+            if result.stdout.strip():
+                logger.warning("Hook stdout: %s", result.stdout.strip())
+            if result.stderr.strip():
+                logger.warning("Hook stderr: %s", result.stderr.strip())
+            return None
+        if capture:
+            return result.stdout.strip()
     except subprocess.TimeoutExpired:
         logger.warning("Hook timed out after %ds: %s", HOOK_TIMEOUT, cmd)
     except Exception as e:
@@ -111,7 +114,7 @@ def _render_and_execute(
         except Exception as e:
             logger.warning("Hook render failed: %s", e)
             continue
-        output = _execute_hook(cmd, cwd, rule.wait, capture=bool(rule.capture_as))
+        output = _execute_hook(cmd, cwd, capture=bool(rule.capture_as))
         if rule.capture_as and output is not None:
             captured[rule.capture_as] = output
     return captured

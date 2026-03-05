@@ -1,9 +1,11 @@
 """Tests for workspace hooks."""
 
+import logging
 import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import jinja2
 import pytest
 
 from tsugite.events.events import ToolCallEvent, ToolResultEvent
@@ -18,7 +20,13 @@ from tsugite.hooks import (
     load_hooks_config,
 )
 
-import jinja2
+
+def _ok_result(stdout="", stderr=""):
+    return MagicMock(returncode=0, stdout=stdout, stderr=stderr)
+
+
+def _fail_result(code=1, stdout="", stderr=""):
+    return MagicMock(returncode=code, stdout=stdout, stderr=stderr)
 
 
 @pytest.fixture
@@ -70,61 +78,61 @@ class TestHookHandler:
 
     def test_fires_on_successful_tool_call(self):
         handler = self._make_handler([HookRule(tools=["write_file"], run="echo {{ path }}")])
-        with patch("tsugite.hooks.subprocess.Popen") as mock_popen:
+        with patch("tsugite.hooks.subprocess.run", return_value=_ok_result()) as mock_run:
             self._simulate_tool_call(handler, "write_file", {"path": "/tmp/test/foo.md"})
-            mock_popen.assert_called_once()
-            assert "foo.md" in mock_popen.call_args[0][0]
+            mock_run.assert_called_once()
+            assert "foo.md" in mock_run.call_args[0][0]
 
     def test_skips_on_failed_tool_call(self):
         handler = self._make_handler([HookRule(tools=["write_file"], run="echo done")])
-        with patch("tsugite.hooks.subprocess.Popen") as mock_popen:
+        with patch("tsugite.hooks.subprocess.run") as mock_run:
             self._simulate_tool_call(handler, "write_file", {"path": "x"}, success=False)
-            mock_popen.assert_not_called()
+            mock_run.assert_not_called()
 
     def test_skips_non_matching_tool(self):
         handler = self._make_handler([HookRule(tools=["write_file"], run="echo done")])
-        with patch("tsugite.hooks.subprocess.Popen") as mock_popen:
+        with patch("tsugite.hooks.subprocess.run") as mock_run:
             self._simulate_tool_call(handler, "read_file")
-            mock_popen.assert_not_called()
+            mock_run.assert_not_called()
 
     def test_wildcard_matches_any_tool(self):
         handler = self._make_handler([HookRule(tools=["*"], run="echo {{ tool }}")])
-        with patch("tsugite.hooks.subprocess.Popen") as mock_popen:
+        with patch("tsugite.hooks.subprocess.run", return_value=_ok_result()) as mock_run:
             self._simulate_tool_call(handler, "anything")
-            mock_popen.assert_called_once()
-            assert "anything" in mock_popen.call_args[0][0]
+            mock_run.assert_called_once()
+            assert "anything" in mock_run.call_args[0][0]
 
     def test_match_truthy_fires(self):
         handler = self._make_handler([
             HookRule(tools=["write_file"], match="{{ path.startswith('memory/') }}", run="echo yes")
         ])
-        with patch("tsugite.hooks.subprocess.Popen") as mock_popen:
+        with patch("tsugite.hooks.subprocess.run", return_value=_ok_result()) as mock_run:
             self._simulate_tool_call(handler, "write_file", {"path": "memory/foo.md"})
-            mock_popen.assert_called_once()
+            mock_run.assert_called_once()
 
     def test_match_falsy_skips(self):
         handler = self._make_handler([
             HookRule(tools=["write_file"], match="{{ path.startswith('memory/') }}", run="echo yes")
         ])
-        with patch("tsugite.hooks.subprocess.Popen") as mock_popen:
+        with patch("tsugite.hooks.subprocess.run") as mock_run:
             self._simulate_tool_call(handler, "write_file", {"path": "other/foo.md"})
-            mock_popen.assert_not_called()
+            mock_run.assert_not_called()
 
     def test_match_error_skips_with_warning(self):
         handler = self._make_handler([
             HookRule(tools=["write_file"], match="{{ undefined_func() }}", run="echo yes")
         ])
-        with patch("tsugite.hooks.subprocess.Popen") as mock_popen:
+        with patch("tsugite.hooks.subprocess.run") as mock_run:
             self._simulate_tool_call(handler, "write_file")
-            mock_popen.assert_not_called()
+            mock_run.assert_not_called()
 
     def test_run_renders_kwargs(self):
         handler = self._make_handler([
             HookRule(tools=["run"], run="echo {{ command }}")
         ])
-        with patch("tsugite.hooks.subprocess.Popen") as mock_popen:
+        with patch("tsugite.hooks.subprocess.run", return_value=_ok_result()) as mock_run:
             self._simulate_tool_call(handler, "run", {"command": "ls -la"})
-            assert mock_popen.call_args[0][0] == "echo ls -la"
+            assert mock_run.call_args[0][0] == "echo ls -la"
 
     def test_path_resolved_to_relative(self, tmp_path):
         handler = self._make_handler(
@@ -132,39 +140,41 @@ class TestHookHandler:
             workspace_dir=tmp_path,
         )
         abs_path = str(tmp_path / "memory" / "note.md")
-        with patch("tsugite.hooks.subprocess.Popen") as mock_popen:
+        with patch("tsugite.hooks.subprocess.run", return_value=_ok_result()) as mock_run:
             self._simulate_tool_call(handler, "write_file", {"path": abs_path})
-            mock_popen.assert_called_once()
-            assert mock_popen.call_args[0][0] == "echo memory/note.md"
+            mock_run.assert_called_once()
+            assert mock_run.call_args[0][0] == "echo memory/note.md"
 
-    def test_popen_error_logged_not_raised(self):
+    def test_error_logged_not_raised(self):
         handler = self._make_handler([HookRule(tools=["write_file"], run="echo done")])
-        with patch("tsugite.hooks.subprocess.Popen", side_effect=OSError("boom")):
+        with patch("tsugite.hooks.subprocess.run", side_effect=OSError("boom")):
             self._simulate_tool_call(handler, "write_file")
 
     def test_no_match_field_always_fires(self):
         handler = self._make_handler([HookRule(tools=["write_file"], run="echo always")])
-        with patch("tsugite.hooks.subprocess.Popen") as mock_popen:
+        with patch("tsugite.hooks.subprocess.run", return_value=_ok_result()) as mock_run:
             self._simulate_tool_call(handler, "write_file")
-            mock_popen.assert_called_once()
+            mock_run.assert_called_once()
 
     def test_pending_cleared_after_result(self):
         handler = self._make_handler([HookRule(tools=["write_file"], run="echo done")])
-        with patch("tsugite.hooks.subprocess.Popen") as mock_popen:
+        with patch("tsugite.hooks.subprocess.run", return_value=_ok_result()) as mock_run:
             self._simulate_tool_call(handler, "write_file")
-            # Second result without a preceding call should not fire
             handler.handle_event(ToolResultEvent(tool_name="write_file", success=True))
-            assert mock_popen.call_count == 1
+            assert mock_run.call_count == 1
 
-    def test_popen_called_with_correct_kwargs(self, tmp_path):
+    def test_subprocess_run_called_with_correct_kwargs(self, tmp_path):
         handler = self._make_handler([HookRule(tools=["write_file"], run="echo done")], workspace_dir=tmp_path)
-        with patch("tsugite.hooks.subprocess.Popen") as mock_popen:
+        with patch("tsugite.hooks.subprocess.run", return_value=_ok_result()) as mock_run:
             self._simulate_tool_call(handler, "write_file")
-            mock_popen.assert_called_once_with(
+            mock_run.assert_called_once_with(
                 "echo done",
                 shell=True,
                 cwd=str(tmp_path),
-                stdout=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                errors="replace",
+                timeout=300,
             )
 
     def test_multiple_rules_all_evaluated(self):
@@ -172,49 +182,45 @@ class TestHookHandler:
             HookRule(tools=["write_file"], run="echo first"),
             HookRule(tools=["write_file"], run="echo second"),
         ])
-        with patch("tsugite.hooks.subprocess.Popen") as mock_popen:
+        with patch("tsugite.hooks.subprocess.run", return_value=_ok_result()) as mock_run:
             self._simulate_tool_call(handler, "write_file")
-            assert mock_popen.call_count == 2
-
-    def test_wait_true_uses_subprocess_run(self):
-        handler = self._make_handler([HookRule(tools=["write_file"], run="echo done", wait=True)])
-        with patch("tsugite.hooks.subprocess.run", return_value=MagicMock(returncode=0)) as mock_run, \
-             patch("tsugite.hooks.subprocess.Popen") as mock_popen:
-            self._simulate_tool_call(handler, "write_file")
-            mock_run.assert_called_once()
-            mock_popen.assert_not_called()
-
-    def test_wait_false_uses_popen(self):
-        handler = self._make_handler([HookRule(tools=["write_file"], run="echo done", wait=False)])
-        with patch("tsugite.hooks.subprocess.run") as mock_run, \
-             patch("tsugite.hooks.subprocess.Popen") as mock_popen:
-            self._simulate_tool_call(handler, "write_file")
-            mock_run.assert_not_called()
-            mock_popen.assert_called_once()
+            assert mock_run.call_count == 2
 
 
 class TestExecuteHook:
-    def test_wait_true_calls_subprocess_run(self, tmp_path):
-        with patch("tsugite.hooks.subprocess.run", return_value=MagicMock(returncode=0)) as mock_run:
-            _execute_hook("echo hi", tmp_path, wait=True)
-            mock_run.assert_called_once_with("echo hi", shell=True, cwd=str(tmp_path), capture_output=True, timeout=300)
+    def test_calls_subprocess_run(self, tmp_path):
+        with patch("tsugite.hooks.subprocess.run", return_value=_ok_result()) as mock_run:
+            _execute_hook("echo hi", tmp_path)
+            mock_run.assert_called_once_with(
+                "echo hi", shell=True, cwd=str(tmp_path),
+                capture_output=True, text=True, errors="replace", timeout=300,
+            )
 
-    def test_wait_false_calls_popen(self, tmp_path):
-        with patch("tsugite.hooks.subprocess.Popen") as mock_popen:
-            _execute_hook("echo hi", tmp_path, wait=False)
-            mock_popen.assert_called_once()
+    def test_nonzero_exit_returns_none(self, tmp_path):
+        with patch("tsugite.hooks.subprocess.run", return_value=_fail_result()):
+            assert _execute_hook("exit 1", tmp_path) is None
 
-    def test_nonzero_exit_logged_not_raised(self, tmp_path):
-        with patch("tsugite.hooks.subprocess.run", return_value=MagicMock(returncode=1)):
-            _execute_hook("exit 1", tmp_path, wait=True)
+    def test_failure_logs_stdout_and_stderr(self, tmp_path, caplog):
+        with patch("tsugite.hooks.subprocess.run", return_value=_fail_result(stdout="out msg", stderr="err msg")):
+            with caplog.at_level(logging.WARNING, logger="tsugite.hooks"):
+                _execute_hook("bad cmd", tmp_path)
+            assert "Hook stdout: out msg" in caplog.text
+            assert "Hook stderr: err msg" in caplog.text
+
+    def test_failure_skips_empty_stdout_stderr(self, tmp_path, caplog):
+        with patch("tsugite.hooks.subprocess.run", return_value=_fail_result()):
+            with caplog.at_level(logging.WARNING, logger="tsugite.hooks"):
+                _execute_hook("bad cmd", tmp_path)
+            assert "Hook stdout" not in caplog.text
+            assert "Hook stderr" not in caplog.text
 
     def test_timeout_logged_not_raised(self, tmp_path):
         with patch("tsugite.hooks.subprocess.run", side_effect=subprocess.TimeoutExpired("cmd", 300)):
-            _execute_hook("sleep 999", tmp_path, wait=True)
+            _execute_hook("sleep 999", tmp_path)
 
     def test_oserror_logged_not_raised(self, tmp_path):
-        with patch("tsugite.hooks.subprocess.Popen", side_effect=OSError("boom")):
-            _execute_hook("echo hi", tmp_path, wait=False)
+        with patch("tsugite.hooks.subprocess.run", side_effect=OSError("boom")):
+            _execute_hook("echo hi", tmp_path)
 
 
 class TestHookRuleDefaults:
@@ -270,17 +276,15 @@ class TestFireCompactHooks:
         (tmp_workspace / ".tsugite" / "hooks.yaml").write_text(
             "hooks:\n  pre_compact:\n    - run: echo pre\n"
         )
-        with patch("tsugite.hooks.subprocess.Popen") as mock_popen, \
-             patch("tsugite.hooks.subprocess.run") as mock_run:
+        with patch("tsugite.hooks.subprocess.run") as mock_run:
             await fire_compact_hooks(tmp_workspace, "post_compact", {})
-            mock_popen.assert_not_called()
             mock_run.assert_not_called()
 
     async def test_pre_compact_fires_with_context(self, tmp_workspace):
         (tmp_workspace / ".tsugite" / "hooks.yaml").write_text(
             "hooks:\n  pre_compact:\n    - run: echo {{ agent_name }}\n      wait: true\n"
         )
-        with patch("tsugite.hooks.subprocess.run", return_value=MagicMock(returncode=0)) as mock_run:
+        with patch("tsugite.hooks.subprocess.run", return_value=_ok_result()) as mock_run:
             await fire_compact_hooks(tmp_workspace, "pre_compact", {"agent_name": "test-agent"})
             mock_run.assert_called_once()
             assert "test-agent" in mock_run.call_args[0][0]
@@ -289,10 +293,10 @@ class TestFireCompactHooks:
         (tmp_workspace / ".tsugite" / "hooks.yaml").write_text(
             "hooks:\n  post_compact:\n    - run: echo {{ turns_compacted }}\n"
         )
-        with patch("tsugite.hooks.subprocess.Popen") as mock_popen:
+        with patch("tsugite.hooks.subprocess.run", return_value=_ok_result()) as mock_run:
             await fire_compact_hooks(tmp_workspace, "post_compact", {"turns_compacted": 5})
-            mock_popen.assert_called_once()
-            assert "5" in mock_popen.call_args[0][0]
+            mock_run.assert_called_once()
+            assert "5" in mock_run.call_args[0][0]
 
     async def test_match_filters_hooks(self, tmp_workspace):
         (tmp_workspace / ".tsugite" / "hooks.yaml").write_text(
@@ -312,8 +316,8 @@ class TestFireCompactHooks:
             "    - run: echo second\n      wait: true\n"
         )
         calls = []
-        with patch("tsugite.hooks.subprocess.run", return_value=MagicMock(returncode=0)) as mock_run:
-            mock_run.side_effect = lambda *a, **kw: (calls.append(a[0]), MagicMock(returncode=0))[1]
+        with patch("tsugite.hooks.subprocess.run", return_value=_ok_result()) as mock_run:
+            mock_run.side_effect = lambda *a, **kw: (calls.append(a[0]), _ok_result())[1]
             await fire_compact_hooks(tmp_workspace, "pre_compact", {})
             assert calls == ["echo first", "echo second"]
 
@@ -345,33 +349,23 @@ class TestCaptureAs:
 
 class TestExecuteHookCapture:
     def test_capture_returns_stdout(self, tmp_path):
-        mock_result = MagicMock(returncode=0, stdout=b"captured output\n")
-        with patch("tsugite.hooks.subprocess.run", return_value=mock_result):
-            output = _execute_hook("echo captured output", tmp_path, wait=False, capture=True)
+        with patch("tsugite.hooks.subprocess.run", return_value=_ok_result(stdout="captured output\n")):
+            output = _execute_hook("echo captured output", tmp_path, capture=True)
             assert output == "captured output"
 
     def test_capture_returns_none_on_failure(self, tmp_path):
-        mock_result = MagicMock(returncode=1)
-        with patch("tsugite.hooks.subprocess.run", return_value=mock_result):
-            output = _execute_hook("exit 1", tmp_path, wait=False, capture=True)
+        with patch("tsugite.hooks.subprocess.run", return_value=_fail_result()):
+            output = _execute_hook("exit 1", tmp_path, capture=True)
             assert output is None
 
-    def test_capture_implies_blocking(self, tmp_path):
-        mock_result = MagicMock(returncode=0, stdout=b"ok")
-        with patch("tsugite.hooks.subprocess.run", return_value=mock_result) as mock_run, \
-             patch("tsugite.hooks.subprocess.Popen") as mock_popen:
-            _execute_hook("echo ok", tmp_path, wait=False, capture=True)
-            mock_run.assert_called_once()
-            mock_popen.assert_not_called()
-
     def test_no_capture_returns_none(self, tmp_path):
-        with patch("tsugite.hooks.subprocess.Popen"):
-            result = _execute_hook("echo hi", tmp_path, wait=False, capture=False)
+        with patch("tsugite.hooks.subprocess.run", return_value=_ok_result()):
+            result = _execute_hook("echo hi", tmp_path, capture=False)
             assert result is None
 
     def test_capture_timeout_returns_none(self, tmp_path):
         with patch("tsugite.hooks.subprocess.run", side_effect=subprocess.TimeoutExpired("cmd", 300)):
-            result = _execute_hook("sleep 999", tmp_path, wait=False, capture=True)
+            result = _execute_hook("sleep 999", tmp_path, capture=True)
             assert result is None
 
 
@@ -380,15 +374,13 @@ class TestRenderAndExecuteCapture:
 
     def test_captures_returned(self, tmp_path):
         rules = [HookRule(run="echo hello", capture_as="greeting")]
-        mock_result = MagicMock(returncode=0, stdout=b"hello")
-        with patch("tsugite.hooks.subprocess.run", return_value=mock_result):
+        with patch("tsugite.hooks.subprocess.run", return_value=_ok_result(stdout="hello")):
             captured = _render_and_execute(self._env, rules, {}, tmp_path)
             assert captured == {"greeting": "hello"}
 
     def test_no_capture_returns_empty_dict(self, tmp_path):
         rules = [HookRule(run="echo hello", wait=True)]
-        mock_result = MagicMock(returncode=0, stdout=b"hello")
-        with patch("tsugite.hooks.subprocess.run", return_value=mock_result):
+        with patch("tsugite.hooks.subprocess.run", return_value=_ok_result(stdout="hello")):
             captured = _render_and_execute(self._env, rules, {}, tmp_path)
             assert captured == {}
 
@@ -400,7 +392,7 @@ class TestRenderAndExecuteCapture:
         call_count = [0]
         def mock_run_fn(*a, **kw):
             call_count[0] += 1
-            return MagicMock(returncode=0, stdout=f"output_{call_count[0]}".encode())
+            return _ok_result(stdout=f"output_{call_count[0]}")
 
         with patch("tsugite.hooks.subprocess.run", side_effect=mock_run_fn):
             captured = _render_and_execute(self._env, rules, {}, tmp_path)
@@ -408,15 +400,16 @@ class TestRenderAndExecuteCapture:
 
     def test_failed_capture_not_included(self, tmp_path):
         rules = [HookRule(run="exit 1", capture_as="should_not_appear")]
-        with patch("tsugite.hooks.subprocess.run", return_value=MagicMock(returncode=1)):
+        with patch("tsugite.hooks.subprocess.run", return_value=_fail_result()):
             captured = _render_and_execute(self._env, rules, {}, tmp_path)
             assert captured == {}
 
-    def test_backward_compat_fire_and_forget(self, tmp_path):
+    def test_non_capture_returns_empty_dict(self, tmp_path):
         rules = [HookRule(run="echo fire", tools=["*"])]
-        with patch("tsugite.hooks.subprocess.Popen"):
+        with patch("tsugite.hooks.subprocess.run", return_value=_ok_result()) as mock_run:
             captured = _render_and_execute(self._env, rules, {}, tmp_path)
             assert captured == {}
+            mock_run.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -436,8 +429,7 @@ class TestFirePreMessageHooks:
         (tmp_workspace / ".tsugite" / "hooks.yaml").write_text(
             "hooks:\n  pre_message:\n    - run: echo rag results\n      capture_as: rag_context\n"
         )
-        mock_result = MagicMock(returncode=0, stdout=b"rag results")
-        with patch("tsugite.hooks.subprocess.run", return_value=mock_result):
+        with patch("tsugite.hooks.subprocess.run", return_value=_ok_result(stdout="rag results")):
             result = await fire_pre_message_hooks(tmp_workspace, {"message": "test"})
             assert result == {"rag_context": "rag results"}
 
@@ -446,8 +438,7 @@ class TestFirePreMessageHooks:
             "hooks:\n  pre_message:\n"
             "    - run: echo {{ message }}\n      capture_as: echo_msg\n"
         )
-        mock_result = MagicMock(returncode=0, stdout=b"hello world")
-        with patch("tsugite.hooks.subprocess.run", return_value=mock_result) as mock_run:
+        with patch("tsugite.hooks.subprocess.run", return_value=_ok_result(stdout="hello world")) as mock_run:
             await fire_pre_message_hooks(tmp_workspace, {"message": "hello world"})
             assert "hello world" in mock_run.call_args[0][0]
 
@@ -481,23 +472,21 @@ class TestOnlyInteractive:
 
     def test_skipped_when_not_interactive(self):
         rules = [HookRule(run="echo hi", only_interactive=True)]
-        with patch("tsugite.hooks.subprocess.Popen") as mock_popen, \
-             patch("tsugite.hooks.subprocess.run") as mock_run:
+        with patch("tsugite.hooks.subprocess.run") as mock_run:
             _render_and_execute(jinja2.Environment(), rules, {}, Path("."), interactive=False)
-            mock_popen.assert_not_called()
             mock_run.assert_not_called()
 
     def test_fires_when_interactive(self):
         rules = [HookRule(run="echo hi", only_interactive=True)]
-        with patch("tsugite.hooks.subprocess.Popen") as mock_popen:
+        with patch("tsugite.hooks.subprocess.run", return_value=_ok_result()) as mock_run:
             _render_and_execute(jinja2.Environment(), rules, {}, Path("."), interactive=True)
-            mock_popen.assert_called_once()
+            mock_run.assert_called_once()
 
     def test_default_fires_regardless_of_interactive(self):
         rules = [HookRule(run="echo hi")]
-        with patch("tsugite.hooks.subprocess.Popen") as mock_popen:
+        with patch("tsugite.hooks.subprocess.run", return_value=_ok_result()) as mock_run:
             _render_and_execute(jinja2.Environment(), rules, {}, Path("."), interactive=False)
-            mock_popen.assert_called_once()
+            mock_run.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_pre_message_respects_only_interactive(self, tmp_workspace):
