@@ -8,10 +8,12 @@ import pytest
 from tsugite.daemon.memory import (
     DEFAULT_CONTEXT_LIMIT,
     MIN_RETAINED_TURNS,
+    SUMMARIZE_SYSTEM_PROMPT,
     _chunk_messages,
     _combine_summaries,
     _count_tokens,
     _estimate_turn_tokens,
+    extract_file_paths_from_turns,
     get_context_limit,
     _message_text,
     _summarize_chunk,
@@ -346,3 +348,46 @@ class TestSplitTurnsForCompaction:
         old, recent = split_turns_for_compaction(turns, "openai:gpt-4o-mini", 1)
         assert old == []
         assert recent == turns
+
+
+class TestExtractFilePathsFromTurns:
+    def test_extracts_file_paths(self):
+        turn = Turn(
+            timestamp=datetime.now(timezone.utc),
+            messages=[
+                {"role": "user", "content": 'read_file(file_path="/home/user/project/main.py")'},
+                {"role": "assistant", "content": 'write_file(path="/tmp/output.txt", content="hello")'},
+            ],
+        )
+        paths = extract_file_paths_from_turns([turn])
+        assert "/home/user/project/main.py" in paths
+        assert "/tmp/output.txt" in paths
+
+    def test_empty_turns(self):
+        assert extract_file_paths_from_turns([]) == []
+
+    def test_no_paths(self):
+        turn = Turn(
+            timestamp=datetime.now(timezone.utc),
+            messages=[{"role": "user", "content": "just a regular message"}],
+        )
+        assert extract_file_paths_from_turns([turn]) == []
+
+    def test_deduplicates(self):
+        turn = Turn(
+            timestamp=datetime.now(timezone.utc),
+            messages=[
+                {"role": "user", "content": 'file_path="/src/app.py"'},
+                {"role": "assistant", "content": 'file_path="/src/app.py"'},
+            ],
+        )
+        paths = extract_file_paths_from_turns([turn])
+        assert paths.count("/src/app.py") == 1
+
+
+class TestSummaryFormatIncludesNewSections:
+    def test_files_accessed_section(self):
+        assert "## Files Accessed" in SUMMARIZE_SYSTEM_PROMPT
+
+    def test_work_progress_section(self):
+        assert "## Work Progress" in SUMMARIZE_SYSTEM_PROMPT

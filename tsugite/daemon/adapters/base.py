@@ -347,12 +347,14 @@ class BaseAdapter(ABC):
         """
         from tsugite.daemon.memory import (
             RETENTION_BUDGET_RATIO,
+            extract_file_paths_from_turns,
             get_context_limit,
             infer_compaction_model,
             split_turns_for_compaction,
             summarize_session,
         )
         from tsugite.history import SessionStorage, Turn, get_history_dir
+        from tsugite.history.models import CompactionSummary
         from tsugite.hooks import fire_compact_hooks
 
         model = self.agent_config.compaction_model or infer_compaction_model(self.resolve_model())
@@ -361,7 +363,10 @@ class BaseAdapter(ABC):
         old_conv_id = session_info.conversation_id
         old_session_path = get_history_dir() / f"{old_conv_id}.jsonl"
 
-        all_turns = [r for r in SessionStorage(old_session_path).load_records() if isinstance(r, Turn)]
+        storage = SessionStorage(old_session_path)
+        records = storage.load_records()
+        all_turns = [r for r in records if isinstance(r, Turn)]
+        prior_summary = next((r for r in records if isinstance(r, CompactionSummary)), None)
 
         context_limit = get_context_limit(model, fallback=self.agent_config.context_limit)
         retention_budget = int(context_limit * RETENTION_BUDGET_RATIO)
@@ -389,7 +394,33 @@ class BaseAdapter(ABC):
         }
         await fire_compact_hooks(self.agent_config.workspace_dir, "pre_compact", hook_context, interactive=False)
 
-        old_messages = [msg for turn in old_turns for msg in turn.messages]
+        # Build metadata context for the summarizer
+        old_messages = []
+
+        # Preserve prior compaction summary so chained compactions don't lose context
+        if prior_summary:
+            old_messages.append(
+                {"role": "user", "content": f"<prior_compaction_summary>\n{prior_summary.summary}\n</prior_compaction_summary>"}
+            )
+
+        functions_used = sorted({fn for turn in old_turns for fn in turn.functions_called})
+        file_paths = extract_file_paths_from_turns(old_turns)
+        meta_parts = [
+            "<session_metadata>",
+            f"  <turn_count>{len(old_turns)}</turn_count>",
+            f"  <time_range>{old_turns[0].timestamp.isoformat()} to {old_turns[-1].timestamp.isoformat()}</time_range>",
+        ]
+        if functions_used:
+            meta_parts.append(f"  <tools_used>{', '.join(functions_used)}</tools_used>")
+        meta_parts.append(f"  <model>{self.resolve_model()}</model>")
+        if file_paths:
+            meta_parts.append(f"  <files_accessed>{', '.join(file_paths)}</files_accessed>")
+        meta_parts.append("</session_metadata>")
+        old_messages.append({"role": "user", "content": "\n".join(meta_parts)})
+
+        # Add actual conversation messages
+        old_messages.extend(msg for turn in old_turns for msg in turn.messages)
+
         summary = await summarize_session(old_messages, model=model, max_context_tokens=self.agent_config.context_limit)
 
         new_conv_id = self.session_manager.compact_session(user_id)
@@ -417,4 +448,9 @@ class BaseAdapter(ABC):
         )
 
         turns_file.unlink(missing_ok=True)
+
+        from tsugite.tools.skills import clear_loaded_skills
+
+        clear_loaded_skills()
+
         logger.info("[%s] Session compacted", self.agent_name)

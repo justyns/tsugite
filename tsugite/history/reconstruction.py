@@ -23,6 +23,7 @@ def reconstruct_messages(session_path: Path) -> List[Dict[str, Any]]:
     """Reconstruct full message history from session.
 
     System prompt is NOT included - it should be added by the caller.
+    Old turn content (tool results/observations) is pruned to save context.
 
     Args:
         session_path: Path to session JSONL file
@@ -56,13 +57,15 @@ def reconstruct_messages(session_path: Path) -> List[Dict[str, Any]]:
                 "content": (
                     "<previous_conversation>\n"
                     "The following is a summary of our earlier conversation, "
-                    "which was compacted to save context space.\n\n"
+                    "which was compacted to save context space.\n"
+                    "Continue from where this conversation left off. "
+                    "Pay attention to file paths, decisions, and incomplete work mentioned below.\n\n"
                     f"{compaction_summary.summary}\n"
                     "</previous_conversation>"
                 ),
             }
         )
-        messages.append({"role": "assistant", "content": "I've reviewed our previous conversation."})
+        messages.append({"role": "assistant", "content": "I've reviewed our previous conversation and I'm ready to continue."})
 
     for record in records:
         if isinstance(record, Turn):
@@ -74,7 +77,53 @@ def reconstruct_messages(session_path: Path) -> List[Dict[str, Any]]:
                 messages.append({"role": "user", "content": update_msg})
                 messages.append({"role": "assistant", "content": "Context updated."})
 
+    messages = prune_old_turn_content(messages)
     return messages
+
+
+def prune_old_turn_content(
+    messages: List[Dict[str, Any]],
+    recent_turn_count: int = 4,
+    max_chars: int = 500,
+) -> List[Dict[str, Any]]:
+    """Truncate long content in older turns to save context.
+
+    Identifies turn boundaries by user messages. In turns older than
+    ``recent_turn_count``, any message content exceeding ``max_chars``
+    is truncated. Short messages are kept intact.
+
+    Args:
+        messages: Full reconstructed message list.
+        recent_turn_count: Number of recent turns to keep verbatim.
+        max_chars: Max characters for truncated content.
+
+    Returns:
+        Pruned copy of messages.
+    """
+    if not messages:
+        return messages
+
+    turn_starts = [i for i, msg in enumerate(messages) if msg.get("role") == "user"]
+
+    if len(turn_starts) <= recent_turn_count:
+        return messages
+
+    cutoff_idx = turn_starts[-recent_turn_count]
+
+    result = []
+    for i, msg in enumerate(messages):
+        if i >= cutoff_idx:
+            result.append(msg)
+            continue
+
+        content = msg.get("content")
+        if not isinstance(content, str) or len(content) <= max_chars:
+            result.append(msg)
+            continue
+
+        result.append({**msg, "content": content[:max_chars] + "\n... [truncated]"})
+
+    return result
 
 
 def _build_context_xml(context: ContextSnapshot) -> Optional[str]:
