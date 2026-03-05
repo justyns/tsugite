@@ -12,6 +12,7 @@ from tsugite.history import (
     list_session_files,
     reconstruct_messages,
 )
+from tsugite.history.reconstruction import prune_old_turn_content
 from tsugite.history.storage import get_machine_name
 
 
@@ -319,3 +320,70 @@ class TestCompactionSummary:
         assert len(summaries) == 1
         assert summaries[0].summary == "Previous conversation was about testing."
         assert summaries[0].previous_turns == 10
+
+
+class TestPruneOldTurnContent:
+    """Tests for prune_old_turn_content."""
+
+    def test_empty_messages(self):
+        assert prune_old_turn_content([]) == []
+
+    def test_few_turns_unchanged(self):
+        messages = [
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": "hi"},
+            {"role": "user", "content": "how are you?"},
+            {"role": "assistant", "content": "good"},
+        ]
+        result = prune_old_turn_content(messages, recent_turn_count=4)
+        assert result == messages
+
+    def test_old_long_content_truncated(self):
+        long_observation = "<observation>" + "x" * 1000 + "</observation>"
+        messages = [
+            {"role": "user", "content": "task 1"},
+            {"role": "assistant", "content": "a" * 800},
+            {"role": "user", "content": long_observation},
+            {"role": "assistant", "content": "done"},
+            # Recent turns (2 user messages = 2 turns)
+            {"role": "user", "content": "task 2"},
+            {"role": "assistant", "content": "ok"},
+            {"role": "user", "content": "task 3"},
+            {"role": "assistant", "content": "ok"},
+        ]
+        result = prune_old_turn_content(messages, recent_turn_count=2, max_chars=100)
+
+        # Old observation should be truncated
+        assert result[2]["content"].endswith("... [truncated]")
+        assert len(result[2]["content"]) < len(long_observation)
+
+        # Old long assistant message should be truncated
+        assert result[1]["content"].endswith("... [truncated]")
+
+        # Recent turns untouched
+        assert result[4]["content"] == "task 2"
+        assert result[6]["content"] == "task 3"
+
+    def test_short_old_content_preserved(self):
+        messages = [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "hello"},
+            {"role": "user", "content": "bye"},
+            {"role": "assistant", "content": "goodbye"},
+        ]
+        result = prune_old_turn_content(messages, recent_turn_count=1, max_chars=500)
+        # Short messages should not be truncated
+        assert result[0]["content"] == "hi"
+        assert result[1]["content"] == "hello"
+
+    def test_recent_long_content_preserved(self):
+        long_content = "x" * 2000
+        messages = [
+            {"role": "user", "content": "old"},
+            {"role": "assistant", "content": "old reply"},
+            {"role": "user", "content": long_content},
+            {"role": "assistant", "content": "recent reply"},
+        ]
+        result = prune_old_turn_content(messages, recent_turn_count=1, max_chars=500)
+        # Last turn (user "x*2000") is recent — kept verbatim
+        assert result[2]["content"] == long_content

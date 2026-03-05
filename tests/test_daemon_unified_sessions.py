@@ -1,6 +1,8 @@
 """Tests for unified sessions across daemon adapters."""
 
+from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -153,6 +155,15 @@ class TestNoIdentityLinksBackwardCompat:
         assert config.identity_links["justyn"] == ["discord:123", "http:justyn"]
 
 
+try:
+    import cronsim  # noqa: F401
+
+    _has_cronsim = True
+except ImportError:
+    _has_cronsim = False
+
+
+@pytest.mark.skipif(not _has_cronsim, reason="cronsim not installed (required by http adapter)")
 class TestHTTPAdapterResolveUser:
     """HTTPAgentAdapter.resolve_http_user resolves identity for direct session manager calls."""
 
@@ -205,3 +216,73 @@ class TestSessionManagerThreadSafety:
 
         assert len(results) == 10
         assert len(set(results.values())) == 10  # All unique conv IDs
+
+
+class TestCompactSessionClearsSkills:
+    """Compaction should clear loaded skills so they get re-loaded in the new session."""
+
+    @pytest.mark.asyncio
+    async def test_compact_session_clears_loaded_skills(self, workspace_dir, tmp_path):
+        from tsugite.history import SessionStorage, get_history_dir
+        from tsugite.history.models import Turn
+
+        # Set up history dir
+        history_dir = tmp_path / "history"
+        history_dir.mkdir()
+
+        # Create a session with turns
+        session_manager = SessionManager("test-agent", workspace_dir, context_limit=128000)
+        user_id = "test-user"
+        conv_id = session_manager.get_or_create_session(user_id)
+
+        session_path = history_dir / f"{conv_id}.jsonl"
+        storage = SessionStorage.create(
+            agent_name="test-agent",
+            model="openai:gpt-4o-mini",
+            session_path=session_path,
+        )
+        for i in range(5):
+            storage.record_turn(
+                messages=[
+                    {"role": "user", "content": f"message {i}"},
+                    {"role": "assistant", "content": f"reply {i}"},
+                ],
+                final_answer=f"reply {i}",
+            )
+
+        adapter = _make_adapter(workspace_dir, session_manager)
+
+        # Pre-load a skill
+        from tsugite.tools.skills import get_skill_manager
+
+        manager = get_skill_manager()
+        manager._loaded_skills["test-skill"] = "skill content"
+
+        with (
+            patch("tsugite.daemon.memory.get_context_limit", return_value=128_000),
+            patch("tsugite.daemon.memory.infer_compaction_model", return_value="openai:gpt-4o-mini"),
+            patch("tsugite.daemon.memory.split_turns_for_compaction") as mock_split,
+            patch("tsugite.daemon.memory.summarize_session", new_callable=AsyncMock, return_value="Summary"),
+            patch("tsugite.history.get_history_dir", return_value=history_dir),
+            patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
+            patch("tsugite.history.storage.get_machine_name", return_value="test"),
+            patch("tsugite.hooks.fire_compact_hooks", new_callable=AsyncMock),
+        ):
+            # Make split return some old turns and some recent
+            old_turns = [
+                Turn(
+                    timestamp=datetime.now(timezone.utc),
+                    messages=[{"role": "user", "content": "old"}],
+                )
+            ]
+            recent_turns = [
+                Turn(
+                    timestamp=datetime.now(timezone.utc),
+                    messages=[{"role": "user", "content": "recent"}],
+                )
+            ]
+            mock_split.return_value = (old_turns, recent_turns)
+
+            await adapter._compact_session(user_id)
+
+        assert manager._loaded_skills == {}

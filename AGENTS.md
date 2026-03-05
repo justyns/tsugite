@@ -224,6 +224,10 @@ Automatic caching for supported providers (OpenAI, Anthropic, Bedrock, Deepseek)
 - Skills also receive cache markers for reuse across turns
 - Cache markers added automatically by `tsugite/core/agent.py`
 
+### Context Management (Daemon Mode)
+
+When using Claude Code as the LLM provider for daemon mode, disable Claude Code's built-in auto-compaction so that tsugite's compaction logic (80% threshold) can manage context properly. If Claude Code compacts first, tsugite's compaction never triggers and session summaries are lost.
+
 ### Multi-Modal Attachments
 
 Tsugite supports vision (images), audio, and document understanding through the attachment system.

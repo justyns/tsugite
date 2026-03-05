@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import re
 
 DEFAULT_COMPACT_MODEL = "openai:gpt-4o-mini"
 DEFAULT_CONTEXT_LIMIT = 128_000
@@ -19,6 +20,8 @@ PROVIDER_COMPACT_MODELS = {
 
 logger = logging.getLogger(__name__)
 
+_FILE_PATH_PATTERN = re.compile(r'(?:file_path|path|filename)["\s:=]+["\'`]?(/[^\s"\'`\],}]+)', re.IGNORECASE)
+
 _SUMMARY_FORMAT = """\
 ## Current Task
 What is actively being worked on or discussed right now.
@@ -28,6 +31,12 @@ Important decisions made during the conversation.
 
 ## Facts & Preferences
 Facts learned about the user, project, or environment. User preferences and conventions.
+
+## Files Accessed
+Files that were read, written, or modified during the conversation. Include full paths.
+
+## Work Progress
+What was completed, what was attempted and failed, what is partially done.
 
 ## Open Questions
 Unresolved questions or ambiguities that still need answers.
@@ -231,6 +240,24 @@ async def summarize_session(
     logger.info("Summarizing %d chunks (context limit: %d, usable: %d)", len(chunks), context_limit, usable_tokens)
     chunk_summaries = await asyncio.gather(*[_summarize_chunk(chunk, model) for chunk in chunks])
     return await _combine_summaries(chunk_summaries, model)
+
+
+def extract_file_paths_from_turns(turns: "list[Turn]") -> list[str]:
+    """Extract file paths mentioned in tool calls across turns.
+
+    Scans turn messages for common file path patterns in tool arguments
+    (read_file, write_file, edit_file, etc.).
+
+    Returns:
+        Deduplicated list of file paths found.
+    """
+    paths: set[str] = set()
+    for turn in turns:
+        for msg in turn.messages:
+            text = _message_text(msg)
+            if text:
+                paths.update(_FILE_PATH_PATTERN.findall(text))
+    return sorted(paths)
 
 
 def _estimate_turn_tokens(turn: "Turn", model: str) -> int:
