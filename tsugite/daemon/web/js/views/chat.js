@@ -1,4 +1,4 @@
-import { get, post, streamPost } from '../api.js';
+import { get, post, streamPost, uploadFiles } from '../api.js';
 import { escapeHtml, renderMarkdown, scrollToBottom } from '../utils.js';
 
 export default () => ({
@@ -12,6 +12,8 @@ export default () => ({
   attachments: [],
   showSkills: false,
   loadedSkills: [],
+  pendingFiles: [],
+  isDragging: false,
 
   init() {
     const maybeReload = () => {
@@ -158,14 +160,64 @@ export default () => ({
   renderHtml(text) { return renderMarkdown(text); },
   escape(s) { return escapeHtml(s); },
 
+  addFiles(fileList) {
+    for (const file of fileList) {
+      const entry = { file, name: file.name, size: file.size, type: file.type, previewUrl: null };
+      if (file.type.startsWith('image/')) entry.previewUrl = URL.createObjectURL(file);
+      this.pendingFiles.push(entry);
+    }
+  },
+
+  removeFile(index) {
+    const entry = this.pendingFiles[index];
+    if (entry?.previewUrl) URL.revokeObjectURL(entry.previewUrl);
+    this.pendingFiles.splice(index, 1);
+  },
+
+  openFilePicker() {
+    this.$refs.fileInput?.click();
+  },
+
+  onFileInputChange(e) {
+    if (e.target.files?.length) this.addFiles(e.target.files);
+    e.target.value = '';
+  },
+
+  onDragEnter(e) { this.isDragging = true; },
+  onDragLeave(e) {
+    if (!e.currentTarget.contains(e.relatedTarget)) this.isDragging = false;
+  },
+  onDrop(e) {
+    this.isDragging = false;
+    if (e.dataTransfer?.files?.length) this.addFiles(e.dataTransfer.files);
+  },
+
   async sendMessage() {
     const msg = this.messageText.trim();
     const agent = this.$store.app.selectedAgent;
-    if (!msg || !agent || this.sending) return;
+    if ((!msg && !this.pendingFiles.length) || !agent || this.sending) return;
 
     this.sending = true;
     this.messageText = '';
-    this.messages.push({ type: 'user', text: msg });
+
+    // Upload pending files
+    let uploadedFiles = [];
+    const fileNames = this.pendingFiles.map(f => f.name);
+    if (this.pendingFiles.length) {
+      try {
+        const data = await uploadFiles(`/api/agents/${agent}/upload`, this.pendingFiles.map(f => f.file));
+        uploadedFiles = data.files || [];
+      } catch (e) {
+        this.messages.push({ type: 'error', text: `Upload failed: ${e.message}` });
+        this.sending = false;
+        return;
+      }
+      this.pendingFiles.forEach(f => { if (f.previewUrl) URL.revokeObjectURL(f.previewUrl); });
+      this.pendingFiles = [];
+    }
+
+    const displayMsg = fileNames.length ? `${msg || ''}\n📎 ${fileNames.join(', ')}`.trim() : msg;
+    this.messages.push({ type: 'user', text: displayMsg });
 
     this.$nextTick(() => {
       const el = this.$refs.messages;
@@ -176,7 +228,9 @@ export default () => ({
     this.messages.push({ type: 'progress', steps: [], statusText: 'Working...', turnCount: 0, toolCount: 0 });
 
     try {
-      const resp = await streamPost(`/api/agents/${agent}/chat`, { message: msg, user_id: this.userId });
+      const chatBody = { message: msg, user_id: this.userId };
+      if (uploadedFiles.length) chatBody.uploaded_files = uploadedFiles;
+      const resp = await streamPost(`/api/agents/${agent}/chat`, chatBody);
       const reader = resp.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
