@@ -206,8 +206,8 @@ def _execute_agent_with_ui(
         return executor(**executor_kwargs)
 
 
-def _unpack_execution_result(result, should_save_history: bool, executor):
-    """Unpack execution result based on whether history was enabled."""
+def _unpack_execution_result(result):
+    """Unpack execution result into a consistent tuple."""
     from tsugite.agent_runner.models import AgentExecutionResult
 
     if isinstance(result, AgentExecutionResult):
@@ -323,7 +323,7 @@ def run(
         console.print("[red]Error: Cannot use --workspace with --no-workspace[/red]")
         raise typer.Exit(1)
 
-    ui_opts = UIOptions.from_cli(
+    ui_opts = UIOptions(
         plain=plain,
         headless=headless,
         no_color=no_color,
@@ -383,7 +383,7 @@ def run(
     # Combine workspace attachments with CLI attachments
     all_attachments = workspace_attachments + (list(attachment) if attachment else [])
 
-    attach_opts = AttachmentOptions.from_cli(
+    attach_opts = AttachmentOptions(
         sources=all_attachments,
         refresh_cache=refresh_cache,
         auto_context=auto_context,
@@ -655,14 +655,13 @@ def run(
             )
 
             result_str, token_count, cost, execution_steps, system_prompt, attachments = _unpack_execution_result(
-                result, history_opts.enabled, executor
+                result
             )
 
             if history_opts.enabled:
                 try:
                     from tsugite.agent_runner.history_integration import save_run_to_history
 
-                    agent_info = get_agent_info(agent_file)
                     save_run_to_history(
                         agent_path=agent_file,
                         agent_name=agent_info["name"],

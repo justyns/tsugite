@@ -14,6 +14,17 @@ from .helpers import (
 )
 
 
+def _truncate_content(text: str) -> str:
+    """Truncate long text content showing first 10 and last 5 lines."""
+    lines = text.split("\n")
+    if len(lines) <= 20:
+        return text
+    preview = "\n".join(lines[:10])
+    preview += f"\n[dim]... ({len(lines) - 15} lines truncated, use --verbose to see all) ...[/dim]\n"
+    preview += "\n".join(lines[-5:])
+    return preview
+
+
 def render(
     agent_path: Optional[str] = typer.Argument(
         None, help="Path to agent markdown file or builtin agent name (optional when using --continue)"
@@ -165,17 +176,7 @@ def render(
                     console.print(f"[yellow]<Attachment: {att.name}>[/yellow]")
 
                     if att.content_type == AttachmentContentType.TEXT and att.content:
-                        if verbose:
-                            console.print(att.content)
-                        else:
-                            lines = att.content.split("\n")
-                            if len(lines) > 20:
-                                preview = "\n".join(lines[:10])
-                                preview += f"\n[dim]... ({len(lines) - 15} lines truncated, use --verbose to see all) ...[/dim]\n"
-                                preview += "\n".join(lines[-5:])
-                                console.print(preview)
-                            else:
-                                console.print(att.content)
+                        console.print(att.content if verbose else _truncate_content(att.content))
                     elif att.source_url:
                         console.print(f"[dim][{att.content_type.value}: {att.source_url}][/dim]")
                     else:
@@ -194,19 +195,7 @@ def render(
                         align="left",
                     )
                     console.print(f"[magenta]<Skill: {skill.name}>[/magenta]")
-                    if verbose:
-                        console.print(skill.content)
-                    else:
-                        lines = skill.content.split("\n")
-                        if len(lines) > 20:
-                            preview = "\n".join(lines[:10])
-                            preview += (
-                                f"\n[dim]... ({len(lines) - 15} lines truncated, use --verbose to see all) ...[/dim]\n"
-                            )
-                            preview += "\n".join(lines[-5:])
-                            console.print(preview)
-                        else:
-                            console.print(skill.content)
+                    console.print(skill.content if verbose else _truncate_content(skill.content))
                     console.print(f"[magenta]</Skill: {skill.name}>[/magenta]")
 
             # Message 2: User (role: user)

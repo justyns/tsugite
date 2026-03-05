@@ -789,7 +789,6 @@ class TestUnpackExecutionResult:
     def test_unpack_agent_execution_result(self):
         """Test unpacking AgentExecutionResult object."""
         from tests.conftest import mock_agent_execution_result
-        from tsugite.agent_runner import run_agent
         from tsugite.cli import _unpack_execution_result
 
         # Create an AgentExecutionResult
@@ -804,7 +803,7 @@ class TestUnpackExecutionResult:
         )
 
         # Unpack it
-        unpacked = _unpack_execution_result(result, should_save_history=True, executor=run_agent)
+        unpacked = _unpack_execution_result(result)
 
         # Verify all fields are extracted correctly
         assert unpacked[0] == "Test response"
@@ -816,11 +815,10 @@ class TestUnpackExecutionResult:
 
     def test_unpack_plain_string(self):
         """Test unpacking plain string result."""
-        from tsugite.agent_runner import run_agent
         from tsugite.cli import _unpack_execution_result
 
         result = "Simple string response"
-        unpacked = _unpack_execution_result(result, should_save_history=False, executor=run_agent)
+        unpacked = _unpack_execution_result(result)
 
         # Should return string + None for all other fields
         assert unpacked[0] == "Simple string response"
