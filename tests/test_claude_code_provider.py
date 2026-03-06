@@ -406,6 +406,56 @@ class TestClaudeCodeAgentIntegration:
         assert captured_events[0].cache_read_input_tokens == 200
 
 
+    @pytest.mark.asyncio
+    async def test_claude_code_no_code_block_returns_text_as_final_answer(self):
+        """When Claude Code responds with plain text (no code block), treat it as a final answer."""
+        from tsugite.core.agent import TsugiteAgent
+        from tsugite.events import EventBus, FinalAnswerEvent
+
+        bus = EventBus()
+        captured = []
+        bus.subscribe(lambda e: captured.append(e) if isinstance(e, FinalAnswerEvent) else None)
+
+        agent = TsugiteAgent(
+            model_string="claude_code:opus",
+            tools=[],
+            instructions="test",
+            max_turns=5,
+            event_bus=bus,
+        )
+
+        mock_process = AsyncMock()
+        mock_process.session_id = "test-session"
+
+        # Response has NO ```python block — just plain text
+        async def mock_send(*args, **kwargs):
+            events = [
+                {"type": "text_delta", "text": "Yes, I'm here! How can I help you today?"},
+                {
+                    "type": "result",
+                    "text": "Yes, I'm here! How can I help you today?",
+                    "cost_usd": 0.005,
+                    "session_id": "test-session",
+                    "input_tokens": 800,
+                    "output_tokens": 50,
+                },
+            ]
+            for e in events:
+                yield e
+
+        mock_process.send_message = mock_send
+        mock_process.start = AsyncMock()
+        mock_process.stop = AsyncMock()
+
+        with patch("tsugite.core.claude_code.ClaudeCodeProcess", return_value=mock_process):
+            result = await agent.run("are you there?")
+
+        # Should return the text as the answer, not loop with errors
+        assert "I'm here" in result
+        assert len(captured) == 1
+        assert "I'm here" in captured[0].answer
+
+
 # ── Session ID passthrough tests ──
 
 

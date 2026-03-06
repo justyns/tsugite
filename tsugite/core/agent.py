@@ -424,13 +424,46 @@ class TsugiteAgent:
                         self._previous_turn_had_error = False
                         self.event_bus.emit(ObservationEvent(observation=observation))
             else:
-                # No code to execute - create a dummy result
+                # No code to execute
+
+                # Claude Code subprocess may respond with plain text instead of a code block,
+                # especially when workspace attachments add conversational context that overrides
+                # the code-block instruction. Treat the text as a final answer rather than looping.
+                if self._is_claude_code:
+                    answer = (thought or "").strip() or "(no response)"
+                    self.memory.add_final_answer(answer)
+
+                    total_tokens = self._claude_code_last_turn_tokens if self._claude_code_last_turn_tokens else None
+                    if self.event_bus:
+                        self.event_bus.emit(
+                            FinalAnswerEvent(
+                                answer=answer,
+                                turns=turn_num + 1,
+                                tokens=total_tokens,
+                                cost=self.total_cost if self.total_cost > 0 else None,
+                            )
+                        )
+                        duration = time.time() - start_time
+                        cache_creation_tokens = self._claude_code_cache_creation_tokens or None
+                        cache_read_tokens = self._claude_code_cache_read_tokens or None
+                        self.event_bus.emit(
+                            CostSummaryEvent(
+                                tokens=total_tokens,
+                                cost=self.total_cost if self.total_cost > 0 else None,
+                                duration=duration,
+                                turns=turn_num + 1,
+                                cached_tokens=None,
+                                cache_creation_tokens=cache_creation_tokens,
+                                cache_read_tokens=cache_read_tokens,
+                            )
+                        )
+                    return answer
+
                 from .executor import ExecutionResult
 
                 exec_result = ExecutionResult(output="", error=None, stdout="", stderr="")
                 xml_observation = None  # No XML for non-code responses
 
-                # Code is required - show a warning that the LLM didn't generate code
                 if self.event_bus:
                     self.event_bus.emit(
                         ErrorEvent(
@@ -440,7 +473,6 @@ class TsugiteAgent:
                         )
                     )
 
-                # Add a correction to memory to guide the LLM
                 correction_msg = (
                     "Format Error: You must respond with a Python code block.\n\n"
                     "```python\n"
@@ -450,9 +482,6 @@ class TsugiteAgent:
                     "Even for simple responses, wrap them in a code block with final_answer()."
                 )
 
-                # Add the thought and correction as a step
-                # This will show the LLM what it did wrong and how to fix it
-                # Use XML format for the correction message
                 from xml.sax.saxutils import escape
 
                 correction_xml = (
@@ -673,13 +702,17 @@ class TsugiteAgent:
 
         parsed = self._parse_response_from_text(accumulated)
 
-        if self.event_bus and not stream and parsed.thought.strip():
+        # If no code block was found, preserve the raw text as thought so the
+        # caller can use it (e.g. treat plain-text responses as final answers).
+        thought = parsed.thought if parsed.thought or parsed.code else accumulated.strip()
+
+        if self.event_bus and not stream and thought.strip():
             self.event_bus.emit(
-                LLMMessageEvent(content=parsed.thought, title=f"Turn {turn_num + 1} Reasoning", step=turn_num + 1)
+                LLMMessageEvent(content=thought, title=f"Turn {turn_num + 1} Reasoning", step=turn_num + 1)
             )
 
         return TurnResult(
-            thought=parsed.thought,
+            thought=thought,
             code=parsed.code,
             step_cost=step_cost,
             content_blocks=parsed.content_blocks,
