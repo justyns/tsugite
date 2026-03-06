@@ -176,6 +176,16 @@ class LocalExecutor:
 
         self.namespace["send_message"] = send_message
 
+        # Override open() to guide LLMs toward using provided tools
+        def _blocked_open(*args, **kwargs):
+            raise RuntimeError(
+                "open() is not available. Use the provided tools instead:\n"
+                "  - read_file(path) to read file contents\n"
+                "  - write_file(path, content) to write to files"
+            )
+
+        self.namespace["open"] = _blocked_open
+
         # Inject path context variables for workspace-aware code
         if path_context:
             self.namespace["WORKSPACE_DIR"] = str(path_context.workspace_dir) if path_context.workspace_dir else None
@@ -234,49 +244,6 @@ class LocalExecutor:
             return pprint.pformat(value, width=PPRINT_WIDTH, compact=False)
         return repr(value)
 
-    @staticmethod
-    def _check_code_safety(code: str) -> Optional[str]:
-        """Check code for anti-patterns before execution.
-
-        Detects common mistakes where LLMs use built-in Python functions
-        instead of the provided tools.
-
-        Args:
-            code: Python code to check
-
-        Returns:
-            Error message string if violations found, None if code is safe
-        """
-        import re
-
-        if re.search(r"\bopen\s*\(", code):
-            code_without_strings = re.sub(r'["\'].*?["\']', "", code)
-            code_without_comments = re.sub(r"#.*$", "", code_without_strings, flags=re.MULTILINE)
-
-            if re.search(r"\bopen\s*\(", code_without_comments):
-                return """Code Safety Check Failed: Detected use of 'open()' for file operations.
-
-Please use the provided tools instead:
-  - read_file(path) - to read file contents
-  - write_file(path, content) - to write to files
-
-Example:
-  # Instead of:
-  with open('file.txt') as f:
-      content = f.read()
-
-  # Use:
-  content = read_file('file.txt')
-
-  # Instead of:
-  with open('output.txt', 'w') as f:
-      f.write(data)
-
-  # Use:
-  write_file('output.txt', data)"""
-
-        return None
-
     async def execute(self, code: str) -> ExecutionResult:
         """Execute code using exec().
 
@@ -298,17 +265,6 @@ Example:
 
         skill_manager = get_skill_manager()
         skill_manager.set_executor(self)
-
-        safety_error = LocalExecutor._check_code_safety(code)
-        if safety_error:
-            return ExecutionResult(
-                output="",
-                error=safety_error,
-                stdout="",
-                stderr=safety_error,
-                final_answer=None,
-                tools_called=[],
-            )
 
         stdout_capture = io.StringIO()
         stderr_capture = io.StringIO()

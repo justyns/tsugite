@@ -274,6 +274,13 @@ if os.path.exists(STATE_PATH):
 # Inject builtins into namespace
 namespace["final_answer"] = final_answer
 namespace["send_message"] = send_message
+def _blocked_open(*args, **kwargs):
+    raise RuntimeError(
+        "open() is not available. Use the provided tools instead:\\n"
+        "  - read_file(path) to read file contents\\n"
+        "  - write_file(path, content) to write to files"
+    )
+namespace["open"] = _blocked_open
 {self._inject_tool_names_code()}
 
 # Load content blocks from files (consumed once per turn)
@@ -413,19 +420,6 @@ with open(RESULT_PATH, "w") as f:
         self._final_answer_value = None
         self._tools_called = []
         self._loaded_skills_for_turn = {}
-
-        from .executor import LocalExecutor
-
-        safety_error = LocalExecutor._check_code_safety(code)
-        if safety_error:
-            return ExecutionResult(
-                output="",
-                error=safety_error,
-                stdout="",
-                stderr=safety_error,
-                final_answer=None,
-                tools_called=[],
-            )
 
         harness_code = self._build_harness(code)
         harness_path = os.path.join(self._tmpdir, "harness.py")
