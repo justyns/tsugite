@@ -126,14 +126,21 @@ class BaseAdapter(ABC):
         self._identity_map = identity_map or {}
 
         from tsugite.workspace import Workspace, WorkspaceNotFoundError
-        from tsugite.workspace.context import build_workspace_attachments
 
         try:
             self._workspace = Workspace.load(agent_config.workspace_dir)
         except WorkspaceNotFoundError:
             self._workspace = None
 
-        self.workspace_attachments = build_workspace_attachments(self._workspace) if self._workspace else []
+        # Workspace attachments are built per-message via _get_workspace_attachments()
+        # so that daily memory files (memory/YYYY-MM-DD.md) are picked up fresh.
+
+    def _get_workspace_attachments(self):
+        """Build workspace attachments fresh each call so new memory files are included."""
+        if not self._workspace:
+            return []
+        from tsugite.workspace.context import build_workspace_attachments
+        return build_workspace_attachments(self._workspace)
 
     def _resolve_agent_path(self, agent_file: Optional[str] = None) -> Optional[Path]:
         """Resolve an agent file to an absolute path.
@@ -280,7 +287,7 @@ class BaseAdapter(ABC):
             original_cwd = os.getcwd()
             try:
                 os.chdir(str(workspace_dir))
-                attachments = list(self.workspace_attachments)
+                attachments = list(self._get_workspace_attachments())
                 if channel_context.metadata and channel_context.metadata.get("uploaded_attachments"):
                     attachments.extend(channel_context.metadata.pop("uploaded_attachments"))
 
@@ -326,6 +333,7 @@ class BaseAdapter(ABC):
                 system_prompt=getattr(result, "system_message", None),
                 attachments=getattr(result, "attachments", None),
                 channel_metadata=metadata,
+                claude_code_session_id=getattr(result, "claude_code_session_id", None),
             )
         except Exception as e:
             logger.warning("Failed to save daemon history: %s", e)

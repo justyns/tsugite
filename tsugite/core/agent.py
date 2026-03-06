@@ -910,12 +910,29 @@ class TsugiteAgent:
         return messages
 
     def _build_claude_code_first_message(self) -> str:
-        """Build first message for claude_code subprocess, including conversation history.
+        """Build first message for claude_code subprocess, including context and history.
 
-        For --continue runs, includes previous conversation as context so the
-        subprocess can recall earlier messages without relying on --resume.
+        Claude Code receives the system prompt via --system-prompt-file, but attachments
+        and skills are normally sent as a context turn in _build_messages(). Since that
+        turn is skipped for the claude_code path, we inline attachment/skill content here.
         """
         parts = []
+
+        # Include attachments and skills only for fresh sessions.
+        # Resumed sessions already have them from the prior conversation.
+        if not self._resume_session:
+            context_parts = []
+            for att in self.attachments:
+                if att.content_type == AttachmentContentType.TEXT:
+                    context_parts.append(f'<attachment name="{att.name}">')
+                    context_parts.append(att.content)
+                    context_parts.append("</attachment>")
+            for skill in self.skills:
+                context_parts.append(f'<skill name="{skill.name}">')
+                context_parts.append(skill.content)
+                context_parts.append("</skill>")
+            if context_parts:
+                parts.append("<context>\n" + "\n".join(context_parts) + "\n</context>\n")
 
         # Include previous conversation history if continuing
         if self.previous_messages:
