@@ -466,6 +466,36 @@ async def test_agent_build_messages():
 
 
 @pytest.mark.asyncio
+async def test_agent_build_messages_no_code_includes_thought():
+    """Test that steps with no code show the LLM's actual thought in history."""
+    agent = TsugiteAgent(
+        model_string="openai:gpt-4o-mini",
+        tools=[],
+        instructions="",
+        max_turns=5,
+    )
+
+    agent.memory.add_task("Hello")
+
+    # Simulate a step where the LLM responded with text but no code
+    agent.memory.add_step(
+        thought="I want to greet the user but forgot to use a code block.",
+        code="",
+        output="",
+        error=None,
+        xml_observation='<tsugite_execution_result status="error">\n<error>Format Error</error>\n</tsugite_execution_result>',
+    )
+
+    messages = agent._build_messages()
+
+    # Assistant message should contain the thought, not an empty code block
+    assistant_msg = messages[2]
+    assert assistant_msg["role"] == "assistant"
+    assert "```python" not in assistant_msg["content"]
+    assert "I want to greet the user" in assistant_msg["content"]
+
+
+@pytest.mark.asyncio
 async def test_agent_extract_reasoning_content():
     """Test extracting reasoning content from responses."""
     agent = TsugiteAgent(

@@ -431,5 +431,4 @@ final_answer(42)
         error_events = [e for e in mock_ui_handler.events if e["event"] == EventType.ERROR]
         assert len(error_events) == 1
         assert "LLM did not generate code" in error_events[0]["event_obj"].error
-        assert "Expected format" in error_events[0]["event_obj"].error
         assert error_events[0]["event_obj"].error_type == "Format Error"

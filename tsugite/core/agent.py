@@ -434,7 +434,7 @@ class TsugiteAgent:
                 if self.event_bus:
                     self.event_bus.emit(
                         ErrorEvent(
-                            error="LLM did not generate code. Expected format:\n\nThought: <explanation>\n```python\n<code>\n```",
+                            error="LLM did not generate code. Expected format:\n\n```python\n<code>\n```",
                             error_type="Format Error",
                             step=turn_num + 1,
                         )
@@ -442,14 +442,12 @@ class TsugiteAgent:
 
                 # Add a correction to memory to guide the LLM
                 correction_msg = (
-                    "Format Error: You must provide your response in a Python code block.\n\n"
-                    "Use this format:\n\n"
-                    "Thought: <your explanation>\n"
+                    "Format Error: You must respond with a Python code block.\n\n"
                     "```python\n"
                     "# Your code here\n"
                     'final_answer("your answer")\n'
                     "```\n\n"
-                    "Remember to call final_answer() with your result."
+                    "Even for simple responses, wrap them in a code block with final_answer()."
                 )
 
                 # Add the thought and correction as a step
@@ -944,7 +942,11 @@ class TsugiteAgent:
         # 5. Previous steps (Code → Observation with embedded skills)
         for step in self.memory.steps:
             # Assistant message is code + any content blocks the LLM defined
-            assistant_msg = f"```python\n{step.code}\n```"
+            if step.code and step.code.strip():
+                assistant_msg = f"```python\n{step.code}\n```"
+            else:
+                # No code — show what the LLM actually said so it sees its own response
+                assistant_msg = step.thought if step.thought else "(empty response)"
             for name, block_content in step.content_blocks.items():
                 assistant_msg += f'\n\n<content name="{name}">\n{block_content}\n</content>'
             messages.append({"role": "assistant", "content": assistant_msg})
