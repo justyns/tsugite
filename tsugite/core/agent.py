@@ -1000,16 +1000,24 @@ class TsugiteAgent:
 
         # Include attachments and skills only for fresh sessions.
         # Resumed sessions already have them from the prior conversation.
+        # Truncate large attachments to avoid "Prompt is too long" errors.
+        max_attachment_chars = 4000
         if not self._resume_session:
             context_parts = []
             for att in self.attachments:
                 if att.content_type == AttachmentContentType.TEXT:
+                    content = att.content
+                    if len(content) > max_attachment_chars:
+                        content = content[:max_attachment_chars] + "\n... (truncated)"
                     context_parts.append(f'<attachment name="{att.name}">')
-                    context_parts.append(att.content)
+                    context_parts.append(content)
                     context_parts.append("</attachment>")
             for skill in self.skills:
+                content = skill.content
+                if len(content) > max_attachment_chars:
+                    content = content[:max_attachment_chars] + "\n... (truncated)"
                 context_parts.append(f'<skill name="{skill.name}">')
-                context_parts.append(skill.content)
+                context_parts.append(content)
                 context_parts.append("</skill>")
             if context_parts:
                 parts.append("<context>\n" + "\n".join(context_parts) + "\n</context>\n")
