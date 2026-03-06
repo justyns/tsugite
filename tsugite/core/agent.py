@@ -567,7 +567,52 @@ class TsugiteAgent:
 
             # Continue loop (LLM will see the observation in next iteration)
 
-        # If we get here, we hit max_turns
+        # If we get here, we hit max_turns — give the LLM one last chance to call final_answer()
+        last_chance_msg = (
+            f"TURN LIMIT REACHED. You have used all {self.max_turns} turns.\n"
+            "You MUST call final_answer() NOW with a summary of your progress so far.\n"
+            "If the task is not complete, include what remains to be done so the user can ask to continue.\n"
+            "Do NOT call any other tools — only final_answer() is available."
+        )
+        self.memory.add_step(
+            thought="(system: turn limit reached)",
+            code="",
+            output=last_chance_msg,
+            error=None,
+            tools_called=[],
+        )
+
+        saved_tools = self.tools
+        self.tools = []
+        try:
+            messages = self._build_messages()
+            if self._is_claude_code:
+                turn = await self._claude_code_turn(claude_process, messages, self.max_turns, stream)
+            else:
+                turn = await self._litellm_turn(messages, self.max_turns, stream)
+
+            if turn.code and turn.code.strip():
+                exec_result = await self.executor.execute(turn.code)
+                if exec_result.final_answer is not None:
+                    self.memory.add_final_answer(exec_result.final_answer)
+                    if claude_process:
+                        self._claude_code_session_id = claude_process.session_id
+                        await claude_process.stop()
+                    if return_full_result:
+                        return AgentResult(
+                            output=exec_result.final_answer,
+                            token_usage=None,
+                            cost=self.total_cost if self.total_cost > 0 else None,
+                            steps=self.memory.steps,
+                            claude_code_session_id=self._claude_code_session_id,
+                            context_window=self._claude_code_context_window,
+                        )
+                    return exec_result.final_answer
+        except Exception:
+            logger.debug("Last-chance turn failed", exc_info=True)
+        finally:
+            self.tools = saved_tools
+
         if claude_process:
             self._claude_code_session_id = claude_process.session_id
             await claude_process.stop()
@@ -938,7 +983,7 @@ class TsugiteAgent:
         parts = [f'turn="{turn}"', f'max_turns="{self.max_turns}"']
         if self.total_tokens > 0:
             parts.append(f'tokens_used="{self.total_tokens}"')
-        if self.max_turns - turn <= 1:
+        if self.max_turns - turn <= 2:
             parts.append('warning="approaching turn limit, wrap up soon"')
         return f'\n<tsugite_budget {" ".join(parts)} />'
 
