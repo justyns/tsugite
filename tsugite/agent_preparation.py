@@ -157,6 +157,34 @@ class AgentPreparer:
         # Merge workspace attachments with explicit attachments (explicit first)
         all_attachments = (attachments or []) + workspace_attachments
 
+        # Step 0b: Load agent-config attachments (Jinja-rendered paths)
+        if agent_config.attachments:
+            from tsugite.attachments.file import FileHandler
+            from tsugite.renderer import AgentRenderer
+
+            _renderer = AgentRenderer()
+            _file_handler = FileHandler()
+
+            for att_path_template in agent_config.attachments:
+                try:
+                    rendered_path = _renderer.env.from_string(att_path_template).render()
+                except Exception as e:
+                    logger.debug("Failed to render attachment path %r: %s", att_path_template, e)
+                    continue
+
+                resolved = Path(rendered_path)
+                if not resolved.is_absolute() and workspace:
+                    resolved = workspace.path / resolved
+
+                if not resolved.exists():
+                    logger.debug("Agent attachment not found (skipped): %s", resolved)
+                    continue
+
+                att = _file_handler.fetch(str(resolved))
+                if att:
+                    all_attachments.append(att)
+                    logger.debug("Loaded agent attachment: %s", resolved)
+
         # Step 1: Execute prefetch tools
         prefetch_context = {}
         if agent_config.prefetch:

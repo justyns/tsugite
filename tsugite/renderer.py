@@ -24,6 +24,38 @@ def tomorrow() -> str:
     return (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
 
 
+def days_ago(n: int) -> datetime:
+    """Return a timezone-aware datetime for N days ago."""
+    try:
+        from tzlocal import get_localzone
+
+        tz = get_localzone()
+    except Exception:
+        tz = None
+    return datetime.now(tz=tz) - timedelta(days=n)
+
+
+def weeks_ago(n: int) -> datetime:
+    """Return a timezone-aware datetime for Monday of the ISO week N weeks ago."""
+    try:
+        from tzlocal import get_localzone
+
+        tz = get_localzone()
+    except Exception:
+        tz = None
+    dt = datetime.now(tz=tz) - timedelta(weeks=n)
+    # Roll back to Monday of that ISO week
+    dt = dt - timedelta(days=dt.weekday())
+    return dt
+
+
+def date_format(dt, fmt: str) -> str:
+    """Format a datetime (or date string) with strftime."""
+    if isinstance(dt, str):
+        dt = datetime.fromisoformat(dt)
+    return dt.strftime(fmt)
+
+
 def slugify(text: str) -> str:
     import re
 
@@ -128,6 +160,9 @@ class AgentRenderer:
                 "timedelta": timedelta,
                 "datetime": datetime,
                 "slugify": slugify,
+                "days_ago": days_ago,
+                "weeks_ago": weeks_ago,
+                "date_format": date_format,
                 "file_exists": file_exists,
                 "is_file": is_file,
                 "is_dir": is_dir,
