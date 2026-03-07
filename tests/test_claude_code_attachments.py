@@ -18,14 +18,13 @@ from tsugite.skill_discovery import Skill
 
 
 class TestClaudeCodeFirstMessageAttachments:
-    def _make_agent(self, attachments=None, skills=None, resume_session=None):
+    def _make_agent(self, attachments=None, skills=None):
         return TsugiteAgent(
             model_string="claude_code:sonnet",
             tools=[],
             instructions="test",
             attachments=attachments,
             skills=skills,
-            resume_session=resume_session,
         )
 
     def _att(self, name="test.md", content="test", content_type=AttachmentContentType.TEXT):
@@ -63,27 +62,6 @@ class TestClaudeCodeFirstMessageAttachments:
         assert '<attachment name="USER.md">' in msg
         assert '<skill name="helper">' in msg
         assert "<context>" in msg
-
-    def test_resumed_session_excludes_attachments(self):
-        att = self._att(name="MEMORY.md", content="memory content")
-        agent = self._make_agent(attachments=[att], resume_session="old-session-id")
-        agent.memory.task = "do something"
-
-        msg = agent._build_claude_code_first_message()
-
-        assert "<attachment" not in msg
-        assert "<context>" not in msg
-        assert "do something" in msg
-
-    def test_resumed_session_excludes_skills(self):
-        skill = Skill(name="my-skill", content="skill instructions")
-        agent = self._make_agent(skills=[skill], resume_session="old-session-id")
-        agent.memory.task = "do something"
-
-        msg = agent._build_claude_code_first_message()
-
-        assert "<skill" not in msg
-        assert "<context>" not in msg
 
     def test_no_attachments_no_context_block(self):
         agent = self._make_agent()
@@ -127,7 +105,7 @@ class TestClaudeCodeFirstMessageAttachments:
 
     def test_task_always_present(self):
         att = self._att(name="doc.md", content="doc")
-        agent = self._make_agent(attachments=[att], resume_session="sess")
+        agent = self._make_agent(attachments=[att])
         agent.memory.task = "my actual task"
 
         msg = agent._build_claude_code_first_message()

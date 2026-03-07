@@ -124,7 +124,6 @@ class TsugiteAgent:
         attachments: List[Attachment] = None,
         skills: List[Skill] = None,
         previous_messages: List[Dict] = None,
-        resume_session: str = None,
     ):
         """Initialize the agent.
 
@@ -140,7 +139,6 @@ class TsugiteAgent:
             attachments: List of Attachment objects for multi-modal inputs
             skills: List of Skill objects for loaded skills
             previous_messages: List of previous conversation messages (user/assistant pairs)
-            resume_session: Claude Code session ID to resume (only used with claude_code provider)
         """
         from tsugite.models import get_model_params
 
@@ -155,7 +153,6 @@ class TsugiteAgent:
         self.attachments = attachments or []
         self.skills = skills or []
         self.previous_messages = previous_messages or []
-        self._resume_session = resume_session
 
         self.total_cost = 0.0
         self.total_tokens = 0
@@ -356,7 +353,6 @@ class TsugiteAgent:
             await claude_process.start(
                 model=self._claude_code_model,
                 system_prompt=self._build_system_prompt(),
-                resume_session=self._resume_session,
             )
         # Main agent loop
         for turn_num in range(self.max_turns):
@@ -998,31 +994,27 @@ class TsugiteAgent:
         """
         parts = []
 
-        # Include attachments and skills only for fresh sessions.
-        # Resumed sessions already have them from the prior conversation.
         # Truncate large attachments to avoid "Prompt is too long" errors.
         max_attachment_chars = 4000
-        if not self._resume_session:
-            context_parts = []
-            for att in self.attachments:
-                if att.content_type == AttachmentContentType.TEXT:
-                    content = att.content
-                    if len(content) > max_attachment_chars:
-                        content = content[:max_attachment_chars] + "\n... (truncated)"
-                    context_parts.append(f'<attachment name="{att.name}">')
-                    context_parts.append(content)
-                    context_parts.append("</attachment>")
-            for skill in self.skills:
-                content = skill.content
+        context_parts = []
+        for att in self.attachments:
+            if att.content_type == AttachmentContentType.TEXT:
+                content = att.content
                 if len(content) > max_attachment_chars:
                     content = content[:max_attachment_chars] + "\n... (truncated)"
-                context_parts.append(f'<skill name="{skill.name}">')
+                context_parts.append(f'<attachment name="{att.name}">')
                 context_parts.append(content)
-                context_parts.append("</skill>")
-            if context_parts:
-                parts.append("<context>\n" + "\n".join(context_parts) + "\n</context>\n")
+                context_parts.append("</attachment>")
+        for skill in self.skills:
+            content = skill.content
+            if len(content) > max_attachment_chars:
+                content = content[:max_attachment_chars] + "\n... (truncated)"
+            context_parts.append(f'<skill name="{skill.name}">')
+            context_parts.append(content)
+            context_parts.append("</skill>")
+        if context_parts:
+            parts.append("<context>\n" + "\n".join(context_parts) + "\n</context>\n")
 
-        # Include previous conversation history if continuing
         if self.previous_messages:
             history_lines = [
                 f"{msg.get('role', 'unknown').capitalize()}: {msg.get('content', '')}" for msg in self.previous_messages

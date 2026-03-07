@@ -53,13 +53,12 @@ class ClaudeCodeProcess:
     def _get_stderr(self) -> str:
         return "\n".join(self._stderr_lines[-20:])  # last 20 lines
 
-    async def start(self, model: str, system_prompt: str, resume_session: str | None = None) -> None:
+    async def start(self, model: str, system_prompt: str) -> None:
         """Launch persistent claude subprocess.
 
         Args:
             model: Model name (sonnet, opus, haiku, or full model ID)
             system_prompt: System prompt text
-            resume_session: Optional session ID to resume
 
         Raises:
             RuntimeError: If claude CLI is not found or fails to start
@@ -78,18 +77,13 @@ class ClaudeCodeProcess:
             "claude", "--print",
             "--input-format", "stream-json",
             "--output-format", "stream-json",
-            "--verbose",
             "--max-turns", "1",
             "--model", model,
             "--tools", "",
             "--strict-mcp-config",
             "--system-prompt-file", self._system_prompt_file,
+            "--session-id", str(uuid.uuid4()),
         ]
-
-        if resume_session:
-            cmd.extend(["--resume", resume_session])
-        else:
-            cmd.extend(["--session-id", str(uuid.uuid4())])
 
         # Copy env but unset keys that trigger nested-session guard or API key usage
         env = {k: v for k, v in os.environ.items() if k not in _CLAUDE_ENV_VARS}

@@ -201,36 +201,6 @@ def _extract_functions_called(execution_steps: list) -> List[str]:
     return sorted(list(functions))
 
 
-def get_claude_code_session_id(conversation_id: str) -> Optional[str]:
-    """Get the Claude Code session ID from a conversation's history metadata.
-
-    Args:
-        conversation_id: Session/conversation ID to look up
-
-    Returns:
-        Claude Code session ID if found, None otherwise
-    """
-    try:
-        from tsugite.history import SessionStorage, Turn
-
-        session_path = get_history_dir() / f"{conversation_id}.jsonl"
-        if not session_path.exists():
-            return None
-
-        storage = SessionStorage.load(session_path)
-        records = storage.load_records()
-
-        # Search turns in reverse for the most recent session ID
-        for record in reversed(records):
-            if isinstance(record, Turn) and record.metadata:
-                session_id = record.metadata.get("claude_code_session_id")
-                if session_id:
-                    return session_id
-
-        return None
-    except Exception:
-        return None
-
 
 def get_latest_conversation() -> Optional[str]:
     """Get the most recent conversation/session ID.

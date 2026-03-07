@@ -107,7 +107,6 @@ class TestClaudeCodeProcess:
             assert "--print" in cmd_args
             assert "--output-format" in cmd_args
             assert "stream-json" in cmd_args[cmd_args.index("--output-format") + 1]
-            assert "--verbose" in cmd_args
             assert "--input-format" in cmd_args
             assert "--max-turns" in cmd_args
             assert "1" in cmd_args[cmd_args.index("--max-turns") + 1]
@@ -117,18 +116,6 @@ class TestClaudeCodeProcess:
 
         # session_id is None until first send_message (init comes after first user msg)
         assert process.session_id is None
-        await process.stop()
-
-    @pytest.mark.asyncio
-    async def test_start_with_resume_session(self, process):
-        mock_proc = self._mock_proc()
-
-        with patch("asyncio.create_subprocess_exec", return_value=mock_proc) as mock_exec:
-            await process.start(model="sonnet", system_prompt="test", resume_session="old-session-id")
-            cmd_args = mock_exec.call_args[0]
-            assert "--resume" in cmd_args
-            assert "old-session-id" in cmd_args[cmd_args.index("--resume") + 1]
-
         await process.stop()
 
     @pytest.mark.asyncio

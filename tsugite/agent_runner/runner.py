@@ -365,7 +365,6 @@ async def _execute_agent_with_prompt(
     injectable_vars: Optional[Dict[str, Any]] = None,
     previous_messages: Optional[List[Dict]] = None,
     path_context: Optional[Any] = None,
-    claude_code_resume_session: Optional[str] = None,
 ) -> str | AgentExecutionResult:
     """Execute agent with a prepared agent.
 
@@ -519,7 +518,6 @@ async def _execute_agent_with_prompt(
             attachments=prepared.attachments,
             skills=prepared.skills,
             previous_messages=previous_messages,
-            resume_session=claude_code_resume_session,
         )
 
         # Set event_bus in context so tools can access it during execution
@@ -752,17 +750,14 @@ async def run_agent_async(
 
     # Load conversation history if continuing
     previous_messages = []
-    claude_code_resume_session = None
     if continue_conversation_id:
-        from tsugite.agent_runner.history_integration import get_claude_code_session_id, load_and_apply_history
+        from tsugite.agent_runner.history_integration import load_and_apply_history
 
         try:
             previous_messages = load_and_apply_history(continue_conversation_id)
         except ValueError:
             # New conversation (e.g., fresh workspace session) - start with empty history
             pass
-
-        claude_code_resume_session = get_claude_code_session_id(continue_conversation_id)
 
     # Parse agent configuration (with inheritance resolution)
     try:
@@ -802,7 +797,6 @@ async def run_agent_async(
             custom_logger=custom_logger,
             previous_messages=previous_messages,
             path_context=path_context,
-            claude_code_resume_session=claude_code_resume_session,
         )
     finally:
         # Always clear the current agent context when done
