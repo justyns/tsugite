@@ -9,6 +9,7 @@ import tempfile
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from tzlocal import get_localzone
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional, Protocol
@@ -210,14 +211,15 @@ class BaseAdapter(ABC):
         attachment context turn) for better cache efficiency.
         """
         tz_name = self.agent_config.timezone
-        if tz_name:
-            try:
+        try:
+            if tz_name:
                 tz = ZoneInfo(tz_name)
-                now = datetime.now(tz)
-                timestamp = now.strftime(f"%Y-%m-%d %H:%M:%S {now.strftime('%Z')}")
-            except (KeyError, Exception):
-                timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        else:
+            else:
+                tz = get_localzone()
+            now = datetime.now(tz)
+            tz_label = tz_name or str(tz)
+            timestamp = now.strftime("%Y-%m-%d %H:%M:%S ") + tz_label
+        except Exception:
             timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         session = self.session_manager.sessions.get(user_id)
         tokens_used = session.cumulative_tokens if session else 0
