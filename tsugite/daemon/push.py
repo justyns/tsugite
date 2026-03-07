@@ -49,6 +49,9 @@ class PushSubscriptionStore:
 
 def get_or_create_vapid_keys(state_dir: Path) -> tuple[str, str]:
     """Get or generate VAPID keys. Returns (private_key_pem_path, public_key_b64url)."""
+    import base64
+
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
     from py_vapid import Vapid
 
     private_key_path = state_dir / "vapid_private.pem"
@@ -65,7 +68,8 @@ def get_or_create_vapid_keys(state_dir: Path) -> tuple[str, str]:
         vapid.save_public_key(str(public_key_path))
         logger.info("Generated new VAPID keys at %s", state_dir)
 
-    public_key_b64url = vapid.public_key_urlsafe_base64
+    raw = vapid.public_key.public_bytes(Encoding.X962, PublicFormat.UncompressedPoint)
+    public_key_b64url = base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
     return str(private_key_path), public_key_b64url
 
 
