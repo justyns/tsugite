@@ -13,14 +13,16 @@ from . import tool
 _scheduler = None
 _loop = None
 _channel_names: set[str] = set()
+_agent_names: set[str] = set()
 
 
-def set_scheduler(scheduler, loop=None, channel_names=None):
+def set_scheduler(scheduler, loop=None, channel_names=None, agent_names=None):
     """Called by the daemon to set/clear the scheduler reference."""
-    global _scheduler, _loop, _channel_names
+    global _scheduler, _loop, _channel_names, _agent_names
     _scheduler = scheduler
     _loop = loop
     _channel_names = channel_names or set()
+    _agent_names = agent_names or set()
 
 
 def _call(fn, *args, **kwargs):
@@ -41,6 +43,12 @@ def _validate_notify(notify: Optional[list[str]], notify_tool: bool) -> None:
         unknown = set(notify) - _channel_names
         if unknown:
             raise ValueError(f"Unknown notification channel(s): {', '.join(sorted(unknown))}")
+
+
+def _validate_agent(agent: str) -> None:
+    """Validate agent name against registered daemon adapters."""
+    if _agent_names and agent not in _agent_names:
+        raise ValueError(f"Unknown agent '{agent}'. Available: {', '.join(sorted(_agent_names))}")
 
 
 def _resolve_agent(agent: Optional[str]) -> str:
@@ -108,6 +116,7 @@ def schedule_create(
 
     _validate_notify(notify, notify_tool)
     agent = _resolve_agent(agent)
+    _validate_agent(agent)
 
     from tsugite.daemon.scheduler import ScheduleEntry
 
@@ -368,6 +377,7 @@ def background_task(
 
     _validate_notify(notify, notify_tool)
     agent = _resolve_agent(agent)
+    _validate_agent(agent)
 
     from tsugite.daemon.scheduler import ScheduleEntry
 

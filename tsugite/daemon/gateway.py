@@ -190,7 +190,8 @@ class Gateway:
             from tsugite.tools.schedule import set_scheduler
 
             channel_names = set(self.config.notification_channels.keys())
-            set_scheduler(self._scheduler_adapter.scheduler, asyncio.get_running_loop(), channel_names)
+            agent_names = set(http_adapters.keys())
+            set_scheduler(self._scheduler_adapter.scheduler, asyncio.get_running_loop(), channel_names, agent_names)
 
             logger.info("Scheduler enabled (schedules: %s)", schedules_path)
 

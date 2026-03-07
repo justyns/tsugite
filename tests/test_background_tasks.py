@@ -100,6 +100,17 @@ class TestAutoReplyField:
         assert restored.auto_reply is False
 
 
+class TestScheduleCreateValidation:
+    def test_rejects_unknown_agent(self, tool_loop):
+        from tsugite.tools.schedule import schedule_create, set_scheduler
+
+        mock_sched = MagicMock()
+        set_scheduler(mock_sched, tool_loop, agent_names={"bot"})
+
+        with pytest.raises(ValueError, match="Unknown agent 'nonexistent'"):
+            schedule_create(id="test", prompt="hi", agent="nonexistent", cron="0 9 * * *")
+
+
 class TestScheduleRunTool:
     def test_calls_fire_now(self, tool_loop):
         from tsugite.tools.schedule import schedule_run, set_scheduler
@@ -117,7 +128,7 @@ class TestBackgroundTaskTool:
         from tsugite.tools.schedule import background_task, set_scheduler
 
         mock_sched = MagicMock()
-        set_scheduler(mock_sched, tool_loop, channel_names={"my-discord"})
+        set_scheduler(mock_sched, tool_loop, channel_names={"my-discord"}, agent_names={"bot"})
 
         with patch("tsugite.agent_runner.helpers.get_current_agent", return_value="bot"):
             result = background_task(prompt="list files", notify=["my-discord"])
@@ -138,10 +149,19 @@ class TestBackgroundTaskTool:
         from tsugite.tools.schedule import background_task, set_scheduler
 
         mock_sched = MagicMock()
-        set_scheduler(mock_sched, tool_loop, channel_names={"discord-dm"})
+        set_scheduler(mock_sched, tool_loop, channel_names={"discord-dm"}, agent_names={"bot"})
 
         with pytest.raises(ValueError, match="Unknown notification"):
             background_task(prompt="test", notify=["nonexistent"])
+
+    def test_rejects_unknown_agent(self, tool_loop):
+        from tsugite.tools.schedule import background_task, set_scheduler
+
+        mock_sched = MagicMock()
+        set_scheduler(mock_sched, tool_loop, agent_names={"bot"})
+
+        with pytest.raises(ValueError, match="Unknown agent 'nonexistent'"):
+            background_task(prompt="test", agent="nonexistent")
 
 
 def _make_discord_channel(user_id="123456789", bot="my-bot") -> NotificationChannelConfig:
