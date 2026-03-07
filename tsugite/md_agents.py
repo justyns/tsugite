@@ -57,6 +57,7 @@ class AgentConfig(BaseModel):
     auto_context: Optional[bool] = None  # Auto-load context files (None = use config default)
     visibility: str = "public"  # Agent visibility: public, private, internal
     spawnable: bool = True  # Whether this agent can be spawned by other agents
+    memory_inject_days: Optional[int] = None  # Days of daily memory files to include (None = workspace default of 3)
     network: Optional[Dict[str, Any]] = None  # Network hints for sandbox proxy allowlist
 
     @field_validator("visibility", mode="after")

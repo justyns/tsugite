@@ -42,6 +42,16 @@ from .tools import Tool
 DEFAULT_MAX_TURNS = 10  # Default maximum reasoning iterations before timeout
 
 
+_NO_TRUNCATE_ATTACHMENTS = {"MEMORY.md"}
+
+
+def _attachment_char_limit(name: str) -> int | None:
+    """Return max chars for a Claude Code attachment, or None for no limit."""
+    if name in _NO_TRUNCATE_ATTACHMENTS:
+        return None
+    return 4000
+
+
 def build_system_prompt(tools: List[Tool], instructions: str = "") -> str:
     """Build system prompt for LLM with tools and instructions.
 
@@ -994,21 +1004,22 @@ class TsugiteAgent:
         """
         parts = []
 
-        # Truncate large attachments to avoid "Prompt is too long" errors.
-        max_attachment_chars = 4000
         context_parts = []
         for att in self.attachments:
             if att.content_type == AttachmentContentType.TEXT:
+                limit = _attachment_char_limit(att.name)
+                if limit == 0:
+                    continue
                 content = att.content
-                if len(content) > max_attachment_chars:
-                    content = content[:max_attachment_chars] + "\n... (truncated)"
+                if limit is not None and len(content) > limit:
+                    content = content[:limit] + "\n... (truncated)"
                 context_parts.append(f'<attachment name="{att.name}">')
                 context_parts.append(content)
                 context_parts.append("</attachment>")
         for skill in self.skills:
             content = skill.content
-            if len(content) > max_attachment_chars:
-                content = content[:max_attachment_chars] + "\n... (truncated)"
+            if len(content) > 4000:
+                content = content[:4000] + "\n... (truncated)"
             context_parts.append(f'<skill name="{skill.name}">')
             context_parts.append(content)
             context_parts.append("</skill>")

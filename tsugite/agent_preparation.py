@@ -149,7 +149,10 @@ class AgentPreparer:
         if workspace:
             from tsugite.workspace.context import build_workspace_attachments
 
-            workspace_attachments = build_workspace_attachments(workspace)
+            memory_days_kwargs = {}
+            if agent_config.memory_inject_days is not None:
+                memory_days_kwargs["memory_days"] = agent_config.memory_inject_days
+            workspace_attachments = build_workspace_attachments(workspace, **memory_days_kwargs)
 
         # Merge workspace attachments with explicit attachments (explicit first)
         all_attachments = (attachments or []) + workspace_attachments

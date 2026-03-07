@@ -103,6 +103,17 @@ class TestClaudeCodeFirstMessageAttachments:
         assert "short content" in msg
         assert "truncated" not in msg
 
+    def test_memory_md_never_truncated(self):
+        large_content = "x" * 10000
+        att = self._att(name="MEMORY.md", content=large_content)
+        agent = self._make_agent(attachments=[att])
+        agent.memory.task = "task"
+
+        msg = agent._build_claude_code_first_message()
+
+        assert "x" * 10000 in msg
+        assert "truncated" not in msg
+
     def test_task_always_present(self):
         att = self._att(name="doc.md", content="doc")
         agent = self._make_agent(attachments=[att])
