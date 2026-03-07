@@ -24,6 +24,7 @@ class AgentConfig(BaseModel):
     model: Optional[str] = None
     compaction_model: Optional[str] = None
     max_turns: Optional[int] = None
+    timezone: str = ""  # IANA timezone for display (e.g. "America/Chicago")
 
 
 class DiscordBotConfig(BaseModel):

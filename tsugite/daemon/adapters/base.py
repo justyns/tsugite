@@ -9,6 +9,7 @@ import tempfile
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional, Protocol
 
@@ -208,7 +209,16 @@ class BaseAdapter(ABC):
         Keeps dynamic metadata in the user message turn (not the cached
         attachment context turn) for better cache efficiency.
         """
-        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        tz_name = self.agent_config.timezone
+        if tz_name:
+            try:
+                tz = ZoneInfo(tz_name)
+                now = datetime.now(tz)
+                timestamp = now.strftime(f"%Y-%m-%d %H:%M:%S {now.strftime('%Z')}")
+            except (KeyError, Exception):
+                timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        else:
+            timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         session = self.session_manager.sessions.get(user_id)
         tokens_used = session.cumulative_tokens if session else 0
 
