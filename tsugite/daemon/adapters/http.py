@@ -1080,7 +1080,7 @@ class HTTPServer:
                     name = fm.get("name", md_file.stem)
                     description = fm.get("description", "")
                 except Exception as e:
-                    logger.debug("Failed to parse frontmatter %s: %s", md_file, e)
+                    logger.warning("Failed to parse frontmatter %s: %s", md_file, e)
                 files.append(
                     {
                         "path": str(resolved),
