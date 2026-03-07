@@ -107,6 +107,7 @@ class TestClaudeCodeProcess:
             assert "--print" in cmd_args
             assert "--output-format" in cmd_args
             assert "stream-json" in cmd_args[cmd_args.index("--output-format") + 1]
+            assert "--verbose" in cmd_args
             assert "--input-format" in cmd_args
             assert "--max-turns" in cmd_args
             assert "1" in cmd_args[cmd_args.index("--max-turns") + 1]

@@ -77,6 +77,7 @@ class ClaudeCodeProcess:
             "claude", "--print",
             "--input-format", "stream-json",
             "--output-format", "stream-json",
+            "--verbose",
             "--max-turns", "1",
             "--model", model,
             "--tools", "",
