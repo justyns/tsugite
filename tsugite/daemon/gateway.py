@@ -13,7 +13,7 @@ from tsugite.daemon.session import SessionManager
 logger = logging.getLogger(__name__)
 
 
-def _build_notifier(discord_adapters: dict):
+def _build_notifier(discord_adapters: dict, push_store=None, vapid_private_key=None, vapid_claims=None):
     """Build an async callback(message, channel_configs) -> dict for sending notifications."""
 
     async def _notify(message: str, channel_configs: list) -> dict:
@@ -24,12 +24,41 @@ def _build_notifier(discord_adapters: dict):
                     results[name] = await _send_discord_dm(discord_adapters, config, message)
                 elif config.type == "webhook":
                     results[name] = await _send_webhook(config, message)
+                elif config.type == "web-push":
+                    results[name] = await _send_web_push_all(push_store, message, vapid_private_key, vapid_claims)
             except Exception as e:
                 logger.error("Notification to '%s' failed: %s", name, e)
                 results[name] = {"error": str(e)}
         return results
 
     return _notify
+
+
+async def _send_web_push_all(push_store, message: str, vapid_private_key: str, vapid_claims: dict) -> dict:
+    """Send web push to all stored subscriptions, pruning expired ones."""
+    if not push_store:
+        return {"error": "push store not initialized"}
+
+    from tsugite.daemon.push import send_web_push
+
+    subs = push_store.all()
+    if not subs:
+        return {"status": "no_subscribers"}
+
+    payload = {"title": "Tsugite", "body": message[:200], "url": "/"}
+    sent = 0
+    expired = []
+    for sub in subs:
+        result = await send_web_push(sub, payload, vapid_private_key, vapid_claims)
+        if result.get("status") == "expired":
+            expired.append(result["endpoint"])
+        elif result.get("status") == "sent":
+            sent += 1
+
+    for endpoint in expired:
+        push_store.unsubscribe(endpoint)
+
+    return {"status": "sent", "sent": sent, "expired": len(expired)}
 
 
 async def _send_discord_dm(discord_adapters: dict, config, message: str) -> dict:
@@ -73,6 +102,9 @@ class Gateway:
         self._http_server = None
         self._scheduler_adapter = None
         self._session_runner = None
+        self._push_store = None
+        self._vapid_private_key = None
+        self._vapid_claims = None
 
     async def start(self):
         """Start all enabled adapters."""
@@ -169,6 +201,22 @@ class Gateway:
                 webhook_store = WebhookStore(self.config.state_dir / "webhooks.json")
 
                 self._http_server = HTTPServer(self.config.http, http_adapters, webhook_store, self.config.agents)
+
+                # Always init push store when HTTP is enabled so subscribe/unsubscribe API works
+                try:
+                    from tsugite.daemon.push import PushSubscriptionStore, get_or_create_vapid_keys
+
+                    self._push_store = PushSubscriptionStore(self.config.state_dir / "push_subscriptions.json")
+                    self._vapid_private_key, vapid_public = get_or_create_vapid_keys(self.config.state_dir)
+                    self._vapid_claims = {"sub": "mailto:tsugite@localhost"}
+                    self._http_server.push_store = self._push_store
+                    self._http_server.vapid_public_key = vapid_public
+                except ImportError:
+                    logger.debug("pywebpush/py-vapid not installed — web push disabled")
+                    self._push_store = None
+                    self._vapid_private_key = None
+                    self._vapid_claims = None
+
                 tasks.append(self._http_server.start())
 
         # Collect adapter start tasks
@@ -225,7 +273,10 @@ class Gateway:
         # Set up notification callback if channels are configured
         if self.config.notification_channels:
             discord_adapters = {a.bot_config.name: a for a in self.adapters if hasattr(a, "bot_config")}
-            notifier = _build_notifier(discord_adapters)
+            push_store = self._push_store
+            vapid_private_key = self._vapid_private_key
+            vapid_claims = self._vapid_claims
+            notifier = _build_notifier(discord_adapters, push_store, vapid_private_key, vapid_claims)
 
             from tsugite.tools.notify import set_notifier
 

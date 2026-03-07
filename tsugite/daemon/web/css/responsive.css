@@ -1,0 +1,144 @@
+/* Touch targets for coarse pointers (mobile, tablets) */
+@media (pointer: coarse) {
+  .btn-sm { min-height: 44px; min-width: 44px; padding: 8px 14px; }
+  .tab-bar button { min-height: 44px; padding: 8px 12px; }
+  #settings-btn { min-height: 44px; }
+  nav select { min-height: 44px; }
+  .turn-item { min-height: 44px; }
+  .form-group input, .form-group select, .form-group textarea { min-height: 44px; }
+  .ask-buttons button { min-height: 44px; padding: 10px 18px; }
+}
+
+/* Tablet breakpoint — stack two-pane layouts, scroll nav */
+@media (max-width: 860px) {
+  /* Nav wraps: title row on top, tab bar scrolls underneath */
+  nav {
+    flex-wrap: wrap;
+  }
+
+  .tab-bar {
+    order: 10;
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .tab-bar button {
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .two-pane {
+    flex-direction: column;
+  }
+
+  .pane-sidebar,
+  .pane-sidebar-wide {
+    width: 100%;
+    max-height: 40vh;
+    overflow-y: auto;
+  }
+
+  .pane-detail {
+    width: 100%;
+  }
+
+  /* Tables: horizontal scroll */
+  .data-table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Forms: stack rows */
+  .form-row {
+    flex-direction: column;
+  }
+
+  /* Status bar: scroll when it overflows */
+  #status-bar {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    flex-wrap: nowrap;
+  }
+}
+
+/* Mobile breakpoint */
+@media (max-width: 640px) {
+  /* Safe area for notch devices */
+  body {
+    padding-top: env(safe-area-inset-top);
+  }
+
+  /* Nav: title + agent selector on top, tabs fixed at bottom */
+  nav {
+    flex-wrap: wrap;
+    padding: 8px 12px;
+  }
+
+  .tab-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 20;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    padding: 4px 8px env(safe-area-inset-bottom);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    justify-content: flex-start;
+  }
+
+  .tab-bar button {
+    font-size: 12px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .spacer { display: none; }
+
+  /* Main content clears fixed tab bar */
+  main {
+    padding-bottom: 60px;
+  }
+
+  /* Chat messages wider on mobile */
+  .msg {
+    max-width: 90%;
+  }
+
+  /* Prevent iOS zoom on input focus */
+  #message-input {
+    font-size: 16px;
+  }
+
+  /* Modals full-width */
+  .modal-content {
+    width: 95%;
+    max-width: none;
+  }
+
+  /* Cards single column */
+  .card-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* Tighter padding */
+  .view-scroll {
+    padding: 12px;
+  }
+
+  #messages {
+    padding: 12px;
+  }
+
+  #input-area {
+    padding: 8px 12px env(safe-area-inset-bottom);
+  }
+
+  /* Tool calls section wider on mobile */
+  .tool-calls-section {
+    max-width: 100%;
+  }
+}

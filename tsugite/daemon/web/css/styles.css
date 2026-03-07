@@ -175,3 +175,9 @@ main { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
 /* Token display */
 .token-masked { font-family: monospace; font-size: 13px; letter-spacing: 1px; }
 .token-reveal { cursor: pointer; color: var(--accent); font-size: 12px; margin-left: 8px; }
+
+/* Two-pane layouts */
+.two-pane { display: flex; gap: 16px; }
+.pane-sidebar { width: 280px; flex-shrink: 0; }
+.pane-sidebar-wide { width: 400px; }
+.pane-detail { flex: 1; min-width: 0; }

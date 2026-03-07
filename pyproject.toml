@@ -1,6 +1,6 @@
 [project]
 name = "tsugite-cli"
-version = "0.6.3"
+version = "0.7.0"
 description = "Micro-agent runner for task automation using markdown definitions"
 authors = [{ name = "Justyn Shull" }]
 requires-python = ">=3.11"
@@ -33,6 +33,8 @@ daemon = [
   "cronsim>=2.6",
   "starlette>=0.36",
   "uvicorn>=0.25",
+  "pywebpush>=2.0.0",
+  "py-vapid>=1.9.0",
 ]
 
 [project.scripts]

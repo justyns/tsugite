@@ -1,5 +1,5 @@
 import Alpine from 'https://cdn.jsdelivr.net/npm/alpinejs@3/dist/module.esm.js';
-import { get } from './api.js';
+import { get, post } from './api.js';
 import chatView from './views/chat.js';
 import dashboardView from './views/dashboard.js';
 import scheduleView from './views/schedules.js';
@@ -48,3 +48,28 @@ async function loadAgents() {
 }
 
 loadAgents();
+
+// Service worker + push notifications
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/static/sw.js').catch(() => {});
+}
+
+window.tsugiteSubscribePush = async function() {
+  const reg = await navigator.serviceWorker.ready;
+  const { public_key } = await get('/api/push/vapid-key');
+  const sub = await reg.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: Uint8Array.from(atob(public_key.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0)),
+  });
+  await post('/api/push/subscribe', sub.toJSON());
+};
+
+window.tsugiteUnsubscribePush = async function() {
+  const reg = await navigator.serviceWorker.ready;
+  const sub = await reg.pushManager.getSubscription();
+  if (sub) {
+    const endpoint = sub.endpoint;
+    await sub.unsubscribe();
+    await post('/api/push/unsubscribe', { endpoint });
+  }
+};

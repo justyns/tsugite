@@ -172,6 +172,8 @@ class HTTPServer:
         self._server = None
         self.scheduler = None  # Set by Gateway after SchedulerAdapter is created
         self.session_runner = None  # Set by Gateway after SessionRunner is created
+        self.push_store = None  # Set by Gateway if web-push is configured
+        self.vapid_public_key = None  # Set by Gateway if web-push is configured
         self._active_backends: dict[tuple[str, str], HTTPInteractionBackend] = {}
         self.app = self._build_app()
 
@@ -237,6 +239,9 @@ class HTTPServer:
             Route("/api/skill-files", self._list_skill_files, methods=["GET"]),
             Route("/api/skill-files/content", self._read_skill_file, methods=["GET"]),
             Route("/api/skill-files/content", self._save_skill_file, methods=["PUT"]),
+            Route("/api/push/vapid-key", self._push_vapid_key, methods=["GET"]),
+            Route("/api/push/subscribe", self._push_subscribe, methods=["POST"]),
+            Route("/api/push/unsubscribe", self._push_unsubscribe, methods=["POST"]),
             Mount("/static", app=StaticFiles(directory=str(WEB_DIR)), name="static"),
             Route("/", self._serve_ui, methods=["GET"]),
         ]
@@ -1167,6 +1172,36 @@ class HTTPServer:
 
     async def _save_skill_file(self, request: Request) -> JSONResponse:
         return await self._save_md_file(request, self._get_allowed_skill_dirs())
+
+    async def _push_vapid_key(self, request: Request) -> JSONResponse:
+        if not self.vapid_public_key:
+            return JSONResponse({"error": "web push not configured"}, status_code=404)
+        return JSONResponse({"public_key": self.vapid_public_key})
+
+    async def _push_subscribe(self, request: Request) -> JSONResponse:
+        auth_err = self._check_auth(request)
+        if auth_err:
+            return auth_err
+        if not self.push_store:
+            return JSONResponse({"error": "web push not configured"}, status_code=404)
+        body = await request.json()
+        if not body.get("endpoint"):
+            return JSONResponse({"error": "missing endpoint"}, status_code=400)
+        self.push_store.subscribe(body)
+        return JSONResponse({"status": "subscribed"})
+
+    async def _push_unsubscribe(self, request: Request) -> JSONResponse:
+        auth_err = self._check_auth(request)
+        if auth_err:
+            return auth_err
+        if not self.push_store:
+            return JSONResponse({"error": "web push not configured"}, status_code=404)
+        body = await request.json()
+        endpoint = body.get("endpoint")
+        if not endpoint:
+            return JSONResponse({"error": "missing endpoint"}, status_code=400)
+        self.push_store.unsubscribe(endpoint)
+        return JSONResponse({"status": "unsubscribed"})
 
     async def _serve_ui(self, request: Request) -> Response:
         ui_path = WEB_DIR / "index.html"

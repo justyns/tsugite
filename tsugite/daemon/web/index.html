@@ -2,10 +2,16 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Tsugite</title>
 <link rel="stylesheet" href="/static/css/theme.css">
 <link rel="stylesheet" href="/static/css/styles.css">
+<link rel="stylesheet" href="/static/css/responsive.css">
+<link rel="manifest" href="/static/manifest.json">
+<meta name="theme-color" content="#303446">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="apple-touch-icon" href="/static/icons/icon-192.png">
 <script type="module" src="/static/js/app.js"></script>
 </head>
 <body x-data :data-theme="$store.app.theme">
@@ -102,7 +108,14 @@
             </div>
           </template>
           <template x-if="msg.type === 'separator'">
-            <div class="history-sep" x-text="msg.text"></div>
+            <div class="history-sep">
+              <template x-if="hasMoreHistory && i === 0">
+                <button class="btn-sm" @click="loadMoreHistory()" x-text="msg.text"></button>
+              </template>
+              <template x-if="!(hasMoreHistory && i === 0)">
+                <span x-text="msg.text"></span>
+              </template>
+            </div>
           </template>
           <template x-if="msg.type === 'user'">
             <div class="msg user" x-html="renderHtml(msg.text)"></div>
@@ -270,9 +283,9 @@
 
   <!-- Agent Files -->
   <div class="view" x-show="$store.app.view === 'agents'" x-data="agentFileView" x-cloak>
-    <div class="view-scroll" style="display:flex;gap:16px">
+    <div class="view-scroll two-pane">
       <!-- File list -->
-      <div style="width:280px;flex-shrink:0">
+      <div class="pane-sidebar">
         <div class="section-header">
           <h2>Agent Files</h2>
           <select x-model="filter" style="font-size:12px;padding:2px 4px">
@@ -305,7 +318,7 @@
       </div>
 
       <!-- Editor -->
-      <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+      <div class="pane-detail" style="display:flex;flex-direction:column">
         <template x-if="!selectedFile">
           <div class="empty-state">Select an agent file to view</div>
         </template>
@@ -338,9 +351,9 @@
 
   <!-- Skill Files -->
   <div class="view" x-show="$store.app.view === 'skills'" x-data="skillFileView" x-cloak>
-    <div class="view-scroll" style="display:flex;gap:16px">
+    <div class="view-scroll two-pane">
       <!-- File list -->
-      <div style="width:280px;flex-shrink:0">
+      <div class="pane-sidebar">
         <div class="section-header">
           <h2>Skill Files</h2>
           <select x-model="filter" style="font-size:12px;padding:2px 4px">
@@ -373,7 +386,7 @@
       </div>
 
       <!-- Editor -->
-      <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+      <div class="pane-detail" style="display:flex;flex-direction:column">
         <template x-if="!selectedFile">
           <div class="empty-state">Select a skill file to view</div>
         </template>
@@ -595,8 +608,8 @@
 
       <!-- Sessions list + detail side by side -->
       <template x-if="!loading && sessions.length > 0">
-        <div style="display:flex;gap:16px">
-          <div style="width:400px;flex-shrink:0">
+        <div class="two-pane">
+          <div class="pane-sidebar pane-sidebar-wide">
             <table class="data-table">
               <thead><tr><th>ID</th><th>Agent</th><th>State</th><th>Created</th><th>Actions</th></tr></thead>
               <tbody>
@@ -622,7 +635,7 @@
           </div>
 
           <!-- Detail panel -->
-          <div style="flex:1;min-width:0">
+          <div class="pane-detail">
             <template x-if="!selectedSession">
               <div class="empty-state">Select a session to view details</div>
             </template>
@@ -696,9 +709,9 @@
 
   <!-- History -->
   <div class="view" x-show="$store.app.view === 'history'" x-data="historyView" x-cloak>
-    <div class="view-scroll" style="display:flex;gap:16px">
+    <div class="view-scroll two-pane">
       <!-- Conversation list -->
-      <div style="width:280px;flex-shrink:0">
+      <div class="pane-sidebar">
         <div class="section-header"><h2>Sessions</h2></div>
         <template x-if="loading">
           <div class="empty-state"><span class="spinner"></span></div>
@@ -718,7 +731,7 @@
       </div>
 
       <!-- Turn detail -->
-      <div style="flex:1;min-width:0">
+      <div class="pane-detail">
         <template x-if="!selectedConv">
           <div class="empty-state">Select a session to view history</div>
         </template>
@@ -855,8 +868,18 @@
 
 <!-- Settings modal -->
 <div class="modal-backdrop" :class="{ open: $store.app.showSettings }" @click.self="$store.app.showSettings = false"
-     x-data="{ token: '', userId: '', tempTheme: '' }"
-     x-effect="if ($store.app.showSettings) { token = localStorage.getItem('tsugite_token') || ''; userId = $store.app.userId; tempTheme = $store.app.theme; }">
+     x-data="{ token: '', userId: '', tempTheme: '', pushSubscribed: false, pushLoading: false,
+       async initPush() { if ('serviceWorker' in navigator && 'PushManager' in window) { try { const reg = await navigator.serviceWorker.ready; const sub = await reg.pushManager.getSubscription(); this.pushSubscribed = !!sub; } catch {} } },
+       async togglePush() {
+         this.pushLoading = true;
+         try {
+           if (this.pushSubscribed) { await window.tsugiteUnsubscribePush(); this.pushSubscribed = false; }
+           else { await window.tsugiteSubscribePush(); this.pushSubscribed = true; }
+         } catch (e) { console.error('Push toggle failed:', e); }
+         this.pushLoading = false;
+       }
+     }"
+     x-effect="if ($store.app.showSettings) { token = localStorage.getItem('tsugite_token') || ''; userId = $store.app.userId; tempTheme = $store.app.theme; this.initPush(); }">
   <div class="modal-content">
     <h2>Settings</h2>
     <label>API Token</label>
@@ -870,6 +893,13 @@
       <option value="macchiato">Macchiato</option>
       <option value="mocha">Mocha</option>
     </select>
+    <template x-if="'serviceWorker' in navigator && 'PushManager' in window">
+      <div style="margin-bottom:16px">
+        <label>Push Notifications</label>
+        <button class="btn-sm" @click="togglePush()" :disabled="pushLoading"
+                x-text="pushLoading ? 'Working...' : (pushSubscribed ? 'Disable Notifications' : 'Enable Notifications')"></button>
+      </div>
+    </template>
     <div class="modal-actions">
       <button class="btn-cancel" @click="$store.app.theme = localStorage.getItem('tsugite_theme') || 'frappe'; $store.app.showSettings = false">Cancel</button>
       <button class="btn-primary" @click="

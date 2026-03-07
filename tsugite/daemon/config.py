@@ -41,7 +41,7 @@ class DiscordBotConfig(BaseModel):
 class NotificationChannelConfig(BaseModel):
     """Configuration for a notification channel (discord DM or webhook)."""
 
-    type: Literal["discord", "webhook"]
+    type: Literal["discord", "webhook", "web-push"]
     # Discord fields
     user_id: Optional[str] = None
     bot: Optional[str] = None
@@ -59,6 +59,7 @@ class NotificationChannelConfig(BaseModel):
         elif self.type == "webhook":
             if not self.url:
                 raise ValueError("Webhook notification channels require 'url'")
+        # web-push: no required fields — subscriptions managed via API
         return self
 
 

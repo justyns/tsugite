@@ -3,6 +3,10 @@ import { escapeHtml, renderMarkdown, scrollToBottom } from '../utils.js';
 
 export default () => ({
   messages: [],
+  _allHistoryMessages: [],
+  _historyLoaded: 0,
+  HISTORY_PAGE_SIZE: 20,
+  hasMoreHistory: false,
   sessions: [],
   sending: false,
   compacting: false,
@@ -27,6 +31,9 @@ export default () => ({
 
   async reload() {
     this.messages = [];
+    this._allHistoryMessages = [];
+    this._historyLoaded = 0;
+    this.hasMoreHistory = false;
     this.statusInfo = {};
     this.loadedSkills = [];
     await this.loadSessions();
@@ -59,27 +66,70 @@ export default () => ({
   async loadHistory() {
     const agent = this.$store.app.selectedAgent;
     if (!agent) return;
+    this._allHistoryMessages = [];
+    this._historyLoaded = 0;
     try {
       const data = await get(`/api/agents/${agent}/history?user_id=${encodeURIComponent(this.userId)}`);
       if (!data.turns || data.turns.length === 0) return;
-      let msgCount = 0;
       for (const turn of data.turns) {
         if (turn.type === 'compaction') {
-          this.messages.push({ type: 'compaction', summary: turn.summary || null });
+          this._allHistoryMessages.push({ type: 'compaction', summary: turn.summary || null });
           continue;
         }
-        if (turn.user) this.messages.push({ type: 'user', text: turn.user });
-        if (turn.assistant) this.messages.push({ type: 'agent', text: turn.assistant });
-        msgCount++;
+        if (turn.user) this._allHistoryMessages.push({ type: 'user', text: turn.user });
+        if (turn.assistant) this._allHistoryMessages.push({ type: 'agent', text: turn.assistant });
       }
-      if (msgCount > 0) {
-        this.messages.push({ type: 'separator', text: `${msgCount} earlier turn${msgCount !== 1 ? 's' : ''} restored` });
-      }
+      this._showRecentHistory();
     } catch { /* ignore */ }
     this.$nextTick(() => {
       const el = this.$refs.messages;
       if (el) scrollToBottom(el);
     });
+  },
+
+  _showRecentHistory() {
+    const all = this._allHistoryMessages;
+    const page = this.HISTORY_PAGE_SIZE;
+    const startIdx = Math.max(0, all.length - page);
+    const slice = all.slice(startIdx);
+    this._historyLoaded = all.length - startIdx;
+    this.hasMoreHistory = startIdx > 0;
+    this.messages = [];
+    if (this.hasMoreHistory) {
+      this.messages.push({ type: 'separator', text: `${startIdx} earlier messages — load more ↑` });
+    }
+    this.messages.push(...slice);
+    if (slice.length > 0) {
+      this.messages.push({ type: 'separator', text: `${this._historyLoaded} of ${all.length} messages loaded` });
+    }
+  },
+
+  loadMoreHistory() {
+    if (!this.hasMoreHistory) return;
+    const all = this._allHistoryMessages;
+    const page = this.HISTORY_PAGE_SIZE;
+    const currentlyShown = this._historyLoaded;
+    const newShown = Math.min(all.length, currentlyShown + page);
+    const startIdx = all.length - newShown;
+    const newSlice = all.slice(startIdx, all.length - currentlyShown);
+    this._historyLoaded = newShown;
+    this.hasMoreHistory = startIdx > 0;
+
+    // Remove old "load more" separator at top
+    if (this.messages.length > 0 && this.messages[0].type === 'separator') {
+      this.messages.shift();
+    }
+    // Insert new messages at top + new separator if needed
+    if (this.hasMoreHistory) {
+      this.messages.unshift(...newSlice, { type: 'separator', text: `${startIdx} earlier messages — load more ↑` });
+    } else {
+      this.messages.unshift(...newSlice);
+    }
+    // Update bottom separator
+    const lastSep = this.messages.findLastIndex(m => m.type === 'separator');
+    if (lastSep >= 0) {
+      this.messages[lastSep].text = `${this._historyLoaded} of ${all.length} messages loaded`;
+    }
   },
 
   async loadStatus() {
