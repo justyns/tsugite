@@ -1,5 +1,5 @@
 import Alpine from 'https://cdn.jsdelivr.net/npm/alpinejs@3/dist/module.esm.js';
-import { get, post } from './api.js';
+import { get, post, patch } from './api.js';
 import chatView from './views/chat.js';
 import dashboardView from './views/dashboard.js';
 import scheduleView from './views/schedules.js';
@@ -10,6 +10,7 @@ import agentFileView from './views/agent-files.js';
 import skillFileView from './views/skills.js';
 
 window.Alpine = Alpine;
+window.tsugiteApi = { get, post, patch };
 
 Alpine.store('app', {
   agents: [],

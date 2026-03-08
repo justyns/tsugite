@@ -96,8 +96,9 @@ async def _send_webhook(config, message: str) -> dict:
 class Gateway:
     """Main daemon gateway routing messages between platform adapters and agents."""
 
-    def __init__(self, config: DaemonConfig):
+    def __init__(self, config: DaemonConfig, config_path: Optional[Path] = None):
         self.config = config
+        self.config_path = config_path
         self.adapters: list[BaseAdapter] = []
         self._http_server = None
         self._scheduler_adapter = None
@@ -200,7 +201,9 @@ class Gateway:
 
                 webhook_store = WebhookStore(self.config.state_dir / "webhooks.json")
 
-                self._http_server = HTTPServer(self.config.http, http_adapters, webhook_store, self.config.agents)
+                self._http_server = HTTPServer(
+                    self.config.http, http_adapters, webhook_store, self.config.agents, gateway=self
+                )
 
                 # Always init push store when HTTP is enabled so subscribe/unsubscribe API works
                 try:
@@ -330,5 +333,5 @@ async def run_daemon(config_path: Optional[Path] = None):
         force=True,
     )
 
-    gateway = Gateway(config)
+    gateway = Gateway(config, config_path=config_path)
     await gateway.start()

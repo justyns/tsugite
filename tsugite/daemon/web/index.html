@@ -26,11 +26,6 @@
     </template>
   </div>
   <span class="spacer"></span>
-  <select x-model="$store.app.selectedAgent">
-    <template x-for="a in $store.app.agents" :key="a.name">
-      <option :value="a.name" x-text="a.name"></option>
-    </template>
-  </select>
   <button id="settings-btn" @click="$store.app.showSettings = true">Settings</button>
 </nav>
 
@@ -868,8 +863,8 @@
 
 <!-- Settings modal -->
 <div class="modal-backdrop" :class="{ open: $store.app.showSettings }" @click.self="$store.app.showSettings = false"
-     x-data="{ token: '', userId: '', tempTheme: '', pushSubscribed: false, pushLoading: false }"
-     x-effect="if ($store.app.showSettings) { token = localStorage.getItem('tsugite_token') || ''; userId = $store.app.userId; tempTheme = $store.app.theme; if ('serviceWorker' in navigator && 'PushManager' in window) { navigator.serviceWorker.ready.then(r => r.pushManager.getSubscription()).then(s => { pushSubscribed = !!s; }).catch(() => {}); } }">
+     x-data="{ token: '', userId: '', tempTheme: '', tempModel: '', loadedModel: '', pushSubscribed: false, pushLoading: false }"
+     x-effect="if ($store.app.showSettings) { token = localStorage.getItem('tsugite_token') || ''; userId = $store.app.userId; tempTheme = $store.app.theme; let agent = $store.app.selectedAgent; if (agent) { window.tsugiteApi.get('/api/agents/' + agent + '/status').then(d => { tempModel = d.model || ''; loadedModel = d.model || ''; }).catch(() => {}); } if ('serviceWorker' in navigator && 'PushManager' in window) { navigator.serviceWorker.ready.then(r => r.pushManager.getSubscription()).then(s => { pushSubscribed = !!s; }).catch(() => {}); } }">
   <div class="modal-content">
     <h2>Settings</h2>
     <label>API Token</label>
@@ -883,6 +878,14 @@
       <option value="macchiato">Macchiato</option>
       <option value="mocha">Mocha</option>
     </select>
+    <label>Agent</label>
+    <select x-model="$store.app.selectedAgent">
+      <template x-for="a in $store.app.agents" :key="a.name">
+        <option :value="a.name" x-text="a.name"></option>
+      </template>
+    </select>
+    <label>Model Override</label>
+    <input type="text" x-model="tempModel" placeholder="e.g. anthropic:claude-sonnet-4-20250514 (blank = use agent default)">
     <template x-if="'serviceWorker' in navigator && 'PushManager' in window">
       <div style="margin-bottom:16px">
         <label>Push Notifications</label>
@@ -899,6 +902,9 @@
         localStorage.setItem('tsugite_user_id', $store.app.userId);
         localStorage.setItem('tsugite_theme', tempTheme);
         $store.app.theme = tempTheme;
+        if (tempModel !== loadedModel) {
+          window.tsugiteApi.patch('/api/agents/' + $store.app.selectedAgent + '/config', { model: tempModel || null }).catch(() => {});
+        }
         $store.app.showSettings = false;
       ">Save</button>
     </div>

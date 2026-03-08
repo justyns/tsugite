@@ -163,11 +163,13 @@ class HTTPServer:
         adapters: dict[str, HTTPAgentAdapter],
         webhook_store: WebhookStore,
         agent_configs: dict[str, AgentConfig],
+        gateway=None,
     ):
         self.config = config
         self.adapters = adapters
         self.webhook_store = webhook_store
         self.agent_configs = agent_configs
+        self.gateway = gateway
         self._auth_tokens = set(config.auth_tokens)
         self._server = None
         self.scheduler = None  # Set by Gateway after SchedulerAdapter is created
@@ -209,6 +211,7 @@ class HTTPServer:
             Route("/api/agents/{agent}/status", self._status, methods=["GET"]),
             Route("/api/agents/{agent}/attachments", self._attachments, methods=["GET"]),
             Route("/api/agents/{agent}/history", self._history, methods=["GET"]),
+            Route("/api/agents/{agent}/config", self._update_agent_config, methods=["PATCH"]),
             Route("/api/agents/{agent}/compact", self._compact, methods=["POST"]),
             Route("/api/agents/{agent}/respond", self._respond, methods=["POST"]),
             Route("/api/schedules", self._list_schedules, methods=["GET"]),
@@ -320,6 +323,36 @@ class HTTPServer:
                 ],
             }
         )
+
+    async def _update_agent_config(self, request: Request) -> JSONResponse:
+        adapter, err = self._get_adapter(request)
+        if err:
+            return err
+
+        body = await request.json()
+        agent_name = request.path_params["agent"]
+        agent_config = adapter.agent_config
+
+        if "model" in body:
+            new_model = body["model"].strip() if body["model"] else None
+            agent_config.model = new_model
+
+            from tsugite.daemon.memory import DEFAULT_CONTEXT_LIMIT, get_context_limit
+
+            if new_model:
+                context_limit = get_context_limit(new_model, fallback=DEFAULT_CONTEXT_LIMIT)
+                agent_config.context_limit = context_limit
+            else:
+                context_limit = DEFAULT_CONTEXT_LIMIT
+                agent_config.context_limit = None
+            adapter.session_manager.update_context_limit(context_limit)
+
+            if self.gateway:
+                from tsugite.daemon.config import save_daemon_config
+
+                save_daemon_config(self.gateway.config, self.gateway.config_path)
+
+        return JSONResponse({"status": "ok", "model": adapter.resolve_model(), "context_limit": agent_config.context_limit})
 
     async def _attachments(self, request: Request) -> JSONResponse:
         adapter, err = self._get_adapter(request)
