@@ -550,13 +550,13 @@ async def _execute_agent_with_prompt(
                 # If result has error, raise it AFTER we've already extracted the steps
                 # The exception will be caught by the caller, but steps are already available
                 if result.error:
-                    # Create custom exception that includes execution details
                     raise AgentExecutionError(
                         f"Agent execution failed: {result.error}",
                         execution_steps=steps_list,
                         token_usage=result.token_usage,
                         cost=result.cost,
                         step_count=step_count,
+                        partial_output=str(result.output) if result.output else None,
                     )
 
                 return AgentExecutionResult(

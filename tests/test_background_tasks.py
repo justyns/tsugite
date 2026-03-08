@@ -403,3 +403,133 @@ class TestBackgroundTaskMaxTurns:
 
         added_entry = mock_sched.add.call_args[0][0]
         assert added_entry.max_turns is None
+
+
+class TestPartialOutputOnMaxTurns:
+    def test_agent_execution_error_carries_partial_output(self):
+        err = AgentExecutionError(
+            "Agent reached max_turns",
+            partial_output="I was analyzing the files when I ran out of turns",
+        )
+        assert err.partial_output == "I was analyzing the files when I ran out of turns"
+
+    def test_agent_execution_error_partial_output_defaults_none(self):
+        err = AgentExecutionError("Agent reached max_turns")
+        assert err.partial_output is None
+
+    @pytest.mark.asyncio
+    async def test_failure_notification_includes_partial_output(self):
+        sa, mock_adapter = _make_scheduler_adapter(
+            notification_channels={"dm": _make_discord_channel()},
+        )
+        mock_adapter.handle_message = AsyncMock(
+            side_effect=AgentExecutionError(
+                "Agent reached max_turns (5)",
+                partial_output="Partial work done here",
+            )
+        )
+
+        entry = ScheduleEntry(
+            id="bg-partial",
+            agent="bot",
+            prompt="do something",
+            schedule_type="once",
+            run_at="2099-01-01T00:00:00Z",
+            notify=["dm"],
+        )
+
+        with (
+            patch("tsugite.daemon.adapters.scheduler_adapter.send_notification") as mock_notify,
+            patch("tsugite.interaction.set_interaction_backend"),
+        ):
+            with pytest.raises(AgentExecutionError):
+                await sa._run_agent(entry)
+
+        mock_notify.assert_called_once()
+        notification_text = mock_notify.call_args[0][0]
+        assert "Partial output" in notification_text
+        assert "Partial work done here" in notification_text
+
+    @pytest.mark.asyncio
+    async def test_failure_notification_without_partial_output(self):
+        sa, mock_adapter = _make_scheduler_adapter(
+            notification_channels={"dm": _make_discord_channel()},
+        )
+        mock_adapter.handle_message = AsyncMock(
+            side_effect=AgentExecutionError("Agent reached max_turns (5)")
+        )
+
+        entry = ScheduleEntry(
+            id="bg-no-partial",
+            agent="bot",
+            prompt="do something",
+            schedule_type="once",
+            run_at="2099-01-01T00:00:00Z",
+            notify=["dm"],
+        )
+
+        with (
+            patch("tsugite.daemon.adapters.scheduler_adapter.send_notification") as mock_notify,
+            patch("tsugite.interaction.set_interaction_backend"),
+        ):
+            with pytest.raises(AgentExecutionError):
+                await sa._run_agent(entry)
+
+        mock_notify.assert_called_once()
+        notification_text = mock_notify.call_args[0][0]
+        assert "Partial output" not in notification_text
+
+
+class TestPartialHistoryOnError:
+    @pytest.mark.asyncio
+    async def test_saves_history_on_agent_execution_error(self, tmp_path):
+        from tsugite.daemon.adapters.base import BaseAdapter, ChannelContext
+
+        mock_adapter = MagicMock(spec=BaseAdapter)
+        mock_adapter.agent_name = "bot"
+        mock_adapter.agent_config = MagicMock()
+        mock_adapter.agent_config.model = "test-model"
+        mock_adapter.agent_config.max_turns = None
+        mock_adapter.agent_config.workspace = None
+        mock_adapter.agent_config.workspace_dir = tmp_path
+        mock_adapter.session_manager = MagicMock()
+        mock_adapter.session_manager.needs_compaction.return_value = False
+        mock_adapter.session_manager.get_or_create_session.return_value = "conv-123"
+        mock_adapter.resolve_user = MagicMock(return_value="test-user")
+        mock_adapter._resolve_agent_path = MagicMock(return_value=Path("/fake/agent.yaml"))
+        mock_adapter._build_message_context = MagicMock(return_value="test prompt")
+        mock_adapter._build_agent_context = MagicMock(return_value={})
+        mock_adapter._get_workspace_attachments = MagicMock(return_value=[])
+        mock_adapter._emit_ui = MagicMock()
+        mock_adapter._identity_map = {}
+
+        channel_ctx = ChannelContext(source="test", channel_id="ch1", user_id="test-user", reply_to="test:test-user")
+
+        error = AgentExecutionError(
+            "Agent reached max_turns (5)",
+            partial_output="I found 3 files",
+            token_usage=100,
+            cost=0.05,
+            execution_steps=[{"step": 1}],
+        )
+
+        with (
+            patch("tsugite.daemon.adapters.base.run_agent", side_effect=error),
+            patch("tsugite.agent_runner.history_integration.save_run_to_history") as mock_save,
+        ):
+            mock_adapter.resolve_model = MagicMock(return_value="test-model")
+            mock_adapter._save_history = BaseAdapter._save_history.__get__(mock_adapter, BaseAdapter)
+            with pytest.raises(AgentExecutionError):
+                await BaseAdapter.handle_message(
+                    mock_adapter,
+                    user_id="test-user",
+                    message="test prompt",
+                    channel_context=channel_ctx,
+                )
+
+        mock_save.assert_called_once()
+        call_kwargs = mock_save.call_args[1]
+        assert "[Error:" in call_kwargs["result"]
+        assert "I found 3 files" in call_kwargs["result"]
+        assert call_kwargs["token_count"] == 100
+        assert call_kwargs["cost"] == 0.05

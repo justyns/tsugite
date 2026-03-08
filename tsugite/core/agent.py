@@ -655,9 +655,14 @@ class TsugiteAgent:
             if self.event_bus:
                 self.event_bus.emit(ErrorEvent(error=error_msg, error_type="RuntimeError"))
 
+            partial_output = None
+            if self.memory.steps:
+                last_step = self.memory.steps[-1]
+                partial_output = last_step.thought or last_step.output
+
             if return_full_result:
                 return AgentResult(
-                    output=None,
+                    output=partial_output,
                     token_usage=None,
                     cost=self.total_cost,
                     steps=self.memory.steps,

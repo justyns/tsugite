@@ -18,6 +18,7 @@ from tzlocal import get_localzone
 from tsugite.agent_inheritance import find_agent_file
 from tsugite.agent_runner import run_agent
 from tsugite.daemon.config import AgentConfig
+from tsugite.exceptions import AgentExecutionError
 from tsugite.daemon.session import SessionManager
 from tsugite.options import ExecutionOptions
 
@@ -194,6 +195,32 @@ class BaseAdapter(ABC):
         except Exception:
             return "unknown"
 
+    def _save_history(
+        self, *, agent_path, message, conv_id, metadata, result_str,
+        token_count=None, cost=None, execution_steps=None,
+        system_prompt=None, attachments=None, claude_code_session_id=None,
+    ):
+        try:
+            from tsugite.agent_runner.history_integration import save_run_to_history
+
+            save_run_to_history(
+                agent_path=agent_path,
+                agent_name=self.agent_name,
+                prompt=message,
+                result=result_str,
+                model=self.resolve_model(),
+                token_count=token_count,
+                cost=cost,
+                execution_steps=execution_steps,
+                continue_conversation_id=conv_id,
+                channel_metadata=metadata,
+                system_prompt=system_prompt,
+                attachments=attachments,
+                claude_code_session_id=claude_code_session_id,
+            )
+        except Exception as e:
+            logger.warning("Failed to save daemon history: %s", e)
+
     @abstractmethod
     async def start(self) -> None:
         """Start the adapter."""
@@ -345,30 +372,28 @@ class BaseAdapter(ABC):
                 os.chdir(original_cwd)
 
         ctx = contextvars.copy_context()
-        result = await asyncio.to_thread(ctx.run, run_in_workspace)
-
         try:
-            from tsugite.agent_runner.history_integration import save_run_to_history
-            from tsugite.agent_runner.validation import get_agent_info
-
-            agent_info = get_agent_info(agent_path)
-            save_run_to_history(
-                agent_path=agent_path,
-                agent_name=self.agent_name,
-                prompt=message,
-                result=str(result),
-                model=agent_info.get("model", "unknown"),
-                token_count=getattr(result, "token_count", None),
-                cost=getattr(result, "cost", None),
-                execution_steps=getattr(result, "execution_steps", None),
-                continue_conversation_id=conv_id,
-                system_prompt=getattr(result, "system_message", None),
-                attachments=getattr(result, "attachments", None),
-                channel_metadata=metadata,
-                claude_code_session_id=getattr(result, "claude_code_session_id", None),
+            result = await asyncio.to_thread(ctx.run, run_in_workspace)
+        except AgentExecutionError as e:
+            error_result = f"[Error: {e}]\n\n{e.partial_output}" if e.partial_output else f"[Error: {e}]"
+            self._save_history(
+                agent_path=agent_path, message=message, conv_id=conv_id,
+                metadata=metadata, result_str=error_result,
+                token_count=e.token_usage, cost=e.cost,
+                execution_steps=e.execution_steps,
             )
-        except Exception as e:
-            logger.warning("Failed to save daemon history: %s", e)
+            raise
+
+        self._save_history(
+            agent_path=agent_path, message=message, conv_id=conv_id,
+            metadata=metadata, result_str=str(result),
+            token_count=getattr(result, "token_count", None),
+            cost=getattr(result, "cost", None),
+            execution_steps=getattr(result, "execution_steps", None),
+            system_prompt=getattr(result, "system_message", None),
+            attachments=getattr(result, "attachments", None),
+            claude_code_session_id=getattr(result, "claude_code_session_id", None),
+        )
 
         if result.context_window:
             self.session_manager.update_context_limit(result.context_window)

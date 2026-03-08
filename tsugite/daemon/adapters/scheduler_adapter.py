@@ -134,13 +134,15 @@ class SchedulerAdapter:
                     message=entry.prompt,
                     channel_context=channel_context,
                 )
-        except AgentExecutionError:
+        except AgentExecutionError as e:
             if resolved_channels:
                 try:
-                    notification = f"**Background task `{entry.id}` failed:**\n\n{entry.prompt[:200]}"
+                    notification = f"**Background task `{entry.id}` failed:**\n\n{e}"
+                    if e.partial_output:
+                        notification += f"\n\n**Partial output:**\n{e.partial_output[:2000]}"
                     await asyncio.to_thread(send_notification, notification, resolved_channels)
-                except Exception as e:
-                    logger.error("Failure notification for schedule '%s' failed: %s", entry.id, e)
+                except Exception as notify_err:
+                    logger.error("Failure notification for schedule '%s' failed: %s", entry.id, notify_err)
             raise
 
         logger.info("Schedule '%s' agent '%s' completed", entry.id, entry.agent)

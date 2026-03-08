@@ -23,18 +23,11 @@ class AgentExecutionError(RuntimeError):
         token_usage: Optional[int] = None,
         cost: Optional[float] = None,
         step_count: int = 0,
+        partial_output: Optional[str] = None,
     ):
-        """Initialize AgentExecutionError.
-
-        Args:
-            message: Error message
-            execution_steps: List of step results from execution
-            token_usage: Token usage count
-            cost: Cost of execution
-            step_count: Number of steps taken
-        """
         super().__init__(message)
         self.execution_steps = execution_steps or []
         self.token_usage = token_usage
         self.cost = cost
         self.step_count = step_count
+        self.partial_output = partial_output
