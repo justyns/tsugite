@@ -868,18 +868,8 @@
 
 <!-- Settings modal -->
 <div class="modal-backdrop" :class="{ open: $store.app.showSettings }" @click.self="$store.app.showSettings = false"
-     x-data="{ token: '', userId: '', tempTheme: '', pushSubscribed: false, pushLoading: false,
-       async initPush() { if ('serviceWorker' in navigator && 'PushManager' in window) { try { const reg = await navigator.serviceWorker.ready; const sub = await reg.pushManager.getSubscription(); this.pushSubscribed = !!sub; } catch {} } },
-       async togglePush() {
-         this.pushLoading = true;
-         try {
-           if (this.pushSubscribed) { await window.tsugiteUnsubscribePush(); this.pushSubscribed = false; }
-           else { await window.tsugiteSubscribePush(); this.pushSubscribed = true; }
-         } catch (e) { console.error('Push toggle failed:', e); }
-         this.pushLoading = false;
-       }
-     }"
-     x-effect="if ($store.app.showSettings) { token = localStorage.getItem('tsugite_token') || ''; userId = $store.app.userId; tempTheme = $store.app.theme; this.initPush(); }">
+     x-data="{ token: '', userId: '', tempTheme: '', pushSubscribed: false, pushLoading: false }"
+     x-effect="if ($store.app.showSettings) { token = localStorage.getItem('tsugite_token') || ''; userId = $store.app.userId; tempTheme = $store.app.theme; if ('serviceWorker' in navigator && 'PushManager' in window) { navigator.serviceWorker.ready.then(r => r.pushManager.getSubscription()).then(s => { pushSubscribed = !!s; }).catch(() => {}); } }">
   <div class="modal-content">
     <h2>Settings</h2>
     <label>API Token</label>
@@ -896,7 +886,8 @@
     <template x-if="'serviceWorker' in navigator && 'PushManager' in window">
       <div style="margin-bottom:16px">
         <label>Push Notifications</label>
-        <button class="btn-sm" @click="togglePush()" :disabled="pushLoading"
+        <button class="btn-sm" :disabled="pushLoading"
+                @click="pushLoading = true; (pushSubscribed ? window.tsugiteUnsubscribePush() : window.tsugiteSubscribePush()).then(() => { pushSubscribed = !pushSubscribed; }).catch(e => console.error('Push toggle failed:', e)).finally(() => { pushLoading = false; })"
                 x-text="pushLoading ? 'Working...' : (pushSubscribed ? 'Disable Notifications' : 'Enable Notifications')"></button>
       </div>
     </template>
