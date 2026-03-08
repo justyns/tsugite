@@ -32,6 +32,16 @@ export { del_ as del };
 
 export function streamPost(path, body) { return request('POST', path, body, true); }
 
+export function connectEvents(onEvent) {
+  const token = getToken();
+  const url = token ? `/api/events?token=${encodeURIComponent(token)}` : '/api/events';
+  const es = new EventSource(url);
+  es.onmessage = (e) => {
+    try { onEvent(JSON.parse(e.data)); } catch { /* ignore parse errors */ }
+  };
+  return es;
+}
+
 export async function uploadFiles(path, files) {
   const form = new FormData();
   for (const f of files) form.append('files', f);

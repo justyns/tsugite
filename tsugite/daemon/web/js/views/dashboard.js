@@ -6,23 +6,25 @@ export default () => ({
   upcomingSchedules: [],
   loading: true,
   error: null,
-  _interval: null,
+  _debounceTimer: null,
 
   init() {
     this.load();
-    this._pollMs = 30000;
-    this._interval = setInterval(() => this.load(), this._pollMs);
+    this.$watch('$store.app.lastEvent', (ev) => {
+      if (!ev) return;
+      if (ev.type === 'agent_status' || ev.type === 'schedule_update') {
+        this._debouncedLoad();
+      }
+    });
   },
 
   destroy() {
-    if (this._interval) clearInterval(this._interval);
+    if (this._debounceTimer) clearTimeout(this._debounceTimer);
   },
 
-  _setPollRate(ms) {
-    if (ms === this._pollMs) return;
-    this._pollMs = ms;
-    clearInterval(this._interval);
-    this._interval = setInterval(() => this.load(), ms);
+  _debouncedLoad() {
+    if (this._debounceTimer) clearTimeout(this._debounceTimer);
+    this._debounceTimer = setTimeout(() => this.load(), 200);
   },
 
   async load() {
@@ -44,9 +46,6 @@ export default () => ({
         }
       }
       this.agentCards = cards;
-
-      const anyRunning = cards.some(c => c.running_tasks > 0);
-      this._setPollRate(anyRunning ? 5000 : 30000);
 
       // Sort schedules by next_run, take first 5
       const schedules = (schedulesData.schedules || [])

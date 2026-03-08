@@ -267,7 +267,10 @@ class Gateway:
                     msg = f"**Review requested** for session `{session.id}`:\n\n> {review.title}"
                     await asyncio.to_thread(send_notification, msg, resolved)
 
-            self._session_runner = SessionRunner(session_store, http_adapters, review_notify_callback=_review_notify)
+            event_bus = self._http_server.event_bus if self._http_server else None
+            self._session_runner = SessionRunner(
+                session_store, http_adapters, review_notify_callback=_review_notify, event_bus=event_bus
+            )
             if self._http_server:
                 self._http_server.session_runner = self._session_runner
             set_session_runner(self._session_runner, asyncio.get_running_loop())

@@ -1,5 +1,5 @@
 import Alpine from 'https://cdn.jsdelivr.net/npm/alpinejs@3/dist/module.esm.js';
-import { get, post, patch } from './api.js';
+import { get, post, patch, connectEvents } from './api.js';
 import chatView from './views/chat.js';
 import dashboardView from './views/dashboard.js';
 import scheduleView from './views/schedules.js';
@@ -19,6 +19,7 @@ Alpine.store('app', {
   theme: localStorage.getItem('tsugite_theme') || 'frappe',
   userId: localStorage.getItem('tsugite_user_id') || 'web-user-1',
   showSettings: false,
+  lastEvent: null,
 });
 
 Alpine.data('chatView', chatView);
@@ -49,6 +50,15 @@ async function loadAgents() {
 }
 
 loadAgents();
+
+// SSE event stream — push updates to Alpine store
+const _es = connectEvents((event) => {
+  Alpine.store('app').lastEvent = { ...event, _ts: Date.now() };
+});
+_es.onopen = () => {
+  // On reconnect, refresh agents to catch up
+  loadAgents();
+};
 
 // Service worker + push notifications
 if ('serviceWorker' in navigator) {

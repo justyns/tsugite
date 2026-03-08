@@ -15,7 +15,6 @@ from tsugite.daemon.agent_session import (
     ReviewGate,
     SessionState,
 )
-
 logger = logging.getLogger(__name__)
 
 # Context var for per-session state
@@ -34,11 +33,12 @@ class SessionReviewBackend:
 
     TIMEOUT = 3600  # 1 hour
 
-    def __init__(self, store: AgentSessionStore, session_id: str, on_review_created=None):
+    def __init__(self, store: AgentSessionStore, session_id: str, on_review_created=None, event_bus=None):
         self._store = store
         self._session_id = session_id
         self._review_events: dict[str, threading.Event] = {}
         self._on_review_created = on_review_created
+        self._event_bus = event_bus
 
     def ask_user(self, question: str, question_type: str = "text", options: Optional[list[str]] = None) -> str:
         context = {}
@@ -55,6 +55,9 @@ class SessionReviewBackend:
             id="", session_id=self._session_id, title=title, description=description, context=context or {}
         )
         review = self._store.create_review(review)
+
+        if self._event_bus:
+            self._event_bus.emit("review_update", {"action": "created", "id": review.id, "session_id": self._session_id})
 
         if self._on_review_created:
             self._on_review_created(review)
@@ -105,11 +108,13 @@ class SessionRunner:
         adapters: dict,
         notify_callback: Optional[NotifyCallback] = None,
         review_notify_callback: Optional[ReviewNotifyCallback] = None,
+        event_bus=None,
     ):
         self._store = store
         self._adapters = adapters
         self._notify_callback = notify_callback
         self._review_notify_callback = review_notify_callback
+        self._event_bus = event_bus
         self._active_tasks: dict[str, asyncio.Task] = {}
         self._review_backends: dict[str, SessionReviewBackend] = {}
 
@@ -147,7 +152,9 @@ class SessionRunner:
                 loop = asyncio.get_event_loop()
                 loop.create_task(self._review_notify_callback(session, review))
 
-        review_backend = SessionReviewBackend(self._store, session.id, on_review_created=_on_review_created)
+        review_backend = SessionReviewBackend(
+            self._store, session.id, on_review_created=_on_review_created, event_bus=self._event_bus
+        )
         self._review_backends[session.id] = review_backend
 
         custom_logger = SimpleNamespace(ui_handler=progress)
@@ -185,6 +192,9 @@ class SessionRunner:
                 current_review_id=None,
             )
             progress._emit("session_complete", {"result_preview": str(result)[:500]})
+            if self._event_bus:
+                self._event_bus.emit("session_update", {"action": "completed", "id": session.id})
+                self._event_bus.emit("agent_status", {"agent": session.agent})
             logger.info("Session '%s' completed", session.id)
 
             if self._notify_callback:
@@ -196,10 +206,14 @@ class SessionRunner:
         except asyncio.CancelledError:
             self._store.update_session(session.id, state=SessionState.CANCELLED.value)
             progress._emit("session_cancelled", {})
+            if self._event_bus:
+                self._event_bus.emit("session_update", {"action": "cancelled", "id": session.id})
             logger.info("Session '%s' cancelled", session.id)
         except Exception as e:
             self._store.update_session(session.id, state=SessionState.FAILED.value, error=str(e))
             progress._emit("session_error", {"error": str(e)})
+            if self._event_bus:
+                self._event_bus.emit("session_update", {"action": "failed", "id": session.id})
             logger.error("Session '%s' failed: %s", session.id, e)
         finally:
             self._review_backends.pop(session.id, None)

@@ -11,31 +11,25 @@ export default () => ({
   error: null,
   reviewComment: '',
   form: { agent: '', prompt: '', model: '' },
-  _refreshTimer: null,
+  _debounceTimer: null,
 
   init() {
     this.load();
-    this._startPolling();
-    this.$watch('$store.app.view', (view) => {
-      if (view === 'sessions') this._startPolling();
-      else this._stopPolling();
+    this.$watch('$store.app.lastEvent', (ev) => {
+      if (!ev) return;
+      if (ev.type === 'session_update' || ev.type === 'review_update') {
+        this._debouncedLoad();
+      }
     });
   },
 
   destroy() {
-    this._stopPolling();
+    if (this._debounceTimer) clearTimeout(this._debounceTimer);
   },
 
-  _startPolling() {
-    if (this._refreshTimer) return;
-    this._refreshTimer = setInterval(() => this.load(), 5000);
-  },
-
-  _stopPolling() {
-    if (this._refreshTimer) {
-      clearInterval(this._refreshTimer);
-      this._refreshTimer = null;
-    }
+  _debouncedLoad() {
+    if (this._debounceTimer) clearTimeout(this._debounceTimer);
+    this._debounceTimer = setTimeout(() => this.load(), 200);
   },
 
   async load() {

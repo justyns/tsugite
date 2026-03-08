@@ -62,6 +62,56 @@ def _should_context_attach(path: Path, size: int) -> bool:
     return False
 
 
+class SSEBroadcaster:
+    """Pub/sub for pushing real-time events to SSE subscribers."""
+
+    def __init__(self):
+        self._subscribers: list[asyncio.Queue] = []
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._loop_thread_id: Optional[int] = None
+
+    def subscribe(self) -> asyncio.Queue:
+        if self._loop is None:
+            self._loop = asyncio.get_running_loop()
+            self._loop_thread_id = threading.current_thread().ident
+        q: asyncio.Queue = asyncio.Queue(maxsize=64)
+        self._subscribers.append(q)
+        return q
+
+    def unsubscribe(self, q: asyncio.Queue):
+        try:
+            self._subscribers.remove(q)
+        except ValueError:
+            pass
+
+    def emit(self, event_type: str, data: dict | None = None):
+        if not self._subscribers:
+            return
+        msg = {"type": event_type, "data": data or {}}
+        on_loop = threading.current_thread().ident == self._loop_thread_id
+        for q in list(self._subscribers):
+            try:
+                if on_loop:
+                    q.put_nowait(msg)
+                elif self._loop:
+                    self._loop.call_soon_threadsafe(q.put_nowait, msg)
+            except (asyncio.QueueFull, RuntimeError):
+                pass
+
+
+async def sse_stream(queue: asyncio.Queue, keepalive_interval: float = 15.0):
+    """Shared async generator for SSE streams with keepalive."""
+    while True:
+        try:
+            data = await asyncio.wait_for(queue.get(), timeout=keepalive_interval)
+        except asyncio.TimeoutError:
+            yield ": keepalive\n\n"
+            continue
+        if data is None:
+            break
+        yield f"data: {json.dumps(data)}\n\n"
+
+
 class SSEProgressHandler(JSONLUIHandler):
     """Converts agent events to SSE messages via an async queue."""
 
@@ -177,12 +227,15 @@ class HTTPServer:
         self.push_store = None  # Set by Gateway if web-push is configured
         self.vapid_public_key = None  # Set by Gateway if web-push is configured
         self._active_backends: dict[tuple[str, str], HTTPInteractionBackend] = {}
+        self.event_bus = SSEBroadcaster()
         self.app = self._build_app()
 
     def _check_auth(self, request: Request) -> Optional[JSONResponse]:
         if not self._auth_tokens:
             return None
         token = request.headers.get("authorization", "").removeprefix("Bearer ")
+        if not token:
+            token = request.query_params.get("token", "")
         if token not in self._auth_tokens:
             return JSONResponse({"error": "unauthorized"}, status_code=401)
         return None
@@ -242,6 +295,7 @@ class HTTPServer:
             Route("/api/skill-files", self._list_skill_files, methods=["GET"]),
             Route("/api/skill-files/content", self._read_skill_file, methods=["GET"]),
             Route("/api/skill-files/content", self._save_skill_file, methods=["PUT"]),
+            Route("/api/events", self._events, methods=["GET"]),
             Route("/api/push/vapid-key", self._push_vapid_key, methods=["GET"]),
             Route("/api/push/subscribe", self._push_subscribe, methods=["POST"]),
             Route("/api/push/unsubscribe", self._push_unsubscribe, methods=["POST"]),
@@ -352,6 +406,7 @@ class HTTPServer:
 
                 save_daemon_config(self.gateway.config, self.gateway.config_path)
 
+        self.event_bus.emit("agent_status", {"agent": agent_name})
         return JSONResponse({"status": "ok", "model": adapter.resolve_model(), "context_limit": agent_config.context_limit})
 
     async def _attachments(self, request: Request) -> JSONResponse:
@@ -469,6 +524,8 @@ class HTTPServer:
             return JSONResponse({"error": f"compaction failed: {e}"}, status_code=500)
 
         new_session = adapter.session_manager.sessions.get(user_id)
+        agent_name = request.path_params["agent"]
+        self.event_bus.emit("agent_status", {"agent": agent_name})
         return JSONResponse(
             {
                 "status": "compacted",
@@ -649,6 +706,8 @@ class HTTPServer:
                 if not progress.has_final:
                     progress._emit("final_result", {"result": response})
 
+                self.event_bus.emit("agent_status", {"agent": agent_name})
+
                 # Emit session info for the web UI status bar
                 session = adapter.session_manager.sessions.get(user_id)
                 if session:
@@ -697,6 +756,7 @@ class HTTPServer:
             getattr(self.scheduler, action)(schedule_id)
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=404)
+        self.event_bus.emit("schedule_update", {"action": status_label, "id": schedule_id})
         return JSONResponse({"status": status_label})
 
     async def _list_schedules(self, request: Request) -> JSONResponse:
@@ -725,6 +785,7 @@ class HTTPServer:
         except (ValueError, TypeError) as e:
             return JSONResponse({"error": str(e)}, status_code=400)
 
+        self.event_bus.emit("schedule_update", {"action": "created", "id": entry.id})
         return JSONResponse(asdict(entry), status_code=201)
 
     async def _get_schedule(self, request: Request) -> JSONResponse:
@@ -764,6 +825,7 @@ class HTTPServer:
             entry = self.scheduler.update(schedule_id, **fields)
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
+        self.event_bus.emit("schedule_update", {"action": "updated", "id": schedule_id})
         return JSONResponse(asdict(entry))
 
     async def _delete_schedule(self, request: Request) -> JSONResponse:
@@ -790,6 +852,7 @@ class HTTPServer:
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=404)
         self.scheduler.fire_now(schedule_id)
+        self.event_bus.emit("schedule_update", {"action": "triggered", "id": schedule_id})
         return JSONResponse({"status": "triggered", "schedule_id": schedule_id})
 
     async def _cleanup_schedules(self, request: Request) -> JSONResponse:
@@ -868,6 +931,7 @@ class HTTPServer:
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
 
+        self.event_bus.emit("session_update", {"action": "started", "id": result.id})
         return JSONResponse(
             {"id": result.id, "state": result.state, "created_at": result.created_at},
             status_code=201,
@@ -890,6 +954,7 @@ class HTTPServer:
             self.session_runner.cancel_session(session_id)
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=404)
+        self.event_bus.emit("session_update", {"action": "cancelled", "id": session_id})
         return JSONResponse({"status": "cancelled"})
 
     async def _api_restart_session(self, request: Request) -> JSONResponse:
@@ -924,6 +989,7 @@ class HTTPServer:
             result = self.session_runner.start_session(new_session)
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
+        self.event_bus.emit("session_update", {"action": "restarted", "id": result.id})
         return JSONResponse(
             {"id": result.id, "state": result.state, "restarted_from": session_id},
             status_code=201,
@@ -977,6 +1043,7 @@ class HTTPServer:
             self.session_runner.resolve_review(review_id, decision, comment)
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
+        self.event_bus.emit("review_update", {"action": "resolved", "id": review_id})
         return JSONResponse({"status": "resolved", "decision": decision})
 
     async def _list_webhooks(self, request: Request) -> JSONResponse:
@@ -1236,6 +1303,24 @@ class HTTPServer:
         self.push_store.unsubscribe(endpoint)
         return JSONResponse({"status": "unsubscribed"})
 
+    async def _events(self, request: Request) -> Response:
+        if err := self._check_auth(request):
+            return err
+        queue = self.event_bus.subscribe()
+
+        async def generator():
+            try:
+                async for chunk in sse_stream(queue):
+                    yield chunk
+            finally:
+                self.event_bus.unsubscribe(queue)
+
+        return StreamingResponse(
+            generator(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+        )
+
     async def _serve_ui(self, request: Request) -> Response:
         ui_path = WEB_DIR / "index.html"
         if not ui_path.exists():
@@ -1251,6 +1336,7 @@ class HTTPServer:
             port=self.config.port,
             log_level="info",
             log_config=None,
+            access_log=False,
         )
         self._server = uvicorn.Server(config)
         logger.info("HTTP API listening on http://%s:%d", self.config.host, self.config.port)
