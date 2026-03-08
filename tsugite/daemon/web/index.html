@@ -232,7 +232,7 @@
         <template x-if="attachments.length === 0">
           <p style="color:var(--muted);font-size:13px">No attachments</p>
         </template>
-        <template x-for="att in attachments" :key="att.name">
+        <template x-for="(att, i) in attachments" :key="i">
           <div class="att-item" x-data="{ open: false }">
             <div class="att-header" @click="open = !open">
               <span class="att-name" x-text="att.name"></span>
