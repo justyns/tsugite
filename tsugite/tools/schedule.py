@@ -342,6 +342,7 @@ def background_task(
     notify_tool: bool = False,
     inject_history: bool = False,
     model: Optional[str] = None,
+    max_turns: Optional[int] = None,
     execution_type: str = "agent",
     command: Optional[str] = None,
     script_timeout: int = 60,
@@ -365,6 +366,7 @@ def background_task(
         notify_tool: If true, gives the background agent the notify_user tool.
         inject_history: If true, inject raw result into user session (in addition to auto-reply).
         model: Optional model override (e.g., "openai:gpt-4o-mini").
+        max_turns: Optional max reasoning turns for the agent. Limits how many LLM iterations the task can use.
         execution_type: "agent" (default) runs an LLM agent, "script" runs a shell command directly.
         command: Shell command to execute when execution_type is "script".
         script_timeout: Max seconds for script execution (default: 60).
@@ -400,6 +402,7 @@ def background_task(
         inject_history=inject_history,
         auto_reply=bool(notify),
         model=model,
+        max_turns=max_turns,
         execution_type=execution_type,
         command=command,
         script_timeout=script_timeout,

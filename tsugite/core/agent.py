@@ -102,6 +102,9 @@ class AgentResult:
     claude_code_session_id: Optional[str] = None
     context_window: Optional[int] = None
 
+    def __str__(self) -> str:
+        return self.output if self.output else self.error if self.error else ""
+
 
 class TsugiteAgent:
     """Custom agent that uses Thought/Code/Observation loop.

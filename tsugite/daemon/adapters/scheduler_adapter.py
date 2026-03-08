@@ -9,6 +9,7 @@ from pathlib import Path
 from tsugite.daemon.adapters.base import BaseAdapter, ChannelContext
 from tsugite.daemon.config import NotificationChannelConfig
 from tsugite.daemon.scheduler import ScheduleEntry, Scheduler
+from tsugite.exceptions import AgentExecutionError
 from tsugite.tools.notify import notify_context, send_notification
 
 logger = logging.getLogger(__name__)
@@ -126,12 +127,21 @@ class SchedulerAdapter:
         set_interaction_backend(NonInteractiveBackend())
 
         ctx = notify_context(resolved_channels) if (entry.notify_tool and resolved_channels) else nullcontext()
-        with ctx:
-            result = await adapter.handle_message(
-                user_id=user_id,
-                message=entry.prompt,
-                channel_context=channel_context,
-            )
+        try:
+            with ctx:
+                result = await adapter.handle_message(
+                    user_id=user_id,
+                    message=entry.prompt,
+                    channel_context=channel_context,
+                )
+        except AgentExecutionError:
+            if resolved_channels:
+                try:
+                    notification = f"**Background task `{entry.id}` failed:**\n\n{entry.prompt[:200]}"
+                    await asyncio.to_thread(send_notification, notification, resolved_channels)
+                except Exception as e:
+                    logger.error("Failure notification for schedule '%s' failed: %s", entry.id, e)
+            raise
 
         logger.info("Schedule '%s' agent '%s' completed", entry.id, entry.agent)
 

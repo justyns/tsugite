@@ -10,6 +10,7 @@ import pytest
 from tsugite.daemon.adapters.scheduler_adapter import SchedulerAdapter
 from tsugite.daemon.config import NotificationChannelConfig
 from tsugite.daemon.scheduler import ScheduleEntry, Scheduler
+from tsugite.exceptions import AgentExecutionError
 
 
 @pytest.fixture
@@ -294,3 +295,111 @@ class TestAutoReply:
 
         # Fallback notification should have been attempted
         assert mock_notify.call_count >= 1
+
+
+class TestAgentExecutionErrorNotification:
+    @pytest.mark.asyncio
+    async def test_sends_failure_notification_on_agent_execution_error(self):
+        sa, mock_adapter = _make_scheduler_adapter(
+            notification_channels={"dm": _make_discord_channel()},
+        )
+        mock_adapter.handle_message = AsyncMock(
+            side_effect=AgentExecutionError("Agent reached max_turns (5)")
+        )
+
+        entry = ScheduleEntry(
+            id="bg-fail",
+            agent="bot",
+            prompt="do something",
+            schedule_type="once",
+            run_at="2099-01-01T00:00:00Z",
+            notify=["dm"],
+        )
+
+        with (
+            patch("tsugite.daemon.adapters.scheduler_adapter.send_notification") as mock_notify,
+            patch("tsugite.interaction.set_interaction_backend"),
+        ):
+            with pytest.raises(AgentExecutionError):
+                await sa._run_agent(entry)
+
+        mock_notify.assert_called_once()
+        notification_text = mock_notify.call_args[0][0]
+        assert "failed" in notification_text
+        assert "bg-fail" in notification_text
+
+    @pytest.mark.asyncio
+    async def test_reraises_after_notification(self):
+        sa, mock_adapter = _make_scheduler_adapter(
+            notification_channels={"dm": _make_discord_channel()},
+        )
+        mock_adapter.handle_message = AsyncMock(
+            side_effect=AgentExecutionError("Agent reached max_turns (5)")
+        )
+
+        entry = ScheduleEntry(
+            id="bg-fail",
+            agent="bot",
+            prompt="do something",
+            schedule_type="once",
+            run_at="2099-01-01T00:00:00Z",
+            notify=["dm"],
+        )
+
+        with (
+            patch("tsugite.daemon.adapters.scheduler_adapter.send_notification"),
+            patch("tsugite.interaction.set_interaction_backend"),
+        ):
+            with pytest.raises(AgentExecutionError, match="max_turns"):
+                await sa._run_agent(entry)
+
+    @pytest.mark.asyncio
+    async def test_no_notification_when_no_channels(self):
+        sa, mock_adapter = _make_scheduler_adapter()
+        mock_adapter.handle_message = AsyncMock(
+            side_effect=AgentExecutionError("Agent reached max_turns (5)")
+        )
+
+        entry = ScheduleEntry(
+            id="bg-fail",
+            agent="bot",
+            prompt="do something",
+            schedule_type="once",
+            run_at="2099-01-01T00:00:00Z",
+        )
+
+        with (
+            patch("tsugite.daemon.adapters.scheduler_adapter.send_notification") as mock_notify,
+            patch("tsugite.interaction.set_interaction_backend"),
+        ):
+            with pytest.raises(AgentExecutionError):
+                await sa._run_agent(entry)
+
+        mock_notify.assert_not_called()
+
+
+class TestBackgroundTaskMaxTurns:
+    def test_passes_max_turns_to_entry(self, tool_loop):
+        from tsugite.tools.schedule import background_task, set_scheduler
+
+        mock_sched = MagicMock()
+        set_scheduler(mock_sched, tool_loop, channel_names={"my-discord"}, agent_names={"bot"})
+
+        with patch("tsugite.agent_runner.helpers.get_current_agent", return_value="bot"):
+            result = background_task(prompt="test", notify=["my-discord"], max_turns=5)
+
+        assert result["status"] == "started"
+        added_entry = mock_sched.add.call_args[0][0]
+        assert added_entry.max_turns == 5
+
+    def test_max_turns_defaults_to_none(self, tool_loop):
+        from tsugite.tools.schedule import background_task, set_scheduler
+
+        mock_sched = MagicMock()
+        set_scheduler(mock_sched, tool_loop, channel_names={"my-discord"}, agent_names={"bot"})
+
+        with patch("tsugite.agent_runner.helpers.get_current_agent", return_value="bot"):
+            background_task(prompt="test", notify=["my-discord"])
+
+        added_entry = mock_sched.add.call_args[0][0]
+        assert added_entry.max_turns is None
