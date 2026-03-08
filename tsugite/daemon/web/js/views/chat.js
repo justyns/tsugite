@@ -405,6 +405,12 @@ export default () => ({
       prog.steps.push({ html: `<span class="err">${escapeHtml(event.message)}</span>` });
     } else if (event.type === 'info') {
       prog.steps.push({ html: escapeHtml(event.message) });
+      // Show info as a visible chat bubble (issue #31)
+      this.messages.push({ type: 'info', text: event.message });
+      this.$nextTick(() => {
+        const el = this.$refs.messages;
+        if (el) scrollToBottom(el);
+      });
     }
   },
 

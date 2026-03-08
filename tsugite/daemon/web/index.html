@@ -121,6 +121,9 @@
           <template x-if="msg.type === 'error'">
             <div class="msg error" x-text="msg.text"></div>
           </template>
+          <template x-if="msg.type === 'info'">
+            <div class="msg info"><span class="info-label">Progress: </span><span x-text="msg.text"></span></div>
+          </template>
           <template x-if="msg.type === 'progress'">
             <div class="msg progress">
               <span class="spinner"></span>

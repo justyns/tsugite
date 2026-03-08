@@ -33,6 +33,8 @@ main { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
 .msg.user { background: var(--user-bg); align-self: flex-end; border-bottom-right-radius: 2px; }
 .msg.agent { background: var(--agent-bg); align-self: flex-start; border-bottom-left-radius: 2px; }
 .msg.error { background: transparent; border: 1px solid var(--error); color: var(--error); align-self: center; font-size: 13px; }
+.msg.info { background: transparent; align-self: flex-start; opacity: 0.7; font-size: 0.88em; border-left: 2px solid var(--border, #555); padding-left: 0.6em; }
+.msg.info .info-label { font-weight: 600; color: var(--text-secondary, #888); }
 .msg.progress { background: transparent; color: var(--muted); align-self: flex-start; font-size: 13px; padding: 4px 14px; }
 .msg code { background: var(--code-bg); padding: 2px 5px; border-radius: 3px; font-size: 13px; }
 .msg pre { background: var(--code-bg); padding: 10px; border-radius: 6px; overflow-x: auto; margin: 6px 0; }
