@@ -1336,7 +1336,6 @@ class HTTPServer:
             port=self.config.port,
             log_level="info",
             log_config=None,
-            access_log=False,
         )
         self._server = uvicorn.Server(config)
         logger.info("HTTP API listening on http://%s:%d", self.config.host, self.config.port)
