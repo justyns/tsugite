@@ -27,6 +27,15 @@ export default () => ({
     this.$watch('$store.app.view', (view) => {
       if (view === 'chat' && this.$store.app.selectedAgent && this.messages.length === 0) this.reload();
     });
+    this.$watch('$store.app.lastEvent', (ev) => {
+      if (!ev) return;
+      if (ev.type === 'history_update' && ev.agent === this.$store.app.selectedAgent) {
+        this.reload();
+      }
+      if (ev.type === 'reconnect' && this.$store.app.selectedAgent) {
+        this.reload();
+      }
+    });
   },
 
   async reload() {

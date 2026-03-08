@@ -66,6 +66,7 @@ const _es = connectEvents((event) => {
 _es.onopen = () => {
   // On reconnect, refresh agents to catch up
   loadAgents();
+  Alpine.store('app').lastEvent = { type: 'reconnect', _ts: Date.now() };
 };
 
 // Service worker + push notifications

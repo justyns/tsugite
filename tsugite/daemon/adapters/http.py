@@ -711,6 +711,7 @@ class HTTPServer:
                     progress._emit("final_result", {"result": response})
 
                 self.event_bus.emit("agent_status", {"agent": agent_name})
+                self.event_bus.emit("history_update", {"agent": agent_name})
 
                 # Emit session info for the web UI status bar
                 session = adapter.session_manager.sessions.get(user_id)
