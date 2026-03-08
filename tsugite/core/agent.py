@@ -365,307 +365,305 @@ class TsugiteAgent:
                 system_prompt=self._build_system_prompt(),
             )
         # Main agent loop
-        for turn_num in range(self.max_turns):
-            # Trigger turn start event
-            if self.event_bus:
-                self.event_bus.emit(
-                    StepStartEvent(
-                        step=turn_num + 1,
-                        max_turns=self.max_turns,
-                        recovering_from_error=self._previous_turn_had_error,
-                    )
-                )
-
-            # Build conversation messages from memory
-            messages = self._build_messages()
-            last_msg = messages[-1]["content"] if messages else ""
-            logger.debug("Turn %d sending %d messages (last: %.200s)", turn_num + 1, len(messages), last_msg)
-
-            if self._is_claude_code:
-                turn = await self._claude_code_turn(claude_process, messages, turn_num, stream)
-            else:
-                turn = await self._litellm_turn(messages, turn_num, stream)
-
-            thought, code, response = turn.thought, turn.code, turn.response
-            logger.debug("Turn %d response (cost=%.4f): %.200s", turn_num + 1, turn.step_cost, (thought or "")[:200])
-
-            # Inject content blocks into executor namespace
-            if turn.content_blocks:
-                await self.executor.inject_content_blocks(turn.content_blocks)
-
-            # Only execute code if the LLM actually generated some
-            if code and code.strip():
-                # Trigger code execution event
+        try:
+            for turn_num in range(self.max_turns):
+                # Trigger turn start event
                 if self.event_bus:
-                    self.event_bus.emit(CodeExecutionEvent(code=code))
-
-                # Execute the code and track duration
-                exec_start_time = time.perf_counter()
-                exec_result = await self.executor.execute(code)
-                exec_duration_ms = int((time.perf_counter() - exec_start_time) * 1000)
-
-                # Generate XML observation
-                xml_observation = exec_result.to_xml(duration_ms=exec_duration_ms)
-
-                # Trigger observation event
-                if self.event_bus:
-                    observation = exec_result.output
-
-                    if exec_result.error:
-                        # Mark that this turn had an error (for recovery UX)
-                        self._previous_turn_had_error = True
-
-                        # Emit warning instead of error - less alarming and signals retry
-                        error_preview = (
-                            exec_result.error[:100] + "..." if len(exec_result.error) > 100 else exec_result.error
+                    self.event_bus.emit(
+                        StepStartEvent(
+                            step=turn_num + 1,
+                            max_turns=self.max_turns,
+                            recovering_from_error=self._previous_turn_had_error,
                         )
+                    )
+
+                # Build conversation messages from memory
+                messages = self._build_messages()
+                last_msg = messages[-1]["content"] if messages else ""
+                logger.debug("Turn %d sending %d messages (last: %.200s)", turn_num + 1, len(messages), last_msg)
+
+                if self._is_claude_code:
+                    turn = await self._claude_code_turn(claude_process, messages, turn_num, stream)
+                else:
+                    turn = await self._litellm_turn(messages, turn_num, stream)
+
+                thought, code, response = turn.thought, turn.code, turn.response
+                logger.debug("Turn %d response (cost=%.4f): %.200s", turn_num + 1, turn.step_cost, (thought or "")[:200])
+
+                # Inject content blocks into executor namespace
+                if turn.content_blocks:
+                    await self.executor.inject_content_blocks(turn.content_blocks)
+
+                # Only execute code if the LLM actually generated some
+                if code and code.strip():
+                    # Trigger code execution event
+                    if self.event_bus:
+                        self.event_bus.emit(CodeExecutionEvent(code=code))
+
+                    # Execute the code and track duration
+                    exec_start_time = time.perf_counter()
+                    exec_result = await self.executor.execute(code)
+                    exec_duration_ms = int((time.perf_counter() - exec_start_time) * 1000)
+
+                    # Generate XML observation
+                    xml_observation = exec_result.to_xml(duration_ms=exec_duration_ms)
+
+                    # Trigger observation event
+                    if self.event_bus:
+                        observation = exec_result.output
+
+                        if exec_result.error:
+                            # Mark that this turn had an error (for recovery UX)
+                            self._previous_turn_had_error = True
+
+                            # Emit warning instead of error - less alarming and signals retry
+                            error_preview = (
+                                exec_result.error[:100] + "..." if len(exec_result.error) > 100 else exec_result.error
+                            )
+                            self.event_bus.emit(
+                                WarningEvent(
+                                    message=f"Tool failed, will retry: {error_preview}",
+                                    step=turn_num + 1,
+                                )
+                            )
+                        else:
+                            # Success - reset error flag
+                            self._previous_turn_had_error = False
+                            self.event_bus.emit(ObservationEvent(observation=observation))
+                else:
+                    # No code to execute
+
+                    # Claude Code subprocess may respond with plain text instead of a code block,
+                    # especially when workspace attachments add conversational context that overrides
+                    # the code-block instruction. Treat the text as a final answer rather than looping.
+                    if self._is_claude_code:
+                        answer = (thought or "").strip() or "(no response)"
+                        self.memory.add_final_answer(answer)
+
+                        total_tokens = self._claude_code_last_turn_tokens if self._claude_code_last_turn_tokens else None
+                        if self.event_bus:
+                            self.event_bus.emit(
+                                FinalAnswerEvent(
+                                    answer=answer,
+                                    turns=turn_num + 1,
+                                    tokens=total_tokens,
+                                    cost=self.total_cost if self.total_cost > 0 else None,
+                                )
+                            )
+                            duration = time.time() - start_time
+                            cache_creation_tokens = self._claude_code_cache_creation_tokens or None
+                            cache_read_tokens = self._claude_code_cache_read_tokens or None
+                            self.event_bus.emit(
+                                CostSummaryEvent(
+                                    tokens=total_tokens,
+                                    cost=self.total_cost if self.total_cost > 0 else None,
+                                    model=self.model_name,
+                                    duration_seconds=duration,
+                                    cached_tokens=None,
+                                    cache_creation_input_tokens=cache_creation_tokens,
+                                    cache_read_input_tokens=cache_read_tokens,
+                                )
+                            )
+                        return answer
+
+                    from .executor import ExecutionResult
+
+                    exec_result = ExecutionResult(output="", error=None, stdout="", stderr="")
+                    xml_observation = None  # No XML for non-code responses
+
+                    if self.event_bus:
                         self.event_bus.emit(
-                            WarningEvent(
-                                message=f"Tool failed, will retry: {error_preview}",
+                            ErrorEvent(
+                                error="LLM did not generate code. Expected format:\n\n```python\n<code>\n```",
+                                error_type="Format Error",
                                 step=turn_num + 1,
                             )
                         )
+
+                    correction_msg = (
+                        "Format Error: You must respond with a Python code block.\n\n"
+                        "```python\n"
+                        "# Your code here\n"
+                        'final_answer("your answer")\n'
+                        "```\n\n"
+                        "Even for simple responses, wrap them in a code block with final_answer()."
+                    )
+
+                    from xml.sax.saxutils import escape
+
+                    correction_xml = (
+                        '<tsugite_execution_result status="error">\n'
+                        "<output></output>\n"
+                        f"<error>{escape(correction_msg)}</error>\n"
+                        "</tsugite_execution_result>"
+                    )
+                    self.memory.add_step(
+                        thought=thought if thought else "(No thought provided)",
+                        code="",
+                        output=correction_msg,
+                        error=None,
+                        tools_called=[],
+                        xml_observation=correction_xml,
+                    )
+
+                    # Continue to next turn - the correction will be in the observation
+                    continue
+
+                # Build observation output, adding reminder if no final_answer
+                step_output = exec_result.output
+                if exec_result.final_answer is None and not exec_result.error:
+                    step_output += (
+                        "\n\n(Reminder: Call final_answer() when you have the result, "
+                        "or ask_user() if you need input from the user.)"
+                    )
+
+                # Append turn/token budget tag so the LLM knows its resource limits
+                budget_tag = self._build_budget_tag(turn_num)
+                step_output += budget_tag
+                xml_observation += budget_tag
+
+                # Add this step to memory (only for successful executions or text mode)
+                self.memory.add_step(
+                    thought=thought,
+                    code=code,
+                    output=step_output,
+                    error=exec_result.error,
+                    tools_called=exec_result.tools_called,
+                    loaded_skills=exec_result.loaded_skills,
+                    xml_observation=xml_observation,
+                    content_blocks=turn.content_blocks,
+                )
+
+                # Check if final_answer was called during execution
+                if exec_result.final_answer is not None:
+                    # Agent is done!
+                    self.memory.add_final_answer(exec_result.final_answer)
+
+                    # Trigger final answer event
+                    if response and response.usage:
+                        total_tokens = response.usage.total_tokens
+                    elif self._is_claude_code and self._claude_code_last_turn_tokens:
+                        total_tokens = self._claude_code_last_turn_tokens
                     else:
-                        # Success - reset error flag
-                        self._previous_turn_had_error = False
-                        self.event_bus.emit(ObservationEvent(observation=observation))
-            else:
-                # No code to execute
+                        total_tokens = None
 
-                # Claude Code subprocess may respond with plain text instead of a code block,
-                # especially when workspace attachments add conversational context that overrides
-                # the code-block instruction. Treat the text as a final answer rather than looping.
-                if self._is_claude_code:
-                    answer = (thought or "").strip() or "(no response)"
-                    self.memory.add_final_answer(answer)
-
-                    total_tokens = self._claude_code_last_turn_tokens if self._claude_code_last_turn_tokens else None
                     if self.event_bus:
                         self.event_bus.emit(
                             FinalAnswerEvent(
-                                answer=answer,
+                                answer=str(exec_result.final_answer),
                                 turns=turn_num + 1,
                                 tokens=total_tokens,
                                 cost=self.total_cost if self.total_cost > 0 else None,
                             )
                         )
+
                         duration = time.time() - start_time
-                        cache_creation_tokens = self._claude_code_cache_creation_tokens or None
-                        cache_read_tokens = self._claude_code_cache_read_tokens or None
+
+                        # Extract cache-related fields (supported by OpenAI, Anthropic, Bedrock, Deepseek)
+                        cached_tokens = None
+                        cache_creation_tokens = None
+                        cache_read_tokens = None
+                        if response and response.usage:
+                            cached_tokens = getattr(response.usage, "cached_tokens", None)
+                            cache_creation_tokens = getattr(response.usage, "cache_creation_input_tokens", None)
+                            cache_read_tokens = getattr(response.usage, "cache_read_input_tokens", None)
+                        elif self._is_claude_code:
+                            cache_creation_tokens = self._claude_code_cache_creation_tokens or None
+                            cache_read_tokens = self._claude_code_cache_read_tokens or None
+
                         self.event_bus.emit(
                             CostSummaryEvent(
                                 tokens=total_tokens,
                                 cost=self.total_cost if self.total_cost > 0 else None,
-                                duration=duration,
-                                turns=turn_num + 1,
-                                cached_tokens=None,
-                                cache_creation_tokens=cache_creation_tokens,
-                                cache_read_tokens=cache_read_tokens,
+                                model=self.model_name,
+                                duration_seconds=duration,
+                                cached_tokens=cached_tokens,
+                                cache_creation_input_tokens=cache_creation_tokens,
+                                cache_read_input_tokens=cache_read_tokens,
                             )
                         )
-                    return answer
 
-                from .executor import ExecutionResult
-
-                exec_result = ExecutionResult(output="", error=None, stdout="", stderr="")
-                xml_observation = None  # No XML for non-code responses
-
-                if self.event_bus:
-                    self.event_bus.emit(
-                        ErrorEvent(
-                            error="LLM did not generate code. Expected format:\n\n```python\n<code>\n```",
-                            error_type="Format Error",
-                            step=turn_num + 1,
-                        )
-                    )
-
-                correction_msg = (
-                    "Format Error: You must respond with a Python code block.\n\n"
-                    "```python\n"
-                    "# Your code here\n"
-                    'final_answer("your answer")\n'
-                    "```\n\n"
-                    "Even for simple responses, wrap them in a code block with final_answer()."
-                )
-
-                from xml.sax.saxutils import escape
-
-                correction_xml = (
-                    '<tsugite_execution_result status="error">\n'
-                    "<output></output>\n"
-                    f"<error>{escape(correction_msg)}</error>\n"
-                    "</tsugite_execution_result>"
-                )
-                self.memory.add_step(
-                    thought=thought if thought else "(No thought provided)",
-                    code="",
-                    output=correction_msg,
-                    error=None,
-                    tools_called=[],
-                    xml_observation=correction_xml,
-                )
-
-                # Continue to next turn - the correction will be in the observation
-                continue
-
-            # Build observation output, adding reminder if no final_answer
-            step_output = exec_result.output
-            if exec_result.final_answer is None and not exec_result.error:
-                step_output += (
-                    "\n\n(Reminder: Call final_answer() when you have the result, "
-                    "or ask_user() if you need input from the user.)"
-                )
-
-            # Append turn/token budget tag so the LLM knows its resource limits
-            budget_tag = self._build_budget_tag(turn_num)
-            step_output += budget_tag
-            xml_observation += budget_tag
-
-            # Add this step to memory (only for successful executions or text mode)
-            self.memory.add_step(
-                thought=thought,
-                code=code,
-                output=step_output,
-                error=exec_result.error,
-                tools_called=exec_result.tools_called,
-                loaded_skills=exec_result.loaded_skills,
-                xml_observation=xml_observation,
-                content_blocks=turn.content_blocks,
-            )
-
-            # Check if final_answer was called during execution
-            if exec_result.final_answer is not None:
-                # Agent is done!
-                self.memory.add_final_answer(exec_result.final_answer)
-
-                # Trigger final answer event
-                if response and response.usage:
-                    total_tokens = response.usage.total_tokens
-                elif self._is_claude_code and self._claude_code_last_turn_tokens:
-                    total_tokens = self._claude_code_last_turn_tokens
-                else:
-                    total_tokens = None
-
-                if self.event_bus:
-                    self.event_bus.emit(
-                        FinalAnswerEvent(
-                            answer=str(exec_result.final_answer),
-                            turns=turn_num + 1,
-                            tokens=total_tokens,
-                            cost=self.total_cost if self.total_cost > 0 else None,
-                        )
-                    )
-
-                    duration = time.time() - start_time
-
-                    # Extract cache-related fields (supported by OpenAI, Anthropic, Bedrock, Deepseek)
-                    cached_tokens = None
-                    cache_creation_tokens = None
-                    cache_read_tokens = None
-                    if response and response.usage:
-                        cached_tokens = getattr(response.usage, "cached_tokens", None)
-                        cache_creation_tokens = getattr(response.usage, "cache_creation_input_tokens", None)
-                        cache_read_tokens = getattr(response.usage, "cache_read_input_tokens", None)
-                    elif self._is_claude_code:
-                        cache_creation_tokens = self._claude_code_cache_creation_tokens or None
-                        cache_read_tokens = self._claude_code_cache_read_tokens or None
-
-                    self.event_bus.emit(
-                        CostSummaryEvent(
-                            tokens=total_tokens,
-                            cost=self.total_cost if self.total_cost > 0 else None,
-                            model=self.model_name,
-                            duration_seconds=duration,
-                            cached_tokens=cached_tokens,
-                            cache_creation_input_tokens=cache_creation_tokens,
-                            cache_read_input_tokens=cache_read_tokens,
-                        )
-                    )
-
-                # Stop claude_code process on completion
-                if claude_process:
-                    self._claude_code_session_id = claude_process.session_id
-                    await claude_process.stop()
-
-                if return_full_result:
-                    return AgentResult(
-                        output=exec_result.final_answer,
-                        token_usage=total_tokens,
-                        cost=self.total_cost if self.total_cost > 0 else None,
-                        steps=self.memory.steps,
-                        claude_code_session_id=self._claude_code_session_id,
-                        context_window=self._claude_code_context_window,
-                    )
-                return exec_result.final_answer
-
-            # Continue loop (LLM will see the observation in next iteration)
-
-        # If we get here, we hit max_turns — give the LLM one last chance to call final_answer()
-        last_chance_msg = (
-            f"TURN LIMIT REACHED. You have used all {self.max_turns} turns.\n"
-            "You MUST call final_answer() NOW with a summary of your progress so far.\n"
-            "If the task is not complete, include what remains to be done so the user can ask to continue.\n"
-            "Do NOT call any other tools — only final_answer() is available."
-        )
-        self.memory.add_step(
-            thought="(system: turn limit reached)",
-            code="",
-            output=last_chance_msg,
-            error=None,
-            tools_called=[],
-        )
-
-        saved_tools = self.tools
-        self.tools = []
-        try:
-            messages = self._build_messages()
-            if self._is_claude_code:
-                turn = await self._claude_code_turn(claude_process, messages, self.max_turns, stream)
-            else:
-                turn = await self._litellm_turn(messages, self.max_turns, stream)
-
-            if turn.code and turn.code.strip():
-                exec_result = await self.executor.execute(turn.code)
-                if exec_result.final_answer is not None:
-                    self.memory.add_final_answer(exec_result.final_answer)
                     if claude_process:
                         self._claude_code_session_id = claude_process.session_id
-                        await claude_process.stop()
+
                     if return_full_result:
                         return AgentResult(
                             output=exec_result.final_answer,
-                            token_usage=None,
+                            token_usage=total_tokens,
                             cost=self.total_cost if self.total_cost > 0 else None,
                             steps=self.memory.steps,
                             claude_code_session_id=self._claude_code_session_id,
                             context_window=self._claude_code_context_window,
                         )
                     return exec_result.final_answer
-        except Exception:
-            logger.debug("Last-chance turn failed", exc_info=True)
-        finally:
-            self.tools = saved_tools
 
-        if claude_process:
-            self._claude_code_session_id = claude_process.session_id
-            await claude_process.stop()
+                # Continue loop (LLM will see the observation in next iteration)
 
-        error_msg = f"Agent reached max_turns ({self.max_turns}) without completing task"
-        if self.event_bus:
-            self.event_bus.emit(ErrorEvent(error=error_msg, error_type="RuntimeError"))
-
-        if return_full_result:
-            return AgentResult(
-                output=None,
-                token_usage=None,
-                cost=self.total_cost,
-                steps=self.memory.steps,
-                error=error_msg,
-                claude_code_session_id=self._claude_code_session_id,
-                context_window=self._claude_code_context_window,
+            # If we get here, we hit max_turns — give the LLM one last chance to call final_answer()
+            last_chance_msg = (
+                f"TURN LIMIT REACHED. You have used all {self.max_turns} turns.\n"
+                "You MUST call final_answer() NOW with a summary of your progress so far.\n"
+                "If the task is not complete, include what remains to be done so the user can ask to continue.\n"
+                "Do NOT call any other tools — only final_answer() is available."
+            )
+            self.memory.add_step(
+                thought="(system: turn limit reached)",
+                code="",
+                output=last_chance_msg,
+                error=None,
+                tools_called=[],
             )
 
-        raise RuntimeError(error_msg)
+            saved_tools = self.tools
+            self.tools = []
+            try:
+                messages = self._build_messages()
+                if self._is_claude_code:
+                    turn = await self._claude_code_turn(claude_process, messages, self.max_turns, stream)
+                else:
+                    turn = await self._litellm_turn(messages, self.max_turns, stream)
+
+                if turn.code and turn.code.strip():
+                    exec_result = await self.executor.execute(turn.code)
+                    if exec_result.final_answer is not None:
+                        self.memory.add_final_answer(exec_result.final_answer)
+                        if claude_process:
+                            self._claude_code_session_id = claude_process.session_id
+                        if return_full_result:
+                            return AgentResult(
+                                output=exec_result.final_answer,
+                                token_usage=None,
+                                cost=self.total_cost if self.total_cost > 0 else None,
+                                steps=self.memory.steps,
+                                claude_code_session_id=self._claude_code_session_id,
+                                context_window=self._claude_code_context_window,
+                            )
+                        return exec_result.final_answer
+            except Exception:
+                logger.debug("Last-chance turn failed", exc_info=True)
+            finally:
+                self.tools = saved_tools
+
+            error_msg = f"Agent reached max_turns ({self.max_turns}) without completing task"
+            if self.event_bus:
+                self.event_bus.emit(ErrorEvent(error=error_msg, error_type="RuntimeError"))
+
+            if return_full_result:
+                return AgentResult(
+                    output=None,
+                    token_usage=None,
+                    cost=self.total_cost,
+                    steps=self.memory.steps,
+                    error=error_msg,
+                    claude_code_session_id=self._claude_code_session_id,
+                    context_window=self._claude_code_context_window,
+                )
+
+            raise RuntimeError(error_msg)
+        finally:
+            if claude_process:
+                self._claude_code_session_id = claude_process.session_id
+                await claude_process.stop()
 
     async def _claude_code_turn(self, process, messages, turn_num, stream) -> TurnResult:
         """Execute one turn via Claude Code subprocess."""
@@ -780,7 +778,7 @@ class TsugiteAgent:
                     self.event_bus.emit(ReasoningTokensEvent(tokens=details.reasoning_tokens, step=turn_num + 1))
 
         if self.event_bus and not stream:
-            display_content = parsed.thought if parsed.thought else response.choices[0].message.content
+            display_content = parsed.thought if parsed.thought else (response.choices[0].message.content if response.choices else "")
             if display_content and display_content.strip():
                 self.event_bus.emit(
                     LLMMessageEvent(content=display_content, title=f"Turn {turn_num + 1} Reasoning", step=turn_num + 1)
@@ -1052,7 +1050,9 @@ class TsugiteAgent:
 
     def _parse_response(self, response) -> ParsedResponse:
         """Parse LLM response into thought, code, and content blocks."""
-        content = response.choices[0].message.content
+        if not response.choices:
+            return ParsedResponse(thought="", code="", content_blocks=[])
+        content = response.choices[0].message.content or ""
         return self._parse_response_from_text(content)
 
     def _parse_response_from_text(self, content: str) -> ParsedResponse:

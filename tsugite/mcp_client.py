@@ -161,6 +161,8 @@ class MCPClient:
 
         async def call_mcp_tool(**kwargs):
             """Call MCP tool and return result."""
+            if self.session is None:
+                raise RuntimeError(f"MCP session not connected. Cannot call tool '{tool_name}'.")
             result = await self.session.call_tool(tool_name, arguments=kwargs)
 
             # Parse result content
