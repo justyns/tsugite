@@ -388,7 +388,9 @@ class TsugiteAgent:
                     turn = await self._litellm_turn(messages, turn_num, stream)
 
                 thought, code, response = turn.thought, turn.code, turn.response
-                logger.debug("Turn %d response (cost=%.4f): %.200s", turn_num + 1, turn.step_cost, (thought or "")[:200])
+                logger.debug(
+                    "Turn %d response (cost=%.4f): %.200s", turn_num + 1, turn.step_cost, (thought or "")[:200]
+                )
 
                 # Inject content blocks into executor namespace
                 if turn.content_blocks:
@@ -440,7 +442,9 @@ class TsugiteAgent:
                         answer = (thought or "").strip() or "(no response)"
                         self.memory.add_final_answer(answer)
 
-                        total_tokens = self._claude_code_last_turn_tokens if self._claude_code_last_turn_tokens else None
+                        total_tokens = (
+                            self._claude_code_last_turn_tokens if self._claude_code_last_turn_tokens else None
+                        )
                         if self.event_bus:
                             self.event_bus.emit(
                                 FinalAnswerEvent(
@@ -778,7 +782,9 @@ class TsugiteAgent:
                     self.event_bus.emit(ReasoningTokensEvent(tokens=details.reasoning_tokens, step=turn_num + 1))
 
         if self.event_bus and not stream:
-            display_content = parsed.thought if parsed.thought else (response.choices[0].message.content if response.choices else "")
+            display_content = (
+                parsed.thought if parsed.thought else (response.choices[0].message.content if response.choices else "")
+            )
             if display_content and display_content.strip():
                 self.event_bus.emit(
                     LLMMessageEvent(content=display_content, title=f"Turn {turn_num + 1} Reasoning", step=turn_num + 1)
@@ -1046,7 +1052,7 @@ class TsugiteAgent:
             parts.append(f'tokens_used="{self.total_tokens}"')
         if self.max_turns - turn <= 2:
             parts.append('warning="approaching turn limit, wrap up soon"')
-        return f'\n<tsugite_budget {" ".join(parts)} />'
+        return f"\n<tsugite_budget {' '.join(parts)} />"
 
     def _parse_response(self, response) -> ParsedResponse:
         """Parse LLM response into thought, code, and content blocks."""

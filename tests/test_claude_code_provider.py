@@ -8,7 +8,6 @@ import pytest
 
 from tsugite.models import _CLAUDE_CODE_MODEL_MAP, get_model_params, parse_model_string
 
-
 # ── Model parsing tests ──
 
 
@@ -139,7 +138,16 @@ class TestClaudeCodeProcess:
         """Init event arrives after first user message -- session_id gets captured."""
         events = [
             json.dumps({"type": "system", "subtype": "init", "session_id": "captured-session"}),
-            json.dumps({"type": "result", "subtype": "success", "result": "ok", "total_cost_usd": 0.001, "duration_ms": 100, "session_id": "captured-session"}),
+            json.dumps(
+                {
+                    "type": "result",
+                    "subtype": "success",
+                    "result": "ok",
+                    "total_cost_usd": 0.001,
+                    "duration_ms": 100,
+                    "session_id": "captured-session",
+                }
+            ),
         ]
         process._process = self._mock_proc(events)
 
@@ -152,8 +160,27 @@ class TestClaudeCodeProcess:
     async def test_send_message_parses_assistant_event(self, process):
         """Test parsing the real claude CLI format: assistant event with full text."""
         events = [
-            json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "Hello world"}], "usage": {"input_tokens": 100, "output_tokens": 50}}, "session_id": "s1"}),
-            json.dumps({"type": "result", "subtype": "success", "result": "Hello world", "total_cost_usd": 0.015, "duration_ms": 1200, "session_id": "s1"}),
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": "Hello world"}],
+                        "usage": {"input_tokens": 100, "output_tokens": 50},
+                    },
+                    "session_id": "s1",
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "result",
+                    "subtype": "success",
+                    "result": "Hello world",
+                    "total_cost_usd": 0.015,
+                    "duration_ms": 1200,
+                    "session_id": "s1",
+                }
+            ),
         ]
         process._process = self._mock_proc(events)
         process._session_id = "s1"
@@ -179,8 +206,23 @@ class TestClaudeCodeProcess:
         events = [
             json.dumps({"type": "content_block_delta", "delta": {"type": "text_delta", "text": "Hello"}}),
             json.dumps({"type": "content_block_delta", "delta": {"type": "text_delta", "text": " world"}}),
-            json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "Hello world"}]}, "session_id": "s1"}),
-            json.dumps({"type": "result", "subtype": "success", "result": "Hello world", "total_cost_usd": 0.003, "duration_ms": 500, "session_id": "s1"}),
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {"role": "assistant", "content": [{"type": "text", "text": "Hello world"}]},
+                    "session_id": "s1",
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "result",
+                    "subtype": "success",
+                    "result": "Hello world",
+                    "total_cost_usd": 0.003,
+                    "duration_ms": 500,
+                    "session_id": "s1",
+                }
+            ),
         ]
         process._process = self._mock_proc(events)
         process._session_id = "s1"
@@ -197,10 +239,18 @@ class TestClaudeCodeProcess:
 
     @pytest.mark.asyncio
     async def test_send_message_writes_correct_json(self, process):
-        events = [json.dumps({
-            "type": "result", "subtype": "success", "result": "done",
-            "total_cost_usd": 0.001, "duration_ms": 100, "session_id": "s1",
-        })]
+        events = [
+            json.dumps(
+                {
+                    "type": "result",
+                    "subtype": "success",
+                    "result": "done",
+                    "total_cost_usd": 0.001,
+                    "duration_ms": 100,
+                    "session_id": "s1",
+                }
+            )
+        ]
         mock_proc = self._mock_proc(events)
         mock_proc.stdin = MagicMock()
         mock_proc.stdin.write = MagicMock()
@@ -294,7 +344,14 @@ class TestClaudeCodeAgentIntegration:
         async def mock_send(*args, **kwargs):
             events = [
                 {"type": "text_delta", "text": "Thought: simple\n```python\nfinal_answer('42')\n```"},
-                {"type": "result", "text": "Thought: simple\n```python\nfinal_answer('42')\n```", "cost_usd": 0.001, "session_id": "test-session", "input_tokens": 500, "output_tokens": 100},
+                {
+                    "type": "result",
+                    "text": "Thought: simple\n```python\nfinal_answer('42')\n```",
+                    "cost_usd": 0.001,
+                    "session_id": "test-session",
+                    "input_tokens": 500,
+                    "output_tokens": 100,
+                },
             ]
             for e in events:
                 yield e
@@ -334,7 +391,14 @@ class TestClaudeCodeAgentIntegration:
         async def mock_send(*args, **kwargs):
             events = [
                 {"type": "text_delta", "text": "Thought: done\n```python\nfinal_answer('hi')\n```"},
-                {"type": "result", "text": "", "cost_usd": 0.01, "session_id": "test-session", "input_tokens": 1000, "output_tokens": 200},
+                {
+                    "type": "result",
+                    "text": "",
+                    "cost_usd": 0.01,
+                    "session_id": "test-session",
+                    "input_tokens": 1000,
+                    "output_tokens": 200,
+                },
             ]
             for e in events:
                 yield e
@@ -373,10 +437,14 @@ class TestClaudeCodeAgentIntegration:
             events = [
                 {"type": "text_delta", "text": "Thought: done\n```python\nfinal_answer('hi')\n```"},
                 {
-                    "type": "result", "text": "", "cost_usd": 0.01,
+                    "type": "result",
+                    "text": "",
+                    "cost_usd": 0.01,
                     "session_id": "test-session",
-                    "input_tokens": 500, "output_tokens": 100,
-                    "cache_creation_input_tokens": 300, "cache_read_input_tokens": 200,
+                    "input_tokens": 500,
+                    "output_tokens": 100,
+                    "cache_creation_input_tokens": 300,
+                    "cache_read_input_tokens": 200,
                 },
             ]
             for e in events:
@@ -392,7 +460,6 @@ class TestClaudeCodeAgentIntegration:
         assert len(captured_events) == 1
         assert captured_events[0].cache_creation_input_tokens == 300
         assert captured_events[0].cache_read_input_tokens == 200
-
 
     @pytest.mark.asyncio
     async def test_claude_code_no_code_block_returns_text_as_final_answer(self):
@@ -508,9 +575,12 @@ class TestClaudeCodeContextLimit:
             events = [
                 {"type": "text_delta", "text": "Thought: done\n```python\nfinal_answer('ok')\n```"},
                 {
-                    "type": "result", "text": "", "cost_usd": 0.01,
+                    "type": "result",
+                    "text": "",
+                    "cost_usd": 0.01,
                     "session_id": "test-session",
-                    "input_tokens": 500, "output_tokens": 100,
+                    "input_tokens": 500,
+                    "output_tokens": 100,
                     "context_window": 200000,
                 },
             ]

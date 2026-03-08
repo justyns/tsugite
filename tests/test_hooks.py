@@ -11,8 +11,8 @@ import pytest
 from tsugite.events.events import ToolCallEvent, ToolResultEvent
 from tsugite.hooks import (
     HookHandler,
-    HooksConfig,
     HookRule,
+    HooksConfig,
     _execute_hook,
     _render_and_execute,
     fire_compact_hooks,
@@ -103,33 +103,29 @@ class TestHookHandler:
             assert "anything" in mock_run.call_args[0][0]
 
     def test_match_truthy_fires(self):
-        handler = self._make_handler([
-            HookRule(tools=["write_file"], match="{{ path.startswith('memory/') }}", run="echo yes")
-        ])
+        handler = self._make_handler(
+            [HookRule(tools=["write_file"], match="{{ path.startswith('memory/') }}", run="echo yes")]
+        )
         with patch("tsugite.hooks.subprocess.run", return_value=_ok_result()) as mock_run:
             self._simulate_tool_call(handler, "write_file", {"path": "memory/foo.md"})
             mock_run.assert_called_once()
 
     def test_match_falsy_skips(self):
-        handler = self._make_handler([
-            HookRule(tools=["write_file"], match="{{ path.startswith('memory/') }}", run="echo yes")
-        ])
+        handler = self._make_handler(
+            [HookRule(tools=["write_file"], match="{{ path.startswith('memory/') }}", run="echo yes")]
+        )
         with patch("tsugite.hooks.subprocess.run") as mock_run:
             self._simulate_tool_call(handler, "write_file", {"path": "other/foo.md"})
             mock_run.assert_not_called()
 
     def test_match_error_skips_with_warning(self):
-        handler = self._make_handler([
-            HookRule(tools=["write_file"], match="{{ undefined_func() }}", run="echo yes")
-        ])
+        handler = self._make_handler([HookRule(tools=["write_file"], match="{{ undefined_func() }}", run="echo yes")])
         with patch("tsugite.hooks.subprocess.run") as mock_run:
             self._simulate_tool_call(handler, "write_file")
             mock_run.assert_not_called()
 
     def test_run_renders_kwargs(self):
-        handler = self._make_handler([
-            HookRule(tools=["run"], run="echo {{ command }}")
-        ])
+        handler = self._make_handler([HookRule(tools=["run"], run="echo {{ command }}")])
         with patch("tsugite.hooks.subprocess.run", return_value=_ok_result()) as mock_run:
             self._simulate_tool_call(handler, "run", {"command": "ls -la"})
             assert mock_run.call_args[0][0] == "echo ls -la"
@@ -178,10 +174,12 @@ class TestHookHandler:
             )
 
     def test_multiple_rules_all_evaluated(self):
-        handler = self._make_handler([
-            HookRule(tools=["write_file"], run="echo first"),
-            HookRule(tools=["write_file"], run="echo second"),
-        ])
+        handler = self._make_handler(
+            [
+                HookRule(tools=["write_file"], run="echo first"),
+                HookRule(tools=["write_file"], run="echo second"),
+            ]
+        )
         with patch("tsugite.hooks.subprocess.run", return_value=_ok_result()) as mock_run:
             self._simulate_tool_call(handler, "write_file")
             assert mock_run.call_count == 2
@@ -192,8 +190,13 @@ class TestExecuteHook:
         with patch("tsugite.hooks.subprocess.run", return_value=_ok_result()) as mock_run:
             _execute_hook("echo hi", tmp_path)
             mock_run.assert_called_once_with(
-                "echo hi", shell=True, cwd=str(tmp_path),
-                capture_output=True, text=True, errors="replace", timeout=300,
+                "echo hi",
+                shell=True,
+                cwd=str(tmp_path),
+                capture_output=True,
+                text=True,
+                errors="replace",
+                timeout=300,
             )
 
     def test_nonzero_exit_returns_none(self, tmp_path):
@@ -248,9 +251,7 @@ class TestHooksConfigCompact:
         assert config.pre_compact[0].wait is True
 
     def test_post_compact_parsed(self, tmp_workspace):
-        (tmp_workspace / ".tsugite" / "hooks.yaml").write_text(
-            "hooks:\n  post_compact:\n    - run: echo done\n"
-        )
+        (tmp_workspace / ".tsugite" / "hooks.yaml").write_text("hooks:\n  post_compact:\n    - run: echo done\n")
         config = load_hooks_config(tmp_workspace)
         assert len(config.post_compact) == 1
 
@@ -273,9 +274,7 @@ class TestFireCompactHooks:
         await fire_compact_hooks(tmp_path, "pre_compact", {})
 
     async def test_no_matching_phase_is_noop(self, tmp_workspace):
-        (tmp_workspace / ".tsugite" / "hooks.yaml").write_text(
-            "hooks:\n  pre_compact:\n    - run: echo pre\n"
-        )
+        (tmp_workspace / ".tsugite" / "hooks.yaml").write_text("hooks:\n  pre_compact:\n    - run: echo pre\n")
         with patch("tsugite.hooks.subprocess.run") as mock_run:
             await fire_compact_hooks(tmp_workspace, "post_compact", {})
             mock_run.assert_not_called()
@@ -300,10 +299,7 @@ class TestFireCompactHooks:
 
     async def test_match_filters_hooks(self, tmp_workspace):
         (tmp_workspace / ".tsugite" / "hooks.yaml").write_text(
-            "hooks:\n  pre_compact:\n"
-            "    - run: echo yes\n"
-            "      match: \"{{ turn_count > 10 }}\"\n"
-            "      wait: true\n"
+            'hooks:\n  pre_compact:\n    - run: echo yes\n      match: "{{ turn_count > 10 }}"\n      wait: true\n'
         )
         with patch("tsugite.hooks.subprocess.run") as mock_run:
             await fire_compact_hooks(tmp_workspace, "pre_compact", {"turn_count": 5})
@@ -390,6 +386,7 @@ class TestRenderAndExecuteCapture:
             HookRule(run="echo two", capture_as="var_b"),
         ]
         call_count = [0]
+
         def mock_run_fn(*a, **kw):
             call_count[0] += 1
             return _ok_result(stdout=f"output_{call_count[0]}")
@@ -435,8 +432,7 @@ class TestFirePreMessageHooks:
 
     async def test_context_rendered_in_command(self, tmp_workspace):
         (tmp_workspace / ".tsugite" / "hooks.yaml").write_text(
-            "hooks:\n  pre_message:\n"
-            "    - run: echo {{ message }}\n      capture_as: echo_msg\n"
+            "hooks:\n  pre_message:\n    - run: echo {{ message }}\n      capture_as: echo_msg\n"
         )
         with patch("tsugite.hooks.subprocess.run", return_value=_ok_result(stdout="hello world")) as mock_run:
             await fire_pre_message_hooks(tmp_workspace, {"message": "hello world"})
@@ -491,8 +487,7 @@ class TestOnlyInteractive:
     @pytest.mark.asyncio
     async def test_pre_message_respects_only_interactive(self, tmp_workspace):
         (tmp_workspace / ".tsugite" / "hooks.yaml").write_text(
-            "hooks:\n  pre_message:\n"
-            "    - run: echo hi\n      capture_as: x\n      only_interactive: true\n"
+            "hooks:\n  pre_message:\n    - run: echo hi\n      capture_as: x\n      only_interactive: true\n"
         )
         with patch("tsugite.hooks.subprocess.run") as mock_run:
             result = await fire_pre_message_hooks(tmp_workspace, {"message": "test"}, interactive=False)

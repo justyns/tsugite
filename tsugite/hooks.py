@@ -146,10 +146,7 @@ class HookHandler:
             except ValueError:
                 pass
 
-        tool_rules = [
-            rule for rule in self.config.post_tool
-            if tool_name in rule.tools or "*" in rule.tools
-        ]
+        tool_rules = [rule for rule in self.config.post_tool if tool_name in rule.tools or "*" in rule.tools]
         _render_and_execute(_jinja_env, tool_rules, context, self.workspace_dir, interactive=self.interactive)
 
 

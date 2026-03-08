@@ -1,6 +1,5 @@
 """Tests for web push notification support."""
 
-import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -236,7 +235,9 @@ class TestSendWebPushAll:
         store.subscribe(sample_sub)
         long_msg = "x" * 500
 
-        with patch("tsugite.daemon.push.send_web_push", new_callable=AsyncMock, return_value={"status": "sent"}) as mock_send:
+        with patch(
+            "tsugite.daemon.push.send_web_push", new_callable=AsyncMock, return_value={"status": "sent"}
+        ) as mock_send:
             await _send_web_push_all(store, long_msg, "/key.pem", {"sub": "mailto:t@t"})
             payload = mock_send.call_args[0][1]
             assert len(payload["body"]) == 200
@@ -248,7 +249,9 @@ class TestBuildNotifier:
         from tsugite.daemon.gateway import _build_notifier
 
         store.subscribe(sample_sub)
-        notifier = _build_notifier({}, push_store=store, vapid_private_key="/key.pem", vapid_claims={"sub": "mailto:t@t"})
+        notifier = _build_notifier(
+            {}, push_store=store, vapid_private_key="/key.pem", vapid_claims={"sub": "mailto:t@t"}
+        )
 
         config = NotificationChannelConfig(type="web-push")
         with patch("tsugite.daemon.push.send_web_push", new_callable=AsyncMock, return_value={"status": "sent"}):

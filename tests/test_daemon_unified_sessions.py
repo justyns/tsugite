@@ -223,7 +223,7 @@ class TestCompactSessionClearsSkills:
 
     @pytest.mark.asyncio
     async def test_compact_session_clears_loaded_skills(self, workspace_dir, tmp_path):
-        from tsugite.history import SessionStorage, get_history_dir
+        from tsugite.history import SessionStorage
         from tsugite.history.models import Turn
 
         # Set up history dir

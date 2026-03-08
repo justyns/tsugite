@@ -9,10 +9,11 @@ import tempfile
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from tzlocal import get_localzone
-from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional, Protocol
+from zoneinfo import ZoneInfo
+
+from tzlocal import get_localzone
 
 from tsugite.agent_inheritance import find_agent_file
 from tsugite.agent_runner import run_agent
@@ -142,6 +143,7 @@ class BaseAdapter(ABC):
         if not self._workspace:
             return []
         from tsugite.workspace.context import build_workspace_attachments
+
         return build_workspace_attachments(self._workspace)
 
     def _get_all_attachments(self):
@@ -442,7 +444,10 @@ class BaseAdapter(ABC):
         # Preserve prior compaction summary so chained compactions don't lose context
         if prior_summary:
             old_messages.append(
-                {"role": "user", "content": f"<prior_compaction_summary>\n{prior_summary.summary}\n</prior_compaction_summary>"}
+                {
+                    "role": "user",
+                    "content": f"<prior_compaction_summary>\n{prior_summary.summary}\n</prior_compaction_summary>",
+                }
             )
 
         functions_used = sorted({fn for turn in old_turns for fn in turn.functions_called})

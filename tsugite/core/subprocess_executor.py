@@ -211,7 +211,8 @@ class SubprocessExecutor:
         self._tools = tools
         self._tool_map = {t.name: t for t in tools}
 
-        from tsugite.tools import _ensure_tools_loaded, _tools as registry
+        from tsugite.tools import _ensure_tools_loaded
+        from tsugite.tools import _tools as registry
 
         _ensure_tools_loaded()
 

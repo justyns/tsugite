@@ -144,7 +144,11 @@ class BubblewrapSandbox:
                 cmd += ["--ro-bind", sys_dir, sys_dir]
 
         # CA certificates: resolve symlinks to find the real path (varies by distro)
-        for cert_path in ["/etc/ssl/certs/ca-certificates.crt", "/etc/ssl/certs/ca-bundle.crt", "/etc/pki/tls/certs/ca-bundle.crt"]:
+        for cert_path in [
+            "/etc/ssl/certs/ca-certificates.crt",
+            "/etc/ssl/certs/ca-bundle.crt",
+            "/etc/pki/tls/certs/ca-bundle.crt",
+        ]:
             p = Path(cert_path)
             if p.exists():
                 real = p.resolve().parent
@@ -204,14 +208,21 @@ class BubblewrapSandbox:
             ssh_proxy_path.write_text(_SSH_PROXY_CONNECT)
 
             cmd += [
-                "--setenv", "HTTP_PROXY", "http://127.0.0.1:12345",
-                "--setenv", "HTTPS_PROXY", "http://127.0.0.1:12345",
-                "--setenv", "GIT_SSH_COMMAND", f"ssh -o StrictHostKeyChecking=accept-new -o ProxyCommand='python3 {ssh_proxy_path} %h %p'",
+                "--setenv",
+                "HTTP_PROXY",
+                "http://127.0.0.1:12345",
+                "--setenv",
+                "HTTPS_PROXY",
+                "http://127.0.0.1:12345",
+                "--setenv",
+                "GIT_SSH_COMMAND",
+                f"ssh -o StrictHostKeyChecking=accept-new -o ProxyCommand='python3 {ssh_proxy_path} %h %p'",
             ]
             actual_cmd = shlex.join(inner_cmd)
             # Start bridge in background, wait for it to bind, then run harness
             cmd += [
-                "sh", "-c",
+                "sh",
+                "-c",
                 f"python3 {bridge_path} & sleep 0.1; exec {actual_cmd}",
             ]
         else:

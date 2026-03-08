@@ -58,12 +58,8 @@ class TestBuildCommand:
         )
         cmd = sandbox.build_command(["python3", "harness.py"])
         setenv_indices = [i for i, v in enumerate(cmd) if v == "--setenv"]
-        http_proxy_set = any(
-            cmd[i + 1] == "HTTP_PROXY" for i in setenv_indices if i + 1 < len(cmd)
-        )
-        https_proxy_set = any(
-            cmd[i + 1] == "HTTPS_PROXY" for i in setenv_indices if i + 1 < len(cmd)
-        )
+        http_proxy_set = any(cmd[i + 1] == "HTTP_PROXY" for i in setenv_indices if i + 1 < len(cmd))
+        https_proxy_set = any(cmd[i + 1] == "HTTPS_PROXY" for i in setenv_indices if i + 1 < len(cmd))
         assert http_proxy_set
         assert https_proxy_set
 
@@ -77,9 +73,7 @@ class TestBuildCommand:
             )
             cmd = sandbox.build_command(["python3", "harness.py"])
             setenv_indices = [i for i, v in enumerate(cmd) if v == "--setenv"]
-            git_ssh_set = any(
-                cmd[i + 1] == "GIT_SSH_COMMAND" for i in setenv_indices if i + 1 < len(cmd)
-            )
+            git_ssh_set = any(cmd[i + 1] == "GIT_SSH_COMMAND" for i in setenv_indices if i + 1 < len(cmd))
             assert git_ssh_set
 
     def test_state_dir_binding(self):
@@ -88,9 +82,7 @@ class TestBuildCommand:
             sandbox = BubblewrapSandbox(config=config, state_dir=Path(tmpdir))
             cmd = sandbox.build_command(["python3", "harness.py"])
             bind_indices = [i for i, v in enumerate(cmd) if v == "--bind"]
-            state_bound = any(
-                cmd[i + 1] == tmpdir for i in bind_indices if i + 1 < len(cmd)
-            )
+            state_bound = any(cmd[i + 1] == tmpdir for i in bind_indices if i + 1 < len(cmd))
             assert state_bound
 
     def test_no_network_mode(self):

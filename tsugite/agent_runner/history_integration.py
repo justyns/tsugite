@@ -201,7 +201,6 @@ def _extract_functions_called(execution_steps: list) -> List[str]:
     return sorted(list(functions))
 
 
-
 def get_latest_conversation() -> Optional[str]:
     """Get the most recent conversation/session ID.
 

@@ -281,9 +281,7 @@ class Scheduler:
     def cleanup(self) -> list[str]:
         """Remove all disabled one-off schedules (orphaned after firing)."""
         to_remove = [
-            sid
-            for sid, entry in self._schedules.items()
-            if entry.schedule_type == "once" and not entry.enabled
+            sid for sid, entry in self._schedules.items() if entry.schedule_type == "once" and not entry.enabled
         ]
         for sid in to_remove:
             del self._schedules[sid]

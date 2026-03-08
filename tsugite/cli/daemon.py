@@ -508,7 +508,9 @@ def schedule_add(
     every: Optional[str] = typer.Option(None, "--every", help="Simple interval (e.g., 30m, 2h, 1d)"),
     tz: str = typer.Option("UTC", "--timezone", "--tz", help="IANA timezone"),
     model: Optional[str] = typer.Option(None, "--model", "-m", help="Model override for this schedule"),
-    no_inject_history: bool = typer.Option(False, "--no-inject-history", help="Don't inject result into user chat sessions"),
+    no_inject_history: bool = typer.Option(
+        False, "--no-inject-history", help="Don't inject result into user chat sessions"
+    ),
     host: str = typer.Option("127.0.0.1", "--host", help="Daemon HTTP host"),
     port: int = typer.Option(8321, "--port", help="Daemon HTTP port"),
     token: Optional[str] = typer.Option(None, "--token", "-t", help="Auth token"),

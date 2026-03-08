@@ -67,8 +67,13 @@ class TestScheduleStatusTool:
 
         mock_sched = MagicMock()
         entry = ScheduleEntry(
-            id="job1", agent="bot", prompt="hello", schedule_type="cron", cron_expr="0 9 * * *",
-            last_status="success", last_run="2026-01-01T00:00:00Z",
+            id="job1",
+            agent="bot",
+            prompt="hello",
+            schedule_type="cron",
+            cron_expr="0 9 * * *",
+            last_status="success",
+            last_run="2026-01-01T00:00:00Z",
         )
         mock_sched.get.return_value = entry
         mock_sched.get_running_ids.return_value = []
@@ -99,7 +104,9 @@ class TestListRunningTasksTool:
         from tsugite.tools.schedule import list_running_tasks, set_scheduler
 
         mock_sched = MagicMock()
-        entry = ScheduleEntry(id="bg-abc", agent="bot", prompt="do stuff", schedule_type="once", run_at="2099-01-01T00:00:00Z")
+        entry = ScheduleEntry(
+            id="bg-abc", agent="bot", prompt="do stuff", schedule_type="once", run_at="2099-01-01T00:00:00Z"
+        )
         mock_sched.get_running_ids.return_value = ["bg-abc"]
         mock_sched.get.return_value = entry
         set_scheduler(mock_sched, tool_loop)
@@ -123,7 +130,9 @@ class TestListRunningTasksTool:
         from tsugite.tools.schedule import list_running_tasks, set_scheduler
 
         mock_sched = MagicMock()
-        entry = ScheduleEntry(id="bg-long", agent="bot", prompt="x" * 500, schedule_type="once", run_at="2099-01-01T00:00:00Z")
+        entry = ScheduleEntry(
+            id="bg-long", agent="bot", prompt="x" * 500, schedule_type="once", run_at="2099-01-01T00:00:00Z"
+        )
         mock_sched.get_running_ids.return_value = ["bg-long"]
         mock_sched.get.return_value = entry
         set_scheduler(mock_sched, tool_loop)
@@ -137,8 +146,11 @@ class TestAgentContextRunningTasks:
         from tsugite.daemon.adapters.base import BaseAdapter
 
         ctx = ChannelContext(
-            source="scheduler", channel_id=None, user_id="scheduler:bot",
-            reply_to="scheduler:bot", metadata={"schedule_id": "job1", "running_tasks": ["job1", "job2"]},
+            source="scheduler",
+            channel_id=None,
+            user_id="scheduler:bot",
+            reply_to="scheduler:bot",
+            metadata={"schedule_id": "job1", "running_tasks": ["job1", "job2"]},
         )
         result = BaseAdapter._build_agent_context(None, ctx)
         assert result["running_tasks"] == ["job1", "job2"]
@@ -147,7 +159,10 @@ class TestAgentContextRunningTasks:
         from tsugite.daemon.adapters.base import BaseAdapter
 
         ctx = ChannelContext(
-            source="cli", channel_id=None, user_id="user1", reply_to="user1",
+            source="cli",
+            channel_id=None,
+            user_id="user1",
+            reply_to="user1",
         )
         result = BaseAdapter._build_agent_context(None, ctx)
         assert result["running_tasks"] == []
@@ -156,7 +171,11 @@ class TestAgentContextRunningTasks:
         from tsugite.daemon.adapters.base import BaseAdapter
 
         ctx = ChannelContext(
-            source="cli", channel_id=None, user_id="user1", reply_to="user1", metadata=None,
+            source="cli",
+            channel_id=None,
+            user_id="user1",
+            reply_to="user1",
+            metadata=None,
         )
         result = BaseAdapter._build_agent_context(None, ctx)
         assert result["running_tasks"] == []

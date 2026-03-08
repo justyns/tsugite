@@ -533,11 +533,17 @@ async def test_agent_custom_executor():
 
     with patch("litellm.acompletion", new_callable=AsyncMock) as mock_acompletion:
         mock_acompletion.return_value = MagicMock(
-            choices=[MagicMock(message=MagicMock(content="""Thought: Test.
+            choices=[
+                MagicMock(
+                    message=MagicMock(
+                        content="""Thought: Test.
 
 ```python
 final_answer(42)
-```"""))],
+```"""
+                    )
+                )
+            ],
             usage=MagicMock(total_tokens=50),
         )
 
@@ -707,9 +713,9 @@ def test_tool_execution_no_task_warnings():
     )
 
     assert "Task pending" not in filtered_stderr, f"Unexpected Task pending warning:\n{stderr_output}"
-    assert (
-        "Task exception was never retrieved" not in filtered_stderr
-    ), f"Unexpected Task exception warning:\n{stderr_output}"
+    assert "Task exception was never retrieved" not in filtered_stderr, (
+        f"Unexpected Task exception warning:\n{stderr_output}"
+    )
 
 
 def test_tool_exception_propagation_from_async():
@@ -771,6 +777,6 @@ def test_tool_exception_propagation_from_async():
         line for line in stderr_output.split("\n") if "failing_tool" in line or "never retrieved" in line
     )
 
-    assert (
-        "exception was never retrieved" not in filtered_stderr.lower()
-    ), f"Exception handling broken:\n{stderr_output}"
+    assert "exception was never retrieved" not in filtered_stderr.lower(), (
+        f"Exception handling broken:\n{stderr_output}"
+    )

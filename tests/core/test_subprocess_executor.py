@@ -1,14 +1,12 @@
 """Tests for subprocess-based code executor."""
 
-import asyncio
-import json
 import shutil
 
 import pytest
 
 from tsugite.core.subprocess_executor import SubprocessExecutor
-from tsugite.events import EventBus, InfoEvent, ToolCallEvent, ToolResultEvent
 from tsugite.core.tools import Tool
+from tsugite.events import EventBus, InfoEvent, ToolCallEvent, ToolResultEvent
 
 
 def _make_tool(name, func, parent_only=False):
@@ -197,6 +195,7 @@ async def test_send_variables():
 @pytest.mark.asyncio
 async def test_multiple_tool_calls():
     """Child can call parent-only tools multiple times in one turn."""
+
     async def greet(name: str = "") -> str:
         return f"Hello, {name}!"
 
@@ -205,9 +204,7 @@ async def test_multiple_tool_calls():
     executor = SubprocessExecutor(event_bus=event_bus)
     executor.set_tools([tool], event_bus)
     try:
-        result = await executor.execute(
-            "a = greet(name='Alice')\nb = greet(name='Bob')\nprint(a, b)"
-        )
+        result = await executor.execute("a = greet(name='Alice')\nb = greet(name='Bob')\nprint(a, b)")
         assert result.error is None
         assert "Hello, Alice!" in result.output
         assert "Hello, Bob!" in result.output

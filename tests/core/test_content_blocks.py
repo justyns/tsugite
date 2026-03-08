@@ -89,9 +89,7 @@ class TestExtractContentBlocks:
         assert "write_file" in cleaned
 
     def test_blocks_before_code(self):
-        text = (
-            '<content name="data">some data</content>\n\n' "Thought: using the data\n\n" "```python\nprint(data)\n```"
-        )
+        text = '<content name="data">some data</content>\n\nThought: using the data\n\n```python\nprint(data)\n```'
         cleaned, blocks = extract_content_blocks(text)
         assert blocks == {"data": "some data"}
         assert "```python" in cleaned
@@ -283,7 +281,7 @@ class TestContentBlocksIntegration:
             call_count += 1
             if call_count == 1:
                 return mock_litellm_response(
-                    "```python\nprint(data)\n```\n\n" '<content name="data">\npersisted value\n</content>'
+                    '```python\nprint(data)\n```\n\n<content name="data">\npersisted value\n</content>'
                 )
             else:
                 return mock_litellm_response("```python\nfinal_answer(data)\n```")

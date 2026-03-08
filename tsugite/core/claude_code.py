@@ -64,9 +64,7 @@ class ClaudeCodeProcess:
             RuntimeError: If claude CLI is not found or fails to start
         """
         if not shutil.which("claude"):
-            raise RuntimeError(
-                "Claude Code CLI not found. Install it with: npm install -g @anthropic-ai/claude-code"
-            )
+            raise RuntimeError("Claude Code CLI not found. Install it with: npm install -g @anthropic-ai/claude-code")
 
         # Write system prompt to temp file
         fd, self._system_prompt_file = tempfile.mkstemp(suffix=".txt", prefix="tsugite_sysprompt_")
@@ -74,16 +72,24 @@ class ClaudeCodeProcess:
             f.write(system_prompt)
 
         cmd = [
-            "claude", "--print",
-            "--input-format", "stream-json",
-            "--output-format", "stream-json",
+            "claude",
+            "--print",
+            "--input-format",
+            "stream-json",
+            "--output-format",
+            "stream-json",
             "--verbose",
-            "--max-turns", "1",
-            "--model", model,
-            "--tools", "",
+            "--max-turns",
+            "1",
+            "--model",
+            model,
+            "--tools",
+            "",
             "--strict-mcp-config",
-            "--system-prompt-file", self._system_prompt_file,
-            "--session-id", str(uuid.uuid4()),
+            "--system-prompt-file",
+            self._system_prompt_file,
+            "--session-id",
+            str(uuid.uuid4()),
         ]
 
         # Copy env but unset keys that trigger nested-session guard or API key usage
@@ -158,9 +164,7 @@ class ClaudeCodeProcess:
                 if usage:
                     self._last_usage = usage
                 content_blocks = message.get("content", [])
-                text = "".join(
-                    block.get("text", "") for block in content_blocks if block.get("type") == "text"
-                )
+                text = "".join(block.get("text", "") for block in content_blocks if block.get("type") == "text")
                 if text:
                     yield {"type": "text_delta", "text": text}
 

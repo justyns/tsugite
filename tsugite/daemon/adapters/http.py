@@ -407,7 +407,9 @@ class HTTPServer:
                 save_daemon_config(self.gateway.config, self.gateway.config_path)
 
         self.event_bus.emit("agent_status", {"agent": agent_name})
-        return JSONResponse({"status": "ok", "model": adapter.resolve_model(), "context_limit": agent_config.context_limit})
+        return JSONResponse(
+            {"status": "ok", "model": adapter.resolve_model(), "context_limit": agent_config.context_limit}
+        )
 
     async def _attachments(self, request: Request) -> JSONResponse:
         adapter, err = self._get_adapter(request)
@@ -607,13 +609,15 @@ class HTTPServer:
             mime_type, content_type = _file_handler._detect_content_type(dest)
             context_attach = _should_context_attach(dest, file_size)
 
-            results.append({
-                "name": dest.name,
-                "content_type": content_type.value,
-                "mime_type": mime_type,
-                "size": file_size,
-                "context_attach": context_attach,
-            })
+            results.append(
+                {
+                    "name": dest.name,
+                    "content_type": content_type.value,
+                    "mime_type": mime_type,
+                    "size": file_size,
+                    "context_attach": context_attach,
+                }
+            )
 
         await form.close()
         return JSONResponse({"files": results})

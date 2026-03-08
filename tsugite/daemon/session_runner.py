@@ -15,6 +15,7 @@ from tsugite.daemon.agent_session import (
     ReviewGate,
     SessionState,
 )
+
 logger = logging.getLogger(__name__)
 
 # Context var for per-session state
@@ -57,7 +58,9 @@ class SessionReviewBackend:
         review = self._store.create_review(review)
 
         if self._event_bus:
-            self._event_bus.emit("review_update", {"action": "created", "id": review.id, "session_id": self._session_id})
+            self._event_bus.emit(
+                "review_update", {"action": "created", "id": review.id, "session_id": self._session_id}
+            )
 
         if self._on_review_created:
             self._on_review_created(review)
@@ -87,6 +90,7 @@ class LoggingProgressHandler:
     def handle_event(self, event) -> None:
         """Handle BaseEvent from EventBus — delegate to JSONLUIHandler's logic."""
         from tsugite.ui.jsonl import JSONLUIHandler
+
         # Reuse JSONLUIHandler's event->_emit dispatch
         JSONLUIHandler.handle_event(self, event)
 

@@ -231,9 +231,15 @@ def schedule_update(
         Updated schedule details
     """
     # Build fields dict from provided params (rename cron → cron_expr)
-    simple = {"prompt": prompt, "cron_expr": cron, "run_at": run_at, "timezone": timezone,
-              "inject_history": inject_history, "execution_type": execution_type,
-              "script_timeout": script_timeout}
+    simple = {
+        "prompt": prompt,
+        "cron_expr": cron,
+        "run_at": run_at,
+        "timezone": timezone,
+        "inject_history": inject_history,
+        "execution_type": execution_type,
+        "script_timeout": script_timeout,
+    }
     fields = {k: v for k, v in simple.items() if v is not None}
 
     if notify is not None:
@@ -314,9 +320,7 @@ def _get_running_tasks_snapshot():
     """Collect running task details in a single scheduler-thread call."""
     running_ids = _scheduler.get_running_ids()
     return [
-        {"id": e.id, "agent": e.agent, "prompt": e.prompt[:200]}
-        for rid in running_ids
-        if (e := _scheduler.get(rid))
+        {"id": e.id, "agent": e.agent, "prompt": e.prompt[:200]} for rid in running_ids if (e := _scheduler.get(rid))
     ]
 
 

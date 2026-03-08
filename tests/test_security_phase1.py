@@ -7,7 +7,6 @@ import pytest
 from tsugite.events import EventType, ToolCallEvent, ToolResultEvent
 from tsugite.tools import get_tool, list_tools, tool
 
-
 # ============================================================================
 # parent_only flag
 # ============================================================================
@@ -227,15 +226,14 @@ class TestRunSafeRemoved:
 
     def test_run_has_no_blocklist_check(self, reset_tool_registry):
         """run() should not check for dangerous patterns."""
-        from tsugite.tools.shell import run
-
         # These patterns were previously blocked
         # Now they should just try to execute (will fail naturally if command doesn't exist)
         # We just verify no ValueError is raised for the pattern check
-        import subprocess
 
         # Mock execute_shell_command to avoid actual execution
         from unittest.mock import patch
+
+        from tsugite.tools.shell import run
 
         with patch("tsugite.tools.shell.execute_shell_command", return_value="ok"):
             result = run("echo rm -rf /", timeout=5)

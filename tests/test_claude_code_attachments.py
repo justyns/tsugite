@@ -5,14 +5,13 @@ Fix 3: claude_code_session_id passed to save_run_to_history from daemon
 """
 
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from tsugite.attachments.base import Attachment, AttachmentContentType
 from tsugite.core.agent import TsugiteAgent
 from tsugite.skill_discovery import Skill
-
 
 # ── Fix 2: _build_claude_code_first_message attachments ──
 

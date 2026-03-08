@@ -13,9 +13,7 @@ from tsugite.daemon.scheduler import ScheduleEntry
 
 
 def _make_entry(**kwargs) -> ScheduleEntry:
-    defaults = dict(
-        id="test-job", agent="bot", prompt="do something", schedule_type="cron", cron_expr="0 9 * * *"
-    )
+    defaults = dict(id="test-job", agent="bot", prompt="do something", schedule_type="cron", cron_expr="0 9 * * *")
     defaults.update(kwargs)
     return ScheduleEntry(**defaults)
 

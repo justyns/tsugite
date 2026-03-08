@@ -23,14 +23,22 @@ class TestAgentFileField:
 
     def test_explicit_value(self):
         entry = ScheduleEntry(
-            id="t", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *",
+            id="t",
+            agent="bot",
+            prompt="hi",
+            schedule_type="cron",
+            cron_expr="0 9 * * *",
             agent_file="agents/custom.md",
         )
         assert entry.agent_file == "agents/custom.md"
 
     def test_serialization_roundtrip(self):
         entry = ScheduleEntry(
-            id="t", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *",
+            id="t",
+            agent="bot",
+            prompt="hi",
+            schedule_type="cron",
+            cron_expr="0 9 * * *",
             agent_file="agents/custom.md",
         )
         data = asdict(entry)
@@ -40,11 +48,24 @@ class TestAgentFileField:
     def test_old_schedules_compat(self):
         """Old schedule data without agent_file should still load."""
         data = {
-            "id": "old", "agent": "bot", "prompt": "hi", "schedule_type": "cron",
-            "cron_expr": "0 9 * * *", "enabled": True, "created_at": "2026-01-01T00:00:00",
-            "last_run": None, "next_run": None, "last_status": None, "last_error": None,
-            "notify": [], "notify_tool": False, "inject_history": True, "auto_reply": False,
-            "model": None, "misfire_grace_seconds": 300, "timezone": "UTC",
+            "id": "old",
+            "agent": "bot",
+            "prompt": "hi",
+            "schedule_type": "cron",
+            "cron_expr": "0 9 * * *",
+            "enabled": True,
+            "created_at": "2026-01-01T00:00:00",
+            "last_run": None,
+            "next_run": None,
+            "last_status": None,
+            "last_error": None,
+            "notify": [],
+            "notify_tool": False,
+            "inject_history": True,
+            "auto_reply": False,
+            "model": None,
+            "misfire_grace_seconds": 300,
+            "timezone": "UTC",
         }
         entry = ScheduleEntry(**data)
         assert entry.agent_file is None
@@ -78,7 +99,11 @@ class TestRunAgentWithAgentFile:
         agent_file.write_text("---\nname: custom\n---\nHello")
 
         entry = ScheduleEntry(
-            id="t", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *",
+            id="t",
+            agent="bot",
+            prompt="hi",
+            schedule_type="cron",
+            cron_expr="0 9 * * *",
             agent_file=str(agent_file),
         )
 
@@ -96,7 +121,11 @@ class TestRunAgentWithAgentFile:
         agent_file.write_text("---\nname: custom\n---\nHello")
 
         entry = ScheduleEntry(
-            id="t", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *",
+            id="t",
+            agent="bot",
+            prompt="hi",
+            schedule_type="cron",
+            cron_expr="0 9 * * *",
             agent_file="+custom",
         )
 
@@ -114,7 +143,11 @@ class TestRunAgentWithAgentFile:
         agent_file.write_text("---\nname: custom\n---\nHello")
 
         entry = ScheduleEntry(
-            id="t", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *",
+            id="t",
+            agent="bot",
+            prompt="hi",
+            schedule_type="cron",
+            cron_expr="0 9 * * *",
             agent_file="agents/custom.md",
         )
 
@@ -127,7 +160,11 @@ class TestRunAgentWithAgentFile:
     @pytest.mark.asyncio
     async def test_missing_file_raises(self, adapter, scheduler_adapter):
         entry = ScheduleEntry(
-            id="t", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *",
+            id="t",
+            agent="bot",
+            prompt="hi",
+            schedule_type="cron",
+            cron_expr="0 9 * * *",
             agent_file="/nonexistent/agent.md",
         )
 
@@ -137,7 +174,11 @@ class TestRunAgentWithAgentFile:
     @pytest.mark.asyncio
     async def test_no_agent_file_no_override(self, adapter, scheduler_adapter):
         entry = ScheduleEntry(
-            id="t", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *",
+            id="t",
+            agent="bot",
+            prompt="hi",
+            schedule_type="cron",
+            cron_expr="0 9 * * *",
         )
 
         with patch("tsugite.daemon.adapters.scheduler_adapter.send_notification"):
@@ -148,8 +189,11 @@ class TestRunAgentWithAgentFile:
 
 
 class _ConcreteAdapter(BaseAdapter):
-    async def start(self): pass
-    async def stop(self): pass
+    async def start(self):
+        pass
+
+    async def stop(self):
+        pass
 
 
 def _make_base_adapter(tmp_path, **overrides):
@@ -190,8 +234,11 @@ class TestHandleMessageOverride:
         override_file.write_text("---\nname: override\n---\nOverride agent")
 
         channel_context = ChannelContext(
-            source="scheduler", channel_id=None, user_id="test",
-            reply_to="test", metadata={"agent_file_override": str(override_file)},
+            source="scheduler",
+            channel_id=None,
+            user_id="test",
+            reply_to="test",
+            metadata={"agent_file_override": str(override_file)},
         )
 
         adapter = _make_base_adapter(tmp_path)
@@ -206,8 +253,11 @@ class TestHandleMessageOverride:
     async def test_ignores_nonexistent_override(self, tmp_path):
         """handle_message falls back to default if override file doesn't exist."""
         channel_context = ChannelContext(
-            source="scheduler", channel_id=None, user_id="test",
-            reply_to="test", metadata={"agent_file_override": "/nonexistent/agent.md"},
+            source="scheduler",
+            channel_id=None,
+            user_id="test",
+            reply_to="test",
+            metadata={"agent_file_override": "/nonexistent/agent.md"},
         )
 
         default_agent = tmp_path / "default.md"

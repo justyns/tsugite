@@ -192,8 +192,13 @@ class TestAutoReply:
         )
 
         entry = ScheduleEntry(
-            id="bg-test", agent="bot", prompt="list files", schedule_type="once",
-            run_at="2099-01-01T00:00:00Z", notify=["dm"], auto_reply=True,
+            id="bg-test",
+            agent="bot",
+            prompt="list files",
+            schedule_type="once",
+            run_at="2099-01-01T00:00:00Z",
+            notify=["dm"],
+            auto_reply=True,
         )
 
         with patch("tsugite.daemon.adapters.scheduler_adapter.send_notification"):
@@ -215,8 +220,13 @@ class TestAutoReply:
         )
 
         entry = ScheduleEntry(
-            id="bg-test", agent="bot", prompt="test", schedule_type="once",
-            run_at="2099-01-01T00:00:00Z", notify=["dm"], auto_reply=True,
+            id="bg-test",
+            agent="bot",
+            prompt="test",
+            schedule_type="once",
+            run_at="2099-01-01T00:00:00Z",
+            notify=["dm"],
+            auto_reply=True,
             inject_history=True,
         )
 
@@ -239,8 +249,14 @@ class TestAutoReply:
         )
 
         entry = ScheduleEntry(
-            id="cron-job", agent="bot", prompt="test", schedule_type="cron",
-            cron_expr="0 9 * * *", notify=["dm"], auto_reply=False, inject_history=True,
+            id="cron-job",
+            agent="bot",
+            prompt="test",
+            schedule_type="cron",
+            cron_expr="0 9 * * *",
+            notify=["dm"],
+            auto_reply=False,
+            inject_history=True,
         )
 
         with (
@@ -264,8 +280,13 @@ class TestAutoReply:
         mock_adapter.handle_message = AsyncMock(side_effect=RuntimeError("agent crashed"))
 
         entry = ScheduleEntry(
-            id="bg-fail", agent="bot", prompt="test", schedule_type="once",
-            run_at="2099-01-01T00:00:00Z", notify=["dm"], auto_reply=True,
+            id="bg-fail",
+            agent="bot",
+            prompt="test",
+            schedule_type="once",
+            run_at="2099-01-01T00:00:00Z",
+            notify=["dm"],
+            auto_reply=True,
         )
 
         with patch("tsugite.daemon.adapters.scheduler_adapter.send_notification") as mock_notify:

@@ -65,7 +65,9 @@ def reconstruct_messages(session_path: Path) -> List[Dict[str, Any]]:
                 ),
             }
         )
-        messages.append({"role": "assistant", "content": "I've reviewed our previous conversation and I'm ready to continue."})
+        messages.append(
+            {"role": "assistant", "content": "I've reviewed our previous conversation and I'm ready to continue."}
+        )
 
     for record in records:
         if isinstance(record, Turn):

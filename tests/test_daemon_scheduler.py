@@ -301,8 +301,13 @@ class TestModelField:
 class TestScriptEntry:
     def test_script_entry_creation(self):
         entry = ScheduleEntry(
-            id="test", agent="bot", prompt="", schedule_type="cron",
-            cron_expr="0 * * * *", execution_type="script", command="echo hello",
+            id="test",
+            agent="bot",
+            prompt="",
+            schedule_type="cron",
+            cron_expr="0 * * * *",
+            execution_type="script",
+            command="echo hello",
         )
         assert entry.execution_type == "script"
         assert entry.command == "echo hello"
@@ -311,15 +316,23 @@ class TestScriptEntry:
     def test_script_requires_command(self):
         with pytest.raises(ValueError, match="command required"):
             ScheduleEntry(
-                id="test", agent="bot", prompt="", schedule_type="cron",
-                cron_expr="0 * * * *", execution_type="script",
+                id="test",
+                agent="bot",
+                prompt="",
+                schedule_type="cron",
+                cron_expr="0 * * * *",
+                execution_type="script",
             )
 
     def test_invalid_execution_type(self):
         with pytest.raises(ValueError, match="execution_type must be"):
             ScheduleEntry(
-                id="test", agent="bot", prompt="hi", schedule_type="cron",
-                cron_expr="0 * * * *", execution_type="bad",
+                id="test",
+                agent="bot",
+                prompt="hi",
+                schedule_type="cron",
+                cron_expr="0 * * * *",
+                execution_type="bad",
             )
 
     def test_agent_defaults(self):
@@ -330,8 +343,13 @@ class TestScriptEntry:
 
     def test_custom_script_timeout(self):
         entry = ScheduleEntry(
-            id="test", agent="bot", prompt="", schedule_type="cron",
-            cron_expr="0 * * * *", execution_type="script", command="curl http://example.com",
+            id="test",
+            agent="bot",
+            prompt="",
+            schedule_type="cron",
+            cron_expr="0 * * * *",
+            execution_type="script",
+            command="curl http://example.com",
             script_timeout=120,
         )
         assert entry.script_timeout == 120
@@ -345,8 +363,13 @@ class TestScriptDispatch:
         sched = Scheduler(schedules_path, run_cb, script_callback=script_cb)
 
         entry = ScheduleEntry(
-            id="s1", agent="bot", prompt="", schedule_type="cron",
-            cron_expr="* * * * *", execution_type="script", command="echo hi",
+            id="s1",
+            agent="bot",
+            prompt="",
+            schedule_type="cron",
+            cron_expr="* * * * *",
+            execution_type="script",
+            command="echo hi",
         )
         sched.add(entry)
         await sched._fire_schedule(sched.get("s1"))
@@ -362,7 +385,11 @@ class TestScriptDispatch:
         sched = Scheduler(schedules_path, run_cb, script_callback=script_cb)
 
         entry = ScheduleEntry(
-            id="a1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="* * * * *",
+            id="a1",
+            agent="bot",
+            prompt="hi",
+            schedule_type="cron",
+            cron_expr="* * * * *",
         )
         sched.add(entry)
         await sched._fire_schedule(sched.get("a1"))
@@ -376,8 +403,13 @@ class TestScriptDispatch:
         sched = Scheduler(schedules_path, run_cb)  # no script_callback
 
         entry = ScheduleEntry(
-            id="s1", agent="bot", prompt="", schedule_type="cron",
-            cron_expr="* * * * *", execution_type="script", command="echo hi",
+            id="s1",
+            agent="bot",
+            prompt="",
+            schedule_type="cron",
+            cron_expr="* * * * *",
+            execution_type="script",
+            command="echo hi",
         )
         sched.add(entry)
         await sched._fire_schedule(sched.get("s1"))
@@ -390,8 +422,13 @@ class TestScriptPersistence:
     def test_script_entry_roundtrip(self, schedules_path, run_callback):
         sched1 = Scheduler(schedules_path, run_callback)
         entry = ScheduleEntry(
-            id="script1", agent="bot", prompt="", schedule_type="cron",
-            cron_expr="0 * * * *", execution_type="script", command="df -h /",
+            id="script1",
+            agent="bot",
+            prompt="",
+            schedule_type="cron",
+            cron_expr="0 * * * *",
+            execution_type="script",
+            command="df -h /",
             script_timeout=30,
         )
         sched1.add(entry)
