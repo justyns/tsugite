@@ -55,11 +55,11 @@
     flex-direction: column;
   }
 
-  /* Status bar: scroll when it overflows */
+  /* Status bar: wrap so Compact button stays visible */
   #status-bar {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    padding: 4px 12px;
   }
 }
 
