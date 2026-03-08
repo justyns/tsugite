@@ -316,7 +316,7 @@ class HTTPServer:
                 "message_count": session.message_count if session else 0,
                 "attachments": [
                     {"name": a.name, "content_type": a.content_type.value, "mime_type": a.mime_type}
-                    for a in adapter._get_workspace_attachments()
+                    for a in adapter._get_all_attachments()
                 ],
             }
         )
@@ -326,7 +326,7 @@ class HTTPServer:
         if err:
             return err
         attachments = []
-        for a in adapter._get_workspace_attachments():
+        for a in adapter._get_all_attachments():
             entry = {"name": a.name, "content_type": a.content_type.value, "mime_type": a.mime_type}
             if a.content_type.value == "text":
                 entry["content"] = a.content
@@ -627,7 +627,7 @@ class HTTPServer:
                             "threshold": adapter.session_manager.compaction_threshold,
                             "message_count": session.message_count,
                             "model": adapter.resolve_model(),
-                            "attachments": [a.name for a in adapter._get_workspace_attachments()],
+                            "attachments": [a.name for a in adapter._get_all_attachments()],
                         },
                     )
             except Exception as e:

@@ -144,6 +144,24 @@ class BaseAdapter(ABC):
         from tsugite.workspace.context import build_workspace_attachments
         return build_workspace_attachments(self._workspace)
 
+    def _get_all_attachments(self):
+        """Build all attachments: workspace + agent config (for UI display)."""
+        attachments = list(self._get_workspace_attachments())
+
+        agent_path = self._resolve_agent_path()
+        if agent_path:
+            try:
+                from tsugite.agent_preparation import resolve_agent_config_attachments
+                from tsugite.md_agents import parse_agent_file
+
+                agent = parse_agent_file(agent_path)
+                workspace_path = self._workspace.path if self._workspace else None
+                attachments.extend(resolve_agent_config_attachments(agent.config.attachments, workspace_path))
+            except Exception as e:
+                logger.debug("Failed to load agent config attachments: %s", e)
+
+        return attachments
+
     def _resolve_agent_path(self, agent_file: Optional[str] = None) -> Optional[Path]:
         """Resolve an agent file to an absolute path.
 
