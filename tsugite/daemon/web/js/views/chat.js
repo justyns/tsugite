@@ -387,6 +387,8 @@ export default () => ({
       }
     } else if (event.type === 'error') {
       prog.steps.push({ html: `<span class="err">${escapeHtml(event.error)}</span>` });
+    } else if (event.type === 'hook_status') {
+      prog.statusText = event.message;
     } else if (event.type === 'init') {
       prog.statusText = `Agent: ${event.agent}`;
       if (event.model) this.statusInfo = { ...this.statusInfo, model: event.model };

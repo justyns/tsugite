@@ -741,10 +741,17 @@ async def run_agent_async(
 
     hooks_dir = workspace.path if workspace else (path_context.effective_cwd if path_context else Path.cwd())
     hook_message = context.pop("raw_message", prompt)
+
+    on_status = None
+    ui_handler = get_ui_handler(custom_logger)
+    if ui_handler and hasattr(ui_handler, "_emit"):
+        on_status = lambda msg: ui_handler._emit("hook_status", {"message": msg})
+
     hook_vars = await fire_pre_message_hooks(
         hooks_dir,
         {"message": hook_message, "agent_name": agent_path.stem},
         interactive=is_interactive(),
+        on_status=on_status,
     )
     context.update(hook_vars)
 

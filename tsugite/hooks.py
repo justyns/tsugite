@@ -5,7 +5,7 @@ import logging
 import shlex
 import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, Optional, Union
+from typing import TYPE_CHECKING, Any, Callable, Literal, Optional, Union
 
 import jinja2
 import yaml
@@ -34,6 +34,7 @@ class HookRule(BaseModel):
     wait: bool = False
     capture_as: Optional[str] = None
     only_interactive: bool = False
+    name: Optional[str] = None
 
 
 class HooksConfig(BaseModel):
@@ -105,6 +106,7 @@ def _render_and_execute(
     context: dict[str, Any],
     cwd: Path,
     interactive: bool = True,
+    on_status: Optional[Callable[[str], None]] = None,
 ) -> dict[str, str]:
     """Render and execute matching hook rules synchronously.
 
@@ -117,6 +119,9 @@ def _render_and_execute(
             continue
         if rule.match and not _match_passes(jinja_env, rule.match, context):
             continue
+        if on_status:
+            label = rule.name or rule.capture_as or "hook"
+            on_status(f"Running {label}...")
         try:
             if isinstance(rule.run, list):
                 cmd: Union[str, list[str]] = [jinja_env.from_string(part).render(context) for part in rule.run]
@@ -173,6 +178,7 @@ async def _fire_hooks(
     phase: str,
     context: dict[str, Any],
     interactive: bool = True,
+    on_status: Optional[Callable[[str], None]] = None,
 ) -> dict[str, str]:
     """Load config and fire hooks for the given phase.
 
@@ -187,7 +193,9 @@ async def _fire_hooks(
     if not rules:
         return {}
 
-    return await asyncio.to_thread(_render_and_execute, _jinja_env, rules, context, workspace_dir, interactive)
+    return await asyncio.to_thread(
+        _render_and_execute, _jinja_env, rules, context, workspace_dir, interactive, on_status
+    )
 
 
 async def fire_compact_hooks(
@@ -201,7 +209,10 @@ async def fire_compact_hooks(
 
 
 async def fire_pre_message_hooks(
-    workspace_dir: Path, context: dict[str, Any], interactive: bool = True
+    workspace_dir: Path,
+    context: dict[str, Any],
+    interactive: bool = True,
+    on_status: Optional[Callable[[str], None]] = None,
 ) -> dict[str, str]:
     """Fire pre_message hooks, returning captured variables."""
-    return await _fire_hooks(workspace_dir, "pre_message", context, interactive=interactive)
+    return await _fire_hooks(workspace_dir, "pre_message", context, interactive=interactive, on_status=on_status)

@@ -569,3 +569,79 @@ class TestRunAsList:
             assert mock_run.call_args[0][0] == ["echo", "it's a test"]
             assert mock_run.call_args[1]["shell"] is False
             assert result == {"out": "hello"}
+
+
+class TestHookName:
+    def test_name_field_parsed(self):
+        rule = HookRule(run="echo hi", name="My Hook")
+        assert rule.name == "My Hook"
+
+    def test_name_defaults_to_none(self):
+        rule = HookRule(run="echo hi")
+        assert rule.name is None
+
+    def test_name_parsed_from_yaml(self, tmp_workspace):
+        (tmp_workspace / ".tsugite" / "hooks.yaml").write_text(
+            "hooks:\n  pre_message:\n    - run: echo hi\n      name: RAG Search\n      capture_as: rag\n"
+        )
+        config = load_hooks_config(tmp_workspace)
+        assert config.pre_message[0].name == "RAG Search"
+
+
+class TestOnStatusCallback:
+    _env = jinja2.Environment()
+
+    def test_on_status_called_with_name(self, tmp_path):
+        rules = [HookRule(run="echo hi", name="RAG Search")]
+        status_calls = []
+        with patch("tsugite.hooks.subprocess.run", return_value=_ok_result()):
+            _render_and_execute(self._env, rules, {}, tmp_path, on_status=status_calls.append)
+        assert status_calls == ["Running RAG Search..."]
+
+    def test_on_status_falls_back_to_capture_as(self, tmp_path):
+        rules = [HookRule(run="echo hi", capture_as="rag_context")]
+        status_calls = []
+        with patch("tsugite.hooks.subprocess.run", return_value=_ok_result(stdout="out")):
+            _render_and_execute(self._env, rules, {}, tmp_path, on_status=status_calls.append)
+        assert status_calls == ["Running rag_context..."]
+
+    def test_on_status_falls_back_to_hook(self, tmp_path):
+        rules = [HookRule(run="echo hi")]
+        status_calls = []
+        with patch("tsugite.hooks.subprocess.run", return_value=_ok_result()):
+            _render_and_execute(self._env, rules, {}, tmp_path, on_status=status_calls.append)
+        assert status_calls == ["Running hook..."]
+
+    def test_on_status_none_does_not_break(self, tmp_path):
+        rules = [HookRule(run="echo hi", name="Test")]
+        with patch("tsugite.hooks.subprocess.run", return_value=_ok_result()):
+            _render_and_execute(self._env, rules, {}, tmp_path, on_status=None)
+
+    def test_on_status_called_per_rule(self, tmp_path):
+        rules = [
+            HookRule(run="echo a", name="First"),
+            HookRule(run="echo b", name="Second"),
+        ]
+        status_calls = []
+        with patch("tsugite.hooks.subprocess.run", return_value=_ok_result()):
+            _render_and_execute(self._env, rules, {}, tmp_path, on_status=status_calls.append)
+        assert status_calls == ["Running First...", "Running Second..."]
+
+    def test_on_status_not_called_for_skipped_rules(self, tmp_path):
+        rules = [HookRule(run="echo hi", name="Skipped", only_interactive=True)]
+        status_calls = []
+        with patch("tsugite.hooks.subprocess.run", return_value=_ok_result()):
+            _render_and_execute(self._env, rules, {}, tmp_path, interactive=False, on_status=status_calls.append)
+        assert status_calls == []
+
+    @pytest.mark.asyncio
+    async def test_fire_pre_message_hooks_passes_on_status(self, tmp_workspace):
+        (tmp_workspace / ".tsugite" / "hooks.yaml").write_text(
+            "hooks:\n  pre_message:\n    - run: echo hi\n      name: Search\n      capture_as: x\n"
+        )
+        status_calls = []
+        with patch("tsugite.hooks.subprocess.run", return_value=_ok_result(stdout="result")):
+            await fire_pre_message_hooks(
+                tmp_workspace, {"message": "test"}, on_status=status_calls.append
+            )
+        assert status_calls == ["Running Search..."]
