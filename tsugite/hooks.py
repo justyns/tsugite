@@ -2,9 +2,10 @@
 
 import asyncio
 import logging
+import shlex
 import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, Optional
+from typing import TYPE_CHECKING, Any, Literal, Optional, Union
 
 import jinja2
 import yaml
@@ -21,6 +22,7 @@ logger = logging.getLogger(__name__)
 FALSY_STRINGS = {"false", "none", "0", ""}
 HOOK_TIMEOUT = 300
 _jinja_env = jinja2.Environment()
+_jinja_env.filters["shell_quote"] = shlex.quote
 
 
 class HookRule(BaseModel):
@@ -28,7 +30,7 @@ class HookRule(BaseModel):
 
     tools: list[str] = Field(default_factory=list)
     match: Optional[str] = None
-    run: str
+    run: Union[str, list[str]]
     wait: bool = False
     capture_as: Optional[str] = None
     only_interactive: bool = False
@@ -68,12 +70,18 @@ def _match_passes(jinja_env: jinja2.Environment, match_expr: str, context: dict[
         return False
 
 
-def _execute_hook(cmd: str, cwd: Path, capture: bool = False) -> Optional[str]:
-    """Run a shell command. Returns stdout if capture=True."""
+def _execute_hook(cmd: Union[str, list[str]], cwd: Path, capture: bool = False) -> Optional[str]:
+    """Run a hook command. Returns stdout if capture=True."""
     try:
         logger.info("Hook fired: %s", cmd)
         result = subprocess.run(
-            cmd, shell=True, cwd=str(cwd), capture_output=True, text=True, errors="replace", timeout=HOOK_TIMEOUT
+            cmd,
+            shell=isinstance(cmd, str),
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=HOOK_TIMEOUT,
         )
         if result.returncode != 0:
             logger.warning("Hook failed (exit %d): %s", result.returncode, cmd)
@@ -110,7 +118,10 @@ def _render_and_execute(
         if rule.match and not _match_passes(jinja_env, rule.match, context):
             continue
         try:
-            cmd = jinja_env.from_string(rule.run).render(context)
+            if isinstance(rule.run, list):
+                cmd: Union[str, list[str]] = [jinja_env.from_string(part).render(context) for part in rule.run]
+            else:
+                cmd = jinja_env.from_string(rule.run).render(context)
         except Exception as e:
             logger.warning("Hook render failed: %s", e)
             continue

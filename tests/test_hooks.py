@@ -14,6 +14,7 @@ from tsugite.hooks import (
     HookRule,
     HooksConfig,
     _execute_hook,
+    _jinja_env,
     _render_and_execute,
     fire_compact_hooks,
     fire_pre_message_hooks,
@@ -493,3 +494,78 @@ class TestOnlyInteractive:
             result = await fire_pre_message_hooks(tmp_workspace, {"message": "test"}, interactive=False)
             mock_run.assert_not_called()
             assert result == {}
+
+
+class TestShellQuoteFilter:
+    def test_apostrophe_escaped(self):
+        result = _jinja_env.from_string("{{ msg | shell_quote }}").render(msg="it's a test")
+        assert result == "'it'\"'\"'s a test'"
+
+    def test_backtick_escaped(self):
+        result = _jinja_env.from_string("{{ msg | shell_quote }}").render(msg="hello `world`")
+        assert result == "'hello `world`'"
+
+    def test_dollar_escaped(self):
+        result = _jinja_env.from_string("{{ msg | shell_quote }}").render(msg="cost is $100")
+        assert result == "'cost is $100'"
+
+    def test_safe_string_unchanged(self):
+        result = _jinja_env.from_string("{{ msg | shell_quote }}").render(msg="hello")
+        assert result == "hello"
+
+    def test_in_command_context(self):
+        result = _jinja_env.from_string("search {{ msg | shell_quote }} --json").render(msg="it's here")
+        assert result.startswith("search ")
+        assert result.endswith(" --json")
+
+
+class TestRunAsList:
+    def test_list_run_parsed(self):
+        rule = HookRule(run=["echo", "{{ message }}"])
+        assert isinstance(rule.run, list)
+
+    def test_list_run_from_yaml(self, tmp_workspace):
+        (tmp_workspace / ".tsugite" / "hooks.yaml").write_text(
+            "hooks:\n  pre_message:\n    - run:\n        - echo\n        - '{{ message }}'\n      capture_as: out\n"
+        )
+        config = load_hooks_config(tmp_workspace)
+        assert isinstance(config.pre_message[0].run, list)
+        assert config.pre_message[0].run == ["echo", "{{ message }}"]
+
+    def test_list_execute_hook_uses_shell_false(self, tmp_path):
+        with patch("tsugite.hooks.subprocess.run", return_value=_ok_result()) as mock_run:
+            _execute_hook(["echo", "hello"], tmp_path)
+            mock_run.assert_called_once_with(
+                ["echo", "hello"],
+                shell=False,
+                cwd=str(tmp_path),
+                capture_output=True,
+                text=True,
+                errors="replace",
+                timeout=300,
+            )
+
+    def test_list_render_and_execute(self, tmp_path):
+        rules = [HookRule(run=["echo", "{{ name }}"], capture_as="out")]
+        with patch("tsugite.hooks.subprocess.run", return_value=_ok_result(stdout="alice")) as mock_run:
+            captured = _render_and_execute(_jinja_env, rules, {"name": "alice"}, tmp_path)
+            assert mock_run.call_args[0][0] == ["echo", "alice"]
+            assert captured == {"out": "alice"}
+
+    def test_list_with_shell_metacharacters(self, tmp_path):
+        rules = [HookRule(run=["echo", "{{ msg }}"], capture_as="out")]
+        with patch("tsugite.hooks.subprocess.run", return_value=_ok_result(stdout="it's $fine")) as mock_run:
+            _render_and_execute(_jinja_env, rules, {"msg": "it's $fine"}, tmp_path)
+            assert mock_run.call_args[0][0] == ["echo", "it's $fine"]
+            assert mock_run.call_args[1]["shell"] is False
+
+    @pytest.mark.asyncio
+    async def test_pre_message_list_run(self, tmp_workspace):
+        (tmp_workspace / ".tsugite" / "hooks.yaml").write_text(
+            "hooks:\n  pre_message:\n    - run:\n        - echo\n        - '{{ message }}'\n      capture_as: out\n"
+        )
+        with patch("tsugite.hooks.subprocess.run", return_value=_ok_result(stdout="hello")) as mock_run:
+            result = await fire_pre_message_hooks(tmp_workspace, {"message": "it's a test"})
+            assert mock_run.call_args[0][0] == ["echo", "it's a test"]
+            assert mock_run.call_args[1]["shell"] is False
+            assert result == {"out": "hello"}
