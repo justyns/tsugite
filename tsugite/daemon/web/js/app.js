@@ -14,8 +14,8 @@ window.tsugiteApi = { get, post, patch };
 
 Alpine.store('app', {
   agents: [],
-  selectedAgent: null,
-  view: location.hash.slice(1) || 'dashboard',
+  selectedAgent: localStorage.getItem('tsugite-agent') || null,
+  view: location.hash.slice(1) || localStorage.getItem('tsugite-view') || 'dashboard',
   theme: localStorage.getItem('tsugite_theme') || 'frappe',
   userId: localStorage.getItem('tsugite_user_id') || 'web-user-1',
   showSettings: false,
@@ -37,6 +37,14 @@ window.addEventListener('hashchange', () => {
 });
 
 Alpine.start();
+
+// Persist view and agent selection to localStorage
+Alpine.effect(() => {
+  const store = Alpine.store('app');
+  localStorage.setItem('tsugite-view', store.view);
+  if (location.hash.slice(1) !== store.view) location.hash = store.view;
+  if (store.selectedAgent) localStorage.setItem('tsugite-agent', store.selectedAgent);
+});
 
 async function loadAgents() {
   try {
