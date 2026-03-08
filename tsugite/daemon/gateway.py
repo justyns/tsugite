@@ -106,6 +106,7 @@ class Gateway:
         self._push_store = None
         self._vapid_private_key = None
         self._vapid_claims = None
+        self._shutting_down = False
 
     async def start(self):
         """Start all enabled adapters."""
@@ -114,8 +115,18 @@ class Gateway:
         set_daemon_mode(True)
 
         loop = asyncio.get_running_loop()
+
+        def _on_signal():
+            if self._shutting_down:
+                logger.info("Forced shutdown")
+                if self._http_server and self._http_server._server:
+                    self._http_server._server.force_exit = True
+                loop.stop()
+                return
+            asyncio.create_task(self._shutdown())
+
         for sig in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(sig, lambda: asyncio.create_task(self._shutdown()))
+            loop.add_signal_handler(sig, _on_signal)
 
         # Build reverse identity map: "discord:123456789" -> "justyn"
         identity_map: dict[str, str] = {}
@@ -302,6 +313,10 @@ class Gateway:
 
     async def _shutdown(self):
         """Graceful shutdown of all adapters."""
+        if self._shutting_down:
+            return
+        self._shutting_down = True
+
         from tsugite.tools import set_daemon_mode
         from tsugite.tools.notify import set_notifier
         from tsugite.tools.schedule import set_scheduler
@@ -312,11 +327,16 @@ class Gateway:
         set_session_runner(None)
         set_daemon_mode(False)
 
+        # Stop HTTP server first since SSE connections block uvicorn shutdown
+        if self._http_server:
+            try:
+                await self._http_server.stop()
+            except Exception as e:
+                logger.error("Error stopping HTTP server: %s", e)
+
         components = [(a, "adapter") for a in self.adapters]
         if self._scheduler_adapter:
             components.append((self._scheduler_adapter, "scheduler"))
-        if self._http_server:
-            components.append((self._http_server, "HTTP server"))
 
         for component, label in components:
             try:

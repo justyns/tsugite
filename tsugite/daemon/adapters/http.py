@@ -1348,4 +1348,12 @@ class HTTPServer:
 
     async def stop(self):
         if self._server:
+            # Signal all SSE subscribers to disconnect
+            if hasattr(self, "event_bus"):
+                for q in list(self.event_bus._subscribers):
+                    try:
+                        q.put_nowait(None)
+                    except asyncio.QueueFull:
+                        pass
             self._server.should_exit = True
+            self._server.force_exit = True
