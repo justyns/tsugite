@@ -207,8 +207,22 @@ class AgentPreparer:
         all_attachments = (attachments or []) + workspace_attachments
 
         # Step 0b: Load agent-config attachments (Jinja-rendered paths)
+        # Support "-filename" prefix to remove a workspace default
         workspace_path = workspace.path if workspace else None
-        all_attachments.extend(resolve_agent_config_attachments(agent_config.attachments, workspace_path))
+        removals = {t.lstrip("-") for t in (agent_config.attachments or []) if t.startswith("-")}
+        keep_templates = [t for t in (agent_config.attachments or []) if not t.startswith("-")]
+        if removals:
+            all_attachments = [a for a in all_attachments if a.name not in removals]
+        all_attachments.extend(resolve_agent_config_attachments(keep_templates, workspace_path))
+
+        # Deduplicate by name (keep first occurrence)
+        seen_names: set[str] = set()
+        deduped: List[Attachment] = []
+        for att in all_attachments:
+            if att.name not in seen_names:
+                seen_names.add(att.name)
+                deduped.append(att)
+        all_attachments = deduped
 
         # Step 1: Execute prefetch tools
         prefetch_context = {}

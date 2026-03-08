@@ -42,14 +42,13 @@ from .tools import Tool
 DEFAULT_MAX_TURNS = 10  # Default maximum reasoning iterations before timeout
 
 
-_NO_TRUNCATE_ATTACHMENTS = {"MEMORY.md"}
-
-
 def _attachment_char_limit(name: str) -> int | None:
-    """Return max chars for a Claude Code attachment, or None for no limit."""
-    if name in _NO_TRUNCATE_ATTACHMENTS:
-        return None
-    return 4000
+    """Return max chars for a Claude Code attachment, or None for no limit.
+
+    Currently returns None (no limit) for all attachments.
+    Kept as a hook for future per-attachment size policies.
+    """
+    return None
 
 
 def build_system_prompt(tools: List[Tool], instructions: str = "") -> str:

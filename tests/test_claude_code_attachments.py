@@ -80,7 +80,7 @@ class TestClaudeCodeFirstMessageAttachments:
 
         assert "<context>" not in msg
 
-    def test_large_attachments_truncated(self):
+    def test_large_attachments_not_truncated(self):
         large_content = "x" * 5000
         att = self._att(name="BIG.md", content=large_content)
         agent = self._make_agent(attachments=[att])
@@ -88,9 +88,8 @@ class TestClaudeCodeFirstMessageAttachments:
 
         msg = agent._build_claude_code_first_message()
 
-        assert "... (truncated)" in msg
-        assert "x" * 4000 in msg
-        assert "x" * 5000 not in msg
+        assert "x" * 5000 in msg
+        assert "truncated" not in msg
 
     def test_small_attachments_not_truncated(self):
         att = self._att(name="small.md", content="short content")

@@ -159,11 +159,25 @@ class BaseAdapter(ABC):
 
                 agent = parse_agent_file(agent_path)
                 workspace_path = self._workspace.path if self._workspace else None
-                attachments.extend(resolve_agent_config_attachments(agent.config.attachments, workspace_path))
+
+                # Support "-filename" removal syntax
+                removals = {t.lstrip("-") for t in (agent.config.attachments or []) if t.startswith("-")}
+                keep_templates = [t for t in (agent.config.attachments or []) if not t.startswith("-")]
+                if removals:
+                    attachments = [a for a in attachments if a.name not in removals]
+                attachments.extend(resolve_agent_config_attachments(keep_templates, workspace_path))
             except Exception as e:
                 logger.debug("Failed to load agent config attachments: %s", e)
 
-        return attachments
+        # Deduplicate by name (keep first occurrence)
+        seen: set[str] = set()
+        deduped = []
+        for att in attachments:
+            if att.name not in seen:
+                seen.add(att.name)
+                deduped.append(att)
+
+        return deduped
 
     def _resolve_agent_path(self, agent_file: Optional[str] = None) -> Optional[Path]:
         """Resolve an agent file to an absolute path.
