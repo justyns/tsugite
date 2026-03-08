@@ -425,13 +425,20 @@ class HTTPServer:
             attachments.append(entry)
         return JSONResponse({"attachments": attachments})
 
-    def _collect_turns(self, session_id: str) -> list:
-        """Collect turns from a session and its compaction chain."""
-        history_dir = get_history_dir()
-        visited = set()
+    def _collect_turns(self, session_id: str, limit: int = 0) -> list:
+        """Collect turns from a session and its compaction chain.
 
-        # Walk the compaction chain, caching loaded storage objects
-        chain = []
+        Args:
+            session_id: The current (newest) session ID.
+            limit: Max number of turns to return (0 = unlimited). Walks
+                   newest-to-oldest and stops early once enough turns are
+                   collected.
+        """
+        history_dir = get_history_dir()
+        visited: set[str] = set()
+
+        # Walk the compaction chain newest-to-oldest
+        chain: list[SessionStorage] = []
         current_id = session_id
         while current_id and current_id not in visited:
             visited.add(current_id)
@@ -445,24 +452,45 @@ class HTTPServer:
             except Exception:
                 break
 
-        # Reverse so oldest session is first; insert compaction markers between sessions
-        chain.reverse()
-        items = []
-        for i, storage in enumerate(chain):
+        # Pre-load records for each session once
+        records_cache: list[list] = []
+        for storage in chain:
             try:
-                turns = [r for r in storage.load_records() if isinstance(r, Turn)]
-                items.extend(turns)
-                if i < len(chain) - 1:
-                    summary = None
-                    for r in chain[i + 1].load_records():
-                        if isinstance(r, CompactionSummary):
-                            summary = r.summary
-                            break
-                    items.append({"marker": "compaction", "summary": summary})
-            except Exception as e:
-                logger.warning("Failed to load history: %s", e)
+                records_cache.append(storage.load_records())
+            except Exception:
+                records_cache.append([])
 
-        return items
+        # Iterate oldest-first (reversed chain) and append for chronological order
+        collected: list = []
+        for idx in reversed(range(len(chain))):
+            records = records_cache[idx]
+            turns = [r for r in records if isinstance(r, Turn)]
+
+            if idx > 0:
+                comp_summary = next(
+                    (r for r in records_cache[idx - 1] if isinstance(r, CompactionSummary)), None
+                )
+                if comp_summary and comp_summary.retained_turns:
+                    turns = turns[: -comp_summary.retained_turns]
+            else:
+                comp_summary = None
+
+            collected.extend(turns)
+
+            if comp_summary:
+                collected.append({"marker": "compaction", "summary": comp_summary.summary})
+
+        if limit > 0:
+            # Keep only the most recent `limit` turns, preserving markers
+            turn_count = 0
+            for i in range(len(collected) - 1, -1, -1):
+                if isinstance(collected[i], Turn):
+                    turn_count += 1
+                    if turn_count > limit:
+                        collected = collected[i + 1 :]
+                        break
+
+        return collected
 
     async def _history(self, request: Request) -> JSONResponse:
         adapter, err = self._get_adapter(request)
@@ -471,9 +499,10 @@ class HTTPServer:
 
         user_id = adapter.resolve_http_user(request.query_params.get("user_id", "web-anonymous"))
         detail = request.query_params.get("detail", "false").lower() == "true"
+        limit = int(request.query_params.get("limit", "100"))
         conversation_id = adapter.session_manager.get_or_create_session(user_id)
 
-        turns = self._collect_turns(conversation_id)
+        turns = self._collect_turns(conversation_id, limit=limit)
 
         result_turns = []
         for item in turns:

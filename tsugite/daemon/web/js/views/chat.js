@@ -78,7 +78,7 @@ export default () => ({
     this._allHistoryMessages = [];
     this._historyLoaded = 0;
     try {
-      const data = await get(`/api/agents/${agent}/history?user_id=${encodeURIComponent(this.userId)}`);
+      const data = await get(`/api/agents/${agent}/history?user_id=${encodeURIComponent(this.userId)}&limit=100`);
       if (!data.turns || data.turns.length === 0) return;
       for (const turn of data.turns) {
         if (turn.type === 'compaction') {
