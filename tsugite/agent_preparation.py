@@ -1,8 +1,11 @@
 """Agent preparation pipeline - unified logic for render and execution."""
 
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 from tsugite.attachments.base import Attachment
 from tsugite.core.tools import Tool
@@ -149,10 +152,7 @@ class AgentPreparer:
         if workspace:
             from tsugite.workspace.context import build_workspace_attachments
 
-            memory_days_kwargs = {}
-            if agent_config.memory_inject_days is not None:
-                memory_days_kwargs["memory_days"] = agent_config.memory_inject_days
-            workspace_attachments = build_workspace_attachments(workspace, **memory_days_kwargs)
+            workspace_attachments = build_workspace_attachments(workspace)
 
         # Merge workspace attachments with explicit attachments (explicit first)
         all_attachments = (attachments or []) + workspace_attachments

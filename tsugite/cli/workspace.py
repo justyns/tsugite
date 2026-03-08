@@ -169,15 +169,6 @@ def show_info(
     else:
         console.print("  [dim]None found[/dim]")
 
-    # Check for memory files
-    console.print("\n[bold]Recent Memory:[/bold]")
-    memory_files = workspace.get_memory_files()
-    if memory_files:
-        for file in memory_files:
-            console.print(f"  ✓ {file.name}")
-    else:
-        console.print("  [dim]None found[/dim]")
-
     # Check for workspace-specific agents
     console.print("\n[bold]Workspace Agents:[/bold]")
     if workspace.agents_dir.exists():

@@ -404,6 +404,7 @@ Task: {{ user_prompt }}
         agent_text = """---
 name: test_agent
 model: openai:gpt-4o-mini
+extends: none
 tools: []
 attachments:
   - coding-standards

@@ -108,16 +108,17 @@ def render(
 
             base_dir = Path.cwd()
 
-            # Inject auto-context if enabled
-            agent_attachments = inject_auto_context_if_enabled(
-                agent.config.attachments,
+            # Agent config attachments are resolved by AgentPreparer as workspace-relative
+            # files — only CLI-level attachments and auto-context are resolved here.
+            cli_only_attachments = inject_auto_context_if_enabled(
+                None,
                 agent.config.auto_context,
                 cli_override=auto_context,
             )
 
             prompt_updated, resolved_attachments = assemble_prompt_with_attachments(
                 prompt=prompt,
-                agent_attachments=agent_attachments,
+                agent_attachments=cli_only_attachments,
                 cli_attachments=attachment,
                 base_dir=base_dir,
                 refresh_cache=refresh_cache,

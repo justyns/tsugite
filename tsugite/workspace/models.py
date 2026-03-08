@@ -1,12 +1,10 @@
 """Convention-based workspace models."""
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Optional
 
 WORKSPACE_FILES = ["PERSONA.md", "SOUL.md", "USER.md", "MEMORY.md", "IDENTITY.md", "AGENTS.md"]
-DEFAULT_MEMORY_INJECT_DAYS = 3
 DEFAULT_COMPACTION_THRESHOLD = 0.8
 
 
@@ -62,32 +60,6 @@ class Workspace:
             path = self.path / filename
             if path.exists() and path.is_file():
                 files.append(path)
-        return files
-
-    def get_memory_files(self, days: int = DEFAULT_MEMORY_INJECT_DAYS) -> List[Path]:
-        """Get recent memory files matching YYYY-MM-DD.md pattern.
-
-        Args:
-            days: Number of days to look back
-
-        Returns:
-            List of memory files from the last N days, sorted chronologically
-        """
-        if not self.memory_dir.exists():
-            return []
-
-        cutoff = datetime.now() - timedelta(days=days)
-        files = []
-
-        for path in sorted(self.memory_dir.glob("*.md")):
-            try:
-                date_str = path.stem
-                file_date = datetime.strptime(date_str, "%Y-%m-%d")
-                if file_date >= cutoff:
-                    files.append(path)
-            except ValueError:
-                continue
-
         return files
 
     def needs_onboarding(self) -> bool:
@@ -309,6 +281,5 @@ __all__ = [
     "Workspace",
     "WorkspaceNotFoundError",
     "WORKSPACE_FILES",
-    "DEFAULT_MEMORY_INJECT_DAYS",
     "DEFAULT_COMPACTION_THRESHOLD",
 ]

@@ -218,6 +218,7 @@ def test_run_command_relative_path(cli_runner, temp_dir, mock_agent_execution):
     agent_content = """---
 name: relative_test
 model: openai:gpt-4o-mini
+extends: none
 tools: []
 ---
 # Test Agent
@@ -284,6 +285,7 @@ def test_agent_file_with_spaces_in_path(cli_runner, temp_dir, mock_agent_executi
     agent_content = """---
 name: space_test
 model: openai:gpt-4o-mini
+extends: none
 tools: []
 ---
 # Test Agent
@@ -749,6 +751,7 @@ class TestRunCommandHistory:
         multistep_agent.write_text("""---
 name: multistep_test
 model: openai:gpt-4o-mini
+extends: none
 tools: []
 ---
 # Multi-step agent

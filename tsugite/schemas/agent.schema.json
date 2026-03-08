@@ -182,18 +182,6 @@
       "title": "Spawnable",
       "type": "boolean"
     },
-    "memory_inject_days": {
-      "anyOf": [
-        {
-          "type": "integer"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "title": "Memory Inject Days"
-    },
     "network": {
       "anyOf": [
         {

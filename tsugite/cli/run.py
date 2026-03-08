@@ -562,15 +562,18 @@ def run(
         agent_info = get_agent_info(agent_file)
         instruction_label = "runtime + agent" if agent_info.get("instructions") else "runtime default"
 
-        agent_attachments = inject_auto_context_if_enabled(
-            agent_info.get("attachments"),
+        # Agent config attachments (USER.md, MEMORY.md, Jinja templates) are resolved
+        # by AgentPreparer as workspace-relative files — not through CLI attachment resolution.
+        # Only CLI-level attachments (-f flag) and auto-context are resolved here.
+        cli_only_attachments = inject_auto_context_if_enabled(
+            None,
             agent_info.get("auto_context"),
             cli_override=attach_opts.auto_context,
         )
 
         prompt, resolved_attachments = assemble_prompt_with_attachments(
             prompt=prompt,
-            agent_attachments=agent_attachments,
+            agent_attachments=cli_only_attachments,
             cli_attachments=attach_opts.sources,
             base_dir=base_dir,
             refresh_cache=attach_opts.refresh_cache,
@@ -592,6 +595,7 @@ def run(
                 "Tools": ", ".join(agent_info.get("tools", [])),
             }
 
+            agent_attachments = agent_info.get("attachments")
             if agent_attachments:
                 info_items["Agent Attachments"] = ", ".join(agent_attachments)
 

@@ -2,12 +2,13 @@
 name: default
 description: Default base agent with sensible defaults
 extends: none
-memory_inject_days: 2
 attachments:
   - USER.md
   - MEMORY.md
   - IDENTITY.md
   - AGENTS.md
+  - "memory/{{ today() }}.md"
+  - "memory/{{ yesterday() }}.md"
   - "memory/{{ date_format(now(), '%Y-%m') }}.md"
   - notes/context/now.md
   - NOW.md

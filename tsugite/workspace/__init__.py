@@ -12,7 +12,6 @@ Convention over configuration: No config.yaml required.
 from .context import build_workspace_attachments
 from .models import (
     DEFAULT_COMPACTION_THRESHOLD,
-    DEFAULT_MEMORY_INJECT_DAYS,
     WORKSPACE_FILES,
     Workspace,
     WorkspaceNotFoundError,
@@ -25,6 +24,5 @@ __all__ = [
     "WorkspaceSession",
     "build_workspace_attachments",
     "WORKSPACE_FILES",
-    "DEFAULT_MEMORY_INJECT_DAYS",
     "DEFAULT_COMPACTION_THRESHOLD",
 ]

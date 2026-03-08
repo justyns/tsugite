@@ -5,26 +5,24 @@ from typing import List
 from tsugite.attachments.base import Attachment
 from tsugite.attachments.file import FileHandler
 
-from .models import DEFAULT_MEMORY_INJECT_DAYS, Workspace
+from .models import Workspace
 
 
 def build_workspace_attachments(
     workspace: Workspace,
-    memory_days: int = DEFAULT_MEMORY_INJECT_DAYS,
 ) -> List[Attachment]:
     """Build attachment list from workspace files (convention-based).
 
     Args:
         workspace: Workspace to build attachments for
-        memory_days: Number of days of memory files to include
 
     Returns:
-        List of attachments for workspace identity and memory files
+        List of attachments for workspace identity files
     """
     handler = FileHandler()
     attachments = []
 
-    paths = workspace.get_workspace_files() + workspace.get_memory_files(days=memory_days)
+    paths = workspace.get_workspace_files()
     for path in paths:
         try:
             att = handler.fetch(str(path))

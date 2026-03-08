@@ -74,58 +74,6 @@ def test_workspace_get_workspace_files_all_exist(tmp_path):
     assert len(files) == 6
 
 
-def test_workspace_get_memory_files_none_exist(tmp_path):
-    """Test workspace with no memory files."""
-    workspace_path = tmp_path / "workspace"
-    workspace_path.mkdir()
-
-    workspace = Workspace.load(workspace_path)
-    memory_files = workspace.get_memory_files()
-
-    assert memory_files == []
-
-
-def test_workspace_get_memory_files_with_date_files(tmp_path):
-    """Test workspace with valid date-named memory files."""
-    from datetime import datetime, timedelta
-
-    workspace_path = tmp_path / "workspace"
-    workspace_path.mkdir()
-    memory_dir = workspace_path / "memory"
-    memory_dir.mkdir()
-
-    # Create files with valid date names
-    today = datetime.now()
-    for i in range(5):
-        date = today - timedelta(days=i)
-        filename = date.strftime("%Y-%m-%d.md")
-        (memory_dir / filename).write_text(f"# Memory {filename}")
-
-    workspace = Workspace.load(workspace_path)
-    memory_files = workspace.get_memory_files(days=3)
-
-    # Should get 3 days (0, 1, 2)
-    assert len(memory_files) == 3
-
-
-def test_workspace_get_memory_files_ignores_invalid_names(tmp_path):
-    """Test workspace ignores non-date memory files."""
-    workspace_path = tmp_path / "workspace"
-    workspace_path.mkdir()
-    memory_dir = workspace_path / "memory"
-    memory_dir.mkdir()
-
-    # Create invalid filenames
-    (memory_dir / "notes.md").write_text("# Notes")
-    (memory_dir / "2024-13-01.md").write_text("# Invalid month")
-    (memory_dir / "invalid-date.md").write_text("# Invalid")
-
-    workspace = Workspace.load(workspace_path)
-    memory_files = workspace.get_memory_files()
-
-    assert memory_files == []
-
-
 def test_workspace_create(tmp_path):
     """Test creating a new workspace."""
     workspace_path = tmp_path / "new-workspace"
