@@ -1372,6 +1372,7 @@ class HTTPServer:
             log_config=None,
         )
         self._server = uvicorn.Server(config)
+        self._server.install_signal_handlers = lambda: None
         logger.info("HTTP API listening on http://%s:%d", self.config.host, self.config.port)
         await self._server.serve()
 
@@ -1385,4 +1386,3 @@ class HTTPServer:
                     except asyncio.QueueFull:
                         pass
             self._server.should_exit = True
-            self._server.force_exit = True
