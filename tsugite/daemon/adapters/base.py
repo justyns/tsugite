@@ -18,8 +18,8 @@ from tzlocal import get_localzone
 from tsugite.agent_inheritance import find_agent_file
 from tsugite.agent_runner import run_agent
 from tsugite.daemon.config import AgentConfig
-from tsugite.exceptions import AgentExecutionError
 from tsugite.daemon.session import SessionManager
+from tsugite.exceptions import AgentExecutionError
 from tsugite.options import ExecutionOptions
 
 if TYPE_CHECKING:
@@ -210,9 +210,19 @@ class BaseAdapter(ABC):
             return "unknown"
 
     def _save_history(
-        self, *, agent_path, message, conv_id, metadata, result_str,
-        token_count=None, cost=None, execution_steps=None,
-        system_prompt=None, attachments=None, claude_code_session_id=None,
+        self,
+        *,
+        agent_path,
+        message,
+        conv_id,
+        metadata,
+        result_str,
+        token_count=None,
+        cost=None,
+        execution_steps=None,
+        system_prompt=None,
+        attachments=None,
+        claude_code_session_id=None,
     ):
         try:
             from tsugite.agent_runner.history_integration import save_run_to_history
@@ -391,16 +401,23 @@ class BaseAdapter(ABC):
         except AgentExecutionError as e:
             error_result = f"[Error: {e}]\n\n{e.partial_output}" if e.partial_output else f"[Error: {e}]"
             self._save_history(
-                agent_path=agent_path, message=message, conv_id=conv_id,
-                metadata=metadata, result_str=error_result,
-                token_count=e.token_usage, cost=e.cost,
+                agent_path=agent_path,
+                message=message,
+                conv_id=conv_id,
+                metadata=metadata,
+                result_str=error_result,
+                token_count=e.token_usage,
+                cost=e.cost,
                 execution_steps=e.execution_steps,
             )
             raise
 
         self._save_history(
-            agent_path=agent_path, message=message, conv_id=conv_id,
-            metadata=metadata, result_str=str(result),
+            agent_path=agent_path,
+            message=message,
+            conv_id=conv_id,
+            metadata=metadata,
+            result_str=str(result),
             token_count=getattr(result, "token_count", None),
             cost=getattr(result, "cost", None),
             execution_steps=getattr(result, "execution_steps", None),

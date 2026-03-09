@@ -467,9 +467,7 @@ class HTTPServer:
             turns = [r for r in records if isinstance(r, Turn)]
 
             if idx > 0:
-                comp_summary = next(
-                    (r for r in records_cache[idx - 1] if isinstance(r, CompactionSummary)), None
-                )
+                comp_summary = next((r for r in records_cache[idx - 1] if isinstance(r, CompactionSummary)), None)
                 if comp_summary and comp_summary.retained_turns:
                     turns = turns[: -comp_summary.retained_turns]
             else:

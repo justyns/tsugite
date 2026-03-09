@@ -641,7 +641,5 @@ class TestOnStatusCallback:
         )
         status_calls = []
         with patch("tsugite.hooks.subprocess.run", return_value=_ok_result(stdout="result")):
-            await fire_pre_message_hooks(
-                tmp_workspace, {"message": "test"}, on_status=status_calls.append
-            )
+            await fire_pre_message_hooks(tmp_workspace, {"message": "test"}, on_status=status_calls.append)
         assert status_calls == ["Running Search..."]

@@ -303,9 +303,7 @@ class TestAgentExecutionErrorNotification:
         sa, mock_adapter = _make_scheduler_adapter(
             notification_channels={"dm": _make_discord_channel()},
         )
-        mock_adapter.handle_message = AsyncMock(
-            side_effect=AgentExecutionError("Agent reached max_turns (5)")
-        )
+        mock_adapter.handle_message = AsyncMock(side_effect=AgentExecutionError("Agent reached max_turns (5)"))
 
         entry = ScheduleEntry(
             id="bg-fail",
@@ -333,9 +331,7 @@ class TestAgentExecutionErrorNotification:
         sa, mock_adapter = _make_scheduler_adapter(
             notification_channels={"dm": _make_discord_channel()},
         )
-        mock_adapter.handle_message = AsyncMock(
-            side_effect=AgentExecutionError("Agent reached max_turns (5)")
-        )
+        mock_adapter.handle_message = AsyncMock(side_effect=AgentExecutionError("Agent reached max_turns (5)"))
 
         entry = ScheduleEntry(
             id="bg-fail",
@@ -356,9 +352,7 @@ class TestAgentExecutionErrorNotification:
     @pytest.mark.asyncio
     async def test_no_notification_when_no_channels(self):
         sa, mock_adapter = _make_scheduler_adapter()
-        mock_adapter.handle_message = AsyncMock(
-            side_effect=AgentExecutionError("Agent reached max_turns (5)")
-        )
+        mock_adapter.handle_message = AsyncMock(side_effect=AgentExecutionError("Agent reached max_turns (5)"))
 
         entry = ScheduleEntry(
             id="bg-fail",
@@ -455,9 +449,7 @@ class TestPartialOutputOnMaxTurns:
         sa, mock_adapter = _make_scheduler_adapter(
             notification_channels={"dm": _make_discord_channel()},
         )
-        mock_adapter.handle_message = AsyncMock(
-            side_effect=AgentExecutionError("Agent reached max_turns (5)")
-        )
+        mock_adapter.handle_message = AsyncMock(side_effect=AgentExecutionError("Agent reached max_turns (5)"))
 
         entry = ScheduleEntry(
             id="bg-no-partial",

@@ -194,9 +194,7 @@ def test_http_request_http_error(mock_httpx_client):
     resp = MagicMock(spec=httpx.Response)
     resp.status_code = 404
     resp.text = "Not Found"
-    resp.raise_for_status.side_effect = httpx.HTTPStatusError(
-        "404", request=MagicMock(), response=resp
-    )
+    resp.raise_for_status.side_effect = httpx.HTTPStatusError("404", request=MagicMock(), response=resp)
     mock_httpx_client.request.return_value = resp
 
     with pytest.raises(RuntimeError, match="HTTP error 404"):
