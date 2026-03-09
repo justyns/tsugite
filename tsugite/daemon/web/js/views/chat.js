@@ -354,6 +354,10 @@ export default () => ({
       if (prog && prog.type === 'progress') {
         if (prog.steps.length > 0) {
           prog.type = 'progress-done';
+          if (!gotResult && prog.errorText) {
+            prog.failed = true;
+            prog.lastMessage = msg;
+          }
         } else {
           this.messages.splice(progressIdx, 1);
         }
@@ -387,6 +391,7 @@ export default () => ({
       }
     } else if (event.type === 'error') {
       prog.steps.push({ html: `<span class="err">${escapeHtml(event.error)}</span>` });
+      prog.errorText = event.error;
     } else if (event.type === 'hook_status') {
       prog.statusText = event.message;
     } else if (event.type === 'init') {
@@ -437,6 +442,16 @@ export default () => ({
     if (msg.turnCount) parts.push(`${msg.turnCount} turn${msg.turnCount > 1 ? 's' : ''}`);
     if (msg.toolCount) parts.push(`${msg.toolCount} tool${msg.toolCount > 1 ? 's' : ''}`);
     return parts.join(', ') || 'trace';
+  },
+
+  retryMessage(msg) {
+    this.messageText = msg;
+    this.sendMessage();
+  },
+
+  continueAfterError(lastMessage, errorText) {
+    this.messageText = `The previous request failed with: ${errorText}\n\nPlease continue from where you left off. The original request was: ${lastMessage}`;
+    this.sendMessage();
   },
 
   onInputKeydown(e) {

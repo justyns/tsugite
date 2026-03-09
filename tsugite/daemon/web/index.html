@@ -145,6 +145,12 @@
                   </template>
                 </ul>
               </details>
+              <template x-if="msg.failed">
+                <div class="retry-actions" style="margin-top:8px;display:flex;gap:8px">
+                  <button class="btn-sm" @click="retryMessage(msg.lastMessage)">Retry</button>
+                  <button class="btn-sm" @click="continueAfterError(msg.lastMessage, msg.errorText)">Continue</button>
+                </div>
+              </template>
             </div>
           </template>
           <template x-if="msg.type === 'ask_user'">
