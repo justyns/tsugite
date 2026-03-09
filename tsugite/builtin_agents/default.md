@@ -25,6 +25,7 @@ tools:
   - send_message
   - web_search
   - fetch_text
+  - http_request
   - run
   - "@schedule"
 auto_load_skills:

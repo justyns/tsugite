@@ -1,12 +1,42 @@
 """HTTP client tools for Tsugite agents."""
 
 import json
+from dataclasses import dataclass
 from typing import Any, Dict, Optional, Union
 
 import httpx
 from ddgs import DDGS
 
 from tsugite.tools import tool
+
+
+@dataclass
+class HttpResponse:
+    """Structured HTTP response."""
+
+    status_code: int
+    headers: Dict[str, str]
+    body: Union[Dict[str, Any], list, str]
+
+
+def _simple_request(
+    url: str,
+    method: str,
+    headers: Optional[Dict[str, str]],
+    timeout: int,
+    body: Optional[Union[str, Dict[str, Any]]] = None,
+) -> httpx.Response:
+    """Make an HTTP request and return the raw response."""
+    kwargs: Dict[str, Any] = {}
+    if isinstance(body, dict):
+        kwargs["json"] = body
+    elif isinstance(body, str):
+        kwargs["content"] = body
+
+    with httpx.Client(timeout=timeout) as client:
+        response = client.request(method=method.upper(), url=url, headers=headers or {}, **kwargs)
+        response.raise_for_status()
+        return response
 
 
 @tool
@@ -25,19 +55,11 @@ def fetch_json(
         timeout: Request timeout in seconds
     """
     try:
-        with httpx.Client(timeout=timeout) as client:
-            response = client.request(
-                method=method.upper(),
-                url=url,
-                headers=headers or {},
-            )
-            response.raise_for_status()
-
-            try:
-                return response.json()
-            except json.JSONDecodeError as e:
-                raise RuntimeError(f"Invalid JSON response: {e}") from e
-
+        response = _simple_request(url, method, headers, timeout)
+        try:
+            return response.json()
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"Invalid JSON response: {e}") from e
     except httpx.TimeoutException as exc:
         raise RuntimeError(f"Request timed out after {timeout} seconds") from exc
     except httpx.HTTPStatusError as e:
@@ -60,23 +82,9 @@ def fetch_text(
         method: HTTP method
         headers: Optional HTTP headers
         timeout: Request timeout in seconds
-
-    Returns:
-        Response text content
-
-    Raises:
-        RuntimeError: If request fails
     """
     try:
-        with httpx.Client(timeout=timeout) as client:
-            response = client.request(
-                method=method.upper(),
-                url=url,
-                headers=headers or {},
-            )
-            response.raise_for_status()
-            return response.text
-
+        return _simple_request(url, method, headers, timeout).text
     except httpx.TimeoutException as exc:
         raise RuntimeError(f"Request timed out after {timeout} seconds") from exc
     except httpx.HTTPStatusError as e:
@@ -86,45 +94,36 @@ def fetch_text(
 
 
 @tool
-def post_json(
+def http_request(
     url: str,
-    data: Dict[str, Any],
+    method: str = "POST",
+    body: Optional[Union[str, Dict[str, Any]]] = None,
     headers: Optional[Dict[str, str]] = None,
     timeout: int = 30,
-) -> Union[Dict[str, Any], str]:
-    """Send JSON data via POST request.
+) -> HttpResponse:
+    """Make an HTTP request with optional body. Use for POST/PUT/PATCH/DELETE or verbose GET.
 
     Args:
-        url: URL to post to
-        data: JSON data to send
+        url: URL to send the request to
+        method: HTTP method (POST, PUT, PATCH, DELETE, GET)
+        body: Request body — dict for JSON (auto-serialized), string for raw body
         headers: Optional HTTP headers
         timeout: Request timeout in seconds
-
-    Returns:
-        Response as JSON dict/list or text if not JSON
-
-    Raises:
-        RuntimeError: If request fails
     """
     try:
-        request_headers = {"Content-Type": "application/json"}
-        if headers:
-            request_headers.update(headers)
+        request_headers = dict(headers) if headers else {}
+        response = _simple_request(url, method, request_headers, timeout, body)
 
-        with httpx.Client(timeout=timeout) as client:
-            response = client.post(
-                url=url,
-                json=data,
-                headers=request_headers,
-            )
-            response.raise_for_status()
+        try:
+            parsed_body = response.json()
+        except (json.JSONDecodeError, ValueError):
+            parsed_body = response.text
 
-            # Try to return JSON, fall back to text
-            try:
-                return response.json()
-            except json.JSONDecodeError:
-                return response.text
-
+        return HttpResponse(
+            status_code=response.status_code,
+            headers=dict(response.headers),
+            body=parsed_body,
+        )
     except httpx.TimeoutException as exc:
         raise RuntimeError(f"Request timed out after {timeout} seconds") from exc
     except httpx.HTTPStatusError as e:
@@ -141,12 +140,6 @@ def download_file(url: str, local_path: str, timeout: int = 60) -> str:
         url: URL to download from
         local_path: Local file path to save to
         timeout: Request timeout in seconds
-
-    Returns:
-        Success message with file size
-
-    Raises:
-        RuntimeError: If download fails
     """
     try:
         with httpx.Client(timeout=timeout) as client:
@@ -160,9 +153,8 @@ def download_file(url: str, local_path: str, timeout: int = 60) -> str:
                         total_size += len(chunk)
 
                 return f"Downloaded {total_size} bytes to {local_path}"
-
     except httpx.TimeoutException as exc:
-        raise RuntimeError(f"Download timed out after {timeout} seconds") from exc
+        raise RuntimeError(f"Request timed out after {timeout} seconds") from exc
     except httpx.HTTPStatusError as e:
         raise RuntimeError(f"HTTP error {e.response.status_code}") from e
     except OSError as e:
@@ -178,12 +170,6 @@ def check_url(url: str, timeout: int = 10) -> Dict[str, Any]:
     Args:
         url: URL to check
         timeout: Request timeout in seconds
-
-    Returns:
-        Dictionary with status info
-
-    Raises:
-        RuntimeError: If check fails
     """
     try:
         with httpx.Client(timeout=timeout) as client:

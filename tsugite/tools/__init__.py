@@ -218,7 +218,7 @@ def expand_tool_specs(tool_specs: List[str]) -> List[str]:
         >>> expand_tool_specs(['@fs', '-*_directory'])
         ['file_exists', 'list_files', 'read_file', 'write_file']
         >>> expand_tool_specs(['@http', '-web_search'])
-        ['check_url', 'download_file', 'fetch_json', 'fetch_text', 'post_json']
+        ['check_url', 'download_file', 'fetch_json', 'fetch_text', 'http_request']
     """
     # Separate inclusions and exclusions
     inclusions = []

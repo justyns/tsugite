@@ -319,10 +319,11 @@ def agents_tools(reset_tool_registry):
 def http_tools(reset_tool_registry):
     """Register HTTP tools for testing."""
     from tsugite.tools import tool
-    from tsugite.tools.http import fetch_text, web_search
+    from tsugite.tools.http import fetch_text, http_request, web_search
 
     # Re-register the tools after registry reset
     tool(fetch_text)
+    tool(http_request)
     tool(web_search)
 
 
