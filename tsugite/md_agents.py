@@ -58,6 +58,7 @@ class AgentConfig(BaseModel):
     visibility: str = "public"  # Agent visibility: public, private, internal
     spawnable: bool = True  # Whether this agent can be spawned by other agents
     network: Optional[Dict[str, Any]] = None  # Network hints for sandbox proxy allowlist
+    run_if: Optional[str] = None  # Jinja expression guard: agent skipped if falsy
 
     @field_validator("visibility", mode="after")
     @classmethod

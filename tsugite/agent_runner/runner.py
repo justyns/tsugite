@@ -790,6 +790,12 @@ async def run_agent_async(
             path_context=path_context,
         )
 
+        # Short-circuit if run_if guard evaluated to false
+        if prepared.skipped:
+            from tsugite.agent_runner.models import AgentSkippedError
+
+            raise AgentSkippedError(prepared.skip_reason or "run_if guard")
+
         # Debug output if requested
         if exec_options.debug:
             import sys

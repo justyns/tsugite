@@ -76,6 +76,8 @@ def schedule_create(
     execution_type: str = "agent",
     command: Optional[str] = None,
     script_timeout: int = 60,
+    expires_at: Optional[str] = None,
+    max_runs: Optional[int] = None,
 ) -> dict:
     """Create a recurring (cron) or one-off schedule to run an agent or script.
 
@@ -98,6 +100,8 @@ def schedule_create(
         execution_type: "agent" (default) runs an LLM agent, "script" runs a shell command directly without LLM.
         command: Shell command to execute when execution_type is "script". Required for script type.
         script_timeout: Max seconds for script execution (default: 60). Only used when execution_type is "script".
+        expires_at: ISO datetime after which the schedule auto-disables (e.g., "2026-04-01T00:00:00Z").
+        max_runs: Auto-disable after this many successful executions.
 
     Returns:
         Created schedule details including computed next_run
@@ -136,6 +140,8 @@ def schedule_create(
         execution_type=execution_type,
         command=command,
         script_timeout=script_timeout,
+        expires_at=expires_at,
+        max_runs=max_runs,
     )
     result = _call(_scheduler.add, entry)
     return asdict(result)
@@ -209,6 +215,8 @@ def schedule_update(
     execution_type: Optional[str] = None,
     command: Optional[str] = None,
     script_timeout: Optional[int] = None,
+    expires_at: Optional[str] = None,
+    max_runs: Optional[int] = None,
 ) -> dict:
     """Update fields on an existing schedule.
 
@@ -226,6 +234,8 @@ def schedule_update(
         execution_type: Change to "agent" or "script" (optional).
         command: Shell command for script execution (optional). Set to empty string to clear.
         script_timeout: Max seconds for script execution (optional).
+        expires_at: ISO datetime for auto-disable (optional). Set to empty string to clear.
+        max_runs: Auto-disable after N successful runs (optional).
 
     Returns:
         Updated schedule details
@@ -239,6 +249,7 @@ def schedule_update(
         "inject_history": inject_history,
         "execution_type": execution_type,
         "script_timeout": script_timeout,
+        "max_runs": max_runs,
     }
     fields = {k: v for k, v in simple.items() if v is not None}
 
@@ -253,7 +264,12 @@ def schedule_update(
         fields["notify_tool"] = notify_tool
 
     # Clearable fields: empty/falsy value → None (clears the field)
-    for param_name, value in [("model", model), ("agent_file", agent_file), ("command", command)]:
+    for param_name, value in [
+        ("model", model),
+        ("agent_file", agent_file),
+        ("command", command),
+        ("expires_at", expires_at),
+    ]:
         if value is not None:
             fields[param_name] = value or None
 

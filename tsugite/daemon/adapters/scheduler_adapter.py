@@ -6,6 +6,7 @@ import subprocess
 from contextlib import nullcontext
 from pathlib import Path
 
+from tsugite.agent_runner.models import AgentSkippedError
 from tsugite.daemon.adapters.base import BaseAdapter, ChannelContext
 from tsugite.daemon.config import NotificationChannelConfig
 from tsugite.daemon.scheduler import ScheduleEntry, Scheduler
@@ -134,6 +135,8 @@ class SchedulerAdapter:
                     message=entry.prompt,
                     channel_context=channel_context,
                 )
+        except AgentSkippedError:
+            raise
         except AgentExecutionError as e:
             if resolved_channels:
                 try:

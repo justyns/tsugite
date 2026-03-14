@@ -98,6 +98,8 @@ class PreparedAgent:
     prefetch_results: Dict[str, Any]
     attachments: List[Attachment]
     skills: List[Skill] = field(default_factory=list)
+    skipped: bool = False
+    skip_reason: str | None = None
 
 
 class AgentPreparer:
@@ -277,8 +279,34 @@ class AgentPreparer:
             "WORKSPACE_DIR": workspace_dir,
         }
 
-        # Step 4: Render template
         renderer = AgentRenderer()
+
+        # Step 3b: Evaluate run_if guard (skip agent if expression is falsy)
+        if agent_config.run_if:
+            skip_reason = None
+            try:
+                guard_result = renderer.render("{{ " + agent_config.run_if + " }}", full_context)
+                if guard_result.strip().lower() in ("", "false", "none", "0"):
+                    skip_reason = f"run_if guard '{agent_config.run_if}' evaluated to false"
+            except Exception as e:
+                skip_reason = f"run_if guard error: {e}"
+            if skip_reason:
+                return PreparedAgent(
+                    agent=agent,
+                    agent_config=agent_config,
+                    system_message="",
+                    user_message="",
+                    rendered_prompt="",
+                    tools=[],
+                    context=full_context,
+                    combined_instructions="",
+                    prefetch_results=prefetch_context,
+                    attachments=all_attachments,
+                    skipped=True,
+                    skip_reason=skip_reason,
+                )
+
+        # Step 4: Render template
         try:
             rendered_prompt = renderer.render(modified_content, full_context)
         except Exception as e:

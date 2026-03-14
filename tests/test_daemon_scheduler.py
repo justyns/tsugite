@@ -181,15 +181,15 @@ class TestSchedulerExecution:
         assert "agent crashed" in stored.last_error
 
     @pytest.mark.asyncio
-    async def test_once_auto_disables(self, scheduler, run_callback):
+    async def test_once_auto_removed(self, scheduler, run_callback):
         future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
         entry = ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="once", run_at=future)
         scheduler.add(entry)
         await scheduler._fire_schedule(scheduler.get("job1"))
 
-        stored = scheduler.get("job1")
-        assert not stored.enabled
-        assert stored.next_run is None
+        # One-off schedules are auto-removed after firing
+        with pytest.raises(ValueError, match="not found"):
+            scheduler.get("job1")
 
     @pytest.mark.asyncio
     async def test_misfire_grace(self, scheduler):
@@ -485,3 +485,141 @@ class TestCallHelper:
             t.join(timeout=2)
             loop.close()
             set_scheduler(None)
+
+
+class TestAutoExpiry:
+    @pytest.mark.asyncio
+    async def test_expires_at_disables(self, scheduler, run_callback):
+        past = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        entry = ScheduleEntry(
+            id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="* * * * *", expires_at=past
+        )
+        scheduler.add(entry)
+        scheduler._fire_due_schedules()
+
+        stored = scheduler.get("job1")
+        assert not stored.enabled
+        assert stored.disabled_reason == "expired"
+        assert stored.next_run is None
+        run_callback.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_expires_at_future_fires(self, scheduler, run_callback):
+        future_expires = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+        entry = ScheduleEntry(
+            id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="* * * * *", expires_at=future_expires
+        )
+        scheduler.add(entry)
+        # Set next_run to the past so it fires
+        scheduler.get("job1").next_run = (datetime.now(timezone.utc) - timedelta(seconds=5)).isoformat()
+        scheduler._fire_due_schedules()
+
+        # Should have created a task (fires normally)
+        assert run_callback.call_count == 0  # callback is async, check task was created
+        stored = scheduler.get("job1")
+        assert stored.enabled
+
+    @pytest.mark.asyncio
+    async def test_max_runs_disables(self, scheduler, run_callback):
+        entry = ScheduleEntry(
+            id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="* * * * *", max_runs=2
+        )
+        scheduler.add(entry)
+
+        # Fire twice
+        await scheduler._fire_schedule(scheduler.get("job1"))
+        assert scheduler.get("job1").run_count == 1
+        await scheduler._fire_schedule(scheduler.get("job1"))
+        assert scheduler.get("job1").run_count == 2
+
+        # Next fire_due_schedules should disable it
+        scheduler.get("job1").next_run = (datetime.now(timezone.utc) - timedelta(seconds=5)).isoformat()
+        scheduler._fire_due_schedules()
+        stored = scheduler.get("job1")
+        assert not stored.enabled
+        assert stored.disabled_reason == "max_runs_reached"
+
+    @pytest.mark.asyncio
+    async def test_run_count_not_incremented_on_error(self, scheduler, run_callback):
+        run_callback.side_effect = RuntimeError("boom")
+        entry = ScheduleEntry(
+            id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="* * * * *", max_runs=2
+        )
+        scheduler.add(entry)
+        await scheduler._fire_schedule(scheduler.get("job1"))
+
+        assert scheduler.get("job1").run_count == 0
+        assert scheduler.get("job1").last_status == "error"
+
+    @pytest.mark.asyncio
+    async def test_enable_clears_disabled_reason(self, scheduler):
+        entry = ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="* * * * *")
+        scheduler.add(entry)
+        scheduler.get("job1").enabled = False
+        scheduler.get("job1").disabled_reason = "expired"
+        scheduler._save()
+
+        scheduler.enable("job1")
+        stored = scheduler.get("job1")
+        assert stored.enabled
+        assert stored.disabled_reason is None
+
+    def test_expiry_fields_serialization_roundtrip(self, schedules_path, run_callback):
+        sched1 = Scheduler(schedules_path, run_callback)
+        expires = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+        entry = ScheduleEntry(
+            id="job1",
+            agent="bot",
+            prompt="hi",
+            schedule_type="cron",
+            cron_expr="* * * * *",
+            expires_at=expires,
+            max_runs=10,
+            run_count=3,
+            disabled_reason=None,
+        )
+        sched1.add(entry)
+
+        sched2 = Scheduler(schedules_path, run_callback)
+        sched2._load()
+        stored = sched2.get("job1")
+        assert stored.expires_at == expires
+        assert stored.max_runs == 10
+        assert stored.run_count == 3
+
+
+class TestAutoCleanup:
+    def test_cleanup_removes_disabled_with_reason(self, scheduler):
+        entry = ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="* * * * *")
+        scheduler.add(entry)
+        scheduler.get("job1").enabled = False
+        scheduler.get("job1").disabled_reason = "expired"
+        scheduler._save()
+
+        removed = scheduler.cleanup()
+        assert "job1" in removed
+
+    def test_cleanup_skips_manually_disabled_cron(self, scheduler):
+        entry = ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="* * * * *")
+        scheduler.add(entry)
+        scheduler.disable("job1")
+
+        removed = scheduler.cleanup()
+        assert removed == []
+        assert len(scheduler.list()) == 1
+
+
+class TestAgentSkippedError:
+    @pytest.mark.asyncio
+    async def test_skipped_sets_status(self, scheduler, run_callback):
+        from tsugite.agent_runner.models import AgentSkippedError
+
+        run_callback.side_effect = AgentSkippedError("run_if guard")
+        entry = ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="* * * * *")
+        scheduler.add(entry)
+        await scheduler._fire_schedule(scheduler.get("job1"))
+
+        stored = scheduler.get("job1")
+        assert stored.last_status == "skipped"
+        assert stored.last_error is None
+        assert stored.run_count == 0  # skipped runs don't count

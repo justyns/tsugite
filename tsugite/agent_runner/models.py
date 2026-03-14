@@ -5,6 +5,14 @@ from typing import Any, List, Optional
 from pydantic import BaseModel, Field
 
 
+class AgentSkippedError(Exception):
+    """Raised when an agent's run_if guard evaluates to false."""
+
+    def __init__(self, reason: str):
+        self.reason = reason
+        super().__init__(reason)
+
+
 class AgentExecutionResult(BaseModel):
     """Result from agent execution with metrics and metadata.
 

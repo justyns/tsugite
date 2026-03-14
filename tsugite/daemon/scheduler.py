@@ -30,7 +30,7 @@ class ScheduleEntry:
     created_at: str = ""
     last_run: str | None = None
     next_run: str | None = None  # computed
-    last_status: str | None = None  # "success" | "error"
+    last_status: str | None = None  # "success" | "error" | "skipped"
     last_error: str | None = None
     notify: list[str] = field(default_factory=list)
     notify_tool: bool = False
@@ -44,6 +44,11 @@ class ScheduleEntry:
     execution_type: str = "agent"  # "agent" | "script"
     command: str | None = None
     script_timeout: int = 60
+    # Auto-expiry
+    expires_at: str | None = None  # ISO datetime, auto-disable after this time
+    max_runs: int | None = None  # Auto-disable after N successful executions
+    run_count: int = 0
+    disabled_reason: str | None = None  # "expired" | "max_runs_reached"
 
     def __post_init__(self):
         if not self.created_at:
@@ -129,11 +134,31 @@ class Scheduler:
                 earliest = t
         return earliest
 
+    def _auto_disable(self, entry: ScheduleEntry, reason: str):
+        entry.enabled = False
+        entry.disabled_reason = reason
+        entry.next_run = None
+        self._save()
+        logger.info("Schedule '%s' auto-disabled: %s", entry.id, reason)
+
     def _fire_due_schedules(self):
         now = datetime.now(timezone.utc)
         for entry in list(self._schedules.values()):
             if not entry.enabled or not entry.next_run:
                 continue
+
+            # Auto-expiry checks
+            if entry.expires_at:
+                expires_dt = datetime.fromisoformat(entry.expires_at)
+                if expires_dt.tzinfo is None:
+                    expires_dt = expires_dt.replace(tzinfo=timezone.utc)
+                if now >= expires_dt:
+                    self._auto_disable(entry, "expired")
+                    continue
+            if entry.max_runs is not None and entry.run_count >= entry.max_runs:
+                self._auto_disable(entry, "max_runs_reached")
+                continue
+
             next_dt = datetime.fromisoformat(entry.next_run)
             if next_dt > now:
                 continue
@@ -157,6 +182,8 @@ class Scheduler:
             task.add_done_callback(self._active_tasks.discard)
 
     async def _fire_schedule(self, entry: ScheduleEntry):
+        from tsugite.agent_runner.models import AgentSkippedError
+
         lock = self._entry_locks.setdefault(entry.id, asyncio.Lock())
         if lock.locked():
             logger.info("Schedule '%s' still running, skipping", entry.id)
@@ -173,6 +200,11 @@ class Scheduler:
                     await self._run_callback(entry)
                 entry.last_status = "success"
                 entry.last_error = None
+                entry.run_count += 1
+            except AgentSkippedError as e:
+                logger.info("Schedule '%s' skipped: %s", entry.id, e.reason)
+                entry.last_status = "skipped"
+                entry.last_error = None
             except Exception as e:
                 logger.error("Schedule '%s' failed: %s", entry.id, e)
                 entry.last_status = "error"
@@ -180,8 +212,9 @@ class Scheduler:
 
             entry.last_run = datetime.now(timezone.utc).isoformat()
             if entry.schedule_type == "once":
-                entry.enabled = False
-                entry.next_run = None
+                # Auto-cleanup: remove one-off schedules after firing
+                self._schedules.pop(entry.id, None)
+                self._entry_locks.pop(entry.id, None)
             self._save()
 
     def _compute_next_run_iso(self, entry: ScheduleEntry) -> str | None:
@@ -239,6 +272,7 @@ class Scheduler:
     def enable(self, schedule_id: str):
         entry = self.get(schedule_id)
         entry.enabled = True
+        entry.disabled_reason = None
         entry.next_run = self._compute_next_run_iso(entry)
         self._save()
         self._wakeup.set()
@@ -279,9 +313,11 @@ class Scheduler:
         return entry
 
     def cleanup(self) -> list[str]:
-        """Remove all disabled one-off schedules (orphaned after firing)."""
+        """Remove disabled one-off schedules and auto-disabled (expired/max_runs) schedules."""
         to_remove = [
-            sid for sid, entry in self._schedules.items() if entry.schedule_type == "once" and not entry.enabled
+            sid
+            for sid, entry in self._schedules.items()
+            if (entry.schedule_type == "once" and not entry.enabled) or entry.disabled_reason
         ]
         for sid in to_remove:
             del self._schedules[sid]
