@@ -333,12 +333,15 @@ class BaseAdapter(ABC):
         """
         user_id = self.resolve_user(user_id, channel_context)
 
-        if self.session_manager.needs_compaction(user_id):
-            self._emit_ui(custom_logger, "compacting")
-            await self._compact_session(user_id)
-            self._emit_ui(custom_logger, "compacted")
-
-        conv_id = self.session_manager.get_or_create_session(user_id)
+        conv_id_override = (channel_context.metadata or {}).get("conv_id_override")
+        if conv_id_override:
+            conv_id = conv_id_override
+        else:
+            if self.session_manager.needs_compaction(user_id):
+                self._emit_ui(custom_logger, "compacting")
+                await self._compact_session(user_id)
+                self._emit_ui(custom_logger, "compacted")
+            conv_id = self.session_manager.get_or_create_session(user_id)
 
         metadata = channel_context.to_dict()
         metadata["daemon_agent"] = self.agent_name

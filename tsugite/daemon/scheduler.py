@@ -49,6 +49,9 @@ class ScheduleEntry:
     max_runs: int | None = None  # Auto-disable after N successful executions
     run_count: int = 0
     disabled_reason: str | None = None  # "expired" | "max_runs_reached"
+    # Per-run session isolation
+    session_id: str | None = None  # If set, reuse this session across runs; otherwise each run gets a unique session
+    run_history: list[dict] = field(default_factory=list)  # Last N runs [{timestamp, status, error, session_id}]
 
     def __post_init__(self):
         if not self.created_at:
@@ -65,7 +68,13 @@ class ScheduleEntry:
             raise ValueError("command required for script execution type")
 
 
-RunCallback = Callable[["ScheduleEntry"], Coroutine[None, None, str]]
+@dataclass
+class RunResult:
+    output: str
+    session_id: str | None = None
+
+
+RunCallback = Callable[["ScheduleEntry"], Coroutine[None, None, "RunResult"]]
 
 
 class Scheduler:
@@ -84,6 +93,7 @@ class Scheduler:
         for entry in self._schedules.values():
             entry.next_run = self._compute_next_run_iso(entry)
         self._save()
+        self.cleanup_history()
         self._running = True
         logger.info("Scheduler started with %d schedule(s)", len(self._schedules))
         await self._main_loop()
@@ -191,13 +201,15 @@ class Scheduler:
 
         async with lock:
             logger.info("Firing schedule '%s' (type=%s, agent=%s)", entry.id, entry.execution_type, entry.agent)
+            run_conv_id = None
             try:
                 if entry.execution_type == "script":
                     if not self._script_callback:
                         raise RuntimeError("No script callback configured — cannot run script schedules")
                     await self._script_callback(entry)
                 else:
-                    await self._run_callback(entry)
+                    run_result = await self._run_callback(entry)
+                    run_conv_id = run_result.session_id
                 entry.last_status = "success"
                 entry.last_error = None
                 entry.run_count += 1
@@ -211,8 +223,18 @@ class Scheduler:
                 entry.last_error = str(e)
 
             entry.last_run = datetime.now(timezone.utc).isoformat()
+            entry.run_history.append(
+                {
+                    "timestamp": entry.last_run,
+                    "status": entry.last_status,
+                    "error": entry.last_error,
+                    "session_id": run_conv_id,
+                }
+            )
+            if len(entry.run_history) > 20:
+                entry.run_history = entry.run_history[-20:]
+
             if entry.schedule_type == "once":
-                # Auto-cleanup: remove one-off schedules after firing
                 self._schedules.pop(entry.id, None)
                 self._entry_locks.pop(entry.id, None)
             self._save()
@@ -326,6 +348,59 @@ class Scheduler:
             self._save()
             logger.info("Cleaned up %d orphaned schedule(s)", len(to_remove))
         return to_remove
+
+    def cleanup_history(self, max_age_days: int = 30, max_files_per_schedule: int = 50) -> int:
+        """Delete old per-run schedule session files."""
+        from tsugite.history import get_history_dir
+
+        history_dir = get_history_dir()
+        if not history_dir.exists():
+            return 0
+
+        removed = 0
+        cutoff_ts = (datetime.now(timezone.utc) - timedelta(days=max_age_days)).timestamp()
+
+        # Active schedule prefixes for matching
+        active_prefixes = set()
+        for sid in self._schedules:
+            active_prefixes.add(f"sched_{sid.replace(':', '_')}_")
+
+        # Single glob for all schedule session files
+        all_files: dict[str, list[tuple[Path, float]]] = {}
+        for f in history_dir.glob("sched_*.jsonl"):
+            try:
+                mtime = f.stat().st_mtime
+            except FileNotFoundError:
+                continue
+            # Find which prefix this file belongs to
+            name = f.name
+            matched_prefix = None
+            for prefix in active_prefixes:
+                if name.startswith(prefix):
+                    matched_prefix = prefix
+                    break
+
+            if matched_prefix:
+                all_files.setdefault(matched_prefix, []).append((f, mtime))
+            elif mtime < cutoff_ts:
+                # Orphaned file from deleted schedule — remove if old
+                f.unlink(missing_ok=True)
+                removed += 1
+
+        # Per-schedule: remove excess by count, then by age
+        for prefix, file_list in all_files.items():
+            file_list.sort(key=lambda x: x[1])
+            for f, _ in file_list[:-max_files_per_schedule]:
+                f.unlink(missing_ok=True)
+                removed += 1
+            for f, mtime in file_list[-max_files_per_schedule:]:
+                if mtime < cutoff_ts:
+                    f.unlink(missing_ok=True)
+                    removed += 1
+
+        if removed:
+            logger.info("Cleaned up %d old schedule session file(s)", removed)
+        return removed
 
     def fire_now(self, schedule_id: str) -> None:
         """Fire a schedule immediately in the background."""

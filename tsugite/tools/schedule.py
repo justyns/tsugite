@@ -78,6 +78,7 @@ def schedule_create(
     script_timeout: int = 60,
     expires_at: Optional[str] = None,
     max_runs: Optional[int] = None,
+    session_id: Optional[str] = None,
 ) -> dict:
     """Create a recurring (cron) or one-off schedule to run an agent or script.
 
@@ -102,6 +103,7 @@ def schedule_create(
         script_timeout: Max seconds for script execution (default: 60). Only used when execution_type is "script".
         expires_at: ISO datetime after which the schedule auto-disables (e.g., "2026-04-01T00:00:00Z").
         max_runs: Auto-disable after this many successful executions.
+        session_id: If set, all runs of this schedule share the same session (persistent LLM context across runs). If omitted, each run gets its own isolated session.
 
     Returns:
         Created schedule details including computed next_run
@@ -142,6 +144,7 @@ def schedule_create(
         script_timeout=script_timeout,
         expires_at=expires_at,
         max_runs=max_runs,
+        session_id=session_id,
     )
     result = _call(_scheduler.add, entry)
     return asdict(result)
@@ -217,6 +220,7 @@ def schedule_update(
     script_timeout: Optional[int] = None,
     expires_at: Optional[str] = None,
     max_runs: Optional[int] = None,
+    session_id: Optional[str] = None,
 ) -> dict:
     """Update fields on an existing schedule.
 
@@ -236,6 +240,7 @@ def schedule_update(
         script_timeout: Max seconds for script execution (optional).
         expires_at: ISO datetime for auto-disable (optional). Set to empty string to clear.
         max_runs: Auto-disable after N successful runs (optional).
+        session_id: Persistent session ID for this schedule (optional). Set to empty string to clear (reverts to per-run sessions).
 
     Returns:
         Updated schedule details
@@ -269,6 +274,7 @@ def schedule_update(
         ("agent_file", agent_file),
         ("command", command),
         ("expires_at", expires_at),
+        ("session_id", session_id),
     ]:
         if value is not None:
             fields[param_name] = value or None
@@ -309,14 +315,15 @@ def schedule_run(id: str) -> dict:
 
 
 @tool(require_daemon=True)
-def schedule_status(id: str) -> dict:
-    """Get the current status of a schedule, including whether it's running.
+def schedule_status(id: str, history_limit: int = 10) -> dict:
+    """Get the current status of a schedule, including whether it's running and recent run history.
 
     Args:
         id: Schedule ID to check
+        history_limit: Max number of recent runs to return (default: 10)
 
     Returns:
-        Dict with schedule state including is_running flag
+        Dict with schedule state including is_running flag and run_history
     """
     entry = _call(_scheduler.get, id)
     running_ids = _call(_scheduler.get_running_ids)
@@ -329,6 +336,9 @@ def schedule_status(id: str) -> dict:
         "last_error": entry.last_error,
         "next_run": entry.next_run,
         "enabled": entry.enabled,
+        "run_count": entry.run_count,
+        "session_id": entry.session_id,
+        "run_history": entry.run_history[-history_limit:],
     }
 
 

@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from tsugite.daemon.scheduler import ScheduleEntry, Scheduler
+from tsugite.daemon.scheduler import RunResult, ScheduleEntry, Scheduler
 
 
 @pytest.fixture
@@ -17,7 +17,7 @@ def schedules_path(tmp_path):
 
 @pytest.fixture
 def run_callback():
-    return AsyncMock(return_value="done")
+    return AsyncMock(return_value=RunResult(output="done"))
 
 
 @pytest.fixture

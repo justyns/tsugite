@@ -4,12 +4,13 @@ import asyncio
 import logging
 import subprocess
 from contextlib import nullcontext
+from datetime import datetime, timezone
 from pathlib import Path
 
 from tsugite.agent_runner.models import AgentSkippedError
 from tsugite.daemon.adapters.base import BaseAdapter, ChannelContext
 from tsugite.daemon.config import NotificationChannelConfig
-from tsugite.daemon.scheduler import ScheduleEntry, Scheduler
+from tsugite.daemon.scheduler import RunResult, ScheduleEntry, Scheduler
 from tsugite.exceptions import AgentExecutionError
 from tsugite.tools.notify import notify_context, send_notification
 
@@ -54,7 +55,7 @@ class SchedulerAdapter:
         """Resolve a notification channel's user to their canonical identity."""
         return self._identity_map.get(f"discord:{config.user_id}", config.user_id)
 
-    async def _run_script(self, entry: ScheduleEntry) -> str:
+    async def _run_script(self, entry: ScheduleEntry) -> RunResult:
         """Run a shell command directly (no LLM)."""
         logger.info("Schedule '%s' executing script: %s", entry.id, entry.command[:100])
 
@@ -90,16 +91,27 @@ class SchedulerAdapter:
                 if adapter:
                     await self._inject_into_user_sessions(adapter, entry, result, resolved_channels)
 
-        return result
+        return RunResult(output=result)
 
-    async def _run_agent(self, entry: ScheduleEntry) -> str:
+    async def _run_agent(self, entry: ScheduleEntry) -> RunResult:
         adapter = self._adapters.get(entry.agent)
         if not adapter:
             raise ValueError(f"No adapter found for agent '{entry.agent}'")
         logger.info("Schedule '%s' executing agent '%s': %s", entry.id, entry.agent, entry.prompt[:100])
 
+        # Per-run session isolation: unique conv_id per run, or persistent if session_id is set
+        if entry.session_id:
+            conv_id = f"sched_{entry.session_id}"
+        else:
+            ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+            safe_id = entry.id.replace(":", "_")
+            conv_id = f"sched_{safe_id}_{ts}"
         user_id = f"scheduler:{entry.agent}"
-        metadata = {"schedule_id": entry.id, "running_tasks": self.scheduler.get_running_ids()}
+        metadata = {
+            "schedule_id": entry.id,
+            "running_tasks": self.scheduler.get_running_ids(),
+            "conv_id_override": conv_id,
+        }
         if entry.notify_tool:
             metadata["notify_tool"] = True
         if entry.model:
@@ -165,7 +177,7 @@ class SchedulerAdapter:
                 if entry.inject_history:
                     await self._inject_into_user_sessions(adapter, entry, truncated, resolved_channels)
 
-        return result
+        return RunResult(output=result, session_id=conv_id)
 
     async def _auto_reply(
         self,

@@ -9,7 +9,7 @@ import pytest
 
 from tsugite.daemon.adapters.scheduler_adapter import SchedulerAdapter
 from tsugite.daemon.config import NotificationChannelConfig
-from tsugite.daemon.scheduler import ScheduleEntry, Scheduler
+from tsugite.daemon.scheduler import RunResult, ScheduleEntry, Scheduler
 from tsugite.exceptions import AgentExecutionError
 
 
@@ -20,7 +20,7 @@ def schedules_path(tmp_path):
 
 @pytest.fixture
 def run_callback():
-    return AsyncMock(return_value="done")
+    return AsyncMock(return_value=RunResult(output="done"))
 
 
 @pytest.fixture
