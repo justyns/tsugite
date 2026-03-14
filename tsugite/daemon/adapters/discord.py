@@ -11,7 +11,7 @@ from discord.ext import commands
 
 from tsugite.daemon.adapters.base import BaseAdapter, ChannelContext
 from tsugite.daemon.config import AgentConfig, DiscordBotConfig
-from tsugite.daemon.session import SessionManager
+from tsugite.daemon.session_store import SessionStore
 from tsugite.events import (
     CodeExecutionEvent,
     ErrorEvent,
@@ -411,10 +411,10 @@ class DiscordAdapter(BaseAdapter):
         bot_config: DiscordBotConfig,
         agent_name: str,
         agent_config: AgentConfig,
-        session_manager: SessionManager,
+        session_store: "SessionStore",
         identity_map: dict[str, str] | None = None,
     ):
-        super().__init__(agent_name, agent_config, session_manager, identity_map=identity_map)
+        super().__init__(agent_name, agent_config, session_store, identity_map=identity_map)
         self.bot_config = bot_config
         self.active_progress_handlers: list[DiscordProgressHandler] = []
 

@@ -328,30 +328,35 @@ class HTTPServer:
         adapter, err = self._get_adapter(request)
         if err:
             return err
-        sessions_dir = adapter.session_manager.sessions_dir
+
+        source = request.query_params.get("source")
+        status = request.query_params.get("status")
+        parent_id = request.query_params.get("parent_id")
+
+        all_sessions = adapter.session_store.list_sessions(
+            agent=adapter.agent_name, source=source, status=status, parent_id=parent_id
+        )
 
         sessions = []
-        if sessions_dir.is_dir():
-            for path in sorted(sessions_dir.glob("*.json")):
-                user_id = path.stem
-                try:
-                    data = json.loads(path.read_text())
-                except (json.JSONDecodeError, OSError):
-                    continue
-                if user_id.isdigit():
-                    label = f"Discord: {user_id}"
-                elif user_id.startswith("web-"):
-                    label = f"Web: {user_id}"
-                else:
-                    label = user_id
-                sessions.append(
-                    {
-                        "user_id": user_id,
-                        "label": label,
-                        "conversation_id": data.get("conversation_id", ""),
-                        "created_at": data.get("created_at", ""),
-                    }
-                )
+        for s in all_sessions:
+            user_id = s.user_id or ""
+            if user_id.isdigit():
+                label = f"Discord: {user_id}"
+            elif user_id.startswith("web-"):
+                label = f"Web: {user_id}"
+            else:
+                label = user_id or s.source
+            sessions.append(
+                {
+                    "user_id": user_id,
+                    "label": label,
+                    "conversation_id": s.id,
+                    "source": s.source,
+                    "status": s.status,
+                    "created_at": s.created_at,
+                    "parent_id": s.parent_id,
+                }
+            )
 
         return JSONResponse({"sessions": sessions})
 
@@ -361,16 +366,15 @@ class HTTPServer:
             return err
 
         user_id = adapter.resolve_http_user(request.query_params.get("user_id", "web-anonymous"))
-        adapter.session_manager.get_or_create_session(user_id)
-        session = adapter.session_manager.sessions.get(user_id)
+        session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
 
         return JSONResponse(
             {
                 "model": adapter.resolve_model(),
-                "tokens": session.cumulative_tokens if session else 0,
-                "context_limit": adapter.session_manager.context_limit,
-                "threshold": adapter.session_manager.compaction_threshold,
-                "message_count": session.message_count if session else 0,
+                "tokens": session.cumulative_tokens,
+                "context_limit": adapter.session_store.get_context_limit(adapter.agent_name),
+                "threshold": adapter.session_store.get_compaction_threshold(adapter.agent_name),
+                "message_count": session.message_count,
                 "attachments": [
                     {"name": a.name, "content_type": a.content_type.value, "mime_type": a.mime_type}
                     for a in adapter._get_all_attachments()
@@ -399,7 +403,7 @@ class HTTPServer:
             else:
                 context_limit = DEFAULT_CONTEXT_LIMIT
                 agent_config.context_limit = None
-            adapter.session_manager.update_context_limit(context_limit)
+            adapter.session_store.update_context_limit(adapter.agent_name, context_limit)
 
             if self.gateway:
                 from tsugite.daemon.config import save_daemon_config
@@ -498,7 +502,8 @@ class HTTPServer:
         user_id = adapter.resolve_http_user(request.query_params.get("user_id", "web-anonymous"))
         detail = request.query_params.get("detail", "false").lower() == "true"
         limit = int(request.query_params.get("limit", "100"))
-        conversation_id = adapter.session_manager.get_or_create_session(user_id)
+        session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
+        conversation_id = session.id
 
         turns = self._collect_turns(conversation_id, limit=limit)
 
@@ -540,26 +545,25 @@ class HTTPServer:
 
         user_id = adapter.resolve_http_user(body.get("user_id", "web-anonymous"))
 
-        adapter.session_manager.get_or_create_session(user_id)
-        session = adapter.session_manager.sessions.get(user_id)
+        session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
 
-        if not session or session.message_count == 0:
+        if session.message_count == 0:
             return JSONResponse({"error": "no session to compact"}, status_code=404)
 
-        old_conv_id = session.conversation_id
+        old_conv_id = session.id
         try:
-            await adapter._compact_session(user_id)
+            await adapter._compact_session(session.id)
         except Exception as e:
             return JSONResponse({"error": f"compaction failed: {e}"}, status_code=500)
 
-        new_session = adapter.session_manager.sessions.get(user_id)
+        new_session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
         agent_name = request.path_params["agent"]
         self.event_bus.emit("agent_status", {"agent": agent_name})
         return JSONResponse(
             {
                 "status": "compacted",
                 "old_conversation_id": old_conv_id,
-                "new_conversation_id": new_session.conversation_id if new_session else None,
+                "new_conversation_id": new_session.id if new_session else None,
             }
         )
 
@@ -741,14 +745,14 @@ class HTTPServer:
                 self.event_bus.emit("history_update", {"agent": agent_name})
 
                 # Emit session info for the web UI status bar
-                session = adapter.session_manager.sessions.get(user_id)
+                session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
                 if session:
                     progress._emit(
                         "session_info",
                         {
                             "tokens": session.cumulative_tokens,
-                            "context_limit": adapter.session_manager.context_limit,
-                            "threshold": adapter.session_manager.compaction_threshold,
+                            "context_limit": adapter.session_store.get_context_limit(adapter.agent_name),
+                            "threshold": adapter.session_store.get_compaction_threshold(adapter.agent_name),
                             "message_count": session.message_count,
                             "model": adapter.resolve_model(),
                             "attachments": [a.name for a in adapter._get_all_attachments()],
@@ -910,17 +914,17 @@ class HTTPServer:
         if err := self._require_auth_and_sessions(request):
             return err
         state = request.query_params.get("state")
-        sessions = self.session_runner.store.list_sessions(state=state)
+        sessions = self.session_runner.store.list_sessions(status=state)
         return JSONResponse(
             {
                 "sessions": [
                     {
                         "id": s.id,
                         "agent": s.agent,
-                        "state": s.state,
-                        "prompt": s.prompt[:200],
+                        "state": s.status,
+                        "prompt": (s.prompt or "")[:200],
                         "created_at": s.created_at,
-                        "updated_at": s.updated_at,
+                        "updated_at": s.last_active,
                         "error": s.error,
                         "current_review_id": s.current_review_id,
                     }
@@ -944,11 +948,12 @@ class HTTPServer:
         if agent not in self.adapters:
             return JSONResponse({"error": f"unknown agent: {agent}"}, status_code=400)
 
-        from tsugite.daemon.agent_session import AgentSession
+        from tsugite.daemon.session_store import Session, SessionSource
 
-        session = AgentSession(
+        session = Session(
             id=body.get("session_id", ""),
             agent=agent,
+            source=SessionSource.BACKGROUND.value,
             prompt=prompt,
             model=body.get("model"),
             agent_file=body.get("agent_file"),
@@ -965,7 +970,7 @@ class HTTPServer:
 
         self.event_bus.emit("session_update", {"action": "started", "id": result.id})
         return JSONResponse(
-            {"id": result.id, "state": result.state, "created_at": result.created_at},
+            {"id": result.id, "status": result.status, "created_at": result.created_at},
             status_code=201,
         )
 
@@ -998,17 +1003,16 @@ class HTTPServer:
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=404)
 
-        from tsugite.daemon.agent_session import SessionState
+        from tsugite.daemon.session_store import Session, SessionSource, SessionStatus
 
-        restartable = {SessionState.INTERRUPTED.value, SessionState.FAILED.value, SessionState.CANCELLED.value}
-        if old.state not in restartable:
-            return JSONResponse({"error": f"cannot restart session in '{old.state}' state"}, status_code=400)
+        restartable = {SessionStatus.INTERRUPTED.value, SessionStatus.FAILED.value, SessionStatus.CANCELLED.value}
+        if old.status not in restartable:
+            return JSONResponse({"error": f"cannot restart session in '{old.status}' state"}, status_code=400)
 
-        from tsugite.daemon.agent_session import AgentSession
-
-        new_session = AgentSession(
-            id="",  # auto-generated
+        new_session = Session(
+            id="",
             agent=old.agent,
+            source=old.source or SessionSource.BACKGROUND.value,
             prompt=old.prompt,
             model=old.model,
             agent_file=old.agent_file,
@@ -1023,7 +1027,7 @@ class HTTPServer:
             return JSONResponse({"error": str(e)}, status_code=400)
         self.event_bus.emit("session_update", {"action": "restarted", "id": result.id})
         return JSONResponse(
-            {"id": result.id, "state": result.state, "restarted_from": session_id},
+            {"id": result.id, "status": result.status, "restarted_from": session_id},
             status_code=201,
         )
 
@@ -1064,7 +1068,7 @@ class HTTPServer:
         except Exception:
             return JSONResponse({"error": "invalid JSON body"}, status_code=400)
 
-        from tsugite.daemon.agent_session import ReviewDecision
+        from tsugite.daemon.session_store import ReviewDecision
 
         decision = body.get("decision", "")
         if decision not in (ReviewDecision.APPROVED.value, ReviewDecision.DECLINED.value):

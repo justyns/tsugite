@@ -1,7 +1,7 @@
 """Tests for the HTTP API adapter."""
 
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from starlette.testclient import TestClient
@@ -34,11 +34,11 @@ def http_config_no_auth():
 
 
 @pytest.fixture
-def mock_adapter(agent_config):
+def mock_adapter(agent_config, tmp_path):
+    from tsugite.daemon.session_store import SessionStore
     from tsugite.workspace import WorkspaceNotFoundError
 
-    mock_session_mgr = MagicMock()
-    mock_session_mgr.get_or_create_session.return_value = "daemon_test-agent_new-user"
+    session_store = SessionStore(tmp_path / "session_store.json")
 
     with patch("tsugite.workspace.Workspace") as mock_ws_cls:
         mock_ws_cls.load.side_effect = WorkspaceNotFoundError("not found")
@@ -46,7 +46,7 @@ def mock_adapter(agent_config):
             adapter = HTTPAgentAdapter(
                 agent_name="test-agent",
                 agent_config=agent_config,
-                session_manager=mock_session_mgr,
+                session_store=session_store,
             )
             return adapter
 

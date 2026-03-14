@@ -8,12 +8,13 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any, Callable, Coroutine, Optional
 
-from tsugite.daemon.agent_session import (
-    AgentSession,
-    AgentSessionStore,
+from tsugite.daemon.session_store import (
     ReviewDecision,
     ReviewGate,
-    SessionState,
+    Session,
+    SessionSource,
+    SessionStatus,
+    SessionStore,
 )
 
 logger = logging.getLogger(__name__)
@@ -34,7 +35,7 @@ class SessionReviewBackend:
 
     TIMEOUT = 3600  # 1 hour
 
-    def __init__(self, store: AgentSessionStore, session_id: str, on_review_created=None, event_bus=None):
+    def __init__(self, store: SessionStore, session_id: str, on_review_created=None, event_bus=None):
         self._store = store
         self._session_id = session_id
         self._review_events: dict[str, threading.Event] = {}
@@ -83,7 +84,7 @@ class SessionReviewBackend:
 class LoggingProgressHandler:
     """Wraps SSE event emission to also append events to the session JSONL log."""
 
-    def __init__(self, store: AgentSessionStore, session_id: str):
+    def __init__(self, store: SessionStore, session_id: str):
         self._store = store
         self._session_id = session_id
 
@@ -99,8 +100,8 @@ class LoggingProgressHandler:
         self._store.append_event(self._session_id, event)
 
 
-NotifyCallback = Callable[[AgentSession, str], Coroutine[Any, Any, None]]
-ReviewNotifyCallback = Callable[[AgentSession, ReviewGate], Coroutine[Any, Any, None]]
+NotifyCallback = Callable[[Session, str], Coroutine[Any, Any, None]]
+ReviewNotifyCallback = Callable[[Session, ReviewGate], Coroutine[Any, Any, None]]
 
 
 class SessionRunner:
@@ -108,7 +109,7 @@ class SessionRunner:
 
     def __init__(
         self,
-        store: AgentSessionStore,
+        store: SessionStore,
         adapters: dict,
         notify_callback: Optional[NotifyCallback] = None,
         review_notify_callback: Optional[ReviewNotifyCallback] = None,
@@ -123,11 +124,13 @@ class SessionRunner:
         self._review_backends: dict[str, SessionReviewBackend] = {}
 
     @property
-    def store(self) -> AgentSessionStore:
+    def store(self) -> SessionStore:
         return self._store
 
-    def start_session(self, session: AgentSession) -> AgentSession:
-        session.state = SessionState.RUNNING.value
+    def start_session(self, session: Session) -> Session:
+        session.status = SessionStatus.RUNNING.value
+        if not session.source:
+            session.source = SessionSource.BACKGROUND.value
         session = self._store.create_session(session)
 
         progress = LoggingProgressHandler(self._store, session.id)
@@ -140,11 +143,11 @@ class SessionRunner:
 
         return session
 
-    async def _run_session(self, session: AgentSession, progress: LoggingProgressHandler) -> None:
+    async def _run_session(self, session: Session, progress: LoggingProgressHandler) -> None:
         adapter = self._adapters.get(session.agent)
         if not adapter:
             self._store.update_session(
-                session.id, state=SessionState.FAILED.value, error=f"No adapter for agent '{session.agent}'"
+                session.id, status=SessionStatus.FAILED.value, error=f"No adapter for agent '{session.agent}'"
             )
             return
 
@@ -190,9 +193,8 @@ class SessionRunner:
             )
             self._store.update_session(
                 session.id,
-                state=SessionState.COMPLETED.value,
+                status=SessionStatus.COMPLETED.value,
                 result=str(result),
-                completed_at=datetime.now(timezone.utc).isoformat(),
                 current_review_id=None,
             )
             progress._emit("session_complete", {"result_preview": str(result)[:500]})
@@ -208,13 +210,13 @@ class SessionRunner:
                     logger.error("Session '%s' notify callback failed: %s", session.id, e)
 
         except asyncio.CancelledError:
-            self._store.update_session(session.id, state=SessionState.CANCELLED.value)
+            self._store.update_session(session.id, status=SessionStatus.CANCELLED.value)
             progress._emit("session_cancelled", {})
             if self._event_bus:
                 self._event_bus.emit("session_update", {"action": "cancelled", "id": session.id})
             logger.info("Session '%s' cancelled", session.id)
         except Exception as e:
-            self._store.update_session(session.id, state=SessionState.FAILED.value, error=str(e))
+            self._store.update_session(session.id, status=SessionStatus.FAILED.value, error=str(e))
             progress._emit("session_error", {"error": str(e)})
             if self._event_bus:
                 self._event_bus.emit("session_update", {"action": "failed", "id": session.id})
@@ -226,15 +228,15 @@ class SessionRunner:
         task = self._active_tasks.get(session_id)
         if task and not task.done():
             task.cancel()
-        self._store.update_session(session_id, state=SessionState.CANCELLED.value)
+        self._store.update_session(session_id, status=SessionStatus.CANCELLED.value)
 
     def resolve_review(self, review_id: str, decision: str, comment: str = "") -> ReviewGate:
         review = self._store.resolve_review(review_id, decision, comment)
 
         # Set session back to running
         session = self._store.get_session(review.session_id)
-        if session.state == SessionState.WAITING_FOR_REVIEW.value:
-            self._store.update_session(review.session_id, state=SessionState.RUNNING.value, current_review_id=None)
+        if session.status == SessionStatus.WAITING_FOR_REVIEW.value:
+            self._store.update_session(review.session_id, status=SessionStatus.RUNNING.value, current_review_id=None)
 
         # Unblock the review backend
         backend = self._review_backends.get(review.session_id)
@@ -254,6 +256,6 @@ class SessionRunner:
             raise RuntimeError(f"No review backend for session '{session_id}'")
         return backend.create_and_wait(title, description, context)
 
-    def get_active_sessions(self) -> list[AgentSession]:
-        active_states = {SessionState.RUNNING.value, SessionState.WAITING_FOR_REVIEW.value}
-        return [s for s in self._store.list_sessions() if s.state in active_states]
+    def get_active_sessions(self) -> list[Session]:
+        active_states = {SessionStatus.RUNNING.value, SessionStatus.WAITING_FOR_REVIEW.value}
+        return [s for s in self._store.list_sessions() if s.status in active_states]

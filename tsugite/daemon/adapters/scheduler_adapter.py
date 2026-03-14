@@ -251,7 +251,8 @@ class SchedulerAdapter:
         """Write a synthetic turn into the user's session JSONL."""
         from tsugite.history import SessionStorage, get_history_dir
 
-        session_id = adapter.session_manager.get_or_create_session(user_id)
+        session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
+        session_id = session.id
         session_path = get_history_dir() / f"{session_id}.jsonl"
         storage = SessionStorage.get_or_create(
             session_id, adapter.agent_name, adapter.resolve_model(), session_path=session_path

@@ -7,7 +7,6 @@ These tests verify that:
 """
 
 import asyncio
-import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -15,7 +14,7 @@ import pytest
 
 from tsugite.daemon.adapters.base import BaseAdapter, ChannelContext
 from tsugite.daemon.config import AgentConfig
-from tsugite.daemon.session import SessionManager
+from tsugite.daemon.session_store import SessionStore
 from tsugite.history import CompactionSummary, SessionStorage, Turn
 from tsugite.history.reconstruction import reconstruct_messages
 
@@ -46,60 +45,51 @@ def create_mock_result(response: str = "Test response", token_count: int = 100) 
     return mock_result
 
 
-class TestSessionManagerPersistence:
-    """Tests for SessionManager file-based persistence."""
+class TestSessionStorePersistence:
+    """Tests for SessionStore file-based persistence."""
 
-    def test_session_file_created_on_first_message(self, tmp_path):
-        """Session file should be created when a new session starts."""
-        sm = SessionManager("test_agent", tmp_path)
-        conv_id = sm.get_or_create_session("user123")
+    def test_session_created_on_first_message(self, tmp_path):
+        """Session should be created when a new session starts."""
+        store = SessionStore(tmp_path / "session_store.json")
+        session = store.get_or_create_interactive("user123", "test_agent")
 
-        session_file = tmp_path / "daemon_sessions" / "user123.json"
-        assert session_file.exists()
-
-        data = json.loads(session_file.read_text())
-        assert data["conversation_id"] == conv_id
-        assert data["compaction_count"] == 0
+        assert session.id
+        assert session.user_id == "user123"
+        assert session.agent == "test_agent"
 
     def test_session_persists_after_restart(self, tmp_path):
-        """Session should be restored from file after SessionManager recreated."""
-        # First session manager instance
-        sm1 = SessionManager("test_agent", tmp_path)
-        original_conv_id = sm1.get_or_create_session("user456")
+        """Session should be restored from file after SessionStore recreated."""
+        store_path = tmp_path / "session_store.json"
+        store1 = SessionStore(store_path)
+        original_session = store1.get_or_create_interactive("user456", "test_agent")
 
-        # Simulate restart: create new SessionManager instance
-        sm2 = SessionManager("test_agent", tmp_path)
-        restored_conv_id = sm2.get_or_create_session("user456")
+        # Simulate restart: create new SessionStore instance
+        store2 = SessionStore(store_path)
+        restored_session = store2.get_or_create_interactive("user456", "test_agent")
 
-        assert restored_conv_id == original_conv_id
+        assert restored_session.id == original_session.id
 
-    def test_compaction_updates_session_file(self, tmp_path):
-        """Compaction should update session file with new conversation ID."""
-        sm = SessionManager("test_agent", tmp_path)
-        original_conv_id = sm.get_or_create_session("user789")
+    def test_compaction_updates_session(self, tmp_path):
+        """Compaction should create a new session with new ID."""
+        store = SessionStore(tmp_path / "session_store.json")
+        original_session = store.get_or_create_interactive("user789", "test_agent")
 
-        # Compact session
-        new_conv_id = sm.compact_session("user789")
+        new_session = store.compact_session(original_session.id)
 
-        assert new_conv_id != original_conv_id
-
-        # Verify file updated
-        session_file = tmp_path / "daemon_sessions" / "user789.json"
-        data = json.loads(session_file.read_text())
-        assert data["conversation_id"] == new_conv_id
-        assert data["compaction_count"] == 1
+        assert new_session.id != original_session.id
 
     def test_session_restored_after_compaction_and_restart(self, tmp_path):
-        """After compaction and restart, should use compacted conversation ID."""
-        sm1 = SessionManager("test_agent", tmp_path)
-        sm1.get_or_create_session("userABC")
-        compacted_conv_id = sm1.compact_session("userABC")
+        """After compaction and restart, should use compacted session ID."""
+        store_path = tmp_path / "session_store.json"
+        store1 = SessionStore(store_path)
+        original = store1.get_or_create_interactive("userABC", "test_agent")
+        compacted = store1.compact_session(original.id)
 
         # Restart
-        sm2 = SessionManager("test_agent", tmp_path)
-        restored_conv_id = sm2.get_or_create_session("userABC")
+        store2 = SessionStore(store_path)
+        restored = store2.get_or_create_interactive("userABC", "test_agent")
 
-        assert restored_conv_id == compacted_conv_id
+        assert restored.id == compacted.id
 
 
 class TestDaemonHistorySaving:
@@ -121,12 +111,12 @@ class TestDaemonHistorySaving:
         )
 
     @pytest.fixture
-    def mock_session_manager(self, mock_workspace):
-        """Create a session manager."""
-        return SessionManager("test_agent", mock_workspace)
+    def mock_session_store(self, tmp_path):
+        """Create a session store."""
+        return SessionStore(tmp_path / "session_store.json")
 
     def test_history_saved_after_message(
-        self, tmp_path, mock_workspace, mock_agent_config, mock_session_manager, monkeypatch
+        self, tmp_path, mock_workspace, mock_agent_config, mock_session_store, monkeypatch
     ):
         """Conversation history should be saved after handle_message."""
         # Patch history directory
@@ -137,9 +127,10 @@ class TestDaemonHistorySaving:
         monkeypatch.setattr("tsugite.agent_runner.history_integration.get_history_dir", lambda: history_dir)
 
         # Get conversation ID that will be used
-        conv_id = mock_session_manager.get_or_create_session("test_user")
+        session = mock_session_store.get_or_create_interactive("test_user", "test_agent")
+        conv_id = session.id
 
-        adapter = _StubAdapter("test_agent", mock_agent_config, mock_session_manager)
+        adapter = _StubAdapter("test_agent", mock_agent_config, mock_session_store)
 
         mock_result = create_mock_result("Test response", 100)
 
@@ -165,7 +156,7 @@ class TestDaemonHistorySaving:
         assert "Test response" in (turns[0].final_answer or "")
 
     def test_history_accumulates_across_messages(
-        self, tmp_path, mock_workspace, mock_agent_config, mock_session_manager, monkeypatch
+        self, tmp_path, mock_workspace, mock_agent_config, mock_session_store, monkeypatch
     ):
         """Multiple messages should accumulate in the same conversation history."""
         history_dir = tmp_path / "history"
@@ -174,9 +165,10 @@ class TestDaemonHistorySaving:
         monkeypatch.setattr("tsugite.history.storage.get_machine_name", lambda: "test_machine")
         monkeypatch.setattr("tsugite.agent_runner.history_integration.get_history_dir", lambda: history_dir)
 
-        conv_id = mock_session_manager.get_or_create_session("test_user")
+        session = mock_session_store.get_or_create_interactive("test_user", "test_agent")
+        conv_id = session.id
 
-        adapter = _StubAdapter("test_agent", mock_agent_config, mock_session_manager)
+        adapter = _StubAdapter("test_agent", mock_agent_config, mock_session_store)
 
         responses = ["Response 1", "Response 2", "Response 3"]
         response_iter = iter(responses)
@@ -206,15 +198,15 @@ class TestMultiAdapterSessionContinuity:
 
     def test_same_user_same_conversation_different_sources(self, tmp_path):
         """Same user should get same conversation regardless of source adapter."""
-        sm = SessionManager("shared_agent", tmp_path)
+        store = SessionStore(tmp_path / "session_store.json")
 
         # Discord adapter gets session
-        discord_conv = sm.get_or_create_session("user123")
+        discord_session = store.get_or_create_interactive("user123", "shared_agent")
 
         # CLI adapter gets session for same user
-        cli_conv = sm.get_or_create_session("user123")
+        cli_session = store.get_or_create_interactive("user123", "shared_agent")
 
-        assert discord_conv == cli_conv
+        assert discord_session.id == cli_session.id
 
     def test_history_shared_across_adapters(self, tmp_path, monkeypatch):
         """History saved by one adapter should be visible to another."""
@@ -223,8 +215,8 @@ class TestMultiAdapterSessionContinuity:
         monkeypatch.setattr("tsugite.history.storage.get_history_dir", lambda: history_dir)
         monkeypatch.setattr("tsugite.history.storage.get_machine_name", lambda: "test_machine")
 
-        sm = SessionManager("shared_agent", tmp_path)
-        sm.get_or_create_session("user123")
+        store = SessionStore(tmp_path / "session_store.json")
+        store.get_or_create_interactive("user123", "shared_agent")
 
         # Create storage and save turns using V2 API
         storage = SessionStorage.create(agent_name="shared_agent", model="test")
@@ -260,12 +252,12 @@ class TestMultiAdapterSessionContinuity:
 
     def test_different_users_get_different_conversations(self, tmp_path):
         """Different users should have separate conversations."""
-        sm = SessionManager("shared_agent", tmp_path)
+        store = SessionStore(tmp_path / "session_store.json")
 
-        user1_conv = sm.get_or_create_session("user1")
-        user2_conv = sm.get_or_create_session("user2")
+        user1_session = store.get_or_create_interactive("user1", "shared_agent")
+        user2_session = store.get_or_create_interactive("user2", "shared_agent")
 
-        assert user1_conv != user2_conv
+        assert user1_session.id != user2_session.id
 
 
 class TestHistoryLoadedOnContinue:
@@ -281,15 +273,16 @@ class TestHistoryLoadedOnContinue:
         workspace = tmp_path / "workspace"
         workspace.mkdir()
 
-        sm = SessionManager("test_agent", workspace)
-        conv_id = sm.get_or_create_session("test_user")
+        store = SessionStore(tmp_path / "session_store.json")
+        session = store.get_or_create_interactive("test_user", "test_agent")
+        conv_id = session.id
 
         agent_config = AgentConfig(
             workspace_dir=workspace,
             agent_file="test.md",
         )
 
-        adapter = _StubAdapter("test_agent", agent_config, sm)
+        adapter = _StubAdapter("test_agent", agent_config, store)
 
         captured_kwargs = {}
 
@@ -318,13 +311,13 @@ class TestHistorySaveErrorHandling:
         workspace = tmp_path / "workspace"
         workspace.mkdir()
 
-        sm = SessionManager("test_agent", workspace)
+        store = SessionStore(tmp_path / "session_store.json")
         agent_config = AgentConfig(
             workspace_dir=workspace,
             agent_file="test.md",
         )
 
-        adapter = _StubAdapter("test_agent", agent_config, sm)
+        adapter = _StubAdapter("test_agent", agent_config, store)
 
         mock_result = create_mock_result("Success response", 100)
 
@@ -358,14 +351,14 @@ class TestDaemonMetadataInHistory:
         workspace = tmp_path / "workspace"
         workspace.mkdir()
 
-        sm = SessionManager("test_agent", workspace)
+        store = SessionStore(tmp_path / "session_store.json")
 
         agent_config = AgentConfig(
             workspace_dir=workspace,
             agent_file="test.md",
         )
 
-        adapter = _StubAdapter("test_agent", agent_config, sm)
+        adapter = _StubAdapter("test_agent", agent_config, store)
         mock_result = create_mock_result("Response", 50)
 
         with patch("tsugite.daemon.adapters.base.run_agent", return_value=mock_result):
@@ -382,7 +375,8 @@ class TestDaemonMetadataInHistory:
 
         # Group chat resolves to composite key: "discord:channel123:test_user"
         resolved_user = adapter.resolve_user("test_user", channel_context)
-        conv_id = sm.get_or_create_session(resolved_user)
+        session = store.get_or_create_interactive(resolved_user, "test_agent")
+        conv_id = session.id
 
         # Verify metadata in saved turn using V2 API
         storage = SessionStorage.load(history_dir / f"{conv_id}.jsonl")

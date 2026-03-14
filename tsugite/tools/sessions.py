@@ -61,18 +61,19 @@ def start_session(
         no_network: Disable network entirely (sandbox only).
 
     Returns:
-        Session details including ID and state
+        Session details including ID and status
     """
-    from tsugite.daemon.agent_session import AgentSession
+    from tsugite.daemon.session_store import Session, SessionSource
 
     if agent is None:
         from tsugite.agent_runner.helpers import get_current_agent
 
         agent = get_current_agent() or "default"
 
-    session = AgentSession(
+    session = Session(
         id=session_id or "",
         agent=agent,
+        source=SessionSource.BACKGROUND.value,
         prompt=prompt,
         model=model,
         agent_file=agent_file,
@@ -87,20 +88,39 @@ def start_session(
 
 
 @tool(require_daemon=True)
-def list_sessions() -> list:
-    """List all agent sessions with their current status.
+def list_sessions(
+    source: Optional[str] = None,
+    status: Optional[str] = None,
+    agent: Optional[str] = None,
+    parent_id: Optional[str] = None,
+) -> list:
+    """List agent sessions with optional filters.
+
+    Args:
+        source: Filter by source type (interactive, schedule, webhook, background, spawned)
+        status: Filter by status (active, running, completed, failed, etc.)
+        agent: Filter by agent name
+        parent_id: Filter by parent session/schedule ID
 
     Returns:
-        List of sessions with id, agent, state, created_at
+        List of sessions with id, agent, source, status, created_at
     """
-    sessions = _call(_session_runner.store.list_sessions)
+    sessions = _call(
+        _session_runner.store.list_sessions,
+        agent=agent,
+        source=source,
+        status=status,
+        parent_id=parent_id,
+    )
     return [
         {
             "id": s.id,
             "agent": s.agent,
-            "state": s.state,
-            "prompt": s.prompt[:200],
+            "source": s.source,
+            "status": s.status,
+            "prompt": (s.prompt or "")[:200],
             "created_at": s.created_at,
+            "parent_id": s.parent_id,
         }
         for s in sessions
     ]
@@ -132,6 +152,52 @@ def cancel_session(session_id: str) -> dict:
     _call(_session_runner.cancel_session, session_id)
     session = _call(_session_runner.store.get_session, session_id)
     return asdict(session)
+
+
+
+@tool(require_daemon=True)
+def session_spawn(
+    prompt: str,
+    agent: Optional[str] = None,
+    name: Optional[str] = None,
+    parent_session_id: Optional[str] = None,
+    notify: Optional[list[str]] = None,
+) -> dict:
+    """Spawn a new long-running session with parent linkage.
+
+    Unlike start_session, spawned sessions are meant for long-running agent-managed
+    workstreams that may outlive the current conversation.
+
+    Args:
+        prompt: Task instruction for the spawned session.
+        agent: Agent name. Defaults to the current agent.
+        name: Human-readable name for the session (used as session ID prefix).
+        parent_session_id: Parent session ID for tracking lineage.
+        notify: Notification channels for result delivery.
+
+    Returns:
+        Session details including ID and status
+    """
+    from tsugite.daemon.session_store import Session, SessionSource
+
+    if agent is None:
+        from tsugite.agent_runner.helpers import get_current_agent
+
+        agent = get_current_agent() or "default"
+
+    session_id = f"spawn-{name}" if name else ""
+
+    session = Session(
+        id=session_id,
+        agent=agent,
+        source=SessionSource.SPAWNED.value,
+        prompt=prompt,
+        parent_id=parent_session_id,
+        notify=notify or [],
+    )
+
+    result = _call(_session_runner.start_session, session)
+    return asdict(result)
 
 
 @tool(require_daemon=True)

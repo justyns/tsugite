@@ -130,13 +130,13 @@ class TestDaemonSessionIdPassthrough:
     async def test_handle_message_passes_session_id_to_history(self):
         from tsugite.daemon.adapters.base import BaseAdapter, ChannelContext
         from tsugite.daemon.config import AgentConfig
-        from tsugite.daemon.session import SessionManager
+        from tsugite.daemon.session_store import SessionStore
 
         agent_config = AgentConfig(
             agent_file="default",
             workspace_dir="/tmp/test-workspace",
         )
-        session_mgr = SessionManager(agent_name="test-agent", workspace_dir=Path("/tmp/test-workspace"))
+        session_store = SessionStore(Path("/tmp/test-workspace") / "session_store.json")
 
         # Create a concrete subclass since BaseAdapter is abstract
         class TestAdapter(BaseAdapter):
@@ -149,7 +149,7 @@ class TestDaemonSessionIdPassthrough:
         adapter = TestAdapter(
             agent_name="test-agent",
             agent_config=agent_config,
-            session_manager=session_mgr,
+            session_store=session_store,
         )
 
         channel_ctx = ChannelContext(source="test", channel_id="ch1", user_id="user1", reply_to="test:ch1")
@@ -183,13 +183,13 @@ class TestDaemonSessionIdPassthrough:
     async def test_handle_message_passes_none_session_id_for_litellm(self):
         from tsugite.daemon.adapters.base import BaseAdapter, ChannelContext
         from tsugite.daemon.config import AgentConfig
-        from tsugite.daemon.session import SessionManager
+        from tsugite.daemon.session_store import SessionStore
 
         agent_config = AgentConfig(
             agent_file="default",
             workspace_dir="/tmp/test-workspace",
         )
-        session_mgr = SessionManager(agent_name="test-agent", workspace_dir=Path("/tmp/test-workspace"))
+        session_store = SessionStore(Path("/tmp/test-workspace") / "session_store.json")
 
         class TestAdapter(BaseAdapter):
             async def start(self):
@@ -201,7 +201,7 @@ class TestDaemonSessionIdPassthrough:
         adapter = TestAdapter(
             agent_name="test-agent",
             agent_config=agent_config,
-            session_manager=session_mgr,
+            session_store=session_store,
         )
 
         channel_ctx = ChannelContext(source="test", channel_id="ch1", user_id="user1", reply_to="test:ch1")

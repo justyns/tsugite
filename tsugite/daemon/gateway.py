@@ -8,7 +8,7 @@ from typing import Optional
 
 from tsugite.daemon.adapters.base import BaseAdapter, resolve_agent_path
 from tsugite.daemon.config import DaemonConfig, load_daemon_config
-from tsugite.daemon.session import SessionManager
+from tsugite.daemon.session_store import SessionStore
 
 logger = logging.getLogger(__name__)
 
@@ -134,9 +134,9 @@ class Gateway:
             for pid in platform_ids:
                 identity_map[pid] = canonical
 
-        # One SessionManager per agent, shared across adapters
-        agent_session_managers: dict[str, SessionManager] = {}
+        # Build per-agent context limits
         default_context_limit = 128000
+        context_limits: dict[str, int] = {}
         for agent_name, agent_config in self.config.agents.items():
             if agent_config.context_limit:
                 context_limit = agent_config.context_limit
@@ -149,9 +149,10 @@ class Gateway:
                 context_limit = default_context_limit
 
             agent_config.context_limit = context_limit
-            agent_session_managers[agent_name] = SessionManager(
-                agent_name, agent_config.workspace_dir, context_limit=context_limit
-            )
+            context_limits[agent_name] = context_limit
+
+        # Single global session store
+        session_store = SessionStore(self.config.state_dir / "session_store.json", context_limits=context_limits)
 
         tasks = []
         http_adapters = {}
@@ -183,7 +184,7 @@ class Gateway:
                         bot_config=bot_config,
                         agent_name=agent_name,
                         agent_config=agent_config,
-                        session_manager=agent_session_managers[agent_name],
+                        session_store=session_store,
                         identity_map=identity_map,
                     )
                 )
@@ -204,7 +205,7 @@ class Gateway:
                 logger.info("HTTP agent '%s' using agent: %s", agent_name, agent_path)
 
                 http_adapters[agent_name] = HTTPAgentAdapter(
-                    agent_name, agent_config, agent_session_managers[agent_name], identity_map=identity_map
+                    agent_name, agent_config, session_store, identity_map=identity_map
                 )
 
             if http_adapters:
@@ -257,13 +258,10 @@ class Gateway:
 
             logger.info("Scheduler enabled (schedules: %s)", schedules_path)
 
-            # Start session runner (requires HTTP adapters to execute agents)
-            from tsugite.daemon.agent_session import AgentSessionStore
+            # Start session runner (uses the unified session store)
             from tsugite.daemon.session_runner import SessionRunner
             from tsugite.tools.sessions import set_session_runner
 
-            sessions_path = self.config.state_dir / "sessions.json"
-            session_store = AgentSessionStore(sessions_path)
             notification_channels = self.config.notification_channels or {}
 
             async def _review_notify(session, review):
@@ -285,7 +283,7 @@ class Gateway:
             if self._http_server:
                 self._http_server.session_runner = self._session_runner
             set_session_runner(self._session_runner, asyncio.get_running_loop())
-            logger.info("Session runner enabled (sessions: %s)", sessions_path)
+            logger.info("Session runner enabled")
 
         # Set up notification callback if channels are configured
         if self.config.notification_channels:

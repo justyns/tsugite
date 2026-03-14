@@ -484,9 +484,11 @@ class TestPartialHistoryOnError:
         mock_adapter.agent_config.max_turns = None
         mock_adapter.agent_config.workspace = None
         mock_adapter.agent_config.workspace_dir = tmp_path
-        mock_adapter.session_manager = MagicMock()
-        mock_adapter.session_manager.needs_compaction.return_value = False
-        mock_adapter.session_manager.get_or_create_session.return_value = "conv-123"
+        mock_adapter.session_store = MagicMock()
+        mock_adapter.session_store.needs_compaction.return_value = False
+        mock_session = MagicMock()
+        mock_session.id = "conv-123"
+        mock_adapter.session_store.get_or_create_interactive.return_value = mock_session
         mock_adapter.resolve_user = MagicMock(return_value="test-user")
         mock_adapter._resolve_agent_path = MagicMock(return_value=Path("/fake/agent.yaml"))
         mock_adapter._build_message_context = MagicMock(return_value="test prompt")

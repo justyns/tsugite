@@ -18,7 +18,7 @@ from tzlocal import get_localzone
 from tsugite.agent_inheritance import find_agent_file
 from tsugite.agent_runner import run_agent
 from tsugite.daemon.config import AgentConfig
-from tsugite.daemon.session import SessionManager
+from tsugite.daemon.session_store import SessionStore
 from tsugite.exceptions import AgentExecutionError
 from tsugite.options import ExecutionOptions
 
@@ -82,6 +82,7 @@ class ChannelContext:
     user_id: str
     reply_to: str
     metadata: Optional[Dict[str, Any]] = None
+    thread_id: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for history storage.
@@ -96,6 +97,8 @@ class ChannelContext:
             "reply_to": self.reply_to,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
+        if self.thread_id:
+            result["thread_id"] = self.thread_id
         if self.metadata:
             result.update(self.metadata)
         # Set is_daemon_managed after merge to prevent override
@@ -113,20 +116,12 @@ class BaseAdapter(ABC):
         self,
         agent_name: str,
         agent_config: AgentConfig,
-        session_manager: SessionManager,
+        session_store: SessionStore,
         identity_map: Optional[Dict[str, str]] = None,
     ):
-        """Initialize base adapter.
-
-        Args:
-            agent_name: Name of the agent this adapter is for
-            agent_config: Agent configuration
-            session_manager: Session manager for this agent
-            identity_map: Reverse lookup from "source:platform_id" to canonical name
-        """
         self.agent_name = agent_name
         self.agent_config = agent_config
-        self.session_manager = session_manager
+        self.session_store = session_store
         self._identity_map = identity_map or {}
 
         from tsugite.workspace import Workspace, WorkspaceNotFoundError
@@ -292,8 +287,11 @@ class BaseAdapter(ABC):
             timestamp = now.strftime("%Y-%m-%d %H:%M:%S ") + tz_label
         except Exception:
             timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        session = self.session_manager.sessions.get(user_id)
-        tokens_used = session.cumulative_tokens if session else 0
+        try:
+            session = self.session_store.get_or_create_interactive(user_id, self.agent_name)
+            tokens_used = session.cumulative_tokens
+        except Exception:
+            tokens_used = 0
 
         return f"""<message_context>
   <datetime>{timestamp}</datetime>
@@ -337,11 +335,26 @@ class BaseAdapter(ABC):
         if conv_id_override:
             conv_id = conv_id_override
         else:
-            if self.session_manager.needs_compaction(user_id):
+            # Route by thread_id if present, otherwise default interactive session
+            thread_id = getattr(channel_context, "thread_id", None)
+            if thread_id:
+                thread_session = self.session_store.find_by_thread(thread_id)
+                if thread_session:
+                    conv_id = thread_session.id
+                else:
+                    session = self.session_store.get_or_create_interactive(user_id, self.agent_name)
+                    conv_id = session.id
+            else:
+                session = self.session_store.get_or_create_interactive(user_id, self.agent_name)
+                conv_id = session.id
+
+            if self.session_store.needs_compaction(conv_id):
                 self._emit_ui(custom_logger, "compacting")
-                await self._compact_session(user_id)
+                await self._compact_session(conv_id)
                 self._emit_ui(custom_logger, "compacted")
-            conv_id = self.session_manager.get_or_create_session(user_id)
+                # Get the new session ID after compaction
+                session = self.session_store.get_or_create_interactive(user_id, self.agent_name)
+                conv_id = session.id
 
         metadata = channel_context.to_dict()
         metadata["daemon_agent"] = self.agent_name
@@ -430,23 +443,20 @@ class BaseAdapter(ABC):
         )
 
         if result.context_window:
-            self.session_manager.update_context_limit(result.context_window)
+            self.session_store.update_context_limit(self.agent_name, result.context_window)
             self.agent_config.context_limit = result.context_window
 
         if result.token_count:
-            self.session_manager.update_token_count(user_id, result.token_count)
+            self.session_store.update_token_count(conv_id, result.token_count)
 
         return str(result)
 
-    async def _compact_session(self, user_id: str) -> None:
+    async def _compact_session(self, session_id: str) -> None:
         """Compact session when approaching context limit.
 
         Uses a sliding window: recent turns are kept verbatim while older
         turns are summarized. This preserves the active conversational thread.
         Fires pre_compact/post_compact hooks if configured.
-
-        Args:
-            user_id: Platform user ID
         """
         from tsugite.daemon.memory import (
             RETENTION_BUDGET_RATIO,
@@ -462,8 +472,7 @@ class BaseAdapter(ABC):
 
         model = self.agent_config.compaction_model or infer_compaction_model(self.resolve_model())
 
-        session_info = self.session_manager.sessions[user_id]
-        old_conv_id = session_info.conversation_id
+        old_conv_id = session_id
         old_session_path = get_history_dir() / f"{old_conv_id}.jsonl"
 
         storage = SessionStorage(old_session_path)
@@ -487,20 +496,20 @@ class BaseAdapter(ABC):
             len(recent_turns),
         )
 
+        old_session = self.session_store.get_session(session_id)
+
         turns_file = _write_turns_tempfile(old_turns)
         hook_context = {
             "conversation_id": old_conv_id,
-            "user_id": user_id,
+            "user_id": old_session.user_id or "",
             "agent_name": self.agent_name,
             "turns_file": str(turns_file),
             "turn_count": len(old_turns),
         }
         await fire_compact_hooks(self.agent_config.workspace_dir, "pre_compact", hook_context, interactive=False)
 
-        # Build metadata context for the summarizer
         old_messages = []
 
-        # Preserve prior compaction summary so chained compactions don't lose context
         if prior_summary:
             old_messages.append(
                 {
@@ -524,13 +533,12 @@ class BaseAdapter(ABC):
         meta_parts.append("</session_metadata>")
         old_messages.append({"role": "user", "content": "\n".join(meta_parts)})
 
-        # Add actual conversation messages
         old_messages.extend(msg for turn in old_turns for msg in turn.messages)
 
         summary = await summarize_session(old_messages, model=model, max_context_tokens=self.agent_config.context_limit)
 
-        new_conv_id = self.session_manager.compact_session(user_id)
-        new_session_path = get_history_dir() / f"{new_conv_id}.jsonl"
+        new_session = self.session_store.compact_session(session_id)
+        new_session_path = get_history_dir() / f"{new_session.id}.jsonl"
         new_storage = SessionStorage.create(
             agent_name=self.agent_name,
             model=self.agent_config.agent_file,
@@ -546,7 +554,7 @@ class BaseAdapter(ABC):
             "post_compact",
             {
                 **hook_context,
-                "new_conversation_id": new_conv_id,
+                "new_conversation_id": new_session.id,
                 "turns_compacted": len(old_turns),
                 "turns_retained": len(recent_turns),
             },

@@ -56,7 +56,10 @@ class TestRecordSyntheticTurn:
         adapter = MagicMock()
         adapter.agent_name = "bot"
         adapter.resolve_model.return_value = "test-model"
-        adapter.session_manager.get_or_create_session.return_value = session_id
+        mock_session = MagicMock()
+        mock_session.id = session_id
+        adapter.session_store = MagicMock()
+        adapter.session_store.get_or_create_interactive.return_value = mock_session
         return adapter
 
     def _record_and_load(self, tmp_path, session_id, result):
