@@ -4,8 +4,7 @@ import conversationsView from './views/conversations.js';
 import dashboardView from './views/dashboard.js';
 import scheduleView from './views/schedules.js';
 import webhookView from './views/webhooks.js';
-import agentFileView from './views/agent-files.js';
-import skillFileView from './views/skills.js';
+import fileEditorView from './views/file-editor.js';
 
 window.Alpine = Alpine;
 window.tsugiteApi = { get, post, patch };
@@ -29,8 +28,8 @@ Alpine.data('conversationsView', conversationsView);
 Alpine.data('dashboardView', dashboardView);
 Alpine.data('scheduleView', scheduleView);
 Alpine.data('webhookView', webhookView);
-Alpine.data('agentFileView', agentFileView);
-Alpine.data('skillFileView', skillFileView);
+Alpine.data('agentFileView', fileEditorView('agents', 'agent-files'));
+Alpine.data('skillFileView', fileEditorView('skills', 'skill-files'));
 
 window.addEventListener('hashchange', () => {
   const hash = location.hash.slice(1);

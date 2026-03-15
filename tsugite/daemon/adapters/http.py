@@ -346,13 +346,20 @@ class HTTPServer:
                 label = user_id or s.source
             sessions.append(
                 {
+                    "id": s.id,
                     "user_id": user_id,
                     "label": label,
                     "conversation_id": s.id,
                     "source": s.source,
                     "status": s.status,
+                    "state": s.status,
                     "created_at": s.created_at,
+                    "last_active": s.last_active,
                     "parent_id": s.parent_id,
+                    "prompt": (s.prompt or "")[:200],
+                    "model": s.model,
+                    "error": s.error,
+                    "result": s.result,
                 }
             )
 

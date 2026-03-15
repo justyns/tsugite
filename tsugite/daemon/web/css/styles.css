@@ -181,12 +181,7 @@ main { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
 /* Schedule run rows */
 .schedule-run-row td { background: var(--bg); }
 
-/* Session groups */
-.session-group { margin-bottom: 12px; }
-.session-group-header { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); padding: 6px 12px; display: flex; align-items: center; }
-
 /* Two-pane layouts */
 .two-pane { display: flex; gap: 16px; }
 .pane-sidebar { width: 280px; flex-shrink: 0; }
-.pane-sidebar-wide { width: 400px; }
 .pane-detail { flex: 1; min-width: 0; }

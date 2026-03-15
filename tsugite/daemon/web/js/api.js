@@ -2,7 +2,7 @@ function getToken() {
   return localStorage.getItem('tsugite_token') || '';
 }
 
-export function authHeaders() {
+function authHeaders() {
   const t = getToken();
   return t ? { Authorization: `Bearer ${t}` } : {};
 }
