@@ -611,32 +611,6 @@
         </div>
       </template>
 
-      <!-- Pending reviews -->
-      <template x-if="reviews.length > 0">
-        <div style="margin-bottom:16px">
-          <div class="section-header"><h2>Pending Reviews</h2></div>
-          <template x-for="r in reviews" :key="r.id">
-            <div class="card" style="margin-bottom:8px;border-left:3px solid var(--yellow)" x-data="{ comment: '' }">
-              <h3 x-text="r.title"></h3>
-              <div class="card-meta">
-                <div>Session: <span x-text="r.session_id"></span></div>
-                <template x-if="r.description">
-                  <div x-text="r.description"></div>
-                </template>
-                <div>Created: <span x-text="formatDate(r.created_at)"></span></div>
-              </div>
-              <div style="margin-top:8px">
-                <input type="text" x-model="comment" placeholder="Comment (optional)" style="margin-bottom:4px;width:100%">
-                <div style="display:flex;gap:8px">
-                  <button class="btn-primary" @click="reviewComment = comment; resolveReview(r, 'approved')">Approve</button>
-                  <button class="btn-cancel" @click="reviewComment = comment; resolveReview(r, 'declined')">Decline</button>
-                </div>
-              </div>
-            </div>
-          </template>
-        </div>
-      </template>
-
       <template x-if="loading">
         <div class="empty-state"><span class="spinner"></span> Loading...</div>
       </template>
@@ -659,8 +633,7 @@
                   <tbody>
                     <template x-for="s in groupedSessions[src]" :key="s.id">
                       <tr @click="selectSession(s)" style="cursor:pointer"
-                          :class="{ 'active': selectedSession?.id === s.id }"
-                          :style="(s.state) === 'waiting_for_review' ? 'border-left:3px solid var(--accent)' : ''">
+                          :class="{ 'active': selectedSession?.id === s.id }">
                         <td style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" x-text="s.id"></td>
                         <td x-text="s.agent"></td>
                         <td><span class="badge" :class="stateBadge(s.state)" x-text="s.state"></span></td>
@@ -723,24 +696,6 @@
                     </div>
                   </div>
                 </div>
-
-                <!-- Pending review for this session -->
-                <template x-if="selectedSession.pending_review">
-                  <div class="card" style="margin-top:8px;border-left:3px solid var(--yellow)" x-data="{ comment: '' }">
-                    <h3>Pending Review</h3>
-                    <p x-text="selectedSession.pending_review.title"></p>
-                    <template x-if="selectedSession.pending_review.description">
-                      <p style="font-size:12px" x-text="selectedSession.pending_review.description"></p>
-                    </template>
-                    <div style="margin-top:8px">
-                      <input type="text" x-model="comment" placeholder="Comment (optional)" style="margin-bottom:4px;width:100%">
-                      <div style="display:flex;gap:8px">
-                        <button class="btn-primary" @click="reviewComment = comment; resolveReview(selectedSession.pending_review, 'approved')">Approve</button>
-                        <button class="btn-cancel" @click="reviewComment = comment; resolveReview(selectedSession.pending_review, 'declined')">Decline</button>
-                      </div>
-                    </div>
-                  </div>
-                </template>
 
                 <!-- Event log -->
                 <template x-if="events.length > 0">

@@ -1,15 +1,12 @@
-"""Tests for async agent sessions with review gates."""
+"""Tests for async agent sessions."""
 
 import asyncio
-import threading
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from tsugite.daemon.session_store import (
-    ReviewDecision,
-    ReviewGate,
     Session,
     SessionSource,
     SessionStatus,
@@ -68,47 +65,6 @@ def test_list_sessions_filter(store):
     assert len(store.list_sessions(status=SessionStatus.RUNNING.value)) == 1
 
 
-# ── Store: Review CRUD ──
-
-
-def test_create_and_get_review(store, sample_session):
-    store.create_session(sample_session)
-    review = ReviewGate(id="r1", session_id="s1", title="Approve deploy?")
-    store.create_review(review)
-    got = store.get_review("r1")
-    assert got.title == "Approve deploy?"
-    assert got.decision == ReviewDecision.PENDING.value
-    assert store.get_session("s1").status == SessionStatus.WAITING_FOR_REVIEW.value
-    assert store.get_session("s1").current_review_id == "r1"
-
-
-def test_resolve_review(store, sample_session):
-    store.create_session(sample_session)
-    store.create_review(ReviewGate(id="r1", session_id="s1", title="OK?"))
-    resolved = store.resolve_review("r1", ReviewDecision.APPROVED.value, "lgtm")
-    assert resolved.decision == ReviewDecision.APPROVED.value
-    assert resolved.reviewer_comment == "lgtm"
-    assert resolved.resolved_at is not None
-
-
-def test_resolve_already_resolved_raises(store, sample_session):
-    store.create_session(sample_session)
-    store.create_review(ReviewGate(id="r1", session_id="s1", title="OK?"))
-    store.resolve_review("r1", ReviewDecision.APPROVED.value)
-    with pytest.raises(ValueError, match="already resolved"):
-        store.resolve_review("r1", ReviewDecision.DECLINED.value)
-
-
-def test_list_reviews_filter(store, sample_session):
-    store.create_session(sample_session)
-    store.create_review(ReviewGate(id="r1", session_id="s1", title="A"))
-    store.create_review(ReviewGate(id="r2", session_id="s1", title="B"))
-    store.resolve_review("r1", ReviewDecision.APPROVED.value)
-    assert len(store.list_reviews()) == 2
-    assert len(store.list_reviews(status=ReviewDecision.PENDING.value)) == 1
-    assert len(store.list_reviews(session_id="s1")) == 2
-
-
 # ── Store: Persistence ──
 
 
@@ -116,11 +72,9 @@ def test_persistence_roundtrip(tmp_path):
     path = tmp_path / "session_store.json"
     store1 = SessionStore(path)
     store1.create_session(Session(id="s1", agent="default", source=SessionSource.BACKGROUND.value, prompt="hi"))
-    store1.create_review(ReviewGate(id="r1", session_id="s1", title="Check"))
 
     store2 = SessionStore(path)
     assert store2.get_session("s1").agent == "default"
-    assert store2.get_review("r1").title == "Check"
 
 
 def test_stale_session_recovery(tmp_path):
@@ -133,26 +87,14 @@ def test_stale_session_recovery(tmp_path):
     )
     store1.create_session(
         Session(
-            id="s2",
-            agent="x",
-            source=SessionSource.BACKGROUND.value,
-            status=SessionStatus.WAITING_FOR_REVIEW.value,
-            prompt="p",
+            id="s2", agent="x", source=SessionSource.BACKGROUND.value, status=SessionStatus.COMPLETED.value, prompt="p"
         )
     )
-    store1.create_session(
-        Session(
-            id="s3", agent="x", source=SessionSource.BACKGROUND.value, status=SessionStatus.COMPLETED.value, prompt="p"
-        )
-    )
-    store1.create_review(ReviewGate(id="r1", session_id="s2", title="Pending review"))
 
     # Simulate daemon restart
     store2 = SessionStore(path)
-    assert store2.get_session("s1").status == SessionStatus.INTERRUPTED.value
-    assert store2.get_session("s2").status == SessionStatus.INTERRUPTED.value
-    assert store2.get_session("s3").status == SessionStatus.COMPLETED.value
-    assert store2.get_review("r1").decision == ReviewDecision.DECLINED.value
+    assert store2.get_session("s1").status == SessionStatus.FAILED.value
+    assert store2.get_session("s2").status == SessionStatus.COMPLETED.value
 
 
 # ── Store: Event Log ──
@@ -283,39 +225,6 @@ async def test_session_runner_notify_callback(tmp_path, mock_adapter):
 
 
 @pytest.mark.asyncio
-async def test_session_runner_resolve_review(tmp_path, mock_adapter):
-    from tsugite.daemon.session_runner import SessionRunner
-
-    store = SessionStore(tmp_path / "session_store.json")
-    runner = SessionRunner(store, {"default": mock_adapter})
-
-    session = Session(
-        id="s1",
-        agent="default",
-        source=SessionSource.BACKGROUND.value,
-        status=SessionStatus.RUNNING.value,
-        prompt="review test",
-    )
-    store.create_session(session)
-
-    review = ReviewGate(id="r1", session_id="s1", title="OK?")
-    store.create_review(review)
-
-    from tsugite.daemon.session_runner import SessionReviewBackend
-
-    backend = SessionReviewBackend(store, "s1")
-    backend._review_events["r1"] = threading.Event()
-    runner._review_backends["s1"] = backend
-
-    runner.resolve_review("r1", ReviewDecision.APPROVED.value, "yes")
-
-    resolved = store.get_review("r1")
-    assert resolved.decision == ReviewDecision.APPROVED.value
-
-    assert store.get_session("s1").status == SessionStatus.RUNNING.value
-
-
-@pytest.mark.asyncio
 async def test_session_runner_event_logging(tmp_path, mock_adapter):
     from tsugite.daemon.session_runner import SessionRunner
 
@@ -330,46 +239,6 @@ async def test_session_runner_event_logging(tmp_path, mock_adapter):
     types = [e["type"] for e in events]
     assert "session_start" in types
     assert "session_complete" in types
-
-
-# ── ReviewBackend Tests ──
-
-
-def test_review_backend_creates_and_blocks(tmp_path):
-    from tsugite.daemon.session_runner import SessionReviewBackend
-
-    store = SessionStore(tmp_path / "session_store.json")
-    store.create_session(
-        Session(
-            id="s1", agent="x", source=SessionSource.BACKGROUND.value, status=SessionStatus.RUNNING.value, prompt="p"
-        )
-    )
-    backend = SessionReviewBackend(store, "s1")
-
-    result_holder = {}
-
-    def ask_in_thread():
-        result_holder["answer"] = backend.ask_user("Approve?", "yes_no")
-
-    t = threading.Thread(target=ask_in_thread)
-    t.start()
-
-    import time
-
-    for _ in range(50):
-        reviews = store.list_reviews(status=ReviewDecision.PENDING.value, session_id="s1")
-        if reviews:
-            break
-        time.sleep(0.05)
-    else:
-        pytest.fail("Review was not created in time")
-
-    review = reviews[0]
-    store.resolve_review(review.id, ReviewDecision.APPROVED.value, "ok")
-    backend._review_events[review.id].set()
-
-    t.join(timeout=5)
-    assert result_holder.get("answer") == "approved"
 
 
 # ── Session Tools Tests ──

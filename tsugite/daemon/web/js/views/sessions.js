@@ -3,13 +3,11 @@ import { formatDate, stateBadgeClass } from '../utils.js';
 
 export default () => ({
   sessions: [],
-  reviews: [],
   selectedSession: null,
   events: [],
   showForm: false,
   loading: true,
   error: null,
-  reviewComment: '',
   form: { agent: '', prompt: '', model: '' },
   _debounceTimer: null,
 
@@ -17,7 +15,7 @@ export default () => ({
     this.load();
     this.$watch('$store.app.lastEvent', (ev) => {
       if (!ev) return;
-      if (ev.type === 'session_update' || ev.type === 'review_update') {
+      if (ev.type === 'session_update') {
         this._debouncedLoad();
       }
     });
@@ -34,12 +32,8 @@ export default () => ({
 
   async load() {
     try {
-      const [sessData, revData] = await Promise.all([
-        get('/api/sessions'),
-        get('/api/reviews?status=pending'),
-      ]);
+      const sessData = await get('/api/sessions');
       this.sessions = (sessData.sessions || []).map(s => ({ ...s, state: s.state || s.status }));
-      this.reviews = revData.reviews || [];
     } catch (e) {
       this.error = e.message;
     } finally {
@@ -99,20 +93,6 @@ export default () => ({
     }
   },
 
-  async resolveReview(r, decision) {
-    try {
-      await post(`/api/reviews/${r.id}/resolve`, {
-        decision,
-        comment: this.reviewComment,
-      });
-      this.reviewComment = '';
-      await this.load();
-      if (this.selectedSession) await this.selectSession(this.selectedSession);
-    } catch (e) {
-      this.error = e.message;
-    }
-  },
-
   get groupedSessions() {
     const groups = { background: [], spawned: [], schedule: [], interactive: [] };
     for (const s of this.sessions) {
@@ -138,11 +118,11 @@ export default () => ({
   },
 
   canCancel(s) {
-    return s.state === 'running' || s.state === 'waiting_for_review';
+    return s.state === 'running';
   },
 
   canRestart(s) {
-    return s.state === 'interrupted' || s.state === 'failed' || s.state === 'cancelled';
+    return s.state === 'failed' || s.state === 'cancelled';
   },
 
   formatDate(iso) {

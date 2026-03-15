@@ -406,8 +406,6 @@ class BaseAdapter(ABC):
                     prompt=enriched_prompt,
                     continue_conversation_id=conv_id,
                     attachments=attachments,
-                    # TODO: Support sandbox options from daemon agent config
-                    # (sandbox, allow_domains, no_network) — see ROADMAP.md
                     exec_options=ExecutionOptions(
                         return_token_usage=True,
                         model_override=(channel_context.metadata or {}).get("model_override")

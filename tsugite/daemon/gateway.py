@@ -264,24 +264,8 @@ class Gateway:
             from tsugite.daemon.session_runner import SessionRunner
             from tsugite.tools.sessions import set_session_runner
 
-            notification_channels = self.config.notification_channels or {}
-
-            async def _review_notify(session, review):
-                if not session.notify:
-                    return
-                from tsugite.tools.notify import send_notification
-
-                resolved = [
-                    (name, notification_channels[name]) for name in session.notify if name in notification_channels
-                ]
-                if resolved:
-                    msg = f"**Review requested** for session `{session.id}`:\n\n> {review.title}"
-                    await asyncio.to_thread(send_notification, msg, resolved)
-
             event_bus = self._http_server.event_bus if self._http_server else None
-            self._session_runner = SessionRunner(
-                session_store, http_adapters, review_notify_callback=_review_notify, event_bus=event_bus
-            )
+            self._session_runner = SessionRunner(session_store, http_adapters, event_bus=event_bus)
             if self._http_server:
                 self._http_server.session_runner = self._session_runner
             set_session_runner(self._session_runner, asyncio.get_running_loop())

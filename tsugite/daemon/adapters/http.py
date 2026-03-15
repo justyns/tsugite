@@ -283,9 +283,6 @@ class HTTPServer:
             Route("/api/sessions/{session_id}/cancel", self._api_cancel_session, methods=["POST"]),
             Route("/api/sessions/{session_id}/restart", self._api_restart_session, methods=["POST"]),
             Route("/api/sessions/{session_id}/events", self._api_session_events, methods=["GET"]),
-            Route("/api/reviews", self._api_list_reviews, methods=["GET"]),
-            Route("/api/reviews/{review_id}", self._api_get_review, methods=["GET"]),
-            Route("/api/reviews/{review_id}/resolve", self._api_resolve_review, methods=["POST"]),
             Route("/api/webhooks", self._list_webhooks, methods=["GET"]),
             Route("/api/webhooks", self._create_webhook, methods=["POST"]),
             Route("/api/webhooks/{token}", self._delete_webhook, methods=["DELETE"]),
@@ -954,12 +951,12 @@ class HTTPServer:
                     {
                         "id": s.id,
                         "agent": s.agent,
+                        "source": s.source,
                         "state": s.status,
                         "prompt": (s.prompt or "")[:200],
                         "created_at": s.created_at,
                         "updated_at": s.last_active,
                         "error": s.error,
-                        "current_review_id": s.current_review_id,
                     }
                     for s in sessions
                 ]
@@ -991,9 +988,6 @@ class HTTPServer:
             model=body.get("model"),
             agent_file=body.get("agent_file"),
             notify=body.get("notify", []),
-            sandbox=body.get("sandbox", False),
-            allow_domains=body.get("allow_domains", []),
-            no_network=body.get("no_network", False),
         )
 
         try:
@@ -1038,7 +1032,7 @@ class HTTPServer:
 
         from tsugite.daemon.session_store import Session, SessionSource, SessionStatus
 
-        restartable = {SessionStatus.INTERRUPTED.value, SessionStatus.FAILED.value, SessionStatus.CANCELLED.value}
+        restartable = {SessionStatus.FAILED.value, SessionStatus.CANCELLED.value}
         if old.status not in restartable:
             return JSONResponse({"error": f"cannot restart session in '{old.status}' state"}, status_code=400)
 
@@ -1050,9 +1044,6 @@ class HTTPServer:
             model=old.model,
             agent_file=old.agent_file,
             notify=old.notify,
-            sandbox=old.sandbox,
-            allow_domains=old.allow_domains,
-            no_network=old.no_network,
         )
         try:
             result = self.session_runner.start_session(new_session)
@@ -1074,46 +1065,6 @@ class HTTPServer:
             return JSONResponse({"error": str(e)}, status_code=404)
         events = self.session_runner.store.read_events(session_id)
         return JSONResponse({"events": events})
-
-    async def _api_list_reviews(self, request: Request) -> JSONResponse:
-        if err := self._require_auth_and_sessions(request):
-            return err
-        status = request.query_params.get("status")
-        reviews = self.session_runner.store.list_reviews(status=status)
-        return JSONResponse({"reviews": [asdict(r) for r in reviews]})
-
-    async def _api_get_review(self, request: Request) -> JSONResponse:
-        if err := self._require_auth_and_sessions(request):
-            return err
-        review_id = request.path_params["review_id"]
-        try:
-            review = self.session_runner.store.get_review(review_id)
-        except ValueError as e:
-            return JSONResponse({"error": str(e)}, status_code=404)
-        return JSONResponse(asdict(review))
-
-    async def _api_resolve_review(self, request: Request) -> JSONResponse:
-        if err := self._require_auth_and_sessions(request):
-            return err
-        review_id = request.path_params["review_id"]
-        try:
-            body = await request.json()
-        except Exception:
-            return JSONResponse({"error": "invalid JSON body"}, status_code=400)
-
-        from tsugite.daemon.session_store import ReviewDecision
-
-        decision = body.get("decision", "")
-        if decision not in (ReviewDecision.APPROVED.value, ReviewDecision.DECLINED.value):
-            return JSONResponse({"error": "decision must be 'approved' or 'declined'"}, status_code=400)
-
-        comment = body.get("comment", "")
-        try:
-            self.session_runner.resolve_review(review_id, decision, comment)
-        except ValueError as e:
-            return JSONResponse({"error": str(e)}, status_code=400)
-        self.event_bus.emit("review_update", {"action": "resolved", "id": review_id})
-        return JSONResponse({"status": "resolved", "decision": decision})
 
     async def _list_webhooks(self, request: Request) -> JSONResponse:
         if err := self._check_auth(request):

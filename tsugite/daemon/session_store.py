@@ -8,7 +8,7 @@ import json
 import logging
 import os
 import threading
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields as dataclass_fields
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
@@ -30,41 +30,12 @@ class SessionSource(str, Enum):
 
 class SessionStatus(str, Enum):
     ACTIVE = "active"
-    PAUSED = "paused"
     COMPLETED = "completed"
     ERROR = "error"
-    # Background/review states (migrated from SessionState)
     PENDING = "pending"
     RUNNING = "running"
-    WAITING_FOR_REVIEW = "waiting_for_review"
     FAILED = "failed"
     CANCELLED = "cancelled"
-    INTERRUPTED = "interrupted"
-
-
-class ReviewDecision(str, Enum):
-    PENDING = "pending"
-    APPROVED = "approved"
-    DECLINED = "declined"
-
-
-@dataclass
-class ReviewGate:
-    id: str
-    session_id: str
-    title: str
-    description: str = ""
-    context: dict = field(default_factory=dict)
-    decision: str = ReviewDecision.PENDING.value
-    reviewer_comment: str = ""
-    created_at: str = ""
-    resolved_at: Optional[str] = None
-
-    def __post_init__(self):
-        if not self.id:
-            self.id = f"review-{uuid4().hex[:8]}"
-        if not self.created_at:
-            self.created_at = datetime.now(timezone.utc).isoformat()
 
 
 @dataclass
@@ -83,17 +54,13 @@ class Session:
     cumulative_tokens: int = 0
     message_count: int = 0
 
-    # Background/review fields
+    # Background session fields
     prompt: Optional[str] = None
     error: Optional[str] = None
     result: Optional[str] = None
-    current_review_id: Optional[str] = None
     model: Optional[str] = None
     agent_file: Optional[str] = None
     notify: list[str] = field(default_factory=list)
-    sandbox: bool = False
-    allow_domains: list[str] = field(default_factory=list)
-    no_network: bool = False
 
     # Platform thread mapping
     platform_thread_id: Optional[str] = None
@@ -118,7 +85,6 @@ class SessionStore:
     def __init__(self, store_path: Path, context_limits: Optional[dict[str, int]] = None):
         self._path = store_path
         self._sessions: dict[str, Session] = {}
-        self._reviews: dict[str, ReviewGate] = {}
         self._lock = threading.Lock()
         self._events_dir_created = False
         self._dirty = False
@@ -298,48 +264,6 @@ class SessionStore:
                 and (not user_id or s.user_id == user_id)
             ]
 
-    # ── Review CRUD (from AgentSessionStore) ──
-
-    def create_review(self, review: ReviewGate) -> ReviewGate:
-        with self._lock:
-            if review.id in self._reviews:
-                raise ValueError(f"Review '{review.id}' already exists")
-            self._reviews[review.id] = review
-            if review.session_id in self._sessions:
-                self._sessions[review.session_id].current_review_id = review.id
-                self._sessions[review.session_id].status = SessionStatus.WAITING_FOR_REVIEW.value
-                self._sessions[review.session_id].last_active = datetime.now(timezone.utc).isoformat()
-            self._save()
-            return review
-
-    def get_review(self, review_id: str) -> ReviewGate:
-        with self._lock:
-            if review_id not in self._reviews:
-                raise ValueError(f"Review '{review_id}' not found")
-            return self._reviews[review_id]
-
-    def resolve_review(self, review_id: str, decision: str, comment: str = "") -> ReviewGate:
-        with self._lock:
-            if review_id not in self._reviews:
-                raise ValueError(f"Review '{review_id}' not found")
-            review = self._reviews[review_id]
-            if review.decision != ReviewDecision.PENDING.value:
-                raise ValueError(f"Review '{review_id}' already resolved")
-            review.decision = decision
-            review.reviewer_comment = comment
-            review.resolved_at = datetime.now(timezone.utc).isoformat()
-            self._save()
-            return review
-
-    def list_reviews(self, status: Optional[str] = None, session_id: Optional[str] = None) -> list[ReviewGate]:
-        with self._lock:
-            reviews = list(self._reviews.values())
-        if status:
-            reviews = [r for r in reviews if r.decision == status]
-        if session_id:
-            reviews = [r for r in reviews if r.session_id == session_id]
-        return reviews
-
     # ── Event log (per-session JSONL) ──
 
     def _events_dir(self) -> Path:
@@ -385,12 +309,6 @@ class SessionStore:
         session = self.get_session(session_id)
         result = asdict(session)
         result["event_count"] = self.event_count(session_id)
-        if session.current_review_id:
-            try:
-                review = self.get_review(session.current_review_id)
-                result["pending_review"] = asdict(review)
-            except ValueError:
-                pass
         return result
 
     # ── Thread lookup ──
@@ -409,10 +327,10 @@ class SessionStore:
             return
         try:
             data = json.loads(self._path.read_text())
+            valid_fields = {f.name for f in dataclass_fields(Session)}
             for sid, sdata in data.get("sessions", {}).items():
+                sdata = {k: v for k, v in sdata.items() if k in valid_fields}
                 self._sessions[sid] = Session(**sdata)
-            for rid, rdata in data.get("reviews", {}).items():
-                self._reviews[rid] = ReviewGate(**rdata)
             # Rebuild indexes
             for sid, session in self._sessions.items():
                 if session.source == SessionSource.INTERACTIVE.value and session.user_id:
@@ -442,7 +360,6 @@ class SessionStore:
             self._save_dir_created = True
         data = {
             "sessions": {sid: asdict(s) for sid, s in self._sessions.items()},
-            "reviews": {rid: asdict(r) for rid, r in self._reviews.items()},
         }
         tmp = self._path.with_suffix(".tmp")
         tmp.write_text(json.dumps(data, separators=(",", ":")))
@@ -463,21 +380,12 @@ class SessionStore:
 
     def _recover_stale_sessions(self):
         changed = False
-        stale_states = {SessionStatus.RUNNING.value, SessionStatus.WAITING_FOR_REVIEW.value}
         for session in self._sessions.values():
-            if session.status in stale_states:
-                session.status = SessionStatus.INTERRUPTED.value
+            if session.status == SessionStatus.RUNNING.value:
+                session.status = SessionStatus.FAILED.value
                 session.error = "Daemon restarted while session was active"
                 session.last_active = datetime.now(timezone.utc).isoformat()
                 changed = True
-        for review in self._reviews.values():
-            if review.decision == ReviewDecision.PENDING.value:
-                parent = self._sessions.get(review.session_id)
-                if parent and parent.status == SessionStatus.INTERRUPTED.value:
-                    review.decision = ReviewDecision.DECLINED.value
-                    review.reviewer_comment = "Auto-declined: daemon restarted"
-                    review.resolved_at = datetime.now(timezone.utc).isoformat()
-                    changed = True
         if changed:
             self._save()
 
@@ -532,21 +440,13 @@ class SessionStore:
                         prompt=sdata.get("prompt"),
                         error=sdata.get("error"),
                         result=sdata.get("result"),
-                        current_review_id=sdata.get("current_review_id"),
                         model=sdata.get("model"),
                         agent_file=sdata.get("agent_file"),
                         notify=sdata.get("notify", []),
-                        sandbox=sdata.get("sandbox", False),
-                        allow_domains=sdata.get("allow_domains", []),
-                        no_network=sdata.get("no_network", False),
                         created_at=sdata.get("created_at", ""),
                         last_active=sdata.get("updated_at", ""),
                     )
                     self._sessions[sid] = session
-                    migrated = True
-
-                for rid, rdata in data.get("reviews", {}).items():
-                    self._reviews[rid] = ReviewGate(**rdata)
                     migrated = True
             except (json.JSONDecodeError, TypeError, KeyError) as e:
                 logger.warning("Failed to migrate legacy sessions.json: %s", e)

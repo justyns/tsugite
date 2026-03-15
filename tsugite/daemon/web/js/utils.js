@@ -59,9 +59,8 @@ export function scrollToBottom(el) {
 
 const _stateBadgeMap = {
   pending: 'badge-muted', active: 'badge-ok', running: 'badge-accent',
-  waiting_for_review: 'badge-accent', completed: 'badge-ok',
-  failed: 'badge-error', error: 'badge-error',
-  cancelled: 'badge-muted', interrupted: 'badge-error',
+  completed: 'badge-ok', failed: 'badge-error', error: 'badge-error',
+  cancelled: 'badge-muted',
 };
 
 export function stateBadgeClass(state) {

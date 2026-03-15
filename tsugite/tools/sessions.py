@@ -38,14 +38,8 @@ def start_session(
     agent_file: Optional[str] = None,
     session_id: Optional[str] = None,
     notify: Optional[list[str]] = None,
-    sandbox: bool = False,
-    allow_domains: Optional[list[str]] = None,
-    no_network: bool = False,
 ) -> dict:
     """Start a new async agent session that runs in the background.
-
-    Sessions support review gates — if the agent calls create_review during execution,
-    the session pauses until a human approves or declines via the web UI or API.
 
     IMPORTANT: Always confirm with the user before starting sessions.
 
@@ -56,9 +50,6 @@ def start_session(
         agent_file: Agent file name or path.
         session_id: Custom session ID. Auto-generated if not provided.
         notify: Notification channels for result delivery.
-        sandbox: Run in subprocess sandbox.
-        allow_domains: Allowed network domains (sandbox only).
-        no_network: Disable network entirely (sandbox only).
 
     Returns:
         Session details including ID and status
@@ -78,9 +69,6 @@ def start_session(
         model=model,
         agent_file=agent_file,
         notify=notify or [],
-        sandbox=sandbox,
-        allow_domains=allow_domains or [],
-        no_network=no_network,
     )
 
     result = _call(_session_runner.start_session, session)
@@ -134,7 +122,7 @@ def session_status(session_id: str) -> dict:
         session_id: Session ID to check
 
     Returns:
-        Full session details including pending review if any
+        Full session details
     """
     return _call(_session_runner.store.session_detail, session_id)
 
@@ -197,29 +185,3 @@ def session_spawn(
 
     result = _call(_session_runner.start_session, session)
     return asdict(result)
-
-
-@tool(require_daemon=True)
-def create_review(title: str, description: str = "", context: Optional[dict] = None) -> dict:
-    """Create a review gate that pauses execution until a human approves or declines.
-
-    This tool blocks until the review is resolved via the web UI or API.
-    Use this for operations that need human approval (destructive actions,
-    deployments, infrastructure changes, etc.).
-
-    Args:
-        title: Short description of what needs approval
-        description: Detailed context for the reviewer
-        context: Additional structured data for the reviewer
-
-    Returns:
-        Dict with decision ('approved' or 'declined') and reviewer comment
-    """
-    from tsugite.daemon.session_runner import get_current_session_id
-
-    session_id = get_current_session_id()
-    if not session_id:
-        raise RuntimeError("create_review can only be used within an agent session")
-
-    review = _session_runner.create_review_for_session(session_id, title, description, context)
-    return {"decision": review.decision, "comment": review.reviewer_comment}
