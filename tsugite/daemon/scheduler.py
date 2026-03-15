@@ -315,6 +315,27 @@ class Scheduler:
             raise ValueError(f"Schedule '{schedule_id}' not found")
         return self._schedules[schedule_id]
 
+    MIN_INTERVAL_SECONDS = 120  # 2 minutes — prevent agents from burning tokens
+
+    def _validate_cron_interval(self, entry: ScheduleEntry) -> None:
+        """Reject cron expressions that fire more frequently than MIN_INTERVAL_SECONDS."""
+        if entry.schedule_type != "cron" or not entry.cron_expr:
+            return
+        try:
+            tz = ZoneInfo(entry.timezone)
+            now_local = datetime.now(timezone.utc).astimezone(tz)
+            it = CronSim(entry.cron_expr, now_local)
+            first = next(it)
+            second = next(it)
+            interval = (second - first).total_seconds()
+            if interval < self.MIN_INTERVAL_SECONDS:
+                raise ValueError(
+                    f"Cron expression '{entry.cron_expr}' fires every {int(interval)}s "
+                    f"(minimum interval: {self.MIN_INTERVAL_SECONDS}s)"
+                )
+        except StopIteration:
+            pass
+
     def update(self, schedule_id: str, **fields) -> ScheduleEntry:
         entry = self.get(schedule_id)
         for key, value in fields.items():
@@ -329,6 +350,7 @@ class Scheduler:
             except (ValueError, KeyError, CronSimError) as e:
                 raise ValueError(f"Invalid cron expression '{entry.cron_expr}': {e}") from e
         entry.next_run = self._compute_next_run_iso(entry)
+        self._validate_cron_interval(entry)
         self._save()
         self._wakeup.set()
         logger.info("Updated schedule '%s'", schedule_id)

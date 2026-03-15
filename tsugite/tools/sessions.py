@@ -20,14 +20,32 @@ def set_session_runner(runner, loop=None):
     _loop = loop
 
 
-def _call(fn, *args, **kwargs):
+def _call(fn, *args, timeout=30, **kwargs):
     """Call a session runner method on the event loop thread (thread-safe)."""
 
     async def _wrapper():
-        return fn(*args, **kwargs)
+        result = fn(*args, **kwargs)
+        if asyncio.iscoroutine(result):
+            return await result
+        return result
 
     future = asyncio.run_coroutine_threadsafe(_wrapper(), _loop)
-    return future.result(timeout=30)
+    return future.result(timeout=timeout)
+
+
+@tool(require_daemon=True)
+def session_reply(session_id: str, message: str) -> dict:
+    """Send a follow-up message to an existing session, continuing its conversation.
+
+    Args:
+        session_id: ID of the session to reply to.
+        message: Message to send to the session.
+
+    Returns:
+        Dict with session_id and the agent's response.
+    """
+    result = _call(_session_runner.reply_to_session, session_id, message, timeout=120)
+    return {"session_id": session_id, "response": str(result)[:2000]}
 
 
 @tool(require_daemon=True)

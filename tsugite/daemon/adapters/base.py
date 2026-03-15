@@ -8,7 +8,7 @@ import os
 import tempfile
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional, Protocol
 from zoneinfo import ZoneInfo
@@ -26,6 +26,21 @@ if TYPE_CHECKING:
     from tsugite.history.models import Turn
 
 logger = logging.getLogger(__name__)
+
+
+def _is_recent(iso_timestamp: str, minutes: int = 10, now: datetime = None) -> bool:
+    """Check if an ISO timestamp is within the last N minutes."""
+    if not iso_timestamp:
+        return False
+    try:
+        dt = datetime.fromisoformat(iso_timestamp)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        if now is None:
+            now = datetime.now(timezone.utc)
+        return (now - dt) < timedelta(minutes=minutes)
+    except (ValueError, TypeError):
+        return False
 
 
 def _write_turns_tempfile(turns: "list[Turn]") -> Path:
@@ -283,7 +298,24 @@ class BaseAdapter(ABC):
         # Session context
         ctx["is_session"] = channel_context.source == "session"
         ctx["session_id"] = meta.get("session_id", "") if ctx["is_session"] else ""
-        ctx["active_sessions"] = []
+
+        # Single pass over sessions for orchestrator awareness
+        window_minutes = meta.get("heartbeat_window", 10)
+        now = datetime.now(timezone.utc)
+        active_sessions = []
+        recent_completions = []
+        for s in self.session_store.list_sessions():
+            if s.status == "running":
+                active_sessions.append(
+                    {"id": s.id, "agent": s.agent, "status": s.status, "prompt": (s.prompt or "")[:100], "source": s.source}
+                )
+            elif s.status in ("completed", "failed") and _is_recent(s.last_active, minutes=window_minutes, now=now):
+                recent_completions.append(
+                    {"id": s.id, "agent": s.agent, "status": s.status, "result": (s.result or "")[:200]}
+                )
+        ctx["active_sessions"] = active_sessions
+        ctx["recent_completions"] = recent_completions
+
         return ctx
 
     def _build_message_context(self, message: str, channel_context: ChannelContext, user_id: str) -> str:

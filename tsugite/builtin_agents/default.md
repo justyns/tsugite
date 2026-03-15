@@ -28,6 +28,7 @@ tools:
   - http_request
   - run
   - "@schedule"
+  - "@sessions"
 auto_load_skills:
   - response_patterns
 prefetch:
@@ -85,6 +86,20 @@ Your context window will be automatically compacted as it approaches its limit. 
 {% if has_notify_tool %}
 - Use `notify_user` to send important findings or alerts. This is the only approved way to send external messages.
 {% endif %}
+{% endif %}
+{% if active_sessions %}
+
+**Active Sessions:**
+{% for s in active_sessions %}
+- `{{ s.id }}` ({{ s.agent }}, {{ s.status }}): {{ s.prompt }}
+{% endfor %}
+{% endif %}
+{% if recent_completions %}
+
+**Recently Completed:**
+{% for s in recent_completions %}
+- `{{ s.id }}` ({{ s.agent }}, {{ s.status }}): {{ s.result }}
+{% endfor %}
 {% endif %}
 {% elif is_interactive %}
 **Interactive Mode**: You are in an interactive session with the user and can ask questions to clarify the task.

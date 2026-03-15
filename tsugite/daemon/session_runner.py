@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any, Callable, Coroutine, Optional
 
+from tsugite.daemon.adapters.base import ChannelContext
 from tsugite.daemon.session_store import (
     Session,
     SessionSource,
@@ -90,7 +91,6 @@ class SessionRunner:
             )
             return
 
-        from tsugite.daemon.adapters.base import ChannelContext
         from tsugite.interaction import NonInteractiveBackend, set_interaction_backend
 
         custom_logger = SimpleNamespace(ui_handler=progress)
@@ -155,6 +155,31 @@ class SessionRunner:
         if task and not task.done():
             task.cancel()
         self._store.update_session(session_id, status=SessionStatus.CANCELLED.value)
+
+    async def reply_to_session(self, session_id: str, message: str) -> str:
+        """Send a follow-up message to an existing session."""
+        session = self._store.get_session(session_id)
+
+        adapter = self._adapters.get(session.agent)
+        if not adapter:
+            raise ValueError(f"No adapter for agent '{session.agent}' (session '{session_id}')")
+
+        channel_context = ChannelContext(
+            source="session",
+            channel_id=None,
+            user_id=f"session:{session_id}",
+            reply_to=f"session:{session_id}",
+            metadata={"conv_id_override": session_id, "session_id": session_id},
+        )
+
+        result = await adapter.handle_message(
+            user_id=f"session:{session_id}",
+            message=message,
+            channel_context=channel_context,
+        )
+
+        self._store.update_session(session_id, last_active=datetime.now(timezone.utc).isoformat())
+        return result
 
     def get_active_sessions(self) -> list[Session]:
         return [s for s in self._store.list_sessions() if s.status == SessionStatus.RUNNING.value]
