@@ -103,6 +103,7 @@ class Gateway:
         self._http_server = None
         self._scheduler_adapter = None
         self._session_runner = None
+        self._session_store = None
         self._push_store = None
         self._vapid_private_key = None
         self._vapid_claims = None
@@ -153,6 +154,7 @@ class Gateway:
 
         # Single global session store
         session_store = SessionStore(self.config.state_dir / "session_store.json", context_limits=context_limits)
+        self._session_store = session_store
 
         tasks = []
         http_adapters = {}
@@ -341,6 +343,9 @@ class Gateway:
                 await component.stop()
             except Exception as e:
                 logger.error("Error stopping %s: %s", label, e)
+
+        if self._session_store:
+            self._session_store.flush()
 
 
 async def run_daemon(config_path: Optional[Path] = None):

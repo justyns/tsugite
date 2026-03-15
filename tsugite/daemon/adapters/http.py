@@ -276,6 +276,7 @@ class HTTPServer:
             Route("/api/schedules/{schedule_id}/enable", self._enable_schedule, methods=["POST"]),
             Route("/api/schedules/{schedule_id}/disable", self._disable_schedule, methods=["POST"]),
             Route("/api/schedules/{schedule_id}/run", self._run_schedule, methods=["POST"]),
+            Route("/api/schedules/{schedule_id}/sessions", self._schedule_sessions, methods=["GET"]),
             Route("/api/sessions", self._api_list_sessions, methods=["GET"]),
             Route("/api/sessions", self._api_start_session, methods=["POST"]),
             Route("/api/sessions/{session_id}", self._api_get_session, methods=["GET"]),
@@ -502,8 +503,12 @@ class HTTPServer:
         user_id = adapter.resolve_http_user(request.query_params.get("user_id", "web-anonymous"))
         detail = request.query_params.get("detail", "false").lower() == "true"
         limit = int(request.query_params.get("limit", "100"))
-        session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
-        conversation_id = session.id
+        session_id = request.query_params.get("session_id")
+        if session_id:
+            conversation_id = session_id
+        else:
+            session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
+            conversation_id = session.id
 
         turns = self._collect_turns(conversation_id, limit=limit)
 
@@ -707,6 +712,10 @@ class HTTPServer:
         if uploaded_attachments:
             metadata["uploaded_attachments"] = uploaded_attachments
 
+        session_id = body.get("session_id")
+        if session_id:
+            metadata["conv_id_override"] = session_id
+
         channel_context = ChannelContext(
             source="http",
             channel_id=None,
@@ -896,6 +905,30 @@ class HTTPServer:
             return err
         removed = self.scheduler.cleanup()
         return JSONResponse({"removed": removed, "count": len(removed)})
+
+    async def _schedule_sessions(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_scheduler(request):
+            return err
+        schedule_id = request.path_params["schedule_id"]
+        # Find any adapter to access the session store
+        adapter = next(iter(self.adapters.values()), None)
+        if not adapter:
+            return JSONResponse({"error": "no adapters"}, status_code=500)
+        sessions = adapter.session_store.list_sessions(parent_id=schedule_id, source="schedule")
+        return JSONResponse({
+            "schedule_id": schedule_id,
+            "sessions": [
+                {
+                    "id": s.id,
+                    "status": s.status,
+                    "created_at": s.created_at,
+                    "last_active": s.last_active,
+                    "result": (s.result or "")[:500],
+                    "error": s.error,
+                }
+                for s in sessions
+            ],
+        })
 
     # ── Session / Review API ──
 

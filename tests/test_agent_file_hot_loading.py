@@ -73,10 +73,13 @@ class TestAgentFileField:
 
 class TestRunAgentWithAgentFile:
     @pytest.fixture
-    def adapter(self):
+    def adapter(self, tmp_path):
+        from tsugite.daemon.session_store import SessionStore
+
         adapter = MagicMock(spec=BaseAdapter)
         adapter.agent_config = MagicMock()
         adapter.agent_config.workspace_dir = Path("/workspace")
+        adapter.agent_name = "bot"
         adapter.handle_message = AsyncMock(return_value="result")
         adapter._workspace = None
         adapter._resolve_agent_path = lambda agent_file=None: resolve_agent_path(
@@ -84,6 +87,7 @@ class TestRunAgentWithAgentFile:
             adapter.agent_config.workspace_dir,
             adapter._workspace,
         )
+        adapter.session_store = SessionStore(tmp_path / "session_store.json")
         return adapter
 
     @pytest.fixture

@@ -11,7 +11,7 @@ from discord.ext import commands
 
 from tsugite.daemon.adapters.base import BaseAdapter, ChannelContext
 from tsugite.daemon.config import AgentConfig, DiscordBotConfig
-from tsugite.daemon.session_store import SessionStore
+from tsugite.daemon.session_store import Session, SessionSource, SessionStore
 from tsugite.events import (
     CodeExecutionEvent,
     ErrorEvent,
@@ -437,6 +437,7 @@ class DiscordAdapter(BaseAdapter):
                 return
 
             is_dm = isinstance(message.channel, discord.DMChannel)
+            is_thread = isinstance(message.channel, discord.Thread)
 
             # Check allowlist for both DMs and server channels
             if bot_config.dm_policy == "allowlist":
@@ -445,39 +446,70 @@ class DiscordAdapter(BaseAdapter):
                         await message.channel.send("You are not authorized.")
                     return
 
+            def strip_mention(text: str) -> str:
+                return text.replace(f"<@{self.bot.user.id}>", "").replace(f"<@!{self.bot.user.id}>", "").strip()
+
             if is_dm:
-                # DMs don't require prefix
                 user_msg = message.content.strip()
+            elif is_thread:
+                bot_owns_thread = message.channel.owner_id == self.bot.user.id
+                if bot_owns_thread:
+                    user_msg = message.content.strip()
+                elif self.bot.user.mentioned_in(message):
+                    user_msg = strip_mention(message.content)
+                else:
+                    return
             else:
-                # Server channels require @mention
                 if not self.bot.user.mentioned_in(message):
                     return
-                # Remove the mention from the message
-                user_msg = message.content.replace(f"<@{self.bot.user.id}>", "").strip()
-                user_msg = user_msg.replace(f"<@!{self.bot.user.id}>", "").strip()
+                user_msg = strip_mention(message.content)
 
             if not user_msg:
                 return
 
-            channel_type = "DM" if is_dm else "channel"
+            channel_type = "thread" if is_thread else ("DM" if is_dm else "channel")
             logger.info("[%s] <- %s (%s): %s", bot_config.name, message.author, channel_type, user_msg[:100])
 
-            # Process message in isolated task to prevent crashes from affecting the bot
             task = asyncio.create_task(self._process_message(message, user_msg, bot_config.name))
             task.add_done_callback(lambda t: _handle_async_exception(t, bot_config.name))
 
     async def _process_message(self, message, user_msg: str, bot_name: str):
         """Process a message in an isolated task."""
+        is_thread = isinstance(message.channel, discord.Thread)
+        thread_id = str(message.channel.id) if is_thread else None
+
         channel_context = ChannelContext(
             source="discord",
             channel_id=str(message.channel.id),
             user_id=str(message.author.id),
             reply_to=f"discord:{message.channel.id}",
+            thread_id=thread_id,
             metadata={
                 "author_name": str(message.author),
                 "guild_id": str(message.guild.id) if message.guild else None,
             },
         )
+
+        # For threads, resolve the session and pass conv_id_override to skip redundant lookup
+        if is_thread and thread_id:
+            existing = self.session_store.find_by_thread(thread_id)
+            if existing:
+                channel_context.metadata["conv_id_override"] = existing.id
+            else:
+                user_id = self.resolve_user(str(message.author.id), channel_context)
+                parent_session = self.session_store.get_or_create_interactive(user_id, self.agent_name)
+
+                thread_session = Session(
+                    id="",
+                    agent=self.agent_name,
+                    source=SessionSource.INTERACTIVE.value,
+                    user_id=user_id,
+                    parent_id=parent_session.id,
+                    platform_thread_id=thread_id,
+                    metadata={"thread_name": getattr(message.channel, "name", "")},
+                )
+                self.session_store.create_session(thread_session)
+                channel_context.metadata["conv_id_override"] = thread_session.id
 
         loop = asyncio.get_running_loop()
         progress = DiscordProgressHandler(message.channel, loop)
@@ -609,6 +641,35 @@ class DiscordAdapter(BaseAdapter):
         for chunk in chunks:
             if chunk.strip():
                 await channel.send(chunk)
+
+    # ── ThreadCapability implementation ──
+
+    async def _get_thread(self, platform_thread_id: str) -> discord.Thread:
+        """Fetch a Discord thread by ID, raising if not found or not a thread."""
+        channel = self.bot.get_channel(int(platform_thread_id))
+        if not channel:
+            channel = await self.bot.fetch_channel(int(platform_thread_id))
+        if not isinstance(channel, discord.Thread):
+            raise RuntimeError(f"Channel {platform_thread_id} is not a thread")
+        return channel
+
+    async def create_thread(self, channel_id: str, title: str) -> str:
+        """Create a Discord thread in the specified channel."""
+        channel = self.bot.get_channel(int(channel_id))
+        if not channel:
+            channel = await self.bot.fetch_channel(int(channel_id))
+        thread = await channel.create_thread(name=title[:100], type=discord.ChannelType.public_thread)
+        return str(thread.id)
+
+    async def send_to_thread(self, platform_thread_id: str, message: str) -> None:
+        thread = await self._get_thread(platform_thread_id)
+        if thread.archived:
+            await thread.edit(archived=False)
+        await self._send_chunked(thread, message)
+
+    async def close_thread(self, platform_thread_id: str) -> None:
+        thread = await self._get_thread(platform_thread_id)
+        await thread.edit(archived=True)
 
     async def start(self):
         """Start Discord bot."""

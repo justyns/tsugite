@@ -154,7 +154,6 @@ def cancel_session(session_id: str) -> dict:
     return asdict(session)
 
 
-
 @tool(require_daemon=True)
 def session_spawn(
     prompt: str,

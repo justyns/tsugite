@@ -225,6 +225,8 @@ class SessionStore:
 
     # ── Generic session CRUD ──
 
+    MAX_SCHEDULE_SESSIONS = 20
+
     def create_session(self, session: Session) -> Session:
         with self._lock:
             if session.id in self._sessions:
@@ -236,8 +238,25 @@ class SessionStore:
             if session.platform_thread_id:
                 self._thread_index[session.platform_thread_id] = session.id
 
+            # Prune old schedule sessions beyond retention limit
+            if session.source == SessionSource.SCHEDULE.value and session.parent_id:
+                self._prune_schedule_sessions(session.parent_id)
+
             self._save()
             return session
+
+    def _prune_schedule_sessions(self, parent_id: str) -> None:
+        """Remove oldest completed schedule sessions beyond MAX_SCHEDULE_SESSIONS. Must hold lock."""
+        children = [
+            s for s in self._sessions.values()
+            if s.source == SessionSource.SCHEDULE.value and s.parent_id == parent_id
+        ]
+        if len(children) <= self.MAX_SCHEDULE_SESSIONS:
+            return
+        children.sort(key=lambda s: s.created_at)
+        for s in children[: len(children) - self.MAX_SCHEDULE_SESSIONS]:
+            if s.status in (SessionStatus.COMPLETED.value, SessionStatus.FAILED.value):
+                del self._sessions[s.id]
 
     def get_session(self, session_id: str) -> Session:
         with self._lock:
@@ -426,7 +445,7 @@ class SessionStore:
             "reviews": {rid: asdict(r) for rid, r in self._reviews.items()},
         }
         tmp = self._path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(data, indent=2))
+        tmp.write_text(json.dumps(data, separators=(",", ":")))
         os.replace(str(tmp), str(self._path))
         self._dirty = False
 

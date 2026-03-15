@@ -44,6 +44,22 @@ class HasUIHandler(Protocol):
     ui_handler: Any
 
 
+class ThreadCapability(Protocol):
+    """Optional protocol for adapters that support platform threads."""
+
+    async def create_thread(self, channel_id: str, title: str) -> str:
+        """Create a platform thread in the given channel. Returns platform_thread_id."""
+        ...
+
+    async def send_to_thread(self, platform_thread_id: str, message: str) -> None:
+        """Send a message to an existing thread."""
+        ...
+
+    async def close_thread(self, platform_thread_id: str) -> None:
+        """Archive/close a thread."""
+        ...
+
+
 def resolve_agent_path(agent_file: str, workspace_dir: Path, workspace: Any = None) -> Optional[Path]:
     """Resolve agent file reference to absolute path.
 
@@ -335,18 +351,13 @@ class BaseAdapter(ABC):
         if conv_id_override:
             conv_id = conv_id_override
         else:
-            # Route by thread_id if present, otherwise default interactive session
-            thread_id = getattr(channel_context, "thread_id", None)
-            if thread_id:
-                thread_session = self.session_store.find_by_thread(thread_id)
-                if thread_session:
-                    conv_id = thread_session.id
-                else:
-                    session = self.session_store.get_or_create_interactive(user_id, self.agent_name)
-                    conv_id = session.id
+            # Route: thread_id lookup → default interactive session
+            thread_id = channel_context.thread_id
+            thread_session = self.session_store.find_by_thread(thread_id) if thread_id else None
+            if thread_session:
+                conv_id = thread_session.id
             else:
-                session = self.session_store.get_or_create_interactive(user_id, self.agent_name)
-                conv_id = session.id
+                conv_id = self.session_store.get_or_create_interactive(user_id, self.agent_name).id
 
             if self.session_store.needs_compaction(conv_id):
                 self._emit_ui(custom_logger, "compacting")
@@ -499,69 +510,70 @@ class BaseAdapter(ABC):
         old_session = self.session_store.get_session(session_id)
 
         turns_file = _write_turns_tempfile(old_turns)
-        hook_context = {
-            "conversation_id": old_conv_id,
-            "user_id": old_session.user_id or "",
-            "agent_name": self.agent_name,
-            "turns_file": str(turns_file),
-            "turn_count": len(old_turns),
-        }
-        await fire_compact_hooks(self.agent_config.workspace_dir, "pre_compact", hook_context, interactive=False)
+        try:
+            hook_context = {
+                "conversation_id": old_conv_id,
+                "user_id": old_session.user_id or "",
+                "agent_name": self.agent_name,
+                "turns_file": str(turns_file),
+                "turn_count": len(old_turns),
+            }
+            await fire_compact_hooks(self.agent_config.workspace_dir, "pre_compact", hook_context, interactive=False)
 
-        old_messages = []
+            old_messages = []
 
-        if prior_summary:
-            old_messages.append(
-                {
-                    "role": "user",
-                    "content": f"<prior_compaction_summary>\n{prior_summary.summary}\n</prior_compaction_summary>",
-                }
+            if prior_summary:
+                old_messages.append(
+                    {
+                        "role": "user",
+                        "content": f"<prior_compaction_summary>\n{prior_summary.summary}\n</prior_compaction_summary>",
+                    }
+                )
+
+            functions_used = sorted({fn for turn in old_turns for fn in turn.functions_called})
+            file_paths = extract_file_paths_from_turns(old_turns)
+            meta_parts = [
+                "<session_metadata>",
+                f"  <turn_count>{len(old_turns)}</turn_count>",
+                f"  <time_range>{old_turns[0].timestamp.isoformat()} to {old_turns[-1].timestamp.isoformat()}</time_range>",
+            ]
+            if functions_used:
+                meta_parts.append(f"  <tools_used>{', '.join(functions_used)}</tools_used>")
+            meta_parts.append(f"  <model>{self.resolve_model()}</model>")
+            if file_paths:
+                meta_parts.append(f"  <files_accessed>{', '.join(file_paths)}</files_accessed>")
+            meta_parts.append("</session_metadata>")
+            old_messages.append({"role": "user", "content": "\n".join(meta_parts)})
+
+            old_messages.extend(msg for turn in old_turns for msg in turn.messages)
+
+            summary = await summarize_session(old_messages, model=model, max_context_tokens=self.agent_config.context_limit)
+
+            new_session = self.session_store.compact_session(session_id)
+            new_session_path = get_history_dir() / f"{new_session.id}.jsonl"
+            new_storage = SessionStorage.create(
+                agent_name=self.agent_name,
+                model=self.agent_config.agent_file,
+                compacted_from=old_conv_id,
+                session_path=new_session_path,
             )
 
-        functions_used = sorted({fn for turn in old_turns for fn in turn.functions_called})
-        file_paths = extract_file_paths_from_turns(old_turns)
-        meta_parts = [
-            "<session_metadata>",
-            f"  <turn_count>{len(old_turns)}</turn_count>",
-            f"  <time_range>{old_turns[0].timestamp.isoformat()} to {old_turns[-1].timestamp.isoformat()}</time_range>",
-        ]
-        if functions_used:
-            meta_parts.append(f"  <tools_used>{', '.join(functions_used)}</tools_used>")
-        meta_parts.append(f"  <model>{self.resolve_model()}</model>")
-        if file_paths:
-            meta_parts.append(f"  <files_accessed>{', '.join(file_paths)}</files_accessed>")
-        meta_parts.append("</session_metadata>")
-        old_messages.append({"role": "user", "content": "\n".join(meta_parts)})
+            new_storage.record_compaction_summary(summary, len(old_turns), retained_turns=len(recent_turns))
+            new_storage.write_turns(recent_turns)
 
-        old_messages.extend(msg for turn in old_turns for msg in turn.messages)
-
-        summary = await summarize_session(old_messages, model=model, max_context_tokens=self.agent_config.context_limit)
-
-        new_session = self.session_store.compact_session(session_id)
-        new_session_path = get_history_dir() / f"{new_session.id}.jsonl"
-        new_storage = SessionStorage.create(
-            agent_name=self.agent_name,
-            model=self.agent_config.agent_file,
-            compacted_from=old_conv_id,
-            session_path=new_session_path,
-        )
-
-        new_storage.record_compaction_summary(summary, len(old_turns), retained_turns=len(recent_turns))
-        new_storage.write_turns(recent_turns)
-
-        await fire_compact_hooks(
-            self.agent_config.workspace_dir,
-            "post_compact",
-            {
-                **hook_context,
-                "new_conversation_id": new_session.id,
-                "turns_compacted": len(old_turns),
-                "turns_retained": len(recent_turns),
-            },
-            interactive=False,
-        )
-
-        turns_file.unlink(missing_ok=True)
+            await fire_compact_hooks(
+                self.agent_config.workspace_dir,
+                "post_compact",
+                {
+                    **hook_context,
+                    "new_conversation_id": new_session.id,
+                    "turns_compacted": len(old_turns),
+                    "turns_retained": len(recent_turns),
+                },
+                interactive=False,
+            )
+        finally:
+            turns_file.unlink(missing_ok=True)
 
         from tsugite.tools.skills import clear_loaded_skills
 

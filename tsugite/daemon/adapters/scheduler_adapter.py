@@ -11,6 +11,7 @@ from tsugite.agent_runner.models import AgentSkippedError
 from tsugite.daemon.adapters.base import BaseAdapter, ChannelContext
 from tsugite.daemon.config import NotificationChannelConfig
 from tsugite.daemon.scheduler import RunResult, ScheduleEntry, Scheduler
+from tsugite.daemon.session_store import Session, SessionSource, SessionStatus
 from tsugite.exceptions import AgentExecutionError
 from tsugite.tools.notify import notify_context, send_notification
 
@@ -99,13 +100,26 @@ class SchedulerAdapter:
             raise ValueError(f"No adapter found for agent '{entry.agent}'")
         logger.info("Schedule '%s' executing agent '%s': %s", entry.id, entry.agent, entry.prompt[:100])
 
-        # Per-run session isolation: unique conv_id per run, or persistent if session_id is set
         if entry.session_id:
             conv_id = f"sched_{entry.session_id}"
         else:
             ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
             safe_id = entry.id.replace(":", "_")
             conv_id = f"sched_{safe_id}_{ts}"
+
+        sched_session = Session(
+            id=conv_id,
+            agent=entry.agent,
+            source=SessionSource.SCHEDULE.value,
+            status=SessionStatus.RUNNING.value,
+            parent_id=entry.id,
+            prompt=entry.prompt,
+        )
+        try:
+            adapter.session_store.create_session(sched_session)
+        except ValueError:
+            pass  # session_id reuse for persistent schedules
+
         user_id = f"scheduler:{entry.agent}"
         metadata = {
             "schedule_id": entry.id,
@@ -148,8 +162,10 @@ class SchedulerAdapter:
                     channel_context=channel_context,
                 )
         except AgentSkippedError:
+            # run_if guard skipped this run — no session needed
             raise
         except AgentExecutionError as e:
+            adapter.session_store.update_session(conv_id, status=SessionStatus.FAILED.value, error=str(e))
             if resolved_channels:
                 try:
                     notification = f"**Background task `{entry.id}` failed:**\n\n{e}"
@@ -160,6 +176,7 @@ class SchedulerAdapter:
                     logger.error("Failure notification for schedule '%s' failed: %s", entry.id, notify_err)
             raise
 
+        adapter.session_store.update_session(conv_id, status=SessionStatus.COMPLETED.value, result=result[:2000])
         logger.info("Schedule '%s' agent '%s' completed", entry.id, entry.agent)
 
         if resolved_channels:
