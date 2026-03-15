@@ -183,5 +183,5 @@ main { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
 
 /* Two-pane layouts */
 .two-pane { display: flex; gap: 16px; }
-.pane-sidebar { width: 280px; flex-shrink: 0; }
+.pane-sidebar { width: 280px; flex-shrink: 0; overflow-y: auto; }
 .pane-detail { flex: 1; min-width: 0; }

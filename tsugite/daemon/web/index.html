@@ -86,7 +86,7 @@
        @dragover.prevent @dragenter.prevent="onDragEnter($event)"
        @dragleave="onDragLeave($event)" @drop.prevent="onDrop($event)"
        style="position:relative">
-    <div class="view-scroll two-pane" style="height:100%">
+    <div class="view-scroll two-pane" style="height:100%; overflow:hidden">
       <!-- Session sidebar -->
       <div class="pane-sidebar">
         <div class="section-header"><h2>Sessions</h2></div>
