@@ -63,13 +63,9 @@ export default () => ({
     } catch { this.sessions = []; }
   },
 
-  get sessionOptions() {
-    const defaultId = this.userId;
-    const opts = this.sessions.map(s => ({ value: s.user_id, label: s.label }));
-    if (!opts.some(o => o.value === defaultId)) {
-      opts.unshift({ value: defaultId, label: `Web: ${defaultId} (new)` });
-    }
-    return opts;
+  get selectedSessionId() {
+    const match = this.sessions.find(s => (s.user_id || s.conversation_id) === this.userId);
+    return match?.conversation_id || null;
   },
 
   async loadHistory() {
@@ -78,7 +74,9 @@ export default () => ({
     this._allHistoryMessages = [];
     this._historyLoaded = 0;
     try {
-      const data = await get(`/api/agents/${agent}/history?user_id=${encodeURIComponent(this.userId)}&limit=100`);
+      let histUrl = `/api/agents/${agent}/history?user_id=${encodeURIComponent(this.userId)}&limit=100`;
+      if (this.selectedSessionId) histUrl += `&session_id=${encodeURIComponent(this.selectedSessionId)}`;
+      const data = await get(histUrl);
       if (!data.turns || data.turns.length === 0) return;
       for (const turn of data.turns) {
         if (turn.type === 'compaction') {
@@ -288,6 +286,7 @@ export default () => ({
 
     try {
       const chatBody = { message: msg, user_id: this.userId };
+      if (this.selectedSessionId) chatBody.session_id = this.selectedSessionId;
       if (uploadedFiles.length) chatBody.uploaded_files = uploadedFiles;
       const resp = await streamPost(`/api/agents/${agent}/chat`, chatBody);
       const reader = resp.body.getReader();

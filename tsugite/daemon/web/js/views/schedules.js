@@ -1,5 +1,5 @@
 import { get, post, patch, del } from '../api.js';
-import { formatDate } from '../utils.js';
+import { formatDate, stateBadgeClass } from '../utils.js';
 
 const emptyForm = () => ({ id: '', agent: '', prompt: '', schedule_type: 'cron', cron_expr: '', run_at: '', timezone: 'UTC', model: '', agent_file: '', max_turns: '' });
 
@@ -10,6 +10,8 @@ export default () => ({
   error: null,
   editingId: null,
   form: emptyForm(),
+  expandedId: null,
+  runSessions: {},
 
   init() {
     this.load();
@@ -17,6 +19,7 @@ export default () => ({
 
   async load() {
     this.error = null;
+    this.runSessions = {};
     try {
       const data = await get('/api/schedules');
       this.schedules = data.schedules || [];
@@ -39,6 +42,7 @@ export default () => ({
   async runNow(s) {
     try {
       await post(`/api/schedules/${s.id}/run`);
+      delete this.runSessions[s.id];
     } catch (e) {
       this.error = e.message;
     }
@@ -114,6 +118,49 @@ export default () => ({
         this.error = e.message;
       }
     }
+  },
+
+  get tableRows() {
+    const rows = [];
+    for (const s of this.schedules) {
+      rows.push({ type: 'schedule', data: s, key: s.id });
+      if (this.expandedId === s.id) {
+        const runs = this.runSessions[s.id];
+        if (runs && runs.length > 0) {
+          for (const run of runs) {
+            rows.push({ type: 'run', data: run, key: 'run-' + run.id });
+          }
+        } else if (runs) {
+          rows.push({ type: 'empty', data: null, key: 'empty-' + s.id });
+        }
+      }
+    }
+    return rows;
+  },
+
+  async toggleRuns(s) {
+    if (this.expandedId === s.id) {
+      this.expandedId = null;
+      return;
+    }
+    this.expandedId = s.id;
+    if (!this.runSessions[s.id]) {
+      try {
+        const data = await get(`/api/schedules/${s.id}/sessions`);
+        this.runSessions = { ...this.runSessions, [s.id]: data.sessions || [] };
+      } catch {
+        this.runSessions = { ...this.runSessions, [s.id]: [] };
+      }
+    }
+  },
+
+  runBadge(status) {
+    return stateBadgeClass(status);
+  },
+
+  viewRunHistory(run) {
+    this.$store.app.viewSessionId = run.id;
+    this.$store.app.view = 'history';
   },
 
   get formTitle() {

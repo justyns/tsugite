@@ -345,7 +345,10 @@ class Gateway:
                 logger.error("Error stopping %s: %s", label, e)
 
         if self._session_store:
-            self._session_store.flush()
+            try:
+                self._session_store.flush()
+            except Exception as e:
+                logger.error("Error flushing session store: %s", e)
 
 
 async def run_daemon(config_path: Optional[Path] = None):

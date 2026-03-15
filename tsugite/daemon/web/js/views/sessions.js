@@ -1,5 +1,5 @@
 import { get, post } from '../api.js';
-import { formatDate } from '../utils.js';
+import { formatDate, stateBadgeClass } from '../utils.js';
 
 export default () => ({
   sessions: [],
@@ -38,7 +38,7 @@ export default () => ({
         get('/api/sessions'),
         get('/api/reviews?status=pending'),
       ]);
-      this.sessions = sessData.sessions || [];
+      this.sessions = (sessData.sessions || []).map(s => ({ ...s, state: s.state || s.status }));
       this.reviews = revData.reviews || [];
     } catch (e) {
       this.error = e.message;
@@ -55,6 +55,7 @@ export default () => ({
         get(`/api/sessions/${s.id}`),
         get(`/api/sessions/${s.id}/events`),
       ]);
+      data.state = data.state || data.status;
       this.selectedSession = data;
       this.events = evData.events || [];
     } catch (e) {
@@ -112,17 +113,28 @@ export default () => ({
     }
   },
 
+  get groupedSessions() {
+    const groups = { background: [], spawned: [], schedule: [], interactive: [] };
+    for (const s of this.sessions) {
+      const src = s.source || 'background';
+      if (groups[src]) groups[src].push(s);
+      else groups.background.push(s);
+    }
+    return groups;
+  },
+
+  get sourceOrder() {
+    return ['background', 'spawned', 'schedule', 'interactive'].filter(
+      src => (this.groupedSessions[src] || []).length > 0
+    );
+  },
+
+  sourceLabel(src) {
+    return { background: 'Background', spawned: 'Spawned', schedule: 'Schedule Runs', interactive: 'Interactive' }[src] || src;
+  },
+
   stateBadge(state) {
-    const map = {
-      pending: 'badge-muted',
-      running: 'badge-accent',
-      waiting_for_review: 'badge-warning',
-      completed: 'badge-ok',
-      failed: 'badge-error',
-      cancelled: 'badge-muted',
-      interrupted: 'badge-error',
-    };
-    return map[state] || '';
+    return stateBadgeClass(state);
   },
 
   canCancel(s) {

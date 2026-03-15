@@ -32,13 +32,32 @@ export default () => ({
       }));
     } catch { /* ignore */ }
     this.loading = false;
+
+    // Auto-select a session if navigated from another view
+    const targetId = this.$store.app.viewSessionId;
+    if (targetId) {
+      this.$store.app.viewSessionId = null;
+      const match = this.conversations.find(c => c.conversation_id === targetId);
+      if (match) {
+        await this.selectConversation(match);
+      } else {
+        // Session not in per-agent list — load directly by session_id
+        await this.selectConversation({ agent, conversation_id: targetId });
+      }
+    }
   },
 
   async selectConversation(conv) {
     this.selectedConv = conv;
     this.turns = [];
     try {
-      const data = await get(`/api/agents/${conv.agent}/history?user_id=${encodeURIComponent(conv.user_id)}&detail=true`);
+      let url = `/api/agents/${conv.agent}/history?detail=true`;
+      if (conv.conversation_id) {
+        url += `&session_id=${encodeURIComponent(conv.conversation_id)}`;
+      } else if (conv.user_id) {
+        url += `&user_id=${encodeURIComponent(conv.user_id)}`;
+      }
+      const data = await get(url);
       this.turns = data.turns || [];
     } catch { /* ignore */ }
   },

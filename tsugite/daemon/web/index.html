@@ -508,24 +508,59 @@
 
       <template x-if="!loading && schedules.length > 0">
         <table class="data-table">
-          <thead><tr><th>ID</th><th>Agent</th><th>Model</th><th>Agent File</th><th>Type</th><th>Status</th><th>Next Run</th><th>Last Run</th><th>Actions</th></tr></thead>
+          <thead><tr><th>ID</th><th>Agent</th><th>Type</th><th>Status</th><th>Next Run</th><th>Last Run</th><th>Actions</th></tr></thead>
           <tbody>
-            <template x-for="s in schedules" :key="s.id">
-              <tr>
-                <td x-text="s.id"></td>
-                <td x-text="s.agent"></td>
-                <td x-text="s.model || '—'"></td>
-                <td x-text="s.agent_file || '—'"></td>
-                <td x-text="s.schedule_type"></td>
-                <td><span class="badge" :class="statusBadge(s)" x-text="statusLabel(s)"></span></td>
-                <td x-text="formatDate(s.next_run)"></td>
-                <td x-text="formatDate(s.last_run)"></td>
-                <td style="white-space:nowrap">
-                  <button class="btn-sm" @click="edit(s)">Edit</button>
-                  <button class="btn-sm" @click="toggle(s)" x-text="s.enabled ? 'Disable' : 'Enable'"></button>
-                  <button class="btn-sm" @click="runNow(s)">Run</button>
-                  <button class="btn-sm danger" @click="remove(s)">Delete</button>
-                </td>
+            <template x-for="row in tableRows" :key="row.key">
+              <tr :class="row.type === 'run' ? 'schedule-run-row' : ''">
+                <template x-if="row.type === 'schedule'">
+                  <td>
+                    <span style="cursor:pointer" @click="toggleRuns(row.data)" x-text="(expandedId === row.data.id ? '▾ ' : '▸ ') + row.data.id"></span>
+                  </td>
+                </template>
+                <template x-if="row.type === 'schedule'">
+                  <td x-text="row.data.agent"></td>
+                </template>
+                <template x-if="row.type === 'schedule'">
+                  <td x-text="row.data.schedule_type"></td>
+                </template>
+                <template x-if="row.type === 'schedule'">
+                  <td><span class="badge" :class="statusBadge(row.data)" x-text="statusLabel(row.data)"></span></td>
+                </template>
+                <template x-if="row.type === 'schedule'">
+                  <td x-text="formatDate(row.data.next_run)"></td>
+                </template>
+                <template x-if="row.type === 'schedule'">
+                  <td x-text="formatDate(row.data.last_run)"></td>
+                </template>
+                <template x-if="row.type === 'schedule'">
+                  <td style="white-space:nowrap">
+                    <button class="btn-sm" @click="edit(row.data)">Edit</button>
+                    <button class="btn-sm" @click="toggle(row.data)" x-text="row.data.enabled ? 'Disable' : 'Enable'"></button>
+                    <button class="btn-sm" @click="runNow(row.data)">Run</button>
+                    <button class="btn-sm danger" @click="remove(row.data)">Delete</button>
+                  </td>
+                </template>
+                <template x-if="row.type === 'run'">
+                  <td colspan="2" style="padding-left:28px;font-size:12px;color:var(--muted)" x-text="row.data.id"></td>
+                </template>
+                <template x-if="row.type === 'run'">
+                  <td></td>
+                </template>
+                <template x-if="row.type === 'run'">
+                  <td><span class="badge" :class="runBadge(row.data.status)" x-text="row.data.status"></span></td>
+                </template>
+                <template x-if="row.type === 'run'">
+                  <td x-text="formatDate(row.data.created_at)" style="font-size:12px"></td>
+                </template>
+                <template x-if="row.type === 'run'">
+                  <td x-text="(row.data.result || row.data.error || '—').substring(0, 80)" style="font-size:12px;color:var(--muted)"></td>
+                </template>
+                <template x-if="row.type === 'run'">
+                  <td><button class="btn-sm" @click="viewRunHistory(row.data)">View</button></td>
+                </template>
+                <template x-if="row.type === 'empty'">
+                  <td colspan="7" style="padding-left:28px;font-size:12px;color:var(--muted)">No recorded runs</td>
+                </template>
               </tr>
             </template>
           </tbody>
@@ -614,28 +649,36 @@
       <template x-if="!loading && sessions.length > 0">
         <div class="two-pane">
           <div class="pane-sidebar pane-sidebar-wide">
-            <table class="data-table">
-              <thead><tr><th>ID</th><th>Agent</th><th>State</th><th>Created</th><th>Actions</th></tr></thead>
-              <tbody>
-                <template x-for="s in sessions" :key="s.id">
-                  <tr @click="selectSession(s)" style="cursor:pointer"
-                      :class="{ 'active': selectedSession?.id === s.id }">
-                    <td x-text="s.id" style="font-size:12px"></td>
-                    <td x-text="s.agent"></td>
-                    <td><span class="badge" :class="stateBadge(s.state)" x-text="s.state"></span></td>
-                    <td x-text="formatDate(s.created_at)" style="font-size:12px"></td>
-                    <td style="white-space:nowrap" @click.stop>
-                      <template x-if="canCancel(s)">
-                        <button class="btn-sm danger" @click="cancelSession(s)">Cancel</button>
-                      </template>
-                      <template x-if="canRestart(s)">
-                        <button class="btn-sm" @click="restartSession(s)">Restart</button>
-                      </template>
-                    </td>
-                  </tr>
-                </template>
-              </tbody>
-            </table>
+            <template x-for="src in sourceOrder" :key="src">
+              <div class="session-group">
+                <div class="session-group-header">
+                  <span x-text="sourceLabel(src)"></span>
+                  <span class="badge badge-muted" x-text="groupedSessions[src].length" style="margin-left:6px"></span>
+                </div>
+                <table class="data-table">
+                  <tbody>
+                    <template x-for="s in groupedSessions[src]" :key="s.id">
+                      <tr @click="selectSession(s)" style="cursor:pointer"
+                          :class="{ 'active': selectedSession?.id === s.id }"
+                          :style="(s.state) === 'waiting_for_review' ? 'border-left:3px solid var(--accent)' : ''">
+                        <td style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" x-text="s.id"></td>
+                        <td x-text="s.agent"></td>
+                        <td><span class="badge" :class="stateBadge(s.state)" x-text="s.state"></span></td>
+                        <td x-text="formatDate(s.created_at)" style="font-size:12px"></td>
+                        <td style="white-space:nowrap" @click.stop>
+                          <template x-if="canCancel(s)">
+                            <button class="btn-sm danger" @click="cancelSession(s)">Cancel</button>
+                          </template>
+                          <template x-if="canRestart(s)">
+                            <button class="btn-sm" @click="restartSession(s)">Restart</button>
+                          </template>
+                        </td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+              </div>
+            </template>
           </div>
 
           <!-- Detail panel -->
@@ -646,23 +689,38 @@
             <template x-if="selectedSession">
               <div>
                 <div class="card">
-                  <h3>Session: <span x-text="selectedSession.id"></span></h3>
+                  <h3 style="display:flex;align-items:center;gap:8px">
+                    <span x-text="selectedSession.id"></span>
+                    <span class="badge badge-muted" x-text="selectedSession.source || 'background'" style="font-weight:normal"></span>
+                  </h3>
                   <div class="card-meta">
                     <div>Agent: <span x-text="selectedSession.agent"></span></div>
-                    <div>State: <span class="badge" :class="stateBadge(selectedSession.state)" x-text="selectedSession.state"></span></div>
+                    <div>Status: <span class="badge" :class="stateBadge(selectedSession.state)" x-text="selectedSession.state"></span></div>
+                    <template x-if="selectedSession.parent_id">
+                      <div>Parent: <span x-text="selectedSession.parent_id" style="font-size:12px"></span></div>
+                    </template>
+                    <template x-if="selectedSession.platform_thread_id">
+                      <div>Thread: <span x-text="selectedSession.platform_thread_id" style="font-size:12px"></span></div>
+                    </template>
                     <div>Prompt: <span x-text="selectedSession.prompt" style="font-size:12px"></span></div>
                     <template x-if="selectedSession.model">
                       <div>Model: <span x-text="selectedSession.model"></span></div>
                     </template>
                     <template x-if="selectedSession.error">
-                      <div style="color:var(--red)">Error: <span x-text="selectedSession.error"></span></div>
+                      <div style="color:var(--error)">Error: <span x-text="selectedSession.error"></span></div>
                     </template>
                     <template x-if="selectedSession.result">
                       <div>Result: <span x-text="selectedSession.result" style="font-size:12px"></span></div>
                     </template>
-                    <template x-if="selectedSession.event_count != null">
-                      <div>Events: <span x-text="selectedSession.event_count"></span></div>
-                    </template>
+                    <div style="font-size:12px;color:var(--muted);margin-top:4px">
+                      Created: <span x-text="formatDate(selectedSession.created_at)"></span>
+                      <template x-if="selectedSession.last_active">
+                        · Last active: <span x-text="formatDate(selectedSession.last_active)"></span>
+                      </template>
+                      <template x-if="selectedSession.event_count != null">
+                        · <span x-text="selectedSession.event_count"></span> events
+                      </template>
+                    </div>
                   </div>
                 </div>
 
@@ -724,10 +782,10 @@
           <div class="empty-state">No sessions found</div>
         </template>
         <div class="turn-list">
-          <template x-for="conv in conversations" :key="conv.user_id + conv.agent">
-            <div class="turn-item" :class="{ active: selectedConv?.user_id === conv.user_id }"
+          <template x-for="conv in conversations" :key="conv.conversation_id || (conv.user_id + conv.agent)">
+            <div class="turn-item" :class="{ active: selectedConv?.conversation_id === conv.conversation_id }"
                  @click="selectConversation(conv)">
-              <div x-text="conv.label"></div>
+              <div x-text="conv.label || conv.conversation_id"></div>
               <div class="turn-meta" x-text="conv.created_at ? formatDate(conv.created_at) : ''"></div>
             </div>
           </template>

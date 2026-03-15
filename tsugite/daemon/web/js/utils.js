@@ -57,3 +57,14 @@ export function scrollToBottom(el) {
   el.scrollTop = el.scrollHeight;
 }
 
+const _stateBadgeMap = {
+  pending: 'badge-muted', active: 'badge-ok', running: 'badge-accent',
+  waiting_for_review: 'badge-accent', completed: 'badge-ok',
+  failed: 'badge-error', error: 'badge-error',
+  cancelled: 'badge-muted', interrupted: 'badge-error',
+};
+
+export function stateBadgeClass(state) {
+  return _stateBadgeMap[state] || 'badge-muted';
+}
+

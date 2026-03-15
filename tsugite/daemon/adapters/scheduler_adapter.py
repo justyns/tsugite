@@ -56,9 +56,44 @@ class SchedulerAdapter:
         """Resolve a notification channel's user to their canonical identity."""
         return self._identity_map.get(f"discord:{config.user_id}", config.user_id)
 
+    def _create_run_session(self, entry: ScheduleEntry) -> str:
+        """Create a Session record for a schedule run. Returns the conv_id."""
+        if entry.session_id:
+            conv_id = f"sched_{entry.session_id}"
+        else:
+            ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+            safe_id = entry.id.replace(":", "_")
+            conv_id = f"sched_{safe_id}_{ts}"
+
+        adapter = self._adapters.get(entry.agent) or next(iter(self._adapters.values()), None)
+        if adapter:
+            sched_session = Session(
+                id=conv_id,
+                agent=entry.agent,
+                source=SessionSource.SCHEDULE.value,
+                status=SessionStatus.RUNNING.value,
+                parent_id=entry.id,
+                prompt=entry.prompt or entry.command or "",
+            )
+            try:
+                adapter.session_store.create_session(sched_session)
+            except ValueError:
+                pass
+        return conv_id
+
+    def _update_run_session(self, conv_id: str, entry: ScheduleEntry, **fields):
+        """Update a schedule run session's status."""
+        adapter = self._adapters.get(entry.agent) or next(iter(self._adapters.values()), None)
+        if adapter:
+            try:
+                adapter.session_store.update_session(conv_id, **fields)
+            except ValueError:
+                pass
+
     async def _run_script(self, entry: ScheduleEntry) -> RunResult:
         """Run a shell command directly (no LLM)."""
         logger.info("Schedule '%s' executing script: %s", entry.id, entry.command[:100])
+        conv_id = self._create_run_session(entry)
 
         try:
             proc = await asyncio.to_thread(
@@ -70,13 +105,16 @@ class SchedulerAdapter:
                 timeout=entry.script_timeout,
             )
         except subprocess.TimeoutExpired as e:
+            self._update_run_session(conv_id, entry, status=SessionStatus.FAILED.value, error=str(e))
             raise RuntimeError(f"Script timed out after {entry.script_timeout}s") from e
 
         if proc.returncode != 0:
             output = (proc.stderr or proc.stdout or "")[:2000]
+            self._update_run_session(conv_id, entry, status=SessionStatus.FAILED.value, error=output)
             raise RuntimeError(f"Script exited with code {proc.returncode}: {output}")
 
         result = proc.stdout[:_MAX_RESULT_CHARS]
+        self._update_run_session(conv_id, entry, status=SessionStatus.COMPLETED.value, result=result[:2000])
         logger.info("Schedule '%s' script completed (exit 0)", entry.id)
 
         resolved_channels = self._resolve_channels(entry.notify) if entry.notify else []
@@ -99,27 +137,7 @@ class SchedulerAdapter:
         if not adapter:
             raise ValueError(f"No adapter found for agent '{entry.agent}'")
         logger.info("Schedule '%s' executing agent '%s': %s", entry.id, entry.agent, entry.prompt[:100])
-
-        if entry.session_id:
-            conv_id = f"sched_{entry.session_id}"
-        else:
-            ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-            safe_id = entry.id.replace(":", "_")
-            conv_id = f"sched_{safe_id}_{ts}"
-
-        sched_session = Session(
-            id=conv_id,
-            agent=entry.agent,
-            source=SessionSource.SCHEDULE.value,
-            status=SessionStatus.RUNNING.value,
-            parent_id=entry.id,
-            prompt=entry.prompt,
-        )
-        try:
-            adapter.session_store.create_session(sched_session)
-        except ValueError:
-            pass  # session_id reuse for persistent schedules
-
+        conv_id = self._create_run_session(entry)
         user_id = f"scheduler:{entry.agent}"
         metadata = {
             "schedule_id": entry.id,
@@ -162,10 +180,9 @@ class SchedulerAdapter:
                     channel_context=channel_context,
                 )
         except AgentSkippedError:
-            # run_if guard skipped this run — no session needed
             raise
         except AgentExecutionError as e:
-            adapter.session_store.update_session(conv_id, status=SessionStatus.FAILED.value, error=str(e))
+            self._update_run_session(conv_id, entry, status=SessionStatus.FAILED.value, error=str(e))
             if resolved_channels:
                 try:
                     notification = f"**Background task `{entry.id}` failed:**\n\n{e}"
@@ -176,7 +193,7 @@ class SchedulerAdapter:
                     logger.error("Failure notification for schedule '%s' failed: %s", entry.id, notify_err)
             raise
 
-        adapter.session_store.update_session(conv_id, status=SessionStatus.COMPLETED.value, result=result[:2000])
+        self._update_run_session(conv_id, entry, status=SessionStatus.COMPLETED.value, result=result[:2000])
         logger.info("Schedule '%s' agent '%s' completed", entry.id, entry.agent)
 
         if resolved_channels:

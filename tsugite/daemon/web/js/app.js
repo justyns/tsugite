@@ -20,6 +20,7 @@ Alpine.store('app', {
   userId: localStorage.getItem('tsugite_user_id') || 'web-user-1',
   showSettings: false,
   lastEvent: null,
+  viewSessionId: null,
 });
 
 Alpine.data('chatView', chatView);
