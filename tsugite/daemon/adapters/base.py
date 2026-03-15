@@ -545,7 +545,9 @@ class BaseAdapter(ABC):
 
             old_messages.extend(msg for turn in old_turns for msg in turn.messages)
 
-            summary = await summarize_session(old_messages, model=model, max_context_tokens=self.agent_config.context_limit)
+            summary = await summarize_session(
+                old_messages, model=model, max_context_tokens=self.agent_config.context_limit
+            )
 
             new_session = self.session_store.compact_session(session_id)
             new_session_path = get_history_dir() / f"{new_session.id}.jsonl"

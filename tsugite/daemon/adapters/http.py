@@ -919,20 +919,22 @@ class HTTPServer:
         if not adapter:
             return JSONResponse({"error": "no adapters"}, status_code=500)
         sessions = adapter.session_store.list_sessions(parent_id=schedule_id, source="schedule")
-        return JSONResponse({
-            "schedule_id": schedule_id,
-            "sessions": [
-                {
-                    "id": s.id,
-                    "status": s.status,
-                    "created_at": s.created_at,
-                    "last_active": s.last_active,
-                    "result": (s.result or "")[:500],
-                    "error": s.error,
-                }
-                for s in sessions
-            ],
-        })
+        return JSONResponse(
+            {
+                "schedule_id": schedule_id,
+                "sessions": [
+                    {
+                        "id": s.id,
+                        "status": s.status,
+                        "created_at": s.created_at,
+                        "last_active": s.last_active,
+                        "result": (s.result or "")[:500],
+                        "error": s.error,
+                    }
+                    for s in sessions
+                ],
+            }
+        )
 
     # ── Session / Review API ──
 

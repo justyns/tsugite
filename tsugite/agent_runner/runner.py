@@ -360,7 +360,6 @@ async def _execute_agent_with_prompt(
     exec_options: Optional[ExecutionOptions] = None,
     workspace: Optional[Any] = None,
     custom_logger: Optional[Any] = None,
-    skip_task_reset: bool = False,
     model_kwargs: Optional[Dict[str, Any]] = None,
     injectable_vars: Optional[Dict[str, Any]] = None,
     previous_messages: Optional[List[Dict]] = None,
@@ -1119,7 +1118,6 @@ async def _execute_step_with_retries(
                     prepared=prepared,
                     exec_options=exec_options,
                     custom_logger=custom_logger,
-                    skip_task_reset=True,
                     model_kwargs=step.model_kwargs,
                     injectable_vars=injectable_vars,
                 )

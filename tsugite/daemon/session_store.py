@@ -8,7 +8,8 @@ import json
 import logging
 import os
 import threading
-from dataclasses import asdict, dataclass, field, fields as dataclass_fields
+from dataclasses import asdict, dataclass, field
+from dataclasses import fields as dataclass_fields
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
@@ -23,7 +24,7 @@ logger = logging.getLogger(__name__)
 class SessionSource(str, Enum):
     INTERACTIVE = "interactive"
     SCHEDULE = "schedule"
-    WEBHOOK = "webhook"
+
     BACKGROUND = "background"
     SPAWNED = "spawned"
 
@@ -32,7 +33,7 @@ class SessionStatus(str, Enum):
     ACTIVE = "active"
     COMPLETED = "completed"
     ERROR = "error"
-    PENDING = "pending"
+
     RUNNING = "running"
     FAILED = "failed"
     CANCELLED = "cancelled"
@@ -214,8 +215,7 @@ class SessionStore:
     def _prune_schedule_sessions(self, parent_id: str) -> None:
         """Remove oldest completed schedule sessions beyond MAX_SCHEDULE_SESSIONS. Must hold lock."""
         children = [
-            s for s in self._sessions.values()
-            if s.source == SessionSource.SCHEDULE.value and s.parent_id == parent_id
+            s for s in self._sessions.values() if s.source == SessionSource.SCHEDULE.value and s.parent_id == parent_id
         ]
         if len(children) <= self.MAX_SCHEDULE_SESSIONS:
             return
