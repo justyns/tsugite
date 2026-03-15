@@ -427,7 +427,7 @@
 
   <!-- Agent Files -->
   <div class="view" x-show="$store.app.view === 'agents'" x-data="agentFileView" x-cloak>
-    <div class="view-scroll two-pane">
+    <div class="view-scroll two-pane" style="height:100%; overflow:hidden">
       <!-- File list -->
       <div class="pane-sidebar">
         <div class="section-header">
@@ -495,7 +495,7 @@
 
   <!-- Skill Files -->
   <div class="view" x-show="$store.app.view === 'skills'" x-data="skillFileView" x-cloak>
-    <div class="view-scroll two-pane">
+    <div class="view-scroll two-pane" style="height:100%; overflow:hidden">
       <!-- File list -->
       <div class="pane-sidebar">
         <div class="section-header">
