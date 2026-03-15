@@ -1,5 +1,5 @@
 import { get, post, streamPost, uploadFiles } from '../api.js';
-import { escapeHtml, renderMarkdown, scrollToBottom } from '../utils.js';
+import { escapeHtml, renderMarkdown, scrollToBottom, formatDate, stateBadgeClass } from '../utils.js';
 
 export default () => ({
   messages: [],
@@ -7,7 +7,6 @@ export default () => ({
   _historyLoaded: 0,
   HISTORY_PAGE_SIZE: 20,
   hasMoreHistory: false,
-  sessions: [],
   sending: false,
   compacting: false,
   statusInfo: {},
@@ -18,24 +17,43 @@ export default () => ({
   loadedSkills: [],
   pendingFiles: [],
   isDragging: false,
+  allSessions: [],
+  selectedSessionId: null,
+  isActiveSession: true,
+  loading: true,
+  selectedSessionMeta: null,
+  turns: [],
+  _debounceTimer: null,
 
   init() {
     const maybeReload = () => {
-      if (this.$store.app.view === 'chat' && this.$store.app.selectedAgent) this.reload();
+      if (this.$store.app.view === 'conversations' && this.$store.app.selectedAgent) this.reload();
     };
     this.$watch('$store.app.selectedAgent', maybeReload);
     this.$watch('$store.app.view', (view) => {
-      if (view === 'chat' && this.$store.app.selectedAgent && this.messages.length === 0) this.reload();
+      if (view === 'conversations' && this.$store.app.selectedAgent) this.reload();
     });
     this.$watch('$store.app.lastEvent', (ev) => {
       if (!ev) return;
       if (ev.type === 'history_update' && ev.agent === this.$store.app.selectedAgent) {
-        this.reload();
+        if (this.isActiveSession) this.loadHistory();
+      }
+      if (ev.type === 'session_update') {
+        this._debouncedLoadSessions();
       }
       if (ev.type === 'reconnect' && this.$store.app.selectedAgent) {
         this.reload();
       }
     });
+  },
+
+  destroy() {
+    if (this._debounceTimer) clearTimeout(this._debounceTimer);
+  },
+
+  _debouncedLoadSessions() {
+    if (this._debounceTimer) clearTimeout(this._debounceTimer);
+    this._debounceTimer = setTimeout(() => this.loadSessions(), 200);
   },
 
   async reload() {
@@ -45,9 +63,22 @@ export default () => ({
     this.hasMoreHistory = false;
     this.statusInfo = {};
     this.loadedSkills = [];
+    this.turns = [];
+    this.selectedSessionMeta = null;
     await this.loadSessions();
-    await this.loadHistory();
-    await this.loadStatus();
+
+    const targetId = this.$store.app.viewSessionId;
+    if (targetId) {
+      this.$store.app.viewSessionId = null;
+      const match = this.allSessions.find(s => s.conversation_id === targetId || s.id === targetId);
+      if (match) {
+        this.selectSession(match);
+      } else {
+        this.selectSession({ conversation_id: targetId, agent: this.$store.app.selectedAgent });
+      }
+    } else {
+      this.autoSelectInteractive();
+    }
   },
 
   get userId() {
@@ -56,16 +87,60 @@ export default () => ({
 
   async loadSessions() {
     const agent = this.$store.app.selectedAgent;
-    if (!agent) return;
+    if (!agent) { this.loading = false; return; }
     try {
       const data = await get(`/api/agents/${agent}/sessions`);
-      this.sessions = data.sessions || [];
-    } catch { this.sessions = []; }
+      this.allSessions = (data.sessions || []).map(s => ({ ...s, state: s.state || s.status }));
+    } catch { this.allSessions = []; }
+    this.loading = false;
   },
 
-  get selectedSessionId() {
-    const match = this.sessions.find(s => (s.user_id || s.conversation_id) === this.userId);
-    return match?.conversation_id || null;
+  get sortedSessions() {
+    const sessions = [...this.allSessions];
+    const userId = this.userId;
+    sessions.sort((a, b) => {
+      const aInteractive = a.source === 'interactive' && (a.user_id === userId || a.conversation_id === userId);
+      const bInteractive = b.source === 'interactive' && (b.user_id === userId || b.conversation_id === userId);
+      if (aInteractive && !bInteractive) return -1;
+      if (!aInteractive && bInteractive) return 1;
+      const aDate = a.last_active || a.created_at || '';
+      const bDate = b.last_active || b.created_at || '';
+      return bDate.localeCompare(aDate);
+    });
+    return sessions;
+  },
+
+  autoSelectInteractive() {
+    const interactive = this.sortedSessions.find(
+      s => s.source === 'interactive' && (s.user_id === this.userId || s.conversation_id === this.userId)
+    );
+    if (interactive) {
+      this.selectSession(interactive);
+    } else if (this.sortedSessions.length > 0) {
+      this.selectSession(this.sortedSessions[0]);
+    }
+  },
+
+  selectSession(session) {
+    const convId = session.conversation_id || session.id;
+    this.selectedSessionId = convId;
+    this.selectedSessionMeta = session;
+    this.messages = [];
+    this._allHistoryMessages = [];
+    this._historyLoaded = 0;
+    this.hasMoreHistory = false;
+    this.turns = [];
+
+    const isInteractive = session.source === 'interactive' &&
+      (session.user_id === this.userId || session.conversation_id === this.userId);
+    this.isActiveSession = isInteractive;
+
+    if (isInteractive) {
+      this.loadHistory();
+      this.loadStatus();
+    } else {
+      this.loadDetailHistory();
+    }
   },
 
   async loadHistory() {
@@ -92,6 +167,16 @@ export default () => ({
       const el = this.$refs.messages;
       if (el) scrollToBottom(el);
     });
+  },
+
+  async loadDetailHistory() {
+    const agent = this.$store.app.selectedAgent;
+    if (!agent || !this.selectedSessionId) return;
+    try {
+      let url = `/api/agents/${agent}/history?detail=true&session_id=${encodeURIComponent(this.selectedSessionId)}`;
+      const data = await get(url);
+      this.turns = data.turns || [];
+    } catch { /* ignore */ }
   },
 
   _showRecentHistory() {
@@ -122,17 +207,14 @@ export default () => ({
     this._historyLoaded = newShown;
     this.hasMoreHistory = startIdx > 0;
 
-    // Remove old "load more" separator at top
     if (this.messages.length > 0 && this.messages[0].type === 'separator') {
       this.messages.shift();
     }
-    // Insert new messages at top + new separator if needed
     if (this.hasMoreHistory) {
       this.messages.unshift(...newSlice, { type: 'separator', text: `${startIdx} earlier messages — load more ↑` });
     } else {
       this.messages.unshift(...newSlice);
     }
-    // Update bottom separator
     const lastSep = this.messages.findLastIndex(m => m.type === 'separator');
     if (lastSep >= 0) {
       this.messages[lastSep].text = `${this._historyLoaded} of ${all.length} messages loaded`;
@@ -192,12 +274,42 @@ export default () => ({
     this.compacting = true;
     try {
       await post(`/api/agents/${agent}/compact`, { user_id: this.userId });
-      await this.reload();
+      await this.loadHistory();
     } catch (e) {
       this.messages.push({ type: 'error', text: `Compact failed: ${e.message}` });
     } finally {
       this.compacting = false;
     }
+  },
+
+  async cancelSession(session) {
+    const id = session.id;
+    if (!id || !confirm(`Cancel session "${id}"?`)) return;
+    try {
+      await post(`/api/sessions/${id}/cancel`);
+      await this.loadSessions();
+    } catch (e) {
+      this.messages.push({ type: 'error', text: `Cancel failed: ${e.message}` });
+    }
+  },
+
+  async restartSession(session) {
+    const id = session.id;
+    if (!id) return;
+    try {
+      await post(`/api/sessions/${id}/restart`);
+      await this.loadSessions();
+    } catch (e) {
+      this.messages.push({ type: 'error', text: `Restart failed: ${e.message}` });
+    }
+  },
+
+  canCancel(s) {
+    return s?.state === 'running';
+  },
+
+  canRestart(s) {
+    return s?.state === 'failed' || s?.state === 'cancelled';
   },
 
   async submitAskUser(msgIndex, response) {
@@ -216,6 +328,42 @@ export default () => ({
 
   renderHtml(text) { return renderMarkdown(text); },
   escape(s) { return escapeHtml(s); },
+  formatDate(iso) { return formatDate(iso) || '—'; },
+  stateBadge(state) { return stateBadgeClass(state); },
+
+  sessionLabel(s) {
+    if (s.source === 'interactive' && (s.user_id === this.userId || s.conversation_id === this.userId)) {
+      return 'Interactive (you)';
+    }
+    return s.label || s.conversation_id || s.id || 'unknown';
+  },
+
+  extractMessages(turn) {
+    if (!turn.messages) return [];
+    const items = [];
+    for (const msg of turn.messages) {
+      if (msg.role === 'assistant') {
+        const codeMatch = msg.content?.match(/```(?:python)?\n([\s\S]*?)```/);
+        if (codeMatch) {
+          items.push({ type: 'tool_call', name: 'code', args: codeMatch[1] });
+        }
+        if (msg.tool_calls) {
+          for (const tc of msg.tool_calls) {
+            const fn = tc.function || {};
+            items.push({ type: 'tool_call', name: fn.name || 'unknown', args: fn.arguments || '{}' });
+          }
+        }
+      } else if (msg.role === 'user' && msg.content?.includes('<tsugite_execution_result>')) {
+        const content = msg.content.replace(/<\/?tsugite_execution_result>/g, '').trim();
+        const truncated = content.length > 500 ? content.slice(0, 500) + '...' : content;
+        items.push({ type: 'tool_result', name: 'result', content: truncated });
+      } else if (msg.role === 'tool') {
+        const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+        items.push({ type: 'tool_result', name: msg.name || '', content: content.length > 500 ? content.slice(0, 500) + '...' : content });
+      }
+    }
+    return items;
+  },
 
   addFiles(fileList) {
     for (const file of fileList) {
@@ -257,7 +405,6 @@ export default () => ({
     this.sending = true;
     this.messageText = '';
 
-    // Upload pending files
     let uploadedFiles = [];
     const fileNames = this.pendingFiles.map(f => f.name);
     if (this.pendingFiles.length) {
@@ -348,7 +495,6 @@ export default () => ({
 
       reader.cancel().catch(() => {});
 
-      // Finalize progress: collapse to summary or remove
       const prog = this.messages[progressIdx];
       if (prog && prog.type === 'progress') {
         if (prog.steps.length > 0) {
@@ -362,7 +508,6 @@ export default () => ({
         }
       }
     } catch (e) {
-      // Remove progress on connection error
       if (this.messages[progressIdx]?.type === 'progress') {
         this.messages.splice(progressIdx, 1);
       }
@@ -420,7 +565,6 @@ export default () => ({
       prog.steps.push({ html: `<span class="err">${escapeHtml(event.message)}</span>` });
     } else if (event.type === 'info') {
       prog.steps.push({ html: escapeHtml(event.message) });
-      // Show info as a visible chat bubble (issue #31)
       this.messages.push({ type: 'info', text: event.message });
       this.$nextTick(() => {
         const el = this.$refs.messages;

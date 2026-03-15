@@ -160,7 +160,7 @@ export default () => ({
 
   viewRunHistory(run) {
     this.$store.app.viewSessionId = run.id;
-    this.$store.app.view = 'history';
+    this.$store.app.view = 'conversations';
   },
 
   get formTitle() {

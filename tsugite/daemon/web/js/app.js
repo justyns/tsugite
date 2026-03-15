@@ -1,10 +1,8 @@
 import Alpine from 'https://cdn.jsdelivr.net/npm/alpinejs@3/dist/module.esm.js';
 import { get, post, patch, connectEvents } from './api.js';
-import chatView from './views/chat.js';
+import conversationsView from './views/conversations.js';
 import dashboardView from './views/dashboard.js';
 import scheduleView from './views/schedules.js';
-import sessionView from './views/sessions.js';
-import historyView from './views/history.js';
 import webhookView from './views/webhooks.js';
 import agentFileView from './views/agent-files.js';
 import skillFileView from './views/skills.js';
@@ -12,10 +10,14 @@ import skillFileView from './views/skills.js';
 window.Alpine = Alpine;
 window.tsugiteApi = { get, post, patch };
 
+const legacyViews = { chat: 'conversations', sessions: 'conversations', history: 'conversations' };
+const initialHash = location.hash.slice(1);
+const initialView = legacyViews[initialHash] || initialHash || localStorage.getItem('tsugite-view') || 'dashboard';
+
 Alpine.store('app', {
   agents: [],
   selectedAgent: localStorage.getItem('tsugite-agent') || null,
-  view: location.hash.slice(1) || localStorage.getItem('tsugite-view') || 'dashboard',
+  view: initialView,
   theme: localStorage.getItem('tsugite_theme') || 'frappe',
   userId: localStorage.getItem('tsugite_user_id') || 'web-user-1',
   showSettings: false,
@@ -23,18 +25,16 @@ Alpine.store('app', {
   viewSessionId: null,
 });
 
-Alpine.data('chatView', chatView);
+Alpine.data('conversationsView', conversationsView);
 Alpine.data('dashboardView', dashboardView);
 Alpine.data('scheduleView', scheduleView);
-Alpine.data('sessionView', sessionView);
-Alpine.data('historyView', historyView);
 Alpine.data('webhookView', webhookView);
 Alpine.data('agentFileView', agentFileView);
 Alpine.data('skillFileView', skillFileView);
 
 window.addEventListener('hashchange', () => {
   const hash = location.hash.slice(1);
-  if (hash) Alpine.store('app').view = hash;
+  if (hash) Alpine.store('app').view = legacyViews[hash] || hash;
 });
 
 Alpine.start();
