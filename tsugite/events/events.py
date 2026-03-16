@@ -92,6 +92,14 @@ class SkillLoadFailedEvent(BaseEvent):
     error_message: str
 
 
+class ContentBlockEvent(BaseEvent):
+    """Content block defined by the agent (escape-free file content)."""
+
+    event_type: EventType = Field(default=EventType.CONTENT_BLOCK, frozen=True)
+    name: str
+    content: str
+
+
 class FinalAnswerEvent(BaseEvent):
     """Agent completed."""
 

@@ -4,6 +4,7 @@ from .base import BaseEvent, EventType
 from .bus import EventBus
 from .events import (
     CodeExecutionEvent,
+    ContentBlockEvent,
     CostSummaryEvent,
     DebugMessageEvent,
     ErrorEvent,
@@ -38,6 +39,7 @@ __all__ = [
     "StepStartEvent",
     "CodeExecutionEvent",
     "ObservationEvent",
+    "ContentBlockEvent",
     "FinalAnswerEvent",
     # LLM
     "LLMMessageEvent",

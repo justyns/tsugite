@@ -429,7 +429,7 @@ export default () => ({
     });
 
     const progressIdx = this.messages.length;
-    this.messages.push({ type: 'progress', steps: [], statusText: 'Working...', turnCount: 0, toolCount: 0 });
+    this.messages.push({ type: 'progress', steps: [], statusText: 'Working...', turnCount: 0, toolCount: 0, contentBlocks: {} });
 
     try {
       const chatBody = { message: msg, user_id: this.userId };
@@ -482,7 +482,9 @@ export default () => ({
             });
           } else if (event.type === 'final_result') {
             gotResult = true;
-            this.messages.push({ type: 'agent', text: event.result });
+            const prog = this.messages[progressIdx];
+            const blocks = prog && Object.keys(prog.contentBlocks || {}).length ? prog.contentBlocks : null;
+            this.messages.push({ type: 'agent', text: event.result, contentBlocks: blocks });
           } else if (event.type === 'session_info') {
             this.updateStatusFromEvent(event);
           } else if (event.type === 'error') {
@@ -541,6 +543,9 @@ export default () => ({
     } else if (event.type === 'init') {
       prog.statusText = `Agent: ${event.agent}`;
       if (event.model) this.statusInfo = { ...this.statusInfo, model: event.model };
+    } else if (event.type === 'content_block') {
+      prog.contentBlocks[event.name] = event.content || '';
+      prog.steps.push({ html: `<details class="content-block"><summary><code>${escapeHtml(event.name)}</code> (content block)</summary><pre><code>${escapeHtml(event.content || '')}</code></pre></details>` });
     } else if (event.type === 'code') {
       prog.steps.push({ html: `<details><summary><code>code</code></summary><pre><code>${escapeHtml(event.content || '')}</code></pre></details>` });
     } else if (event.type === 'tool_result') {

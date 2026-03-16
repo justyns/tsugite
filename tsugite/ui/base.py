@@ -13,6 +13,7 @@ from rich.syntax import Syntax
 from tsugite.events import (
     BaseEvent,
     CodeExecutionEvent,
+    ContentBlockEvent,
     CostSummaryEvent,
     DebugMessageEvent,
     ErrorEvent,
@@ -119,6 +120,7 @@ class CustomUIHandler:
         StepStartEvent: "_handle_step_start",
         CodeExecutionEvent: "_handle_code_execution",
         ObservationEvent: "_handle_observation",
+        ContentBlockEvent: "_handle_content_block",
         FinalAnswerEvent: "_handle_final_answer",
         ErrorEvent: "_handle_error",
         LLMMessageEvent: "_handle_llm_message",
@@ -257,6 +259,10 @@ class CustomUIHandler:
         if self.state.steps_history:
             self.state.steps_history[-1]["actions"].append({"type": "observation", "content": observation})
             self.state.steps_history[-1]["status"] = "completed"
+
+    def _handle_content_block(self, event: ContentBlockEvent) -> None:
+        """Handle content block event."""
+        pass
 
     def _handle_final_answer(self, event: FinalAnswerEvent) -> None:
         """Handle final answer event."""

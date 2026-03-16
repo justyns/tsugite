@@ -42,6 +42,9 @@ class EventType(IntEnum):
     TOOL_CALL = 25
     TOOL_RESULT = 26
 
+    # Content events
+    CONTENT_BLOCK = 28
+
 
 class BaseEvent(BaseModel):
     """Base class for all UI events."""

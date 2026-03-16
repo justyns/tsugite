@@ -7,6 +7,7 @@ from typing import Generator
 from tsugite.console import get_stderr_console
 from tsugite.events import (
     CodeExecutionEvent,
+    ContentBlockEvent,
     CostSummaryEvent,
     ErrorEvent,
     FileReadEvent,

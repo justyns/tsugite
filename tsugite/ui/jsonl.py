@@ -6,6 +6,7 @@ from typing import Any, Dict
 from tsugite.events import (
     BaseEvent,
     CodeExecutionEvent,
+    ContentBlockEvent,
     ErrorEvent,
     FileReadEvent,
     FileWriteEvent,
@@ -61,6 +62,7 @@ class JSONLUIHandler:
         LLMMessageEvent: "_handle_llm_message",
         CodeExecutionEvent: "_handle_code_execution",
         ObservationEvent: "_handle_observation",
+        ContentBlockEvent: "_handle_content_block",
         FinalAnswerEvent: "_handle_final_answer",
         ErrorEvent: "_handle_error",
         SkillLoadedEvent: "_handle_skill_loaded",
@@ -101,6 +103,9 @@ class JSONLUIHandler:
                 "tool_result",
                 {"tool": event.tool or "unknown", "success": False, "error": event.error or event.observation},
             )
+
+    def _handle_content_block(self, event: ContentBlockEvent) -> None:
+        self._emit("content_block", {"name": event.name, "content": event.content})
 
     def _handle_final_answer(self, event: FinalAnswerEvent) -> None:
         self._emit(

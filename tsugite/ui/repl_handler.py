@@ -13,6 +13,7 @@ from rich.syntax import Syntax
 from tsugite.events import (
     BaseEvent,
     CodeExecutionEvent,
+    ContentBlockEvent,
     CostSummaryEvent,
     DebugMessageEvent,
     ErrorEvent,
@@ -79,6 +80,7 @@ class ReplUIHandler:
         StepStartEvent: "_handle_step_start",
         CodeExecutionEvent: "_handle_code_execution",
         ObservationEvent: "_handle_observation",
+        ContentBlockEvent: "_handle_content_block",
         FinalAnswerEvent: "_handle_final_answer",
         ErrorEvent: "_handle_error",
         LLMMessageEvent: "_handle_llm_message",

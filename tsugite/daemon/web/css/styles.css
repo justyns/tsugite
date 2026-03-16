@@ -50,6 +50,12 @@ main { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
 .tool-steps pre { font-size: 11px; max-height: 150px; overflow: auto; margin: 4px 0; }
 .tool-summary { font-size: 12px; color: var(--muted); margin-top: 4px; }
 
+/* Content blocks */
+.content-block { margin: 4px 0; }
+.content-block summary { cursor: pointer; font-size: 12px; color: var(--muted); }
+.content-block pre { font-size: 12px; max-height: 300px; overflow: auto; margin: 4px 0; background: var(--code-bg); padding: 8px; border-radius: 4px; }
+.content-blocks { margin-bottom: 8px; border-left: 2px solid var(--accent); padding-left: 8px; }
+
 /* Spinner */
 .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--muted); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: middle; margin-right: 6px; }
 @keyframes spin { to { transform: rotate(360deg); } }

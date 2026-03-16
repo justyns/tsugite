@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 from tsugite.attachments.base import Attachment, AttachmentContentType
 from tsugite.events import (
     CodeExecutionEvent,
+    ContentBlockEvent,
     CostSummaryEvent,
     ErrorEvent,
     EventBus,
@@ -394,8 +395,11 @@ class TsugiteAgent:
                     "Turn %d response (cost=%.4f): %.200s", turn_num + 1, turn.step_cost, (thought or "")[:200]
                 )
 
-                # Inject content blocks into executor namespace
+                # Emit and inject content blocks into executor namespace
                 if turn.content_blocks:
+                    if self.event_bus:
+                        for cb_name, cb_content in turn.content_blocks.items():
+                            self.event_bus.emit(ContentBlockEvent(name=cb_name, content=cb_content))
                     await self.executor.inject_content_blocks(turn.content_blocks)
 
                 # Only execute code if the LLM actually generated some
