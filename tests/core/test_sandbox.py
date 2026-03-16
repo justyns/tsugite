@@ -101,6 +101,52 @@ class TestBuildCommand:
         assert "HTTP_PROXY" not in cmd
 
 
+    def test_cert_symlink_resolution(self):
+        """Cert symlink target directory gets bound (Arch: /etc/ssl/cert.pem -> /etc/ca-certificates/...)."""
+        config = SandboxConfig()
+        sandbox = BubblewrapSandbox(config=config, workspace_dir=Path("/home/user/project"))
+        cmd = sandbox.build_command(["python3", "harness.py"])
+        ro_binds = []
+        for i, v in enumerate(cmd):
+            if v == "--ro-bind" and i + 2 < len(cmd):
+                ro_binds.append(cmd[i + 1])
+        # The real cert path (resolved from symlink) should be in the ro-binds,
+        # unless it's already under /usr or /etc/ssl
+        cert_pem = Path("/etc/ssl/cert.pem")
+        if cert_pem.exists() and cert_pem.is_symlink():
+            real_dir = str(cert_pem.resolve().parent)
+            if not real_dir.startswith("/usr") and not real_dir.startswith("/etc/ssl"):
+                assert real_dir in ro_binds, f"Expected {real_dir} in ro-binds"
+
+    def test_extra_ro_binds(self):
+        """extra_ro_binds paths appear as --ro-bind in command."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            extra = Path(tmpdir)
+            config = SandboxConfig(extra_ro_binds=[extra])
+            sandbox = BubblewrapSandbox(config=config, workspace_dir=Path("/home/user/project"))
+            cmd = sandbox.build_command(["python3", "harness.py"])
+            ro_binds = [cmd[i + 1] for i, v in enumerate(cmd) if v == "--ro-bind" and i + 1 < len(cmd)]
+            assert str(extra) in ro_binds
+
+    def test_extra_rw_binds(self):
+        """extra_rw_binds paths appear as --bind (rw) in command."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            extra = Path(tmpdir)
+            config = SandboxConfig(extra_rw_binds=[extra])
+            sandbox = BubblewrapSandbox(config=config, workspace_dir=Path("/home/user/project"))
+            cmd = sandbox.build_command(["python3", "harness.py"])
+            rw_binds = [cmd[i + 1] for i, v in enumerate(cmd) if v == "--bind" and i + 1 < len(cmd)]
+            assert str(extra) in rw_binds
+
+    def test_use_proxy_property(self):
+        """_use_proxy is True only when proxy_socket set and no_network is False."""
+        config = SandboxConfig()
+        assert BubblewrapSandbox(config=config, proxy_socket=Path("/tmp/p.sock"))._use_proxy is True
+        assert BubblewrapSandbox(config=config)._use_proxy is False
+        config_no_net = SandboxConfig(no_network=True)
+        assert BubblewrapSandbox(config=config_no_net, proxy_socket=Path("/tmp/p.sock"))._use_proxy is False
+
+
 class TestCheckAvailable:
     def test_available(self):
         with patch("shutil.which", return_value="/usr/bin/bwrap"):

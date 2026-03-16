@@ -1,6 +1,8 @@
 """Tests for subprocess-based code executor."""
 
+import os
 import shutil
+import tempfile
 
 import pytest
 
@@ -208,6 +210,109 @@ async def test_multiple_tool_calls():
         assert result.error is None
         assert "Hello, Alice!" in result.output
         assert "Hello, Bob!" in result.output
+    finally:
+        executor.cleanup()
+
+
+@pytest.mark.skipif(not shutil.which("bwrap"), reason="bwrap not installed")
+@pytest.mark.asyncio
+async def test_sandbox_blocks_filesystem_read():
+    """Sandbox can't read files outside workspace (e.g., /etc/passwd)."""
+    from pathlib import Path
+
+    from tsugite.core.sandbox import SandboxConfig
+
+    with tempfile.TemporaryDirectory() as workspace:
+        config = SandboxConfig(no_network=True)
+        executor = SubprocessExecutor(workspace_dir=Path(workspace), sandbox_config=config)
+        try:
+            result = await executor.execute(
+                "import os\n"
+                "try:\n"
+                "    with __builtins__['open']('/etc/passwd', 'r') as f:\n"
+                "        print('READ:', f.read()[:20])\n"
+                "except Exception as e:\n"
+                "    print(f'BLOCKED: {type(e).__name__}')\n"
+            )
+            assert result.error is None
+            assert "BLOCKED:" in result.output
+            assert "READ:" not in result.output
+        finally:
+            executor.cleanup()
+
+
+@pytest.mark.skipif(not shutil.which("bwrap"), reason="bwrap not installed")
+@pytest.mark.asyncio
+async def test_sandbox_blocks_sensitive_dotfiles():
+    """Sandbox can't read ~/.ssh, ~/.gnupg, ~/.bashrc even though home is partially visible."""
+    from pathlib import Path
+
+    from tsugite.core.sandbox import SandboxConfig
+
+    config = SandboxConfig(no_network=True)
+    executor = SubprocessExecutor(sandbox_config=config)
+    try:
+        result = await executor.execute(
+            "import os\n"
+            "home = os.path.expanduser('~')\n"
+            "blocked = 0\n"
+            "for name in ['.ssh', '.gnupg', '.bashrc', '.config']:\n"
+            "    path = os.path.join(home, name)\n"
+            "    if not os.path.exists(path):\n"
+            "        blocked += 1\n"
+            "    else:\n"
+            "        print(f'LEAKED: {name}')\n"
+            "print(f'BLOCKED: {blocked}/4')\n"
+        )
+        assert result.error is None
+        assert "LEAKED:" not in result.output
+        assert "BLOCKED: 4/4" in result.output
+    finally:
+        executor.cleanup()
+
+
+@pytest.mark.skipif(not shutil.which("bwrap"), reason="bwrap not installed")
+@pytest.mark.asyncio
+async def test_sandbox_write_isolation():
+    """Writes to /tmp inside sandbox don't escape to host /tmp."""
+    from pathlib import Path
+
+    from tsugite.core.sandbox import SandboxConfig
+
+    marker = f"sandbox_escape_test_{os.getpid()}.txt"
+    host_path = os.path.join("/tmp", marker)
+
+    config = SandboxConfig(no_network=True)
+    executor = SubprocessExecutor(sandbox_config=config)
+    try:
+        result = await executor.execute(
+            f"with __builtins__['open']('/tmp/{marker}', 'w') as f:\n"
+            "    f.write('escaped')\n"
+            "print('WROTE')\n"
+        )
+        assert result.error is None
+        assert "WROTE" in result.output
+        assert not os.path.exists(host_path), "File escaped sandbox to host /tmp"
+    finally:
+        executor.cleanup()
+        # Clean up just in case
+        if os.path.exists(host_path):
+            os.unlink(host_path)
+
+
+@pytest.mark.skipif(not shutil.which("bwrap"), reason="bwrap not installed")
+@pytest.mark.asyncio
+async def test_sandbox_pid_namespace():
+    """Sandbox process runs in an isolated PID namespace."""
+    from tsugite.core.sandbox import SandboxConfig
+
+    config = SandboxConfig(no_network=True)
+    executor = SubprocessExecutor(sandbox_config=config)
+    try:
+        result = await executor.execute("import os\nprint(os.getpid())")
+        assert result.error is None
+        pid = int(result.output.strip())
+        assert pid < 100, f"PID {pid} suggests PID namespace is not isolated"
     finally:
         executor.cleanup()
 

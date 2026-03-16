@@ -112,6 +112,42 @@ class TestProxyLifecycle:
                 await proxy.stop()
 
     @pytest.mark.asyncio
+    async def test_non_connect_method_rejected(self):
+        """Only CONNECT is supported; GET/POST should get 400."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sock_path = Path(tmpdir) / "proxy.sock"
+            proxy = ConnectProxy(socket_path=sock_path, allowed_domains=["*:*"])
+            await proxy.start()
+            try:
+                reader, writer = await asyncio.open_unix_connection(str(sock_path))
+                writer.write(b"GET http://example.com/ HTTP/1.1\r\nHost: example.com\r\n\r\n")
+                await writer.drain()
+                response = await asyncio.wait_for(reader.read(4096), timeout=5)
+                assert b"400 Bad Request" in response
+                assert b"Only CONNECT supported" in response
+            finally:
+                writer.close()
+                await proxy.stop()
+
+    @pytest.mark.asyncio
+    async def test_connect_default_port(self):
+        """CONNECT without port defaults to 443."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sock_path = Path(tmpdir) / "proxy.sock"
+            # Allow only port 22 — default port 443 should be blocked
+            proxy = ConnectProxy(socket_path=sock_path, allowed_domains=["example.com:22"])
+            await proxy.start()
+            try:
+                reader, writer = await asyncio.open_unix_connection(str(sock_path))
+                writer.write(b"CONNECT example.com HTTP/1.1\r\nHost: example.com\r\n\r\n")
+                await writer.drain()
+                response = await asyncio.wait_for(reader.read(4096), timeout=5)
+                assert b"403 Forbidden" in response
+            finally:
+                writer.close()
+                await proxy.stop()
+
+    @pytest.mark.asyncio
     async def test_malformed_port_rejected(self):
         """Malformed port in CONNECT target should get 400."""
         with tempfile.TemporaryDirectory() as tmpdir:
