@@ -143,8 +143,11 @@ class BubblewrapSandbox:
             if p.exists():
                 cmd += ["--ro-bind", sys_dir, sys_dir]
 
-        # CA certificates: resolve symlinks to find the real path (varies by distro)
+        # CA certificates: resolve symlinks to find the real path (varies by distro).
+        # Check both bundle files and the cert.pem symlink (Arch/EndeavourOS uses
+        # /etc/ssl/cert.pem -> /etc/ca-certificates/extracted/tls-ca-bundle.pem).
         for cert_path in [
+            "/etc/ssl/cert.pem",
             "/etc/ssl/certs/ca-certificates.crt",
             "/etc/ssl/certs/ca-bundle.crt",
             "/etc/pki/tls/certs/ca-bundle.crt",
