@@ -168,7 +168,13 @@ export default () => ({
           continue;
         }
         if (turn.user) this._allHistoryMessages.push({ type: 'user', text: turn.user });
-        if (turn.assistant) this._allHistoryMessages.push({ type: 'agent', text: turn.assistant });
+        if (turn.assistant) {
+          const msg = { type: 'agent', text: turn.assistant };
+          if (turn.content_blocks && Object.keys(turn.content_blocks).length) {
+            msg.contentBlocks = turn.content_blocks;
+          }
+          this._allHistoryMessages.push(msg);
+        }
       }
       this._showRecentHistory();
     } catch { /* ignore */ }

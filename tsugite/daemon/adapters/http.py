@@ -28,6 +28,7 @@ from tsugite.daemon.config import AgentConfig, HTTPConfig
 from tsugite.daemon.scheduler import ScheduleEntry
 from tsugite.daemon.webhook_store import WebhookStore
 from tsugite.events.base import BaseEvent
+from tsugite.core.content_blocks import extract_content_blocks
 from tsugite.history.models import CompactionSummary, Turn
 from tsugite.history.storage import SessionStorage, get_history_dir
 from tsugite.skill_discovery import get_builtin_skills_path
@@ -615,12 +616,22 @@ class HTTPServer:
                     content = msg.get("content", "")
                     user_msg = content if isinstance(content, str) else str(content)
                     break
+            content_blocks = {}
+            for msg in item.messages:
+                if msg.get("role") == "assistant":
+                    content = msg.get("content", "")
+                    if isinstance(content, str) and "<content" in content:
+                        _, blocks = extract_content_blocks(content)
+                        content_blocks.update(blocks)
+
             turn_data = {
                 "user": user_msg,
                 "assistant": item.final_answer or "",
                 "timestamp": item.timestamp.isoformat() if item.timestamp else None,
                 "tools_used": item.functions_called or [],
             }
+            if content_blocks:
+                turn_data["content_blocks"] = content_blocks
             if detail:
                 turn_data["messages"] = item.messages
             result_turns.append(turn_data)
