@@ -2,13 +2,13 @@
 
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from tsugite.daemon.adapters.base import BaseAdapter, ChannelContext, _is_recent
 from tsugite.daemon.config import AgentConfig
-from tsugite.daemon.session_store import Session, SessionSource, SessionStatus, SessionStore
+from tsugite.daemon.session_store import Session, SessionStore
 
 
 class _StubAdapter(BaseAdapter):
@@ -107,9 +107,7 @@ class TestBuildAgentContext:
         adapter = _make_adapter(workspace_dir, tmp_store)
         # Session completed 8 minutes ago
         ts = (datetime.now(timezone.utc) - timedelta(minutes=8)).isoformat()
-        completed = Session(
-            id="sess-3", agent="worker", source="background", status="completed", last_active=ts
-        )
+        completed = Session(id="sess-3", agent="worker", source="background", status="completed", last_active=ts)
         tmp_store.create_session(completed)
 
         # Default window (10 min) should include it
@@ -139,7 +137,8 @@ class TestBuildAgentContext:
 class TestRunIfWithSessions:
     def test_run_if_sessions_guard(self):
         from tsugite.agent_preparation import AgentPreparer
-        from tsugite.md_agents import Agent, AgentConfig as MdAgentConfig
+        from tsugite.md_agents import Agent
+        from tsugite.md_agents import AgentConfig as MdAgentConfig
 
         config = MdAgentConfig(
             name="orchestrator",

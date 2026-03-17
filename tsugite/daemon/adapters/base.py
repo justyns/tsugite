@@ -307,7 +307,13 @@ class BaseAdapter(ABC):
         for s in self.session_store.list_sessions():
             if s.status == "running":
                 active_sessions.append(
-                    {"id": s.id, "agent": s.agent, "status": s.status, "prompt": (s.prompt or "")[:100], "source": s.source}
+                    {
+                        "id": s.id,
+                        "agent": s.agent,
+                        "status": s.status,
+                        "prompt": (s.prompt or "")[:100],
+                        "source": s.source,
+                    }
                 )
             elif s.status in ("completed", "failed") and _is_recent(s.last_active, minutes=window_minutes, now=now):
                 recent_completions.append(

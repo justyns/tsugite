@@ -100,7 +100,6 @@ class TestBuildCommand:
         assert "--unshare-net" not in cmd
         assert "HTTP_PROXY" not in cmd
 
-
     def test_cert_symlink_resolution(self):
         """Cert symlink target directory gets bound (Arch: /etc/ssl/cert.pem -> /etc/ca-certificates/...)."""
         config = SandboxConfig()

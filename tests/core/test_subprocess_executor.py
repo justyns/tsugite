@@ -245,7 +245,6 @@ async def test_sandbox_blocks_filesystem_read():
 @pytest.mark.asyncio
 async def test_sandbox_blocks_sensitive_dotfiles():
     """Sandbox can't read ~/.ssh, ~/.gnupg, ~/.bashrc even though home is partially visible."""
-    from pathlib import Path
 
     from tsugite.core.sandbox import SandboxConfig
 
@@ -275,7 +274,6 @@ async def test_sandbox_blocks_sensitive_dotfiles():
 @pytest.mark.asyncio
 async def test_sandbox_write_isolation():
     """Writes to /tmp inside sandbox don't escape to host /tmp."""
-    from pathlib import Path
 
     from tsugite.core.sandbox import SandboxConfig
 
@@ -286,9 +284,7 @@ async def test_sandbox_write_isolation():
     executor = SubprocessExecutor(sandbox_config=config)
     try:
         result = await executor.execute(
-            f"with __builtins__['open']('/tmp/{marker}', 'w') as f:\n"
-            "    f.write('escaped')\n"
-            "print('WROTE')\n"
+            f"with __builtins__['open']('/tmp/{marker}', 'w') as f:\n    f.write('escaped')\nprint('WROTE')\n"
         )
         assert result.error is None
         assert "WROTE" in result.output
