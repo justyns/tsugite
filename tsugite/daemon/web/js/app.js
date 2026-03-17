@@ -15,12 +15,14 @@ const initialHash = location.hash.slice(1);
 const initialView = legacyViews[initialHash] || initialHash || localStorage.getItem('tsugite-view') || 'dashboard';
 
 Alpine.store('app', {
+  tabs: ['dashboard','conversations','workspace','agents','skills','schedules','webhooks'],
   agents: [],
   selectedAgent: localStorage.getItem('tsugite-agent') || null,
   view: initialView,
   theme: localStorage.getItem('tsugite_theme') || 'frappe',
   userId: localStorage.getItem('tsugite_user_id') || 'web-user-1',
   showSettings: false,
+  menuOpen: false,
   lastEvent: null,
   viewSessionId: null,
   pendingWorkspaceFiles: [],

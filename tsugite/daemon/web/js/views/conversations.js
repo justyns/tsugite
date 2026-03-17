@@ -2,6 +2,7 @@ import { get, post, streamPost, uploadFiles } from '../api.js';
 import { escapeHtml, renderMarkdown, scrollToBottom, formatDate, formatFileSize, stateBadgeClass } from '../utils.js';
 
 export default () => ({
+  sidebarOpen: false,
   messages: [],
   _allHistoryMessages: [],
   _historyLoaded: 0,
@@ -129,6 +130,7 @@ export default () => ({
   },
 
   selectSession(session) {
+    this.sidebarOpen = false;
     const convId = session.conversation_id || session.id;
     this.selectedSessionId = convId;
     this.selectedSessionMeta = session;

@@ -2,6 +2,7 @@ import { get, put, post } from '../api.js';
 import { formatDate, formatFileSize } from '../utils.js';
 
 export default () => ({
+  sidebarOpen: false,
   files: [],
   loading: true,
   error: null,
@@ -60,6 +61,7 @@ export default () => ({
 
   async selectFile(file) {
     if (this.isDirty && !confirm('You have unsaved changes. Discard?')) return;
+    this.sidebarOpen = false;
     this.selectedFile = file;
     this.content = '';
     this.originalContent = '';

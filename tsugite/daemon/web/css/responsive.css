@@ -1,8 +1,9 @@
 /* Touch targets for coarse pointers (mobile, tablets) */
 @media (pointer: coarse) {
   .btn-sm { min-height: 44px; min-width: 44px; padding: 8px 14px; }
+  #status-bar .btn-sm { min-height: 36px; min-width: 36px; padding: 4px 10px; }
   .tab-bar button { min-height: 44px; padding: 8px 12px; }
-  #settings-btn { min-height: 44px; }
+  .settings-btn { min-height: 44px; }
   nav select { min-height: 44px; }
   .turn-item { min-height: 44px; }
   .form-group input, .form-group select, .form-group textarea { min-height: 44px; }
@@ -69,37 +70,79 @@
     padding-top: env(safe-area-inset-top);
   }
 
-  /* Nav: title + agent selector on top, tabs fixed at bottom */
   nav {
     flex-wrap: wrap;
     padding: 8px 12px;
   }
 
-  .tab-bar {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    z-index: 20;
-    background: var(--surface);
-    border-top: 1px solid var(--border);
-    padding: 4px 8px env(safe-area-inset-bottom);
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    justify-content: flex-start;
-  }
-
-  .tab-bar button {
-    font-size: 12px;
-    white-space: nowrap;
-    flex-shrink: 0;
-  }
-
   .spacer { display: none; }
 
-  /* Main content clears fixed tab bar */
+  /* Hamburger button */
+  .menu-toggle {
+    display: flex; flex-direction: column; gap: 4px;
+    background: none; border: none; cursor: pointer; padding: 8px;
+  }
+  .menu-toggle span {
+    display: block; width: 20px; height: 2px;
+    background: var(--text); border-radius: 1px;
+    transition: transform 0.2s, opacity 0.2s;
+  }
+
+  /* Slide-out nav menu overlay */
+  .nav-menu {
+    display: block;
+    position: fixed; inset: 0; z-index: 30;
+    background: rgba(0,0,0,0); pointer-events: none;
+    transition: background 0.2s;
+  }
+  .nav-menu.open {
+    background: rgba(0,0,0,0.5); pointer-events: auto;
+  }
+  .nav-menu-panel {
+    width: 260px; height: 100%; background: var(--surface);
+    border-right: 1px solid var(--border); padding: 16px;
+    display: flex; flex-direction: column; gap: 4px;
+    transform: translateX(-100%); transition: transform 0.2s ease;
+  }
+  .nav-menu.open .nav-menu-panel { transform: translateX(0); }
+  .nav-menu .tab-bar { flex-direction: column; width: 100%; }
+  .nav-menu .tab-bar button { text-align: left; width: 100%; }
+
+  /* Hide tab bar + settings from top nav (they live in the slide-out menu) */
+  nav > .tab-bar,
+  nav > .settings-btn { display: none; }
+
   main {
-    padding-bottom: 60px;
+    padding-bottom: 0;
+  }
+
+  /* Collapsible sidebar panels */
+  .sidebar-toggle {
+    display: flex; align-items: center; gap: 6px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 6px; padding: 6px 12px; margin-bottom: 8px;
+    color: var(--muted); font-size: 12px; cursor: pointer; width: 100%;
+  }
+  .sidebar-toggle:hover { color: var(--text); border-color: var(--accent); }
+  .sidebar-toggle-arrow { transition: transform 0.2s; }
+  .sidebar-toggle-arrow.open { transform: rotate(180deg); }
+
+  .pane-sidebar {
+    max-height: 0; overflow: hidden; width: 100%;
+    transition: max-height 0.2s ease;
+  }
+  .pane-sidebar.sidebar-open {
+    max-height: 50vh; overflow-y: auto;
+  }
+
+  /* Multiline input hint */
+  .input-hint {
+    display: block;
+    font-size: 11px;
+    color: var(--muted);
+    align-self: center;
+    white-space: nowrap;
+    opacity: 0.6;
   }
 
   /* Chat messages wider on mobile */

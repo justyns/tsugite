@@ -11,8 +11,8 @@ nav h1 { font-size: 15px; font-weight: 600; margin-right: 8px; }
 .tab-bar button.active { color: var(--text); background: var(--bg); border-color: var(--border); }
 .spacer { flex: 1; }
 nav select { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px; font-size: 13px; }
-#settings-btn { background: none; border: 1px solid var(--border); color: var(--muted); border-radius: 6px; padding: 5px 10px; cursor: pointer; font-size: 13px; }
-#settings-btn:hover { color: var(--text); border-color: var(--text); }
+.settings-btn { background: none; border: 1px solid var(--border); color: var(--muted); border-radius: 6px; padding: 5px 10px; cursor: pointer; font-size: 13px; }
+.settings-btn:hover { color: var(--text); border-color: var(--text); }
 
 /* Main content area */
 main { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
@@ -191,3 +191,9 @@ main { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
 .two-pane { display: flex; gap: 16px; }
 .pane-sidebar { width: 280px; flex-shrink: 0; overflow-y: auto; }
 .pane-detail { flex: 1; min-width: 0; }
+
+/* Mobile UI elements — hidden on desktop */
+.menu-toggle { display: none; }
+.nav-menu { display: none; }
+.sidebar-toggle { display: none; }
+.input-hint { display: none; }

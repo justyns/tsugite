@@ -2,6 +2,7 @@ import { get, put } from '../api.js';
 
 export default function fileEditorView(viewName, apiPrefix) {
   return () => ({
+    sidebarOpen: false,
     files: [],
     loading: true,
     error: null,
@@ -47,6 +48,7 @@ export default function fileEditorView(viewName, apiPrefix) {
 
     async selectFile(file) {
       if (this.isDirty && !confirm('You have unsaved changes. Discard?')) return;
+      this.sidebarOpen = false;
       this.selectedFile = file;
       this.content = '';
       this.originalContent = '';

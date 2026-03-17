@@ -17,17 +17,34 @@
 <body x-data :data-theme="$store.app.theme">
 
 <nav>
+  <button class="menu-toggle" @click="$store.app.menuOpen = !$store.app.menuOpen" aria-label="Menu">
+    <span></span><span></span><span></span>
+  </button>
   <h1>Tsugite</h1>
   <div class="tab-bar">
-    <template x-for="tab in ['dashboard','conversations','workspace','agents','skills','schedules','webhooks']" :key="tab">
-      <button @click="$store.app.view = tab; location.hash = tab"
+    <template x-for="tab in $store.app.tabs" :key="tab">
+      <button @click="$store.app.view = tab; location.hash = tab; $store.app.menuOpen = false"
               :class="{ active: $store.app.view === tab }"
               x-text="tab[0].toUpperCase() + tab.slice(1)"></button>
     </template>
   </div>
   <span class="spacer"></span>
-  <button id="settings-btn" @click="$store.app.showSettings = true">Settings</button>
+  <button class="settings-btn" @click="$store.app.showSettings = true">Settings</button>
 </nav>
+
+<div class="nav-menu" :class="{ open: $store.app.menuOpen }"
+     @click.self="$store.app.menuOpen = false">
+  <div class="nav-menu-panel">
+    <div class="tab-bar">
+      <template x-for="tab in $store.app.tabs" :key="tab">
+        <button @click="$store.app.view = tab; location.hash = tab; $store.app.menuOpen = false"
+                :class="{ active: $store.app.view === tab }"
+                x-text="tab[0].toUpperCase() + tab.slice(1)"></button>
+      </template>
+    </div>
+    <button class="settings-btn" @click="$store.app.showSettings = true; $store.app.menuOpen = false">Settings</button>
+  </div>
+</div>
 
 <main>
   <!-- Dashboard -->
@@ -88,7 +105,7 @@
        style="position:relative">
     <div class="view-scroll two-pane" style="height:100%; overflow:hidden">
       <!-- Session sidebar -->
-      <div class="pane-sidebar">
+      <div class="pane-sidebar" :class="{ 'sidebar-open': sidebarOpen }">
         <div class="section-header"><h2>Sessions</h2></div>
         <template x-if="loading">
           <div class="empty-state"><span class="spinner"></span></div>
@@ -113,6 +130,10 @@
 
       <!-- Main panel -->
       <div class="pane-detail" style="display:flex;flex-direction:column;min-height:0">
+        <button class="sidebar-toggle" @click="sidebarOpen = !sidebarOpen">
+          <span class="sidebar-toggle-arrow" :class="{ open: sidebarOpen }">▾</span>
+          <span x-text="sidebarOpen ? 'Hide Sessions' : 'Sessions'"></span>
+        </button>
         <template x-if="!selectedSessionId">
           <div class="empty-state">Select a session</div>
         </template>
@@ -275,6 +296,7 @@
               <textarea id="message-input" x-model="messageText" rows="1"
                         placeholder="Send a message..." autofocus
                         @keydown="onInputKeydown" @input="autoResize"></textarea>
+              <span class="input-hint">Shift+Enter for newline</span>
               <button id="send-btn" @click="sendMessage()" :disabled="sending">Send</button>
             </div>
           </div>
@@ -441,7 +463,7 @@
   <div class="view" x-show="$store.app.view === 'workspace'" x-data="workspaceView" x-cloak>
     <div class="view-scroll two-pane" style="height:100%; overflow:hidden">
       <!-- File list -->
-      <div class="pane-sidebar">
+      <div class="pane-sidebar" :class="{ 'sidebar-open': sidebarOpen }">
         <div class="section-header">
           <h2>Workspace</h2>
         </div>
@@ -472,6 +494,10 @@
 
       <!-- Editor / Viewer -->
       <div class="pane-detail" style="display:flex;flex-direction:column">
+        <button class="sidebar-toggle" @click="sidebarOpen = !sidebarOpen">
+          <span class="sidebar-toggle-arrow" :class="{ open: sidebarOpen }">▾</span>
+          <span x-text="sidebarOpen ? 'Hide Files' : 'Files'"></span>
+        </button>
         <template x-if="!selectedFile">
           <div class="empty-state">Select a file to view</div>
         </template>
@@ -516,7 +542,7 @@
   <div class="view" x-show="$store.app.view === 'agents'" x-data="agentFileView" x-cloak>
     <div class="view-scroll two-pane" style="height:100%; overflow:hidden">
       <!-- File list -->
-      <div class="pane-sidebar">
+      <div class="pane-sidebar" :class="{ 'sidebar-open': sidebarOpen }">
         <div class="section-header">
           <h2>Agent Files</h2>
           <select x-model="filter" style="font-size:12px;padding:2px 4px">
@@ -550,6 +576,10 @@
 
       <!-- Editor -->
       <div class="pane-detail" style="display:flex;flex-direction:column">
+        <button class="sidebar-toggle" @click="sidebarOpen = !sidebarOpen">
+          <span class="sidebar-toggle-arrow" :class="{ open: sidebarOpen }">▾</span>
+          <span x-text="sidebarOpen ? 'Hide Agents' : 'Agents'"></span>
+        </button>
         <template x-if="!selectedFile">
           <div class="empty-state">Select an agent file to view</div>
         </template>
@@ -584,7 +614,7 @@
   <div class="view" x-show="$store.app.view === 'skills'" x-data="skillFileView" x-cloak>
     <div class="view-scroll two-pane" style="height:100%; overflow:hidden">
       <!-- File list -->
-      <div class="pane-sidebar">
+      <div class="pane-sidebar" :class="{ 'sidebar-open': sidebarOpen }">
         <div class="section-header">
           <h2>Skill Files</h2>
           <select x-model="filter" style="font-size:12px;padding:2px 4px">
@@ -618,6 +648,10 @@
 
       <!-- Editor -->
       <div class="pane-detail" style="display:flex;flex-direction:column">
+        <button class="sidebar-toggle" @click="sidebarOpen = !sidebarOpen">
+          <span class="sidebar-toggle-arrow" :class="{ open: sidebarOpen }">▾</span>
+          <span x-text="sidebarOpen ? 'Hide Skills' : 'Skills'"></span>
+        </button>
         <template x-if="!selectedFile">
           <div class="empty-state">Select a skill file to view</div>
         </template>
