@@ -19,7 +19,7 @@
 <nav>
   <h1>Tsugite</h1>
   <div class="tab-bar">
-    <template x-for="tab in ['dashboard','conversations','agents','skills','schedules','webhooks']" :key="tab">
+    <template x-for="tab in ['dashboard','conversations','workspace','agents','skills','schedules','webhooks']" :key="tab">
       <button @click="$store.app.view = tab; location.hash = tab"
               :class="{ active: $store.app.view === tab }"
               x-text="tab[0].toUpperCase() + tab.slice(1)"></button>
@@ -433,6 +433,81 @@
         <div class="modal-actions">
           <button class="btn-cancel" @click="showSkills = false">Close</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Workspace Browser -->
+  <div class="view" x-show="$store.app.view === 'workspace'" x-data="workspaceView" x-cloak>
+    <div class="view-scroll two-pane" style="height:100%; overflow:hidden">
+      <!-- File list -->
+      <div class="pane-sidebar">
+        <div class="section-header">
+          <h2>Workspace</h2>
+        </div>
+        <template x-if="workspaceDir">
+          <div style="font-size:11px;color:var(--muted);padding:0 12px 8px;word-break:break-all" x-text="workspaceDir"></div>
+        </template>
+        <template x-if="loading">
+          <div class="empty-state"><span class="spinner"></span></div>
+        </template>
+        <template x-if="!loading && files.length === 0">
+          <div class="empty-state">No files in workspace</div>
+        </template>
+        <div class="turn-list">
+          <template x-for="file in files" :key="file.path">
+            <div class="turn-item" :class="{ active: selectedFile?.path === file.path }"
+                 @click="selectFile(file)">
+              <div style="display:flex;align-items:center;gap:6px">
+                <span x-text="file.path" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+                <template x-if="!file.is_text">
+                  <span class="badge" style="font-size:10px;flex-shrink:0">binary</span>
+                </template>
+              </div>
+              <div class="turn-meta" x-text="formatSize(file.size) + ' · ' + formatDate(file.modified)"></div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- Editor / Viewer -->
+      <div class="pane-detail" style="display:flex;flex-direction:column">
+        <template x-if="!selectedFile">
+          <div class="empty-state">Select a file to view</div>
+        </template>
+        <template x-if="selectedFile">
+          <div style="display:flex;flex-direction:column;flex:1;min-height:0">
+            <div class="section-header">
+              <h2>
+                <span x-text="selectedFile.name"></span>
+                <template x-if="isDirty">
+                  <span style="color:var(--accent);font-size:12px;margin-left:8px">unsaved</span>
+                </template>
+              </h2>
+              <div style="display:flex;gap:6px">
+                <button class="btn-sm" @click="attachToChat(selectedFile)" title="Attach to conversation">Attach</button>
+                <template x-if="selectedFile.is_text">
+                  <button class="btn-sm" @click="save()" :disabled="saving || !isDirty"
+                          x-text="saving ? 'Saving...' : 'Save'"></button>
+                </template>
+              </div>
+            </div>
+            <div style="font-size:11px;color:var(--muted);margin-bottom:8px" x-text="selectedFile.path"></div>
+            <template x-if="error">
+              <div class="msg error" x-text="error" style="margin-bottom:8px"></div>
+            </template>
+            <template x-if="!selectedFile.is_text">
+              <div class="empty-state">
+                <div>Binary file</div>
+                <div style="font-size:12px;color:var(--muted);margin-top:4px" x-text="formatSize(selectedFile.size)"></div>
+              </div>
+            </template>
+            <template x-if="selectedFile.is_text">
+              <textarea x-model="content"
+                        style="flex:1;min-height:300px;font-family:monospace;font-size:13px;resize:vertical;background:var(--surface0);color:var(--text);border:1px solid var(--surface2);border-radius:6px;padding:12px;tab-size:2"></textarea>
+            </template>
+          </div>
+        </template>
       </div>
     </div>
   </div>

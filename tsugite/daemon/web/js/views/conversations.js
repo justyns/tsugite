@@ -1,5 +1,5 @@
 import { get, post, streamPost, uploadFiles } from '../api.js';
-import { escapeHtml, renderMarkdown, scrollToBottom, formatDate, stateBadgeClass } from '../utils.js';
+import { escapeHtml, renderMarkdown, scrollToBottom, formatDate, formatFileSize, stateBadgeClass } from '../utils.js';
 
 export default () => ({
   messages: [],
@@ -44,6 +44,13 @@ export default () => ({
       if (ev.type === 'reconnect' && this.$store.app.selectedAgent) {
         this.reload();
       }
+    });
+    this.$watch('$store.app.pendingWorkspaceFiles', (files) => {
+      if (!files || !files.length) return;
+      for (const f of files) {
+        this.pendingFiles.push({ name: f.name, file: null, previewUrl: null, fromWorkspace: true, uploadInfo: f });
+      }
+      this.$store.app.pendingWorkspaceFiles = [];
     });
   },
 
@@ -407,15 +414,22 @@ export default () => ({
 
     let uploadedFiles = [];
     const fileNames = this.pendingFiles.map(f => f.name);
-    if (this.pendingFiles.length) {
+    const workspaceFiles = this.pendingFiles.filter(f => f.fromWorkspace);
+    const normalFiles = this.pendingFiles.filter(f => !f.fromWorkspace);
+    if (normalFiles.length) {
       try {
-        const data = await uploadFiles(`/api/agents/${agent}/upload`, this.pendingFiles.map(f => f.file));
+        const data = await uploadFiles(`/api/agents/${agent}/upload`, normalFiles.map(f => f.file));
         uploadedFiles = data.files || [];
       } catch (e) {
         this.messages.push({ type: 'error', text: `Upload failed: ${e.message}` });
         this.sending = false;
         return;
       }
+    }
+    for (const wf of workspaceFiles) {
+      uploadedFiles.push(wf.uploadInfo);
+    }
+    if (this.pendingFiles.length) {
       this.pendingFiles.forEach(f => { if (f.previewUrl) URL.revokeObjectURL(f.previewUrl); });
       this.pendingFiles = [];
     }
@@ -561,10 +575,10 @@ export default () => ({
         prog.steps.push({ html: `<code>${escapeHtml(label)}</code> <span class="${cls}">${status}</span>` });
       }
     } else if (event.type === 'file_read') {
-      const readSize = this._formatFileSize(event.byte_count);
+      const readSize = formatFileSize(event.byte_count);
       prog.steps.push({ html: `<code>${escapeHtml(event.path)}</code> read (${readSize})` });
     } else if (event.type === 'file_write') {
-      const writeSize = this._formatFileSize(event.byte_count);
+      const writeSize = formatFileSize(event.byte_count);
       prog.steps.push({ html: `<code>${escapeHtml(event.path)}</code> written (${writeSize})` });
     } else if (event.type === 'warning') {
       prog.steps.push({ html: `<span class="err">${escapeHtml(event.message)}</span>` });
@@ -576,13 +590,6 @@ export default () => ({
         if (el) scrollToBottom(el);
       });
     }
-  },
-
-  _formatFileSize(bytes) {
-    if (bytes == null) return '';
-    if (bytes < 1024) return `${bytes} bytes`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   },
 
   progressSummaryText(msg) {

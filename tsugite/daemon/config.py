@@ -70,6 +70,7 @@ class HTTPConfig(BaseModel):
     host: str = "127.0.0.1"
     port: int = 8374
     auth_tokens: List[str] = Field(default_factory=list)
+    max_workspace_file_size: int = 1024 * 1024  # 1MB
 
 
 class DaemonConfig(BaseModel):

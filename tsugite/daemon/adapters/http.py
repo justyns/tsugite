@@ -3,7 +3,9 @@
 import asyncio
 import json
 import logging
+import mimetypes
 import re
+import shutil
 import threading
 from dataclasses import asdict
 from dataclasses import fields as dataclass_fields
@@ -38,6 +40,72 @@ MAX_TEXT_ATTACH_SIZE = 50 * 1024  # 50KB — ~12K tokens
 MAX_BINARY_ATTACH_SIZE = 10 * 1024 * 1024  # 10MB
 MAX_UPLOAD_TOTAL = 100 * 1024 * 1024  # 100MB per request
 MAX_UPLOAD_FILES = 20
+MAX_WORKSPACE_LIST_FILES = 5000
+
+# MIME types treated as text for workspace browsing (beyond text/*)
+_TEXT_MIMES = {
+    "application/json",
+    "application/xml",
+    "application/javascript",
+    "application/x-sh",
+    "application/x-shellscript",
+    "application/toml",
+    "application/yaml",
+    "application/x-yaml",
+    "application/sql",
+    "application/graphql",
+    "application/xhtml+xml",
+    "image/svg+xml",
+}
+# Extensions that mimetypes doesn't know about or misidentifies
+_TEXT_EXTENSIONS_EXTRA = {
+    ".yaml",
+    ".yml",
+    ".toml",
+    ".jsonl",
+    ".ndjson",
+    ".tsx",
+    ".jsx",
+    ".mjs",
+    ".cjs",
+    ".vue",
+    ".svelte",
+    ".go",
+    ".rs",
+    ".kt",
+    ".scala",
+    ".swift",
+    ".ex",
+    ".exs",
+    ".erl",
+    ".jl",
+    ".r",
+    ".env",
+    ".cfg",
+    ".ini",
+    ".conf",
+    ".editorconfig",
+    ".gitignore",
+    ".gitattributes",
+    ".dockerignore",
+    ".graphql",
+    ".gql",
+    ".proto",
+    ".lock",
+    ".sum",
+    ".mod",
+}
+
+
+def _is_text_mime(path: Path) -> bool:
+    """Check if a file is likely text based on its MIME type or extension."""
+    if path.suffix.lower() in _TEXT_EXTENSIONS_EXTRA:
+        return True
+    mime, _ = mimetypes.guess_type(path.name)
+    if mime is None:
+        return False
+    return mime.startswith("text/") or mime in _TEXT_MIMES
+
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +118,19 @@ def _sanitize_filename(name: str) -> str:
     name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name)
     name = name.lstrip(".")
     return name[:200] or "upload"
+
+
+def _deduplicate_dest(uploads_dir: Path, name: str, max_copies: int = 1000) -> tuple[Path, Optional[str]]:
+    """Find a non-colliding destination path in uploads_dir. Returns (path, error_or_None)."""
+    dest = uploads_dir / name
+    if not dest.exists():
+        return dest, None
+    stem, suffix = dest.stem, dest.suffix
+    for counter in range(1, max_copies + 1):
+        dest = uploads_dir / f"{stem}_{counter}{suffix}"
+        if not dest.exists():
+            return dest, None
+    return dest, "too many copies of this file"
 
 
 def _should_context_attach(path: Path, size: int) -> bool:
@@ -293,6 +374,10 @@ class HTTPServer:
             Route("/api/skill-files", self._list_skill_files, methods=["GET"]),
             Route("/api/skill-files/content", self._read_skill_file, methods=["GET"]),
             Route("/api/skill-files/content", self._save_skill_file, methods=["PUT"]),
+            Route("/api/agents/{agent}/workspace", self._list_workspace_files, methods=["GET"]),
+            Route("/api/agents/{agent}/workspace/content", self._read_workspace_file, methods=["GET"]),
+            Route("/api/agents/{agent}/workspace/content", self._save_workspace_file, methods=["PUT"]),
+            Route("/api/agents/{agent}/workspace/attach", self._attach_workspace_file, methods=["POST"]),
             Route("/api/events", self._events, methods=["GET"]),
             Route("/api/push/vapid-key", self._push_vapid_key, methods=["GET"]),
             Route("/api/push/subscribe", self._push_subscribe, methods=["POST"]),
@@ -635,13 +720,9 @@ class HTTPServer:
             dest = uploads_dir / name
             if not dest.resolve().is_relative_to(uploads_dir.resolve()):
                 continue
-            # Deduplicate on collision
-            if dest.exists():
-                stem, suffix = dest.stem, dest.suffix
-                counter = 1
-                while dest.exists():
-                    dest = uploads_dir / f"{stem}_{counter}{suffix}"
-                    counter += 1
+            dest, dedup_err = _deduplicate_dest(uploads_dir, name)
+            if dedup_err:
+                continue
 
             dest.write_bytes(content)
             written_paths.append(dest)
@@ -1301,6 +1382,195 @@ class HTTPServer:
 
     async def _save_skill_file(self, request: Request) -> JSONResponse:
         return await self._save_md_file(request, self._get_allowed_skill_dirs())
+
+    # -- Workspace browser endpoints --
+
+    def _validate_workspace_path(
+        self, adapter: "HTTPAgentAdapter", path_str: str
+    ) -> tuple[Path, Optional[JSONResponse]]:
+        """Validate a workspace file path stays within the workspace directory."""
+        workspace_dir = adapter.agent_config.workspace_dir
+        try:
+            resolved = (workspace_dir / path_str).resolve()
+        except (ValueError, OSError):
+            return Path(), JSONResponse({"error": "invalid path"}, status_code=400)
+        if not resolved.is_relative_to(workspace_dir.resolve()):
+            return Path(), JSONResponse({"error": "path outside workspace"}, status_code=403)
+        return resolved, None
+
+    async def _list_workspace_files(self, request: Request) -> JSONResponse:
+        adapter, err = self._get_adapter(request)
+        if err:
+            return err
+
+        workspace_dir = adapter.agent_config.workspace_dir
+        if not workspace_dir.is_dir():
+            return JSONResponse({"files": []})
+
+        subdir = request.query_params.get("subdir", "")
+        if subdir:
+            target, path_err = self._validate_workspace_path(adapter, subdir)
+            if path_err:
+                return path_err
+            if not target.is_dir():
+                return JSONResponse({"error": "not a directory"}, status_code=400)
+        else:
+            target = workspace_dir
+
+        from tsugite.tools.fs import _build_gitignore_matcher
+
+        gitignore_spec = _build_gitignore_matcher(workspace_dir)
+        resolved_ws = workspace_dir.resolve()
+        files = []
+        try:
+            for item in target.rglob("*"):
+                if not item.is_file() or item.is_symlink():
+                    continue
+                try:
+                    if not item.resolve().is_relative_to(resolved_ws):
+                        continue
+                except (ValueError, OSError):
+                    continue
+                rel = str(item.relative_to(workspace_dir))
+                if gitignore_spec and gitignore_spec.match_file(rel):
+                    continue
+                stat = item.stat()
+                files.append(
+                    {
+                        "path": rel,
+                        "name": item.name,
+                        "size": stat.st_size,
+                        "is_text": _is_text_mime(item),
+                        "modified": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+                    }
+                )
+                if len(files) >= MAX_WORKSPACE_LIST_FILES:
+                    break
+        except OSError as e:
+            return JSONResponse({"error": f"listing failed: {e}"}, status_code=500)
+
+        files.sort(key=lambda f: f["path"])
+        return JSONResponse({"files": files, "workspace_dir": str(workspace_dir)})
+
+    async def _read_workspace_file(self, request: Request) -> JSONResponse:
+        adapter, err = self._get_adapter(request)
+        if err:
+            return err
+
+        path_str = request.query_params.get("path", "")
+        if not path_str:
+            return JSONResponse({"error": "path parameter required"}, status_code=400)
+
+        resolved, path_err = self._validate_workspace_path(adapter, path_str)
+        if path_err:
+            return path_err
+        if not resolved.exists():
+            return JSONResponse({"error": "file not found"}, status_code=404)
+        if resolved.is_dir():
+            return JSONResponse({"error": "path is a directory"}, status_code=400)
+
+        st = resolved.stat()
+
+        if not _is_text_mime(resolved):
+            return JSONResponse({"path": path_str, "content": None, "is_text": False, "size": st.st_size})
+
+        max_size = self.config.max_workspace_file_size
+        if st.st_size > max_size:
+            return JSONResponse(
+                {"error": f"file too large (max {max_size // 1024}KB for text viewing)"}, status_code=413
+            )
+
+        try:
+            content = resolved.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            return JSONResponse({"path": path_str, "content": None, "is_text": False, "size": st.st_size})
+        except OSError as e:
+            return JSONResponse({"error": f"read failed: {e}"}, status_code=500)
+
+        return JSONResponse({"path": path_str, "content": content, "is_text": True})
+
+    async def _save_workspace_file(self, request: Request) -> JSONResponse:
+        adapter, err = self._get_adapter(request)
+        if err:
+            return err
+
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+
+        path_str = body.get("path", "")
+        content = body.get("content")
+        if not path_str or content is None:
+            return JSONResponse({"error": "path and content required"}, status_code=400)
+
+        max_size = self.config.max_workspace_file_size
+        if len(content) > max_size:
+            return JSONResponse({"error": f"content too large (max {max_size // 1024}KB)"}, status_code=413)
+
+        resolved, path_err = self._validate_workspace_path(adapter, path_str)
+        if path_err:
+            return path_err
+        if not resolved.exists():
+            return JSONResponse({"error": "file not found"}, status_code=404)
+        if not _is_text_mime(resolved):
+            return JSONResponse({"error": "file type not editable"}, status_code=400)
+
+        try:
+            resolved.write_text(content, encoding="utf-8")
+        except OSError as e:
+            return JSONResponse({"error": f"write failed: {e}"}, status_code=500)
+
+        return JSONResponse({"status": "saved"})
+
+    async def _attach_workspace_file(self, request: Request) -> JSONResponse:
+        adapter, err = self._get_adapter(request)
+        if err:
+            return err
+
+        path_str = request.query_params.get("path", "")
+        if not path_str:
+            return JSONResponse({"error": "path parameter required"}, status_code=400)
+
+        resolved, path_err = self._validate_workspace_path(adapter, path_str)
+        if path_err:
+            return path_err
+        if not resolved.exists():
+            return JSONResponse({"error": "file not found"}, status_code=404)
+        if not resolved.is_file():
+            return JSONResponse({"error": "not a file"}, status_code=400)
+
+        uploads_dir = adapter.agent_config.workspace_dir / "uploads"
+        uploads_dir.mkdir(parents=True, exist_ok=True)
+
+        dest, dedup_err = _deduplicate_dest(uploads_dir, resolved.name)
+        if dedup_err:
+            return JSONResponse({"error": dedup_err}, status_code=409)
+        if not dest.resolve().is_relative_to(uploads_dir.resolve()):
+            return JSONResponse({"error": "invalid filename"}, status_code=400)
+
+        try:
+            shutil.copy2(resolved, dest)
+        except OSError as e:
+            return JSONResponse({"error": f"copy failed: {e}"}, status_code=500)
+
+        file_size = dest.stat().st_size
+        mime_type, content_type = _file_handler._detect_content_type(dest)
+        context_attach = _should_context_attach(dest, file_size)
+
+        return JSONResponse(
+            {
+                "files": [
+                    {
+                        "name": dest.name,
+                        "content_type": content_type.value,
+                        "mime_type": mime_type,
+                        "size": file_size,
+                        "context_attach": context_attach,
+                    }
+                ]
+            }
+        )
 
     async def _push_vapid_key(self, request: Request) -> JSONResponse:
         if not self.vapid_public_key:
