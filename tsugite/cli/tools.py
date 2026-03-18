@@ -16,8 +16,9 @@ def tools_list(
     category: Optional[str] = typer.Option(None, "--category", help="Filter by category (fs, shell, http, etc.)"),
 ):
     """List all available tools."""
-    from tsugite.tools import _tools
+    from tsugite.tools import _ensure_tools_loaded, _tools
 
+    _ensure_tools_loaded()
     if not _tools:
         console.print("[yellow]No tools registered[/yellow]")
         return
@@ -59,8 +60,9 @@ def tools_show(
     tool_name: str = typer.Argument(help="Tool name to inspect"),
 ):
     """Show detailed information about a specific tool."""
-    from tsugite.tools import _tools
+    from tsugite.tools import _ensure_tools_loaded, _tools
 
+    _ensure_tools_loaded()
     if tool_name not in _tools:
         console.print(f"[red]Tool '{tool_name}' not found[/red]")
         console.print("\nUse [cyan]tsugite tools list[/cyan] to see all available tools")
