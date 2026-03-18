@@ -99,21 +99,29 @@ _TEXT_EXTENSIONS_EXTRA = {
 
 
 def _extract_step_details(messages: list) -> list:
-    """Extract structured step details from enriched message dicts."""
+    """Extract structured step details from enriched message dicts.
+
+    Only processes messages that have enriched fields (thought, raw_output, error).
+    Old-format messages without these fields produce no steps.
+    """
+    # Early exit: skip if no enriched data present
+    if not any(
+        msg.get("thought") or msg.get("raw_output") or msg.get("error")
+        for msg in messages
+    ):
+        return []
+
     steps = []
     current = {}
     for msg in messages:
-        if msg.get("role") == "assistant" and msg.get("thought"):
-            current["thought"] = msg["thought"]
+        if msg.get("role") == "assistant":
+            if msg.get("thought"):
+                current["thought"] = msg["thought"]
             code_match = re.search(r"```(?:python)?\n([\s\S]*?)```", msg.get("content", ""))
             if code_match:
                 current["code"] = code_match.group(1)
             if msg.get("content_blocks"):
                 current["content_blocks"] = msg["content_blocks"]
-        elif msg.get("role") == "assistant":
-            code_match = re.search(r"```(?:python)?\n([\s\S]*?)```", msg.get("content", ""))
-            if code_match:
-                current["code"] = code_match.group(1)
         elif msg.get("role") == "user" and (msg.get("raw_output") or msg.get("error")):
             if msg.get("raw_output"):
                 current["output"] = msg["raw_output"]
@@ -123,7 +131,6 @@ def _extract_step_details(messages: list) -> list:
                 steps.append(current)
                 current = {}
         elif msg.get("role") == "user" and current:
-            # Observation without enriched fields — flush current step
             steps.append(current)
             current = {}
     if current:
@@ -643,19 +650,22 @@ class HTTPServer:
                     entry["summary"] = item["summary"]
                 result_turns.append(entry)
                 continue
+            # Single pass over messages to extract user prompt, content blocks, and enrichment flag
             user_msg = ""
+            content_blocks = {}
+            has_enriched = False
             for msg in item.messages:
-                if msg.get("role") == "user":
+                role = msg.get("role")
+                if role == "user" and not user_msg:
                     content = msg.get("content", "")
                     user_msg = content if isinstance(content, str) else str(content)
-                    break
-            content_blocks = {}
-            for msg in item.messages:
-                if msg.get("role") == "assistant":
+                elif role == "assistant":
                     content = msg.get("content", "")
                     if isinstance(content, str) and "<content" in content:
                         _, blocks = extract_content_blocks(content)
                         content_blocks.update(blocks)
+                if msg.get("thought") or msg.get("raw_output") or msg.get("error"):
+                    has_enriched = True
 
             turn_data = {
                 "user": user_msg,
@@ -666,10 +676,10 @@ class HTTPServer:
             if content_blocks:
                 turn_data["content_blocks"] = content_blocks
 
-            # Extract step details from enriched messages
-            steps = _extract_step_details(item.messages)
-            if steps:
-                turn_data["steps"] = steps
+            if has_enriched:
+                steps = _extract_step_details(item.messages)
+                if steps:
+                    turn_data["steps"] = steps
             if item.metadata and item.metadata.get("reasoning_history"):
                 turn_data["reasoning"] = item.metadata["reasoning_history"]
 

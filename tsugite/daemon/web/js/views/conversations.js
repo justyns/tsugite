@@ -168,20 +168,25 @@ export default () => ({
           continue;
         }
         if (turn.user) this._allHistoryMessages.push({ type: 'user', text: turn.user });
-        if (turn.steps && turn.steps.length > 0) {
-          const parts = [];
-          for (const step of turn.steps) {
-            if (step.thought) parts.push(`**Thinking:** ${step.thought}`);
-            if (step.code) parts.push('```python\n' + step.code + '\n```');
-            if (step.output) parts.push(`**Output:** ${step.output.length > 500 ? step.output.slice(0, 500) + '...' : step.output}`);
-            if (step.error) parts.push(`**Error:** ${step.error}`);
+        if ((turn.steps && turn.steps.length > 0) || (turn.reasoning && turn.reasoning.length > 0)) {
+          const htmlSteps = [];
+          if (turn.reasoning) {
+            for (const r of turn.reasoning) {
+              htmlSteps.push({ html: `<details><summary>thinking</summary><pre><code>${escapeHtml(r)}</code></pre></details>` });
+            }
           }
-          if (parts.length > 0) {
-            this._allHistoryMessages.push({ type: 'progress-done', text: parts.join('\n\n') });
+          for (const step of (turn.steps || [])) {
+            if (step.thought) htmlSteps.push({ html: `<details><summary>thought</summary><pre><code>${escapeHtml(step.thought)}</code></pre></details>` });
+            if (step.code) htmlSteps.push({ html: `<details><summary><code>code</code></summary><pre><code>${escapeHtml(step.code)}</code></pre></details>` });
+            if (step.output) {
+              const out = step.output.length > 500 ? step.output.slice(0, 500) + '...' : step.output;
+              htmlSteps.push({ html: `<details><summary><code>output</code> <span class="ok">ok</span></summary><pre><code>${escapeHtml(out)}</code></pre></details>` });
+            }
+            if (step.error) htmlSteps.push({ html: `<code>output</code> <span class="err">err</span>: ${escapeHtml(step.error)}` });
           }
-        }
-        if (turn.reasoning && turn.reasoning.length > 0) {
-          this._allHistoryMessages.push({ type: 'progress-done', text: '**Reasoning:**\n' + turn.reasoning.join('\n\n') });
+          if (htmlSteps.length > 0) {
+            this._allHistoryMessages.push({ type: 'progress-done', steps: htmlSteps, turnCount: turn.steps?.length || 0, toolCount: 0 });
+          }
         }
         if (turn.assistant) {
           const msg = { type: 'agent', text: turn.assistant };
