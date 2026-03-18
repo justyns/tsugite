@@ -659,7 +659,9 @@ class HTTPServer:
         try:
             await adapter._compact_session(session.id)
         except Exception as e:
-            return JSONResponse({"error": f"compaction failed: {e}"}, status_code=500)
+            msg = str(e) or repr(e)
+            logger.exception("Compaction failed for agent %s", adapter.agent_name)
+            return JSONResponse({"error": f"compaction failed: {msg}"}, status_code=500)
 
         new_session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
         agent_name = request.path_params["agent"]

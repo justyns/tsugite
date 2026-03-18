@@ -13,6 +13,7 @@ from tsugite.daemon.memory import (
     _combine_summaries,
     _count_tokens,
     _estimate_turn_tokens,
+    _llm_complete,
     _message_text,
     _summarize_chunk,
     extract_file_paths_from_turns,
@@ -383,6 +384,37 @@ class TestExtractFilePathsFromTurns:
         )
         paths = extract_file_paths_from_turns([turn])
         assert paths.count("/src/app.py") == 1
+
+
+class TestLlmCompleteErrorHandling:
+    @pytest.mark.asyncio
+    async def test_llm_call_failure_raises_runtime_error(self):
+        with patch("litellm.acompletion", new_callable=AsyncMock, side_effect=Exception("connection refused")):
+            with pytest.raises(RuntimeError, match=r"LLM call failed.*connection refused"):
+                await _llm_complete("system", "user", "openai:gpt-4o-mini")
+
+    @pytest.mark.asyncio
+    async def test_empty_response_raises_runtime_error(self):
+        response = _mock_llm_response("")
+        # Override: empty string content
+        response.choices[0].message.content = ""
+        with patch("litellm.acompletion", new_callable=AsyncMock, return_value=response):
+            with pytest.raises(RuntimeError, match=r"LLM returned empty response"):
+                await _llm_complete("system", "user", "openai:gpt-4o-mini")
+
+    @pytest.mark.asyncio
+    async def test_none_response_raises_runtime_error(self):
+        response = _mock_llm_response("ok")
+        response.choices[0].message.content = None
+        with patch("litellm.acompletion", new_callable=AsyncMock, return_value=response):
+            with pytest.raises(RuntimeError, match=r"LLM returned empty response"):
+                await _llm_complete("system", "user", "openai:gpt-4o-mini")
+
+    @pytest.mark.asyncio
+    async def test_successful_call_returns_content(self):
+        with patch("litellm.acompletion", new_callable=AsyncMock, return_value=_mock_llm_response("hello")):
+            result = await _llm_complete("system", "user", "openai:gpt-4o-mini")
+        assert result == "hello"
 
 
 class TestSummaryFormatIncludesNewSections:
