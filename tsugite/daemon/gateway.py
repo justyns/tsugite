@@ -273,6 +273,20 @@ class Gateway:
             set_session_runner(self._session_runner, asyncio.get_running_loop())
             logger.info("Session runner enabled")
 
+        # Load adapter plugins
+        from tsugite.plugins import load_adapter_plugins
+
+        plugin_results = load_adapter_plugins(
+            plugin_config=self.config.plugins,
+            session_store=session_store,
+            identity_map=identity_map,
+            agents_config=self.config.agents,
+        )
+        for info, adapter in plugin_results:
+            if adapter:
+                self.adapters.append(adapter)
+                tasks.append(adapter.start())
+
         # Set up notification callback if channels are configured
         if self.config.notification_channels:
             discord_adapters = {a.bot_config.name: a for a in self.adapters if hasattr(a, "bot_config")}

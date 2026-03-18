@@ -322,4 +322,9 @@ def _ensure_tools_loaded():
     # Load custom shell tools after built-in tools
     load_custom_shell_tools()
 
+    # Load plugin tools after custom shell tools
+    from tsugite.plugins import load_tool_plugins
+
+    load_tool_plugins()
+
     _tools_loaded = True

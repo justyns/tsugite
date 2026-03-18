@@ -1,0 +1,16 @@
+[project]
+name = "tsugite-example-plugin"
+version = "0.1.0"
+description = "Example tsugite plugin demonstrating tool and adapter registration via entry points"
+requires-python = ">=3.11"
+
+# A single package can register plugins in multiple groups
+[project.entry-points."tsugite.tools"]
+example = "tsugite_example_plugin:register_tools"
+
+[project.entry-points."tsugite.adapters"]
+example = "tsugite_example_plugin:create_adapter"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

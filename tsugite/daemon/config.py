@@ -2,7 +2,7 @@
 
 import os
 from pathlib import Path
-from typing import Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 import yaml
 from pydantic import BaseModel, Field, model_validator
@@ -85,6 +85,7 @@ class DaemonConfig(BaseModel):
     http: Optional[HTTPConfig] = None
     notification_channels: Dict[str, NotificationChannelConfig] = Field(default_factory=dict)
     identity_links: Dict[str, List[str]] = Field(default_factory=dict)
+    plugins: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
 
 
 def _expand_env_vars(data: dict, *keys: str) -> None:
