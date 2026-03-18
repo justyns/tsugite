@@ -168,6 +168,21 @@ export default () => ({
           continue;
         }
         if (turn.user) this._allHistoryMessages.push({ type: 'user', text: turn.user });
+        if (turn.steps && turn.steps.length > 0) {
+          const parts = [];
+          for (const step of turn.steps) {
+            if (step.thought) parts.push(`**Thinking:** ${step.thought}`);
+            if (step.code) parts.push('```python\n' + step.code + '\n```');
+            if (step.output) parts.push(`**Output:** ${step.output.length > 500 ? step.output.slice(0, 500) + '...' : step.output}`);
+            if (step.error) parts.push(`**Error:** ${step.error}`);
+          }
+          if (parts.length > 0) {
+            this._allHistoryMessages.push({ type: 'progress-done', text: parts.join('\n\n') });
+          }
+        }
+        if (turn.reasoning && turn.reasoning.length > 0) {
+          this._allHistoryMessages.push({ type: 'progress-done', text: '**Reasoning:**\n' + turn.reasoning.join('\n\n') });
+        }
         if (turn.assistant) {
           const msg = { type: 'agent', text: turn.assistant };
           if (turn.content_blocks && Object.keys(turn.content_blocks).length) {
@@ -358,6 +373,9 @@ export default () => ({
     const items = [];
     for (const msg of turn.messages) {
       if (msg.role === 'assistant') {
+        if (msg.thought) {
+          items.push({ type: 'thought', content: msg.thought });
+        }
         const codeMatch = msg.content?.match(/```(?:python)?\n([\s\S]*?)```/);
         if (codeMatch) {
           items.push({ type: 'tool_call', name: 'code', args: codeMatch[1] });
@@ -368,10 +386,18 @@ export default () => ({
             items.push({ type: 'tool_call', name: fn.name || 'unknown', args: fn.arguments || '{}' });
           }
         }
+        if (msg.content_blocks) {
+          for (const [name, val] of Object.entries(msg.content_blocks)) {
+            items.push({ type: 'content_block', name, content: typeof val === 'string' ? val : JSON.stringify(val) });
+          }
+        }
       } else if (msg.role === 'user' && msg.content?.includes('<tsugite_execution_result>')) {
         const content = msg.content.replace(/<\/?tsugite_execution_result>/g, '').trim();
         const truncated = content.length > 500 ? content.slice(0, 500) + '...' : content;
         items.push({ type: 'tool_result', name: 'result', content: truncated });
+        if (msg.error) {
+          items.push({ type: 'error', content: msg.error });
+        }
       } else if (msg.role === 'tool') {
         const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
         items.push({ type: 'tool_result', name: msg.name || '', content: content.length > 500 ? content.slice(0, 500) + '...' : content });

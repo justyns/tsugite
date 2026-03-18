@@ -41,6 +41,7 @@ class AgentExecutionResult(BaseModel):
     )  # List of Attachment objects (using Any for Pydantic compatibility)
     claude_code_session_id: Optional[str] = None
     context_window: Optional[int] = None
+    reasoning_history: Optional[List[str]] = None
 
     def __str__(self) -> str:
         """Allow result to be used as string for backward compatibility.

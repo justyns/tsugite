@@ -387,6 +387,23 @@
                                     <pre class="tool-call-args" x-text="m.content"></pre>
                                   </details>
                                 </template>
+                                <template x-if="m.type === 'thought'">
+                                  <details>
+                                    <summary class="tool-call-name"><span class="badge" style="background:var(--muted);color:var(--bg)">Thinking</span></summary>
+                                    <pre class="tool-call-args" x-text="m.content"></pre>
+                                  </details>
+                                </template>
+                                <template x-if="m.type === 'content_block'">
+                                  <details>
+                                    <summary class="tool-result-name">Content: <span x-text="m.name"></span></summary>
+                                    <pre class="tool-call-args" x-text="m.content"></pre>
+                                  </details>
+                                </template>
+                                <template x-if="m.type === 'error'">
+                                  <div style="color:var(--err, red);font-size:12px;padding:4px 8px">
+                                    <strong>Error:</strong> <span x-text="m.content"></span>
+                                  </div>
+                                </template>
                               </div>
                             </template>
                           </details>

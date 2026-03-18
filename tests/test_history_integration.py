@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from tsugite.agent_runner.history_integration import (
+    _build_turn_messages,
     _extract_functions_called,
     save_run_to_history,
 )
@@ -415,3 +416,157 @@ class TestRunHistoryIntegration:
 
             assert len(files) == 1
             assert conv_id in str(files[0])
+
+
+class TestBuildTurnMessages:
+    """Tests for _build_turn_messages with enriched step data."""
+
+    def test_basic_messages(self):
+        """Test basic prompt + result messages (no steps)."""
+        msgs = _build_turn_messages("hello", "world")
+        assert len(msgs) == 2
+        assert msgs[0] == {"role": "user", "content": "hello"}
+        assert msgs[1] == {"role": "assistant", "content": "world"}
+
+    def test_step_with_thought_and_code(self):
+        """Test that thought is persisted on assistant message."""
+        step = MagicMock()
+        step.code = "print('hi')"
+        step.xml_observation = "<tsugite_execution_result>hi</tsugite_execution_result>"
+        step.thought = "I should print hi"
+        step.output = "hi"
+        step.error = None
+        step.content_blocks = {}
+
+        msgs = _build_turn_messages("prompt", "result", [step])
+        # user, assistant (code+thought), user (observation+output), assistant (result)
+        assert len(msgs) == 4
+        assert msgs[1]["role"] == "assistant"
+        assert msgs[1]["thought"] == "I should print hi"
+        assert "```python" in msgs[1]["content"]
+        assert msgs[2]["raw_output"] == "hi"
+
+    def test_step_with_error(self):
+        """Test that error is persisted on observation message."""
+        step = MagicMock()
+        step.code = "1/0"
+        step.xml_observation = "<tsugite_execution_result>ZeroDivisionError</tsugite_execution_result>"
+        step.thought = ""
+        step.output = ""
+        step.error = "ZeroDivisionError: division by zero"
+        step.content_blocks = {}
+
+        msgs = _build_turn_messages("prompt", "result", [step])
+        obs = [m for m in msgs if m.get("role") == "user" and m.get("error")]
+        assert len(obs) == 1
+        assert obs[0]["error"] == "ZeroDivisionError: division by zero"
+
+    def test_step_with_content_blocks(self):
+        """Test that content_blocks are persisted on assistant message."""
+        step = MagicMock()
+        step.code = "generate_chart()"
+        step.xml_observation = "<tsugite_execution_result>chart created</tsugite_execution_result>"
+        step.thought = ""
+        step.output = "chart created"
+        step.error = None
+        step.content_blocks = {"chart": "<svg>...</svg>"}
+
+        msgs = _build_turn_messages("prompt", "result", [step])
+        assistant_msgs = [m for m in msgs if m.get("role") == "assistant" and m.get("content_blocks")]
+        assert len(assistant_msgs) == 1
+        assert assistant_msgs[0]["content_blocks"] == {"chart": "<svg>...</svg>"}
+
+    def test_thought_only_step(self):
+        """Test that a step with thought but no code still emits a message."""
+        step = MagicMock()
+        step.code = ""
+        step.xml_observation = ""
+        step.thought = "Thinking about what to do..."
+        step.output = ""
+        step.error = None
+        step.content_blocks = {}
+
+        msgs = _build_turn_messages("prompt", "result", [step])
+        # user, assistant (thought), assistant (result)
+        assert len(msgs) == 3
+        assert msgs[1]["role"] == "assistant"
+        assert msgs[1]["thought"] == "Thinking about what to do..."
+
+    def test_backward_compat_old_format(self):
+        """Test that messages without new fields still work."""
+        msgs = _build_turn_messages("prompt", "result")
+        # Just user + result - no extra fields
+        assert len(msgs) == 2
+        assert "thought" not in msgs[0]
+        assert "thought" not in msgs[1]
+
+
+class TestReasoningHistoryPersistence:
+    """Tests for reasoning_history persistence in metadata."""
+
+    def test_reasoning_history_saved_in_metadata(self, tmp_path, sample_agent_file):
+        """Test that reasoning_history is stored in turn metadata."""
+        with (
+            patch("tsugite.config.load_config") as mock_config,
+            patch("tsugite.history.storage.get_history_dir", return_value=tmp_path),
+            patch("tsugite.history.storage.get_machine_name", return_value="test_machine"),
+            patch("tsugite.md_agents.parse_agent_file") as mock_parse,
+        ):
+            from tsugite.history import SessionStorage, Turn
+
+            mock_config.return_value = MagicMock(history_enabled=True)
+            mock_agent = MagicMock()
+            mock_agent.config = MagicMock(disable_history=False)
+            mock_parse.return_value = mock_agent
+
+            conv_id = save_run_to_history(
+                agent_path=sample_agent_file,
+                agent_name="test_agent",
+                prompt="test prompt",
+                result="test result",
+                model="test_model",
+                reasoning_history=["First I considered...", "Then I decided..."],
+            )
+
+            assert conv_id is not None
+            storage = SessionStorage.load(tmp_path / f"{conv_id}.jsonl")
+            records = storage.load_records()
+            turns = [r for r in records if isinstance(r, Turn)]
+            assert len(turns) == 1
+            assert turns[0].metadata is not None
+            assert turns[0].metadata["reasoning_history"] == [
+                "First I considered...",
+                "Then I decided...",
+            ]
+
+    def test_no_reasoning_history_no_metadata_pollution(self, tmp_path, sample_agent_file):
+        """Test that empty reasoning_history doesn't add to metadata."""
+        with (
+            patch("tsugite.config.load_config") as mock_config,
+            patch("tsugite.history.storage.get_history_dir", return_value=tmp_path),
+            patch("tsugite.history.storage.get_machine_name", return_value="test_machine"),
+            patch("tsugite.md_agents.parse_agent_file") as mock_parse,
+        ):
+            from tsugite.history import SessionStorage, Turn
+
+            mock_config.return_value = MagicMock(history_enabled=True)
+            mock_agent = MagicMock()
+            mock_agent.config = MagicMock(disable_history=False)
+            mock_parse.return_value = mock_agent
+
+            conv_id = save_run_to_history(
+                agent_path=sample_agent_file,
+                agent_name="test_agent",
+                prompt="test prompt",
+                result="test result",
+                model="test_model",
+                reasoning_history=None,
+            )
+
+            assert conv_id is not None
+            storage = SessionStorage.load(tmp_path / f"{conv_id}.jsonl")
+            records = storage.load_records()
+            turns = [r for r in records if isinstance(r, Turn)]
+            assert len(turns) == 1
+            # metadata should be None (no channel_metadata, no claude_code_session_id, no reasoning)
+            assert turns[0].metadata is None

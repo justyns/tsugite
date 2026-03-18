@@ -218,9 +218,10 @@ def _unpack_execution_result(result):
             result.execution_steps,
             result.system_message,
             result.attachments,
+            result.reasoning_history,
         )
 
-    return result, None, None, None, None, None
+    return result, None, None, None, None, None, None
 
 
 def _display_result(result_str: str, ui_opts: UIOptions, stderr_console: Console):
@@ -658,7 +659,7 @@ def run(
                 console,
             )
 
-            result_str, token_count, cost, execution_steps, system_prompt, attachments = _unpack_execution_result(
+            result_str, token_count, cost, execution_steps, system_prompt, attachments, reasoning_history = _unpack_execution_result(
                 result
             )
 
@@ -679,6 +680,7 @@ def run(
                         system_prompt=system_prompt,
                         attachments=attachments,
                         channel_metadata=daemon_metadata,
+                        reasoning_history=reasoning_history,
                     )
                 except Exception:
                     pass

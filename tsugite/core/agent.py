@@ -101,6 +101,7 @@ class AgentResult:
     error: Optional[str] = None
     claude_code_session_id: Optional[str] = None
     context_window: Optional[int] = None
+    reasoning_history: Optional[List[str]] = None
 
     def __str__(self) -> str:
         return self.output if self.output else self.error if self.error else ""
@@ -604,6 +605,7 @@ class TsugiteAgent:
                             steps=self.memory.steps,
                             claude_code_session_id=self._claude_code_session_id,
                             context_window=self._claude_code_context_window,
+                            reasoning_history=self.memory.reasoning_history or None,
                         )
                     return exec_result.final_answer
 
@@ -647,6 +649,7 @@ class TsugiteAgent:
                                 steps=self.memory.steps,
                                 claude_code_session_id=self._claude_code_session_id,
                                 context_window=self._claude_code_context_window,
+                                reasoning_history=self.memory.reasoning_history or None,
                             )
                         return exec_result.final_answer
             except Exception:
@@ -672,6 +675,7 @@ class TsugiteAgent:
                     error=error_msg,
                     claude_code_session_id=self._claude_code_session_id,
                     context_window=self._claude_code_context_window,
+                    reasoning_history=self.memory.reasoning_history or None,
                 )
 
             raise RuntimeError(error_msg)

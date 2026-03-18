@@ -76,6 +76,7 @@ def save_run_to_history(
     channel_metadata: Optional[dict] = None,
     duration_ms: Optional[int] = None,
     claude_code_session_id: Optional[str] = None,
+    reasoning_history: Optional[List[str]] = None,
 ) -> Optional[str]:
     """Save a single agent run to history.
 
@@ -94,6 +95,7 @@ def save_run_to_history(
         channel_metadata: Optional channel routing metadata
         duration_ms: Execution duration in milliseconds
         claude_code_session_id: Claude Code session ID to store in turn metadata
+        reasoning_history: Extended thinking/reasoning from the model
 
     Returns:
         Session ID if saved, None if history disabled or failed
@@ -143,10 +145,12 @@ def save_run_to_history(
 
         functions_called = _extract_functions_called(execution_steps) if execution_steps else []
 
-        # Merge claude_code_session_id into metadata if present
+        # Merge claude_code_session_id and reasoning_history into metadata if present
         metadata = dict(channel_metadata) if channel_metadata else {}
         if claude_code_session_id:
             metadata["claude_code_session_id"] = claude_code_session_id
+        if reasoning_history:
+            metadata["reasoning_history"] = reasoning_history
 
         storage.record_turn(
             messages=messages,
@@ -171,7 +175,11 @@ def _build_turn_messages(
     result: str,
     execution_steps: Optional[list] = None,
 ) -> List[Dict[str, Any]]:
-    """Build message list for a turn."""
+    """Build message list for a turn.
+
+    Persists all available step data as extra fields on message dicts.
+    Old code reading only role/content will ignore the extras (backward compatible).
+    """
     messages = []
 
     messages.append({"role": "user", "content": prompt})
@@ -180,11 +188,28 @@ def _build_turn_messages(
         for step in execution_steps:
             code = getattr(step, "code", "")
             xml_observation = getattr(step, "xml_observation", "")
+            thought = getattr(step, "thought", "")
+            output = getattr(step, "output", "")
+            error = getattr(step, "error", None)
+            content_blocks = getattr(step, "content_blocks", {})
 
             if code:
-                messages.append({"role": "assistant", "content": f"```python\n{code}\n```"})
+                assistant_msg = {"role": "assistant", "content": f"```python\n{code}\n```"}
+                if thought:
+                    assistant_msg["thought"] = thought
+                if content_blocks:
+                    assistant_msg["content_blocks"] = content_blocks
+                messages.append(assistant_msg)
+            elif thought:
+                messages.append({"role": "assistant", "content": thought, "thought": thought})
+
             if xml_observation:
-                messages.append({"role": "user", "content": xml_observation})
+                obs_msg = {"role": "user", "content": xml_observation}
+                if output:
+                    obs_msg["raw_output"] = output
+                if error:
+                    obs_msg["error"] = error
+                messages.append(obs_msg)
 
     if result:
         messages.append({"role": "assistant", "content": result})

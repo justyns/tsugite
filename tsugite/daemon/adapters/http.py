@@ -98,6 +98,39 @@ _TEXT_EXTENSIONS_EXTRA = {
 }
 
 
+def _extract_step_details(messages: list) -> list:
+    """Extract structured step details from enriched message dicts."""
+    steps = []
+    current = {}
+    for msg in messages:
+        if msg.get("role") == "assistant" and msg.get("thought"):
+            current["thought"] = msg["thought"]
+            code_match = re.search(r"```(?:python)?\n([\s\S]*?)```", msg.get("content", ""))
+            if code_match:
+                current["code"] = code_match.group(1)
+            if msg.get("content_blocks"):
+                current["content_blocks"] = msg["content_blocks"]
+        elif msg.get("role") == "assistant":
+            code_match = re.search(r"```(?:python)?\n([\s\S]*?)```", msg.get("content", ""))
+            if code_match:
+                current["code"] = code_match.group(1)
+        elif msg.get("role") == "user" and (msg.get("raw_output") or msg.get("error")):
+            if msg.get("raw_output"):
+                current["output"] = msg["raw_output"]
+            if msg.get("error"):
+                current["error"] = msg["error"]
+            if current:
+                steps.append(current)
+                current = {}
+        elif msg.get("role") == "user" and current:
+            # Observation without enriched fields — flush current step
+            steps.append(current)
+            current = {}
+    if current:
+        steps.append(current)
+    return steps
+
+
 def _is_text_mime(path: Path) -> bool:
     """Check if a file is likely text based on its MIME type or extension."""
     if path.suffix.lower() in _TEXT_EXTENSIONS_EXTRA:
@@ -632,6 +665,14 @@ class HTTPServer:
             }
             if content_blocks:
                 turn_data["content_blocks"] = content_blocks
+
+            # Extract step details from enriched messages
+            steps = _extract_step_details(item.messages)
+            if steps:
+                turn_data["steps"] = steps
+            if item.metadata and item.metadata.get("reasoning_history"):
+                turn_data["reasoning"] = item.metadata["reasoning_history"]
+
             if detail:
                 turn_data["messages"] = item.messages
             result_turns.append(turn_data)
