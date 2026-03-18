@@ -89,6 +89,7 @@ def _resolve_litellm_model(model: str) -> str:
 
 _CLAUDE_CODE_CONTEXT_LIMITS = {
     "claude-opus-4-6": 1_000_000,
+    "claude-sonnet-4-6": 1_000_000,
 }
 _CLAUDE_CODE_DEFAULT_CONTEXT_LIMIT = 200_000
 

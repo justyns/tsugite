@@ -550,11 +550,11 @@ class TestClaudeCodeContextLimit:
         limit = get_context_limit("claude_code:opus")
         assert limit == 1_000_000
 
-    def test_context_limit_sonnet_returns_200k(self):
+    def test_context_limit_sonnet_returns_1m(self):
         from tsugite.daemon.memory import get_context_limit
 
         limit = get_context_limit("claude_code:sonnet")
-        assert limit == 200_000
+        assert limit == 1_000_000
 
     def test_context_limit_haiku_returns_200k(self):
         from tsugite.daemon.memory import get_context_limit
