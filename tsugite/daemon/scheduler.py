@@ -72,6 +72,8 @@ class ScheduleEntry:
 class RunResult:
     output: str
     session_id: str | None = None
+    tokens: int | None = None
+    cost: float | None = None
 
 
 RunCallback = Callable[["ScheduleEntry"], Coroutine[None, None, "RunResult"]]
@@ -202,6 +204,7 @@ class Scheduler:
         async with lock:
             logger.info("Firing schedule '%s' (type=%s, agent=%s)", entry.id, entry.execution_type, entry.agent)
             run_conv_id = None
+            run_result = None
             try:
                 if entry.execution_type == "script":
                     if not self._script_callback:
@@ -223,14 +226,18 @@ class Scheduler:
                 entry.last_error = str(e)
 
             entry.last_run = datetime.now(timezone.utc).isoformat()
-            entry.run_history.append(
-                {
-                    "timestamp": entry.last_run,
-                    "status": entry.last_status,
-                    "error": entry.last_error,
-                    "session_id": run_conv_id,
-                }
-            )
+            run_record = {
+                "timestamp": entry.last_run,
+                "status": entry.last_status,
+                "error": entry.last_error,
+                "session_id": run_conv_id,
+            }
+            if run_result is not None:
+                if run_result.tokens is not None:
+                    run_record["tokens"] = run_result.tokens
+                if run_result.cost is not None:
+                    run_record["cost"] = run_result.cost
+            entry.run_history.append(run_record)
             if len(entry.run_history) > 20:
                 entry.run_history = entry.run_history[-20:]
 

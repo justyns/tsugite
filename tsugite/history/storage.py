@@ -430,6 +430,8 @@ class SessionStorage:
         messages: List[Dict[str, Any]],
         final_answer: Optional[str] = None,
         tokens: Optional[int] = None,
+        input_tokens: Optional[int] = None,
+        output_tokens: Optional[int] = None,
         cost: Optional[float] = None,
         model: Optional[str] = None,
         duration_ms: Optional[int] = None,
@@ -442,6 +444,8 @@ class SessionStorage:
             messages: Full LiteLLM message array for this turn
             final_answer: Optional final answer text
             tokens: Token count for this turn
+            input_tokens: Input/prompt tokens for this turn
+            output_tokens: Output/completion tokens for this turn
             cost: Cost for this turn
             model: Model used (may differ from session default)
             duration_ms: Execution duration
@@ -467,6 +471,8 @@ class SessionStorage:
             final_answer=final_answer,
             user_summary=user_summary,
             tokens=tokens,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
             cost=cost,
             timestamp=datetime.now(timezone.utc),
             model=model,

@@ -6,6 +6,7 @@ the session storage system.
 
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -68,6 +69,8 @@ def save_run_to_history(
     result: str,
     model: str,
     token_count: Optional[int] = None,
+    input_tokens: Optional[int] = None,
+    output_tokens: Optional[int] = None,
     cost: Optional[float] = None,
     execution_steps: Optional[list] = None,
     continue_conversation_id: Optional[str] = None,
@@ -76,6 +79,7 @@ def save_run_to_history(
     channel_metadata: Optional[dict] = None,
     duration_ms: Optional[int] = None,
     claude_code_session_id: Optional[str] = None,
+    schedule_id: Optional[str] = None,
 ) -> Optional[str]:
     """Save a single agent run to history.
 
@@ -86,6 +90,8 @@ def save_run_to_history(
         result: Agent's final answer
         model: Model used
         token_count: Number of tokens used
+        input_tokens: Input/prompt tokens used
+        output_tokens: Output/completion tokens used
         cost: Cost of execution
         execution_steps: List of execution steps (from agent memory)
         continue_conversation_id: Optional session ID to continue
@@ -94,6 +100,7 @@ def save_run_to_history(
         channel_metadata: Optional channel routing metadata
         duration_ms: Execution duration in milliseconds
         claude_code_session_id: Claude Code session ID to store in turn metadata
+        schedule_id: Schedule ID if this was a scheduled run
 
     Returns:
         Session ID if saved, None if history disabled or failed
@@ -101,6 +108,7 @@ def save_run_to_history(
     if os.environ.get("TSUGITE_SUBAGENT_MODE") == "1":
         return None
 
+    session_id = None
     try:
         config = load_config()
         if not getattr(config, "history_enabled", True):
@@ -152,6 +160,8 @@ def save_run_to_history(
             messages=messages,
             final_answer=result,
             tokens=token_count,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
             cost=cost,
             model=model,
             duration_ms=duration_ms,
@@ -159,11 +169,59 @@ def save_run_to_history(
             metadata=metadata or None,
         )
 
-        return storage.session_id
+        session_id = storage.session_id
 
     except Exception as e:
         print(f"Warning: Failed to save run to history: {e}", file=sys.stderr)
-        return None
+
+    # Record to usage store (even if history save failed, try to record usage)
+    _record_usage(
+        agent_name=agent_name,
+        model=model,
+        session_id=session_id,
+        schedule_id=schedule_id,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        total_tokens=token_count,
+        cost=cost,
+        duration_ms=duration_ms,
+    )
+
+    return session_id
+
+
+def _record_usage(
+    agent_name: str,
+    model: str,
+    session_id: Optional[str],
+    schedule_id: Optional[str],
+    input_tokens: Optional[int],
+    output_tokens: Optional[int],
+    total_tokens: Optional[int],
+    cost: Optional[float],
+    duration_ms: Optional[int],
+) -> None:
+    """Record usage to the SQLite usage store. Best-effort, never raises."""
+    try:
+        from tsugite.usage import UsageRecord, get_usage_store
+
+        store = get_usage_store()
+        store.record(
+            UsageRecord(
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                agent=agent_name,
+                model=model,
+                session_id=session_id,
+                schedule_id=schedule_id,
+                input_tokens=input_tokens or 0,
+                output_tokens=output_tokens or 0,
+                total_tokens=total_tokens or 0,
+                cost=cost or 0.0,
+                duration_ms=duration_ms,
+            )
+        )
+    except Exception as e:
+        print(f"Warning: Failed to record usage: {e}", file=sys.stderr)
 
 
 def _build_turn_messages(

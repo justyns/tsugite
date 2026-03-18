@@ -4,6 +4,8 @@ import { formatDate } from '../utils.js';
 export default () => ({
   agentCards: [],
   upcomingSchedules: [],
+  usageSummary: null,
+  usageByAgent: [],
   loading: true,
   error: null,
   _debounceTimer: null,
@@ -53,10 +55,37 @@ export default () => ({
         .sort((a, b) => new Date(a.next_run) - new Date(b.next_run))
         .slice(0, 5);
       this.upcomingSchedules = schedules;
+
+      // Load usage data
+      await this._loadUsage(agentsData.agents || []);
     } catch (e) {
       this.error = e.message;
     } finally {
       this.loading = false;
+    }
+  },
+
+  async _loadUsage(agents) {
+    try {
+      // Get 30-day summary
+      const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      this.usageSummary = await get(`/api/usage/summary?since=${since}`);
+
+      // Get per-agent usage for the top agents
+      const agentUsages = [];
+      for (const agent of agents.slice(0, 10)) {
+        try {
+          const data = await get(`/api/usage/summary?agent=${agent.name}&since=${since}`);
+          if (data.run_count > 0) {
+            agentUsages.push({ name: agent.name, ...data });
+          }
+        } catch { /* skip */ }
+      }
+      agentUsages.sort((a, b) => b.total_cost - a.total_cost);
+      this.usageByAgent = agentUsages;
+    } catch {
+      this.usageSummary = null;
+      this.usageByAgent = [];
     }
   },
 
@@ -70,6 +99,19 @@ export default () => ({
     const tk = (card.tokens / 1000).toFixed(1);
     const lk = (card.context_limit / 1000).toFixed(0);
     return `${tk}k / ${lk}k (${this.contextPct(card)}%)`;
+  },
+
+  formatCost(cost) {
+    if (!cost || cost === 0) return '$0.00';
+    if (cost < 0.01) return '$' + cost.toFixed(4);
+    return '$' + cost.toFixed(2);
+  },
+
+  formatTokens(tokens) {
+    if (!tokens) return '0';
+    if (tokens >= 1000000) return (tokens / 1000000).toFixed(1) + 'M';
+    if (tokens >= 1000) return (tokens / 1000).toFixed(1) + 'k';
+    return tokens.toString();
   },
 
   formatDate,

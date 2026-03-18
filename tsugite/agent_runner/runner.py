@@ -561,6 +561,8 @@ async def _execute_agent_with_prompt(
                 return AgentExecutionResult(
                     response=str(result.output),
                     token_count=result.token_usage,
+                    input_tokens=result.input_tokens,
+                    output_tokens=result.output_tokens,
                     cost=result.cost,
                     step_count=step_count,
                     execution_steps=steps_list,
@@ -573,6 +575,8 @@ async def _execute_agent_with_prompt(
                 return AgentExecutionResult(
                     response=str(result),
                     token_count=None,
+                    input_tokens=None,
+                    output_tokens=None,
                     cost=None,
                     step_count=0,
                     execution_steps=[],

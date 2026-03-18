@@ -810,11 +810,13 @@ class TestUnpackExecutionResult:
 
         # Verify all fields are extracted correctly
         assert unpacked[0] == "Test response"
-        assert unpacked[1] == 100
-        assert unpacked[2] == 0.005
-        assert unpacked[3] == [{"step": 1}]
-        assert unpacked[4] == "System prompt"
-        assert unpacked[5] == [("file.txt", "content")]
+        assert unpacked[1] == 100  # token_count
+        assert unpacked[2] is None  # input_tokens
+        assert unpacked[3] is None  # output_tokens
+        assert unpacked[4] == 0.005  # cost
+        assert unpacked[5] == [{"step": 1}]  # execution_steps
+        assert unpacked[6] == "System prompt"  # system_message
+        assert unpacked[7] == [("file.txt", "content")]  # attachments
 
     def test_unpack_plain_string(self):
         """Test unpacking plain string result."""
@@ -825,8 +827,11 @@ class TestUnpackExecutionResult:
 
         # Should return string + None for all other fields
         assert unpacked[0] == "Simple string response"
-        assert unpacked[1] is None
-        assert unpacked[2] is None
-        assert unpacked[3] is None
-        assert unpacked[4] is None
+        assert unpacked[1] is None  # token_count
+        assert unpacked[2] is None  # input_tokens
+        assert unpacked[3] is None  # output_tokens
+        assert unpacked[4] is None  # cost
+        assert unpacked[5] is None  # execution_steps
+        assert unpacked[6] is None  # system_message
+        assert unpacked[7] is None  # attachments
         assert unpacked[5] is None

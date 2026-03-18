@@ -111,6 +111,8 @@ class Turn(BaseModel):
     final_answer: Optional[str] = Field(default=None, description="Final answer if provided")
     user_summary: Optional[str] = Field(default=None, description="First user message truncated (for display)")
     tokens: Optional[int] = Field(default=None, description="Total tokens used in this turn")
+    input_tokens: Optional[int] = Field(default=None, description="Input/prompt tokens used in this turn")
+    output_tokens: Optional[int] = Field(default=None, description="Output/completion tokens used in this turn")
     cost: Optional[float] = Field(default=None, description="Estimated cost for this turn")
     timestamp: datetime = Field(..., description="When this turn occurred")
     model: Optional[str] = Field(default=None, description="Model used (may change mid-session)")

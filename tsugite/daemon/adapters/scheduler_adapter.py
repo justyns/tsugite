@@ -211,7 +211,20 @@ class SchedulerAdapter:
                 if entry.inject_history:
                     await self._inject_into_user_sessions(adapter, entry, truncated, resolved_channels)
 
-        return RunResult(output=result, session_id=conv_id)
+        # Retrieve tokens/cost from the usage store for the just-completed run
+        run_tokens = None
+        run_cost = None
+        try:
+            from tsugite.usage import get_usage_store
+
+            records = get_usage_store().query(agent=entry.agent, limit=1)
+            if records and records[0].session_id == conv_id:
+                run_tokens = records[0].total_tokens or None
+                run_cost = records[0].cost or None
+        except Exception:
+            pass
+
+        return RunResult(output=result, session_id=conv_id, tokens=run_tokens, cost=run_cost)
 
     async def _auto_reply(
         self,

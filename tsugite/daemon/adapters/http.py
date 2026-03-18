@@ -379,6 +379,9 @@ class HTTPServer:
             Route("/api/agents/{agent}/workspace/content", self._read_workspace_file, methods=["GET"]),
             Route("/api/agents/{agent}/workspace/content", self._save_workspace_file, methods=["PUT"]),
             Route("/api/agents/{agent}/workspace/attach", self._attach_workspace_file, methods=["POST"]),
+            Route("/api/usage/summary", self._usage_summary, methods=["GET"]),
+            Route("/api/usage/breakdown", self._usage_breakdown, methods=["GET"]),
+            Route("/api/usage/history", self._usage_history, methods=["GET"]),
             Route("/api/events", self._events, methods=["GET"]),
             Route("/api/push/vapid-key", self._push_vapid_key, methods=["GET"]),
             Route("/api/push/subscribe", self._push_subscribe, methods=["POST"]),
@@ -1630,6 +1633,81 @@ class HTTPServer:
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
         )
+
+    # ── Usage API ──
+
+    async def _usage_summary(self, request: Request) -> JSONResponse:
+        if err := self._check_auth(request):
+            return err
+        from tsugite.usage import get_usage_store
+
+        params = request.query_params
+        store = get_usage_store()
+        data = store.summary(
+            agent=params.get("agent"),
+            schedule_id=params.get("schedule_id"),
+            model=params.get("model"),
+            since=params.get("since"),
+        )
+        return JSONResponse(data)
+
+    async def _usage_breakdown(self, request: Request) -> JSONResponse:
+        if err := self._check_auth(request):
+            return err
+        from tsugite.usage import get_usage_store
+
+        params = request.query_params
+        period = params.get("period", "day")
+        if period not in ("day", "week", "month"):
+            return JSONResponse({"error": "period must be day, week, or month"}, status_code=400)
+
+        store = get_usage_store()
+        rows = store.aggregate(
+            group_by=period,
+            agent=params.get("agent"),
+            schedule_id=params.get("schedule_id"),
+            model=params.get("model"),
+            since=params.get("since"),
+        )
+        return JSONResponse({"breakdown": rows})
+
+    async def _usage_history(self, request: Request) -> JSONResponse:
+        if err := self._check_auth(request):
+            return err
+        from tsugite.usage import get_usage_store
+
+        params = request.query_params
+        try:
+            limit = int(params.get("limit", "50"))
+        except ValueError:
+            limit = 50
+
+        store = get_usage_store()
+        records = store.query(
+            agent=params.get("agent"),
+            schedule_id=params.get("schedule_id"),
+            model=params.get("model"),
+            since=params.get("since"),
+            limit=limit,
+        )
+        return JSONResponse({
+            "records": [
+                {
+                    "timestamp": r.timestamp,
+                    "agent": r.agent,
+                    "model": r.model,
+                    "session_id": r.session_id,
+                    "schedule_id": r.schedule_id,
+                    "input_tokens": r.input_tokens,
+                    "output_tokens": r.output_tokens,
+                    "total_tokens": r.total_tokens,
+                    "cached_tokens": r.cached_tokens,
+                    "cost": r.cost,
+                    "duration_ms": r.duration_ms,
+                }
+                for r in records
+            ]
+        })
 
     async def _serve_ui(self, request: Request) -> Response:
         ui_path = WEB_DIR / "index.html"

@@ -93,6 +93,46 @@
               </table>
             </div>
           </template>
+          <template x-if="usageSummary && usageSummary.run_count > 0">
+            <div style="margin-top:24px">
+              <div class="section-header"><h2>Usage (Last 30 Days)</h2></div>
+              <div class="card-grid">
+                <div class="card">
+                  <h3>Total Cost</h3>
+                  <div class="card-meta">
+                    <div style="font-size:24px;font-weight:bold" x-text="formatCost(usageSummary.total_cost)"></div>
+                    <div><span x-text="usageSummary.run_count"></span> runs</div>
+                    <div>Avg <span x-text="formatCost(usageSummary.avg_cost_per_run)"></span>/run</div>
+                  </div>
+                </div>
+                <div class="card">
+                  <h3>Tokens</h3>
+                  <div class="card-meta">
+                    <div>Total: <span x-text="formatTokens(usageSummary.total_tokens)"></span></div>
+                    <div>Input: <span x-text="formatTokens(usageSummary.input_tokens)"></span></div>
+                    <div>Output: <span x-text="formatTokens(usageSummary.output_tokens)"></span></div>
+                  </div>
+                </div>
+              </div>
+              <template x-if="usageByAgent.length > 0">
+                <div style="margin-top:12px">
+                  <table class="data-table">
+                    <thead><tr><th>Agent</th><th style="text-align:right">Runs</th><th style="text-align:right">Tokens</th><th style="text-align:right">Cost</th></tr></thead>
+                    <tbody>
+                      <template x-for="a in usageByAgent" :key="a.name">
+                        <tr>
+                          <td x-text="a.name"></td>
+                          <td style="text-align:right" x-text="a.run_count"></td>
+                          <td style="text-align:right" x-text="formatTokens(a.total_tokens)"></td>
+                          <td style="text-align:right" x-text="formatCost(a.total_cost)"></td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </div>
+              </template>
+            </div>
+          </template>
         </div>
       </template>
     </div>

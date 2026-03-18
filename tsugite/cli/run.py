@@ -214,13 +214,15 @@ def _unpack_execution_result(result):
         return (
             result.response,
             result.token_count,
+            result.input_tokens,
+            result.output_tokens,
             result.cost,
             result.execution_steps,
             result.system_message,
             result.attachments,
         )
 
-    return result, None, None, None, None, None
+    return result, None, None, None, None, None, None, None
 
 
 def _display_result(result_str: str, ui_opts: UIOptions, stderr_console: Console):
@@ -658,8 +660,8 @@ def run(
                 console,
             )
 
-            result_str, token_count, cost, execution_steps, system_prompt, attachments = _unpack_execution_result(
-                result
+            result_str, token_count, input_tokens, output_tokens, cost, execution_steps, system_prompt, attachments = (
+                _unpack_execution_result(result)
             )
 
             if history_opts.enabled:
@@ -673,6 +675,8 @@ def run(
                         result=result_str,
                         model=exec_opts.model_override or agent_info.get("model", "default"),
                         token_count=token_count,
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
                         cost=cost,
                         execution_steps=execution_steps,
                         continue_conversation_id=history_opts.continue_id,

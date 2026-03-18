@@ -32,6 +32,8 @@ class AgentExecutionResult(BaseModel):
 
     response: str
     token_count: Optional[int] = None
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
     cost: Optional[float] = None
     step_count: int = 0
     execution_steps: List[Any] = Field(default_factory=list)

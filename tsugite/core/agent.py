@@ -101,6 +101,8 @@ class AgentResult:
     error: Optional[str] = None
     claude_code_session_id: Optional[str] = None
     context_window: Optional[int] = None
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
 
     def __str__(self) -> str:
         return self.output if self.output else self.error if self.error else ""
@@ -169,6 +171,8 @@ class TsugiteAgent:
 
         self.total_cost = 0.0
         self.total_tokens = 0
+        self.total_input_tokens = 0
+        self.total_output_tokens = 0
         self._previous_turn_had_error = False
 
         self.tool_map = {tool.name: tool for tool in tools}
@@ -604,6 +608,8 @@ class TsugiteAgent:
                             steps=self.memory.steps,
                             claude_code_session_id=self._claude_code_session_id,
                             context_window=self._claude_code_context_window,
+                            input_tokens=self.total_input_tokens or None,
+                            output_tokens=self.total_output_tokens or None,
                         )
                     return exec_result.final_answer
 
@@ -647,6 +653,8 @@ class TsugiteAgent:
                                 steps=self.memory.steps,
                                 claude_code_session_id=self._claude_code_session_id,
                                 context_window=self._claude_code_context_window,
+                                input_tokens=self.total_input_tokens or None,
+                                output_tokens=self.total_output_tokens or None,
                             )
                         return exec_result.final_answer
             except Exception:
@@ -672,6 +680,8 @@ class TsugiteAgent:
                     error=error_msg,
                     claude_code_session_id=self._claude_code_session_id,
                     context_window=self._claude_code_context_window,
+                    input_tokens=self.total_input_tokens or None,
+                    output_tokens=self.total_output_tokens or None,
                 )
 
             raise RuntimeError(error_msg)
@@ -713,6 +723,8 @@ class TsugiteAgent:
                 self._claude_code_cache_creation_tokens += cache_creation
                 self._claude_code_cache_read_tokens += cache_read
                 self.total_tokens += turn_total
+                self.total_input_tokens += input_tokens + cache_creation + cache_read
+                self.total_output_tokens += output_tokens
                 if event.get("context_window"):
                     self._claude_code_context_window = event["context_window"]
 
@@ -778,6 +790,8 @@ class TsugiteAgent:
         # Track cumulative tokens
         if response and response.usage:
             self.total_tokens += getattr(response.usage, "total_tokens", 0) or 0
+            self.total_input_tokens += getattr(response.usage, "prompt_tokens", 0) or 0
+            self.total_output_tokens += getattr(response.usage, "completion_tokens", 0) or 0
 
         # Extract reasoning content
         reasoning_content = self._extract_reasoning_content(response)

@@ -244,12 +244,17 @@ class BaseAdapter(ABC):
         metadata,
         result_str,
         token_count=None,
+        input_tokens=None,
+        output_tokens=None,
         cost=None,
         execution_steps=None,
         system_prompt=None,
         attachments=None,
         claude_code_session_id=None,
     ):
+        # Extract schedule_id from metadata if present
+        schedule_id = (metadata or {}).get("schedule_id")
+
         try:
             from tsugite.agent_runner.history_integration import save_run_to_history
 
@@ -260,6 +265,8 @@ class BaseAdapter(ABC):
                 result=result_str,
                 model=self.resolve_model(),
                 token_count=token_count,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
                 cost=cost,
                 execution_steps=execution_steps,
                 continue_conversation_id=conv_id,
@@ -267,6 +274,7 @@ class BaseAdapter(ABC):
                 system_prompt=system_prompt,
                 attachments=attachments,
                 claude_code_session_id=claude_code_session_id,
+                schedule_id=schedule_id,
             )
         except Exception as e:
             logger.warning("Failed to save daemon history: %s", e)
@@ -482,6 +490,8 @@ class BaseAdapter(ABC):
             metadata=metadata,
             result_str=str(result),
             token_count=getattr(result, "token_count", None),
+            input_tokens=getattr(result, "input_tokens", None),
+            output_tokens=getattr(result, "output_tokens", None),
             cost=getattr(result, "cost", None),
             execution_steps=getattr(result, "execution_steps", None),
             system_prompt=getattr(result, "system_message", None),
