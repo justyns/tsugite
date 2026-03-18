@@ -2,7 +2,9 @@
 
 import asyncio
 import logging
+import logging.handlers
 import signal
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -335,16 +337,48 @@ class Gateway:
                 logger.error("Error flushing session store: %s", e)
 
 
-async def run_daemon(config_path: Optional[Path] = None):
+_LOG_FORMAT = "%(asctime)s [%(name)s] %(levelname)s: %(message)s"
+_LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+
+
+def _configure_logging(config: DaemonConfig) -> None:
+    """Set up root logger handlers based on daemon config."""
+    level = getattr(logging, config.log_level.upper(), logging.INFO)
+    formatter = logging.Formatter(_LOG_FORMAT, datefmt=_LOG_DATE_FORMAT)
+
+    handlers: list[logging.Handler] = []
+    if config.log_to_console:
+        handlers.append(logging.StreamHandler(sys.stderr))
+    if config.log_file:
+        config.log_file.parent.mkdir(parents=True, exist_ok=True)
+        handlers.append(
+            logging.handlers.RotatingFileHandler(
+                config.log_file, maxBytes=10 * 1024 * 1024, backupCount=3
+            )
+        )
+    if not handlers:
+        handlers.append(logging.NullHandler())
+
+    root = logging.getLogger()
+    root.setLevel(level)
+    for h in root.handlers[:]:
+        root.removeHandler(h)
+    for h in handlers:
+        h.setFormatter(formatter)
+        root.addHandler(h)
+
+
+async def run_daemon(
+    config_path: Optional[Path] = None,
+    config_overrides: Optional[dict] = None,
+):
     """Main daemon entry point."""
     config = load_daemon_config(config_path)
+    if config_overrides:
+        for key, value in config_overrides.items():
+            setattr(config, key, value)
 
-    logging.basicConfig(
-        level=getattr(logging, config.log_level.upper(), logging.INFO),
-        format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
-        datefmt="%H:%M:%S",
-        force=True,
-    )
+    _configure_logging(config)
 
     gateway = Gateway(config, config_path=config_path)
     await gateway.start()

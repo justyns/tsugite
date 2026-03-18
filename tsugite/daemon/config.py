@@ -78,6 +78,8 @@ class DaemonConfig(BaseModel):
 
     state_dir: Path = Field(default_factory=_get_default_state_dir)
     log_level: str = "info"
+    log_file: Optional[Path] = None
+    log_to_console: bool = True
     agents: Dict[str, AgentConfig]
     discord_bots: List[DiscordBotConfig] = Field(default_factory=list)
     http: Optional[HTTPConfig] = None
@@ -90,6 +92,13 @@ def _expand_env_vars(data: dict, *keys: str) -> None:
     for key in keys:
         if key in data and isinstance(data[key], str):
             data[key] = os.path.expandvars(data[key])
+
+
+def _expand_paths(data: dict, *keys: str) -> None:
+    """Expand user home directory in the specified path-valued keys in-place."""
+    for key in keys:
+        if key in data and data[key]:
+            data[key] = Path(data[key]).expanduser()
 
 
 def load_daemon_config(path: Optional[Path] = None) -> DaemonConfig:
@@ -131,8 +140,7 @@ def load_daemon_config(path: Optional[Path] = None) -> DaemonConfig:
         if "headers" in channel:
             channel["headers"] = {k: os.path.expandvars(v) for k, v in channel["headers"].items()}
 
-    if "state_dir" in data:
-        data["state_dir"] = Path(data["state_dir"]).expanduser()
+    _expand_paths(data, "state_dir", "log_file")
 
     return DaemonConfig.model_validate(data)
 

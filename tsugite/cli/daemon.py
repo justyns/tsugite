@@ -648,6 +648,11 @@ def daemon_main(
     config: Optional[Path] = typer.Option(
         None, "--config", "-c", help="Path to daemon config (default: ~/.config/tsugite/daemon.yaml)"
     ),
+    log_file: Optional[Path] = typer.Option(None, "--log-file", help="Log to file (overrides config)"),
+    log_level: Optional[str] = typer.Option(None, "--log-level", help="Log level (overrides config)"),
+    log_to_console: Optional[bool] = typer.Option(
+        None, "--log-to-console/--no-console-log", help="Log to stderr (default: true)"
+    ),
 ):
     """Start tsugite daemon for Discord/Telegram bots."""
     if ctx.invoked_subcommand is not None:
@@ -657,8 +662,16 @@ def daemon_main(
 
     from tsugite.daemon.gateway import run_daemon
 
+    overrides = {}
+    if log_file is not None:
+        overrides["log_file"] = log_file
+    if log_level is not None:
+        overrides["log_level"] = log_level
+    if log_to_console is not None:
+        overrides["log_to_console"] = log_to_console
+
     try:
-        asyncio.run(run_daemon(config))
+        asyncio.run(run_daemon(config, config_overrides=overrides or None))
     except (KeyboardInterrupt, SystemExit, RuntimeError):
         pass
     finally:
