@@ -193,8 +193,14 @@ async def _llm_complete(system_prompt: str, user_content: str, model: str) -> st
         {"role": "user", "content": user_content},
     ]
     params = get_model_params(model, messages=messages)
-    response = await acompletion(**params)
-    return response.choices[0].message.content
+    try:
+        response = await acompletion(**params)
+    except Exception as e:
+        raise RuntimeError(f"LLM call failed ({model}): {e}") from e
+    content = response.choices[0].message.content
+    if not content:
+        raise RuntimeError(f"LLM returned empty response ({model})")
+    return content
 
 
 async def _summarize_chunk(messages: list[dict], model: str) -> str:
