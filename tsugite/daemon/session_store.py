@@ -100,6 +100,10 @@ class SessionStore:
         # Index: platform_thread_id -> session_id for fast thread lookup
         self._thread_index: dict[str, str] = {}
 
+        # Per-session compaction locks: (user_id, agent) -> Event
+        # Event is unset while compaction is in progress, set when done.
+        self._compaction_events: dict[tuple[str, str], threading.Event] = {}
+
         self._load()
         self._migrate_legacy()
         self._recover_stale_sessions()
@@ -114,6 +118,41 @@ class SessionStore:
 
     def update_context_limit(self, agent: str, limit: int) -> None:
         self._context_limits[agent] = limit
+
+    # ── Compaction locking ──
+
+    def begin_compaction(self, user_id: str, agent: str) -> bool:
+        """Try to start compaction. Returns True if this caller should compact.
+
+        If another caller is already compacting this session, returns False.
+        """
+        with self._lock:
+            key = (user_id, agent)
+            if key in self._compaction_events:
+                return False
+            self._compaction_events[key] = threading.Event()
+            return True
+
+    def end_compaction(self, user_id: str, agent: str) -> None:
+        """Signal that compaction is complete. Wakes all waiters."""
+        with self._lock:
+            key = (user_id, agent)
+            event = self._compaction_events.pop(key, None)
+        if event:
+            event.set()
+
+    def wait_for_compaction(self, user_id: str, agent: str, timeout: float = 300) -> bool:
+        """Block until an in-progress compaction finishes. Returns True if done, False on timeout."""
+        with self._lock:
+            event = self._compaction_events.get((user_id, agent))
+        if event is None:
+            return True
+        return event.wait(timeout=timeout)
+
+    def is_compacting(self, user_id: str, agent: str) -> bool:
+        """Check if a session is currently being compacted."""
+        with self._lock:
+            return (user_id, agent) in self._compaction_events
 
     # ── Interactive session management (replaces SessionManager) ──
 

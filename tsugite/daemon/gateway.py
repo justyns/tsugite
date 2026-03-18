@@ -221,6 +221,10 @@ class Gateway:
                     self.config.http, http_adapters, webhook_store, self.config.agents, gateway=self
                 )
 
+                # Wire up event_bus on adapters so they can broadcast compaction state
+                for adapter in http_adapters.values():
+                    adapter.event_bus = self._http_server.event_bus
+
                 # Always init push store when HTTP is enabled so subscribe/unsubscribe API works
                 try:
                     from tsugite.daemon.push import PushSubscriptionStore, get_or_create_vapid_keys

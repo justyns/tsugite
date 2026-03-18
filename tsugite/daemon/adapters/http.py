@@ -655,16 +655,24 @@ class HTTPServer:
         if session.message_count == 0:
             return JSONResponse({"error": "no session to compact"}, status_code=404)
 
+        agent_name = request.path_params["agent"]
         old_conv_id = session.id
+
+        if not adapter.session_store.begin_compaction(user_id, adapter.agent_name):
+            return JSONResponse({"error": "compaction already in progress"}, status_code=409)
+
+        self.event_bus.emit("compaction_started", {"agent": agent_name})
         try:
             await adapter._compact_session(session.id)
         except Exception as e:
             msg = str(e) or repr(e)
             logger.exception("Compaction failed for agent %s", adapter.agent_name)
             return JSONResponse({"error": f"compaction failed: {msg}"}, status_code=500)
+        finally:
+            adapter.session_store.end_compaction(user_id, adapter.agent_name)
+            self.event_bus.emit("compaction_finished", {"agent": agent_name})
 
         new_session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
-        agent_name = request.path_params["agent"]
         self.event_bus.emit("agent_status", {"agent": agent_name})
         return JSONResponse(
             {

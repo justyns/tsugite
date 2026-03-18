@@ -154,6 +154,7 @@ class BaseAdapter(ABC):
         self.agent_config = agent_config
         self.session_store = session_store
         self._identity_map = identity_map or {}
+        self.event_bus = None  # Set by HTTPServer for global SSE broadcast
 
         from tsugite.workspace import Workspace, WorkspaceNotFoundError
 
@@ -285,6 +286,12 @@ class BaseAdapter(ABC):
         if custom_logger and hasattr(custom_logger, "ui_handler"):
             custom_logger.ui_handler._emit(event_type, {})
 
+    def _broadcast_compaction(self, agent: str, *, started: bool) -> None:
+        """Broadcast compaction state change to all SSE subscribers."""
+        if self.event_bus:
+            event_type = "compaction_started" if started else "compaction_finished"
+            self.event_bus.emit(event_type, {"agent": agent})
+
     def _build_agent_context(self, channel_context: ChannelContext) -> Dict[str, Any]:
         """Build context dict for agent template rendering."""
         ctx: Dict[str, Any] = {"is_daemon": True, "is_scheduled": False, "schedule_id": "", "has_notify_tool": False}
@@ -397,9 +404,23 @@ class BaseAdapter(ABC):
             else:
                 conv_id = self.session_store.get_or_create_interactive(user_id, self.agent_name).id
 
-            if self.session_store.needs_compaction(conv_id):
+            if self.session_store.needs_compaction(conv_id) or self.session_store.is_compacting(
+                user_id, self.agent_name
+            ):
                 self._emit_ui(custom_logger, "compacting")
-                await self._compact_session(conv_id)
+                if self.session_store.begin_compaction(user_id, self.agent_name):
+                    # We own the compaction
+                    self._broadcast_compaction(self.agent_name, started=True)
+                    try:
+                        await self._compact_session(conv_id)
+                    finally:
+                        self.session_store.end_compaction(user_id, self.agent_name)
+                        self._broadcast_compaction(self.agent_name, started=False)
+                else:
+                    # Another request is already compacting; wait for it
+                    await asyncio.to_thread(
+                        self.session_store.wait_for_compaction, user_id, self.agent_name
+                    )
                 self._emit_ui(custom_logger, "compacted")
                 # Get the new session ID after compaction
                 session = self.session_store.get_or_create_interactive(user_id, self.agent_name)

@@ -1,5 +1,6 @@
 """Tests for unified sessions across daemon adapters."""
 
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -291,3 +292,59 @@ class TestCompactSessionClearsSkills:
             await adapter._compact_session(conv_id)
 
         assert manager._loaded_skills == {}
+
+
+class TestCompactionLocking:
+    """Tests for session compaction lock/queue mechanism."""
+
+    def test_begin_compaction_returns_true_first_time(self, session_store):
+        assert session_store.begin_compaction("user1", "test-agent") is True
+
+    def test_begin_compaction_returns_false_if_already_compacting(self, session_store):
+        session_store.begin_compaction("user1", "test-agent")
+        assert session_store.begin_compaction("user1", "test-agent") is False
+
+    def test_end_compaction_allows_new_begin(self, session_store):
+        session_store.begin_compaction("user1", "test-agent")
+        session_store.end_compaction("user1", "test-agent")
+        assert session_store.begin_compaction("user1", "test-agent") is True
+
+    def test_is_compacting(self, session_store):
+        assert session_store.is_compacting("user1", "test-agent") is False
+        session_store.begin_compaction("user1", "test-agent")
+        assert session_store.is_compacting("user1", "test-agent") is True
+        session_store.end_compaction("user1", "test-agent")
+        assert session_store.is_compacting("user1", "test-agent") is False
+
+    def test_wait_for_compaction_returns_immediately_if_not_compacting(self, session_store):
+        assert session_store.wait_for_compaction("user1", "test-agent", timeout=0.1) is True
+
+    def test_wait_for_compaction_blocks_until_done(self, session_store):
+        session_store.begin_compaction("user1", "test-agent")
+        result = [None]
+
+        def waiter():
+            result[0] = session_store.wait_for_compaction("user1", "test-agent", timeout=5)
+
+        t = threading.Thread(target=waiter)
+        t.start()
+        session_store.end_compaction("user1", "test-agent")
+        t.join(timeout=2)
+        assert not t.is_alive()
+        assert result[0] is True
+
+    def test_wait_for_compaction_times_out(self, session_store):
+        session_store.begin_compaction("user1", "test-agent")
+        assert session_store.wait_for_compaction("user1", "test-agent", timeout=0.05) is False
+        # Clean up
+        session_store.end_compaction("user1", "test-agent")
+
+    def test_different_users_independent(self, session_store):
+        session_store.begin_compaction("user1", "test-agent")
+        assert session_store.begin_compaction("user2", "test-agent") is True
+        assert session_store.is_compacting("user1", "test-agent") is True
+        assert session_store.is_compacting("user2", "test-agent") is True
+
+    def test_end_compaction_idempotent(self, session_store):
+        """end_compaction on a non-compacting session is a no-op."""
+        session_store.end_compaction("user1", "test-agent")  # Should not raise
