@@ -87,7 +87,10 @@ def _resolve_litellm_model(model: str) -> str:
     return params.get("_litellm_model", params["model"])
 
 
-_CLAUDE_CODE_CONTEXT_LIMIT = 200_000
+_CLAUDE_CODE_CONTEXT_LIMITS = {
+    "claude-opus-4-6": 1_000_000,
+}
+_CLAUDE_CODE_DEFAULT_CONTEXT_LIMIT = 200_000
 
 
 def get_context_limit(model: str, fallback: int | None = None) -> int:
@@ -99,7 +102,8 @@ def get_context_limit(model: str, fallback: int | None = None) -> int:
 
     params = get_model_params(model)
     if params.get("_provider") == "claude_code":
-        return _CLAUDE_CODE_CONTEXT_LIMIT
+        litellm_model = params.get("_litellm_model", params["model"])
+        return _CLAUDE_CODE_CONTEXT_LIMITS.get(litellm_model, _CLAUDE_CODE_DEFAULT_CONTEXT_LIMIT)
 
     from litellm import get_model_info
 
