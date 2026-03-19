@@ -290,7 +290,10 @@ class BaseAdapter(ABC):
         """Broadcast compaction state change to all SSE subscribers."""
         if self.event_bus:
             event_type = "compaction_started" if started else "compaction_finished"
-            self.event_bus.emit(event_type, {"agent": agent})
+            try:
+                self.event_bus.emit(event_type, {"agent": agent})
+            except Exception:
+                logger.debug("Failed to broadcast %s", event_type)
 
     def _build_agent_context(self, channel_context: ChannelContext) -> Dict[str, Any]:
         """Build context dict for agent template rendering."""
@@ -418,9 +421,11 @@ class BaseAdapter(ABC):
                         self._broadcast_compaction(self.agent_name, started=False)
                 else:
                     # Another request is already compacting; wait for it
-                    await asyncio.to_thread(
+                    done = await asyncio.to_thread(
                         self.session_store.wait_for_compaction, user_id, self.agent_name
                     )
+                    if not done:
+                        raise TimeoutError("Timed out waiting for session compaction to finish")
                 self._emit_ui(custom_logger, "compacted")
                 # Get the new session ID after compaction
                 session = self.session_store.get_or_create_interactive(user_id, self.agent_name)
