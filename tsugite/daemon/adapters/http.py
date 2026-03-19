@@ -466,6 +466,7 @@ class HTTPServer:
                 "context_limit": adapter.session_store.get_context_limit(adapter.agent_name),
                 "threshold": adapter.session_store.get_compaction_threshold(adapter.agent_name),
                 "message_count": session.message_count,
+                "compacting": adapter.session_store.is_compacting(user_id, adapter.agent_name),
                 "attachments": [
                     {"name": a.name, "content_type": a.content_type.value, "mime_type": a.mime_type}
                     for a in adapter._get_all_attachments()
@@ -655,16 +656,24 @@ class HTTPServer:
         if session.message_count == 0:
             return JSONResponse({"error": "no session to compact"}, status_code=404)
 
+        agent_name = request.path_params["agent"]
         old_conv_id = session.id
+
+        if not adapter.session_store.begin_compaction(user_id, adapter.agent_name):
+            return JSONResponse({"error": "compaction already in progress"}, status_code=409)
+
+        adapter._broadcast_compaction(agent_name, started=True)
         try:
             await adapter._compact_session(session.id)
         except Exception as e:
             msg = str(e) or repr(e)
             logger.exception("Compaction failed for agent %s", adapter.agent_name)
             return JSONResponse({"error": f"compaction failed: {msg}"}, status_code=500)
+        finally:
+            adapter.session_store.end_compaction(user_id, adapter.agent_name)
+            adapter._broadcast_compaction(agent_name, started=False)
 
         new_session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
-        agent_name = request.path_params["agent"]
         self.event_bus.emit("agent_status", {"agent": agent_name})
         return JSONResponse(
             {

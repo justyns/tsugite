@@ -42,6 +42,13 @@ export default () => ({
       if (ev.type === 'session_update') {
         this._debouncedLoadSessions();
       }
+      if (ev.type === 'compaction_started' && ev.agent === this.$store.app.selectedAgent) {
+        this.compacting = true;
+      }
+      if (ev.type === 'compaction_finished' && ev.agent === this.$store.app.selectedAgent) {
+        this.compacting = false;
+        if (this.isActiveSession) this.loadHistory();
+      }
       if (ev.type === 'reconnect' && this.$store.app.selectedAgent) {
         this.reload();
       }
@@ -242,6 +249,7 @@ export default () => ({
     try {
       const data = await get(`/api/agents/${agent}/status?user_id=${encodeURIComponent(this.userId)}`);
       this.statusInfo = data;
+      if (data.compacting !== undefined) this.compacting = data.compacting;
     } catch { /* ignore */ }
   },
 
