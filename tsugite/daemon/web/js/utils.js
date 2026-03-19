@@ -60,6 +60,10 @@ export function formatDate(iso) {
   return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
+export function contentBlockHtml(name, content) {
+  return `<details class="content-block"><summary><code>${escapeHtml(name)}</code> (content block)</summary><pre><code>${escapeHtml(content)}</code></pre></details>`;
+}
+
 export function scrollToBottom(el) {
   el.scrollTop = el.scrollHeight;
 }

@@ -1001,8 +1001,10 @@ class TsugiteAgent:
             else:
                 # No code — show what the LLM actually said so it sees its own response
                 assistant_msg = step.thought if step.thought else "(empty response)"
-            for name, block_content in step.content_blocks.items():
-                assistant_msg += f'\n\n<content name="{name}">\n{block_content}\n</content>'
+            from tsugite.core.content_blocks import serialize_content_blocks
+            cb_str = serialize_content_blocks(step.content_blocks)
+            if cb_str:
+                assistant_msg += f"\n\n{cb_str}"
             messages.append({"role": "assistant", "content": assistant_msg})
 
             # Observation with loaded skills embedded

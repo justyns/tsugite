@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from tsugite.agent_runner.history_integration import (
+    _build_turn_messages,
     _extract_functions_called,
     save_run_to_history,
 )
@@ -415,3 +416,51 @@ class TestRunHistoryIntegration:
 
             assert len(files) == 1
             assert conv_id in str(files[0])
+
+
+class TestBuildTurnMessages:
+    """Tests for _build_turn_messages helper."""
+
+    def test_content_blocks_included_in_assistant_message(self):
+        """Content blocks on execution steps should be appended to assistant messages."""
+        step = MagicMock()
+        step.code = "print('hi')"
+        step.xml_observation = "<result>ok</result>"
+        step.content_blocks = {"summary": "This is a summary", "data": "col1,col2"}
+
+        messages = _build_turn_messages("hello", "done", execution_steps=[step])
+
+        assistant_msgs = [m for m in messages if m["role"] == "assistant"]
+        assert len(assistant_msgs) == 2  # step code + final result
+
+        code_msg = assistant_msgs[0]["content"]
+        assert "```python" in code_msg
+        assert '<content name="summary">' in code_msg
+        assert "This is a summary" in code_msg
+        assert '<content name="data">' in code_msg
+        assert "col1,col2" in code_msg
+
+    def test_no_content_blocks_unchanged(self):
+        """Steps without content_blocks attr should work fine."""
+        step = MagicMock(spec=["code", "xml_observation"])
+        step.code = "x = 1"
+        step.xml_observation = "<result>1</result>"
+
+        messages = _build_turn_messages("hi", "bye", execution_steps=[step])
+
+        assistant_msgs = [m for m in messages if m["role"] == "assistant"]
+        assert len(assistant_msgs) == 2
+        assert "<content" not in assistant_msgs[0]["content"]
+
+    def test_empty_content_blocks(self):
+        """Steps with empty content_blocks dict should not add anything."""
+        step = MagicMock()
+        step.code = "x = 1"
+        step.xml_observation = ""
+        step.content_blocks = {}
+
+        messages = _build_turn_messages("hi", "bye", execution_steps=[step])
+
+        assistant_msgs = [m for m in messages if m["role"] == "assistant"]
+        code_msg = assistant_msgs[0]["content"]
+        assert code_msg == "```python\nx = 1\n```"

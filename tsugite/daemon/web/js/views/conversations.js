@@ -1,5 +1,5 @@
 import { get, post, streamPost, uploadFiles } from '../api.js';
-import { escapeHtml, renderMarkdown, scrollToBottom, formatDate, formatFileSize, stateBadgeClass } from '../utils.js';
+import { escapeHtml, renderMarkdown, scrollToBottom, formatDate, formatFileSize, stateBadgeClass, contentBlockHtml } from '../utils.js';
 
 export default () => ({
   sidebarOpen: false,
@@ -189,12 +189,14 @@ export default () => ({
           continue;
         }
         if (turn.user) this._allHistoryMessages.push({ type: 'user', text: turn.user });
+        if (turn.content_blocks && Object.keys(turn.content_blocks).length) {
+          const steps = Object.entries(turn.content_blocks).map(([name, content]) => ({
+            html: contentBlockHtml(name, content)
+          }));
+          this._allHistoryMessages.push({ type: 'progress-done', steps, turnCount: 0, toolCount: 0 });
+        }
         if (turn.assistant) {
-          const msg = { type: 'agent', text: turn.assistant };
-          if (turn.content_blocks && Object.keys(turn.content_blocks).length) {
-            msg.contentBlocks = turn.content_blocks;
-          }
-          this._allHistoryMessages.push(msg);
+          this._allHistoryMessages.push({ type: 'agent', text: turn.assistant });
         }
       }
       this._showRecentHistory();
@@ -473,7 +475,7 @@ export default () => ({
     });
 
     const progressIdx = this.messages.length;
-    this.messages.push({ type: 'progress', steps: [], statusText: 'Working...', turnCount: 0, toolCount: 0, contentBlocks: {} });
+    this.messages.push({ type: 'progress', steps: [], statusText: 'Working...', turnCount: 0, toolCount: 0 });
 
     try {
       const chatBody = { message: msg, user_id: this.userId };
@@ -526,9 +528,7 @@ export default () => ({
             });
           } else if (event.type === 'final_result') {
             gotResult = true;
-            const prog = this.messages[progressIdx];
-            const blocks = prog && Object.keys(prog.contentBlocks || {}).length ? prog.contentBlocks : null;
-            this.messages.push({ type: 'agent', text: event.result, contentBlocks: blocks });
+            this.messages.push({ type: 'agent', text: event.result });
           } else if (event.type === 'session_info') {
             this.updateStatusFromEvent(event);
           } else if (event.type === 'error') {
@@ -588,8 +588,7 @@ export default () => ({
       prog.statusText = `Agent: ${event.agent}`;
       if (event.model) this.statusInfo = { ...this.statusInfo, model: event.model };
     } else if (event.type === 'content_block') {
-      prog.contentBlocks[event.name] = event.content || '';
-      prog.steps.push({ html: `<details class="content-block"><summary><code>${escapeHtml(event.name)}</code> (content block)</summary><pre><code>${escapeHtml(event.content || '')}</code></pre></details>` });
+      prog.steps.push({ html: contentBlockHtml(event.name, event.content || '') });
     } else if (event.type === 'code') {
       prog.steps.push({ html: `<details><summary><code>code</code></summary><pre><code>${escapeHtml(event.content || '')}</code></pre></details>` });
     } else if (event.type === 'tool_result') {

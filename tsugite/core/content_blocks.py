@@ -37,6 +37,18 @@ def extract_content_blocks(text: str) -> Tuple[str, Dict[str, str]]:
     return cleaned, blocks
 
 
+def serialize_content_blocks(blocks: Dict[str, str]) -> str:
+    """Serialize content blocks dict back into XML-tagged string.
+
+    Returns a string with each block as `<content name="...">...</content>`,
+    separated by double newlines. Empty dict returns empty string.
+    """
+    parts = []
+    for name, content in blocks.items():
+        parts.append(f'<content name="{name}">\n{content}\n</content>')
+    return "\n\n".join(parts)
+
+
 def write_content_blocks_to_files(blocks: Dict[str, str], tmpdir: str) -> Dict[str, str]:
     """Write content blocks to content-addressed temp files.
 

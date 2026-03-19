@@ -194,16 +194,6 @@
                   </template>
                   <template x-if="msg.type === 'agent'">
                     <div class="msg agent">
-                      <template x-if="msg.contentBlocks">
-                        <div class="content-blocks">
-                          <template x-for="(val, key) in Object.entries(msg.contentBlocks)" :key="key">
-                            <details class="content-block">
-                              <summary><code x-text="val[0]"></code> (content block)</summary>
-                              <pre><code x-text="val[1]"></code></pre>
-                            </details>
-                          </template>
-                        </div>
-                      </template>
                       <div x-html="renderHtml(msg.text)"></div>
                     </div>
                   </template>
