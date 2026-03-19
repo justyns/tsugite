@@ -174,6 +174,20 @@ export default () => ({
           this._allHistoryMessages.push({ type: 'compaction', summary: turn.summary || null });
           continue;
         }
+        if (turn.type === 'hook_execution') {
+          this._allHistoryMessages.push({
+            type: 'hook',
+            phase: turn.phase,
+            name: turn.name,
+            command: turn.command,
+            exit_code: turn.exit_code,
+            stdout: turn.stdout,
+            stderr: turn.stderr,
+            duration_ms: turn.duration_ms,
+            timestamp: turn.timestamp,
+          });
+          continue;
+        }
         if (turn.user) this._allHistoryMessages.push({ type: 'user', text: turn.user });
         if (turn.assistant) {
           const msg = { type: 'agent', text: turn.assistant };

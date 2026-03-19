@@ -25,6 +25,7 @@ from .models import (
     CompactionSummary,
     ContextSnapshot,
     ContextUpdate,
+    HookExecution,
     SessionMeta,
     SessionRecord,
     Turn,
@@ -312,6 +313,8 @@ class SessionStorage:
                 return Turn.model_validate(data)
             elif record_type == "compaction_summary":
                 return CompactionSummary.model_validate(data)
+            elif record_type == "hook_execution":
+                return HookExecution.model_validate(data)
             # Handle old format "metadata" type (V1 format)
             elif record_type == "metadata":
                 print("Warning: Skipping old V1 metadata record (incompatible format)")
@@ -479,6 +482,11 @@ class SessionStorage:
         self._turn_count += 1
         self._total_tokens += tokens or 0
         self._total_cost += cost or 0.0
+
+    def record_hook_executions(self, executions: List[HookExecution]) -> None:
+        """Write hook execution records."""
+        if executions:
+            self._write_records(executions)
 
     def record_compaction_summary(self, summary: str, previous_turns: int, retained_turns: int = 0) -> None:
         """Record compaction summary.

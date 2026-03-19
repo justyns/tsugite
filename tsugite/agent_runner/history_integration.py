@@ -148,6 +148,12 @@ def save_run_to_history(
         if claude_code_session_id:
             metadata["claude_code_session_id"] = claude_code_session_id
 
+        # Write accumulated hook execution records before the turn
+        from tsugite.hooks import drain_all_executions
+
+        hook_executions = drain_all_executions()
+        storage.record_hook_executions(hook_executions)
+
         storage.record_turn(
             messages=messages,
             final_answer=result,

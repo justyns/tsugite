@@ -203,9 +203,10 @@ class TestExecuteHook:
                 env=None,
             )
 
-    def test_nonzero_exit_returns_none(self, tmp_path):
+    def test_nonzero_exit_returns_nonzero_code(self, tmp_path):
         with patch("tsugite.hooks.subprocess.run", return_value=_fail_result()):
-            assert _execute_hook("exit 1", tmp_path) is None
+            result = _execute_hook("exit 1", tmp_path)
+            assert result.exit_code == 1
 
     def test_failure_logs_stdout_and_stderr(self, tmp_path, caplog):
         with patch("tsugite.hooks.subprocess.run", return_value=_fail_result(stdout="out msg", stderr="err msg")):
@@ -348,25 +349,27 @@ class TestCaptureAs:
 
 
 class TestExecuteHookCapture:
-    def test_capture_returns_stdout(self, tmp_path):
+    def test_returns_stdout(self, tmp_path):
         with patch("tsugite.hooks.subprocess.run", return_value=_ok_result(stdout="captured output\n")):
-            output = _execute_hook("echo captured output", tmp_path, capture=True)
-            assert output == "captured output"
+            result = _execute_hook("echo captured output", tmp_path)
+            assert result.stdout == "captured output"
+            assert result.exit_code == 0
 
-    def test_capture_returns_none_on_failure(self, tmp_path):
+    def test_failure_returns_nonzero(self, tmp_path):
         with patch("tsugite.hooks.subprocess.run", return_value=_fail_result()):
-            output = _execute_hook("exit 1", tmp_path, capture=True)
-            assert output is None
+            result = _execute_hook("exit 1", tmp_path)
+            assert result.exit_code == 1
 
-    def test_no_capture_returns_none(self, tmp_path):
+    def test_success_returns_zero(self, tmp_path):
         with patch("tsugite.hooks.subprocess.run", return_value=_ok_result()):
-            result = _execute_hook("echo hi", tmp_path, capture=False)
-            assert result is None
+            result = _execute_hook("echo hi", tmp_path)
+            assert result.exit_code == 0
 
-    def test_capture_timeout_returns_none(self, tmp_path):
+    def test_timeout_returns_negative_exit(self, tmp_path):
         with patch("tsugite.hooks.subprocess.run", side_effect=subprocess.TimeoutExpired("cmd", 300)):
-            result = _execute_hook("sleep 999", tmp_path, capture=True)
-            assert result is None
+            result = _execute_hook("sleep 999", tmp_path)
+            assert result.exit_code == -1
+            assert "Timed out" in result.stderr
 
 
 class TestRenderAndExecuteCapture:
@@ -375,14 +378,16 @@ class TestRenderAndExecuteCapture:
     def test_captures_returned(self, tmp_path):
         rules = [HookRule(run="echo hello", capture_as="greeting")]
         with patch("tsugite.hooks.subprocess.run", return_value=_ok_result(stdout="hello")):
-            captured = _render_and_execute(self._env, rules, {}, tmp_path)
-            assert captured == {"greeting": "hello"}
+            results = _render_and_execute(self._env, rules, {}, tmp_path)
+            assert results.captured == {"greeting": "hello"}
+            assert len(results.executions) == 1
+            assert results.executions[0].exit_code == 0
 
     def test_no_capture_returns_empty_dict(self, tmp_path):
         rules = [HookRule(run="echo hello", wait=True)]
         with patch("tsugite.hooks.subprocess.run", return_value=_ok_result(stdout="hello")):
-            captured = _render_and_execute(self._env, rules, {}, tmp_path)
-            assert captured == {}
+            results = _render_and_execute(self._env, rules, {}, tmp_path)
+            assert results.captured == {}
 
     def test_multiple_captures(self, tmp_path):
         rules = [
@@ -396,20 +401,22 @@ class TestRenderAndExecuteCapture:
             return _ok_result(stdout=f"output_{call_count[0]}")
 
         with patch("tsugite.hooks.subprocess.run", side_effect=mock_run_fn):
-            captured = _render_and_execute(self._env, rules, {}, tmp_path)
-            assert captured == {"var_a": "output_1", "var_b": "output_2"}
+            results = _render_and_execute(self._env, rules, {}, tmp_path)
+            assert results.captured == {"var_a": "output_1", "var_b": "output_2"}
 
     def test_failed_capture_not_included(self, tmp_path):
         rules = [HookRule(run="exit 1", capture_as="should_not_appear")]
         with patch("tsugite.hooks.subprocess.run", return_value=_fail_result()):
-            captured = _render_and_execute(self._env, rules, {}, tmp_path)
-            assert captured == {}
+            results = _render_and_execute(self._env, rules, {}, tmp_path)
+            assert results.captured == {}
+            assert len(results.executions) == 1
+            assert results.executions[0].exit_code == 1
 
     def test_non_capture_returns_empty_dict(self, tmp_path):
         rules = [HookRule(run="echo fire", tools=["*"])]
         with patch("tsugite.hooks.subprocess.run", return_value=_ok_result()) as mock_run:
-            captured = _render_and_execute(self._env, rules, {}, tmp_path)
-            assert captured == {}
+            results = _render_and_execute(self._env, rules, {}, tmp_path)
+            assert results.captured == {}
             mock_run.assert_called_once()
 
 
@@ -552,9 +559,9 @@ class TestRunAsList:
     def test_list_render_and_execute(self, tmp_path):
         rules = [HookRule(run=["echo", "{{ name }}"], capture_as="out")]
         with patch("tsugite.hooks.subprocess.run", return_value=_ok_result(stdout="alice")) as mock_run:
-            captured = _render_and_execute(_jinja_env, rules, {"name": "alice"}, tmp_path)
+            results = _render_and_execute(_jinja_env, rules, {"name": "alice"}, tmp_path)
             assert mock_run.call_args[0][0] == ["echo", "alice"]
-            assert captured == {"out": "alice"}
+            assert results.captured == {"out": "alice"}
 
     def test_list_with_shell_metacharacters(self, tmp_path):
         rules = [HookRule(run=["echo", "{{ msg }}"], capture_as="out")]

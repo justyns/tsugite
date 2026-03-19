@@ -580,7 +580,8 @@ class BaseAdapter(ABC):
                 "turns_file": str(turns_file),
                 "turn_count": len(old_turns),
             }
-            await fire_compact_hooks(self.agent_config.workspace_dir, "pre_compact", hook_context, interactive=False)
+            pre_compact_execs = await fire_compact_hooks(self.agent_config.workspace_dir, "pre_compact", hook_context, interactive=False)
+            storage.record_hook_executions(pre_compact_execs)
 
             old_messages = []
 
@@ -629,7 +630,7 @@ class BaseAdapter(ABC):
             new_storage.record_compaction_summary(summary, len(old_turns), retained_turns=len(recent_turns))
             new_storage.write_turns(recent_turns)
 
-            await fire_compact_hooks(
+            post_compact_execs = await fire_compact_hooks(
                 self.agent_config.workspace_dir,
                 "post_compact",
                 {
@@ -640,6 +641,7 @@ class BaseAdapter(ABC):
                 },
                 interactive=False,
             )
+            new_storage.record_hook_executions(post_compact_execs)
         finally:
             turns_file.unlink(missing_ok=True)
 

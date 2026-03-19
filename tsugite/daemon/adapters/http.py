@@ -29,7 +29,7 @@ from tsugite.daemon.scheduler import ScheduleEntry
 from tsugite.daemon.webhook_store import WebhookStore
 from tsugite.events.base import BaseEvent
 from tsugite.core.content_blocks import extract_content_blocks
-from tsugite.history.models import CompactionSummary, Turn
+from tsugite.history.models import CompactionSummary, HookExecution, Turn
 from tsugite.history.storage import SessionStorage, get_history_dir
 from tsugite.skill_discovery import get_builtin_skills_path
 from tsugite.ui.jsonl import JSONLUIHandler
@@ -560,16 +560,32 @@ class HTTPServer:
         collected: list = []
         for idx in reversed(range(len(chain))):
             records = records_cache[idx]
-            turns = [r for r in records if isinstance(r, Turn)]
+            turns_and_hooks = [r for r in records if isinstance(r, (Turn, HookExecution))]
 
             if idx > 0:
                 comp_summary = next((r for r in records_cache[idx - 1] if isinstance(r, CompactionSummary)), None)
                 if comp_summary and comp_summary.retained_turns:
-                    turns = turns[: -comp_summary.retained_turns]
+                    # Count only Turn records for retention trimming
+                    turn_count_total = sum(1 for r in turns_and_hooks if isinstance(r, Turn))
+                    keep_from = turn_count_total - comp_summary.retained_turns
+                    trimmed: list = []
+                    seen_turns = 0
+                    for r in turns_and_hooks:
+                        if isinstance(r, Turn):
+                            if seen_turns < keep_from:
+                                seen_turns += 1
+                                continue
+                            seen_turns += 1
+                        elif isinstance(r, HookExecution):
+                            # Keep hooks that belong to retained turns (after trim point)
+                            if seen_turns < keep_from:
+                                continue
+                        trimmed.append(r)
+                    turns_and_hooks = trimmed
             else:
                 comp_summary = None
 
-            collected.extend(turns)
+            collected.extend(turns_and_hooks)
 
             if comp_summary:
                 collected.append({"marker": "compaction", "summary": comp_summary.summary})
@@ -610,6 +626,9 @@ class HTTPServer:
                 if item.get("summary"):
                     entry["summary"] = item["summary"]
                 result_turns.append(entry)
+                continue
+            if isinstance(item, HookExecution):
+                result_turns.append(item.model_dump(mode="json", exclude_none=True))
                 continue
             user_msg = ""
             for msg in item.messages:

@@ -8,9 +8,20 @@ Key features:
 """
 
 from datetime import datetime
-from typing import Any, Dict, List, Literal, Optional
+from typing import Annotated, Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
+
+
+def _parse_iso_datetime(v):
+    if v is None:
+        return None
+    if isinstance(v, str):
+        return datetime.fromisoformat(v.replace("Z", "+00:00"))
+    return v
+
+
+ISODatetime = Annotated[datetime, BeforeValidator(_parse_iso_datetime)]
 
 
 class AttachmentRef(BaseModel):
@@ -31,10 +42,7 @@ class AttachmentRef(BaseModel):
 
 
 class SessionMeta(BaseModel):
-    """Metadata for a session (first record in JSONL file).
-
-    Contains information about the session itself, not the conversation content.
-    """
+    """Metadata for a session (first record in JSONL file)."""
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -43,25 +51,12 @@ class SessionMeta(BaseModel):
     agent: str = Field(..., description="Agent name used in this session")
     model: str = Field(..., description="Model identifier (provider:model format)")
     machine: str = Field(..., description="Hostname/machine name where session occurred")
-    created_at: datetime = Field(..., description="Session creation timestamp")
+    created_at: ISODatetime = Field(..., description="Session creation timestamp")
     compacted_from: Optional[str] = Field(default=None, description="Previous session ID if compacted")
-
-    @field_validator("created_at", mode="before")
-    @classmethod
-    def parse_datetime(cls, v):
-        if v is None:
-            return None
-        if isinstance(v, str):
-            return datetime.fromisoformat(v.replace("Z", "+00:00"))
-        return v
 
 
 class ContextSnapshot(BaseModel):
-    """Initial context state for a session.
-
-    Captures all attachments and skills at session start.
-    Content is stored by reference (hash or URL), not inline.
-    """
+    """Initial context state for a session."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -74,10 +69,7 @@ class ContextSnapshot(BaseModel):
 
 
 class ContextUpdate(BaseModel):
-    """Delta update to context (recorded when context changes).
-
-    Only records what changed, not the full context.
-    """
+    """Delta update to context (recorded when context changes)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -86,23 +78,12 @@ class ContextUpdate(BaseModel):
     removed: List[str] = Field(default_factory=list, description="Removed attachment names")
     added_skills: List[str] = Field(default_factory=list, description="Newly loaded skills")
     removed_skills: List[str] = Field(default_factory=list, description="Unloaded skills")
-    timestamp: datetime = Field(..., description="When this update occurred")
+    timestamp: ISODatetime = Field(..., description="When this update occurred")
     hash: str = Field(..., description="New context hash after this update")
-
-    @field_validator("timestamp", mode="before")
-    @classmethod
-    def parse_datetime(cls, v):
-        if isinstance(v, str):
-            return datetime.fromisoformat(v.replace("Z", "+00:00"))
-        return v
 
 
 class Turn(BaseModel):
-    """A single conversation turn with full message history.
-
-    Contains the complete LiteLLM message array for exact reconstruction.
-    Messages may have array content for multi-modal (images, etc).
-    """
+    """A single conversation turn with full message history."""
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -112,7 +93,7 @@ class Turn(BaseModel):
     user_summary: Optional[str] = Field(default=None, description="First user message truncated (for display)")
     tokens: Optional[int] = Field(default=None, description="Total tokens used in this turn")
     cost: Optional[float] = Field(default=None, description="Estimated cost for this turn")
-    timestamp: datetime = Field(..., description="When this turn occurred")
+    timestamp: ISODatetime = Field(..., description="When this turn occurred")
     model: Optional[str] = Field(default=None, description="Model used (may change mid-session)")
     duration_ms: Optional[int] = Field(default=None, description="Execution duration in milliseconds")
     functions_called: List[str] = Field(default_factory=list, description="Tool/function names called")
@@ -120,20 +101,9 @@ class Turn(BaseModel):
         default=None, description="Channel routing metadata (source, channel_id, user_id, reply_to)"
     )
 
-    @field_validator("timestamp", mode="before")
-    @classmethod
-    def parse_datetime(cls, v):
-        if isinstance(v, str):
-            return datetime.fromisoformat(v.replace("Z", "+00:00"))
-        return v
-
 
 class CompactionSummary(BaseModel):
-    """Summary from a compacted session.
-
-    When a session is compacted, this record preserves a summary of
-    the previous conversation for context.
-    """
+    """Summary from a compacted session."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -143,5 +113,21 @@ class CompactionSummary(BaseModel):
     retained_turns: int = Field(default=0, description="Number of recent turns kept verbatim after compaction")
 
 
+class HookExecution(BaseModel):
+    """Record of a hook execution with its output and exit code."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["hook_execution"] = "hook_execution"
+    phase: str = Field(..., description="Hook phase: post_tool, pre_message, pre_compact, post_compact")
+    name: Optional[str] = Field(default=None, description="Hook name or capture_as variable")
+    command: str = Field(..., description="Rendered command that was executed")
+    exit_code: int = Field(..., description="Process exit code")
+    stdout: Optional[str] = Field(default=None, description="Standard output")
+    stderr: Optional[str] = Field(default=None, description="Standard error")
+    duration_ms: Optional[int] = Field(default=None, description="Execution duration in milliseconds")
+    timestamp: ISODatetime = Field(..., description="When this hook was executed")
+
+
 # Type alias for any record type
-SessionRecord = SessionMeta | ContextSnapshot | ContextUpdate | Turn | CompactionSummary
+SessionRecord = SessionMeta | ContextSnapshot | ContextUpdate | Turn | CompactionSummary | HookExecution
