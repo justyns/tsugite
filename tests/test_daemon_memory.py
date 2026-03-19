@@ -417,6 +417,46 @@ class TestLlmCompleteErrorHandling:
         assert result == "hello"
 
 
+class TestInferCompactionModelClaudeCode:
+    def test_claude_code_sonnet_returns_haiku(self):
+        assert infer_compaction_model("claude_code:sonnet") == "claude_code:haiku"
+
+    def test_claude_code_opus_returns_haiku(self):
+        assert infer_compaction_model("claude_code:opus") == "claude_code:haiku"
+
+    def test_claude_code_haiku_returns_haiku(self):
+        assert infer_compaction_model("claude_code:haiku") == "claude_code:haiku"
+
+
+class TestLlmCompleteClaudeCodeRouting:
+    @pytest.mark.asyncio
+    async def test_routes_to_claude_code_complete(self):
+        with patch(
+            "tsugite.core.claude_code.claude_code_complete",
+            new_callable=AsyncMock,
+            return_value="claude code result",
+        ) as mock_cc:
+            result = await _llm_complete("system", "user", "claude_code:sonnet")
+        assert result == "claude code result"
+        mock_cc.assert_called_once_with("system", "user", "claude-sonnet-4-6")
+
+    @pytest.mark.asyncio
+    async def test_claude_code_empty_response_raises(self):
+        with patch("tsugite.core.claude_code.claude_code_complete", new_callable=AsyncMock, return_value=""):
+            with pytest.raises(RuntimeError, match=r"LLM returned empty response"):
+                await _llm_complete("system", "user", "claude_code:haiku")
+
+    @pytest.mark.asyncio
+    async def test_claude_code_error_raises_runtime_error(self):
+        with patch(
+            "tsugite.core.claude_code.claude_code_complete",
+            new_callable=AsyncMock,
+            side_effect=Exception("cli not found"),
+        ):
+            with pytest.raises(RuntimeError, match=r"LLM call failed.*cli not found"):
+                await _llm_complete("system", "user", "claude_code:sonnet")
+
+
 class TestSummaryFormatIncludesNewSections:
     def test_files_accessed_section(self):
         assert "## Files Accessed" in SUMMARIZE_SYSTEM_PROMPT

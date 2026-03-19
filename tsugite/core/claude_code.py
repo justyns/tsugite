@@ -19,6 +19,23 @@ logger = logging.getLogger(__name__)
 _CLAUDE_ENV_VARS = {"CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "ANTHROPIC_API_KEY"}
 
 
+async def claude_code_complete(system_prompt: str, user_content: str, model: str) -> str:
+    """One-shot completion via Claude Code CLI.
+
+    Creates a subprocess, sends a single message, and returns the result text.
+    Used for compaction/summarization when the agent uses the claude_code provider.
+    """
+    proc = ClaudeCodeProcess()
+    try:
+        await proc.start(model, system_prompt)
+        async for event in proc.send_message(user_content):
+            if event["type"] == "result":
+                return event.get("text", "")
+        return ""
+    finally:
+        await proc.stop()
+
+
 class ClaudeCodeProcess:
     """Manages a persistent claude CLI subprocess for LLM completions.
 

@@ -15,6 +15,7 @@ PROVIDER_COMPACT_MODELS = {
     "anthropic": "anthropic:claude-3-haiku-20240307",
     "google": "google:gemini-2.0-flash-lite",
     "openrouter": "openrouter:openai/gpt-4o-mini",
+    "claude_code": "claude_code:haiku",
     "ollama": None,  # use agent model as-is
 }
 
@@ -90,6 +91,7 @@ def _resolve_litellm_model(model: str) -> str:
 _CLAUDE_CODE_CONTEXT_LIMITS = {
     "claude-opus-4-6": 1_000_000,
     "claude-sonnet-4-6": 1_000_000,
+    "claude-haiku-4-5-20251001": 200_000,
 }
 _CLAUDE_CODE_DEFAULT_CONTEXT_LIMIT = 200_000
 
@@ -189,20 +191,31 @@ def _chunk_messages(messages: list[dict], max_chunk_tokens: int, model: str) -> 
 
 async def _llm_complete(system_prompt: str, user_content: str, model: str) -> str:
     """Send a system+user message pair to the LLM and return the response text."""
-    from litellm import acompletion
-
     from tsugite.models import get_model_params
 
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_content},
-    ]
-    params = get_model_params(model, messages=messages)
+    params = get_model_params(model)
+
     try:
-        response = await acompletion(**params)
+        if params.get("_provider") == "claude_code":
+            from tsugite.core.claude_code import claude_code_complete
+
+            content = await claude_code_complete(
+                system_prompt, user_content, _resolve_litellm_model(model)
+            )
+        else:
+            from litellm import acompletion
+
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content},
+            ]
+            litellm_params = get_model_params(model, messages=messages)
+            litellm_params = {k: v for k, v in litellm_params.items() if not k.startswith("_")}
+            response = await acompletion(**litellm_params)
+            content = response.choices[0].message.content
     except Exception as e:
         raise RuntimeError(f"LLM call failed ({model}): {e}") from e
-    content = response.choices[0].message.content
+
     if not content:
         raise RuntimeError(f"LLM returned empty response ({model})")
     return content
