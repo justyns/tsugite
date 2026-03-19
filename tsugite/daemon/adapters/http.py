@@ -521,7 +521,9 @@ class HTTPServer:
             attachments.append(entry)
         return JSONResponse({"attachments": attachments})
 
-    def _collect_turns(self, session_id: str, limit: int = 0) -> list:
+    def _collect_turns(
+        self, session_id: str, limit: int = 0
+    ) -> tuple[list, str | None, str | None]:
         """Collect turns from a session and its compaction chain.
 
         Args:
@@ -529,6 +531,10 @@ class HTTPServer:
             limit: Max number of turns to return (0 = unlimited). Walks
                    newest-to-oldest and stops early once enough turns are
                    collected.
+
+        Returns:
+            (turns, compaction_summary, compacted_from) where the latter two
+            come from the current session's metadata/records.
         """
         history_dir = get_history_dir()
         visited: set[str] = set()
@@ -600,7 +606,16 @@ class HTTPServer:
                         collected = collected[i + 1 :]
                         break
 
-        return collected
+        compaction_summary = None
+        compacted_from = None
+        if chain:
+            if chain[0]._meta:
+                compacted_from = chain[0]._meta.compacted_from
+            cs = next((r for r in records_cache[0] if isinstance(r, CompactionSummary)), None)
+            if cs:
+                compaction_summary = cs.summary
+
+        return collected, compaction_summary, compacted_from
 
     async def _history(self, request: Request) -> JSONResponse:
         adapter, err = self._get_adapter(request)
@@ -617,7 +632,7 @@ class HTTPServer:
             session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
             conversation_id = session.id
 
-        turns = self._collect_turns(conversation_id, limit=limit)
+        turns, compaction_summary, compacted_from = self._collect_turns(conversation_id, limit=limit)
 
         result_turns = []
         for item in turns:
@@ -656,7 +671,12 @@ class HTTPServer:
                 turn_data["messages"] = item.messages
             result_turns.append(turn_data)
 
-        return JSONResponse({"conversation_id": conversation_id, "turns": result_turns})
+        return JSONResponse({
+            "conversation_id": conversation_id,
+            "turns": result_turns,
+            "compaction_summary": compaction_summary,
+            "compacted_from": compacted_from,
+        })
 
     async def _compact(self, request: Request) -> JSONResponse:
         adapter, err = self._get_adapter(request)

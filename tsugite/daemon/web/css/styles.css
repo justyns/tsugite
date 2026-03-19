@@ -64,6 +64,10 @@ main { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
 .history-sep { text-align: center; color: var(--muted); font-size: 12px; padding: 8px; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
 .history-sep .msg { text-align: left; }
 .compaction-body, .hook-body { max-width: 100%; font-size: 12px; }
+.compaction-banner { background: color-mix(in srgb, var(--accent) 8%, var(--bg)); border-left: 3px solid var(--accent); border-radius: 4px; padding: 10px 12px; margin-bottom: 12px; }
+.compaction-banner-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-size: 13px; color: var(--muted); }
+.compaction-banner-link { font-size: 12px; color: var(--accent); text-decoration: none; }
+.compaction-banner-link:hover { text-decoration: underline; }
 .hook-body pre { margin: 4px 0; padding: 6px 8px; background: var(--bg); border-radius: 4px; overflow-x: auto; }
 .hook-stderr code { color: var(--error); }
 .hook-exit { font-size: 11px; padding: 1px 6px; border-radius: 3px; margin-left: 6px; }

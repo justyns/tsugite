@@ -24,6 +24,8 @@ export default () => ({
   loading: true,
   selectedSessionMeta: null,
   turns: [],
+  compactionSummary: null,
+  compactedFrom: null,
   _debounceTimer: null,
 
   init() {
@@ -146,6 +148,8 @@ export default () => ({
     this._historyLoaded = 0;
     this.hasMoreHistory = false;
     this.turns = [];
+    this.compactionSummary = null;
+    this.compactedFrom = null;
 
     const isInteractive = session.source === 'interactive' &&
       (session.user_id === this.userId || session.conversation_id === this.userId);
@@ -168,6 +172,8 @@ export default () => ({
       let histUrl = `/api/agents/${agent}/history?user_id=${encodeURIComponent(this.userId)}&limit=100`;
       if (this.selectedSessionId) histUrl += `&session_id=${encodeURIComponent(this.selectedSessionId)}`;
       const data = await get(histUrl);
+      this.compactionSummary = data.compaction_summary || null;
+      this.compactedFrom = data.compacted_from || null;
       if (!data.turns || data.turns.length === 0) return;
       for (const turn of data.turns) {
         if (turn.type === 'compaction') {

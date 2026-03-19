@@ -142,6 +142,17 @@
         <template x-if="selectedSessionId && isActiveSession">
           <div style="display:flex;flex-direction:column;flex:1;min-height:0">
             <div id="messages" x-ref="messages">
+              <template x-if="compactionSummary">
+                <div class="compaction-banner">
+                  <div class="compaction-banner-header">
+                    <strong>Previous conversation summary</strong>
+                    <template x-if="compactedFrom">
+                      <a href="#" @click.prevent="selectSession({conversation_id: compactedFrom})" class="compaction-banner-link">view previous session</a>
+                    </template>
+                  </div>
+                  <div class="msg agent compaction-body" x-html="renderHtml(compactionSummary)"></div>
+                </div>
+              </template>
               <template x-for="(msg, i) in messages" :key="i">
                 <div>
                   <template x-if="msg.type === 'compaction'">
