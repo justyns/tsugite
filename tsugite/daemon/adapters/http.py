@@ -23,12 +23,12 @@ from starlette.staticfiles import StaticFiles
 from tsugite.agent_inheritance import get_builtin_agents_path, get_global_agents_paths
 from tsugite.attachments.base import AttachmentContentType
 from tsugite.attachments.file import FileHandler
+from tsugite.core.content_blocks import extract_content_blocks
 from tsugite.daemon.adapters.base import BaseAdapter, ChannelContext
 from tsugite.daemon.config import AgentConfig, HTTPConfig
 from tsugite.daemon.scheduler import ScheduleEntry
 from tsugite.daemon.webhook_store import WebhookStore
 from tsugite.events.base import BaseEvent
-from tsugite.core.content_blocks import extract_content_blocks
 from tsugite.history.models import CompactionSummary, HookExecution, Turn
 from tsugite.history.storage import SessionStorage, get_history_dir
 from tsugite.skill_discovery import get_builtin_skills_path

@@ -212,12 +212,14 @@ def _make_base_adapter(tmp_path, **overrides):
     adapter.agent_config.context_limit = 128000
     adapter.session_store = MagicMock()
     adapter.session_store.needs_compaction.return_value = False
+    adapter.session_store.is_compacting.return_value = False
     mock_session = MagicMock()
     mock_session.id = "conv-123"
     adapter.session_store.get_or_create_interactive.return_value = mock_session
     adapter.workspace_attachments = []
     adapter._workspace = None
     adapter._identity_map = {}
+    adapter.event_bus = None
     for k, v in overrides.items():
         setattr(adapter, k, v)
     return adapter

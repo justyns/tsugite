@@ -369,11 +369,7 @@ def _configure_logging(config: DaemonConfig) -> None:
         handlers.append(logging.StreamHandler(sys.stderr))
     if config.log_file:
         config.log_file.parent.mkdir(parents=True, exist_ok=True)
-        handlers.append(
-            logging.handlers.RotatingFileHandler(
-                config.log_file, maxBytes=10 * 1024 * 1024, backupCount=3
-            )
-        )
+        handlers.append(logging.handlers.RotatingFileHandler(config.log_file, maxBytes=10 * 1024 * 1024, backupCount=3))
     if not handlers:
         handlers.append(logging.NullHandler())
 

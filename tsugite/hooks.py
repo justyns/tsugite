@@ -204,16 +204,18 @@ def _render_and_execute(
             captured[rule.capture_as] = hook_result.stdout
 
         cmd_str = cmd if isinstance(cmd, str) else shlex.join(cmd)
-        executions.append(HookExecution(
-            phase=phase,
-            name=rule.name or rule.capture_as,
-            command=cmd_str,
-            exit_code=hook_result.exit_code,
-            stdout=hook_result.stdout or None,
-            stderr=hook_result.stderr or None,
-            duration_ms=hook_result.duration_ms,
-            timestamp=datetime.now(timezone.utc),
-        ))
+        executions.append(
+            HookExecution(
+                phase=phase,
+                name=rule.name or rule.capture_as,
+                command=cmd_str,
+                exit_code=hook_result.exit_code,
+                stdout=hook_result.stdout or None,
+                stderr=hook_result.stderr or None,
+                duration_ms=hook_result.duration_ms,
+                timestamp=datetime.now(timezone.utc),
+            )
+        )
     return HookResults(captured=captured, executions=executions)
 
 
@@ -246,8 +248,12 @@ class HookHandler:
 
         tool_rules = [rule for rule in self.config.post_tool if tool_name in rule.tools or "*" in rule.tools]
         results = _render_and_execute(
-            _jinja_env, tool_rules, context, self.workspace_dir,
-            interactive=self.interactive, phase="post_tool",
+            _jinja_env,
+            tool_rules,
+            context,
+            self.workspace_dir,
+            interactive=self.interactive,
+            phase="post_tool",
         )
         self._executions.extend(results.executions)
 
@@ -305,8 +311,14 @@ async def _fire_hooks(
         return HookResults(captured={}, executions=[])
 
     return await asyncio.to_thread(
-        _render_and_execute, _jinja_env, rules, context, workspace_dir,
-        interactive=interactive, on_status=on_status, phase=phase,
+        _render_and_execute,
+        _jinja_env,
+        rules,
+        context,
+        workspace_dir,
+        interactive=interactive,
+        on_status=on_status,
+        phase=phase,
     )
 
 

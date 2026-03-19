@@ -153,6 +153,7 @@ class TestContextVariablesInTemplates:
         agent.config.tools = []
         agent.config.instructions = ""
         agent.config.auto_load_skills = []
+        agent.config.run_if = None
         agent.content = "Test content"
 
         # Create path context
@@ -196,6 +197,7 @@ class TestContextVariablesInTemplates:
         agent.config.tools = []
         agent.config.instructions = ""
         agent.config.auto_load_skills = []
+        agent.config.run_if = None
         agent.content = "Test content"
 
         preparer = AgentPreparer()
@@ -234,6 +236,7 @@ class TestEnvironmentBlockInSystemPrompt:
         agent.config.tools = []
         agent.config.instructions = ""
         agent.config.auto_load_skills = []
+        agent.config.run_if = None
         agent.content = "Test content"
 
         # Create path context where invoked_from differs from CWD
@@ -281,6 +284,7 @@ class TestEnvironmentBlockInSystemPrompt:
         agent.config.tools = []
         agent.config.instructions = ""
         agent.config.auto_load_skills = []
+        agent.config.run_if = None
         agent.content = "Test content"
 
         # Create path context where invoked_from equals CWD

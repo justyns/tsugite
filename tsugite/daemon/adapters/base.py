@@ -421,9 +421,7 @@ class BaseAdapter(ABC):
                         self._broadcast_compaction(self.agent_name, started=False)
                 else:
                     # Another request is already compacting; wait for it
-                    done = await asyncio.to_thread(
-                        self.session_store.wait_for_compaction, user_id, self.agent_name
-                    )
+                    done = await asyncio.to_thread(self.session_store.wait_for_compaction, user_id, self.agent_name)
                     if not done:
                         raise TimeoutError("Timed out waiting for session compaction to finish")
                 self._emit_ui(custom_logger, "compacted")
@@ -580,7 +578,9 @@ class BaseAdapter(ABC):
                 "turns_file": str(turns_file),
                 "turn_count": len(old_turns),
             }
-            pre_compact_execs = await fire_compact_hooks(self.agent_config.workspace_dir, "pre_compact", hook_context, interactive=False)
+            pre_compact_execs = await fire_compact_hooks(
+                self.agent_config.workspace_dir, "pre_compact", hook_context, interactive=False
+            )
             storage.record_hook_executions(pre_compact_execs)
 
             old_messages = []

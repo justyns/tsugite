@@ -152,7 +152,9 @@ class TestAgentContextRunningTasks:
             reply_to="scheduler:bot",
             metadata={"schedule_id": "job1", "running_tasks": ["job1", "job2"]},
         )
-        result = BaseAdapter._build_agent_context(None, ctx)
+        mock_self = MagicMock()
+        mock_self.session_store.list_sessions.return_value = []
+        result = BaseAdapter._build_agent_context(mock_self, ctx)
         assert result["running_tasks"] == ["job1", "job2"]
 
     def test_defaults_to_empty_list(self):
@@ -164,7 +166,9 @@ class TestAgentContextRunningTasks:
             user_id="user1",
             reply_to="user1",
         )
-        result = BaseAdapter._build_agent_context(None, ctx)
+        mock_self = MagicMock()
+        mock_self.session_store.list_sessions.return_value = []
+        result = BaseAdapter._build_agent_context(mock_self, ctx)
         assert result["running_tasks"] == []
 
     def test_defaults_when_no_metadata(self):
@@ -177,5 +181,7 @@ class TestAgentContextRunningTasks:
             reply_to="user1",
             metadata=None,
         )
-        result = BaseAdapter._build_agent_context(None, ctx)
+        mock_self = MagicMock()
+        mock_self.session_store.list_sessions.return_value = []
+        result = BaseAdapter._build_agent_context(mock_self, ctx)
         assert result["running_tasks"] == []
