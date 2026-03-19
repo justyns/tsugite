@@ -466,6 +466,7 @@ class HTTPServer:
                 "context_limit": adapter.session_store.get_context_limit(adapter.agent_name),
                 "threshold": adapter.session_store.get_compaction_threshold(adapter.agent_name),
                 "message_count": session.message_count,
+                "compacting": adapter.session_store.is_compacting(user_id, adapter.agent_name),
                 "attachments": [
                     {"name": a.name, "content_type": a.content_type.value, "mime_type": a.mime_type}
                     for a in adapter._get_all_attachments()
