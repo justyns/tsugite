@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 import shlex
 import subprocess
 from pathlib import Path
@@ -35,6 +36,27 @@ class HookRule(BaseModel):
     capture_as: Optional[str] = None
     only_interactive: bool = False
     name: Optional[str] = None
+    env: dict[str, str] = Field(default_factory=dict)
+
+
+def _build_hook_env(
+    context: dict[str, Any],
+    custom_env: dict[str, str] | None = None,
+    phase: str = "",
+    workspace_dir: str = "",
+) -> dict[str, str]:
+    """Build environment dict for hook subprocess: parent env + TSUGITE_* + custom."""
+    env = os.environ.copy()
+    if phase:
+        env["TSUGITE_HOOK_PHASE"] = phase
+    if workspace_dir:
+        env["TSUGITE_WORKSPACE_DIR"] = workspace_dir
+    for key, value in context.items():
+        if isinstance(value, (str, int, float, bool)):
+            env[f"TSUGITE_{key.upper()}"] = str(value)
+    if custom_env:
+        env.update(custom_env)
+    return env
 
 
 class HooksConfig(BaseModel):
@@ -71,7 +93,12 @@ def _match_passes(jinja_env: jinja2.Environment, match_expr: str, context: dict[
         return False
 
 
-def _execute_hook(cmd: Union[str, list[str]], cwd: Path, capture: bool = False) -> Optional[str]:
+def _execute_hook(
+    cmd: Union[str, list[str]],
+    cwd: Path,
+    capture: bool = False,
+    env: dict[str, str] | None = None,
+) -> Optional[str]:
     """Run a hook command. Returns stdout if capture=True."""
     try:
         logger.info("Hook fired: %s", cmd)
@@ -83,6 +110,7 @@ def _execute_hook(cmd: Union[str, list[str]], cwd: Path, capture: bool = False) 
             text=True,
             errors="replace",
             timeout=HOOK_TIMEOUT,
+            env=env,
         )
         if result.returncode != 0:
             logger.warning("Hook failed (exit %d): %s", result.returncode, cmd)
@@ -107,12 +135,14 @@ def _render_and_execute(
     cwd: Path,
     interactive: bool = True,
     on_status: Optional[Callable[[str], None]] = None,
+    phase: str = "",
 ) -> dict[str, str]:
     """Render and execute matching hook rules synchronously.
 
     Returns:
         Dict mapping capture_as names to stdout content. Empty if no captures.
     """
+    base_env = _build_hook_env(context, phase=phase, workspace_dir=str(cwd))
     captured: dict[str, str] = {}
     for rule in rules:
         if rule.only_interactive and not interactive:
@@ -130,7 +160,18 @@ def _render_and_execute(
         except Exception as e:
             logger.warning("Hook render failed: %s", e)
             continue
-        output = _execute_hook(cmd, cwd, capture=bool(rule.capture_as))
+
+        if rule.env:
+            env = base_env.copy()
+            for env_key, env_val in rule.env.items():
+                try:
+                    env[env_key] = jinja_env.from_string(env_val).render(context)
+                except Exception as e:
+                    logger.warning("Hook env render failed for %s: %s", env_key, e)
+        else:
+            env = base_env
+
+        output = _execute_hook(cmd, cwd, capture=bool(rule.capture_as), env=env)
         if rule.capture_as and output is not None:
             captured[rule.capture_as] = output
     return captured
@@ -163,7 +204,10 @@ class HookHandler:
                 pass
 
         tool_rules = [rule for rule in self.config.post_tool if tool_name in rule.tools or "*" in rule.tools]
-        _render_and_execute(_jinja_env, tool_rules, context, self.workspace_dir, interactive=self.interactive)
+        _render_and_execute(
+            _jinja_env, tool_rules, context, self.workspace_dir,
+            interactive=self.interactive, phase="post_tool",
+        )
 
 
 def setup_hook_handler(workspace_dir: Path, event_bus: "EventBus", interactive: bool = True) -> None:
@@ -194,7 +238,8 @@ async def _fire_hooks(
         return {}
 
     return await asyncio.to_thread(
-        _render_and_execute, _jinja_env, rules, context, workspace_dir, interactive, on_status
+        _render_and_execute, _jinja_env, rules, context, workspace_dir,
+        interactive=interactive, on_status=on_status, phase=phase,
     )
 
 

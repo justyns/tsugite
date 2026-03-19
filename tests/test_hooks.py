@@ -13,6 +13,7 @@ from tsugite.hooks import (
     HookHandler,
     HookRule,
     HooksConfig,
+    _build_hook_env,
     _execute_hook,
     _jinja_env,
     _render_and_execute,
@@ -164,15 +165,16 @@ class TestHookHandler:
         handler = self._make_handler([HookRule(tools=["write_file"], run="echo done")], workspace_dir=tmp_path)
         with patch("tsugite.hooks.subprocess.run", return_value=_ok_result()) as mock_run:
             self._simulate_tool_call(handler, "write_file")
-            mock_run.assert_called_once_with(
-                "echo done",
-                shell=True,
-                cwd=str(tmp_path),
-                capture_output=True,
-                text=True,
-                errors="replace",
-                timeout=300,
-            )
+            mock_run.assert_called_once()
+            _, kwargs = mock_run.call_args
+            assert kwargs["shell"] is True
+            assert kwargs["cwd"] == str(tmp_path)
+            assert kwargs["capture_output"] is True
+            assert kwargs["text"] is True
+            assert kwargs["timeout"] == 300
+            assert kwargs["env"] is not None
+            assert kwargs["env"]["TSUGITE_HOOK_PHASE"] == "post_tool"
+            assert kwargs["env"]["TSUGITE_WORKSPACE_DIR"] == str(tmp_path)
 
     def test_multiple_rules_all_evaluated(self):
         handler = self._make_handler(
@@ -198,6 +200,7 @@ class TestExecuteHook:
                 text=True,
                 errors="replace",
                 timeout=300,
+                env=None,
             )
 
     def test_nonzero_exit_returns_none(self, tmp_path):
@@ -543,6 +546,7 @@ class TestRunAsList:
                 text=True,
                 errors="replace",
                 timeout=300,
+                env=None,
             )
 
     def test_list_render_and_execute(self, tmp_path):
@@ -643,3 +647,99 @@ class TestOnStatusCallback:
         with patch("tsugite.hooks.subprocess.run", return_value=_ok_result(stdout="result")):
             await fire_pre_message_hooks(tmp_workspace, {"message": "test"}, on_status=status_calls.append)
         assert status_calls == ["Running Search..."]
+
+
+class TestBuildHookEnv:
+    def test_inherits_parent_env(self):
+        env = _build_hook_env({})
+        assert "PATH" in env
+
+    def test_context_vars_prefixed(self):
+        env = _build_hook_env({"tool": "write_file", "path": "foo.md"})
+        assert env["TSUGITE_TOOL"] == "write_file"
+        assert env["TSUGITE_PATH"] == "foo.md"
+
+    def test_int_and_bool_converted_to_str(self):
+        env = _build_hook_env({"count": 42, "verbose": True})
+        assert env["TSUGITE_COUNT"] == "42"
+        assert env["TSUGITE_VERBOSE"] == "True"
+
+    def test_none_and_complex_skipped(self):
+        env = _build_hook_env({"empty": None, "nested": {"a": 1}, "items": [1, 2]})
+        assert "TSUGITE_EMPTY" not in env
+        assert "TSUGITE_NESTED" not in env
+        assert "TSUGITE_ITEMS" not in env
+
+    def test_phase_and_workspace_metadata(self):
+        env = _build_hook_env({}, phase="pre_compact", workspace_dir="/home/user/project")
+        assert env["TSUGITE_HOOK_PHASE"] == "pre_compact"
+        assert env["TSUGITE_WORKSPACE_DIR"] == "/home/user/project"
+
+    def test_empty_phase_and_workspace_not_set(self):
+        env = _build_hook_env({})
+        assert "TSUGITE_HOOK_PHASE" not in env
+        assert "TSUGITE_WORKSPACE_DIR" not in env
+
+    def test_custom_env_applied(self):
+        env = _build_hook_env({}, custom_env={"MY_VAR": "hello"})
+        assert env["MY_VAR"] == "hello"
+
+    def test_custom_env_overrides_tsugite_vars(self):
+        env = _build_hook_env({"tool": "write_file"}, custom_env={"TSUGITE_TOOL": "overridden"})
+        assert env["TSUGITE_TOOL"] == "overridden"
+
+
+class TestExecuteHookEnv:
+    def test_env_kwarg_passed_to_subprocess(self, tmp_path):
+        fake_env = {"MY_VAR": "hello"}
+        with patch("tsugite.hooks.subprocess.run", return_value=_ok_result()) as mock_run:
+            _execute_hook("echo hi", tmp_path, env=fake_env)
+            assert mock_run.call_args[1]["env"] == {"MY_VAR": "hello"}
+
+    def test_env_none_by_default(self, tmp_path):
+        with patch("tsugite.hooks.subprocess.run", return_value=_ok_result()) as mock_run:
+            _execute_hook("echo hi", tmp_path)
+            assert mock_run.call_args[1]["env"] is None
+
+
+class TestRenderAndExecuteEnv:
+    _env = jinja2.Environment()
+
+    def test_env_flows_through(self, tmp_path):
+        rules = [HookRule(run="echo hi")]
+        with patch("tsugite.hooks.subprocess.run", return_value=_ok_result()) as mock_run:
+            _render_and_execute(self._env, rules, {"tool": "write_file"}, tmp_path, phase="post_tool")
+            env = mock_run.call_args[1]["env"]
+            assert env["TSUGITE_TOOL"] == "write_file"
+            assert env["TSUGITE_HOOK_PHASE"] == "post_tool"
+            assert env["TSUGITE_WORKSPACE_DIR"] == str(tmp_path)
+
+    def test_custom_env_rendered_with_jinja(self, tmp_path):
+        rules = [HookRule(run="echo hi", env={"FILE": "{{ path }}", "STATIC": "fixed"})]
+        with patch("tsugite.hooks.subprocess.run", return_value=_ok_result()) as mock_run:
+            _render_and_execute(self._env, rules, {"path": "foo.md"}, tmp_path)
+            env = mock_run.call_args[1]["env"]
+            assert env["FILE"] == "foo.md"
+            assert env["STATIC"] == "fixed"
+
+    def test_custom_env_render_failure_skips_key(self, tmp_path):
+        rules = [HookRule(run="echo hi", env={"BAD": "{{ undefined_func() }}", "GOOD": "ok"})]
+        with patch("tsugite.hooks.subprocess.run", return_value=_ok_result()) as mock_run:
+            _render_and_execute(self._env, rules, {}, tmp_path)
+            env = mock_run.call_args[1]["env"]
+            assert "BAD" not in env
+            assert env["GOOD"] == "ok"
+
+
+class TestHookRuleEnv:
+    def test_env_defaults_to_empty_dict(self):
+        rule = HookRule(run="echo hi")
+        assert rule.env == {}
+
+    def test_env_parsed_from_yaml(self, tmp_workspace):
+        (tmp_workspace / ".tsugite" / "hooks.yaml").write_text(
+            "hooks:\n  post_tool:\n    - tools: [write_file]\n      run: echo done\n"
+            "      env:\n        FILE_PATH: '{{ path }}'\n        LOG_LEVEL: debug\n"
+        )
+        config = load_hooks_config(tmp_workspace)
+        assert config.post_tool[0].env == {"FILE_PATH": "{{ path }}", "LOG_LEVEL": "debug"}
