@@ -208,10 +208,7 @@ export default () => ({
       }
       this._showRecentHistory();
     } catch { /* ignore */ }
-    this.$nextTick(() => {
-      const el = this.$refs.messages;
-      if (el) scrollToBottom(el);
-    });
+    this.scrollMessages();
   },
 
   async loadDetailHistory() {
@@ -273,6 +270,12 @@ export default () => ({
       const data = await get(`/api/agents/${agent}/status?user_id=${encodeURIComponent(this.userId)}`);
       this.statusInfo = data;
       if (data.compacting !== undefined) this.compacting = data.compacting;
+      if (data.busy && data.pending_message && !this.sending &&
+          !this.messages.some(m => m.type === 'user' && m.text === data.pending_message)) {
+        this.messages.push({ type: 'user', text: data.pending_message });
+        this.messages.push({ type: 'progress', steps: [], statusText: 'Working...', turnCount: 0, toolCount: 0 });
+        this.scrollMessages();
+      }
     } catch { /* ignore */ }
   },
 
@@ -377,6 +380,13 @@ export default () => ({
   formatDate(iso) { return formatDate(iso) || '—'; },
   stateBadge(state) { return stateBadgeClass(state); },
 
+  scrollMessages() {
+    this.$nextTick(() => {
+      const el = this.$refs.messages;
+      if (el) scrollToBottom(el);
+    });
+  },
+
   sessionLabel(s) {
     if (s.source === 'interactive' && (s.user_id === this.userId || s.conversation_id === this.userId)) {
       return 'Interactive (you)';
@@ -476,10 +486,7 @@ export default () => ({
     const displayMsg = fileNames.length ? `${msg || ''}\n📎 ${fileNames.join(', ')}`.trim() : msg;
     this.messages.push({ type: 'user', text: displayMsg });
 
-    this.$nextTick(() => {
-      const el = this.$refs.messages;
-      if (el) scrollToBottom(el);
-    });
+    this.scrollMessages();
 
     const progressIdx = this.messages.length;
     this.messages.push({ type: 'progress', steps: [], statusText: 'Working...', turnCount: 0, toolCount: 0 });
@@ -529,10 +536,7 @@ export default () => ({
               answer: '',
               inputValue: '',
             });
-            this.$nextTick(() => {
-              const el = this.$refs.messages;
-              if (el) scrollToBottom(el);
-            });
+            this.scrollMessages();
           } else if (event.type === 'final_result') {
             gotResult = true;
             this.messages.push({ type: 'agent', text: event.result });
@@ -567,10 +571,7 @@ export default () => ({
       this.messages.push({ type: 'error', text: `Connection error: ${e.message}` });
     } finally {
       this.sending = false;
-      this.$nextTick(() => {
-        const el = this.$refs.messages;
-        if (el) scrollToBottom(el);
-      });
+      this.scrollMessages();
     }
   },
 
@@ -621,10 +622,7 @@ export default () => ({
     } else if (event.type === 'info') {
       prog.steps.push({ html: escapeHtml(event.message) });
       this.messages.push({ type: 'info', text: event.message });
-      this.$nextTick(() => {
-        const el = this.$refs.messages;
-        if (el) scrollToBottom(el);
-      });
+      this.scrollMessages();
     }
   },
 

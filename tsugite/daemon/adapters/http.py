@@ -253,6 +253,7 @@ class HTTPInteractionBackend:
         self._progress = progress
         self._event = threading.Event()
         self._response: Optional[str] = None
+        self.pending_message: Optional[str] = None
 
     def ask_user(self, question: str, question_type: str = "text", options: Optional[list[str]] = None) -> str:
         self._event.clear()
@@ -459,6 +460,9 @@ class HTTPServer:
         user_id = adapter.resolve_http_user(request.query_params.get("user_id", "web-anonymous"))
         session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
 
+        backend_key = (adapter.agent_name, user_id)
+        backend = self._active_backends.get(backend_key)
+
         return JSONResponse(
             {
                 "model": adapter.resolve_model(),
@@ -467,6 +471,8 @@ class HTTPServer:
                 "threshold": adapter.session_store.get_compaction_threshold(adapter.agent_name),
                 "message_count": session.message_count,
                 "compacting": adapter.session_store.is_compacting(user_id, adapter.agent_name),
+                "busy": backend is not None,
+                "pending_message": backend.pending_message if backend else None,
                 "attachments": [
                     {"name": a.name, "content_type": a.content_type.value, "mime_type": a.mime_type}
                     for a in adapter._get_all_attachments()
@@ -876,6 +882,7 @@ class HTTPServer:
 
         interaction_backend = HTTPInteractionBackend(progress)
         backend_key = (agent_name, user_id)
+        interaction_backend.pending_message = message
         self._active_backends[backend_key] = interaction_backend
 
         async def run_agent():
