@@ -116,43 +116,36 @@
     padding-bottom: 0;
   }
 
-  /* Collapsible sidebar panels */
-  .sidebar-toggle {
-    display: flex; align-items: center; gap: 6px;
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: 6px; padding: 6px 12px; margin-bottom: 8px;
-    color: var(--muted); font-size: 12px; cursor: pointer; width: 100%;
-  }
-  .sidebar-toggle:hover { color: var(--text); border-color: var(--accent); }
-  .sidebar-toggle-arrow { transition: transform 0.2s; }
-  .sidebar-toggle-arrow.open { transform: rotate(180deg); }
+  /* Hide sidebar toggle on mobile — use back button drill-down instead */
+  .sidebar-toggle { display: none; }
 
+  /* Session list: full-height when visible, hidden when session selected */
   .pane-sidebar {
-    max-height: 0; overflow: hidden; width: 100%;
-    transition: max-height 0.2s ease;
-  }
-  .pane-sidebar.sidebar-open {
-    max-height: 50vh; overflow-y: auto;
+    max-height: none; overflow-y: auto; width: 100%; flex: 1;
   }
 
-  /* Multiline input hint */
-  .input-hint {
-    display: block;
-    font-size: 11px;
-    color: var(--muted);
-    align-self: center;
-    white-space: nowrap;
-    opacity: 0.6;
+  /* Back button for returning to session list */
+  .mobile-back-btn {
+    display: flex; align-items: center; gap: 4px;
+    background: none; border: none; color: var(--accent);
+    font-size: 14px; padding: 8px 12px; cursor: pointer;
+    flex-shrink: 0;
   }
+  .mobile-back-btn:hover { text-decoration: underline; }
+
+  /* Hide hint on mobile — Enter naturally adds newlines */
+  .input-hint { display: none; }
 
   /* Chat messages wider on mobile */
   .msg {
     max-width: 90%;
   }
 
-  /* Prevent iOS zoom on input focus */
+  /* Taller textarea on mobile + prevent iOS zoom */
   #message-input {
     font-size: 16px;
+    min-height: 60px;
+    max-height: 200px;
   }
 
   /* Modals full-width */
@@ -183,4 +176,7 @@
   .tool-calls-section {
     max-width: 100%;
   }
+
+  /* Mobile drill-down: hide sidebar when in chat, hide detail when browsing sessions */
+  .mobile-hidden { display: none !important; }
 }

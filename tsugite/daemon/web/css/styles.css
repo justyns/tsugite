@@ -206,4 +206,5 @@ main { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
 .menu-toggle { display: none; }
 .nav-menu { display: none; }
 .sidebar-toggle { display: none; }
+.mobile-back-btn { display: none; }
 .input-hint { display: none; }

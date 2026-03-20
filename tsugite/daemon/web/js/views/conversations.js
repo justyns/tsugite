@@ -29,6 +29,7 @@ export default () => ({
   _debounceTimer: null,
 
   init() {
+    this._mobileQuery = window.matchMedia('(max-width: 640px)');
     const maybeReload = () => {
       if (this.$store.app.view === 'conversations' && this.$store.app.selectedAgent) this.reload();
     };
@@ -645,14 +646,28 @@ export default () => ({
   },
 
   onInputKeydown(e) {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey && !this._mobileQuery.matches) {
       e.preventDefault();
       this.sendMessage();
     }
   },
 
+  backToSessions() {
+    this.selectedSessionId = null;
+    this.selectedSessionMeta = null;
+    this.messages = [];
+    this._allHistoryMessages = [];
+    this._historyLoaded = 0;
+    this.hasMoreHistory = false;
+    this.turns = [];
+    this.compactionSummary = null;
+    this.compactedFrom = null;
+    this.isActiveSession = true;
+  },
+
   autoResize(e) {
+    const maxH = parseInt(getComputedStyle(e.target).maxHeight) || 150;
     e.target.style.height = 'auto';
-    e.target.style.height = Math.min(e.target.scrollHeight, 150) + 'px';
+    e.target.style.height = Math.min(e.target.scrollHeight, maxH) + 'px';
   },
 });
