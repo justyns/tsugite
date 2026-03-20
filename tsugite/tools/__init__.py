@@ -318,6 +318,7 @@ def _ensure_tools_loaded():
     from . import sessions as sessions  # noqa: E402, F401
     from . import shell as shell  # noqa: E402, F401
     from . import skills as skills  # noqa: E402, F401
+    from . import kv as kv  # noqa: E402, F401
 
     # Load custom shell tools after built-in tools
     load_custom_shell_tools()

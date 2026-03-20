@@ -8,7 +8,8 @@ logger = logging.getLogger(__name__)
 
 GROUP_TOOLS = "tsugite.tools"
 GROUP_ADAPTERS = "tsugite.adapters"
-PLUGIN_GROUPS = (GROUP_TOOLS, GROUP_ADAPTERS)
+GROUP_KVSTORE = "tsugite.kvstore"
+PLUGIN_GROUPS = (GROUP_TOOLS, GROUP_ADAPTERS, GROUP_KVSTORE)
 
 
 @dataclass

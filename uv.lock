@@ -2633,7 +2633,7 @@ wheels = [
 
 [[package]]
 name = "tsugite-cli"
-version = "0.7.8"
+version = "0.7.10"
 source = { editable = "." }
 dependencies = [
     { name = "ddgs" },

@@ -28,6 +28,13 @@ def get_current_agent() -> Optional[str]:
     return getattr(_current_agent_context, "name", None)
 
 
+def resolve_current_agent(explicit: Optional[str] = None, default: str = "default") -> str:
+    """Resolve agent name: explicit value > current agent context > default."""
+    if explicit is not None:
+        return explicit
+    return get_current_agent() or default
+
+
 def clear_current_agent() -> None:
     """Clear the currently executing agent from thread-local storage."""
     if hasattr(_current_agent_context, "name"):

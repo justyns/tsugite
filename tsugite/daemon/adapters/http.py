@@ -384,6 +384,9 @@ class HTTPServer:
             Route("/api/push/vapid-key", self._push_vapid_key, methods=["GET"]),
             Route("/api/push/subscribe", self._push_subscribe, methods=["POST"]),
             Route("/api/push/unsubscribe", self._push_unsubscribe, methods=["POST"]),
+            Route("/api/kv/namespaces", self._kv_namespaces, methods=["GET"]),
+            Route("/api/kv/{namespace}/keys", self._kv_keys, methods=["GET"]),
+            Route("/api/kv/{namespace}/keys/{key:path}", self._kv_get, methods=["GET"]),
             Mount("/static", app=StaticFiles(directory=str(WEB_DIR)), name="static"),
             Route("/", self._serve_ui, methods=["GET"]),
         ]
@@ -1669,6 +1672,32 @@ class HTTPServer:
             return JSONResponse({"error": "missing endpoint"}, status_code=400)
         self.push_store.unsubscribe(endpoint)
         return JSONResponse({"status": "unsubscribed"})
+
+    async def _kv_namespaces(self, request: Request) -> JSONResponse:
+        if err := self._check_auth(request):
+            return err
+        from tsugite.kvstore import get_backend
+        return JSONResponse({"namespaces": get_backend().list_namespaces()})
+
+    async def _kv_keys(self, request: Request) -> JSONResponse:
+        if err := self._check_auth(request):
+            return err
+        from tsugite.kvstore import get_backend
+        namespace = request.path_params["namespace"]
+        prefix = request.query_params.get("prefix", "")
+        keys = get_backend().list_keys(namespace, prefix)
+        return JSONResponse({"namespace": namespace, "keys": keys})
+
+    async def _kv_get(self, request: Request) -> JSONResponse:
+        if err := self._check_auth(request):
+            return err
+        from tsugite.kvstore import get_backend
+        namespace = request.path_params["namespace"]
+        key = request.path_params["key"]
+        result = get_backend().get_with_metadata(namespace, key)
+        if result is None:
+            return JSONResponse({"error": "key not found"}, status_code=404)
+        return JSONResponse({"namespace": namespace, "key": key, **result})
 
     async def _events(self, request: Request) -> Response:
         if err := self._check_auth(request):
