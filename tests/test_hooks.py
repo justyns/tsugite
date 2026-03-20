@@ -3,20 +3,23 @@
 import logging
 import subprocess
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import jinja2
 import pytest
 
+from tsugite.agent_runner.models import AgentExecutionResult
 from tsugite.events.events import ToolCallEvent, ToolResultEvent
 from tsugite.hooks import (
     HookHandler,
     HookRule,
     HooksConfig,
     _build_hook_env,
+    _execute_agent_hook,
     _execute_hook,
     _jinja_env,
     _render_and_execute,
+    _render_and_execute_async,
     fire_compact_hooks,
     fire_pre_message_hooks,
     load_hooks_config,
@@ -750,3 +753,199 @@ class TestHookRuleEnv:
         )
         config = load_hooks_config(tmp_workspace)
         assert config.post_tool[0].env == {"FILE_PATH": "{{ path }}", "LOG_LEVEL": "debug"}
+
+
+class TestHookRuleValidation:
+    def test_shell_requires_run(self):
+        with pytest.raises(ValueError, match="shell hooks require 'run'"):
+            HookRule(type="shell")
+
+    def test_shell_forbids_agent(self):
+        with pytest.raises(ValueError, match="shell hooks cannot have 'agent'"):
+            HookRule(type="shell", run="echo hi", agent="test.md")
+
+    def test_agent_requires_agent(self):
+        with pytest.raises(ValueError, match="agent hooks require 'agent'"):
+            HookRule(type="agent")
+
+    def test_agent_forbids_run(self):
+        with pytest.raises(ValueError, match="agent hooks cannot have 'run'"):
+            HookRule(type="agent", agent="test.md", run="echo hi")
+
+    def test_shell_default_backwards_compat(self):
+        rule = HookRule(run="echo hi")
+        assert rule.type == "shell"
+        assert rule.run == "echo hi"
+
+    def test_agent_valid(self):
+        rule = HookRule(type="agent", agent="summarizer.md")
+        assert rule.type == "agent"
+        assert rule.agent == "summarizer.md"
+        assert rule.run is None
+
+    def test_agent_with_model_and_max_turns(self):
+        rule = HookRule.model_validate(
+            {"type": "agent", "agent": "test.md", "model": "sonnet", "max_turns": 5}
+        )
+        assert rule.hook_model == "sonnet"
+        assert rule.max_turns == 5
+
+    def test_agent_type_from_yaml(self, tmp_workspace):
+        (tmp_workspace / ".tsugite" / "hooks.yaml").write_text(
+            "hooks:\n  pre_message:\n"
+            "    - type: agent\n"
+            "      agent: summarizer.md\n"
+            "      model: sonnet\n"
+            "      max_turns: 3\n"
+            "      capture_as: summary\n"
+        )
+        config = load_hooks_config(tmp_workspace)
+        rule = config.pre_message[0]
+        assert rule.type == "agent"
+        assert rule.agent == "summarizer.md"
+        assert rule.hook_model == "sonnet"
+        assert rule.max_turns == 3
+        assert rule.capture_as == "summary"
+
+
+_PATCH_FIND = "tsugite.agent_inheritance.find_agent_file"
+_PATCH_RUN = "tsugite.agent_runner.run_agent_async"
+
+
+class TestExecuteAgentHook:
+    @pytest.mark.asyncio
+    async def test_agent_executes_and_captures(self, tmp_path):
+        rule = HookRule(type="agent", agent="test.md", capture_as="result")
+        mock_result = AgentExecutionResult(response="agent output")
+        with (
+            patch(_PATCH_FIND, return_value=tmp_path / "test.md"),
+            patch(_PATCH_RUN, new_callable=AsyncMock, return_value=mock_result),
+        ):
+            result = await _execute_agent_hook(rule, {"key": "val"}, tmp_path)
+        assert result.exit_code == 0
+        assert result.stdout == "agent output"
+
+    @pytest.mark.asyncio
+    async def test_agent_not_found(self, tmp_path):
+        rule = HookRule(type="agent", agent="missing.md")
+        with patch(_PATCH_FIND, return_value=None):
+            result = await _execute_agent_hook(rule, {}, tmp_path)
+        assert result.exit_code == -1
+        assert "not found" in result.stderr.lower()
+
+    @pytest.mark.asyncio
+    async def test_agent_exception_caught(self, tmp_path):
+        rule = HookRule(type="agent", agent="test.md")
+        with (
+            patch(_PATCH_FIND, return_value=tmp_path / "test.md"),
+            patch(_PATCH_RUN, new_callable=AsyncMock, side_effect=RuntimeError("boom")),
+        ):
+            result = await _execute_agent_hook(rule, {}, tmp_path)
+        assert result.exit_code == -1
+        assert "boom" in result.stderr
+
+    @pytest.mark.asyncio
+    async def test_agent_passes_model_and_max_turns(self, tmp_path):
+        rule = HookRule.model_validate(
+            {"type": "agent", "agent": "test.md", "model": "haiku", "max_turns": 2}
+        )
+        mock_result = AgentExecutionResult(response="ok")
+        with (
+            patch(_PATCH_FIND, return_value=tmp_path / "test.md"),
+            patch(_PATCH_RUN, new_callable=AsyncMock, return_value=mock_result) as mock_run,
+        ):
+            await _execute_agent_hook(rule, {}, tmp_path)
+        exec_opts = mock_run.call_args[0][2]
+        assert exec_opts.model_override == "haiku"
+        assert exec_opts.max_turns_override == 2
+
+
+class TestRenderAndExecuteAsyncAgentHooks:
+    _env = jinja2.Environment()
+
+    @pytest.mark.asyncio
+    async def test_agent_hook_in_async_path(self, tmp_path):
+        rules = [HookRule(type="agent", agent="test.md", capture_as="out")]
+        mock_result = AgentExecutionResult(response="agent says hi")
+        with (
+            patch(_PATCH_FIND, return_value=tmp_path / "test.md"),
+            patch(_PATCH_RUN, new_callable=AsyncMock, return_value=mock_result),
+        ):
+            results = await _render_and_execute_async(self._env, rules, {}, tmp_path)
+        assert results.captured == {"out": "agent says hi"}
+        assert len(results.executions) == 1
+        assert results.executions[0].command == "agent:test.md"
+
+    @pytest.mark.asyncio
+    async def test_mixed_shell_and_agent(self, tmp_path):
+        rules = [
+            HookRule(run="echo shell", capture_as="shell_out"),
+            HookRule(type="agent", agent="test.md", capture_as="agent_out"),
+        ]
+        mock_result = AgentExecutionResult(response="agent result")
+        with (
+            patch("tsugite.hooks.subprocess.run", return_value=_ok_result(stdout="shell result")),
+            patch(_PATCH_FIND, return_value=tmp_path / "test.md"),
+            patch(_PATCH_RUN, new_callable=AsyncMock, return_value=mock_result),
+        ):
+            results = await _render_and_execute_async(self._env, rules, {}, tmp_path)
+        assert results.captured == {"shell_out": "shell result", "agent_out": "agent result"}
+        assert len(results.executions) == 2
+
+    @pytest.mark.asyncio
+    async def test_agent_failure_does_not_block_others(self, tmp_path):
+        rules = [
+            HookRule(type="agent", agent="bad.md", capture_as="fail"),
+            HookRule(run="echo ok", capture_as="ok_out"),
+        ]
+        with (
+            patch(_PATCH_FIND, return_value=None),
+            patch("tsugite.hooks.subprocess.run", return_value=_ok_result(stdout="ok")),
+        ):
+            results = await _render_and_execute_async(self._env, rules, {}, tmp_path)
+        assert "fail" not in results.captured
+        assert results.captured == {"ok_out": "ok"}
+        assert len(results.executions) == 2
+
+
+class TestSyncGuardAgentHooks:
+    _env = jinja2.Environment()
+
+    def test_agent_skipped_in_sync_path(self, tmp_path, caplog):
+        rules = [HookRule(type="agent", agent="test.md", capture_as="out")]
+        with caplog.at_level(logging.WARNING, logger="tsugite.hooks"):
+            results = _render_and_execute(self._env, rules, {}, tmp_path)
+        assert results.captured == {}
+        assert len(results.executions) == 0
+        assert "not supported in sync" in caplog.text
+
+    def test_shell_still_works_alongside_agent_in_sync(self, tmp_path, caplog):
+        rules = [
+            HookRule(type="agent", agent="test.md"),
+            HookRule(run="echo hi", capture_as="out"),
+        ]
+        with (
+            caplog.at_level(logging.WARNING, logger="tsugite.hooks"),
+            patch("tsugite.hooks.subprocess.run", return_value=_ok_result(stdout="hi")),
+        ):
+            results = _render_and_execute(self._env, rules, {}, tmp_path)
+        assert results.captured == {"out": "hi"}
+        assert "not supported in sync" in caplog.text
+
+
+@pytest.mark.asyncio
+class TestFirePreMessageAgentHooks:
+    async def test_agent_hook_via_fire_pre_message(self, tmp_workspace):
+        (tmp_workspace / ".tsugite" / "hooks.yaml").write_text(
+            "hooks:\n  pre_message:\n"
+            "    - type: agent\n"
+            "      agent: rag.md\n"
+            "      capture_as: rag_context\n"
+        )
+        mock_result = AgentExecutionResult(response="relevant context")
+        with (
+            patch(_PATCH_FIND, return_value=tmp_workspace / "rag.md"),
+            patch(_PATCH_RUN, new_callable=AsyncMock, return_value=mock_result),
+        ):
+            result = await fire_pre_message_hooks(tmp_workspace, {"message": "test"})
+        assert result == {"rag_context": "relevant context"}

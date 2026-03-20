@@ -1,6 +1,7 @@
 """Workspace hooks — fire shell commands after tool calls and lifecycle events."""
 
 import asyncio
+import json
 import logging
 import os
 import shlex
@@ -12,7 +13,7 @@ from typing import TYPE_CHECKING, Any, Callable, Literal, NamedTuple, Optional, 
 
 import jinja2
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from tsugite.events.base import BaseEvent
 from tsugite.events.events import ToolCallEvent, ToolResultEvent
@@ -32,14 +33,34 @@ _jinja_env.filters["shell_quote"] = shlex.quote
 class HookRule(BaseModel):
     """A hook rule — used for post_tool, pre_compact, post_compact, and pre_message hooks."""
 
+    model_config = ConfigDict(populate_by_name=True)
+
+    type: Literal["shell", "agent"] = "shell"
     tools: list[str] = Field(default_factory=list)
     match: Optional[str] = None
-    run: Union[str, list[str]]
+    run: Optional[Union[str, list[str]]] = None
     wait: bool = False
     capture_as: Optional[str] = None
     only_interactive: bool = False
     name: Optional[str] = None
     env: dict[str, str] = Field(default_factory=dict)
+    agent: Optional[str] = None
+    hook_model: Optional[str] = Field(default=None, alias="model")
+    max_turns: Optional[int] = None
+
+    @model_validator(mode="after")
+    def _validate_type_fields(self) -> "HookRule":
+        if self.type == "shell":
+            if self.run is None:
+                raise ValueError("shell hooks require 'run'")
+            if self.agent is not None:
+                raise ValueError("shell hooks cannot have 'agent'")
+        elif self.type == "agent":
+            if self.agent is None:
+                raise ValueError("agent hooks require 'agent'")
+            if self.run is not None:
+                raise ValueError("agent hooks cannot have 'run'")
+        return self
 
 
 def _build_hook_env(
@@ -105,6 +126,10 @@ class HookResult(NamedTuple):
     duration_ms: int
 
 
+def _elapsed_ms(start: float) -> int:
+    return int((time.monotonic() - start) * 1000)
+
+
 def _execute_hook(
     cmd: Union[str, list[str]],
     cwd: Path,
@@ -124,7 +149,7 @@ def _execute_hook(
             timeout=HOOK_TIMEOUT,
             env=env,
         )
-        elapsed = int((time.monotonic() - start) * 1000)
+        elapsed = _elapsed_ms(start)
         if result.returncode != 0:
             logger.warning("Hook failed (exit %d): %s", result.returncode, cmd)
             if result.stdout.strip():
@@ -138,12 +163,56 @@ def _execute_hook(
             duration_ms=elapsed,
         )
     except subprocess.TimeoutExpired:
-        elapsed = int((time.monotonic() - start) * 1000)
+        elapsed = _elapsed_ms(start)
         logger.warning("Hook timed out after %ds: %s", HOOK_TIMEOUT, cmd)
         return HookResult(exit_code=-1, stdout="", stderr=f"Timed out after {HOOK_TIMEOUT}s", duration_ms=elapsed)
     except Exception as e:
-        elapsed = int((time.monotonic() - start) * 1000)
+        elapsed = _elapsed_ms(start)
         logger.warning("Hook error: %s", e)
+        return HookResult(exit_code=-1, stdout="", stderr=str(e), duration_ms=elapsed)
+
+
+async def _execute_agent_hook(
+    rule: HookRule,
+    context: dict[str, Any],
+    cwd: Path,
+) -> HookResult:
+    """Run an agent hook. Returns structured result."""
+    from tsugite.agent_inheritance import find_agent_file
+    from tsugite.agent_runner import run_agent_async
+    from tsugite.agent_runner.models import AgentExecutionResult
+    from tsugite.options import ExecutionOptions
+
+    start = time.monotonic()
+    try:
+        agent_path = find_agent_file(rule.agent, cwd)
+        if agent_path is None:
+            elapsed = _elapsed_ms(start)
+            msg = f"Agent not found: {rule.agent}"
+            logger.warning("Hook agent error: %s", msg)
+            return HookResult(exit_code=-1, stdout="", stderr=msg, duration_ms=elapsed)
+
+        prompt = json.dumps(context, default=str)
+        exec_options = ExecutionOptions(
+            model_override=rule.hook_model,
+            max_turns_override=rule.max_turns,
+        )
+
+        logger.info("Hook agent fired: %s", rule.agent)
+        result = await asyncio.wait_for(
+            run_agent_async(agent_path, prompt, exec_options, context=context),
+            timeout=HOOK_TIMEOUT,
+        )
+        response = result.response if isinstance(result, AgentExecutionResult) else str(result)
+        elapsed = _elapsed_ms(start)
+        return HookResult(exit_code=0, stdout=response.strip(), stderr="", duration_ms=elapsed)
+    except asyncio.TimeoutError:
+        elapsed = _elapsed_ms(start)
+        logger.warning("Hook agent timed out after %ds: %s", HOOK_TIMEOUT, rule.agent)
+        return HookResult(exit_code=-1, stdout="", stderr=f"Timed out after {HOOK_TIMEOUT}s", duration_ms=elapsed)
+    except Exception as e:
+        elapsed = _elapsed_ms(start)
+        logger.warning("Hook agent error: %s", e)
         return HookResult(exit_code=-1, stdout="", stderr=str(e), duration_ms=elapsed)
 
 
@@ -152,6 +221,48 @@ class HookResults(NamedTuple):
 
     captured: dict[str, str]
     executions: list[HookExecution]
+
+
+def _render_shell_rule(
+    jinja_env: jinja2.Environment,
+    rule: HookRule,
+    context: dict[str, Any],
+    base_env: dict[str, str],
+) -> Optional[tuple[Union[str, list[str]], dict[str, str]]]:
+    """Render command and env for a shell rule. Returns None on failure."""
+    try:
+        if isinstance(rule.run, list):
+            cmd: Union[str, list[str]] = [jinja_env.from_string(part).render(context) for part in rule.run]
+        else:
+            cmd = jinja_env.from_string(rule.run).render(context)
+    except Exception as e:
+        logger.warning("Hook render failed: %s", e)
+        return None
+
+    if rule.env:
+        env = base_env.copy()
+        for env_key, env_val in rule.env.items():
+            try:
+                env[env_key] = jinja_env.from_string(env_val).render(context)
+            except Exception as e:
+                logger.warning("Hook env render failed for %s: %s", env_key, e)
+    else:
+        env = base_env
+
+    return cmd, env
+
+
+def _build_execution(rule: HookRule, cmd_str: str, hook_result: HookResult, phase: str) -> HookExecution:
+    return HookExecution(
+        phase=phase,
+        name=rule.name or rule.capture_as,
+        command=cmd_str,
+        exit_code=hook_result.exit_code,
+        stdout=hook_result.stdout or None,
+        stderr=hook_result.stderr or None,
+        duration_ms=hook_result.duration_ms,
+        timestamp=datetime.now(timezone.utc),
+    )
 
 
 def _render_and_execute(
@@ -172,6 +283,9 @@ def _render_and_execute(
     captured: dict[str, str] = {}
     executions: list[HookExecution] = []
     for rule in rules:
+        if rule.type == "agent":
+            logger.warning("Agent hooks are not supported in sync execution (phase=%s), skipping", phase)
+            continue
         if rule.only_interactive and not interactive:
             continue
         if rule.match and not _match_passes(jinja_env, rule.match, context):
@@ -179,43 +293,57 @@ def _render_and_execute(
         if on_status:
             label = rule.name or rule.capture_as or "hook"
             on_status(f"Running {label}...")
-        try:
-            if isinstance(rule.run, list):
-                cmd: Union[str, list[str]] = [jinja_env.from_string(part).render(context) for part in rule.run]
-            else:
-                cmd = jinja_env.from_string(rule.run).render(context)
-        except Exception as e:
-            logger.warning("Hook render failed: %s", e)
-            continue
 
-        if rule.env:
-            env = base_env.copy()
-            for env_key, env_val in rule.env.items():
-                try:
-                    env[env_key] = jinja_env.from_string(env_val).render(context)
-                except Exception as e:
-                    logger.warning("Hook env render failed for %s: %s", env_key, e)
-        else:
-            env = base_env
+        rendered = _render_shell_rule(jinja_env, rule, context, base_env)
+        if rendered is None:
+            continue
+        cmd, env = rendered
 
         hook_result = _execute_hook(cmd, cwd, env=env)
+        cmd_str = cmd if isinstance(cmd, str) else shlex.join(cmd)
 
         if rule.capture_as and hook_result.exit_code == 0 and hook_result.stdout:
             captured[rule.capture_as] = hook_result.stdout
+        executions.append(_build_execution(rule, cmd_str, hook_result, phase))
+    return HookResults(captured=captured, executions=executions)
 
-        cmd_str = cmd if isinstance(cmd, str) else shlex.join(cmd)
-        executions.append(
-            HookExecution(
-                phase=phase,
-                name=rule.name or rule.capture_as,
-                command=cmd_str,
-                exit_code=hook_result.exit_code,
-                stdout=hook_result.stdout or None,
-                stderr=hook_result.stderr or None,
-                duration_ms=hook_result.duration_ms,
-                timestamp=datetime.now(timezone.utc),
-            )
-        )
+
+async def _render_and_execute_async(
+    jinja_env: jinja2.Environment,
+    rules: list[HookRule],
+    context: dict[str, Any],
+    cwd: Path,
+    interactive: bool = True,
+    on_status: Optional[Callable[[str], None]] = None,
+    phase: str = "",
+) -> HookResults:
+    """Render and execute matching hook rules, supporting both shell and agent types."""
+    base_env = _build_hook_env(context, phase=phase, workspace_dir=str(cwd))
+    captured: dict[str, str] = {}
+    executions: list[HookExecution] = []
+    for rule in rules:
+        if rule.only_interactive and not interactive:
+            continue
+        if rule.match and not _match_passes(jinja_env, rule.match, context):
+            continue
+        if on_status:
+            label = rule.name or rule.capture_as or "hook"
+            on_status(f"Running {label}...")
+
+        if rule.type == "agent":
+            hook_result = await _execute_agent_hook(rule, context, cwd)
+            cmd_str = f"agent:{rule.agent}"
+        else:
+            rendered = _render_shell_rule(jinja_env, rule, context, base_env)
+            if rendered is None:
+                continue
+            cmd, env = rendered
+            hook_result = await asyncio.to_thread(_execute_hook, cmd, cwd, env)
+            cmd_str = cmd if isinstance(cmd, str) else shlex.join(cmd)
+
+        if rule.capture_as and hook_result.exit_code == 0 and hook_result.stdout:
+            captured[rule.capture_as] = hook_result.stdout
+        executions.append(_build_execution(rule, cmd_str, hook_result, phase))
     return HookResults(captured=captured, executions=executions)
 
 
@@ -310,8 +438,7 @@ async def _fire_hooks(
     if not rules:
         return HookResults(captured={}, executions=[])
 
-    return await asyncio.to_thread(
-        _render_and_execute,
+    return await _render_and_execute_async(
         _jinja_env,
         rules,
         context,
