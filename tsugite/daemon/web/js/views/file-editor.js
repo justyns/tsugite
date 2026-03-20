@@ -61,6 +61,12 @@ export default function fileEditorView(viewName, apiPrefix) {
       }
     },
 
+    backToFiles() {
+      this.selectedFile = null;
+      this.content = '';
+      this.originalContent = '';
+    },
+
     async save() {
       if (!this.selectedFile || this.selectedFile.readonly || this.saving) return;
       this.saving = true;

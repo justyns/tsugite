@@ -650,7 +650,7 @@
   <div class="view" x-show="$store.app.view === 'agents'" x-data="agentFileView" x-cloak>
     <div class="view-scroll two-pane" style="height:100%; overflow:hidden">
       <!-- File list -->
-      <div class="pane-sidebar" :class="{ 'sidebar-open': sidebarOpen }">
+      <div class="pane-sidebar" :class="{ 'sidebar-open': sidebarOpen, 'mobile-hidden': selectedFile }">
         <div class="section-header">
           <h2>Agent Files</h2>
           <select x-model="filter" style="font-size:12px;padding:2px 4px">
@@ -683,11 +683,12 @@
       </div>
 
       <!-- Editor -->
-      <div class="pane-detail" style="display:flex;flex-direction:column">
+      <div class="pane-detail" :class="{ 'mobile-hidden': !selectedFile }" style="display:flex;flex-direction:column">
         <button class="sidebar-toggle" @click="sidebarOpen = !sidebarOpen">
           <span class="sidebar-toggle-arrow" :class="{ open: sidebarOpen }">▾</span>
           <span x-text="sidebarOpen ? 'Hide Agents' : 'Agents'"></span>
         </button>
+        <button class="mobile-back-btn" @click="backToFiles()">&#8592; Agents</button>
         <template x-if="!selectedFile">
           <div class="empty-state">Select an agent file to view</div>
         </template>
@@ -722,7 +723,7 @@
   <div class="view" x-show="$store.app.view === 'skills'" x-data="skillFileView" x-cloak>
     <div class="view-scroll two-pane" style="height:100%; overflow:hidden">
       <!-- File list -->
-      <div class="pane-sidebar" :class="{ 'sidebar-open': sidebarOpen }">
+      <div class="pane-sidebar" :class="{ 'sidebar-open': sidebarOpen, 'mobile-hidden': selectedFile }">
         <div class="section-header">
           <h2>Skill Files</h2>
           <select x-model="filter" style="font-size:12px;padding:2px 4px">
@@ -755,11 +756,12 @@
       </div>
 
       <!-- Editor -->
-      <div class="pane-detail" style="display:flex;flex-direction:column">
+      <div class="pane-detail" :class="{ 'mobile-hidden': !selectedFile }" style="display:flex;flex-direction:column">
         <button class="sidebar-toggle" @click="sidebarOpen = !sidebarOpen">
           <span class="sidebar-toggle-arrow" :class="{ open: sidebarOpen }">▾</span>
           <span x-text="sidebarOpen ? 'Hide Skills' : 'Skills'"></span>
         </button>
+        <button class="mobile-back-btn" @click="backToFiles()">&#8592; Skills</button>
         <template x-if="!selectedFile">
           <div class="empty-state">Select a skill file to view</div>
         </template>
