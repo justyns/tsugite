@@ -221,7 +221,17 @@
                       <span x-text="msg.statusText"></span>
                       <ul class="tool-steps">
                         <template x-for="(step, j) in msg.steps" :key="j">
-                          <li x-html="step.html"></li>
+                          <li>
+                            <template x-if="step.hasDetails">
+                              <details :open="step.open" @toggle="if(step.open !== $el.open) step.open = $el.open">
+                                <summary x-html="step.summary"></summary>
+                                <pre><code x-text="step.content"></code></pre>
+                              </details>
+                            </template>
+                            <template x-if="!step.hasDetails">
+                              <span x-html="step.html"></span>
+                            </template>
+                          </li>
                         </template>
                       </ul>
                     </div>
@@ -232,7 +242,17 @@
                         <summary class="tool-summary" x-text="progressSummaryText(msg)"></summary>
                         <ul class="tool-steps">
                           <template x-for="(step, j) in msg.steps" :key="j">
-                            <li x-html="step.html"></li>
+                            <li>
+                              <template x-if="step.hasDetails">
+                                <details :open="step.open" @toggle="if(step.open !== $el.open) step.open = $el.open">
+                                  <summary x-html="step.summary"></summary>
+                                  <pre><code x-text="step.content"></code></pre>
+                                </details>
+                              </template>
+                              <template x-if="!step.hasDetails">
+                                <span x-html="step.html"></span>
+                              </template>
+                            </li>
                           </template>
                         </ul>
                       </details>
@@ -1011,6 +1031,12 @@
     </select>
     <label>Model Override</label>
     <input type="text" x-model="tempModel" placeholder="e.g. anthropic:claude-sonnet-4-20250514 (blank = use agent default)">
+    <div style="margin-bottom:16px">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" :checked="$store.app.autoFollow" @change="$store.app.autoFollow = $el.checked; localStorage.setItem('tsugite_auto_follow', $el.checked)">
+        Auto-follow turn details during streaming
+      </label>
+    </div>
     <template x-if="'serviceWorker' in navigator && 'PushManager' in window">
       <div style="margin-bottom:16px">
         <label>Push Notifications</label>

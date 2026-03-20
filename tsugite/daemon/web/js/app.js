@@ -27,6 +27,7 @@ Alpine.store('app', {
   lastEvent: null,
   viewSessionId: null,
   pendingWorkspaceFiles: [],
+  autoFollow: localStorage.getItem('tsugite_auto_follow') !== 'false',
 });
 
 Alpine.data('conversationsView', conversationsView);

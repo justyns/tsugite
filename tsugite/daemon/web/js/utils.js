@@ -64,6 +64,10 @@ export function contentBlockHtml(name, content) {
   return `<details class="content-block"><summary><code>${escapeHtml(name)}</code> (content block)</summary><pre><code>${escapeHtml(content)}</code></pre></details>`;
 }
 
+export function truncate(s, max = 500) {
+  return s.length > max ? s.slice(0, max) + '...' : s;
+}
+
 export function scrollToBottom(el) {
   el.scrollTop = el.scrollHeight;
 }

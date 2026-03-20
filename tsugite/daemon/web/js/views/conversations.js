@@ -1,5 +1,5 @@
 import { get, post, streamPost, uploadFiles } from '../api.js';
-import { escapeHtml, renderMarkdown, scrollToBottom, formatDate, formatFileSize, stateBadgeClass, contentBlockHtml } from '../utils.js';
+import { escapeHtml, renderMarkdown, scrollToBottom, formatDate, formatFileSize, stateBadgeClass, contentBlockHtml, truncate } from '../utils.js';
 
 export default () => ({
   sidebarOpen: false,
@@ -28,6 +28,7 @@ export default () => ({
   compactionSummary: null,
   compactedFrom: null,
   _debounceTimer: null,
+  _scrollTimer: null,
 
   init() {
     this._mobileQuery = window.matchMedia('(max-width: 640px)');
@@ -68,6 +69,7 @@ export default () => ({
 
   destroy() {
     if (this._debounceTimer) clearTimeout(this._debounceTimer);
+    if (this._scrollTimer) clearTimeout(this._scrollTimer);
   },
 
   _debouncedLoadSessions() {
@@ -171,7 +173,7 @@ export default () => ({
     this._allHistoryMessages = [];
     this._historyLoaded = 0;
     try {
-      let histUrl = `/api/agents/${agent}/history?user_id=${encodeURIComponent(this.userId)}&limit=100`;
+      let histUrl = `/api/agents/${agent}/history?user_id=${encodeURIComponent(this.userId)}&limit=100&detail=true`;
       if (this.selectedSessionId) histUrl += `&session_id=${encodeURIComponent(this.selectedSessionId)}`;
       const data = await get(histUrl);
       this.compactionSummary = data.compaction_summary || null;
@@ -197,11 +199,24 @@ export default () => ({
           continue;
         }
         if (turn.user) this._allHistoryMessages.push({ type: 'user', text: turn.user });
+
+        const steps = [];
+        if (turn.messages) {
+          for (const item of this.extractMessages(turn)) {
+            if (item.type === 'tool_call') {
+              steps.push({ hasDetails: true, summary: `<code>${escapeHtml(item.name)}</code>`, content: escapeHtml(truncate(item.args)), open: false });
+            } else if (item.type === 'tool_result') {
+              steps.push({ hasDetails: true, summary: `<code>${escapeHtml(item.name || 'result')}</code>`, content: escapeHtml(item.content), open: false });
+            }
+          }
+        }
         if (turn.content_blocks && Object.keys(turn.content_blocks).length) {
-          const steps = Object.entries(turn.content_blocks).map(([name, content]) => ({
-            html: contentBlockHtml(name, content)
-          }));
-          this._allHistoryMessages.push({ type: 'progress-done', steps, turnCount: 0, toolCount: 0 });
+          for (const [name, content] of Object.entries(turn.content_blocks)) {
+            steps.push({ html: contentBlockHtml(name, content) });
+          }
+        }
+        if (steps.length > 0) {
+          this._allHistoryMessages.push({ type: 'progress-done', steps, turnCount: 0, toolCount: turn.tools_used?.length || 0 });
         }
         if (turn.assistant) {
           this._allHistoryMessages.push({ type: 'agent', text: turn.assistant });
@@ -388,6 +403,28 @@ export default () => ({
     });
   },
 
+  _scrollThrottled() {
+    if (this._scrollTimer) return;
+    this._scrollTimer = setTimeout(() => {
+      this._scrollTimer = null;
+      this.scrollMessages();
+    }, 150);
+  },
+
+  _pushDetailStep(prog, summary, contentHtml) {
+    const follow = this.$store.app.autoFollow;
+    if (follow && prog._lastOpenIdx != null) {
+      const prev = prog.steps[prog._lastOpenIdx];
+      if (prev?.hasDetails) prev.open = false;
+    }
+    const idx = prog.steps.length;
+    prog.steps.push({ hasDetails: true, summary, content: contentHtml, open: follow });
+    if (follow) {
+      prog._lastOpenIdx = idx;
+      this._scrollThrottled();
+    }
+  },
+
   sessionLabel(s) {
     if (s.source === 'interactive' && (s.user_id === this.userId || s.conversation_id === this.userId)) {
       return 'Interactive (you)';
@@ -412,11 +449,10 @@ export default () => ({
         }
       } else if (msg.role === 'user' && msg.content?.includes('<tsugite_execution_result>')) {
         const content = msg.content.replace(/<\/?tsugite_execution_result>/g, '').trim();
-        const truncated = content.length > 500 ? content.slice(0, 500) + '...' : content;
-        items.push({ type: 'tool_result', name: 'result', content: truncated });
+        items.push({ type: 'tool_result', name: 'result', content: truncate(content) });
       } else if (msg.role === 'tool') {
         const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
-        items.push({ type: 'tool_result', name: msg.name || '', content: content.length > 500 ? content.slice(0, 500) + '...' : content });
+        items.push({ type: 'tool_result', name: msg.name || '', content: truncate(content) });
       }
     }
     return items;
@@ -590,7 +626,7 @@ export default () => ({
     } else if (event.type === 'thought') {
       prog.statusText = 'Thinking...';
       if (event.content) {
-        prog.steps.push({ html: `<details><summary>thought</summary><pre><code>${escapeHtml(event.content)}</code></pre></details>` });
+        this._pushDetailStep(prog, 'thought', escapeHtml(event.content));
       }
     } else if (event.type === 'error') {
       prog.steps.push({ html: `<span class="err">${escapeHtml(event.error)}</span>` });
@@ -603,7 +639,7 @@ export default () => ({
     } else if (event.type === 'content_block') {
       prog.steps.push({ html: contentBlockHtml(event.name, event.content || '') });
     } else if (event.type === 'code') {
-      prog.steps.push({ html: `<details><summary><code>code</code></summary><pre><code>${escapeHtml(event.content || '')}</code></pre></details>` });
+      this._pushDetailStep(prog, `<code>code</code>`, escapeHtml(event.content || ''));
     } else if (event.type === 'tool_result') {
       const isCodeResult = event.tool === 'unknown';
       if (!isCodeResult) prog.toolCount++;
@@ -612,7 +648,7 @@ export default () => ({
       const label = isCodeResult ? 'output' : event.tool;
       const output = event.output || event.error || '';
       if (output) {
-        prog.steps.push({ html: `<details><summary><code>${escapeHtml(label)}</code> <span class="${cls}">${status}</span></summary><pre><code>${escapeHtml(output)}</code></pre></details>` });
+        this._pushDetailStep(prog, `<code>${escapeHtml(label)}</code> <span class="${cls}">${status}</span>`, escapeHtml(output));
       } else {
         prog.steps.push({ html: `<code>${escapeHtml(label)}</code> <span class="${cls}">${status}</span>` });
       }
