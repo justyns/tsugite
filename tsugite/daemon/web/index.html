@@ -321,7 +321,8 @@
                         placeholder="Send a message..." autofocus
                         @keydown="onInputKeydown" @input="autoResize"></textarea>
               <span class="input-hint">Shift+Enter for newline</span>
-              <button id="send-btn" @click="sendMessage()" :disabled="sending">Send</button>
+              <button id="send-btn" x-show="!sending" @click="sendMessage()">Send</button>
+              <button id="stop-btn" x-show="sending" @click="cancelChat()">Stop</button>
             </div>
           </div>
         </template>

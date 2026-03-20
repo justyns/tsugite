@@ -310,6 +310,7 @@ class HTTPServer:
         self.push_store = None  # Set by Gateway if web-push is configured
         self.vapid_public_key = None  # Set by Gateway if web-push is configured
         self._active_backends: dict[tuple[str, str], HTTPInteractionBackend] = {}
+        self._active_chat_tasks: dict[tuple[str, str], asyncio.Task] = {}
         self.event_bus = SSEBroadcaster()
         self.app = self._build_app()
 
@@ -343,6 +344,7 @@ class HTTPServer:
             Route("/api/agents", self._list_agents, methods=["GET"]),
             Route("/api/agents/{agent}/sessions", self._list_sessions, methods=["GET"]),
             Route("/api/agents/{agent}/chat", self._chat, methods=["POST"]),
+            Route("/api/agents/{agent}/chat/cancel", self._cancel_chat, methods=["POST"]),
             Route("/api/agents/{agent}/upload", self._upload, methods=["POST"]),
             Route("/api/agents/{agent}/status", self._status, methods=["GET"]),
             Route("/api/agents/{agent}/attachments", self._attachments, methods=["GET"]),
@@ -923,14 +925,20 @@ class HTTPServer:
                             "attachments": [a.name for a in adapter._get_all_attachments()],
                         },
                     )
+            except asyncio.CancelledError:
+                logger.info("[%s] Chat cancelled by user for %s", adapter.agent_name, user_id)
+                progress._emit("cancelled", {"reason": "User cancelled"})
             except Exception as e:
                 logger.exception("[%s] Chat error", adapter.agent_name)
                 progress._emit("error", {"error": str(e)})
             finally:
                 self._active_backends.pop(backend_key, None)
+                self._active_chat_tasks.pop(backend_key, None)
                 progress.signal_done()
 
-        asyncio.create_task(run_agent())
+        task = asyncio.create_task(run_agent())
+        self._active_chat_tasks[backend_key] = task
+        task.add_done_callback(lambda _: self._active_chat_tasks.pop(backend_key, None))
 
         return StreamingResponse(
             progress.event_generator(),
@@ -941,6 +949,23 @@ class HTTPServer:
                 "X-Accel-Buffering": "no",
             },
         )
+
+    async def _cancel_chat(self, request: Request) -> JSONResponse:
+        adapter, err = self._get_adapter(request)
+        if err:
+            return err
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+        raw_user_id = body.get("user_id", "web-anonymous")
+        user_id = adapter.resolve_http_user(raw_user_id)
+        backend_key = (request.path_params["agent"], user_id)
+        task = self._active_chat_tasks.get(backend_key)
+        if task and not task.done():
+            task.cancel()
+            return JSONResponse({"status": "cancelled"})
+        return JSONResponse({"error": "no active chat"}, status_code=404)
 
     def _require_auth_and_scheduler(self, request: Request) -> Optional[JSONResponse]:
         """Check auth and scheduler availability. Returns error response or None."""

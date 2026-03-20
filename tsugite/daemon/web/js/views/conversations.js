@@ -9,6 +9,7 @@ export default () => ({
   HISTORY_PAGE_SIZE: 20,
   hasMoreHistory: false,
   sending: false,
+  _activeReader: null,
   compacting: false,
   statusInfo: {},
   messageText: '',
@@ -497,6 +498,7 @@ export default () => ({
       if (uploadedFiles.length) chatBody.uploaded_files = uploadedFiles;
       const resp = await streamPost(`/api/agents/${agent}/chat`, chatBody);
       const reader = resp.body.getReader();
+      this._activeReader = reader;
       const decoder = new TextDecoder();
       let buffer = '';
       let gotResult = false;
@@ -514,7 +516,9 @@ export default () => ({
           try { event = JSON.parse(line.slice(6)); } catch { continue; }
 
           if (event.type === 'done') {
-            reader.cancel().catch(() => {});
+            break;
+          } else if (event.type === 'cancelled') {
+            this.messages.push({ type: 'info', text: 'Generation stopped.' });
             break;
           } else if (event.type === 'compacting') {
             this.compacting = true;
@@ -570,6 +574,7 @@ export default () => ({
       }
       this.messages.push({ type: 'error', text: `Connection error: ${e.message}` });
     } finally {
+      this._activeReader = null;
       this.sending = false;
       this.scrollMessages();
     }
@@ -643,7 +648,23 @@ export default () => ({
     this.sendMessage();
   },
 
+  async cancelChat() {
+    const agent = this.$store.app.selectedAgent;
+    if (!agent || !this.sending) return;
+    try {
+      await post(`/api/agents/${agent}/chat/cancel`, { user_id: this.userId });
+    } catch (e) { /* best effort */ }
+    if (this._activeReader) {
+      this._activeReader.cancel().catch(() => {});
+    }
+  },
+
   onInputKeydown(e) {
+    if (e.key === 'Escape' && this.sending) {
+      e.preventDefault();
+      this.cancelChat();
+      return;
+    }
     if (e.key === 'Enter' && !e.shiftKey && !this._mobileQuery.matches) {
       e.preventDefault();
       this.sendMessage();
