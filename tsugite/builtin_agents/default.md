@@ -27,6 +27,7 @@ tools:
   - fetch_text
   - http_request
   - run
+  - "@kv"
   - "@schedule"
   - "@sessions"
 auto_load_skills:
