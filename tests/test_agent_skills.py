@@ -68,6 +68,39 @@ auto_load_skills: []
         assert agent.config.auto_load_skills == []
 
 
+class TestAgentConfigSkillPathsField:
+    """Test skill_paths field in AgentConfig."""
+
+    def test_agent_with_skill_paths(self, tmp_path):
+        agent_file = tmp_path / "agent.md"
+        agent_file.write_text("""---
+name: test_agent
+extends: none
+skill_paths:
+  - ~/my-skills
+  - /opt/team-skills
+---
+
+# Test Agent
+{{ user_prompt }}
+""")
+        agent = parse_agent_file(agent_file)
+        assert agent.config.skill_paths == ["~/my-skills", "/opt/team-skills"]
+
+    def test_agent_without_skill_paths(self, tmp_path):
+        agent_file = tmp_path / "agent.md"
+        agent_file.write_text("""---
+name: test_agent
+extends: none
+---
+
+# Test Agent
+{{ user_prompt }}
+""")
+        agent = parse_agent_file(agent_file)
+        assert agent.config.skill_paths == []
+
+
 class TestAgentPreparationWithSkills:
     """Test agent preparation with skill loading."""
 

@@ -7,7 +7,7 @@ and builds an index for efficient discovery.
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from tsugite.utils import parse_yaml_frontmatter
 
@@ -47,7 +47,7 @@ def get_builtin_skills_path() -> Path:
     return Path(__file__).parent / "builtin_skills"
 
 
-def scan_skills(workspace=None) -> List[SkillMeta]:
+def scan_skills(workspace=None, extra_paths: Optional[List[str]] = None) -> List[SkillMeta]:
     """Scan all skill directories and extract frontmatter with workspace priority.
 
     Only reads YAML frontmatter, not full file content.
@@ -55,13 +55,15 @@ def scan_skills(workspace=None) -> List[SkillMeta]:
 
     Search order (highest to lowest priority):
     0. workspace/skills/    - Workspace-specific (if workspace provided)
-    1. .tsugite/skills/     - Project-local
-    2. skills/              - Project convention
-    3. builtin_skills/      - Built-in (package)
-    4. ~/.config/tsugite/skills/  - Global user
+    1. extra_paths          - User-configured additional paths
+    2. .tsugite/skills/     - Project-local
+    3. skills/              - Project convention
+    4. builtin_skills/      - Built-in (package)
+    5. ~/.config/tsugite/skills/  - Global user
 
     Args:
         workspace: Optional workspace to check for workspace-specific skills
+        extra_paths: Optional list of additional directory paths to search
 
     Returns:
         List of SkillMeta objects for discovered skills
@@ -72,6 +74,11 @@ def scan_skills(workspace=None) -> List[SkillMeta]:
     if workspace and hasattr(workspace, "skills_dir"):
         if workspace.skills_dir.exists():
             skill_paths.append(workspace.skills_dir)
+
+    # User-configured extra paths
+    if extra_paths:
+        for p in extra_paths:
+            skill_paths.append(Path(p).expanduser())
 
     # Project and system paths
     skill_paths.extend(

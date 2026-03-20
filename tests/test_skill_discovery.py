@@ -317,3 +317,87 @@ class TestBuildSkillIndex:
         assert "An example skill" in index
         # Should not have empty parentheses or brackets
         assert "()" not in index or "[]" not in index
+
+
+class TestScanSkillsExtraPaths:
+    """Test extra_paths parameter in scan_skills."""
+
+    @pytest.fixture
+    def skill_dirs(self, tmp_path):
+        """Create temporary skill directories for testing."""
+        project_local = tmp_path / ".tsugite" / "skills"
+        extra = tmp_path / "extra_skills"
+
+        project_local.mkdir(parents=True)
+        extra.mkdir(parents=True)
+
+        return {
+            "project_local": project_local,
+            "extra": extra,
+            "base": tmp_path,
+        }
+
+    def _write_skill(self, path, name, description="A skill"):
+        path.write_text(f"---\nname: {name}\ndescription: {description}\n---\nContent\n")
+
+    def test_extra_paths_scanned(self, skill_dirs, monkeypatch):
+        """Skills in extra_paths directories are discovered."""
+        monkeypatch.chdir(skill_dirs["base"])
+        monkeypatch.setenv("HOME", str(skill_dirs["base"]))
+
+        self._write_skill(skill_dirs["extra"] / "custom.md", "custom_skill", "Custom")
+
+        skills = scan_skills(extra_paths=[str(skill_dirs["extra"])])
+        names = [s.name for s in skills]
+        assert "custom_skill" in names
+
+    def test_extra_paths_priority_over_project(self, skill_dirs, monkeypatch):
+        """Extra paths have higher priority than project-local skills."""
+        monkeypatch.chdir(skill_dirs["base"])
+        monkeypatch.setenv("HOME", str(skill_dirs["base"]))
+
+        self._write_skill(skill_dirs["extra"] / "dup.md", "dup", "Extra version")
+        self._write_skill(skill_dirs["project_local"] / "dup.md", "dup", "Project version")
+
+        skills = scan_skills(extra_paths=[str(skill_dirs["extra"])])
+        dup = [s for s in skills if s.name == "dup"]
+        assert len(dup) == 1
+        assert dup[0].description == "Extra version"
+
+    def test_extra_paths_tilde_expansion(self, skill_dirs, monkeypatch):
+        """Tilde in extra_paths is expanded to home directory."""
+        monkeypatch.chdir(skill_dirs["base"])
+        monkeypatch.setenv("HOME", str(skill_dirs["base"]))
+
+        custom_dir = skill_dirs["base"] / "custom_skills"
+        custom_dir.mkdir()
+        self._write_skill(custom_dir / "tilde.md", "tilde_skill", "Tilde test")
+
+        skills = scan_skills(extra_paths=["~/custom_skills"])
+        names = [s.name for s in skills]
+        assert "tilde_skill" in names
+
+    def test_extra_paths_nonexistent_ignored(self, skill_dirs, monkeypatch):
+        """Non-existent extra paths are silently ignored."""
+        monkeypatch.chdir(skill_dirs["base"])
+        monkeypatch.setenv("HOME", str(skill_dirs["base"]))
+
+        self._write_skill(skill_dirs["project_local"] / "real.md", "real_skill")
+
+        skills = scan_skills(extra_paths=["/nonexistent/path"])
+        names = [s.name for s in skills]
+        assert "real_skill" in names
+
+    def test_extra_paths_empty_list(self, skill_dirs, monkeypatch):
+        """Empty extra_paths list behaves same as None."""
+        monkeypatch.chdir(skill_dirs["base"])
+        monkeypatch.setenv("HOME", str(skill_dirs["base"]))
+
+        self._write_skill(skill_dirs["project_local"] / "test.md", "test_skill")
+
+        skills_none = scan_skills(extra_paths=None)
+        skills_empty = scan_skills(extra_paths=[])
+
+        names_none = {s.name for s in skills_none}
+        names_empty = {s.name for s in skills_empty}
+        assert names_none == names_empty

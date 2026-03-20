@@ -360,10 +360,12 @@ class AgentPreparer:
 
         skills = []
         if auto_load_skills:
+            from tsugite.config import load_config
             from tsugite.events.events import SkillLoadFailedEvent
             from tsugite.tools.skills import SkillManager
 
-            skill_manager = SkillManager()
+            extra_skill_paths = agent_config.skill_paths + load_config().skill_paths
+            skill_manager = SkillManager(extra_paths=extra_skill_paths or None)
             for skill_name in auto_load_skills:
                 # Attempt to load skill (returns message string for agents/tools)
                 result = skill_manager.load_skill(skill_name)

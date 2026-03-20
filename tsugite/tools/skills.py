@@ -20,16 +20,18 @@ class SkillManager:
     An instance should be created per agent/session and passed to tools.
     """
 
-    def __init__(self, workspace=None):
+    def __init__(self, workspace=None, extra_paths: Optional[List[str]] = None):
         """Initialize skill manager.
 
         Args:
             workspace: Optional workspace to check for workspace-specific skills
+            extra_paths: Optional list of additional directory paths to search for skills
         """
         self._skill_registry: Dict[str, SkillMeta] = {}
         self._loaded_skills: Dict[str, str] = {}
         self._registry_initialized = False
         self._workspace = workspace
+        self._extra_paths = extra_paths
         self._executor = None
 
     def set_executor(self, executor):
@@ -46,7 +48,7 @@ class SkillManager:
     def _ensure_registry_initialized(self):
         """Initialize skill registry if not already initialized."""
         if not self._registry_initialized:
-            skills = scan_skills(workspace=self._workspace)
+            skills = scan_skills(workspace=self._workspace, extra_paths=self._extra_paths)
             self._skill_registry = {skill.name: skill for skill in skills}
             self._registry_initialized = True
 
@@ -189,7 +191,10 @@ def get_skill_manager() -> SkillManager:
     """
     global _default_skill_manager
     if _default_skill_manager is None:
-        _default_skill_manager = SkillManager()
+        from tsugite.config import load_config
+
+        config = load_config()
+        _default_skill_manager = SkillManager(extra_paths=config.skill_paths or None)
     return _default_skill_manager
 
 

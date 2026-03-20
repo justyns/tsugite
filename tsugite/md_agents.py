@@ -48,6 +48,7 @@ class AgentConfig(BaseModel):
     prefetch: List[Dict[str, Any]] = Field(default_factory=list)
     attachments: List[str] = Field(default_factory=list)
     auto_load_skills: List[str] = Field(default_factory=list)
+    skill_paths: List[str] = Field(default_factory=list)
     instructions: str = ""
     mcp_servers: Dict[str, Optional[List[str]]] = Field(default_factory=dict)
     extends: Optional[str] = None

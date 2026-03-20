@@ -114,6 +114,7 @@ class Config(BaseModel):
     auto_context_enabled: bool = True
     auto_context_files: List[str] = Field(default_factory=lambda: [".tsugite/CONTEXT.md", "AGENTS.md", "CLAUDE.md"])
     auto_context_include_global: bool = True
+    skill_paths: List[str] = Field(default_factory=list)
 
 
 def get_config_path() -> Path:

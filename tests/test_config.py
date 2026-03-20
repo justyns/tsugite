@@ -104,6 +104,7 @@ def test_config_with_empty_values(tmp_path):
         "auto_context_enabled": True,
         "auto_context_files": [".tsugite/CONTEXT.md", "AGENTS.md", "CLAUDE.md"],
         "auto_context_include_global": True,
+        "skill_paths": [],
     }
 
 
@@ -136,3 +137,20 @@ def test_load_invalid_json(tmp_path):
     config = load_config(config_path)
     assert config.default_model is None
     assert config.model_aliases == {}
+
+
+def test_skill_paths_round_trip(tmp_path):
+    """Test saving and loading config with skill_paths."""
+    config_path = tmp_path / "config.json"
+    config = Config(skill_paths=["~/my-skills", "/opt/team-skills"])
+    save_config(config, config_path)
+
+    loaded = load_config(config_path)
+    assert loaded.skill_paths == ["~/my-skills", "/opt/team-skills"]
+
+
+def test_skill_paths_default_empty(tmp_path):
+    """Test that skill_paths defaults to empty list."""
+    config_path = tmp_path / "config.json"
+    config = load_config(config_path)
+    assert config.skill_paths == []
