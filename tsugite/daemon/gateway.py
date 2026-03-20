@@ -109,6 +109,7 @@ class Gateway:
         self._push_store = None
         self._vapid_private_key = None
         self._vapid_claims = None
+        self._compaction_scheduler = None
         self._shutting_down = False
 
     async def start(self):
@@ -277,6 +278,24 @@ class Gateway:
             set_session_runner(self._session_runner, asyncio.get_running_loop())
             logger.info("Session runner enabled")
 
+        # Start compaction scheduler for agents with auto_compact config
+        agents_with_auto_compact = {
+            name: cfg
+            for name, cfg in self.config.agents.items()
+            if cfg.auto_compact and cfg.auto_compact.schedule
+        }
+        if agents_with_auto_compact and http_adapters:
+            from tsugite.daemon.compaction_scheduler import CompactionScheduler
+
+            self._compaction_scheduler = CompactionScheduler(
+                agents_with_auto_compact, session_store, http_adapters
+            )
+            tasks.append(self._compaction_scheduler.start())
+            logger.info(
+                "Compaction scheduler enabled for %d agent(s)",
+                len(agents_with_auto_compact),
+            )
+
         # Load adapter plugins
         from tsugite.plugins import load_adapter_plugins
 
@@ -341,6 +360,8 @@ class Gateway:
         components = [(a, "adapter") for a in self.adapters]
         if self._scheduler_adapter:
             components.append((self._scheduler_adapter, "scheduler"))
+        if self._compaction_scheduler:
+            components.append((self._compaction_scheduler, "compaction scheduler"))
 
         for component, label in components:
             try:

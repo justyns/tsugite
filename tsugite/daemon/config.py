@@ -15,6 +15,13 @@ def _get_default_state_dir() -> Path:
     return get_xdg_data_path("daemon")
 
 
+class AutoCompactConfig(BaseModel):
+    """Scheduled auto-compaction settings."""
+
+    schedule: Optional[str] = None  # Cron expression, e.g. "0 0 * * *"
+    min_turns: int = 1  # Skip if fewer turns since last compaction
+
+
 class AgentConfig(BaseModel):
     """Configuration for a single agent."""
 
@@ -25,6 +32,7 @@ class AgentConfig(BaseModel):
     compaction_model: Optional[str] = None
     max_turns: Optional[int] = None
     timezone: str = ""  # IANA timezone for display (e.g. "America/Chicago")
+    auto_compact: Optional[AutoCompactConfig] = None
 
 
 class DiscordBotConfig(BaseModel):

@@ -303,6 +303,17 @@ class SessionStore:
                 and (not user_id or s.user_id == user_id)
             ]
 
+    def list_interactive_by_agent(self, agent: str) -> list[Session]:
+        """Return all active interactive sessions for a given agent."""
+        with self._lock:
+            return [
+                s
+                for s in self._sessions.values()
+                if s.agent == agent
+                and s.source == SessionSource.INTERACTIVE.value
+                and s.status == SessionStatus.ACTIVE.value
+            ]
+
     # ── Event log (per-session JSONL) ──
 
     def _events_dir(self) -> Path:
