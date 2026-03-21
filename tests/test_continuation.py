@@ -448,6 +448,6 @@ class TestToolCallHistory:
         cached = apply_cache_control_to_messages(reconstructed)
 
         assert len(cached) == 4
-        # All 4 messages get cache_control (4 <= default max_markers of 4)
+        # Last 2 messages get cache_control (default max_markers=2, context turn uses the other 2)
         cached_count = sum(1 for msg in cached if "cache_control" in msg)
-        assert cached_count == 4
+        assert cached_count == 2
