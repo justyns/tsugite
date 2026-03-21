@@ -364,6 +364,8 @@ async def _execute_agent_with_prompt(
     injectable_vars: Optional[Dict[str, Any]] = None,
     previous_messages: Optional[List[Dict]] = None,
     path_context: Optional[Any] = None,
+    claude_code_resume_session: Optional[str] = None,
+    claude_code_resume_after_compaction: bool = False,
 ) -> str | AgentExecutionResult:
     """Execute agent with a prepared agent.
 
@@ -517,6 +519,8 @@ async def _execute_agent_with_prompt(
             attachments=prepared.attachments,
             skills=prepared.skills,
             previous_messages=previous_messages,
+            resume_session=claude_code_resume_session,
+            resume_after_compaction=claude_code_resume_after_compaction,
         )
 
         # Set event_bus in context so tools can access it during execution
@@ -567,6 +571,7 @@ async def _execute_agent_with_prompt(
                     system_message=prepared.system_message,
                     attachments=prepared.attachments,
                     claude_code_session_id=result.claude_code_session_id,
+                    claude_code_compacted=result.claude_code_compacted,
                     context_window=result.context_window,
                 )
             else:
@@ -761,14 +766,27 @@ async def run_agent_async(
 
     # Load conversation history if continuing
     previous_messages = []
+    claude_code_resume_session = None
+    claude_code_resume_after_compaction = False
     if continue_conversation_id:
-        from tsugite.agent_runner.history_integration import load_and_apply_history
+        from tsugite.agent_runner.history_integration import (
+            get_claude_code_session_info,
+            load_and_apply_history,
+        )
 
-        try:
-            previous_messages = load_and_apply_history(continue_conversation_id)
-        except ValueError:
-            # New conversation (e.g., fresh workspace session) - start with empty history
-            pass
+        # Check if we can resume an existing Claude Code session
+        session_info = get_claude_code_session_info(continue_conversation_id)
+        if session_info:
+            claude_code_resume_session = session_info.session_id
+            claude_code_resume_after_compaction = session_info.compacted
+
+        if not claude_code_resume_session:
+            # No Claude Code session to resume -- load history for serialization
+            try:
+                previous_messages = load_and_apply_history(continue_conversation_id)
+            except ValueError:
+                # New conversation (e.g., fresh workspace session) - start with empty history
+                pass
 
     # Parse agent configuration (with inheritance resolution)
     try:
@@ -807,14 +825,35 @@ async def run_agent_async(
             print(_format_debug_output(prepared), file=sys.stderr)
 
         # Execute with the low-level helper (async - no asyncio.run wrapper)
-        return await _execute_agent_with_prompt(
-            prepared=prepared,
-            exec_options=exec_options,
-            workspace=workspace,
-            custom_logger=custom_logger,
-            previous_messages=previous_messages,
-            path_context=path_context,
-        )
+        try:
+            return await _execute_agent_with_prompt(
+                prepared=prepared,
+                exec_options=exec_options,
+                workspace=workspace,
+                custom_logger=custom_logger,
+                previous_messages=previous_messages,
+                path_context=path_context,
+                claude_code_resume_session=claude_code_resume_session,
+                claude_code_resume_after_compaction=claude_code_resume_after_compaction,
+            )
+        except (RuntimeError, AgentExecutionError) as e:
+            err_str = str(e).lower()
+            if claude_code_resume_session and ("process ended" in err_str or "no conversation found" in err_str):
+                logger.warning("Claude Code resume failed (%s), retrying with full history", e)
+                try:
+                    previous_messages = load_and_apply_history(continue_conversation_id)
+                except Exception:
+                    logger.warning("Failed to load history for fallback, starting fresh")
+                    previous_messages = []
+                return await _execute_agent_with_prompt(
+                    prepared=prepared,
+                    exec_options=exec_options,
+                    workspace=workspace,
+                    custom_logger=custom_logger,
+                    previous_messages=previous_messages,
+                    path_context=path_context,
+                )
+            raise
     finally:
         # Always clear the current agent context when done
         clear_current_agent()

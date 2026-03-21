@@ -123,6 +123,7 @@ class AgentResult:
     steps: Optional[List[StepResult]] = None
     error: Optional[str] = None
     claude_code_session_id: Optional[str] = None
+    claude_code_compacted: bool = False
     context_window: Optional[int] = None
 
     def __str__(self) -> str:
@@ -160,6 +161,8 @@ class TsugiteAgent:
         attachments: List[Attachment] = None,
         skills: List[Skill] = None,
         previous_messages: List[Dict] = None,
+        resume_session: Optional[str] = None,
+        resume_after_compaction: bool = False,
     ):
         """Initialize the agent.
 
@@ -189,6 +192,8 @@ class TsugiteAgent:
         self.attachments = attachments or []
         self.skills = skills or []
         self.previous_messages = previous_messages or []
+        self._resume_session = resume_session
+        self._resume_after_compaction = resume_after_compaction
 
         self.total_cost = 0.0
         self.total_tokens = 0
@@ -208,6 +213,7 @@ class TsugiteAgent:
         self._claude_code_context_window: Optional[int] = None
         self._claude_code_cache_creation_tokens: int = 0
         self._claude_code_cache_read_tokens: int = 0
+        self._claude_code_compacted: bool = False
 
     def _run_async_in_sync_context(self, coro):
         """Run async coroutine in synchronous context, handling event loop properly.
@@ -389,6 +395,7 @@ class TsugiteAgent:
             await claude_process.start(
                 model=self._claude_code_model,
                 system_prompt=self._build_system_prompt(),
+                resume_session=self._resume_session,
             )
         # Main agent loop
         try:
@@ -626,6 +633,7 @@ class TsugiteAgent:
                             cost=self.total_cost if self.total_cost > 0 else None,
                             steps=self.memory.steps,
                             claude_code_session_id=self._claude_code_session_id,
+                            claude_code_compacted=self._claude_code_compacted,
                             context_window=self._claude_code_context_window,
                         )
                     return exec_result.final_answer
@@ -701,6 +709,7 @@ class TsugiteAgent:
         finally:
             if claude_process:
                 self._claude_code_session_id = claude_process.session_id
+                self._claude_code_compacted = claude_process.compacted
                 await claude_process.stop()
 
     async def _claude_code_turn(self, process, messages, turn_num, stream) -> TurnResult:
@@ -1046,32 +1055,42 @@ class TsugiteAgent:
         Claude Code receives the system prompt via --system-prompt-file, but attachments
         and skills are normally sent as a context turn in _build_messages(). Since that
         turn is skipped for the claude_code path, we inline attachment/skill content here.
+
+        When resuming a Claude Code session, history is skipped (Claude Code already has
+        it). Attachments are included on fresh sessions and after Claude Code compaction
+        (which may have lost them), but skipped on regular resumes to avoid accumulation.
         """
         parts = []
 
-        context_parts = []
-        for att in self.attachments:
-            if att.content_type == AttachmentContentType.TEXT:
-                limit = _attachment_char_limit(att.name)
-                if limit == 0:
-                    continue
-                content = att.content
-                if limit is not None and len(content) > limit:
-                    content = content[:limit] + "\n... (truncated)"
-                context_parts.append(f'<attachment name="{att.name}">')
-                context_parts.append(content)
-                context_parts.append("</attachment>")
-        for skill in self.skills:
-            content = skill.content
-            if len(content) > 4000:
-                content = content[:4000] + "\n... (truncated)"
-            context_parts.append(f'<skill name="{skill.name}">')
-            context_parts.append(content)
-            context_parts.append("</skill>")
-        if context_parts:
-            parts.append("<context>\n" + "\n".join(context_parts) + "\n</context>\n")
+        # Include attachments on fresh sessions or after compaction (may have been lost)
+        include_context = not self._resume_session or self._resume_after_compaction
 
-        if self.previous_messages:
+        if include_context:
+            context_parts = []
+            for att in self.attachments:
+                if att.content_type == AttachmentContentType.TEXT:
+                    limit = _attachment_char_limit(att.name)
+                    if limit == 0:
+                        continue
+                    content = att.content
+                    if limit is not None and len(content) > limit:
+                        content = content[:limit] + "\n... (truncated)"
+                    context_parts.append(f'<attachment name="{att.name}">')
+                    context_parts.append(content)
+                    context_parts.append("</attachment>")
+            for skill in self.skills:
+                content = skill.content
+                if len(content) > 4000:
+                    content = content[:4000] + "\n... (truncated)"
+                context_parts.append(f'<skill name="{skill.name}">')
+                context_parts.append(content)
+                context_parts.append("</skill>")
+            if context_parts:
+                parts.append("<context>\n" + "\n".join(context_parts) + "\n</context>\n")
+
+        # Only serialize history for fresh sessions. Resumed sessions already have
+        # the conversation in Claude Code's internal state.
+        if self.previous_messages and not self._resume_session:
             trimmed = _trim_messages_to_token_budget(
                 self.previous_messages,
                 self._get_claude_code_history_budget(),

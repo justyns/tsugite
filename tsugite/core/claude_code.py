@@ -50,11 +50,17 @@ class ClaudeCodeProcess:
         self._system_prompt_file: str | None = None
         self._stderr_lines: list[str] = []
         self._stderr_task: asyncio.Task | None = None
+        self._compacted: bool = False
         self._last_usage: dict = {}
 
     @property
     def session_id(self) -> str | None:
         return self._session_id
+
+    @property
+    def compacted(self) -> bool:
+        """Whether Claude Code auto-compacted during this session."""
+        return self._compacted
 
     async def _drain_stderr(self) -> None:
         """Background task: read stderr lines so the pipe never fills up."""
@@ -70,12 +76,13 @@ class ClaudeCodeProcess:
     def _get_stderr(self) -> str:
         return "\n".join(self._stderr_lines[-20:])  # last 20 lines
 
-    async def start(self, model: str, system_prompt: str) -> None:
+    async def start(self, model: str, system_prompt: str, resume_session: str | None = None) -> None:
         """Launch persistent claude subprocess.
 
         Args:
             model: Model name (sonnet, opus, haiku, or full model ID)
             system_prompt: System prompt text
+            resume_session: Optional session ID to resume instead of starting fresh
 
         Raises:
             RuntimeError: If claude CLI is not found or fails to start
@@ -105,9 +112,12 @@ class ClaudeCodeProcess:
             "--strict-mcp-config",
             "--system-prompt-file",
             self._system_prompt_file,
-            "--session-id",
-            str(uuid.uuid4()),
         ]
+
+        if resume_session:
+            cmd.extend(["--resume", resume_session])
+        else:
+            cmd.extend(["--session-id", str(uuid.uuid4())])
 
         # Copy env but unset keys that trigger nested-session guard or API key usage
         env = {k: v for k, v in os.environ.items() if k not in _CLAUDE_ENV_VARS}
@@ -169,6 +179,15 @@ class ClaudeCodeProcess:
             if event_type == "system" and event.get("subtype") == "init":
                 self._session_id = event.get("session_id")
                 logger.debug("Init event received (session=%s)", self._session_id)
+                continue
+
+            # Compact boundary — Claude Code auto-compacted the conversation
+            if event_type == "system" and event.get("subtype") == "compact_boundary":
+                self._compacted = True
+                logger.info(
+                    "Claude Code auto-compacted (preTokens=%s)",
+                    event.get("compactMetadata", {}).get("preTokens"),
+                )
                 continue
 
             # Content block delta (streaming with --include-partial-messages)

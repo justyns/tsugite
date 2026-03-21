@@ -250,6 +250,7 @@ class BaseAdapter(ABC):
         system_prompt=None,
         attachments=None,
         claude_code_session_id=None,
+        claude_code_compacted=False,
     ):
         try:
             from tsugite.agent_runner.history_integration import save_run_to_history
@@ -268,6 +269,7 @@ class BaseAdapter(ABC):
                 system_prompt=system_prompt,
                 attachments=attachments,
                 claude_code_session_id=claude_code_session_id,
+                claude_code_compacted=claude_code_compacted,
             )
         except Exception as e:
             logger.warning("Failed to save daemon history: %s", e)
@@ -511,6 +513,7 @@ class BaseAdapter(ABC):
             system_prompt=getattr(result, "system_message", None),
             attachments=getattr(result, "attachments", None),
             claude_code_session_id=getattr(result, "claude_code_session_id", None),
+            claude_code_compacted=getattr(result, "claude_code_compacted", False),
         )
 
         if result.context_window:

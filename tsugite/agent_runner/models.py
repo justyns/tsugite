@@ -40,6 +40,7 @@ class AgentExecutionResult(BaseModel):
         default_factory=list
     )  # List of Attachment objects (using Any for Pydantic compatibility)
     claude_code_session_id: Optional[str] = None
+    claude_code_compacted: bool = False
     context_window: Optional[int] = None
 
     def __str__(self) -> str:

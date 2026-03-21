@@ -6,6 +6,7 @@ the session storage system.
 
 import os
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -76,6 +77,7 @@ def save_run_to_history(
     channel_metadata: Optional[dict] = None,
     duration_ms: Optional[int] = None,
     claude_code_session_id: Optional[str] = None,
+    claude_code_compacted: bool = False,
 ) -> Optional[str]:
     """Save a single agent run to history.
 
@@ -143,10 +145,12 @@ def save_run_to_history(
 
         functions_called = _extract_functions_called(execution_steps) if execution_steps else []
 
-        # Merge claude_code_session_id into metadata if present
+        # Merge claude_code session info into metadata if present
         metadata = dict(channel_metadata) if channel_metadata else {}
         if claude_code_session_id:
             metadata["claude_code_session_id"] = claude_code_session_id
+        if claude_code_compacted:
+            metadata["claude_code_compacted"] = True
 
         # Write accumulated hook execution records before the turn
         from tsugite.hooks import drain_all_executions
@@ -210,6 +214,46 @@ def _extract_functions_called(execution_steps: list) -> List[str]:
         if hasattr(step, "tools_called") and step.tools_called:
             functions.update(step.tools_called)
     return sorted(list(functions))
+
+
+@dataclass
+class ClaudeCodeSessionInfo:
+    """Info about the Claude Code session for a conversation."""
+
+    session_id: str
+    compacted: bool = False
+
+
+def get_claude_code_session_info(conversation_id: str) -> Optional["ClaudeCodeSessionInfo"]:
+    """Get the Claude Code session ID and compaction state from conversation history.
+
+    Returns None if the session was compacted by Tsugite (Claude Code session would
+    be stale) or if no session ID is found (e.g. non-claude_code model was used).
+    """
+    try:
+        from tsugite.history import SessionStorage, Turn
+        from tsugite.history.models import CompactionSummary
+
+        session_path = get_history_dir() / f"{conversation_id}.jsonl"
+        if not session_path.exists():
+            return None
+
+        storage = SessionStorage(session_path)
+        records = storage.load_records()
+
+        # Single reversed pass: find the last Turn with a session ID,
+        # but bail if we hit a CompactionSummary (stale Claude Code session)
+        for record in reversed(records):
+            if isinstance(record, CompactionSummary):
+                return None
+            if isinstance(record, Turn) and record.metadata:
+                session_id = record.metadata.get("claude_code_session_id")
+                if session_id:
+                    compacted = record.metadata.get("claude_code_compacted", False)
+                    return ClaudeCodeSessionInfo(session_id, compacted)
+        return None
+    except Exception:
+        return None
 
 
 def get_latest_conversation() -> Optional[str]:
