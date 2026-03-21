@@ -448,5 +448,6 @@ class TestToolCallHistory:
         cached = apply_cache_control_to_messages(reconstructed)
 
         assert len(cached) == 4
-        for msg in cached:
-            assert msg["cache_control"] == {"type": "ephemeral"}
+        # All 4 messages get cache_control (4 <= default max_markers of 4)
+        cached_count = sum(1 for msg in cached if "cache_control" in msg)
+        assert cached_count == 4

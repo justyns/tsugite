@@ -304,22 +304,30 @@ def get_turns(session_path: Path) -> List[Turn]:
     return [r for r in storage.load_records() if isinstance(r, Turn)]
 
 
-def apply_cache_control_to_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Apply cache control markers to all conversation messages.
+def apply_cache_control_to_messages(messages: List[Dict[str, Any]], max_markers: int = 4) -> List[Dict[str, Any]]:
+    """Apply cache control markers to conversation messages.
 
-    Following industry best practices from Anthropic and OpenAI, we cache
-    all conversation history.
+    Anthropic limits cache_control blocks to 4 per request. We place markers
+    on the last few messages (the stable prefix that won't change next turn).
 
     Args:
         messages: List of message dicts
+        max_markers: Maximum cache_control markers to add (Anthropic limit is 4,
+                     but the system prompt and context turn may use 2 already)
 
     Returns:
-        Messages with cache_control added
+        Messages with cache_control added to the last max_markers messages
     """
     if not messages:
         return messages
 
-    return [{**msg, "cache_control": {"type": "ephemeral"}} for msg in messages]
+    # Only mark the last few messages as cacheable (the stable conversation prefix).
+    # Earlier messages are stable too but Anthropic enforces a max of 4 blocks.
+    result = list(messages)
+    start = max(0, len(result) - max_markers)
+    for i in range(start, len(result)):
+        result[i] = {**result[i], "cache_control": {"type": "ephemeral"}}
+    return result
 
 
 def load_and_apply_history(session_path: Path) -> List[Dict[str, Any]]:

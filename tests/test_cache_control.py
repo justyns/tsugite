@@ -28,20 +28,20 @@ class TestApplyCacheControlToMessages:
         assert result == []
 
     def test_single_turn_caching(self):
-        """Test caching a single turn - all messages cached."""
+        """Test caching a single turn - both messages cached (within default limit)."""
         messages = [
             {"role": "user", "content": "Hello"},
             {"role": "assistant", "content": "Hi"},
         ]
         result = apply_cache_control_to_messages(messages)
 
-        # Both messages should have cache_control
+        # Both messages should have cache_control (2 <= default max_markers of 4)
         assert len(result) == 2
         assert result[0]["cache_control"] == {"type": "ephemeral"}
         assert result[1]["cache_control"] == {"type": "ephemeral"}
 
-    def test_multiple_turns_all_cached(self):
-        """Test that all turns are cached (industry best practice)."""
+    def test_multiple_turns_only_last_cached(self):
+        """Test that only the last max_markers messages get cache_control."""
         messages = [
             {"role": "user", "content": "Turn 1 user"},
             {"role": "assistant", "content": "Turn 1 assistant"},
@@ -52,13 +52,17 @@ class TestApplyCacheControlToMessages:
         ]
         result = apply_cache_control_to_messages(messages)
 
-        # All messages should have cache_control
+        # Only last 4 messages should have cache_control (default max_markers=4)
         assert len(result) == 6
-        for i, msg in enumerate(result):
-            assert msg["cache_control"] == {"type": "ephemeral"}, f"Message {i} not cached"
+        assert "cache_control" not in result[0]
+        assert "cache_control" not in result[1]
+        assert result[2]["cache_control"] == {"type": "ephemeral"}
+        assert result[3]["cache_control"] == {"type": "ephemeral"}
+        assert result[4]["cache_control"] == {"type": "ephemeral"}
+        assert result[5]["cache_control"] == {"type": "ephemeral"}
 
-    def test_many_turns_all_cached(self):
-        """Test that even many turns are all cached."""
+    def test_many_turns_respects_limit(self):
+        """Test that many turns only cache the last max_markers messages."""
         messages = []
         for i in range(10):
             messages.append({"role": "user", "content": f"Turn {i}"})
@@ -66,10 +70,30 @@ class TestApplyCacheControlToMessages:
 
         result = apply_cache_control_to_messages(messages)
 
-        # All 20 messages should be cached
+        # Only last 4 should be cached (default max_markers=4)
         assert len(result) == 20
-        for msg in result:
+        cached_count = sum(1 for msg in result if "cache_control" in msg)
+        assert cached_count == 4
+        # First 16 should NOT have cache_control
+        for msg in result[:16]:
+            assert "cache_control" not in msg
+        # Last 4 should
+        for msg in result[16:]:
             assert msg["cache_control"] == {"type": "ephemeral"}
+
+    def test_custom_max_markers(self):
+        """Test with a custom max_markers value."""
+        messages = [
+            {"role": "user", "content": f"Turn {i}"}
+            for i in range(10)
+        ]
+        result = apply_cache_control_to_messages(messages, max_markers=2)
+
+        cached_count = sum(1 for msg in result if "cache_control" in msg)
+        assert cached_count == 2
+        assert "cache_control" not in result[7]
+        assert result[8]["cache_control"] == {"type": "ephemeral"}
+        assert result[9]["cache_control"] == {"type": "ephemeral"}
 
     def test_preserves_existing_fields(self):
         """Test that existing message fields are preserved."""
@@ -90,12 +114,24 @@ class TestApplyCacheControlToMessages:
         assert result[1]["function_call"] == {"name": "test"}
         assert result[1]["cache_control"] == {"type": "ephemeral"}
 
+    def test_anthropic_4_block_limit(self):
+        """Test that we never exceed Anthropic's 4 cache_control block limit."""
+        messages = []
+        for i in range(100):
+            messages.append({"role": "user", "content": f"Turn {i}"})
+            messages.append({"role": "assistant", "content": f"Response {i}"})
+
+        result = apply_cache_control_to_messages(messages)
+
+        cached_count = sum(1 for msg in result if "cache_control" in msg)
+        assert cached_count <= 4
+
 
 class TestCacheControlIntegration:
     """Integration tests for cache control with conversation history."""
 
     def test_load_and_cache_conversation(self, temp_history_dir):
-        """Test loading conversation and applying cache control to all messages."""
+        """Test loading conversation and applying cache control."""
         from tsugite.history import reconstruct_messages
 
         storage = SessionStorage.create(agent_name="test_agent", model="test:model")
@@ -116,16 +152,15 @@ class TestCacheControlIntegration:
         messages = reconstruct_messages(storage.session_path)
         assert len(messages) == 6  # 3 turns × 2 messages
 
-        # Apply cache control to all messages (industry best practice)
+        # Apply cache control - only last 4 messages should be cached
         cached = apply_cache_control_to_messages(messages)
 
-        # All messages should be cached
         assert len(cached) == 6
-        for msg in cached:
-            assert msg["cache_control"] == {"type": "ephemeral"}
+        cached_count = sum(1 for msg in cached if "cache_control" in msg)
+        assert cached_count == 4
 
-    def test_long_conversation_all_cached(self, temp_history_dir):
-        """Test that even long conversations have all messages cached."""
+    def test_long_conversation_respects_limit(self, temp_history_dir):
+        """Test that long conversations respect the cache_control block limit."""
         from tsugite.history import reconstruct_messages
 
         storage = SessionStorage.create(agent_name="test_agent", model="test:model")
@@ -145,9 +180,8 @@ class TestCacheControlIntegration:
         messages = reconstruct_messages(storage.session_path)
         assert len(messages) == 20  # 10 turns × 2 messages
 
-        # Apply cache control - should cache all messages
+        # Apply cache control - should only cache last 4 messages
         cached = apply_cache_control_to_messages(messages)
 
-        # All 20 messages should be cached
         cached_count = sum(1 for msg in cached if "cache_control" in msg)
-        assert cached_count == 20
+        assert cached_count == 4
