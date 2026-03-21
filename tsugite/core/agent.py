@@ -52,6 +52,29 @@ def _attachment_char_limit(name: str) -> int | None:
     return None
 
 
+def _trim_messages_to_token_budget(messages: List[Dict], budget_tokens: int) -> List[Dict]:
+    """Keep the most recent messages that fit within a token budget.
+
+    Walks from newest to oldest, estimating tokens as len(content) // 4.
+    Returns messages in original order.
+    """
+    if not messages:
+        return messages
+
+    kept_indices = []
+    used = 0
+    for i in range(len(messages) - 1, -1, -1):
+        content = messages[i].get("content", "")
+        est_tokens = len(content) // 4 if isinstance(content, str) else 100
+        if used + est_tokens > budget_tokens and kept_indices:
+            break
+        used += est_tokens
+        kept_indices.append(i)
+
+    kept_indices.reverse()
+    return [messages[i] for i in kept_indices]
+
+
 def build_system_prompt(tools: List[Tool], instructions: str = "") -> str:
     """Build system prompt for LLM with tools and instructions.
 
@@ -690,6 +713,11 @@ class TsugiteAgent:
             # Subsequent turns: subprocess has context, just send the new observation
             user_content = messages[-1]["content"] if messages else ""
 
+        logger.info(
+            "Claude Code turn %d: sending ~%d chars (~%d est tokens)",
+            turn_num + 1, len(user_content), len(user_content) // 4,
+        )
+
         accumulated = ""
         step_cost = 0.0
 
@@ -1044,10 +1072,20 @@ class TsugiteAgent:
             parts.append("<context>\n" + "\n".join(context_parts) + "\n</context>\n")
 
         if self.previous_messages:
+            trimmed = _trim_messages_to_token_budget(
+                self.previous_messages,
+                self._get_claude_code_history_budget(),
+            )
+            dropped = len(self.previous_messages) - len(trimmed)
             history_lines = [
-                f"{msg.get('role', 'unknown').capitalize()}: {msg.get('content', '')}" for msg in self.previous_messages
+                f"{msg.get('role', 'unknown').capitalize()}: {msg.get('content', '')}" for msg in trimmed
             ]
-            parts.append("<conversation_history>\n" + "\n\n".join(history_lines) + "\n</conversation_history>\n")
+            header = "<conversation_history"
+            if dropped > 0:
+                header += f' note="{dropped} older messages omitted for context"'
+                logger.info("Trimmed %d of %d previous messages to fit history budget", dropped, len(self.previous_messages))
+            header += ">"
+            parts.append(header + "\n" + "\n\n".join(history_lines) + "\n</conversation_history>\n")
 
         # Add the current task
         parts.append(self.memory.task)
@@ -1056,6 +1094,22 @@ class TsugiteAgent:
     def _build_system_prompt(self) -> str:
         """Build system prompt that teaches LLM how to solve tasks."""
         return build_system_prompt(self.tools, self.instructions)
+
+    def _get_claude_code_history_budget(self) -> int:
+        """Get token budget for conversation history in claude_code first message.
+
+        Reserves 50% of context for: Claude Code's own system prompt, tsugite's
+        system prompt, attachments/skills, current task, and multi-step headroom.
+        """
+        from tsugite.daemon.memory import _CLAUDE_CODE_CONTEXT_LIMITS
+
+        if self._claude_code_context_window:
+            context_limit = self._claude_code_context_window
+        else:
+            litellm_model = self.litellm_params.get("_litellm_model", self._claude_code_model or "")
+            context_limit = _CLAUDE_CODE_CONTEXT_LIMITS.get(litellm_model, 200_000)
+
+        return context_limit // 2
 
     def _build_budget_tag(self, turn_num: int) -> str:
         """Build XML budget tag showing turn and token usage for the LLM."""

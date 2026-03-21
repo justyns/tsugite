@@ -141,15 +141,18 @@ class ClaudeCodeProcess:
             "message": {"role": "user", "content": content},
             "session_id": self._session_id or "default",
         }
+        content_len = len(content)
         self._process.stdin.write((json.dumps(msg) + "\n").encode())
         await self._process.stdin.drain()
-        logger.debug("Sent message (%.200s)", content)
+        logger.debug("Sent message (%d chars, ~%d est tokens): %.200s", content_len, content_len // 4, content)
 
         while True:
             line = await self._process.stdout.readline()
             if not line:
                 stderr = self._get_stderr()
-                raise RuntimeError(f"Claude Code process ended unexpectedly. stderr: {stderr}")
+                raise RuntimeError(
+                    f"Claude Code process ended unexpectedly (sent ~{content_len} chars). stderr: {stderr}"
+                )
 
             raw = line.decode().strip()
             if not raw:
