@@ -179,28 +179,29 @@ export default () => ({
       this.compactionSummary = data.compaction_summary || null;
       this.compactedFrom = data.compacted_from || null;
       if (!data.turns || data.turns.length === 0) return;
+      let pendingHooks = [];
       for (const turn of data.turns) {
         if (turn.type === 'compaction') {
           this._allHistoryMessages.push({ type: 'compaction', summary: turn.summary || null });
           continue;
         }
         if (turn.type === 'hook_execution') {
-          this._allHistoryMessages.push({
-            type: 'hook',
-            phase: turn.phase,
-            name: turn.name,
-            command: turn.command,
-            exit_code: turn.exit_code,
-            stdout: turn.stdout,
-            stderr: turn.stderr,
-            duration_ms: turn.duration_ms,
-            timestamp: turn.timestamp,
-          });
+          pendingHooks.push(turn);
           continue;
         }
         if (turn.user) this._allHistoryMessages.push({ type: 'user', text: turn.user });
 
         const steps = [];
+        for (const h of pendingHooks) {
+          const summary = this._hookStepHtml(h.name, h.phase, h.exit_code);
+          const output = [h.stdout, h.stderr].filter(Boolean).join('\n');
+          if (output) {
+            steps.push({ hasDetails: true, summary, content: escapeHtml(output), open: false });
+          } else {
+            steps.push({ html: summary });
+          }
+        }
+        pendingHooks = [];
         if (turn.messages) {
           for (const item of this.extractMessages(turn)) {
             if (item.type === 'tool_call') {
@@ -216,7 +217,7 @@ export default () => ({
           }
         }
         if (steps.length > 0) {
-          this._allHistoryMessages.push({ type: 'progress-done', steps, turnCount: 0, toolCount: turn.tools_used?.length || 0 });
+          this._allHistoryMessages.push({ type: 'progress-done', steps, turnCount: turn.turn_count || 1, toolCount: turn.tools_used?.length || 0 });
         }
         if (turn.assistant) {
           this._allHistoryMessages.push({ type: 'agent', text: turn.assistant });
@@ -409,6 +410,12 @@ export default () => ({
       this._scrollTimer = null;
       this.scrollMessages();
     }, 150);
+  },
+
+  _hookStepHtml(name, phase, exitCode) {
+    const cls = exitCode === 0 ? 'ok' : 'err';
+    const label = `${name || 'hook'} (${phase})`;
+    return `<code>${escapeHtml(label)}</code> <span class="hook-exit ${cls}">exit ${exitCode}</span>`;
   },
 
   _pushDetailStep(prog, summary, contentHtml) {
@@ -633,6 +640,14 @@ export default () => ({
       prog.errorText = event.error;
     } else if (event.type === 'hook_status') {
       prog.statusText = event.message;
+    } else if (event.type === 'hook_execution') {
+      const summary = this._hookStepHtml(event.name, event.phase, event.exit_code);
+      const output = [event.stdout, event.stderr].filter(Boolean).join('\n');
+      if (output) {
+        this._pushDetailStep(prog, summary, escapeHtml(output));
+      } else {
+        prog.steps.push({ html: summary });
+      }
     } else if (event.type === 'init') {
       prog.statusText = `Agent: ${event.agent}`;
       if (event.model) this.statusInfo = { ...this.statusInfo, model: event.model };
@@ -644,13 +659,12 @@ export default () => ({
       const isCodeResult = event.tool === 'unknown';
       if (!isCodeResult) prog.toolCount++;
       const cls = event.success ? 'ok' : 'err';
-      const status = event.success ? 'ok' : 'err';
       const label = isCodeResult ? 'output' : event.tool;
       const output = event.output || event.error || '';
       if (output) {
-        this._pushDetailStep(prog, `<code>${escapeHtml(label)}</code> <span class="${cls}">${status}</span>`, escapeHtml(output));
+        this._pushDetailStep(prog, `<code>${escapeHtml(label)}</code> <span class="${cls}">${cls}</span>`, escapeHtml(output));
       } else {
-        prog.steps.push({ html: `<code>${escapeHtml(label)}</code> <span class="${cls}">${status}</span>` });
+        prog.steps.push({ html: `<code>${escapeHtml(label)}</code> <span class="${cls}">${cls}</span>` });
       }
     } else if (event.type === 'file_read') {
       const readSize = formatFileSize(event.byte_count);

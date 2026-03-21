@@ -87,11 +87,12 @@ main { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
 #input-area { padding: 12px 16px; background: var(--surface); border-top: 1px solid var(--border); display: flex; gap: 10px; flex-shrink: 0; }
 #message-input { flex: 1; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; font-size: 14px; font-family: inherit; resize: none; min-height: 42px; max-height: 150px; }
 #message-input:focus { outline: none; border-color: var(--accent); }
-#send-btn, #stop-btn { border: none; border-radius: 8px; padding: 10px 20px; font-size: 14px; font-weight: 600; cursor: pointer; align-self: flex-end; }
-#send-btn { background: var(--accent); color: var(--btn-text); }
+#send-btn, #stop-btn { border-radius: 8px; padding: 10px 20px; font-size: 14px; font-weight: 600; cursor: pointer; align-self: flex-end; }
+#send-btn { background: var(--accent); color: var(--btn-text); border: none; }
 #send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-#send-btn:hover:not(:disabled), #stop-btn:hover { filter: brightness(1.1); }
-#stop-btn { background: var(--error); color: var(--btn-text); }
+#send-btn:hover:not(:disabled) { filter: brightness(1.1); }
+#stop-btn { background: none; color: var(--error); border: 1px solid var(--error); }
+#stop-btn:hover { background: var(--error); color: var(--btn-text); }
 
 /* Modals */
 .modal-backdrop { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 10; align-items: center; justify-content: center; }

@@ -315,6 +315,7 @@ async def _render_and_execute_async(
     cwd: Path,
     interactive: bool = True,
     on_status: Optional[Callable[[str], None]] = None,
+    on_result: Optional[Callable[["HookExecution"], None]] = None,
     phase: str = "",
 ) -> HookResults:
     """Render and execute matching hook rules, supporting both shell and agent types."""
@@ -343,7 +344,10 @@ async def _render_and_execute_async(
 
         if rule.capture_as and hook_result.exit_code == 0 and hook_result.stdout:
             captured[rule.capture_as] = hook_result.stdout
-        executions.append(_build_execution(rule, cmd_str, hook_result, phase))
+        execution = _build_execution(rule, cmd_str, hook_result, phase)
+        executions.append(execution)
+        if on_result:
+            on_result(execution)
     return HookResults(captured=captured, executions=executions)
 
 
@@ -424,6 +428,7 @@ async def _fire_hooks(
     context: dict[str, Any],
     interactive: bool = True,
     on_status: Optional[Callable[[str], None]] = None,
+    on_result: Optional[Callable[["HookExecution"], None]] = None,
 ) -> HookResults:
     """Load config and fire hooks for the given phase.
 
@@ -445,6 +450,7 @@ async def _fire_hooks(
         workspace_dir,
         interactive=interactive,
         on_status=on_status,
+        on_result=on_result,
         phase=phase,
     )
 
@@ -465,9 +471,12 @@ async def fire_pre_message_hooks(
     context: dict[str, Any],
     interactive: bool = True,
     on_status: Optional[Callable[[str], None]] = None,
+    on_result: Optional[Callable[["HookExecution"], None]] = None,
 ) -> dict[str, str]:
     """Fire pre_message hooks, returning captured variables. Executions are accumulated internally."""
     global _pre_message_executions
-    results = await _fire_hooks(workspace_dir, "pre_message", context, interactive=interactive, on_status=on_status)
+    results = await _fire_hooks(
+        workspace_dir, "pre_message", context, interactive=interactive, on_status=on_status, on_result=on_result
+    )
     _pre_message_executions.extend(results.executions)
     return results.captured

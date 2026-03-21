@@ -742,15 +742,20 @@ async def run_agent_async(
     hook_message = context.pop("raw_message", prompt)
 
     on_status = None
+    on_hook_result = None
     ui_handler = get_ui_handler(custom_logger)
     if ui_handler and hasattr(ui_handler, "_emit"):
         on_status = lambda msg: ui_handler._emit("hook_status", {"message": msg})
+        on_hook_result = lambda ex: ui_handler._emit(
+            "hook_execution", ex.model_dump(exclude={"type", "timestamp"})
+        )
 
     hook_vars = await fire_pre_message_hooks(
         hooks_dir,
         {"message": hook_message, "agent_name": agent_path.stem},
         interactive=is_interactive(),
         on_status=on_status,
+        on_result=on_hook_result,
     )
     context.update(hook_vars)
 

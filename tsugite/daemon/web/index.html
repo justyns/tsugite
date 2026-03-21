@@ -169,28 +169,6 @@
                       </template>
                     </div>
                   </template>
-                  <template x-if="msg.type === 'hook'">
-                    <div class="history-sep">
-                      <details>
-                        <summary>
-                          <span x-text="(msg.name || 'hook') + ' (' + msg.phase + ')'"></span>
-                          <span class="hook-exit" :class="msg.exit_code === 0 ? 'hook-ok' : 'hook-err'"
-                                x-text="'exit ' + msg.exit_code"></span>
-                          <template x-if="msg.duration_ms != null">
-                            <span class="hook-duration" x-text="msg.duration_ms + 'ms'"></span>
-                          </template>
-                        </summary>
-                        <div class="msg hook-body">
-                          <template x-if="msg.stdout">
-                            <pre class="hook-stdout"><code x-text="msg.stdout"></code></pre>
-                          </template>
-                          <template x-if="msg.stderr">
-                            <pre class="hook-stderr"><code x-text="msg.stderr"></code></pre>
-                          </template>
-                        </div>
-                      </details>
-                    </div>
-                  </template>
                   <template x-if="msg.type === 'separator'">
                     <div class="history-sep">
                       <template x-if="hasMoreHistory && i === 0">
