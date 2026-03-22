@@ -119,6 +119,13 @@ You have running tmux sessions that you can interact with using tmux tools (tmux
 {% endfor %}
 {% endif %}
 
+{% if "run" in tools and "tmux_create" in tools %}
+## Shell vs Tmux
+
+- Use `run()` for commands that produce output and exit: `run("ls -la")`, `run("git status")`, `run("python script.py")`
+- Use tmux tools for interactive programs (htop, k9s, psql, python REPL), long-running processes you want to monitor, or when you need a persistent shell session where state carries across commands
+{% endif %}
+
 {% if subagent_instructions is defined and subagent_instructions %}
 {{ subagent_instructions }}
 {% endif %}
