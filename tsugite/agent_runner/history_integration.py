@@ -241,11 +241,14 @@ def get_claude_code_session_info(conversation_id: str) -> Optional["ClaudeCodeSe
         storage = SessionStorage(session_path)
         records = storage.load_records()
 
-        # Single reversed pass: find the last Turn with a session ID,
-        # but bail if we hit a CompactionSummary (stale Claude Code session)
-        for record in reversed(records):
+        # Two-pass: CompactionSummary means the Claude Code session is stale
+        # (it has turns that were summarized away). Must check forward first
+        # because retained turns come AFTER the CompactionSummary in the file.
+        for record in records:
             if isinstance(record, CompactionSummary):
                 return None
+
+        for record in reversed(records):
             if isinstance(record, Turn) and record.metadata:
                 session_id = record.metadata.get("claude_code_session_id")
                 if session_id:
