@@ -30,6 +30,7 @@ tools:
   - "@kv"
   - "@schedule"
   - "@sessions"
+  - "@tmux"
 auto_load_skills:
   - response_patterns
 prefetch:
@@ -106,6 +107,16 @@ Your context window will be automatically compacted as it approaches its limit. 
 **Interactive Mode**: You are in an interactive session with the user and can ask questions to clarify the task.
 {% else %}
 **Non-Interactive Mode**: You are in a headless session. You cannot ask the user questions.
+{% endif %}
+
+{% set tmux = tmux_sessions() %}
+{% if tmux %}
+
+**Tmux Sessions:**
+You have running tmux sessions that you can interact with using tmux tools (tmux_read, tmux_send, tmux_kill).
+{% for s in tmux %}
+- `{{ s.name }}`: {{ s.status }}{% if s.command %} (started with: {{ s.command }}){% endif %}
+{% endfor %}
 {% endif %}
 
 {% if subagent_instructions is defined and subagent_instructions %}

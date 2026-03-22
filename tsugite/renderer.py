@@ -139,6 +139,16 @@ def cwd() -> str:
     return str(Path.cwd())
 
 
+def _tmux_sessions() -> list:
+    """Get active tsugite-managed tmux sessions for Jinja2 templates."""
+    try:
+        from tsugite.tools.tmux import get_tmux_sessions
+
+        return get_tmux_sessions()
+    except (ImportError, FileNotFoundError, OSError):
+        return []
+
+
 class AgentRenderer:
     """Jinja2 template renderer for agent content."""
 
@@ -169,6 +179,7 @@ class AgentRenderer:
                 "read_text": read_text,
                 "env": dict(os.environ),
                 "cwd": cwd,
+                "tmux_sessions": _tmux_sessions,
             }
         )
 

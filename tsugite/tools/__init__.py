@@ -1,6 +1,7 @@
 """Tool registry for Tsugite agents."""
 
 import inspect
+import shutil
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List
 
@@ -153,7 +154,7 @@ def get_tools_by_category(category: str) -> List[str]:
     return sorted(category_tools)
 
 
-_OPTIONAL_CATEGORIES = {"schedule", "notify", "sessions", "kv"}
+_OPTIONAL_CATEGORIES = {"schedule", "notify", "sessions", "kv", "tmux"}
 
 
 def _expand_single_spec(spec: str, strict: bool = True) -> List[str]:
@@ -319,6 +320,9 @@ def _ensure_tools_loaded():
     from . import shell as shell  # noqa: E402, F401
     from . import skills as skills  # noqa: E402, F401
     from . import kv as kv  # noqa: E402, F401
+
+    if shutil.which("tmux"):
+        from . import tmux as tmux  # noqa: E402, F401
 
     # Load custom shell tools after built-in tools
     load_custom_shell_tools()
