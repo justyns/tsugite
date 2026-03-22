@@ -241,19 +241,27 @@ def get_claude_code_session_info(conversation_id: str) -> Optional["ClaudeCodeSe
         storage = SessionStorage(session_path)
         records = storage.load_records()
 
-        # Two-pass: CompactionSummary means the Claude Code session is stale
-        # (it has turns that were summarized away). Must check forward first
-        # because retained turns come AFTER the CompactionSummary in the file.
-        for record in records:
+        # Find the last CompactionSummary index (if any).
+        # Session IDs from retained turns (carried over from pre-compaction)
+        # are stale, but session IDs from turns AFTER the compaction are valid.
+        compaction_idx = -1
+        for i, record in enumerate(records):
             if isinstance(record, CompactionSummary):
-                return None
+                compaction_idx = i
 
         for record in reversed(records):
             if isinstance(record, Turn) and record.metadata:
                 session_id = record.metadata.get("claude_code_session_id")
-                if session_id:
-                    compacted = record.metadata.get("claude_code_compacted", False)
-                    return ClaudeCodeSessionInfo(session_id, compacted)
+                if not session_id:
+                    continue
+                # If this turn is a retained turn from before compaction
+                # (carried over with stale session ID), skip it
+                if compaction_idx >= 0:
+                    turn_idx = records.index(record)
+                    if turn_idx <= compaction_idx:
+                        continue
+                compacted = record.metadata.get("claude_code_compacted", False)
+                return ClaudeCodeSessionInfo(session_id, compacted)
         return None
     except Exception:
         return None
