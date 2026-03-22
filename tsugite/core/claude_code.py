@@ -132,7 +132,8 @@ class ClaudeCodeProcess:
 
         # Start draining stderr in background to prevent pipe buffer deadlock
         self._stderr_task = asyncio.create_task(self._drain_stderr())
-        logger.info("Claude Code subprocess started (pid=%d, model=%s)", self._process.pid, model)
+        mode = f"resume={resume_session}" if resume_session else "new session"
+        logger.info("Claude Code subprocess started (pid=%d, model=%s, %s)", self._process.pid, model, mode)
 
     async def send_message(self, content: str) -> AsyncIterator[dict]:
         """Write user message to stdin and yield streaming events from stdout.

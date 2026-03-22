@@ -1,7 +1,10 @@
 """Agent execution engine using TsugiteAgent."""
 
 import asyncio
+import logging
 import time
+
+logger = logging.getLogger(__name__)
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
@@ -779,6 +782,9 @@ async def run_agent_async(
         if session_info:
             claude_code_resume_session = session_info.session_id
             claude_code_resume_after_compaction = session_info.compacted
+            logger.info("Resuming Claude Code session %s (compacted=%s)", claude_code_resume_session, claude_code_resume_after_compaction)
+        else:
+            logger.debug("No Claude Code session to resume for %s", continue_conversation_id)
 
         if not claude_code_resume_session:
             # No Claude Code session to resume -- load history for serialization
