@@ -520,8 +520,7 @@ class BaseAdapter(ABC):
             self.session_store.update_context_limit(self.agent_name, result.context_window)
             self.agent_config.context_limit = result.context_window
 
-        if result.token_count:
-            self.session_store.update_token_count(conv_id, result.token_count)
+        self.session_store.update_token_count(conv_id, result.token_count or 0)
 
         return str(result)
 

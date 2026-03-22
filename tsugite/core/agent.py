@@ -210,6 +210,7 @@ class TsugiteAgent:
         self._claude_code_model = self.litellm_params.get("model") if self._is_claude_code else None
         self._claude_code_session_id: Optional[str] = None
         self._claude_code_last_turn_tokens: int = 0
+        self._claude_code_context_tokens: int = 0
         self._claude_code_context_window: Optional[int] = None
         self._claude_code_cache_creation_tokens: int = 0
         self._claude_code_cache_read_tokens: int = 0
@@ -627,9 +628,10 @@ class TsugiteAgent:
                         self._claude_code_session_id = claude_process.session_id
 
                     if return_full_result:
+                        context_tokens = self._claude_code_context_tokens or total_tokens
                         return AgentResult(
                             output=exec_result.final_answer,
-                            token_usage=total_tokens,
+                            token_usage=context_tokens,
                             cost=self.total_cost if self.total_cost > 0 else None,
                             steps=self.memory.steps,
                             claude_code_session_id=self._claude_code_session_id,
@@ -747,6 +749,7 @@ class TsugiteAgent:
                 output_tokens = event.get("output_tokens") or 0
                 turn_total = input_tokens + cache_creation + cache_read + output_tokens
                 self._claude_code_last_turn_tokens = turn_total
+                self._claude_code_context_tokens = input_tokens + cache_creation + cache_read
                 self._claude_code_cache_creation_tokens += cache_creation
                 self._claude_code_cache_read_tokens += cache_read
                 self.total_tokens += turn_total

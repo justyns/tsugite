@@ -224,7 +224,8 @@ class SessionStore:
         with self._lock:
             session = self._sessions.get(session_id)
             if session:
-                session.cumulative_tokens = max(session.cumulative_tokens, tokens_used)
+                if tokens_used > 0:
+                    session.cumulative_tokens = tokens_used
                 session.message_count += 1
                 session.last_active = datetime.now(timezone.utc).isoformat()
                 self._mark_dirty()
