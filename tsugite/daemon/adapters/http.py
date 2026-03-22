@@ -725,6 +725,8 @@ class HTTPServer:
 
         new_session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
         self.event_bus.emit("agent_status", {"agent": agent_name})
+        if new_session:
+            self.event_bus.emit("session_update", {"action": "compacted", "id": new_session.id})
         return JSONResponse(
             {
                 "status": "compacted",

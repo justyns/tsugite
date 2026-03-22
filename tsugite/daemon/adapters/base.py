@@ -430,6 +430,8 @@ class BaseAdapter(ABC):
                 # Get the new session ID after compaction
                 session = self.session_store.get_or_create_interactive(user_id, self.agent_name)
                 conv_id = session.id
+                if self.event_bus:
+                    self.event_bus.emit("session_update", {"action": "compacted", "id": conv_id})
 
         metadata = channel_context.to_dict()
         metadata["daemon_agent"] = self.agent_name

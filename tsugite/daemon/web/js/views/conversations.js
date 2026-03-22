@@ -52,7 +52,7 @@ export default () => ({
       }
       if (ev.type === 'compaction_finished' && ev.agent === this.$store.app.selectedAgent) {
         this.compacting = false;
-        if (this.isActiveSession) this.loadHistory();
+        if (this.isActiveSession) this.reload();
       }
       if (ev.type === 'reconnect' && this.$store.app.selectedAgent) {
         this.reload();
