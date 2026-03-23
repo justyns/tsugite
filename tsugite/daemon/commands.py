@@ -92,3 +92,35 @@ async def cmd_bg(adapter: BaseAdapter, prompt: str, agent: str | None = None) ->
         return f"Failed to start background session: {e}"
 
     return f"Background session started (ID: {result.id})"
+
+
+@adapter_command(
+    name="compact",
+    description="Compact the current conversation to free context space",
+    params=[
+        CommandParam("user_id", str, "User whose session to compact"),
+        CommandParam("message", str, "Extra instructions for compaction (e.g. remember/forget specific things)", required=False),
+    ],
+)
+async def cmd_compact(adapter: BaseAdapter, user_id: str, message: str | None = None) -> str:
+    """Compact the interactive session for the given user."""
+    session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
+
+    if session.message_count == 0:
+        return "No conversation to compact."
+
+    if not adapter.session_store.begin_compaction(user_id, adapter.agent_name):
+        return "Compaction already in progress."
+
+    old_id = session.id
+    adapter._broadcast_compaction(adapter.agent_name, started=True)
+    try:
+        await adapter._compact_session(session.id, instructions=message)
+    except Exception as e:
+        return f"Compaction failed: {e}"
+    finally:
+        adapter.session_store.end_compaction(user_id, adapter.agent_name)
+        adapter._broadcast_compaction(adapter.agent_name, started=False)
+
+    new_session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
+    return f"Session compacted (old: {old_id[:12]}, new: {new_session.id[:12]})"

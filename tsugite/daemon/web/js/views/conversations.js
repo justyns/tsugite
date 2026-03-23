@@ -777,15 +777,20 @@ export default () => ({
   async _runCommand(cmd, argsText) {
     const agent = this.$store.app.selectedAgent;
     const kwargs = {};
-    const requiredParams = cmd.params.filter(p => p.required);
-    if (requiredParams.length === 1) {
-      kwargs[requiredParams[0].name] = argsText;
-    } else if (requiredParams.length > 1) {
+    const hasUserId = cmd.params.some(p => p.name === 'user_id');
+    const visibleParams = cmd.params.filter(p => p.name !== 'user_id');
+    const requiredVisible = visibleParams.filter(p => p.required);
+    if (requiredVisible.length === 1 && argsText) {
+      kwargs[requiredVisible[0].name] = argsText;
+    } else if (requiredVisible.length > 1) {
       const parts = argsText.split(/\s+/);
-      for (let i = 0; i < cmd.params.length && i < parts.length; i++) {
-        kwargs[cmd.params[i].name] = parts[i];
+      for (let i = 0; i < visibleParams.length && i < parts.length; i++) {
+        kwargs[visibleParams[i].name] = parts[i];
       }
+    } else if (visibleParams.length === 1 && !visibleParams[0].required && argsText) {
+      kwargs[visibleParams[0].name] = argsText;
     }
+    if (hasUserId) kwargs.user_id = this.userId;
     try {
       const data = await post(`/api/agents/${agent}/commands/${cmd.name}`, kwargs);
       return data.result || JSON.stringify(data);

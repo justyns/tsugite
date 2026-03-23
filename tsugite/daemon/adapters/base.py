@@ -526,7 +526,7 @@ class BaseAdapter(ABC):
 
         return str(result)
 
-    async def _compact_session(self, session_id: str) -> None:
+    async def _compact_session(self, session_id: str, instructions: str | None = None) -> None:
         """Compact session when approaching context limit.
 
         Uses a sliding window: recent turns are kept verbatim while older
@@ -613,6 +613,9 @@ class BaseAdapter(ABC):
             old_messages.append({"role": "user", "content": "\n".join(meta_parts)})
 
             old_messages.extend(msg for turn in old_turns for msg in turn.messages)
+
+            if instructions:
+                old_messages.append({"role": "user", "content": f"<compaction_instructions>{instructions}</compaction_instructions>"})
 
             try:
                 summary = await summarize_session(

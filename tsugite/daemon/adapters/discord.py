@@ -500,17 +500,22 @@ class DiscordAdapter(BaseAdapter):
         """Convert an AdapterCommand to a discord app_commands.Command and add to the bot tree."""
         adapter = self
 
-        # Build a callback with a proper signature so discord.py can extract parameters
-        params = [
+        # user_id is auto-injected from the interaction, so hide it from the Discord UI
+        visible_params = [p for p in cmd.params if p.name != "user_id"]
+        auto_inject_user_id = len(visible_params) < len(cmd.params)
+
+        sig_params = [
             inspect.Parameter("interaction", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=discord.Interaction)
         ]
-        for p in cmd.params:
+        for p in visible_params:
             ann = Optional[p.type] if not p.required else p.type
             default = inspect.Parameter.empty if p.required else None
-            params.append(inspect.Parameter(p.name, inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=ann, default=default))
+            sig_params.append(inspect.Parameter(p.name, inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=ann, default=default))
 
         async def callback(interaction: discord.Interaction, **kwargs):
             await interaction.response.defer()
+            if auto_inject_user_id:
+                kwargs.setdefault("user_id", str(interaction.user.id))
             try:
                 result = await cmd.handler(adapter, **kwargs)
             except Exception as e:
@@ -518,11 +523,10 @@ class DiscordAdapter(BaseAdapter):
                 result = f"Command failed: {e}"
             await interaction.followup.send(str(result)[:2000])
 
-        callback.__signature__ = inspect.Signature(params)
-        callback.__annotations__ = {p.name: p.annotation for p in params}
+        callback.__signature__ = inspect.Signature(sig_params)
+        callback.__annotations__ = {p.name: p.annotation for p in sig_params}
 
-        # Add parameter descriptions via app_commands.describe
-        descriptions = {p.name: p.description for p in cmd.params}
+        descriptions = {p.name: p.description for p in visible_params}
         if descriptions:
             callback = discord.app_commands.describe(**descriptions)(callback)
 
