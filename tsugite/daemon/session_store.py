@@ -66,6 +66,8 @@ class Session:
     # Platform thread mapping
     platform_thread_id: Optional[str] = None
 
+    title: Optional[str] = None
+
     def __post_init__(self):
         if not self.id:
             self.id = f"session-{uuid4().hex[:8]}"

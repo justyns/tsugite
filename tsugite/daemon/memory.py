@@ -266,6 +266,56 @@ async def summarize_session(
     return await _combine_summaries(chunk_summaries, model)
 
 
+TITLE_SYSTEM_PROMPT = (
+    "Generate a short title (3-6 words) for this conversation. "
+    "Return only the title, nothing else. No quotes, no punctuation at the end."
+)
+
+TITLE_TIMEOUT = 30
+SHORT_TITLE_THRESHOLD = 60
+
+
+async def generate_session_title(messages: list[dict], model: str) -> str:
+    """Generate a short title from conversation messages using a cheap model."""
+    text_parts = []
+    for msg in messages:
+        content = _message_text(msg)
+        if content:
+            text_parts.append(f"{msg.get('role', 'user').upper()}: {content[:500]}")
+    if not text_parts:
+        return ""
+    convo_text = "\n\n".join(text_parts)
+    title = await asyncio.wait_for(
+        _llm_complete(TITLE_SYSTEM_PROMPT, convo_text, model),
+        timeout=TITLE_TIMEOUT,
+    )
+    return title.strip().strip('"\'')[:80]
+
+
+async def auto_title_session(
+    session_id: str,
+    user_content: str,
+    assistant_content: str,
+    agent_model: str,
+    store,
+    event_bus=None,
+) -> None:
+    """Generate and store a title for a session. Skips LLM call for short prompts."""
+    if len(user_content) <= SHORT_TITLE_THRESHOLD:
+        store.update_session(session_id, title=user_content)
+    else:
+        model = infer_compaction_model(agent_model)
+        messages = [
+            {"role": "user", "content": user_content},
+            {"role": "assistant", "content": assistant_content},
+        ]
+        title = await generate_session_title(messages, model)
+        if title:
+            store.update_session(session_id, title=title)
+    if event_bus:
+        event_bus.emit("session_update", {"action": "titled", "id": session_id})
+
+
 def extract_file_paths_from_turns(turns: "list[Turn]") -> list[str]:
     """Extract file paths mentioned in tool calls across turns.
 

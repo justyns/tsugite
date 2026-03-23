@@ -365,6 +365,7 @@ class HTTPServer:
             Route("/api/sessions", self._api_list_sessions, methods=["GET"]),
             Route("/api/sessions", self._api_start_session, methods=["POST"]),
             Route("/api/sessions/{session_id}", self._api_get_session, methods=["GET"]),
+            Route("/api/sessions/{session_id}", self._api_update_session, methods=["PATCH"]),
             Route("/api/sessions/{session_id}/cancel", self._api_cancel_session, methods=["POST"]),
             Route("/api/sessions/{session_id}/restart", self._api_restart_session, methods=["POST"]),
             Route("/api/sessions/{session_id}/events", self._api_session_events, methods=["GET"]),
@@ -501,6 +502,7 @@ class HTTPServer:
                     "model": s.model,
                     "error": s.error,
                     "result": s.result,
+                    "title": s.title,
                 }
             )
 
@@ -1194,6 +1196,7 @@ class HTTPServer:
                         "created_at": s.created_at,
                         "updated_at": s.last_active,
                         "error": s.error,
+                        "title": s.title,
                     }
                     for s in sessions
                 ]
@@ -1244,6 +1247,23 @@ class HTTPServer:
         session_id = request.path_params["session_id"]
         try:
             return JSONResponse(self._session_detail(session_id))
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+
+    async def _api_update_session(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_sessions(request):
+            return err
+        session_id = request.path_params["session_id"]
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+        title = body.get("title")
+        if title is None:
+            return JSONResponse({"error": "No updatable fields provided"}, status_code=400)
+        try:
+            self.session_runner.store.update_session(session_id, title=title)
+            return JSONResponse({"ok": True, "title": title})
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=404)
 

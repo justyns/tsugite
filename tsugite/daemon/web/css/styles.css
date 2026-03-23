@@ -171,6 +171,12 @@ main { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
 .status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 .item-row { display: flex; align-items: center; gap: 6px; }
 .session-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-label-row { display: flex; align-items: center; gap: 4px; overflow: hidden; min-width: 0; }
+.session-label-row .session-label { flex: 1; min-width: 0; }
+.session-edit-btn { opacity: 0; cursor: pointer; font-size: 11px; color: var(--muted); flex-shrink: 0; }
+.turn-item:hover .session-edit-btn { opacity: 0.7; }
+.session-edit-btn:hover { opacity: 1 !important; color: var(--accent); }
+.session-title-input { background: var(--surface); color: var(--text); border: 1px solid var(--accent); border-radius: 4px; padding: 1px 4px; font-size: 13px; width: 100%; outline: none; }
 
 /* Turn list (history view) */
 .turn-list { display: flex; flex-direction: column; gap: 8px; }

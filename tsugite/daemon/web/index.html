@@ -125,7 +125,17 @@
                      @click="selectSession(s)">
                   <div class="item-row">
                     <span class="status-dot" :style="{ background: statusDotColor(s.state) }"></span>
-                    <span x-text="sessionLabel(s)" class="session-label"></span>
+                    <template x-if="editingSessionId === s.id">
+                      <input class="session-title-input" type="text" x-model="editingTitle"
+                             @blur="saveTitle(s)" @keydown.enter="saveTitle(s)" @keydown.escape="editingSessionId = null"
+                             @click.stop>
+                    </template>
+                    <template x-if="editingSessionId !== s.id">
+                      <span class="session-label-row">
+                        <span x-text="sessionLabel(s)" class="session-label"></span>
+                        <span class="session-edit-btn" @click="startEditTitle(s, $event)" title="Rename">&#9998;</span>
+                      </span>
+                    </template>
                   </div>
                   <div class="turn-meta" x-text="formatDate(s.last_active || s.created_at)"></div>
                 </div>
@@ -146,7 +156,17 @@
                      @click="selectSession(s)">
                   <div class="item-row">
                     <span class="status-dot" :style="{ background: statusDotColor(s.state) }"></span>
-                    <span x-text="sessionLabel(s)" class="session-label"></span>
+                    <template x-if="editingSessionId === s.id">
+                      <input class="session-title-input" type="text" x-model="editingTitle"
+                             @blur="saveTitle(s)" @keydown.enter="saveTitle(s)" @keydown.escape="editingSessionId = null"
+                             @click.stop>
+                    </template>
+                    <template x-if="editingSessionId !== s.id">
+                      <span class="session-label-row">
+                        <span x-text="sessionLabel(s)" class="session-label"></span>
+                        <span class="session-edit-btn" @click="startEditTitle(s, $event)" title="Rename">&#9998;</span>
+                      </span>
+                    </template>
                   </div>
                   <div class="turn-meta" x-text="formatDate(s.last_active || s.created_at)"></div>
                 </div>
@@ -173,7 +193,17 @@
                      @click="selectSession(s)">
                   <div class="item-row">
                     <span class="status-dot" :style="{ background: statusDotColor(s.state) }"></span>
-                    <span x-text="sessionLabel(s)" class="session-label"></span>
+                    <template x-if="editingSessionId === s.id">
+                      <input class="session-title-input" type="text" x-model="editingTitle"
+                             @blur="saveTitle(s)" @keydown.enter="saveTitle(s)" @keydown.escape="editingSessionId = null"
+                             @click.stop>
+                    </template>
+                    <template x-if="editingSessionId !== s.id">
+                      <span class="session-label-row">
+                        <span x-text="sessionLabel(s)" class="session-label"></span>
+                        <span class="session-edit-btn" @click="startEditTitle(s, $event)" title="Rename">&#9998;</span>
+                      </span>
+                    </template>
                   </div>
                   <div class="turn-meta" x-text="formatDate(s.last_active || s.created_at)"></div>
                 </div>

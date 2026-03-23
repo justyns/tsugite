@@ -1,4 +1,4 @@
-import { get, post, streamPost, uploadFiles } from '../api.js';
+import { get, post, patch, streamPost, uploadFiles } from '../api.js';
 import { escapeHtml, renderMarkdown, scrollToBottom, formatDate, formatFileSize, stateBadgeClass, contentBlockHtml, truncate } from '../utils.js';
 
 export default () => ({
@@ -139,7 +139,7 @@ export default () => ({
 
     for (const s of this.allSessions) {
       if (filter) {
-        const text = (s.label || '') + (s.id || '') + (s.conversation_id || '') + (s.source || '') + (s.state || '');
+        const text = (s.title || '') + (s.label || '') + (s.id || '') + (s.conversation_id || '') + (s.source || '') + (s.state || '');
         if (!text.toLowerCase().includes(filter)) continue;
       }
       const isMyInteractive = s.source === 'interactive' && (s.user_id === userId || s.conversation_id === userId);
@@ -466,7 +466,11 @@ export default () => ({
     }
   },
 
+  editingSessionId: null,
+  editingTitle: '',
+
   sessionLabel(s) {
+    if (s.title) return s.title;
     if (s.source === 'interactive' && (s.user_id === this.userId || s.conversation_id === this.userId)) {
       return s.label || s.agent || 'Interactive';
     }
@@ -477,6 +481,28 @@ export default () => ({
       return name || s.id;
     }
     return s.label || s.conversation_id || s.id || 'unknown';
+  },
+
+  startEditTitle(s, event) {
+    event.stopPropagation();
+    this.editingSessionId = s.id;
+    this.editingTitle = s.title || this.sessionLabel(s);
+    this.$nextTick(() => {
+      const input = this.$el.querySelector('.session-title-input');
+      if (input) { input.focus(); input.select(); }
+    });
+  },
+
+  async saveTitle(s) {
+    const title = this.editingTitle.trim();
+    this.editingSessionId = null;
+    if (!title || title === (s.title || this.sessionLabel(s))) return;
+    try {
+      await patch(`/api/sessions/${s.id}`, { title });
+      s.title = title;
+    } catch (e) {
+      console.error('Failed to rename session', e);
+    }
   },
 
   statusDotColor(state) {

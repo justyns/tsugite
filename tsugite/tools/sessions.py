@@ -124,6 +124,7 @@ def list_sessions(
             "agent": s.agent,
             "source": s.source,
             "status": s.status,
+            "title": s.title,
             "prompt": (s.prompt or "")[:200],
             "created_at": s.created_at,
             "parent_id": s.parent_id,
@@ -158,6 +159,21 @@ def cancel_session(session_id: str) -> dict:
     _call(_session_runner.cancel_session, session_id)
     session = _call(_session_runner.store.get_session, session_id)
     return asdict(session)
+
+
+@tool(require_daemon=True)
+def rename_session(session_id: str, title: str) -> dict:
+    """Rename a session by setting its title.
+
+    Args:
+        session_id: Session ID to rename.
+        title: New title for the session.
+
+    Returns:
+        Updated session details.
+    """
+    session = _call(_session_runner.store.update_session, session_id, title=title)
+    return {"session_id": session.id, "title": session.title}
 
 
 @tool(require_daemon=True)

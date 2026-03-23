@@ -524,7 +524,25 @@ class BaseAdapter(ABC):
 
         self.session_store.update_token_count(conv_id, result.token_count or 0)
 
+        try:
+            session = self.session_store.get_session(conv_id)
+            if session and session.message_count <= 1 and not session.title:
+                asyncio.ensure_future(self._auto_title_session(conv_id, message, str(result)))
+        except Exception as e:
+            logger.debug("Auto-title check failed for session '%s': %s", conv_id, e)
+
         return str(result)
+
+    async def _auto_title_session(self, session_id: str, user_message: str, assistant_response: str) -> None:
+        try:
+            from tsugite.daemon.memory import auto_title_session
+
+            await auto_title_session(
+                session_id, user_message, assistant_response,
+                self.resolve_model(), self.session_store, self.event_bus,
+            )
+        except Exception as e:
+            logger.debug("Auto-title failed for session '%s': %s", session_id, e)
 
     async def _compact_session(self, session_id: str, instructions: str | None = None) -> None:
         """Compact session when approaching context limit.

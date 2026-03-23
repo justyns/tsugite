@@ -74,6 +74,7 @@ class SchedulerAdapter:
                 status=SessionStatus.RUNNING.value,
                 parent_id=entry.id,
                 prompt=entry.prompt or entry.command or "",
+                title=entry.id,
             )
             try:
                 adapter.session_store.create_session(sched_session)

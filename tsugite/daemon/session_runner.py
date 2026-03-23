@@ -120,12 +120,15 @@ class SessionRunner:
                 channel_context=channel_context,
                 custom_logger=custom_logger,
             )
+            result_str = str(result)
             self._store.update_session(
                 session.id,
                 status=SessionStatus.COMPLETED.value,
-                result=str(result),
+                result=result_str,
             )
-            progress._emit("session_complete", {"result_preview": str(result)[:500]})
+            if not session.title:
+                asyncio.ensure_future(self._auto_title_background_session(session, result_str, adapter))
+            progress._emit("session_complete", {"result_preview": result_str[:500]})
             if self._event_bus:
                 self._event_bus.emit("session_update", {"action": "completed", "id": session.id})
                 self._event_bus.emit("agent_status", {"agent": session.agent})
@@ -133,7 +136,7 @@ class SessionRunner:
 
             if self._notify_callback:
                 try:
-                    await self._notify_callback(self._store.get_session(session.id), str(result))
+                    await self._notify_callback(self._store.get_session(session.id), result_str)
                 except Exception as e:
                     logger.error("Session '%s' notify callback failed: %s", session.id, e)
 
@@ -149,6 +152,17 @@ class SessionRunner:
             if self._event_bus:
                 self._event_bus.emit("session_update", {"action": "failed", "id": session.id})
             logger.error("Session '%s' failed: %s", session.id, e)
+
+    async def _auto_title_background_session(self, session: Session, result_str: str, adapter) -> None:
+        try:
+            from tsugite.daemon.memory import auto_title_session
+
+            await auto_title_session(
+                session.id, session.prompt or "", result_str,
+                adapter.resolve_model(), self._store, self._event_bus,
+            )
+        except Exception as e:
+            logger.debug("Auto-title failed for session '%s': %s", session.id, e)
 
     def cancel_session(self, session_id: str) -> None:
         task = self._active_tasks.get(session_id)

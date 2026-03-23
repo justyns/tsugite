@@ -161,8 +161,8 @@ async def cmd_sessions(adapter: BaseAdapter, status: str | None = None) -> str:
         return "No sessions found."
     lines = []
     for s in sessions[:10]:
-        prompt_preview = (s.prompt or "")[:60]
-        lines.append(f"[{s.status}] {s.id[:12]} — {prompt_preview}")
+        label = s.title or (s.prompt or "")[:60]
+        lines.append(f"[{s.status}] {s.id[:12]} — {label}")
     if len(sessions) > 10:
         lines.append(f"... and {len(sessions) - 10} more")
     return "\n".join(lines)
