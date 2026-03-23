@@ -42,6 +42,7 @@ class DiscordBotConfig(BaseModel):
     token: str
     agent: str  # References agents key
     command_prefix: str = "!"
+    guild_id: Optional[str] = None  # Sync app commands to this guild only (instant; good for dev)
     dm_policy: Literal["allowlist", "open"] = "allowlist"
     allow_from: List[str] = Field(default_factory=list)
 

@@ -1,6 +1,7 @@
 """Discord bot adapter."""
 
 import asyncio
+import inspect
 import logging
 import re
 from types import SimpleNamespace
@@ -422,10 +423,25 @@ class DiscordAdapter(BaseAdapter):
         intents.message_content = True
 
         self.bot = commands.Bot(command_prefix=bot_config.command_prefix, intents=intents)
+        self._register_commands()
 
         @self.bot.event
         async def on_ready():
-            logger.info("Discord bot '%s' logged in as %s (agent: %s)", bot_config.name, self.bot.user, agent_name)
+            try:
+                if bot_config.guild_id:
+                    guild = discord.Object(id=int(bot_config.guild_id))
+                    self.bot.tree.copy_global_to(guild=guild)
+                    await self.bot.tree.sync(guild=guild)
+                else:
+                    await self.bot.tree.sync()
+                synced = len(self.bot.tree.get_commands())
+                logger.info(
+                    "Discord bot '%s' logged in as %s (agent: %s, %d app commands synced)",
+                    bot_config.name, self.bot.user, agent_name, synced,
+                )
+            except Exception as e:
+                logger.error("Failed to sync app commands for '%s': %s", bot_config.name, e)
+                logger.info("Discord bot '%s' logged in as %s (agent: %s)", bot_config.name, self.bot.user, agent_name)
 
         @self.bot.event
         async def on_error(event_method, *args, **kwargs):
@@ -472,6 +488,46 @@ class DiscordAdapter(BaseAdapter):
 
             task = asyncio.create_task(self._process_message(message, user_msg, bot_config.name))
             task.add_done_callback(lambda t: _handle_async_exception(t, bot_config.name))
+
+    def _register_commands(self):
+        """Auto-register adapter commands from the shared registry as Discord app commands."""
+        from tsugite.daemon.commands import get_commands
+
+        for cmd in get_commands().values():
+            self._add_app_command(cmd)
+
+    def _add_app_command(self, cmd: "AdapterCommand"):
+        """Convert an AdapterCommand to a discord app_commands.Command and add to the bot tree."""
+        adapter = self
+
+        # Build a callback with a proper signature so discord.py can extract parameters
+        params = [
+            inspect.Parameter("interaction", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=discord.Interaction)
+        ]
+        for p in cmd.params:
+            ann = Optional[p.type] if not p.required else p.type
+            default = inspect.Parameter.empty if p.required else None
+            params.append(inspect.Parameter(p.name, inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=ann, default=default))
+
+        async def callback(interaction: discord.Interaction, **kwargs):
+            await interaction.response.defer()
+            try:
+                result = await cmd.handler(adapter, **kwargs)
+            except Exception as e:
+                logger.error("App command '%s' failed: %s", cmd.name, e)
+                result = f"Command failed: {e}"
+            await interaction.followup.send(str(result)[:2000])
+
+        callback.__signature__ = inspect.Signature(params)
+        callback.__annotations__ = {p.name: p.annotation for p in params}
+
+        # Add parameter descriptions via app_commands.describe
+        descriptions = {p.name: p.description for p in cmd.params}
+        if descriptions:
+            callback = discord.app_commands.describe(**descriptions)(callback)
+
+        app_cmd = discord.app_commands.Command(name=cmd.name, description=cmd.description, callback=callback)
+        self.bot.tree.add_command(app_cmd)
 
     async def _process_message(self, message, user_msg: str, bot_name: str):
         """Process a message in an isolated task."""

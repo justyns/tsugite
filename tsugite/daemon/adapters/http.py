@@ -389,6 +389,8 @@ class HTTPServer:
             Route("/api/kv/namespaces", self._kv_namespaces, methods=["GET"]),
             Route("/api/kv/{namespace}/keys", self._kv_keys, methods=["GET"]),
             Route("/api/kv/{namespace}/keys/{key:path}", self._kv_get, methods=["GET"]),
+            Route("/api/commands", self._list_commands, methods=["GET"]),
+            Route("/api/agents/{agent}/commands/{command_name}", self._run_command, methods=["POST"]),
             Mount("/static", app=StaticFiles(directory=str(WEB_DIR)), name="static"),
             Route("/", self._serve_ui, methods=["GET"]),
         ]
@@ -396,6 +398,53 @@ class HTTPServer:
 
     async def _health(self, request: Request) -> JSONResponse:
         return JSONResponse({"status": "ok", "agents": list(self.adapters.keys())})
+
+    async def _list_commands(self, request: Request) -> JSONResponse:
+        if err := self._check_auth(request):
+            return err
+        from tsugite.daemon.commands import get_commands
+
+        return JSONResponse({"commands": [
+            {
+                "name": cmd.name,
+                "description": cmd.description,
+                "params": [
+                    {"name": p.name, "type": p.type.__name__, "description": p.description, "required": p.required, **({"choices": p.choices} if p.choices else {})}
+                    for p in cmd.params
+                ],
+            }
+            for cmd in get_commands().values()
+        ]})
+
+    async def _run_command(self, request: Request) -> JSONResponse:
+        adapter, err = self._get_adapter(request)
+        if err:
+            return err
+        from tsugite.daemon.commands import get_commands
+
+        command_name = request.path_params["command_name"]
+        commands = get_commands()
+        if command_name not in commands:
+            return JSONResponse({"error": f"Unknown command: {command_name}"}, status_code=404)
+
+        cmd = commands[command_name]
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+
+        allowed_keys = {p.name for p in cmd.params}
+        filtered = {k: v for k, v in body.items() if k in allowed_keys}
+
+        missing = [p.name for p in cmd.params if p.required and p.name not in filtered]
+        if missing:
+            return JSONResponse({"error": f"Missing required params: {', '.join(missing)}"}, status_code=400)
+
+        try:
+            result = await cmd.handler(adapter, **filtered)
+        except Exception as e:
+            return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"result": result})
 
     async def _list_agents(self, request: Request) -> JSONResponse:
         if err := self._check_auth(request):

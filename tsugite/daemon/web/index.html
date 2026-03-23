@@ -313,11 +313,20 @@
             </div>
 
             <div id="input-area">
+              <div class="command-suggestions" x-show="showCommandSuggestions" x-cloak>
+                <template x-for="(cmd, ci) in filteredCommands" :key="cmd.name">
+                  <div class="command-suggestion" :class="{ 'selected': ci === commandSelectedIndex }"
+                       @click="selectCommand(cmd)" @mouseenter="commandSelectedIndex = ci">
+                    <span class="cmd-name" x-text="'/' + cmd.name"></span>
+                    <span class="cmd-desc" x-text="cmd.description"></span>
+                  </div>
+                </template>
+              </div>
               <button class="attach-btn" @click="openFilePicker()" title="Attach files">📎</button>
               <input type="file" multiple x-ref="fileInput" @change="onFileInputChange($event)" style="display:none">
               <textarea id="message-input" x-model="messageText" rows="1"
                         placeholder="Send a message..." autofocus
-                        @keydown="onInputKeydown" @input="autoResize"></textarea>
+                        @keydown="onInputKeydown" @input="autoResize($event); onInputChange()"></textarea>
               <span class="input-hint">Shift+Enter for newline</span>
               <button id="send-btn" x-show="!sending" @click="sendMessage()">Send</button>
               <button id="stop-btn" x-show="sending" @click="cancelChat()">Stop</button>

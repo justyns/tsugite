@@ -29,8 +29,20 @@ export default () => ({
   compactedFrom: null,
   _debounceTimer: null,
   _scrollTimer: null,
+  availableCommands: [],
+  showCommandSuggestions: false,
+  commandSelectedIndex: 0,
+
+  get filteredCommands() {
+    const text = this.messageText;
+    if (!text.startsWith('/')) return [];
+    const query = text.slice(1).split(/\s/)[0].toLowerCase();
+    if (text.includes(' ')) return [];
+    return this.availableCommands.filter(c => c.name.startsWith(query));
+  },
 
   init() {
+    this._loadCommands();
     this._mobileQuery = window.matchMedia('(max-width: 640px)');
     const maybeReload = () => {
       if (this.$store.app.view === 'conversations' && this.$store.app.selectedAgent) this.reload();
@@ -502,6 +514,26 @@ export default () => ({
     const agent = this.$store.app.selectedAgent;
     if ((!msg && !this.pendingFiles.length) || !agent || this.sending) return;
 
+    // Intercept slash commands
+    const parsed = this._parseCommand(msg);
+    if (parsed && !this.pendingFiles.length) {
+      this.sending = true;
+      this.messageText = '';
+      this.showCommandSuggestions = false;
+      this.messages.push({ type: 'user', text: msg });
+      this.scrollMessages();
+      try {
+        const result = await this._runCommand(parsed.command, parsed.args);
+        this.messages.push({ type: 'agent', text: result });
+      } catch (e) {
+        this.messages.push({ type: 'error', text: `Command error: ${e.message}` });
+      } finally {
+        this.sending = false;
+        this.scrollMessages();
+      }
+      return;
+    }
+
     this.sending = true;
     this.messageText = '';
 
@@ -709,7 +741,85 @@ export default () => ({
     }
   },
 
+  async _loadCommands() {
+    try {
+      const data = await get('/api/commands');
+      this.availableCommands = data.commands || [];
+    } catch {
+      this.availableCommands = [];
+    }
+  },
+
+  onInputChange() {
+    this.showCommandSuggestions = this.messageText.startsWith('/') && !this.messageText.includes(' ') && this.filteredCommands.length > 0;
+    this.commandSelectedIndex = 0;
+  },
+
+  selectCommand(cmd) {
+    this.messageText = `/${cmd.name} `;
+    this.showCommandSuggestions = false;
+    this.$nextTick(() => {
+      const input = document.getElementById('message-input');
+      if (input) input.focus();
+    });
+  },
+
+  _parseCommand(text) {
+    const match = text.match(/^\/(\S+)\s*(.*)/s);
+    if (!match) return null;
+    const name = match[1];
+    const rest = match[2].trim();
+    const cmd = this.availableCommands.find(c => c.name === name);
+    if (!cmd) return null;
+    return { command: cmd, args: rest };
+  },
+
+  async _runCommand(cmd, argsText) {
+    const agent = this.$store.app.selectedAgent;
+    const kwargs = {};
+    const requiredParams = cmd.params.filter(p => p.required);
+    if (requiredParams.length === 1) {
+      kwargs[requiredParams[0].name] = argsText;
+    } else if (requiredParams.length > 1) {
+      const parts = argsText.split(/\s+/);
+      for (let i = 0; i < cmd.params.length && i < parts.length; i++) {
+        kwargs[cmd.params[i].name] = parts[i];
+      }
+    }
+    try {
+      const data = await post(`/api/agents/${agent}/commands/${cmd.name}`, kwargs);
+      return data.result || JSON.stringify(data);
+    } catch (e) {
+      return `Command failed: ${e.message}`;
+    }
+  },
+
   onInputKeydown(e) {
+    // Command autocomplete navigation
+    if (this.showCommandSuggestions) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        this.commandSelectedIndex = Math.min(this.commandSelectedIndex + 1, this.filteredCommands.length - 1);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        this.commandSelectedIndex = Math.max(this.commandSelectedIndex - 1, 0);
+        return;
+      }
+      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+        e.preventDefault();
+        const selected = this.filteredCommands[this.commandSelectedIndex];
+        if (selected) this.selectCommand(selected);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        this.showCommandSuggestions = false;
+        return;
+      }
+    }
+
     if (e.key === 'Escape' && this.sending) {
       e.preventDefault();
       this.cancelChat();
