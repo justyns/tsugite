@@ -113,17 +113,72 @@
         <template x-if="!loading && allSessions.length === 0">
           <div class="empty-state">No sessions</div>
         </template>
+        <input type="text" x-model="sessionFilter" placeholder="Filter sessions..." class="session-filter"
+               x-show="!loading && allSessions.length > 0">
         <div class="turn-list">
-          <template x-for="s in sortedSessions" :key="s.conversation_id || s.id">
-            <div class="turn-item" :class="{ active: selectedSessionId === (s.conversation_id || s.id) }"
-                 @click="selectSession(s)">
-              <div style="display:flex;align-items:center;gap:6px">
-                <span x-text="sessionLabel(s)" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
-                <span class="badge badge-muted" x-text="s.source || 'background'" style="font-size:10px;flex-shrink:0"></span>
-                <span class="badge" :class="stateBadge(s.state)" x-text="s.state" style="font-size:10px;flex-shrink:0"></span>
-              </div>
-              <div class="turn-meta" x-text="formatDate(s.last_active || s.created_at)"></div>
+          <!-- Interactive sessions -->
+          <template x-if="groupedSessions.interactive.length > 0">
+            <div>
+              <div class="session-group-header">Interactive</div>
+              <template x-for="s in groupedSessions.interactive" :key="s.conversation_id || s.id">
+                <div class="turn-item" :class="{ active: selectedSessionId === (s.conversation_id || s.id) }"
+                     @click="selectSession(s)">
+                  <div class="item-row">
+                    <span class="status-dot" :style="{ background: statusDotColor(s.state) }"></span>
+                    <span x-text="sessionLabel(s)" class="session-label"></span>
+                  </div>
+                  <div class="turn-meta" x-text="formatDate(s.last_active || s.created_at)"></div>
+                </div>
+              </template>
             </div>
+          </template>
+
+          <!-- Scheduled sessions -->
+          <template x-if="groupedSessions.scheduled.length > 0 || groupedSessions.scheduledHidden > 0">
+            <details>
+              <summary class="session-group-header">
+                Scheduled
+                <span class="badge badge-muted" style="font-size:10px;margin-left:4px"
+                      x-text="groupedSessions.scheduledTotal"></span>
+              </summary>
+              <template x-for="s in groupedSessions.scheduled" :key="s.conversation_id || s.id">
+                <div class="turn-item" :class="{ active: selectedSessionId === (s.conversation_id || s.id) }"
+                     @click="selectSession(s)">
+                  <div class="item-row">
+                    <span class="status-dot" :style="{ background: statusDotColor(s.state) }"></span>
+                    <span x-text="sessionLabel(s)" class="session-label"></span>
+                  </div>
+                  <div class="turn-meta" x-text="formatDate(s.last_active || s.created_at)"></div>
+                </div>
+              </template>
+              <template x-if="groupedSessions.scheduledHidden > 0">
+                <div class="turn-item" style="opacity:0.6;font-style:italic;cursor:pointer"
+                     @click="showCompletedScheduled = !showCompletedScheduled">
+                  <span x-text="showCompletedScheduled ? 'Hide completed' : groupedSessions.scheduledHidden + ' completed (click to show)'"></span>
+                </div>
+              </template>
+            </details>
+          </template>
+
+          <!-- Background sessions -->
+          <template x-if="groupedSessions.background.length > 0">
+            <details>
+              <summary class="session-group-header">
+                Background
+                <span class="badge badge-muted" style="font-size:10px;margin-left:4px"
+                      x-text="groupedSessions.background.length"></span>
+              </summary>
+              <template x-for="s in groupedSessions.background" :key="s.conversation_id || s.id">
+                <div class="turn-item" :class="{ active: selectedSessionId === (s.conversation_id || s.id) }"
+                     @click="selectSession(s)">
+                  <div class="item-row">
+                    <span class="status-dot" :style="{ background: statusDotColor(s.state) }"></span>
+                    <span x-text="sessionLabel(s)" class="session-label"></span>
+                  </div>
+                  <div class="turn-meta" x-text="formatDate(s.last_active || s.created_at)"></div>
+                </div>
+              </template>
+            </details>
           </template>
         </div>
       </div>
@@ -512,7 +567,7 @@
           <template x-for="file in files" :key="file.path">
             <div class="turn-item" :class="{ active: selectedFile?.path === file.path }"
                  @click="selectFile(file)">
-              <div style="display:flex;align-items:center;gap:6px">
+              <div class="item-row">
                 <span x-text="file.path" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
                 <template x-if="!file.is_text">
                   <span class="badge" style="font-size:10px;flex-shrink:0">binary</span>

@@ -163,6 +163,15 @@ main { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
 /* Empty state */
 .empty-state { text-align: center; padding: 40px 20px; color: var(--muted); font-size: 14px; }
 
+/* Session groups */
+.session-group-header { padding: 6px 12px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); border-bottom: 1px solid var(--border); cursor: pointer; user-select: none; }
+.session-filter { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 12px; font-family: inherit; margin-bottom: 8px; box-sizing: border-box; }
+.session-filter:focus { outline: none; border-color: var(--accent); }
+.session-filter::placeholder { color: var(--muted); }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.item-row { display: flex; align-items: center; gap: 6px; }
+.session-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* Turn list (history view) */
 .turn-list { display: flex; flex-direction: column; gap: 8px; }
 .turn-item { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; cursor: pointer; font-size: 13px; }

@@ -3,6 +3,8 @@ import { escapeHtml, renderMarkdown, scrollToBottom, formatDate, formatFileSize,
 
 export default () => ({
   sidebarOpen: false,
+  showCompletedScheduled: false,
+  sessionFilter: '',
   messages: [],
   _allHistoryMessages: [],
   _historyLoaded: 0,
@@ -128,30 +130,50 @@ export default () => ({
     this.loading = false;
   },
 
-  get sortedSessions() {
-    const sessions = [...this.allSessions];
+  get groupedSessions() {
     const userId = this.userId;
-    sessions.sort((a, b) => {
-      const aInteractive = a.source === 'interactive' && (a.user_id === userId || a.conversation_id === userId);
-      const bInteractive = b.source === 'interactive' && (b.user_id === userId || b.conversation_id === userId);
-      if (aInteractive && !bInteractive) return -1;
-      if (!aInteractive && bInteractive) return 1;
-      const aDate = a.last_active || a.created_at || '';
-      const bDate = b.last_active || b.created_at || '';
-      return bDate.localeCompare(aDate);
-    });
-    return sessions;
+    const filter = this.sessionFilter.toLowerCase();
+    const interactive = [];
+    const scheduled = [];
+    const background = [];
+
+    for (const s of this.allSessions) {
+      if (filter) {
+        const text = (s.label || '') + (s.id || '') + (s.conversation_id || '') + (s.source || '') + (s.state || '');
+        if (!text.toLowerCase().includes(filter)) continue;
+      }
+      const isMyInteractive = s.source === 'interactive' && (s.user_id === userId || s.conversation_id === userId);
+      if (isMyInteractive) {
+        interactive.push(s);
+      } else if (s.source === 'schedule' || (s.id && s.id.startsWith('sched_'))) {
+        scheduled.push(s);
+      } else {
+        background.push(s);
+      }
+    }
+
+    const byDate = (a, b) => (b.last_active || b.created_at || '').localeCompare(a.last_active || a.created_at || '');
+    interactive.sort(byDate);
+    scheduled.sort(byDate);
+    background.sort(byDate);
+
+    const filteredScheduled = this.showCompletedScheduled
+      ? scheduled
+      : scheduled.filter(s => s.state === 'active' || s.state === 'running');
+
+    return {
+      interactive,
+      scheduled: filteredScheduled,
+      scheduledTotal: scheduled.length,
+      scheduledHidden: scheduled.length - filteredScheduled.length,
+      background,
+    };
   },
 
   autoSelectInteractive() {
-    const interactive = this.sortedSessions.find(
-      s => s.source === 'interactive' && (s.user_id === this.userId || s.conversation_id === this.userId)
-    );
-    if (interactive) {
-      this.selectSession(interactive);
-    } else if (this.sortedSessions.length > 0) {
-      this.selectSession(this.sortedSessions[0]);
-    }
+    const g = this.groupedSessions;
+    const first = g.interactive[0] || g.scheduled[0] || g.background[0];
+    if (first) this.selectSession(first);
   },
 
   selectSession(session) {
@@ -446,9 +468,21 @@ export default () => ({
 
   sessionLabel(s) {
     if (s.source === 'interactive' && (s.user_id === this.userId || s.conversation_id === this.userId)) {
-      return 'Interactive (you)';
+      return s.label || s.agent || 'Interactive';
+    }
+    if (s.id && s.id.startsWith('sched_')) {
+      const parts = s.id.replace(/^sched_/, '').split('_');
+      const dateIdx = parts.findIndex(p => /^\d{8}$/.test(p));
+      const name = dateIdx > 0 ? parts.slice(0, dateIdx).join('-') : parts[0];
+      return name || s.id;
     }
     return s.label || s.conversation_id || s.id || 'unknown';
+  },
+
+  statusDotColor(state) {
+    if (state === 'active' || state === 'running') return 'var(--ok)';
+    if (state === 'error' || state === 'failed') return 'var(--error)';
+    return 'var(--muted)';
   },
 
   extractMessages(turn) {
