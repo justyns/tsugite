@@ -124,3 +124,45 @@ async def cmd_compact(adapter: BaseAdapter, user_id: str, message: str | None = 
 
     new_session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
     return f"Session compacted (old: {old_id[:12]}, new: {new_session.id[:12]})"
+
+
+@adapter_command(
+    name="status",
+    description="Show agent status and context usage",
+    params=[CommandParam("user_id", str, "User to check status for")],
+)
+async def cmd_status(adapter: BaseAdapter, user_id: str) -> str:
+    """Show current agent status, token usage, and context window info."""
+    session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
+    context_limit = adapter.session_store.get_context_limit(adapter.agent_name)
+    tokens = session.cumulative_tokens
+    pct = int(tokens / context_limit * 100) if context_limit else 0
+    compacting = adapter.session_store.is_compacting(user_id, adapter.agent_name)
+
+    lines = [
+        f"Model: {adapter.resolve_model()}",
+        f"Context: {tokens:,} / {context_limit:,} tokens ({pct}%)",
+        f"Messages: {session.message_count}",
+    ]
+    if compacting:
+        lines.append("Compaction: in progress")
+    return "\n".join(lines)
+
+
+@adapter_command(
+    name="sessions",
+    description="List active and recent background sessions",
+    params=[CommandParam("status", str, "Filter by status (running, completed, failed)", required=False)],
+)
+async def cmd_sessions(adapter: BaseAdapter, status: str | None = None) -> str:
+    """List background sessions for the current agent."""
+    sessions = adapter.session_store.list_sessions(agent=adapter.agent_name, status=status)
+    if not sessions:
+        return "No sessions found."
+    lines = []
+    for s in sessions[:10]:
+        prompt_preview = (s.prompt or "")[:60]
+        lines.append(f"[{s.status}] {s.id[:12]} — {prompt_preview}")
+    if len(sessions) > 10:
+        lines.append(f"... and {len(sessions) - 10} more")
+    return "\n".join(lines)
