@@ -77,6 +77,24 @@ _es.onopen = () => {
   Alpine.store('app').lastEvent = { type: 'reconnect', _ts: Date.now() };
 };
 
+// In standalone PWA mode, force external links to open in the system browser
+// target="_blank" alone is unreliable across platforms (especially iOS Safari)
+if (window.matchMedia('(display-mode: standalone)').matches || navigator.standalone) {
+  document.addEventListener('click', (e) => {
+    const anchor = e.target.closest('a[href]');
+    if (!anchor) return;
+    const url = anchor.getAttribute('href');
+    if (!url || url.startsWith('#') || url.startsWith('javascript:')) return;
+    try {
+      const linkUrl = new URL(url, location.href);
+      if (linkUrl.origin !== location.origin) {
+        e.preventDefault();
+        window.open(linkUrl.href, '_blank');
+      }
+    } catch { /* malformed URL, let browser handle it */ }
+  });
+}
+
 // Service worker + push notifications
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/static/sw.js').catch(() => {});
