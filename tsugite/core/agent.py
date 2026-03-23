@@ -759,6 +759,9 @@ class TsugiteAgent:
         if stream and self.event_bus:
             self.event_bus.emit(StreamCompleteEvent())
 
+        if accumulated.strip().lower() == "prompt is too long":
+            raise RuntimeError(f"Claude Code prompt too long (session={self._claude_code_session_id})")
+
         parsed = self._parse_response_from_text(accumulated)
 
         # If no code block was found, preserve the raw text as thought so the

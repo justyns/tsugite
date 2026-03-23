@@ -844,7 +844,7 @@ async def run_agent_async(
             )
         except (RuntimeError, AgentExecutionError) as e:
             err_str = str(e).lower()
-            if claude_code_resume_session and ("process ended" in err_str or "no conversation found" in err_str):
+            if claude_code_resume_session and ("process ended" in err_str or "no conversation found" in err_str or "prompt too long" in err_str):
                 logger.warning("Claude Code resume failed (%s), retrying with full history", e)
                 try:
                     previous_messages = load_and_apply_history(continue_conversation_id)
