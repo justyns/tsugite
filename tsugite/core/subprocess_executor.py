@@ -19,7 +19,7 @@ import textwrap
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from .executor import ExecutionResult
+from .executor import EXECUTOR_BUILTIN_TOOLS, ExecutionResult
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +86,12 @@ _SEND_MESSAGE_STUB = textwrap.dedent("""\
             msg = ""
         _ipc_call("tool_call", name="send_message", kwargs={"message": str(msg)})
         return f"Message sent: {msg}"
+""")
+
+_REACT_TO_MESSAGE_STUB = textwrap.dedent("""\
+    def react_to_message(emoji="", message_id=None):
+        _ipc_call("tool_call", name="react_to_message", kwargs={"emoji": str(emoji), "message_id": message_id})
+        return f"Reacted with {emoji}"
 """)
 
 # Mirrors LocalExecutor._split_code_for_last_expr — duplicated because this runs
@@ -217,7 +223,7 @@ class SubprocessExecutor:
         _ensure_tools_loaded()
 
         for t in tools:
-            if t.name in ("final_answer", "send_message"):
+            if t.name in EXECUTOR_BUILTIN_TOOLS:
                 continue
 
             registry_info = registry.get(t.name)
@@ -241,7 +247,7 @@ class SubprocessExecutor:
         # Build tool stubs
         tool_stubs = []
         for t in self._tools:
-            if t.name in ("final_answer", "send_message"):
+            if t.name in EXECUTOR_BUILTIN_TOOLS:
                 continue
             if t.name in self._parent_only_tools:
                 tool_stubs.append(_build_parent_only_tool_stub(t.name))
@@ -257,6 +263,7 @@ class SubprocessExecutor:
 {_TIMED_AUDIT_WRAPPER}
 {_FINAL_ANSWER_STUB}
 {_SEND_MESSAGE_STUB}
+{_REACT_TO_MESSAGE_STUB}
 {_SPLIT_CODE_FN}
 
 PPRINT_WIDTH = 100
@@ -275,6 +282,7 @@ if os.path.exists(STATE_PATH):
 # Inject builtins into namespace
 namespace["final_answer"] = final_answer
 namespace["send_message"] = send_message
+namespace["react_to_message"] = react_to_message
 def _blocked_open(*args, **kwargs):
     raise RuntimeError(
         "open() is not available. Use the provided tools instead:\\n"
@@ -383,7 +391,7 @@ finally:
 
 # Save state (JSON-serializable vars only)
 save_state = {{}}
-skip_keys = {{"final_answer", "send_message", "__builtins__"}}
+skip_keys = {{"final_answer", "send_message", "react_to_message", "__builtins__"}}
 for k, v in namespace.items():
     if k.startswith("_") or k in skip_keys:
         continue
@@ -411,7 +419,7 @@ with open(RESULT_PATH, "w") as f:
         """Generate code to inject tool function references into namespace."""
         lines = []
         for t in self._tools:
-            if t.name in ("final_answer", "send_message"):
+            if t.name in EXECUTOR_BUILTIN_TOOLS:
                 continue
             lines.append(f'namespace["{t.name}"] = {t.name}')
         return "\n".join(lines)
@@ -606,6 +614,14 @@ with open(RESULT_PATH, "w") as f:
 
                     self.event_bus.emit(InfoEvent(message=str(message)))
                 resp = {"call_id": call_id, "result": f"Message sent: {message}", "error": None}
+            elif name == "react_to_message":
+                emoji = kwargs.get("emoji", "")
+                message_id = kwargs.get("message_id")
+                if self.event_bus:
+                    from tsugite.events import ReactionEvent
+
+                    self.event_bus.emit(ReactionEvent(emoji=str(emoji), message_id=message_id))
+                resp = {"call_id": call_id, "result": f"Reacted with {emoji}", "error": None}
             elif name in self._tool_map:
                 tool = self._tool_map[name]
                 try:

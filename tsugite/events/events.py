@@ -100,6 +100,14 @@ class ContentBlockEvent(BaseEvent):
     content: str
 
 
+class ReactionEvent(BaseEvent):
+    """Agent reacts to a message with an emoji."""
+
+    event_type: EventType = Field(default=EventType.REACTION, frozen=True)
+    emoji: str
+    message_id: Optional[str] = None
+
+
 class FinalAnswerEvent(BaseEvent):
     """Agent completed."""
 

@@ -300,13 +300,12 @@ class TsugiteAgent:
         if isinstance(self.executor, SubprocessExecutor):
             self.executor.set_tools(self.tools, event_bus=self.event_bus)
             return
+        from tsugite.core.executor import EXECUTOR_BUILTIN_TOOLS
+
         tool_functions = {}
 
         for tool in self.tools:
-            # Skip built-in functions - executor has its own versions
-            # final_answer: handles completion signaling
-            # send_message: needs event_bus access for progress updates
-            if tool.name in ("final_answer", "send_message"):
+            if tool.name in EXECUTOR_BUILTIN_TOOLS:
                 continue
 
             def make_tool_wrapper(tool_obj):

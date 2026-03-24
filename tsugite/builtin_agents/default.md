@@ -23,6 +23,7 @@ tools:
   - list_available_skills
   - final_answer
   - send_message
+  - react_to_message
   - web_search
   - fetch_text
   - http_request

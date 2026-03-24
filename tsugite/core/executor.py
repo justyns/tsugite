@@ -16,6 +16,11 @@ from typing import Any, Dict, List, Optional
 
 PPRINT_WIDTH = 100
 
+# Tools with special executor handling (not injected via the normal tool wrapper path).
+# These are implemented directly in the executor because they need event_bus access
+# or special completion signaling.
+EXECUTOR_BUILTIN_TOOLS = frozenset({"final_answer", "send_message", "react_to_message"})
+
 
 @dataclass
 class ExecutionResult:
@@ -175,6 +180,15 @@ class LocalExecutor:
             return f"Message sent: {msg}"
 
         self.namespace["send_message"] = send_message
+
+        def react_to_message(emoji="", message_id=None):
+            if self.event_bus:
+                from tsugite.events import ReactionEvent
+
+                self.event_bus.emit(ReactionEvent(emoji=str(emoji), message_id=message_id))
+            return f"Reacted with {emoji}"
+
+        self.namespace["react_to_message"] = react_to_message
 
         # Override open() to guide LLMs toward using provided tools
         def _blocked_open(*args, **kwargs):

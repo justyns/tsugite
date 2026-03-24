@@ -21,6 +21,7 @@ from tsugite.events import (
     InfoEvent,
     LLMMessageEvent,
     ObservationEvent,
+    ReactionEvent,
     ReasoningContentEvent,
     ReasoningTokensEvent,
     StepProgressEvent,
@@ -90,6 +91,7 @@ class ReplUIHandler:
         StreamChunkEvent: "_handle_stream_chunk",
         StreamCompleteEvent: "_handle_stream_complete",
         InfoEvent: "_handle_info",
+        ReactionEvent: "_handle_reaction",
         DebugMessageEvent: "_handle_debug_message",
         WarningEvent: "_handle_warning",
         StepProgressEvent: "_handle_step_progress",
@@ -363,6 +365,11 @@ class ReplUIHandler:
         """Handle info message."""
         if event.message:
             self.console.print(f"[dim]{event.message}[/dim]")
+
+    def _handle_reaction(self, event: ReactionEvent) -> None:
+        """Handle reaction event."""
+        if event.emoji:
+            self.console.print(f"[dim]Reacted: {event.emoji}[/dim]")
 
     def _handle_debug_message(self, event: DebugMessageEvent) -> None:
         """Handle debug message."""

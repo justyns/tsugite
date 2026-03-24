@@ -45,6 +45,9 @@ class EventType(IntEnum):
     # Content events
     CONTENT_BLOCK = 28
 
+    # Reaction events
+    REACTION = 29
+
 
 class BaseEvent(BaseModel):
     """Base class for all UI events."""

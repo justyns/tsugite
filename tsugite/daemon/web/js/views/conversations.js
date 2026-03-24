@@ -680,6 +680,14 @@ export default () => ({
               inputValue: '',
             });
             this.scrollMessages();
+          } else if (event.type === 'reaction') {
+            for (let i = this.messages.length - 1; i >= 0; i--) {
+              if (this.messages[i].type === 'user') {
+                if (!this.messages[i].reactions) this.messages[i].reactions = [];
+                this.messages[i].reactions.push(event.emoji);
+                break;
+              }
+            }
           } else if (event.type === 'final_result') {
             gotResult = true;
             this.messages.push({ type: 'agent', text: event.result });

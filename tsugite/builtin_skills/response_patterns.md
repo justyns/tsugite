@@ -1,6 +1,6 @@
 ---
 name: response_patterns
-description: How to respond effectively - when to use print/send_message/final_answer/ask_user
+description: How to respond effectively - when to use print/send_message/react_to_message/final_answer/ask_user
 ---
 
 # Response Patterns
@@ -11,6 +11,7 @@ description: How to respond effectively - when to use print/send_message/final_a
 |----------|----------|-----------|---------|
 | `print(x)` | You (next turn) | Continues | Intermediate data |
 | `send_message(msg)` | User | Continues | Progress updates |
+| `react_to_message(emoji)` | User | Continues | Emoji acknowledgment |
 | `final_answer(msg)` | User | **Stops** | Final response |
 | `ask_user(q)` | User | **Blocks** | Get user input |
 
@@ -26,6 +27,17 @@ More examples:
 - "Thanks" → `final_answer("You're welcome!")`
 - "What's 2+2?" → `final_answer("4")`
 - "What can you do?" → `final_answer("I can read/write files, run commands, search code, and help with tasks.")`
+
+## Reactions
+
+Acknowledge messages with emoji instead of (or before) a text response:
+
+```python
+react_to_message("👍")  # React to the most recent user message
+react_to_message("✅")  # Checkmark when task is done
+```
+
+Use reactions for lightweight acknowledgment — when a thumbs-up says enough and a text reply would be noise. You can react and still send a text response, or react and call `final_answer("")` for reaction-only.
 
 ## Progress Updates
 
@@ -88,6 +100,7 @@ Use `ask_user` when:
 
 ✅ Do:
 - `final_answer()` immediately for simple responses
+- `react_to_message()` for quick acknowledgment (👍, ✅, 👀)
 - `send_message()` for progress on tasks > 5 seconds
 - `ask_user()` when you genuinely need user input
 - `print()` only for data YOU need to see

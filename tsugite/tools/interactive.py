@@ -141,6 +141,35 @@ def send_message(message: str) -> str:
     return f"Message sent: {message}"
 
 
+@tool
+def react_to_message(emoji: str, message_id: Optional[str] = None) -> str:
+    """Add a reaction emoji to a message.
+
+    Use this to acknowledge messages with emoji reactions instead of
+    (or in addition to) sending a text response.
+    If message_id is omitted, reacts to the most recent user message.
+
+    Args:
+        emoji: The emoji to react with (e.g., "👍", "✅", "👀", "⏳")
+        message_id: Optional platform message ID to react to
+
+    Returns:
+        Confirmation that reaction was added
+
+    Example:
+        react_to_message("👍")
+        react_to_message("✅", message_id="123456")
+    """
+    from tsugite.ui_context import get_event_bus
+
+    event_bus = get_event_bus()
+    if event_bus:
+        from tsugite.events import ReactionEvent
+
+        event_bus.emit(ReactionEvent(emoji=emoji, message_id=message_id))
+    return f"Reacted with {emoji}"
+
+
 @tool(parent_only=True)
 def ask_user(question: str, question_type: str = "text", options: Optional[List[str]] = None) -> str:
     """Ask the user a question interactively.

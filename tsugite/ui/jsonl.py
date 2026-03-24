@@ -14,6 +14,7 @@ from tsugite.events import (
     InfoEvent,
     LLMMessageEvent,
     ObservationEvent,
+    ReactionEvent,
     SkillLoadedEvent,
     SkillLoadFailedEvent,
     SkillUnloadedEvent,
@@ -73,6 +74,7 @@ class JSONLUIHandler:
         ToolCallEvent: "_handle_tool_call",
         ToolResultEvent: "_handle_tool_result",
         InfoEvent: "_handle_info",
+        ReactionEvent: "_handle_reaction",
     }
 
     def handle_event(self, event: BaseEvent) -> None:
@@ -153,6 +155,9 @@ class JSONLUIHandler:
 
     def _handle_info(self, event: InfoEvent) -> None:
         self._emit("info", {"message": event.message})
+
+    def _handle_reaction(self, event: ReactionEvent) -> None:
+        self._emit("reaction", {"emoji": event.emoji, "message_id": event.message_id})
 
     def _emit(self, event_type: str, data: Dict[str, Any]) -> None:
         """Print JSONL event to stdout.

@@ -265,7 +265,16 @@
                     </div>
                   </template>
                   <template x-if="msg.type === 'user'">
-                    <div class="msg user" x-html="renderHtml(msg.text)"></div>
+                    <div class="msg user">
+                      <div x-html="renderHtml(msg.text)"></div>
+                      <template x-if="msg.reactions && msg.reactions.length">
+                        <div class="msg-reactions">
+                          <template x-for="(emoji, ri) in msg.reactions" :key="ri">
+                            <span class="reaction-badge" x-text="emoji"></span>
+                          </template>
+                        </div>
+                      </template>
+                    </div>
                   </template>
                   <template x-if="msg.type === 'agent'">
                     <div class="msg agent">

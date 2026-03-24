@@ -14,6 +14,7 @@ from .events import (
     InfoEvent,
     LLMMessageEvent,
     ObservationEvent,
+    ReactionEvent,
     ReasoningContentEvent,
     ReasoningTokensEvent,
     SkillLoadedEvent,
@@ -45,6 +46,8 @@ __all__ = [
     "LLMMessageEvent",
     "ReasoningContentEvent",
     "ReasoningTokensEvent",
+    # Reaction
+    "ReactionEvent",
     # Meta
     "InfoEvent",
     "ErrorEvent",

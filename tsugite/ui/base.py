@@ -23,6 +23,7 @@ from tsugite.events import (
     InfoEvent,
     LLMMessageEvent,
     ObservationEvent,
+    ReactionEvent,
     ReasoningContentEvent,
     ReasoningTokensEvent,
     SkillLoadedEvent,
@@ -130,6 +131,7 @@ class CustomUIHandler:
         StreamChunkEvent: "_handle_stream_chunk",
         StreamCompleteEvent: "_handle_stream_complete",
         InfoEvent: "_handle_info",
+        ReactionEvent: "_handle_reaction",
         SkillLoadedEvent: "_handle_skill_loaded",
         SkillLoadFailedEvent: "_handle_skill_load_failed",
         SkillUnloadedEvent: "_handle_skill_unloaded",
@@ -480,6 +482,11 @@ class CustomUIHandler:
         message = event.message
         if message:
             self._print(f"[dim]{message}[/dim]")
+
+    def _handle_reaction(self, event: ReactionEvent) -> None:
+        """Handle reaction event."""
+        if event.emoji:
+            self._print(f"[dim]Reacted: {event.emoji}[/dim]")
 
     def _handle_skill_loaded(self, event: SkillLoadedEvent) -> None:
         """Handle skill loaded event."""

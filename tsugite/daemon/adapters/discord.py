@@ -18,6 +18,7 @@ from tsugite.events import (
     ErrorEvent,
     FinalAnswerEvent,
     ObservationEvent,
+    ReactionEvent,
     ReasoningContentEvent,
     StepStartEvent,
     WarningEvent,
@@ -51,15 +52,22 @@ class DiscordProgressHandler:
 
     MAX_DISPLAY_STEPS = 10  # Show last N steps if too many
 
-    def __init__(self, channel: discord.abc.Messageable, loop: asyncio.AbstractEventLoop):
+    def __init__(
+        self,
+        channel: discord.abc.Messageable,
+        loop: asyncio.AbstractEventLoop,
+        trigger_message: Optional[discord.Message] = None,
+    ):
         """Initialize progress handler.
 
         Args:
             channel: Discord channel to send progress updates to
             loop: Discord bot's event loop (for thread-safe scheduling)
+            trigger_message: The user message that triggered this interaction (for reactions)
         """
         self.channel = channel
         self.loop = loop
+        self.trigger_message = trigger_message
         self.progress_msg: Optional[discord.Message] = None
         self.updates: list[ProgressStep] = []
         self.update_lock = asyncio.Lock()
@@ -128,6 +136,14 @@ class DiscordProgressHandler:
             elif isinstance(event, ErrorEvent):
                 self.updates.append(ProgressStep("Error", False, "❌"))
                 await self._update_progress()
+
+            elif isinstance(event, ReactionEvent):
+                target = self.trigger_message
+                if target and event.emoji:
+                    try:
+                        await target.add_reaction(event.emoji)
+                    except discord.errors.HTTPException as e:
+                        logger.debug("Failed to add reaction %s: %s", event.emoji, e)
 
             elif isinstance(event, FinalAnswerEvent):
                 if self.updates and not self.updates[-1].completed:
@@ -572,7 +588,7 @@ class DiscordAdapter(BaseAdapter):
                 channel_context.metadata["conv_id_override"] = thread_session.id
 
         loop = asyncio.get_running_loop()
-        progress = DiscordProgressHandler(message.channel, loop)
+        progress = DiscordProgressHandler(message.channel, loop, trigger_message=message)
         custom_logger = SimpleNamespace(ui_handler=progress)
 
         from tsugite.interaction import set_interaction_backend
