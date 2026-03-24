@@ -1266,11 +1266,21 @@ class HTTPServer:
         except Exception:
             return JSONResponse({"error": "Invalid JSON"}, status_code=400)
         title = body.get("title")
-        if title is None:
+        status = body.get("status")
+        if title is None and status is None:
             return JSONResponse({"error": "No updatable fields provided"}, status_code=400)
         try:
-            self.session_runner.rename_session(session_id, title)
-            return JSONResponse({"ok": True, "title": title})
+            result = {}
+            if title is not None:
+                self.session_runner.rename_session(session_id, title)
+                result["title"] = title
+            if status is not None:
+                if status != "completed":
+                    return JSONResponse({"error": "Only 'completed' status is allowed"}, status_code=400)
+                self.session_runner.store.update_session(session_id, status=status)
+                self.event_bus.emit("session_update", {"action": "completed", "id": session_id})
+                result["status"] = status
+            return JSONResponse({"ok": True, **result})
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=404)
 

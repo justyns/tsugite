@@ -416,6 +416,21 @@ export default () => ({
     return s?.state === 'failed' || s?.state === 'cancelled';
   },
 
+  canComplete(s) {
+    return s?.state === 'active' || s?.state === 'running';
+  },
+
+  async completeSession(session) {
+    const id = session.id || session.conversation_id;
+    if (!id || !confirm('Mark this session as completed?')) return;
+    try {
+      await patch(`/api/sessions/${id}`, { status: 'completed' });
+      await this.loadSessions();
+    } catch (e) {
+      this.messages.push({ type: 'error', text: `Mark complete failed: ${e.message}` });
+    }
+  },
+
   async submitAskUser(msgIndex, response) {
     const agent = this.$store.app.selectedAgent;
     if (!agent) return;

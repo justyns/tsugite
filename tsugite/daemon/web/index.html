@@ -387,6 +387,7 @@
                 <span><span class="spinner"></span> Compacting...</span>
               </template>
               <button class="btn-sm" x-show="!compacting" @click="compactSession()" :disabled="sending">Compact</button>
+              <button class="btn-sm" x-show="!compacting && !sending" @click="completeSession(selectedSessionMeta)">Mark Complete</button>
             </div>
 
             <div class="drag-overlay" x-show="isDragging" x-cloak>Drop files to attach</div>
@@ -461,6 +462,9 @@
                   <div style="display:flex;gap:8px;margin-top:8px">
                     <template x-if="canCancel(selectedSessionMeta)">
                       <button class="btn-sm danger" @click="cancelSession(selectedSessionMeta)">Cancel</button>
+                    </template>
+                    <template x-if="canComplete(selectedSessionMeta)">
+                      <button class="btn-sm" @click="completeSession(selectedSessionMeta)">Mark Complete</button>
                     </template>
                     <template x-if="canRestart(selectedSessionMeta)">
                       <button class="btn-sm" @click="restartSession(selectedSessionMeta)">Restart</button>
