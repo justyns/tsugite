@@ -32,6 +32,10 @@ def mock_storage():
     storage.turn_count = 2
     storage.total_tokens = 200
     storage.total_cost = 0.004
+    storage.total_duration_ms = 0
+    storage.all_functions_called = ["read_file"]
+    storage.status = "success"
+    storage.error_message = None
 
     turn1 = Turn(
         timestamp=datetime(2025, 11, 10, 12, 0, 5, tzinfo=timezone.utc),
@@ -79,6 +83,10 @@ def mock_storage_list():
     storage1.turn_count = 2
     storage1.total_tokens = 200
     storage1.total_cost = 0.004
+    storage1.total_duration_ms = 0
+    storage1.all_functions_called = []
+    storage1.status = "success"
+    storage1.error_message = None
     storages.append(storage1)
 
     storage2 = MagicMock(spec=SessionStorage)
@@ -90,6 +98,10 @@ def mock_storage_list():
     storage2.turn_count = 5
     storage2.total_tokens = 1000
     storage2.total_cost = 0.02
+    storage2.total_duration_ms = 0
+    storage2.all_functions_called = []
+    storage2.status = "success"
+    storage2.error_message = None
     storages.append(storage2)
 
     return storages
@@ -222,6 +234,13 @@ def test_read_conversation_with_missing_optional_fields(history_tools):
     storage.model = "openai:gpt-4o-mini"
     storage.machine = "test-machine"
     storage.created_at = datetime(2025, 11, 10, 12, 0, 0, tzinfo=timezone.utc)
+    storage.turn_count = 1
+    storage.total_tokens = 0
+    storage.total_cost = 0.0
+    storage.total_duration_ms = 0
+    storage.all_functions_called = []
+    storage.status = None
+    storage.error_message = None
 
     turn = Turn(
         timestamp=datetime(2025, 11, 10, 12, 0, 5, tzinfo=timezone.utc),

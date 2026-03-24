@@ -129,5 +129,18 @@ class HookExecution(BaseModel):
     timestamp: ISODatetime = Field(..., description="When this hook was executed")
 
 
+class SessionStatus(BaseModel):
+    """Final status of an agent run, appended as last record."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["session_status"] = "session_status"
+    status: Literal["success", "error", "interrupted"] = Field(..., description="Run outcome")
+    error_message: Optional[str] = Field(default=None, description="Error details if failed")
+    timestamp: ISODatetime = Field(..., description="When status was recorded")
+
+
 # Type alias for any record type
-SessionRecord = SessionMeta | ContextSnapshot | ContextUpdate | Turn | CompactionSummary | HookExecution
+SessionRecord = (
+    SessionMeta | ContextSnapshot | ContextUpdate | Turn | CompactionSummary | HookExecution | SessionStatus
+)

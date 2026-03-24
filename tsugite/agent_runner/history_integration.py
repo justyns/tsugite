@@ -78,6 +78,8 @@ def save_run_to_history(
     duration_ms: Optional[int] = None,
     claude_code_session_id: Optional[str] = None,
     claude_code_compacted: bool = False,
+    status: str = "success",
+    error_message: Optional[str] = None,
 ) -> Optional[str]:
     """Save a single agent run to history.
 
@@ -168,6 +170,8 @@ def save_run_to_history(
             functions_called=functions_called,
             metadata=metadata or None,
         )
+
+        storage.record_status(status, error_message)
 
         return storage.session_id
 

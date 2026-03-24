@@ -8,6 +8,7 @@ from .models import (
     HookExecution,
     SessionMeta,
     SessionRecord,
+    SessionStatus,
     Turn,
 )
 from .reconstruction import (
@@ -35,6 +36,7 @@ __all__ = [
     "HookExecution",
     "SessionMeta",
     "SessionRecord",
+    "SessionStatus",
     "Turn",
     # Storage
     "SessionStorage",

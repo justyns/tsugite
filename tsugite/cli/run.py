@@ -639,6 +639,32 @@ def run(
             stderr_console.rule(f"[bold cyan]🚀 Starting {execution_type.title()} Execution[/bold cyan]")
             stderr_console.print()
 
+        def _save_history(result_str="", token_count=None, cost=None, execution_steps=None,
+                        system_prompt=None, attachments=None, status="success", error_message=None):
+            if not history_opts.enabled:
+                return
+            try:
+                from tsugite.agent_runner.history_integration import save_run_to_history
+
+                save_run_to_history(
+                    agent_path=agent_file,
+                    agent_name=agent_info["name"],
+                    prompt=prompt,
+                    result=result_str,
+                    model=exec_opts.model_override or agent_info.get("model", "default"),
+                    token_count=token_count,
+                    cost=cost,
+                    execution_steps=execution_steps,
+                    continue_conversation_id=history_opts.continue_id,
+                    system_prompt=system_prompt,
+                    attachments=attachments,
+                    channel_metadata=daemon_metadata,
+                    status=status,
+                    error_message=error_message,
+                )
+            except Exception:
+                pass
+
         try:
             executor_kwargs = _build_executor_kwargs(
                 agent_file,
@@ -662,39 +688,23 @@ def run(
                 result
             )
 
-            if history_opts.enabled:
-                try:
-                    from tsugite.agent_runner.history_integration import save_run_to_history
-
-                    save_run_to_history(
-                        agent_path=agent_file,
-                        agent_name=agent_info["name"],
-                        prompt=prompt,
-                        result=result_str,
-                        model=exec_opts.model_override or agent_info.get("model", "default"),
-                        token_count=token_count,
-                        cost=cost,
-                        execution_steps=execution_steps,
-                        continue_conversation_id=history_opts.continue_id,
-                        system_prompt=system_prompt,
-                        attachments=attachments,
-                        channel_metadata=daemon_metadata,
-                    )
-                except Exception:
-                    pass
-
+            _save_history(result_str, token_count, cost, execution_steps, system_prompt, attachments)
             _display_result(result_str, ui_opts, stderr_console)
 
         except ValueError as e:
+            _save_history(status="error", error_message=str(e))
             get_error_console(ui_opts.headless, console).print(f"[red]Configuration error: {e}[/red]")
             raise typer.Exit(1)
         except RuntimeError as e:
+            _save_history(status="error", error_message=str(e))
             get_error_console(ui_opts.headless, console).print(f"[red]Execution error: {e}[/red]")
             raise typer.Exit(1)
         except KeyboardInterrupt:
+            _save_history(status="interrupted")
             get_error_console(ui_opts.headless, console).print("\n[yellow]Agent execution interrupted by user[/yellow]")
             raise typer.Exit(130)
         except Exception as e:
+            _save_history(status="error", error_message=str(e))
             err_console = get_error_console(ui_opts.headless, console)
             err_console.print(f"[red]Unexpected error: {e}[/red]")
             if not ui_opts.log_json:

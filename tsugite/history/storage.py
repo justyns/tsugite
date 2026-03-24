@@ -28,6 +28,7 @@ from .models import (
     HookExecution,
     SessionMeta,
     SessionRecord,
+    SessionStatus,
     Turn,
 )
 
@@ -107,7 +108,12 @@ class SessionStorage:
         self._turn_count: int = 0
         self._total_tokens: int = 0
         self._total_cost: float = 0.0
+        self._total_duration_ms: int = 0
+        self._all_functions: set = set()
         self._meta: Optional[SessionMeta] = None
+        self._status: Optional[str] = None
+        self._error_message: Optional[str] = None
+        self._cached_records: Optional[List[SessionRecord]] = None
 
     @classmethod
     def create(
@@ -211,6 +217,7 @@ class SessionStorage:
         """Append multiple records in a single locked write."""
         if not records:
             return
+        self._cached_records = None
         self.session_path.parent.mkdir(parents=True, exist_ok=True)
 
         try:
@@ -238,10 +245,15 @@ class SessionStorage:
             self._turn_count += 1
             self._total_tokens += turn.tokens or 0
             self._total_cost += turn.cost or 0.0
+            self._total_duration_ms += turn.duration_ms or 0
+            if turn.functions_called:
+                self._all_functions.update(turn.functions_called)
 
     def _replay_state(self) -> None:
         """Replay records to rebuild current state."""
-        for record in self.load_records():
+        records = self._read_records_from_file()
+        self._cached_records = records
+        for record in records:
             if isinstance(record, SessionMeta):
                 self._meta = record
             elif isinstance(record, ContextSnapshot):
@@ -264,13 +276,21 @@ class SessionStorage:
                 self._turn_count += 1
                 self._total_tokens += record.tokens or 0
                 self._total_cost += record.cost or 0.0
+                self._total_duration_ms += record.duration_ms or 0
+                if record.functions_called:
+                    self._all_functions.update(record.functions_called)
+            elif isinstance(record, SessionStatus):
+                self._status = record.status
+                self._error_message = record.error_message
 
     def load_records(self) -> List[SessionRecord]:
-        """Load all records from session file.
+        """Load all records, using cache from replay if available."""
+        if self._cached_records is not None:
+            return self._cached_records
+        return self._read_records_from_file()
 
-        Returns:
-            List of session records
-        """
+    def _read_records_from_file(self) -> List[SessionRecord]:
+        """Read and parse all records from the JSONL file."""
         if not self.session_path.exists():
             return []
 
@@ -315,6 +335,8 @@ class SessionStorage:
                 return CompactionSummary.model_validate(data)
             elif record_type == "hook_execution":
                 return HookExecution.model_validate(data)
+            elif record_type == "session_status":
+                return SessionStatus.model_validate(data)
             # Handle old format "metadata" type (V1 format)
             elif record_type == "metadata":
                 print("Warning: Skipping old V1 metadata record (incompatible format)")
@@ -482,11 +504,25 @@ class SessionStorage:
         self._turn_count += 1
         self._total_tokens += tokens or 0
         self._total_cost += cost or 0.0
+        self._total_duration_ms += duration_ms or 0
+        if functions_called:
+            self._all_functions.update(functions_called)
 
     def record_hook_executions(self, executions: List[HookExecution]) -> None:
         """Write hook execution records."""
         if executions:
             self._write_records(executions)
+
+    def record_status(self, status: str, error_message: Optional[str] = None) -> None:
+        """Record final run status (success, error, interrupted)."""
+        record = SessionStatus(
+            status=status,
+            error_message=error_message,
+            timestamp=datetime.now(timezone.utc),
+        )
+        self._write_record(record)
+        self._status = status
+        self._error_message = error_message
 
     def record_compaction_summary(self, summary: str, previous_turns: int, retained_turns: int = 0) -> None:
         """Record compaction summary.
@@ -526,6 +562,36 @@ class SessionStorage:
     @property
     def created_at(self) -> Optional[datetime]:
         return self._meta.created_at if self._meta else None
+
+    @property
+    def status(self) -> Optional[str]:
+        return self._status
+
+    @property
+    def error_message(self) -> Optional[str]:
+        return self._error_message
+
+    @property
+    def total_duration_ms(self) -> int:
+        return self._total_duration_ms
+
+    @property
+    def all_functions_called(self) -> List[str]:
+        return sorted(self._all_functions)
+
+    @classmethod
+    def load_meta_fast(cls, session_path: Path) -> Optional[SessionMeta]:
+        """Read only the first line of a session file for fast metadata access."""
+        try:
+            with open(session_path, "r", encoding="utf-8") as f:
+                line = f.readline().strip()
+                if line:
+                    data = json.loads(line)
+                    if data.get("type") == "session_meta":
+                        return SessionMeta.model_validate(data)
+        except Exception:
+            pass
+        return None
 
 
 def list_session_files() -> List[Path]:

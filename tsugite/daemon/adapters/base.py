@@ -251,6 +251,8 @@ class BaseAdapter(ABC):
         attachments=None,
         claude_code_session_id=None,
         claude_code_compacted=False,
+        status="success",
+        error_message=None,
     ):
         try:
             from tsugite.agent_runner.history_integration import save_run_to_history
@@ -270,6 +272,8 @@ class BaseAdapter(ABC):
                 attachments=attachments,
                 claude_code_session_id=claude_code_session_id,
                 claude_code_compacted=claude_code_compacted,
+                status=status,
+                error_message=error_message,
             )
         except Exception as e:
             logger.warning("Failed to save daemon history: %s", e)

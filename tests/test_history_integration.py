@@ -464,3 +464,177 @@ class TestBuildTurnMessages:
         assistant_msgs = [m for m in messages if m["role"] == "assistant"]
         code_msg = assistant_msgs[0]["content"]
         assert code_msg == "```python\nx = 1\n```"
+
+
+class TestSessionStatus:
+    """Tests for session status recording."""
+
+    def test_save_run_records_success_status(self, tmp_path, sample_agent_file):
+        with (
+            patch("tsugite.config.load_config") as mock_config,
+            patch("tsugite.history.storage.get_history_dir", return_value=tmp_path),
+            patch("tsugite.history.storage.get_machine_name", return_value="test_machine"),
+            patch("tsugite.md_agents.parse_agent_file") as mock_parse,
+        ):
+            mock_config.return_value = MagicMock(history_enabled=True)
+            mock_agent = MagicMock()
+            mock_agent.config = MagicMock(disable_history=False)
+            mock_parse.return_value = mock_agent
+
+            conv_id = save_run_to_history(
+                agent_path=sample_agent_file,
+                agent_name="test_agent",
+                prompt="test prompt",
+                result="test result",
+                model="openai:gpt-4o",
+                status="success",
+            )
+
+            from tsugite.history import SessionStorage
+
+            storage = SessionStorage.load(tmp_path / f"{conv_id}.jsonl")
+            assert storage.status == "success"
+            assert storage.error_message is None
+
+    def test_save_run_records_error_status(self, tmp_path, sample_agent_file):
+        with (
+            patch("tsugite.config.load_config") as mock_config,
+            patch("tsugite.history.storage.get_history_dir", return_value=tmp_path),
+            patch("tsugite.history.storage.get_machine_name", return_value="test_machine"),
+            patch("tsugite.md_agents.parse_agent_file") as mock_parse,
+        ):
+            mock_config.return_value = MagicMock(history_enabled=True)
+            mock_agent = MagicMock()
+            mock_agent.config = MagicMock(disable_history=False)
+            mock_parse.return_value = mock_agent
+
+            conv_id = save_run_to_history(
+                agent_path=sample_agent_file,
+                agent_name="test_agent",
+                prompt="test prompt",
+                result="",
+                model="openai:gpt-4o",
+                status="error",
+                error_message="Connection timeout",
+            )
+
+            from tsugite.history import SessionStorage
+
+            storage = SessionStorage.load(tmp_path / f"{conv_id}.jsonl")
+            assert storage.status == "error"
+            assert storage.error_message == "Connection timeout"
+
+    def test_save_run_records_interrupted_status(self, tmp_path, sample_agent_file):
+        with (
+            patch("tsugite.config.load_config") as mock_config,
+            patch("tsugite.history.storage.get_history_dir", return_value=tmp_path),
+            patch("tsugite.history.storage.get_machine_name", return_value="test_machine"),
+            patch("tsugite.md_agents.parse_agent_file") as mock_parse,
+        ):
+            mock_config.return_value = MagicMock(history_enabled=True)
+            mock_agent = MagicMock()
+            mock_agent.config = MagicMock(disable_history=False)
+            mock_parse.return_value = mock_agent
+
+            conv_id = save_run_to_history(
+                agent_path=sample_agent_file,
+                agent_name="test_agent",
+                prompt="test prompt",
+                result="",
+                model="openai:gpt-4o",
+                status="interrupted",
+            )
+
+            from tsugite.history import SessionStorage
+
+            storage = SessionStorage.load(tmp_path / f"{conv_id}.jsonl")
+            assert storage.status == "interrupted"
+
+    def test_default_status_is_success(self, tmp_path, sample_agent_file):
+        with (
+            patch("tsugite.config.load_config") as mock_config,
+            patch("tsugite.history.storage.get_history_dir", return_value=tmp_path),
+            patch("tsugite.history.storage.get_machine_name", return_value="test_machine"),
+            patch("tsugite.md_agents.parse_agent_file") as mock_parse,
+        ):
+            mock_config.return_value = MagicMock(history_enabled=True)
+            mock_agent = MagicMock()
+            mock_agent.config = MagicMock(disable_history=False)
+            mock_parse.return_value = mock_agent
+
+            conv_id = save_run_to_history(
+                agent_path=sample_agent_file,
+                agent_name="test_agent",
+                prompt="test prompt",
+                result="test result",
+                model="openai:gpt-4o",
+            )
+
+            from tsugite.history import SessionStorage
+
+            storage = SessionStorage.load(tmp_path / f"{conv_id}.jsonl")
+            assert storage.status == "success"
+
+
+class TestSessionStorageAggregates:
+    """Tests for aggregated storage properties (duration, functions)."""
+
+    def test_total_duration_ms(self, tmp_path):
+        from tsugite.history import SessionStorage
+
+        with patch("tsugite.history.storage.get_machine_name", return_value="test"):
+            storage = SessionStorage.create("agent", "model", session_path=tmp_path / "test.jsonl")
+            storage.record_turn(
+                messages=[{"role": "user", "content": "hi"}],
+                final_answer="hello",
+                duration_ms=1500,
+            )
+            storage.record_turn(
+                messages=[{"role": "user", "content": "bye"}],
+                final_answer="goodbye",
+                duration_ms=2500,
+            )
+            assert storage.total_duration_ms == 4000
+
+    def test_all_functions_called(self, tmp_path):
+        from tsugite.history import SessionStorage
+
+        with patch("tsugite.history.storage.get_machine_name", return_value="test"):
+            storage = SessionStorage.create("agent", "model", session_path=tmp_path / "test.jsonl")
+            storage.record_turn(
+                messages=[{"role": "user", "content": "hi"}],
+                functions_called=["read_file", "write_file"],
+            )
+            storage.record_turn(
+                messages=[{"role": "user", "content": "bye"}],
+                functions_called=["web_search", "read_file"],
+            )
+            assert storage.all_functions_called == ["read_file", "web_search", "write_file"]
+
+    def test_old_sessions_have_unknown_status(self, tmp_path):
+        from tsugite.history import SessionStorage
+
+        with patch("tsugite.history.storage.get_machine_name", return_value="test"):
+            storage = SessionStorage.create("agent", "model", session_path=tmp_path / "test.jsonl")
+            storage.record_turn(
+                messages=[{"role": "user", "content": "hi"}],
+                final_answer="hello",
+            )
+            # No record_status call - simulates old session
+            reloaded = SessionStorage.load(tmp_path / "test.jsonl")
+            assert reloaded.status is None
+
+    def test_load_meta_fast(self, tmp_path):
+        from tsugite.history import SessionStorage
+
+        with patch("tsugite.history.storage.get_machine_name", return_value="test"):
+            storage = SessionStorage.create("my_agent", "my_model", session_path=tmp_path / "test.jsonl")
+            storage.record_turn(
+                messages=[{"role": "user", "content": "hi"}],
+                final_answer="hello",
+            )
+
+        meta = SessionStorage.load_meta_fast(tmp_path / "test.jsonl")
+        assert meta is not None
+        assert meta.agent == "my_agent"
+        assert meta.model == "my_model"

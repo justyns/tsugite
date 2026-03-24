@@ -15,7 +15,7 @@ def read_conversation(conversation_id: str) -> Dict[str, Any]:
 
     Returns:
         Dictionary containing:
-        - metadata: Conversation metadata (id, agent, model, machine, created_at)
+        - metadata: Conversation metadata (id, agent, model, machine, created_at, status)
         - turns: List of conversation turns with messages, functions called, tokens, costs
         - summary: High-level statistics
 
@@ -39,39 +39,31 @@ def read_conversation(conversation_id: str) -> Dict[str, Any]:
         "model": storage.model,
         "machine": storage.machine,
         "created_at": storage.created_at.isoformat() if storage.created_at else None,
+        "status": storage.status,
     }
 
     turns = []
-    total_tokens = 0
-    total_cost = 0.0
-    all_functions = set()
-
     for record in records:
         if isinstance(record, Turn):
-            turn_data = {
-                "timestamp": record.timestamp.isoformat(),
-                "user_summary": record.user_summary,
-                "final_answer": record.final_answer,
-                "functions_called": record.functions_called or [],
-                "tokens": record.tokens,
-                "cost": record.cost,
-                "messages": record.messages,
-            }
-
-            turns.append(turn_data)
-
-            if record.tokens:
-                total_tokens += record.tokens
-            if record.cost:
-                total_cost += record.cost
-            if record.functions_called:
-                all_functions.update(record.functions_called)
+            turns.append(
+                {
+                    "timestamp": record.timestamp.isoformat(),
+                    "user_summary": record.user_summary,
+                    "final_answer": record.final_answer,
+                    "functions_called": record.functions_called or [],
+                    "tokens": record.tokens,
+                    "cost": record.cost,
+                    "duration_ms": record.duration_ms,
+                    "messages": record.messages,
+                }
+            )
 
     summary = {
-        "turn_count": len(turns),
-        "total_tokens": total_tokens if total_tokens > 0 else None,
-        "total_cost": round(total_cost, 4) if total_cost > 0 else None,
-        "functions_used": sorted(list(all_functions)),
+        "turn_count": storage.turn_count,
+        "total_tokens": storage.total_tokens if storage.total_tokens > 0 else None,
+        "total_cost": round(storage.total_cost, 4) if storage.total_cost > 0 else None,
+        "total_duration_ms": storage.total_duration_ms if storage.total_duration_ms > 0 else None,
+        "functions_used": storage.all_functions_called,
     }
 
     return {"metadata": metadata, "turns": turns, "summary": summary}
@@ -82,6 +74,7 @@ def list_conversations(
     limit: int = 10,
     agent: Optional[str] = None,
     machine: Optional[str] = None,
+    status: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """List recent conversations with optional filtering.
 
@@ -89,11 +82,12 @@ def list_conversations(
         limit: Maximum number of conversations to return (default: 10, max: 100)
         agent: Filter by agent name (optional)
         machine: Filter by machine name (optional)
+        status: Filter by status: success, error, interrupted (optional)
 
     Returns:
         List of conversation summaries, sorted by most recent first.
         Each entry contains: conversation_id, agent, model, machine, created_at,
-        turn_count, total_tokens, total_cost
+        turn_count, total_tokens, total_cost, status, duration_ms, functions_used
     """
     if limit < 1 or limit > 100:
         raise ValueError("Limit must be between 1 and 100")
@@ -108,10 +102,11 @@ def list_conversations(
         try:
             storage = SessionStorage.load(session_file)
 
-            # Apply filters
             if agent and storage.agent != agent:
                 continue
             if machine and storage.machine != machine:
+                continue
+            if status and storage.status != status:
                 continue
 
             conversations.append(
@@ -124,6 +119,9 @@ def list_conversations(
                     "turn_count": storage.turn_count,
                     "total_tokens": storage.total_tokens,
                     "total_cost": round(storage.total_cost, 4) if storage.total_cost else None,
+                    "status": storage.status,
+                    "duration_ms": storage.total_duration_ms if storage.total_duration_ms > 0 else None,
+                    "functions_used": storage.all_functions_called,
                 }
             )
 
@@ -131,3 +129,62 @@ def list_conversations(
             continue
 
     return conversations
+
+
+@tool
+def search_conversations(
+    query: str,
+    limit: int = 10,
+    agent: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Search conversation history by text content.
+
+    Searches across user prompts, agent outputs, and tool/function names.
+
+    Args:
+        query: Text to search for (case-insensitive)
+        limit: Maximum number of results (default: 10, max: 50)
+        agent: Filter by agent name (optional)
+
+    Returns:
+        List of matching conversations with match context snippet.
+    """
+    if limit < 1 or limit > 50:
+        raise ValueError("Limit must be between 1 and 50")
+
+    from tsugite.cli.history import _search_turns
+
+    session_files = list_session_files()
+    query_lower = query.lower()
+    results = []
+
+    for session_file in session_files:
+        if len(results) >= limit:
+            break
+
+        try:
+            storage = SessionStorage.load(session_file)
+
+            if agent and storage.agent != agent:
+                continue
+
+            match_snippet = _search_turns(storage.load_records(), query_lower)
+            if not match_snippet:
+                continue
+
+            results.append(
+                {
+                    "conversation_id": storage.session_id,
+                    "agent": storage.agent,
+                    "match": match_snippet,
+                    "status": storage.status,
+                    "created_at": storage.created_at.isoformat() if storage.created_at else None,
+                    "total_tokens": storage.total_tokens,
+                    "total_cost": round(storage.total_cost, 4) if storage.total_cost else None,
+                }
+            )
+
+        except Exception:
+            continue
+
+    return results
