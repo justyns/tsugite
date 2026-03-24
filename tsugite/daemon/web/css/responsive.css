@@ -33,15 +33,22 @@
     flex-direction: column;
   }
 
+  /* Sidebar uses mobile-style drill-down (one pane at a time) */
   .pane-sidebar {
-    width: 100%;
-    max-height: 40vh;
-    overflow-y: auto;
+    max-height: none; overflow-y: auto; width: 100%; flex: 1;
   }
 
-  .pane-detail {
-    width: 100%;
+  .sidebar-toggle { display: none; }
+
+  .mobile-back-btn {
+    display: flex; align-items: center; gap: 4px;
+    background: none; border: none; color: var(--accent);
+    font-size: 14px; padding: 8px 12px; cursor: pointer;
+    flex-shrink: 0;
   }
+  .mobile-back-btn:hover { text-decoration: underline; }
+
+  .mobile-hidden { display: none !important; }
 
   /* Tables: horizontal scroll */
   .data-table {
@@ -116,23 +123,6 @@
     padding-bottom: 0;
   }
 
-  /* Hide sidebar toggle on mobile — use back button drill-down instead */
-  .sidebar-toggle { display: none; }
-
-  /* Session list: full-height when visible, hidden when session selected */
-  .pane-sidebar {
-    max-height: none; overflow-y: auto; width: 100%; flex: 1;
-  }
-
-  /* Back button for returning to session list */
-  .mobile-back-btn {
-    display: flex; align-items: center; gap: 4px;
-    background: none; border: none; color: var(--accent);
-    font-size: 14px; padding: 8px 12px; cursor: pointer;
-    flex-shrink: 0;
-  }
-  .mobile-back-btn:hover { text-decoration: underline; }
-
   /* Hide hint on mobile — Enter naturally adds newlines */
   .input-hint { display: none; }
 
@@ -177,6 +167,4 @@
     max-width: 100%;
   }
 
-  /* Mobile drill-down: hide sidebar when in chat, hide detail when browsing sessions */
-  .mobile-hidden { display: none !important; }
 }
