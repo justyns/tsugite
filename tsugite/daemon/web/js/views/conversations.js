@@ -59,6 +59,10 @@ export default () => ({
         if (this.isActiveSession) this.loadHistory();
       }
       if (ev.type === 'session_update') {
+        if (ev.action === 'titled' && ev.title) {
+          const s = this.allSessions.find(x => x.id === ev.id);
+          if (s) { s.title = ev.title; return; }
+        }
         this._debouncedLoadSessions();
       }
       if (ev.type === 'compaction_started' && ev.agent === this.$store.app.selectedAgent) {

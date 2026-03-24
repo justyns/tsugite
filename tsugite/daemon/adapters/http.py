@@ -472,9 +472,13 @@ class HTTPServer:
         source = request.query_params.get("source")
         status = request.query_params.get("status")
         parent_id = request.query_params.get("parent_id")
+        try:
+            limit = max(1, min(int(request.query_params.get("limit", "100")), 1000))
+        except (ValueError, TypeError):
+            limit = 100
 
         all_sessions = adapter.session_store.list_sessions(
-            agent=adapter.agent_name, source=source, status=status, parent_id=parent_id
+            agent=adapter.agent_name, source=source, status=status, parent_id=parent_id, limit=limit
         )
 
         sessions = []
@@ -686,7 +690,10 @@ class HTTPServer:
 
         user_id = adapter.resolve_http_user(request.query_params.get("user_id", "web-anonymous"))
         detail = request.query_params.get("detail", "false").lower() == "true"
-        limit = int(request.query_params.get("limit", "100"))
+        try:
+            limit = max(1, min(int(request.query_params.get("limit", "100")), 1000))
+        except (ValueError, TypeError):
+            limit = 100
         session_id = request.query_params.get("session_id")
         if session_id:
             conversation_id = session_id
@@ -1262,7 +1269,7 @@ class HTTPServer:
         if title is None:
             return JSONResponse({"error": "No updatable fields provided"}, status_code=400)
         try:
-            self.session_runner.store.update_session(session_id, title=title)
+            self.session_runner.rename_session(session_id, title)
             return JSONResponse({"ok": True, "title": title})
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=404)

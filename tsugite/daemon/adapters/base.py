@@ -535,12 +535,13 @@ class BaseAdapter(ABC):
 
     async def _auto_title_session(self, session_id: str, user_message: str, assistant_response: str) -> None:
         try:
-            from tsugite.daemon.memory import auto_title_session
+            from tsugite.daemon.memory import compute_session_title
 
-            await auto_title_session(
-                session_id, user_message, assistant_response,
-                self.resolve_model(), self.session_store, self.event_bus,
-            )
+            title = await compute_session_title(user_message, assistant_response, self.resolve_model())
+            if title:
+                self.session_store.update_session(session_id, title=title)
+                if self.event_bus:
+                    self.event_bus.emit("session_update", {"action": "titled", "id": session_id, "title": title})
         except Exception as e:
             logger.debug("Auto-title failed for session '%s': %s", session_id, e)
 

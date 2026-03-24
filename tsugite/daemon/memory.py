@@ -292,28 +292,20 @@ async def generate_session_title(messages: list[dict], model: str) -> str:
     return title.strip().strip('"\'')[:80]
 
 
-async def auto_title_session(
-    session_id: str,
+async def compute_session_title(
     user_content: str,
     assistant_content: str,
     agent_model: str,
-    store,
-    event_bus=None,
-) -> None:
-    """Generate and store a title for a session. Skips LLM call for short prompts."""
+) -> str:
+    """Compute a title for a session. Returns empty string if no title could be generated."""
     if len(user_content) <= SHORT_TITLE_THRESHOLD:
-        store.update_session(session_id, title=user_content)
-    else:
-        model = infer_compaction_model(agent_model)
-        messages = [
-            {"role": "user", "content": user_content},
-            {"role": "assistant", "content": assistant_content},
-        ]
-        title = await generate_session_title(messages, model)
-        if title:
-            store.update_session(session_id, title=title)
-    if event_bus:
-        event_bus.emit("session_update", {"action": "titled", "id": session_id})
+        return user_content
+    model = infer_compaction_model(agent_model)
+    messages = [
+        {"role": "user", "content": user_content},
+        {"role": "assistant", "content": assistant_content},
+    ]
+    return await generate_session_title(messages, model)
 
 
 def extract_file_paths_from_turns(turns: "list[Turn]") -> list[str]:

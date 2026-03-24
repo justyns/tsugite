@@ -235,6 +235,7 @@ class SessionStore:
     # ── Generic session CRUD ──
 
     MAX_SCHEDULE_SESSIONS = 20
+    MAX_BACKGROUND_SESSIONS = 100
 
     def create_session(self, session: Session) -> Session:
         with self._lock:
@@ -247,9 +248,10 @@ class SessionStore:
             if session.platform_thread_id:
                 self._thread_index[session.platform_thread_id] = session.id
 
-            # Prune old schedule sessions beyond retention limit
             if session.source == SessionSource.SCHEDULE.value and session.parent_id:
                 self._prune_schedule_sessions(session.parent_id)
+            elif session.source in (SessionSource.BACKGROUND.value, SessionSource.SPAWNED.value):
+                self._prune_background_sessions(session.agent)
 
             self._save()
             return session
@@ -265,6 +267,22 @@ class SessionStore:
         for s in children[: len(children) - self.MAX_SCHEDULE_SESSIONS]:
             if s.status in (SessionStatus.COMPLETED.value, SessionStatus.FAILED.value):
                 del self._sessions[s.id]
+
+    def _prune_background_sessions(self, agent: str) -> None:
+        """Remove oldest completed background/spawned sessions beyond MAX_BACKGROUND_SESSIONS. Must hold lock."""
+        terminal = (SessionStatus.COMPLETED.value, SessionStatus.FAILED.value, SessionStatus.CANCELLED.value)
+        children = [
+            s
+            for s in self._sessions.values()
+            if s.agent == agent
+            and s.source in (SessionSource.BACKGROUND.value, SessionSource.SPAWNED.value)
+            and s.status in terminal
+        ]
+        if len(children) <= self.MAX_BACKGROUND_SESSIONS:
+            return
+        children.sort(key=lambda s: s.created_at)
+        for s in children[: len(children) - self.MAX_BACKGROUND_SESSIONS]:
+            del self._sessions[s.id]
 
     def get_session(self, session_id: str) -> Session:
         with self._lock:
@@ -294,9 +312,10 @@ class SessionStore:
         parent_id: Optional[str] = None,
         status: Optional[str] = None,
         user_id: Optional[str] = None,
+        limit: int = 0,
     ) -> list[Session]:
         with self._lock:
-            return [
+            results = [
                 s
                 for s in self._sessions.values()
                 if (not agent or s.agent == agent)
@@ -305,6 +324,10 @@ class SessionStore:
                 and (not status or s.status == status)
                 and (not user_id or s.user_id == user_id)
             ]
+            if limit:
+                results.sort(key=lambda s: s.last_active or s.created_at, reverse=True)
+                results = results[:limit]
+            return results
 
     def list_interactive_by_agent(self, agent: str) -> list[Session]:
         """Return all active interactive sessions for a given agent."""

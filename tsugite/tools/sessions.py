@@ -172,7 +172,7 @@ def rename_session(session_id: str, title: str) -> dict:
     Returns:
         Updated session details.
     """
-    session = _call(_session_runner.store.update_session, session_id, title=title)
+    session = _call(_session_runner.rename_session, session_id, title)
     return {"session_id": session.id, "title": session.title}
 
 

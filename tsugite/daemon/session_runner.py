@@ -153,14 +153,19 @@ class SessionRunner:
                 self._event_bus.emit("session_update", {"action": "failed", "id": session.id})
             logger.error("Session '%s' failed: %s", session.id, e)
 
+    def rename_session(self, session_id: str, title: str) -> Session:
+        session = self._store.update_session(session_id, title=title)
+        if self._event_bus:
+            self._event_bus.emit("session_update", {"action": "titled", "id": session_id, "title": title})
+        return session
+
     async def _auto_title_background_session(self, session: Session, result_str: str, adapter) -> None:
         try:
-            from tsugite.daemon.memory import auto_title_session
+            from tsugite.daemon.memory import compute_session_title
 
-            await auto_title_session(
-                session.id, session.prompt or "", result_str,
-                adapter.resolve_model(), self._store, self._event_bus,
-            )
+            title = await compute_session_title(session.prompt or "", result_str, adapter.resolve_model())
+            if title:
+                self.rename_session(session.id, title)
         except Exception as e:
             logger.debug("Auto-title failed for session '%s': %s", session.id, e)
 
