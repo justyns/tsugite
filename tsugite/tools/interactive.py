@@ -112,7 +112,7 @@ def final_answer(result: str) -> None:
     pass
 
 
-@tool
+@tool(interactive_only=True)
 def send_message(message: str) -> str:
     """Send a progress message to the user without stopping execution.
 
@@ -141,7 +141,7 @@ def send_message(message: str) -> str:
     return f"Message sent: {message}"
 
 
-@tool
+@tool(interactive_only=True)
 def react_to_message(emoji: str, message_id: Optional[str] = None) -> str:
     """Add a reaction emoji to a message.
 

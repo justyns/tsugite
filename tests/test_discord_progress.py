@@ -21,6 +21,7 @@ from tsugite.events import (  # noqa: E402
     CodeExecutionEvent,
     ErrorEvent,
     FinalAnswerEvent,
+    InfoEvent,
     ObservationEvent,
     ReasoningContentEvent,
     StepStartEvent,
@@ -220,6 +221,30 @@ async def test_progress_handler_summary():
     # Check summary shows turn count
     content = channel.messages[0].content
     assert "✅ Done (3 turns)" in content
+
+
+@pytest.mark.asyncio
+async def test_progress_handler_info_event():
+    """Test InfoEvent sends standalone message to channel."""
+    channel = MockChannel()
+    handler = DiscordProgressHandler(channel, asyncio.get_running_loop())
+
+    await handler._handle_event_async(StepStartEvent(step=1, max_turns=10))
+    assert len(channel.messages) == 1  # progress message
+
+    await handler._handle_event_async(InfoEvent(message="Processing step 1 of 5..."))
+    assert len(channel.messages) == 2  # progress + info message
+    assert channel.messages[1].content == "Processing step 1 of 5..."
+
+
+@pytest.mark.asyncio
+async def test_progress_handler_info_event_empty():
+    """Test empty InfoEvent is silently ignored."""
+    channel = MockChannel()
+    handler = DiscordProgressHandler(channel, asyncio.get_running_loop())
+
+    await handler._handle_event_async(InfoEvent(message=""))
+    assert len(channel.messages) == 0
 
 
 class TestCodeBlockChunking:

@@ -17,6 +17,7 @@ from tsugite.events import (
     CodeExecutionEvent,
     ErrorEvent,
     FinalAnswerEvent,
+    InfoEvent,
     ObservationEvent,
     ReactionEvent,
     ReasoningContentEvent,
@@ -136,6 +137,13 @@ class DiscordProgressHandler:
             elif isinstance(event, ErrorEvent):
                 self.updates.append(ProgressStep("Error", False, "❌"))
                 await self._update_progress()
+
+            elif isinstance(event, InfoEvent):
+                if event.message:
+                    try:
+                        await self.channel.send(event.message)
+                    except discord.errors.HTTPException as e:
+                        logger.debug("Failed to send info message: %s", e)
 
             elif isinstance(event, ReactionEvent):
                 target = self.trigger_message

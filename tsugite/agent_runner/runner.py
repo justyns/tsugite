@@ -420,6 +420,13 @@ async def _execute_agent_with_prompt(
     if os.environ.get("TSUGITE_SUBAGENT_MODE") == "1":
         tools = [t for t in tools if t.name not in ["ask_user", "ask_user_batch"]]
 
+    # Filter out interactive_only tools when no UI handler (e.g. scheduled tasks)
+    if not ui_handler:
+        from tsugite.tools import get_interactive_only_names
+
+        interactive_names = get_interactive_only_names()
+        tools = [t for t in tools if t.name not in interactive_names]
+
     # Register per-agent custom shell tools (if any)
     if agent_config.custom_tools:
         from tsugite.shell_tool_config import parse_tool_definition_from_dict

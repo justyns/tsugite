@@ -15,6 +15,7 @@ class ToolInfo:
     description: str
     parameters: Dict[str, Any]
     parent_only: bool = False
+    interactive_only: bool = False
 
 
 # Global tool registry
@@ -25,8 +26,12 @@ _daemon_tools: Dict[str, Callable] = {}
 _daemon_mode = False
 
 
-def _register_tool(func: Callable, parent_only: bool = False) -> None:
-    """Register a function into the tool registry."""
+def _register_tool(func: Callable) -> None:
+    """Register a function into the tool registry.
+
+    Reads flags (parent_only, interactive_only) from function attributes
+    set by the @tool decorator.
+    """
     sig = inspect.signature(func)
     doc = func.__doc__ or "No description available"
 
@@ -43,27 +48,31 @@ def _register_tool(func: Callable, parent_only: bool = False) -> None:
         func=func,
         description=doc.split("\n")[0].strip(),
         parameters=parameters,
-        parent_only=parent_only,
+        parent_only=getattr(func, "_parent_only", False),
+        interactive_only=getattr(func, "_interactive_only", False),
     )
 
 
-def tool(func=None, *, require_daemon=False, parent_only=False):
+def tool(func=None, *, require_daemon=False, parent_only=False, interactive_only=False):
     """Register a function as a tool.
 
     Args:
         require_daemon: Only register when running in daemon mode.
         parent_only: If True, tool must run in parent process (not in sandbox).
             Used for tools that need direct user interaction or spawn subprocesses.
+        interactive_only: If True, tool is only available when a UI handler is present.
+            Hidden in scheduled tasks where there's no way to display output.
     """
 
     def decorator(fn):
         fn._parent_only = parent_only
+        fn._interactive_only = interactive_only
         if require_daemon:
             _daemon_tools[fn.__name__] = fn
             if _daemon_mode:
-                _register_tool(fn, parent_only=parent_only)
+                _register_tool(fn)
         else:
-            _register_tool(fn, parent_only=parent_only)
+            _register_tool(fn)
         return fn
 
     if func is not None:
@@ -80,10 +89,16 @@ def set_daemon_mode(enabled: bool):
     _daemon_mode = enabled
     if enabled:
         for fn in _daemon_tools.values():
-            _register_tool(fn, parent_only=getattr(fn, "_parent_only", False))
+            _register_tool(fn)
     else:
         for name in _daemon_tools:
             _tools.pop(name, None)
+
+
+def get_interactive_only_names() -> set:
+    """Return names of tools marked interactive_only."""
+    _ensure_tools_loaded()
+    return {name for name, info in _tools.items() if info.interactive_only}
 
 
 def get_tool(name: str) -> ToolInfo:
