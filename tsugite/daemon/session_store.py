@@ -164,7 +164,11 @@ class SessionStore:
             if key in self._interactive_index:
                 session_id = self._interactive_index[key]
                 if session_id in self._sessions:
-                    return self._sessions[session_id]
+                    session = self._sessions[session_id]
+                    if session.status in (SessionStatus.CANCELLED.value, SessionStatus.COMPLETED.value):
+                        session.status = SessionStatus.ACTIVE.value
+                        self._mark_dirty()
+                    return session
 
             # Create new interactive session
             conv_id = f"daemon_{agent}_{user_id}"
