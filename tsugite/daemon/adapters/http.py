@@ -605,9 +605,11 @@ class HTTPServer:
         history_dir = get_history_dir()
         visited: set[str] = set()
 
-        # Walk the compaction chain newest-to-oldest
-        chain: list[SessionStorage] = []
+        # Walk the compaction chain newest-to-oldest, loading lazily.
+        # Each entry: (storage, records_or_None, compacted_from)
+        chain: list[tuple[SessionStorage, list | None, str | None]] = []
         current_id = session_id
+        turns_loaded = 0
         while current_id and current_id not in visited:
             visited.add(current_id)
             path = history_dir / f"{current_id}.jsonl"
@@ -615,29 +617,46 @@ class HTTPServer:
                 break
             try:
                 storage = SessionStorage.load(path)
-                chain.append(storage)
-                current_id = storage._meta.compacted_from if storage._meta else None
+                compacted_from_id = storage._meta.compacted_from if storage._meta else None
+                if limit > 0 and turns_loaded >= limit and len(chain) > 0:
+                    # We have enough turns from newer links; only store metadata
+                    chain.append((storage, None, compacted_from_id))
+                    break
+                records = storage.load_records()
+                turn_count = sum(1 for r in records if isinstance(r, Turn))
+                turns_loaded += turn_count
+                chain.append((storage, records, compacted_from_id))
+                current_id = compacted_from_id
             except Exception:
                 break
 
-        # Pre-load records for each session once
-        records_cache: list[list] = []
-        for storage in chain:
-            try:
-                records_cache.append(storage.load_records())
-            except Exception:
-                records_cache.append([])
+        # Extract compaction summary/compacted_from from the newest session
+        compaction_summary = None
+        compacted_from = None
+        if chain:
+            newest_storage, newest_records, _ = chain[0]
+            if newest_storage._meta:
+                compacted_from = newest_storage._meta.compacted_from
+            if newest_records:
+                cs = next((r for r in newest_records if isinstance(r, CompactionSummary)), None)
+                if cs:
+                    compaction_summary = cs.summary
 
         # Iterate oldest-first (reversed chain) and append for chronological order
         collected: list = []
         for idx in reversed(range(len(chain))):
-            records = records_cache[idx]
+            _, records, _ = chain[idx]
+            if records is None:
+                continue
             turns_and_hooks = [r for r in records if isinstance(r, (Turn, HookExecution))]
 
+            # Trim retained turns that overlap with the next (newer) session
             if idx > 0:
-                comp_summary = next((r for r in records_cache[idx - 1] if isinstance(r, CompactionSummary)), None)
+                _, next_records, _ = chain[idx - 1]
+                comp_summary = None
+                if next_records:
+                    comp_summary = next((r for r in next_records if isinstance(r, CompactionSummary)), None)
                 if comp_summary and comp_summary.retained_turns:
-                    # Count only Turn records for retention trimming
                     turn_count_total = sum(1 for r in turns_and_hooks if isinstance(r, Turn))
                     keep_from = turn_count_total - comp_summary.retained_turns
                     trimmed: list = []
@@ -649,7 +668,6 @@ class HTTPServer:
                                 continue
                             seen_turns += 1
                         elif isinstance(r, HookExecution):
-                            # Keep hooks that belong to retained turns (after trim point)
                             if seen_turns < keep_from:
                                 continue
                         trimmed.append(r)
@@ -663,7 +681,6 @@ class HTTPServer:
                 collected.append({"marker": "compaction", "summary": comp_summary.summary})
 
         if limit > 0:
-            # Keep only the most recent `limit` turns, preserving markers
             turn_count = 0
             for i in range(len(collected) - 1, -1, -1):
                 if isinstance(collected[i], Turn):
@@ -671,15 +688,6 @@ class HTTPServer:
                     if turn_count > limit:
                         collected = collected[i + 1 :]
                         break
-
-        compaction_summary = None
-        compacted_from = None
-        if chain:
-            if chain[0]._meta:
-                compacted_from = chain[0]._meta.compacted_from
-            cs = next((r for r in records_cache[0] if isinstance(r, CompactionSummary)), None)
-            if cs:
-                compaction_summary = cs.summary
 
         return collected, compaction_summary, compacted_from
 
