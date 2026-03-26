@@ -772,7 +772,8 @@ class HTTPServer:
 
         adapter._broadcast_compaction(agent_name, started=True)
         try:
-            await adapter._compact_session(session.id)
+            instructions = body.get("instructions")
+            await adapter._compact_session(session.id, instructions=instructions)
         except Exception as e:
             msg = str(e) or repr(e)
             logger.exception("Compaction failed for agent %s", adapter.agent_name)

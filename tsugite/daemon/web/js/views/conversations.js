@@ -386,6 +386,21 @@ export default () => ({
     }
   },
 
+  async compactAndRetry(msg) {
+    const agent = this.$store.app.selectedAgent;
+    if (!agent || this.sending || this.compacting) return;
+    this.compacting = true;
+    try {
+      await post(`/api/agents/${agent}/compact`, { user_id: this.userId });
+      await this.loadHistory();
+      if (msg) await this.sendMessage(msg);
+    } catch (e) {
+      this.messages.push({ type: 'error', text: `Compact & retry failed: ${e.message}` });
+    } finally {
+      this.compacting = false;
+    }
+  },
+
   async cancelSession(session) {
     const id = session.id;
     if (!id || !confirm(`Cancel session "${id}"?`)) return;

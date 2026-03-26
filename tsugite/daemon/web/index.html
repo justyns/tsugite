@@ -332,6 +332,9 @@
                         <div class="retry-actions" style="margin-top:8px;display:flex;gap:8px">
                           <button class="btn-sm" @click="retryMessage(msg.lastMessage)">Retry</button>
                           <button class="btn-sm" @click="continueAfterError(msg.lastMessage, msg.errorText)">Continue</button>
+                          <template x-if="msg.errorText && msg.errorText.toLowerCase().includes('prompt too long')">
+                            <button class="btn-sm" @click="compactAndRetry(msg.lastMessage)">Compact & Retry</button>
+                          </template>
                         </div>
                       </template>
                     </div>

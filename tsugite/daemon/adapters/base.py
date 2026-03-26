@@ -416,26 +416,7 @@ class BaseAdapter(ABC):
             if self.session_store.needs_compaction(conv_id) or self.session_store.is_compacting(
                 user_id, self.agent_name
             ):
-                self._emit_ui(custom_logger, "compacting")
-                if self.session_store.begin_compaction(user_id, self.agent_name):
-                    # We own the compaction
-                    self._broadcast_compaction(self.agent_name, started=True)
-                    try:
-                        await self._compact_session(conv_id)
-                    finally:
-                        self.session_store.end_compaction(user_id, self.agent_name)
-                        self._broadcast_compaction(self.agent_name, started=False)
-                else:
-                    # Another request is already compacting; wait for it
-                    done = await asyncio.to_thread(self.session_store.wait_for_compaction, user_id, self.agent_name)
-                    if not done:
-                        raise TimeoutError("Timed out waiting for session compaction to finish")
-                self._emit_ui(custom_logger, "compacted")
-                # Get the new session ID after compaction
-                session = self.session_store.get_or_create_interactive(user_id, self.agent_name)
-                conv_id = session.id
-                if self.event_bus:
-                    self.event_bus.emit("session_update", {"action": "compacted", "id": conv_id})
+                conv_id = await self._run_compaction(user_id, conv_id, custom_logger)
 
         metadata = channel_context.to_dict()
         metadata["daemon_agent"] = self.agent_name
@@ -494,18 +475,24 @@ class BaseAdapter(ABC):
         try:
             result = await asyncio.to_thread(ctx.run, run_in_workspace)
         except AgentExecutionError as e:
-            error_result = f"[Error: {e}]\n\n{e.partial_output}" if e.partial_output else f"[Error: {e}]"
-            self._save_history(
-                agent_path=agent_path,
-                message=message,
-                conv_id=conv_id,
-                metadata=metadata,
-                result_str=error_result,
-                token_count=e.token_usage,
-                cost=e.cost,
-                execution_steps=e.execution_steps,
-            )
-            raise
+            if "prompt too long" in str(e).lower() and not conv_id_override:
+                logger.warning("[%s] Prompt too long, auto-compacting and retrying", self.agent_name)
+                conv_id = await self._run_compaction(user_id, conv_id, custom_logger)
+                ctx = contextvars.copy_context()
+                result = await asyncio.to_thread(ctx.run, run_in_workspace)
+            else:
+                error_result = f"[Error: {e}]\n\n{e.partial_output}" if e.partial_output else f"[Error: {e}]"
+                self._save_history(
+                    agent_path=agent_path,
+                    message=message,
+                    conv_id=conv_id,
+                    metadata=metadata,
+                    result_str=error_result,
+                    token_count=e.token_usage,
+                    cost=e.cost,
+                    execution_steps=e.execution_steps,
+                )
+                raise
 
         self._save_history(
             agent_path=agent_path,
@@ -549,6 +536,32 @@ class BaseAdapter(ABC):
         except Exception as e:
             logger.debug("Auto-title failed for session '%s': %s", session_id, e)
 
+    _DEFAULT_COMPACT_INSTRUCTIONS = (
+        "Pay special attention to the last 5-10 messages. "
+        "They contain the user's most recent active context. "
+        "Preserve their details precisely in the summary."
+    )
+
+    async def _run_compaction(self, user_id: str, conv_id: str, custom_logger: Optional[HasUIHandler] = None) -> str:
+        """Run session compaction and return the new conv_id."""
+        self._emit_ui(custom_logger, "compacting")
+        if self.session_store.begin_compaction(user_id, self.agent_name):
+            self._broadcast_compaction(self.agent_name, started=True)
+            try:
+                await self._compact_session(conv_id)
+            finally:
+                self.session_store.end_compaction(user_id, self.agent_name)
+                self._broadcast_compaction(self.agent_name, started=False)
+        else:
+            done = await asyncio.to_thread(self.session_store.wait_for_compaction, user_id, self.agent_name)
+            if not done:
+                raise TimeoutError("Timed out waiting for session compaction to finish")
+        self._emit_ui(custom_logger, "compacted")
+        session = self.session_store.get_or_create_interactive(user_id, self.agent_name)
+        if self.event_bus:
+            self.event_bus.emit("session_update", {"action": "compacted", "id": session.id})
+        return session.id
+
     async def _compact_session(self, session_id: str, instructions: str | None = None) -> None:
         """Compact session when approaching context limit.
 
@@ -556,6 +569,8 @@ class BaseAdapter(ABC):
         turns are summarized. This preserves the active conversational thread.
         Fires pre_compact/post_compact hooks if configured.
         """
+        if instructions is None:
+            instructions = self._DEFAULT_COMPACT_INSTRUCTIONS
         from tsugite.daemon.memory import (
             RETENTION_BUDGET_RATIO,
             extract_file_paths_from_turns,
