@@ -53,6 +53,10 @@ export default () => ({
     this.$watch('$store.app.view', (view) => {
       if (view === 'conversations' && this.$store.app.selectedAgent) this.reload();
     });
+    // Eagerly load if agent is already selected (from localStorage)
+    if (this.$store.app.view === 'conversations' && this.$store.app.selectedAgent) {
+      this.reload();
+    }
     this.$watch('$store.app.lastEvent', (ev) => {
       if (!ev) return;
       if (ev.type === 'history_update' && ev.agent === this.$store.app.selectedAgent) {
