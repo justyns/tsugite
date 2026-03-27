@@ -68,10 +68,16 @@ async function loadAgents() {
 loadAgents();
 
 // SSE event stream — push updates to Alpine store
+let _esConnected = false;
 const _es = connectEvents((event) => {
   Alpine.store('app').lastEvent = { ...event, _ts: Date.now() };
 });
 _es.onopen = () => {
+  if (!_esConnected) {
+    // First connection — views already loaded via init(), skip reload
+    _esConnected = true;
+    return;
+  }
   // On reconnect, refresh agents to catch up
   loadAgents();
   Alpine.store('app').lastEvent = { type: 'reconnect', _ts: Date.now() };
