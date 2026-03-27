@@ -617,6 +617,7 @@ export default () => ({
     if (parsed && !this.pendingFiles.length) {
       this.sending = true;
       this.messageText = '';
+      this._resetInputHeight();
       this.showCommandSuggestions = false;
       this.messages.push({ type: 'user', text: msg });
       this.scrollMessages();
@@ -634,6 +635,7 @@ export default () => ({
 
     this.sending = true;
     this.messageText = '';
+    this._resetInputHeight();
 
     let uploadedFiles = [];
     const fileNames = this.pendingFiles.map(f => f.name);
@@ -959,5 +961,12 @@ export default () => ({
     const maxH = parseInt(getComputedStyle(e.target).maxHeight) || 150;
     e.target.style.height = 'auto';
     e.target.style.height = Math.min(e.target.scrollHeight, maxH) + 'px';
+  },
+
+  _resetInputHeight() {
+    this.$nextTick(() => {
+      const ta = document.getElementById('message-input');
+      if (ta) ta.style.height = 'auto';
+    });
   },
 });
