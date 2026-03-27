@@ -600,26 +600,34 @@
         <div class="section-header">
           <h2>Workspace</h2>
         </div>
-        <template x-if="workspaceDir">
-          <div style="font-size:11px;color:var(--muted);padding:0 12px 8px;word-break:break-all" x-text="workspaceDir"></div>
-        </template>
+        <div style="font-size:12px;padding:4px 12px 8px;display:flex;flex-wrap:wrap;align-items:center;gap:2px">
+          <span style="cursor:pointer;color:var(--accent)" @click="goToRoot()">workspace</span>
+          <template x-for="crumb in breadcrumbs" :key="crumb.path">
+            <span>
+              <span style="color:var(--muted);margin:0 2px">/</span>
+              <span style="cursor:pointer;color:var(--accent)" @click="goToBreadcrumb(crumb)" x-text="crumb.name"></span>
+            </span>
+          </template>
+        </div>
         <template x-if="loading">
           <div class="empty-state"><span class="spinner"></span></div>
         </template>
-        <template x-if="!loading && files.length === 0">
-          <div class="empty-state">No files in workspace</div>
+        <template x-if="!loading && entries.length === 0">
+          <div class="empty-state">Empty directory</div>
         </template>
         <div class="turn-list">
-          <template x-for="file in files" :key="file.path">
-            <div class="turn-item" :class="{ active: selectedFile?.path === file.path }"
-                 @click="selectFile(file)">
+          <template x-for="entry in entries" :key="entry.path">
+            <div class="turn-item" :class="{ active: !entry.is_dir && selectedFile?.path === entry.path }"
+                 @click="entry.is_dir ? openDir(entry) : selectFile(entry)">
               <div class="item-row">
-                <span x-text="file.path" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
-                <template x-if="!file.is_text">
-                  <span class="badge" style="font-size:10px;flex-shrink:0">binary</span>
-                </template>
+                <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+                  <span x-text="entry.is_dir ? '\u{1F4C1} ' : ''" style="font-size:13px"></span>
+                  <span x-text="entry.name"></span>
+                </span>
               </div>
-              <div class="turn-meta" x-text="formatSize(file.size) + ' · ' + formatDate(file.modified)"></div>
+              <template x-if="!entry.is_dir">
+                <div class="turn-meta" x-text="formatSize(entry.size) + ' \u00b7 ' + formatDate(entry.modified)"></div>
+              </template>
             </div>
           </template>
         </div>
@@ -645,26 +653,16 @@
               </h2>
               <div style="display:flex;gap:6px">
                 <button class="btn-sm" @click="attachToChat(selectedFile)" title="Attach to conversation">Attach</button>
-                <template x-if="selectedFile.is_text">
-                  <button class="btn-sm" @click="save()" :disabled="saving || !isDirty"
-                          x-text="saving ? 'Saving...' : 'Save'"></button>
-                </template>
+                <button class="btn-sm" @click="save()" :disabled="saving || !isDirty"
+                        x-text="saving ? 'Saving...' : 'Save'"></button>
               </div>
             </div>
             <div style="font-size:11px;color:var(--muted);margin-bottom:8px" x-text="selectedFile.path"></div>
             <template x-if="error">
               <div class="msg error" x-text="error" style="margin-bottom:8px"></div>
             </template>
-            <template x-if="!selectedFile.is_text">
-              <div class="empty-state">
-                <div>Binary file</div>
-                <div style="font-size:12px;color:var(--muted);margin-top:4px" x-text="formatSize(selectedFile.size)"></div>
-              </div>
-            </template>
-            <template x-if="selectedFile.is_text">
-              <textarea x-model="content"
-                        style="flex:1;min-height:300px;font-family:monospace;font-size:13px;resize:vertical;background:var(--surface0);color:var(--text);border:1px solid var(--surface2);border-radius:6px;padding:12px;tab-size:2"></textarea>
-            </template>
+            <textarea x-model="content"
+                      style="flex:1;min-height:300px;font-family:monospace;font-size:13px;resize:vertical;background:var(--surface0);color:var(--text);border:1px solid var(--surface2);border-radius:6px;padding:12px;tab-size:2"></textarea>
           </div>
         </template>
       </div>

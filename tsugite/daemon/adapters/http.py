@@ -1598,7 +1598,7 @@ class HTTPServer:
 
         workspace_dir = adapter.agent_config.workspace_dir
         if not workspace_dir.is_dir():
-            return JSONResponse({"files": []})
+            return JSONResponse({"entries": [], "subdir": "", "workspace_dir": str(workspace_dir)})
 
         subdir = request.query_params.get("subdir", "")
         if subdir:
@@ -1613,37 +1613,37 @@ class HTTPServer:
         from tsugite.tools.fs import _build_gitignore_matcher
 
         gitignore_spec = _build_gitignore_matcher(workspace_dir)
-        resolved_ws = workspace_dir.resolve()
-        files = []
+        entries = []
         try:
-            for item in target.rglob("*"):
-                if not item.is_file() or item.is_symlink():
-                    continue
+            import stat as stat_mod
+
+            for item in sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())):
                 try:
-                    if not item.resolve().is_relative_to(resolved_ws):
-                        continue
-                except (ValueError, OSError):
+                    st = item.lstat()
+                except OSError:
                     continue
+                if stat_mod.S_ISLNK(st.st_mode):
+                    continue
+                is_dir = stat_mod.S_ISDIR(st.st_mode)
                 rel = str(item.relative_to(workspace_dir))
-                if gitignore_spec and gitignore_spec.match_file(rel):
+                if gitignore_spec and gitignore_spec.match_file(rel + ("/" if is_dir else "")):
                     continue
-                stat = item.stat()
-                files.append(
-                    {
-                        "path": rel,
-                        "name": item.name,
-                        "size": stat.st_size,
-                        "is_text": _is_text_mime(item),
-                        "modified": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
-                    }
-                )
-                if len(files) >= MAX_WORKSPACE_LIST_FILES:
-                    break
+                if is_dir:
+                    entries.append({"path": rel, "name": item.name, "is_dir": True})
+                elif stat_mod.S_ISREG(st.st_mode) and _is_text_mime(item):
+                    entries.append(
+                        {
+                            "path": rel,
+                            "name": item.name,
+                            "is_dir": False,
+                            "size": st.st_size,
+                            "modified": datetime.fromtimestamp(st.st_mtime, tz=timezone.utc).isoformat(),
+                        }
+                    )
         except OSError as e:
             return JSONResponse({"error": f"listing failed: {e}"}, status_code=500)
 
-        files.sort(key=lambda f: f["path"])
-        return JSONResponse({"files": files, "workspace_dir": str(workspace_dir)})
+        return JSONResponse({"entries": entries, "subdir": subdir, "workspace_dir": str(workspace_dir)})
 
     async def _read_workspace_file(self, request: Request) -> JSONResponse:
         adapter, err = self._get_adapter(request)
