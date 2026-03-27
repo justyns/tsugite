@@ -21,6 +21,7 @@ export default () => ({
   loadedSkills: [],
   pendingFiles: [],
   isDragging: false,
+  expandedInput: false,
   allSessions: [],
   selectedSessionId: null,
   isActiveSession: true,
@@ -964,6 +965,7 @@ export default () => ({
   },
 
   _resetInputHeight() {
+    this.expandedInput = false;
     this.$nextTick(() => {
       const ta = document.getElementById('message-input');
       if (ta) ta.style.height = 'auto';

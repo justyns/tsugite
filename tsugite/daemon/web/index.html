@@ -422,10 +422,13 @@
               </div>
               <button class="attach-btn" @click="openFilePicker()" title="Attach files">📎</button>
               <input type="file" multiple x-ref="fileInput" @change="onFileInputChange($event)" style="display:none">
+              <button class="attach-btn" @click="expandedInput = !expandedInput" :title="expandedInput ? 'Collapse editor' : 'Expand editor'" x-text="expandedInput ? '⤓' : '⤢'"></button>
               <textarea id="message-input" x-model="messageText" rows="1"
+                        :class="{ 'input-expanded': expandedInput }"
                         placeholder="Send a message..." autofocus
-                        @keydown="onInputKeydown" @input="autoResize($event); onInputChange()"></textarea>
-              <span class="input-hint">Shift+Enter for newline</span>
+                        @keydown="onInputKeydown($event)" @input="if (!expandedInput) autoResize($event); onInputChange()"
+                        @keydown.escape="expandedInput = false"></textarea>
+              <span class="input-hint" x-text="expandedInput ? 'Escape to collapse' : 'Shift+Enter for newline'"></span>
               <button id="send-btn" x-show="!sending" @click="sendMessage()">Send</button>
               <button id="stop-btn" x-show="sending" @click="cancelChat()">Stop</button>
             </div>

@@ -96,8 +96,9 @@ main { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
 .command-suggestion:hover, .command-suggestion.selected { background: var(--bg); }
 .command-suggestion .cmd-name { color: var(--accent); font-weight: 600; font-size: 14px; white-space: nowrap; }
 .command-suggestion .cmd-desc { color: var(--text-muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#message-input { flex: 1; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; font-size: 14px; font-family: inherit; resize: none; min-height: 42px; max-height: 150px; }
+#message-input { flex: 1; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; font-size: 14px; font-family: inherit; resize: none; min-height: 42px; max-height: 150px; transition: max-height 0.15s ease; }
 #message-input:focus { outline: none; border-color: var(--accent); }
+#message-input.input-expanded { max-height: 60vh; height: 60vh; resize: vertical; }
 #send-btn, #stop-btn { border-radius: 8px; padding: 10px 20px; font-size: 14px; font-weight: 600; cursor: pointer; align-self: flex-end; }
 #send-btn { background: var(--accent); color: var(--btn-text); border: none; }
 #send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
