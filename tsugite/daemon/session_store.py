@@ -165,7 +165,7 @@ class SessionStore:
                 session_id = self._interactive_index[key]
                 if session_id in self._sessions:
                     session = self._sessions[session_id]
-                    if session.status in (SessionStatus.CANCELLED.value, SessionStatus.COMPLETED.value):
+                    if session.status in (SessionStatus.CANCELLED.value, SessionStatus.COMPLETED.value, SessionStatus.FAILED.value):
                         session.status = SessionStatus.ACTIVE.value
                         self._mark_dirty()
                     return session
@@ -177,6 +177,7 @@ class SessionStore:
                 agent=agent,
                 source=SessionSource.INTERACTIVE.value,
                 user_id=user_id,
+                title="Main Session",
             )
 
             # Estimate tokens from existing history
@@ -188,6 +189,11 @@ class SessionStore:
             self._interactive_index[key] = conv_id
             self._save()
             return session
+
+    def default_interactive_ids(self, agent: str) -> dict:
+        """Return {user_id: session_id} for all default interactive sessions for this agent."""
+        with self._lock:
+            return {uid: sid for (uid, ag), sid in self._interactive_index.items() if ag == agent}
 
     def needs_compaction(self, session_id: str) -> bool:
         with self._lock:

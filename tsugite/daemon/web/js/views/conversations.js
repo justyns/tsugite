@@ -429,15 +429,28 @@ export default () => ({
   },
 
   canCancel(s) {
-    return s?.state === 'running';
+    return s?.state === 'running' && !s?.is_default;
   },
 
   canRestart(s) {
-    return s?.state === 'failed' || s?.state === 'cancelled';
+    return (s?.state === 'failed' || s?.state === 'cancelled') && !s?.is_default;
   },
 
   canComplete(s) {
-    return s?.state === 'active' || s?.state === 'running';
+    return (s?.state === 'active' || s?.state === 'running') && !s?.is_default;
+  },
+
+  async newSession() {
+    const agent = this.$store.app.selectedAgent;
+    if (!agent) return;
+    try {
+      const data = await post(`/api/agents/${agent}/sessions/new`, { user_id: this.userId });
+      await this.loadSessions();
+      const session = this.allSessions.find(s => s.id === data.id);
+      if (session) this.selectSession(session);
+    } catch (e) {
+      this.messages.push({ type: 'error', text: `Failed to create session: ${e.message}` });
+    }
   },
 
   async completeSession(session) {

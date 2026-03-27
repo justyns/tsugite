@@ -343,6 +343,7 @@ class HTTPServer:
             Route("/api/health", self._health, methods=["GET"]),
             Route("/api/agents", self._list_agents, methods=["GET"]),
             Route("/api/agents/{agent}/sessions", self._list_sessions, methods=["GET"]),
+            Route("/api/agents/{agent}/sessions/new", self._new_interactive_session, methods=["POST"]),
             Route("/api/agents/{agent}/chat", self._chat, methods=["POST"]),
             Route("/api/agents/{agent}/chat/cancel", self._cancel_chat, methods=["POST"]),
             Route("/api/agents/{agent}/upload", self._upload, methods=["POST"]),
@@ -481,6 +482,7 @@ class HTTPServer:
             agent=adapter.agent_name, source=source, status=status, parent_id=parent_id, limit=limit
         )
 
+        default_ids = adapter.session_store.default_interactive_ids(adapter.agent_name)
         sessions = []
         for s in all_sessions:
             user_id = s.user_id or ""
@@ -507,10 +509,37 @@ class HTTPServer:
                     "error": s.error,
                     "result": s.result,
                     "title": s.title,
+                    "is_default": default_ids.get(user_id) == s.id,
                 }
             )
 
         return JSONResponse({"sessions": sessions})
+
+    async def _new_interactive_session(self, request: Request) -> JSONResponse:
+        adapter, err = self._get_adapter(request)
+        if err:
+            return err
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+
+        user_id = adapter.resolve_http_user(body.get("user_id", "web-anonymous"))
+
+        from tsugite.daemon.session_store import Session, SessionSource
+        from tsugite.history.storage import generate_session_id
+
+        session_id = generate_session_id(adapter.agent_name)
+        session = Session(
+            id=session_id,
+            agent=adapter.agent_name,
+            source=SessionSource.INTERACTIVE.value,
+            user_id=user_id,
+        )
+        adapter.session_store.create_session(session)
+        if self.event_bus:
+            self.event_bus.emit("session_update", {"action": "created", "id": session_id})
+        return JSONResponse({"id": session_id}, status_code=201)
 
     async def _status(self, request: Request) -> JSONResponse:
         adapter, err = self._get_adapter(request)

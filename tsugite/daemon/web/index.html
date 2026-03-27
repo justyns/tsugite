@@ -110,30 +110,35 @@
         <template x-if="loading">
           <div class="empty-state"><span class="spinner"></span></div>
         </template>
-        <template x-if="!loading && allSessions.length === 0">
-          <div class="empty-state">No sessions</div>
-        </template>
         <input type="text" x-model="sessionFilter" placeholder="Filter sessions..." class="session-filter"
                x-show="!loading && allSessions.length > 0">
         <div class="turn-list">
-          <!-- Interactive sessions -->
-          <template x-if="groupedSessions.interactive.length > 0">
+          <!-- Interactive sessions (always show header with + button) -->
+          <template x-if="!loading">
             <div>
-              <div class="session-group-header">Interactive</div>
+              <div class="session-group-header" style="display:flex;align-items:center;justify-content:space-between">
+                <span>Interactive</span>
+                <button class="btn-sm" @click="newSession()" title="New conversation" style="padding:2px 8px;font-size:12px">+</button>
+              </div>
               <template x-for="s in groupedSessions.interactive" :key="s.conversation_id || s.id">
                 <div class="turn-item" :class="{ active: selectedSessionId === (s.conversation_id || s.id) }"
                      @click="selectSession(s)">
                   <div class="item-row">
                     <span class="status-dot" :style="{ background: statusDotColor(s.state) }"></span>
-                    <template x-if="editingSessionId === s.id">
+                    <template x-if="s.is_default">
+                      <span style="font-size:9px;color:var(--accent);flex-shrink:0" title="Default session">&#9679;</span>
+                    </template>
+                    <template x-if="editingSessionId === s.id && !s.is_default">
                       <input class="session-title-input" type="text" x-model="editingTitle"
                              @blur="saveTitle(s)" @keydown.enter="saveTitle(s)" @keydown.escape="editingSessionId = null"
                              @click.stop>
                     </template>
-                    <template x-if="editingSessionId !== s.id">
+                    <template x-if="editingSessionId !== s.id || s.is_default">
                       <span class="session-label-row">
                         <span x-text="sessionLabel(s)" class="session-label"></span>
-                        <span class="session-edit-btn" @click="startEditTitle(s, $event)" title="Rename">&#9998;</span>
+                        <template x-if="!s.is_default">
+                          <span class="session-edit-btn" @click="startEditTitle(s, $event)" title="Rename">&#9998;</span>
+                        </template>
                       </span>
                     </template>
                   </div>
@@ -221,7 +226,10 @@
         </button>
         <button class="mobile-back-btn" @click="backToSessions()">&#8592; Sessions</button>
         <template x-if="!selectedSessionId">
-          <div class="empty-state">Select a session</div>
+          <div class="empty-state">
+            <div>Select a session or</div>
+            <button class="btn-sm" @click="newSession()" style="margin-top:8px">Start new conversation</button>
+          </div>
         </template>
 
         <!-- Active interactive session: full chat UI -->
@@ -390,7 +398,7 @@
                 <span><span class="spinner"></span> Compacting...</span>
               </template>
               <button class="btn-sm" x-show="!compacting" @click="compactSession()" :disabled="sending">Compact</button>
-              <button class="btn-sm" x-show="!compacting && !sending" @click="completeSession(selectedSessionMeta)">Mark Complete</button>
+              <button class="btn-sm" x-show="!compacting && !sending && !selectedSessionMeta?.is_default" @click="completeSession(selectedSessionMeta)">Mark Complete</button>
             </div>
 
             <div class="drag-overlay" x-show="isDragging" x-cloak>Drop files to attach</div>
