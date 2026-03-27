@@ -438,34 +438,17 @@
         <!-- Non-interactive session: read-only history -->
         <template x-if="selectedSessionId && !isActiveSession">
           <div style="overflow-y:auto;flex:1">
-            <!-- Session metadata card -->
+            <!-- Session metadata header -->
             <template x-if="selectedSessionMeta">
-              <div class="card" style="margin-bottom:12px">
-                <h3 style="display:flex;align-items:center;gap:8px">
-                  <span x-text="selectedSessionMeta.id || selectedSessionMeta.conversation_id"></span>
+              <div style="margin-bottom:12px">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+                  <span class="badge" :class="stateBadge(selectedSessionMeta.state)" x-text="selectedSessionMeta.state"></span>
                   <span class="badge badge-muted" x-text="selectedSessionMeta.source || 'background'" style="font-weight:normal"></span>
-                </h3>
-                <div class="card-meta">
-                  <div>Status: <span class="badge" :class="stateBadge(selectedSessionMeta.state)" x-text="selectedSessionMeta.state"></span></div>
-                  <template x-if="selectedSessionMeta.prompt">
-                    <div>Prompt: <span x-text="selectedSessionMeta.prompt" style="font-size:12px"></span></div>
-                  </template>
                   <template x-if="selectedSessionMeta.model">
-                    <div>Model: <span x-text="selectedSessionMeta.model"></span></div>
+                    <span style="font-size:11px;color:var(--muted)" x-text="selectedSessionMeta.model"></span>
                   </template>
-                  <template x-if="selectedSessionMeta.error">
-                    <div style="color:var(--error)">Error: <span x-text="selectedSessionMeta.error"></span></div>
-                  </template>
-                  <template x-if="selectedSessionMeta.result">
-                    <div>Result: <span x-text="selectedSessionMeta.result" style="font-size:12px"></span></div>
-                  </template>
-                  <div style="font-size:12px;color:var(--muted);margin-top:4px">
-                    Created: <span x-text="formatDate(selectedSessionMeta.created_at)"></span>
-                    <template x-if="selectedSessionMeta.last_active">
-                      · Last active: <span x-text="formatDate(selectedSessionMeta.last_active)"></span>
-                    </template>
-                  </div>
-                  <div style="display:flex;gap:8px;margin-top:8px">
+                  <span style="font-size:11px;color:var(--muted)" x-text="formatDate(selectedSessionMeta.created_at)"></span>
+                  <div style="display:flex;gap:6px;margin-left:auto">
                     <template x-if="canCancel(selectedSessionMeta)">
                       <button class="btn-sm danger" @click="cancelSession(selectedSessionMeta)">Cancel</button>
                     </template>
@@ -477,6 +460,16 @@
                     </template>
                   </div>
                 </div>
+                <div style="font-size:11px;color:var(--muted);margin-bottom:8px;word-break:break-all" x-text="selectedSessionMeta.id || selectedSessionMeta.conversation_id"></div>
+                <template x-if="selectedSessionMeta.prompt">
+                  <div class="msg user" x-html="renderHtml(selectedSessionMeta.prompt)"></div>
+                </template>
+                <template x-if="selectedSessionMeta.error">
+                  <div class="msg error" x-text="selectedSessionMeta.error" style="margin-top:8px"></div>
+                </template>
+                <template x-if="selectedSessionMeta.result && turns.length === 0">
+                  <div class="msg agent" x-html="renderHtml(selectedSessionMeta.result)" style="margin-top:8px"></div>
+                </template>
               </div>
             </template>
 
