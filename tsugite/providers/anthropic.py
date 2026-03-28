@@ -63,7 +63,7 @@ class AnthropicProvider:
         body: dict[str, Any] = {
             "model": model,
             "messages": translated,
-            "max_tokens": kwargs.pop("max_tokens", 8192),
+            "max_tokens": kwargs.pop("max_tokens", self._default_max_tokens(model)),
             "stream": stream,
         }
         if system:
@@ -145,6 +145,10 @@ class AnthropicProvider:
             cost=calculate_cost(self.name, model, usage),
             raw=data,
         )
+
+    def _default_max_tokens(self, model: str) -> int:
+        info = self.get_model_info(model)
+        return info.max_output_tokens if info and info.max_output_tokens else 4096
 
     def count_tokens(self, text: str, model: str) -> int:
         return default_count_tokens(text, model)
