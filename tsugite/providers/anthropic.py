@@ -11,21 +11,23 @@ from typing import Any, AsyncIterator
 import httpx
 
 from .base import CompletionResponse, ModelInfo, StreamChunk, Usage, default_count_tokens
-from .model_registry import calculate_cost, get_model_info as _get_model_info
+from .model_registry import calculate_cost, get_model_info as _get_model_info, register_models
 
 logger = logging.getLogger(__name__)
 
 API_BASE = "https://api.anthropic.com"
 API_VERSION = "2023-06-01"
 
-_KNOWN_MODELS = [
-    "claude-opus-4-6",
-    "claude-sonnet-4-6",
-    "claude-3-5-sonnet-20241022",
-    "claude-3-5-haiku-20241022",
-    "claude-3-haiku-20240307",
-    "claude-haiku-4-5-20251001",
-]
+# fmt: off
+_ANTHROPIC_MODELS: dict[str, ModelInfo] = {
+    "anthropic/claude-opus-4-6":            ModelInfo(max_input_tokens=200_000, max_output_tokens=32_000, input_cost_per_million=15.00, output_cost_per_million=75.00, supports_vision=True),
+    "anthropic/claude-sonnet-4-6":          ModelInfo(max_input_tokens=200_000, max_output_tokens=16_000, input_cost_per_million=3.00, output_cost_per_million=15.00, supports_vision=True),
+    "anthropic/claude-3-5-sonnet-20241022": ModelInfo(max_input_tokens=200_000, max_output_tokens=8_192, input_cost_per_million=3.00, output_cost_per_million=15.00, supports_vision=True),
+    "anthropic/claude-3-5-haiku-20241022":  ModelInfo(max_input_tokens=200_000, max_output_tokens=8_192, input_cost_per_million=0.80, output_cost_per_million=4.00, supports_vision=True),
+    "anthropic/claude-3-haiku-20240307":    ModelInfo(max_input_tokens=200_000, max_output_tokens=4_096, input_cost_per_million=0.25, output_cost_per_million=1.25, supports_vision=True),
+    "anthropic/claude-haiku-4-5-20251001":  ModelInfo(max_input_tokens=200_000, max_output_tokens=8_192, input_cost_per_million=0.80, output_cost_per_million=4.00, supports_vision=True),
+}
+# fmt: on
 
 
 class AnthropicProvider:
@@ -36,6 +38,8 @@ class AnthropicProvider:
         self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
         self.api_base = (api_base or API_BASE).rstrip("/")
         self._client: httpx.AsyncClient | None = None
+
+        register_models(_ANTHROPIC_MODELS)
 
     def _get_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
@@ -157,7 +161,7 @@ class AnthropicProvider:
         return _get_model_info(self.name, model)
 
     async def list_models(self) -> list[str]:
-        return list(_KNOWN_MODELS)
+        return [k.split("/", 1)[1] for k in _ANTHROPIC_MODELS]
 
 
 def _translate_messages(messages: list[dict]) -> tuple[str | None, list[dict]]:

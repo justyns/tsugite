@@ -16,6 +16,20 @@ _CLAUDE_CODE_MODEL_MAP = {
 }
 
 
+def _register_claude_code_models() -> None:
+    from tsugite.providers.base import ModelInfo
+    from tsugite.providers.model_registry import register_models
+
+    register_models({
+        "claude_code/claude-opus-4-6": ModelInfo(max_input_tokens=1_000_000, supports_vision=True),
+        "claude_code/claude-sonnet-4-6": ModelInfo(max_input_tokens=1_000_000, supports_vision=True),
+        "claude_code/claude-haiku-4-5-20251001": ModelInfo(max_input_tokens=200_000, supports_vision=True),
+    })
+
+
+_register_claude_code_models()
+
+
 def resolve_model_alias(model_string: str) -> str:
     """Resolve a model alias to its full model string.
 

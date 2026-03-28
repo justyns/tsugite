@@ -10,9 +10,26 @@ from typing import Any, AsyncIterator
 import httpx
 
 from .base import CompletionResponse, ModelInfo, StreamChunk, Usage, default_count_tokens
-from .model_registry import calculate_cost, get_model_info as _get_model_info
+from .model_registry import calculate_cost, get_model_info as _get_model_info, register_models
 
 logger = logging.getLogger(__name__)
+
+# fmt: off
+_OPENAI_MODELS: dict[str, ModelInfo] = {
+    "openai/gpt-4o":              ModelInfo(max_input_tokens=128_000, max_output_tokens=16_384, input_cost_per_million=2.50, output_cost_per_million=10.00, supports_vision=True),
+    "openai/gpt-4o-mini":         ModelInfo(max_input_tokens=128_000, max_output_tokens=16_384, input_cost_per_million=0.15, output_cost_per_million=0.60, supports_vision=True),
+    "openai/gpt-4o-2024-11-20":   ModelInfo(max_input_tokens=128_000, max_output_tokens=16_384, input_cost_per_million=2.50, output_cost_per_million=10.00, supports_vision=True),
+    "openai/gpt-4-turbo":         ModelInfo(max_input_tokens=128_000, max_output_tokens=4_096, input_cost_per_million=10.00, output_cost_per_million=30.00, supports_vision=True),
+    "openai/gpt-4":               ModelInfo(max_input_tokens=8_192, max_output_tokens=8_192, input_cost_per_million=30.00, output_cost_per_million=60.00),
+    "openai/gpt-3.5-turbo":       ModelInfo(max_input_tokens=16_385, max_output_tokens=4_096, input_cost_per_million=0.50, output_cost_per_million=1.50),
+    "openai/o1":                   ModelInfo(max_input_tokens=200_000, max_output_tokens=100_000, input_cost_per_million=15.00, output_cost_per_million=60.00, supports_vision=True, supports_reasoning=True),
+    "openai/o1-mini":              ModelInfo(max_input_tokens=128_000, max_output_tokens=65_536, input_cost_per_million=3.00, output_cost_per_million=12.00, supports_reasoning=True),
+    "openai/o1-preview":           ModelInfo(max_input_tokens=128_000, max_output_tokens=32_768, input_cost_per_million=15.00, output_cost_per_million=60.00, supports_reasoning=True),
+    "openai/o3":                   ModelInfo(max_input_tokens=200_000, max_output_tokens=100_000, input_cost_per_million=10.00, output_cost_per_million=40.00, supports_vision=True, supports_reasoning=True),
+    "openai/o3-mini":              ModelInfo(max_input_tokens=200_000, max_output_tokens=100_000, input_cost_per_million=1.10, output_cost_per_million=4.40, supports_reasoning=True),
+    "openai/o4-mini":              ModelInfo(max_input_tokens=200_000, max_output_tokens=100_000, input_cost_per_million=1.10, output_cost_per_million=4.40, supports_vision=True, supports_reasoning=True),
+}
+# fmt: on
 
 _PROVIDER_CONFIGS: dict[str, dict[str, Any]] = {
     "openai": {
@@ -62,6 +79,9 @@ class OpenAICompatProvider:
         self.api_key = api_key
         self.extra_headers = extra_headers or {}
         self._client: httpx.AsyncClient | None = None
+
+        if name == "openai":
+            register_models(_OPENAI_MODELS)
 
     def _get_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
@@ -191,43 +211,56 @@ class OpenAICompatProvider:
             return []
 
     async def _list_ollama_models(self, client: httpx.AsyncClient, headers: dict) -> list[str]:
-        """List Ollama models and register context lengths from /api/show."""
+        """List Ollama chat models, registering context lengths and capabilities from /api/show."""
         from .model_registry import register_model
 
         base = self.api_base.replace("/v1", "")
         resp = await client.get(f"{base}/api/tags", headers=headers)
         resp.raise_for_status()
-        names = [m["name"] for m in resp.json().get("models", [])]
+        all_names = [m["name"] for m in resp.json().get("models", [])]
 
-        for name in names:
+        chat_models = []
+        for name in all_names:
             try:
                 show_resp = await client.post(f"{base}/api/show", json={"name": name}, headers=headers)
-                if show_resp.status_code == 200:
-                    data = show_resp.json()
-                    model_info = data.get("model_info", {})
+                if show_resp.status_code != 200:
+                    chat_models.append(name)
+                    continue
 
-                    # Context length is under {arch}.context_length (e.g., qwen2.context_length)
-                    ctx_len = None
-                    for key, val in model_info.items():
-                        if key.endswith(".context_length") and isinstance(val, int):
-                            ctx_len = val
-                            break
+                data = show_resp.json()
+                caps = data.get("capabilities") or []
 
-                    # Fallback: check num_ctx in parameters string
-                    if not ctx_len:
-                        for line in data.get("parameters", "").splitlines():
-                            if "num_ctx" in line:
-                                try:
-                                    ctx_len = int(line.split()[-1])
-                                except (ValueError, IndexError):
-                                    pass
+                # Filter: only include models that support completion (chat)
+                if caps and "completion" not in caps:
+                    continue
 
-                    if ctx_len:
-                        register_model("ollama", name, ModelInfo(max_input_tokens=ctx_len))
+                model_info_dict = data.get("model_info", {})
+
+                # Context length from {arch}.context_length
+                ctx_len = None
+                for key, val in model_info_dict.items():
+                    if key.endswith(".context_length") and isinstance(val, int):
+                        ctx_len = val
+                        break
+
+                if not ctx_len:
+                    for line in data.get("parameters", "").splitlines():
+                        if "num_ctx" in line:
+                            try:
+                                ctx_len = int(line.split()[-1])
+                            except (ValueError, IndexError):
+                                pass
+
+                info = ModelInfo(
+                    max_input_tokens=ctx_len or 128_000,
+                    supports_vision="vision" in caps,
+                )
+                register_model("ollama", name, info)
+                chat_models.append(name)
             except Exception:
-                pass
+                chat_models.append(name)
 
-        return names
+        return chat_models
 
 
 def create_provider(name: str = "openai", **kwargs: Any) -> OpenAICompatProvider:
