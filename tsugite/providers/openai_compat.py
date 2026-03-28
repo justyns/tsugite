@@ -181,10 +181,7 @@ class OpenAICompatProvider:
         try:
             client = self._get_client()
             if self.name == "ollama":
-                base = self.api_base.replace("/v1", "")
-                resp = await client.get(f"{base}/api/tags", headers=headers)
-                resp.raise_for_status()
-                return [m["name"] for m in resp.json().get("models", [])]
+                return await self._list_ollama_models(client, headers)
 
             resp = await client.get(f"{self.api_base}/models", headers=headers)
             resp.raise_for_status()
@@ -192,6 +189,45 @@ class OpenAICompatProvider:
         except Exception as e:
             logger.debug("Failed to list models for %s: %s", self.name, e)
             return []
+
+    async def _list_ollama_models(self, client: httpx.AsyncClient, headers: dict) -> list[str]:
+        """List Ollama models and register context lengths from /api/show."""
+        from .model_registry import register_model
+
+        base = self.api_base.replace("/v1", "")
+        resp = await client.get(f"{base}/api/tags", headers=headers)
+        resp.raise_for_status()
+        names = [m["name"] for m in resp.json().get("models", [])]
+
+        for name in names:
+            try:
+                show_resp = await client.post(f"{base}/api/show", json={"name": name}, headers=headers)
+                if show_resp.status_code == 200:
+                    data = show_resp.json()
+                    model_info = data.get("model_info", {})
+
+                    # Context length is under {arch}.context_length (e.g., qwen2.context_length)
+                    ctx_len = None
+                    for key, val in model_info.items():
+                        if key.endswith(".context_length") and isinstance(val, int):
+                            ctx_len = val
+                            break
+
+                    # Fallback: check num_ctx in parameters string
+                    if not ctx_len:
+                        for line in data.get("parameters", "").splitlines():
+                            if "num_ctx" in line:
+                                try:
+                                    ctx_len = int(line.split()[-1])
+                                except (ValueError, IndexError):
+                                    pass
+
+                    if ctx_len:
+                        register_model("ollama", name, ModelInfo(max_input_tokens=ctx_len))
+            except Exception:
+                pass
+
+        return names
 
 
 def create_provider(name: str = "openai", **kwargs: Any) -> OpenAICompatProvider:

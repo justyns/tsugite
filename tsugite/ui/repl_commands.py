@@ -28,6 +28,7 @@ def handle_help(console: Console) -> None:
         ("/exit, /quit", "Exit the REPL"),
         ("/clear", "Clear the screen"),
         ("/model <name>", "Switch to a different model"),
+        ("/models", "Interactive model picker"),
         ("/agent <name>", "Switch to a different agent"),
         ("/attach <path>", "Attach a file for context"),
         ("/detach <path>", "Remove an attachment"),

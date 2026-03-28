@@ -96,10 +96,10 @@ def detect_available_providers() -> dict[str, int]:
     Returns:
         Dict of provider name -> model count (0 if unavailable)
     """
-    providers = {}
+    from tsugite.providers import list_all_providers
 
-    # Check each provider
-    for provider_name in ["ollama", "openai", "anthropic", "google"]:
+    providers = {}
+    for provider_name in list_all_providers():
         models = fetch_provider_models(provider_name)
         providers[provider_name] = len(models)
 

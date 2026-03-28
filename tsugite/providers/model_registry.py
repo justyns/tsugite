@@ -56,6 +56,11 @@ def get_model_info(provider: str, model: str) -> ModelInfo | None:
     return best_match
 
 
+def register_model(provider: str, model: str, info: ModelInfo) -> None:
+    """Register or update model info. Called by providers during discovery."""
+    _REGISTRY[f"{provider}/{model}"] = info
+
+
 def calculate_cost(provider: str, model: str, usage: Usage) -> float | None:
     """Calculate cost from usage stats. Returns None for unknown models."""
     info = get_model_info(provider, model)

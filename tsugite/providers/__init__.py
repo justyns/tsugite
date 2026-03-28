@@ -28,6 +28,17 @@ _BUILTIN_PROVIDERS: dict[str, str] = {
 _cache: dict[str, Provider] = {}
 
 
+def list_all_providers() -> list[str]:
+    """All known provider names (built-in + plugins)."""
+    names = set(_BUILTIN_PROVIDERS.keys())
+    try:
+        for ep in importlib.metadata.entry_points(group=GROUP_PROVIDERS):
+            names.add(ep.name)
+    except Exception:
+        pass
+    return sorted(names)
+
+
 def clear_cache() -> None:
     """Clear the provider cache. Useful for tests."""
     _cache.clear()

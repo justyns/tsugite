@@ -47,6 +47,7 @@ from .mcp import mcp_app  # noqa: E402
 from .plugins import plugin_app  # noqa: E402
 from .run import _unpack_execution_result  # noqa: E402, F401
 from .serve import serve_app  # noqa: E402
+from .models import models_app  # noqa: E402
 from .tools import tools_app  # noqa: E402
 from .validate import validate_command  # noqa: E402
 from .workspace import workspace_app  # noqa: E402
@@ -62,5 +63,6 @@ app.add_typer(tools_app, name="tools")
 app.add_typer(plugin_app, name="plugin")
 app.add_typer(history_app, name="history")
 app.add_typer(workspace_app, name="workspace")
+app.add_typer(models_app, name="models")
 app.command("init")(init)
 app.command("validate")(validate_command)

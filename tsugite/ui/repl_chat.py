@@ -248,9 +248,21 @@ def run_repl_chat(
                         console.print("[yellow]Cannot switch conversations in active session.[/yellow]")
                         console.print("[dim]Exit and use `tsugite chat --continue <id>` to resume.[/dim]")
 
-                    elif command == "/model":
-                        if not args:
-                            console.print(f"[cyan]Current model: {manager.model_override or model}[/cyan]")
+                    elif command in ("/model", "/models"):
+                        if command == "/models" or not args:
+                            if command == "/models":
+                                try:
+                                    from tsugite.cli.init import detect_available_providers, prompt_for_model
+
+                                    providers = detect_available_providers()
+                                    chosen = prompt_for_model(providers)
+                                    if chosen:
+                                        manager.model_override = chosen
+                                        console.print(f"[green]Model changed to: {chosen}[/green]")
+                                except (ImportError, KeyboardInterrupt):
+                                    console.print("[yellow]Model selection cancelled.[/yellow]")
+                            else:
+                                console.print(f"[cyan]Current model: {manager.model_override or model}[/cyan]")
                         else:
                             new_model = args[0]
                             manager.model_override = new_model
