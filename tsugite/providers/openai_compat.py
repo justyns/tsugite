@@ -87,6 +87,7 @@ class OpenAICompatProvider:
         headers = self._build_headers()
 
         if stream:
+            body["stream_options"] = {"include_usage": True}
             return self._stream(url, headers, body)
 
         client = self._get_client()
@@ -96,6 +97,10 @@ class OpenAICompatProvider:
 
     async def _stream(self, url: str, headers: dict, body: dict) -> AsyncIterator[StreamChunk]:
         client = self._get_client()
+        stream_usage: Usage | None = None
+        stream_cost: float | None = None
+        model = body.get("model", "")
+
         async with client.stream("POST", url, json=body, headers=headers) as resp:
             resp.raise_for_status()
             async for line in resp.aiter_lines():
@@ -103,12 +108,24 @@ class OpenAICompatProvider:
                     continue
                 payload = line[6:]
                 if payload.strip() == "[DONE]":
-                    yield StreamChunk(content="", done=True)
+                    yield StreamChunk(content="", done=True, usage=stream_usage, cost=stream_cost)
                     return
                 try:
                     data = json.loads(payload)
                 except json.JSONDecodeError:
                     continue
+
+                # Final chunk with usage data (empty choices, usage present)
+                usage_data = data.get("usage")
+                if usage_data and not data.get("choices"):
+                    stream_usage = Usage(
+                        prompt_tokens=usage_data.get("prompt_tokens", 0),
+                        completion_tokens=usage_data.get("completion_tokens", 0),
+                        total_tokens=usage_data.get("total_tokens", 0),
+                    )
+                    stream_cost = calculate_cost(self.name, model, stream_usage)
+                    continue
+
                 choices = data.get("choices", [])
                 if choices:
                     delta = choices[0].get("delta", {})

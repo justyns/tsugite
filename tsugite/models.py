@@ -94,16 +94,23 @@ def get_provider_and_model(model_string: str) -> tuple[str, Provider, str]:
 
 def is_reasoning_model_without_stop_support(model_string: str) -> bool:
     """Check if model is a reasoning model that doesn't support stop sequences."""
+    from tsugite.providers.model_registry import get_model_info
+
     try:
-        provider, model_name, variant = parse_model_string(model_string)
+        resolved = resolve_model_alias(model_string)
+        provider, model_name, variant = parse_model_string(resolved)
     except ValueError:
         return False
 
-    if provider != "openai":
-        return False
+    model_id = get_model_id(resolved)
+    info = get_model_info(provider, model_id)
+    if info and info.supports_reasoning:
+        return True
 
-    pattern = r"^(o1|o3)(-mini|-preview)?(-\d{4}-\d{2}-\d{2})?$"
-    return bool(re.match(pattern, model_name))
+    # Fallback regex for models not in the registry (e.g., new OpenAI reasoning models)
+    if provider == "openai":
+        return bool(re.match(r"^(o1|o3|o4)(-mini|-preview)?(-\d{4}-\d{2}-\d{2})?$", model_name))
+    return False
 
 
 def filter_reasoning_model_params(model_name: str, params: dict) -> dict:

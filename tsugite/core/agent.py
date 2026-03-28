@@ -781,6 +781,8 @@ class TsugiteAgent:
 
         if stream:
             accumulated_content = ""
+            step_cost = 0.0
+            final_chunk = None
             result = await self._provider.acompletion(
                 messages=messages, model=self._model_id, stream=True, **self._model_kwargs
             )
@@ -790,17 +792,23 @@ class TsugiteAgent:
                     accumulated_content += chunk.content
                     if self.event_bus:
                         self.event_bus.emit(StreamChunkEvent(chunk=chunk.content))
+                if chunk.done:
+                    final_chunk = chunk
 
             if self.event_bus:
                 self.event_bus.emit(StreamCompleteEvent())
 
+            if final_chunk and final_chunk.usage:
+                self.total_tokens += final_chunk.usage.total_tokens
+                step_cost = final_chunk.cost or 0.0
+                self.total_cost += step_cost
+
             parsed = self._parse_response_from_text(accumulated_content)
 
-            # Streaming doesn't return usage/cost — estimate if needed
             return TurnResult(
                 thought=parsed.thought,
                 code=parsed.code,
-                step_cost=0.0,
+                step_cost=step_cost,
                 content_blocks=parsed.content_blocks,
                 response=None,
             )
@@ -939,14 +947,17 @@ class TsugiteAgent:
         blocks = []
         text_parts = ["<context>"]
 
-        # Text attachments wrapped in XML
+        model_info = self._provider.get_model_info(self._model_id) if not self._is_claude_code else None
+        model_supports_vision = model_info.supports_vision if model_info else True
+
         for att in self.attachments:
             if att.content_type == AttachmentContentType.TEXT:
                 text_parts.append(f'<attachment name="{att.name}">')
                 text_parts.append(att.content)
                 text_parts.append("</attachment>")
+            elif att.content_type == AttachmentContentType.IMAGE and not model_supports_vision:
+                text_parts.append(f'<attachment name="{att.name}">[Image: {att.name}]</attachment>')
             else:
-                # Native multi-modal block (image_url, file, etc.)
                 block = self._format_attachment(att)
                 if block:
                     blocks.append(block)

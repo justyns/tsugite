@@ -86,6 +86,10 @@ class AnthropicProvider:
 
     async def _stream(self, url: str, headers: dict, body: dict) -> AsyncIterator[StreamChunk]:
         client = self._get_client()
+        input_tokens = 0
+        output_tokens = 0
+        model = body.get("model", "")
+
         async with client.stream("POST", url, json=body, headers=headers) as resp:
             resp.raise_for_status()
             async for line in resp.aiter_lines():
@@ -101,8 +105,17 @@ class AnthropicProvider:
                     delta = data.get("delta", {})
                     if delta.get("type") == "text_delta":
                         yield StreamChunk(content=delta.get("text", ""))
+                elif event_type == "message_start":
+                    usage_data = data.get("message", {}).get("usage", {})
+                    input_tokens = usage_data.get("input_tokens", 0)
+                elif event_type == "message_delta":
+                    usage_data = data.get("usage", {})
+                    output_tokens = usage_data.get("output_tokens", 0)
                 elif event_type == "message_stop":
-                    yield StreamChunk(content="", done=True)
+                    total = input_tokens + output_tokens
+                    usage = Usage(prompt_tokens=input_tokens, completion_tokens=output_tokens, total_tokens=total)
+                    cost = calculate_cost(self.name, model, usage)
+                    yield StreamChunk(content="", done=True, usage=usage, cost=cost)
                     return
 
     def _parse_response(self, data: dict, model: str) -> CompletionResponse:

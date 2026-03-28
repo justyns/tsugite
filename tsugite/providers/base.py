@@ -33,6 +33,8 @@ class CompletionResponse:
 class StreamChunk:
     content: str = ""
     done: bool = False
+    usage: Usage | None = None
+    cost: float | None = None
 
 
 @dataclass
@@ -41,6 +43,10 @@ class ModelInfo:
     max_output_tokens: int | None = None
     input_cost_per_million: float | None = None
     output_cost_per_million: float | None = None
+    supports_vision: bool = False
+    supports_audio: bool = False
+    supports_reasoning: bool = False
+    supports_streaming: bool = True
 
 
 @runtime_checkable
