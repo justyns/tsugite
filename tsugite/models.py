@@ -1,18 +1,23 @@
 """Model adapters for Tsugite agents."""
 
-import os
+from __future__ import annotations
+
 import re
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from tsugite.providers.base import Provider
+
+
+_CLAUDE_CODE_MODEL_MAP = {
+    "opus": "claude-opus-4-6",
+    "sonnet": "claude-sonnet-4-6",
+    "haiku": "claude-haiku-4-5-20251001",
+}
 
 
 def resolve_model_alias(model_string: str) -> str:
     """Resolve a model alias to its full model string.
-
-    Args:
-        model_string: Either an alias name or full model string
-
-    Returns:
-        Full model string (resolved alias or original string)
 
     Examples:
         >>> resolve_model_alias("cheap")  # if alias exists
@@ -52,231 +57,78 @@ def parse_model_string(model_string: str) -> tuple[str, str, Optional[str]]:
     return provider, model_name, variant
 
 
-def is_reasoning_model_without_stop_support(model_string: str) -> bool:
-    """Check if model is a reasoning model that doesn't support stop sequences.
+def get_model_id(model_string: str) -> str:
+    """Get the model ID to pass to the provider's acompletion().
 
-    OpenAI's o1/o3 reasoning models don't support the stop parameter.
-
-    Args:
-        model_string: Full model string like "openai:o1-mini"
-
-    Returns:
-        True if this is a reasoning model that doesn't support stop sequences
+    For most providers this is the model_name (+ variant for ollama).
+    For claude_code, maps short names to full model IDs.
     """
+    resolved = resolve_model_alias(model_string)
+    provider, model_name, variant = parse_model_string(resolved)
+
+    if provider == "claude_code":
+        return _CLAUDE_CODE_MODEL_MAP.get(model_name, model_name)
+
+    if provider == "ollama" and variant:
+        return f"{model_name}:{variant}"
+
+    return model_name
+
+
+def get_provider_and_model(model_string: str) -> tuple[str, Provider, str]:
+    """Parse a model string and return (provider_name, provider_instance, model_id).
+
+    This is the main entry point for resolving a tsugite model string
+    into something usable for LLM calls.
+    """
+    from tsugite.providers import get_provider
+
+    resolved = resolve_model_alias(model_string)
+    provider_name, model_name, variant = parse_model_string(resolved)
+
+    provider = get_provider(provider_name)
+    model_id = get_model_id(resolved)
+
+    return provider_name, provider, model_id
+
+
+def is_reasoning_model_without_stop_support(model_string: str) -> bool:
+    """Check if model is a reasoning model that doesn't support stop sequences."""
     try:
         provider, model_name, variant = parse_model_string(model_string)
     except ValueError:
         return False
 
-    # Only OpenAI reasoning models have this limitation
     if provider != "openai":
         return False
 
-    # Check if it's an o1 or o3 model (with optional version suffix)
-    # Matches: o1, o1-mini, o1-preview, o1-2024-12-17, o3, o3-mini, o3-2025-01-31, etc.
     pattern = r"^(o1|o3)(-mini|-preview)?(-\d{4}-\d{2}-\d{2})?$"
     return bool(re.match(pattern, model_name))
 
 
-def get_model_params(model_string: str, **kwargs) -> dict:
-    """Get parameters for direct litellm.acompletion() calls.
-
-    Returns a dict with model ID and parameters for direct LiteLLM usage.
-
-    Args:
-        model_string: Model specification like "openai:gpt-4o-mini" or an alias
-        **kwargs: Additional model parameters (reasoning_effort, response_format, temperature, etc.)
-
-    Returns:
-        Dict with "model" key and all parameters ready for litellm.acompletion()
-
-    Examples:
-        >>> params = get_model_params("openai:gpt-4o-mini", temperature=0.7)
-        >>> params["model"]
-        'openai/gpt-4o-mini'
-        >>> params["temperature"]
-        0.7
-
-        >>> # Reasoning models - unsupported params filtered out
-        >>> params = get_model_params("openai:o1", temperature=0.7)
-        >>> "temperature" not in params  # Filtered for o1
-        True
-    """
-    # Resolve aliases and parse model string
-    resolved_model = resolve_model_alias(model_string)
-    provider, model_name, variant = parse_model_string(resolved_model)
-
-    # Build parameters dict
-    params = dict(kwargs)
-
-    # Filter parameters for reasoning models
-    if is_reasoning_model_without_stop_support(resolved_model):
-        params = filter_reasoning_model_params(model_name, params)
-
-    # Build provider-specific parameters
-    if provider == "ollama":
-        return build_ollama_params(model_name, variant, params)
-    elif provider == "openai":
-        return build_openai_params(model_name, params)
-    elif provider == "anthropic":
-        return build_anthropic_params(model_name, params)
-    elif provider == "google":
-        return build_google_params(model_name, params)
-    elif provider == "github_copilot":
-        return build_github_copilot_params(model_name, params)
-    elif provider == "claude_code":
-        return build_claude_code_params(model_name, params)
-    else:
-        return build_fallback_params(provider, model_name, params)
-
-
 def filter_reasoning_model_params(model_name: str, params: dict) -> dict:
-    """Filter out unsupported parameters for reasoning models.
-
-    OpenAI's o1/o3 reasoning models don't support certain parameters.
-
-    Args:
-        model_name: The model name (e.g., "o1", "o1-mini")
-        params: Dictionary of parameters
-
-    Returns:
-        Filtered parameters dict (modifies in-place and returns)
-    """
+    """Filter out unsupported parameters for reasoning models."""
     unsupported_params = ["stop", "temperature", "top_p", "presence_penalty", "frequency_penalty"]
 
-    # o1-mini specifically doesn't support reasoning_effort
     if "o1-mini" in model_name:
         unsupported_params.append("reasoning_effort")
 
-    # Remove unsupported parameters
     for param in unsupported_params:
         params.pop(param, None)
 
     return params
 
 
-def build_ollama_params(model_name: str, variant: str | None, params: dict) -> dict:
-    """Build parameters for Ollama provider.
+def get_model_kwargs(model_string: str, **kwargs) -> dict:
+    """Prepare kwargs for provider.acompletion(), filtering reasoning model params.
 
-    Args:
-        model_name: The model name
-        variant: Optional model variant
-        params: Base parameters dict
-
-    Returns:
-        Updated parameters dict
+    Returns cleaned kwargs dict ready to pass as **kwargs to provider.acompletion().
     """
-    full_model_name = f"{model_name}:{variant}" if variant else model_name
-    params["model"] = f"openai/{full_model_name}"
-    params.setdefault("api_base", os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1"))
-    params.setdefault("api_key", "ollama")
-    return params
+    resolved = resolve_model_alias(model_string)
 
+    params = dict(kwargs)
+    if is_reasoning_model_without_stop_support(resolved):
+        _, model_name, _ = parse_model_string(resolved)
+        params = filter_reasoning_model_params(model_name, params)
 
-def build_openai_params(model_name: str, params: dict) -> dict:
-    """Build parameters for OpenAI provider.
-
-    Args:
-        model_name: The model name
-        params: Base parameters dict
-
-    Returns:
-        Updated parameters dict
-    """
-    params["model"] = f"openai/{model_name}"
-    if "api_key" not in params:
-        params["api_key"] = os.getenv("OPENAI_API_KEY")
-    return params
-
-
-def build_anthropic_params(model_name: str, params: dict) -> dict:
-    """Build parameters for Anthropic provider.
-
-    Args:
-        model_name: The model name
-        params: Base parameters dict
-
-    Returns:
-        Updated parameters dict
-    """
-    params["model"] = f"anthropic/{model_name}"
-    if "api_key" not in params:
-        params["api_key"] = os.getenv("ANTHROPIC_API_KEY")
-    return params
-
-
-def build_google_params(model_name: str, params: dict) -> dict:
-    """Build parameters for Google provider.
-
-    Args:
-        model_name: The model name
-        params: Base parameters dict
-
-    Returns:
-        Updated parameters dict
-    """
-    params["model"] = f"gemini/{model_name}"
-    if "api_key" not in params:
-        params["api_key"] = os.getenv("GOOGLE_API_KEY")
-    return params
-
-
-def build_github_copilot_params(model_name: str, params: dict) -> dict:
-    """Build parameters for GitHub Copilot provider.
-
-    Args:
-        model_name: The model name
-        params: Base parameters dict
-
-    Returns:
-        Updated parameters dict
-    """
-    params["model"] = f"github_copilot/{model_name}"
-
-    # GitHub Copilot requires specific headers
-    extra_headers = params.get("extra_headers", {})
-    if "editor-version" not in extra_headers:
-        extra_headers["editor-version"] = "vscode/1.95.0"
-    if "Copilot-Integration-Id" not in extra_headers:
-        extra_headers["Copilot-Integration-Id"] = "vscode-chat"
-    params["extra_headers"] = extra_headers
-
-    return params
-
-
-_CLAUDE_CODE_MODEL_MAP = {
-    "opus": "claude-opus-4-6",
-    "sonnet": "claude-sonnet-4-6",
-    "haiku": "claude-haiku-4-5-20251001",
-}
-
-
-def build_claude_code_params(model_name: str, params: dict) -> dict:
-    """Build parameters for Claude Code CLI provider.
-
-    Args:
-        model_name: The model name (sonnet, opus, haiku, or full model ID)
-        params: Base parameters dict
-
-    Returns:
-        Updated parameters dict with _provider marker
-    """
-    params["model"] = model_name
-    params["_provider"] = "claude_code"
-    params["_litellm_model"] = _CLAUDE_CODE_MODEL_MAP.get(model_name, model_name)
-    return params
-
-
-def build_fallback_params(provider: str, model_name: str, params: dict) -> dict:
-    """Build parameters for fallback/unknown providers.
-
-    Args:
-        provider: The provider name
-        model_name: The model name
-        params: Base parameters dict
-
-    Returns:
-        Updated parameters dict
-    """
-    params["model"] = f"{provider}/{model_name}"
     return params

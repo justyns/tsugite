@@ -1,8 +1,6 @@
 """Initialization command for first-time setup."""
 
-import logging
 import subprocess
-from contextlib import contextmanager
 from pathlib import Path
 from typing import List, Optional
 
@@ -44,18 +42,6 @@ def _get_questionary_style():
     )
 
 
-@contextmanager
-def suppress_litellm_warnings():
-    """Temporarily suppress LiteLLM warnings."""
-    litellm_logger = logging.getLogger("LiteLLM")
-    original_level = litellm_logger.level
-    litellm_logger.setLevel(logging.ERROR)
-    try:
-        yield
-    finally:
-        litellm_logger.setLevel(original_level)
-
-
 def detect_ollama() -> bool:
     """Check if Ollama is running."""
     try:
@@ -71,48 +57,31 @@ def detect_ollama() -> bool:
 
 
 def fetch_provider_models(provider: str) -> List[str]:
-    """Get available models for a provider using LiteLLM.
+    """Get available models for a provider via the provider system.
 
     Args:
         provider: Provider name (ollama, openai, anthropic, google)
 
     Returns:
-        List of model strings in LiteLLM format (e.g., "ollama/qwen2.5-coder:7b")
+        List of model strings in provider format (e.g., "ollama/qwen2.5-coder:7b")
     """
+    import asyncio
+
+    from tsugite.providers import get_provider
+
     try:
-        from litellm import get_valid_models
-
-        with suppress_litellm_warnings():
-            # For ollama, check endpoint to get locally installed models
-            if provider == "ollama":
-                models = get_valid_models(
-                    custom_llm_provider="ollama",
-                    check_provider_endpoint=True,
-                )
-            # For cloud providers, get models based on API key presence
-            elif provider == "openai":
-                models = get_valid_models(custom_llm_provider="openai")
-            elif provider == "anthropic":
-                models = get_valid_models(custom_llm_provider="anthropic")
-            elif provider == "google":
-                # Use "gemini" instead of "google" for LiteLLM
-                models = get_valid_models(custom_llm_provider="gemini")
-                # Convert gemini/* to google:* for consistency
-                models = [m.replace("gemini/", "google/") for m in models]
-            else:
-                return []
-
-        return models if models else []
+        prov = get_provider(provider)
+        models = asyncio.run(prov.list_models())
+        return [f"{provider}/{m}" for m in models] if models else []
     except Exception:
-        # Silently return empty list on error
         return []
 
 
-def litellm_to_tsugite_format(model: str) -> str:
-    """Convert LiteLLM model format to Tsugite format.
+def provider_to_tsugite_format(model: str) -> str:
+    """Convert provider/model format to Tsugite format.
 
     Args:
-        model: Model in LiteLLM format (e.g., "ollama/qwen2.5-coder:7b")
+        model: Model in provider format (e.g., "ollama/qwen2.5-coder:7b")
 
     Returns:
         Model in Tsugite format (e.g., "ollama:qwen2.5-coder:7b")
@@ -208,7 +177,7 @@ def prompt_for_model(providers: dict[str, int], skip_prompt: bool = False, defau
             return f"{selected_provider}:{model or 'default'}"
 
         # Convert to Tsugite format
-        tsugite_models = [litellm_to_tsugite_format(m) for m in models]
+        tsugite_models = [provider_to_tsugite_format(m) for m in models]
 
         if skip_prompt:
             return tsugite_models[0]

@@ -7,6 +7,24 @@ import pytest
 from tsugite.core.agent import AgentResult, TsugiteAgent
 from tsugite.core.executor import LocalExecutor
 from tsugite.core.tools import create_tool_from_function
+from tsugite.providers.base import CompletionResponse, Usage
+
+
+def _mock_response(content: str, reasoning_content: str = None) -> CompletionResponse:
+    return CompletionResponse(
+        content=content,
+        reasoning_content=reasoning_content,
+        usage=Usage(total_tokens=100),
+        cost=0.001,
+    )
+
+
+def _patch_provider(agent, side_effect=None, return_value=None):
+    """Patch an agent's provider.acompletion with an AsyncMock."""
+    mock = AsyncMock(side_effect=side_effect, return_value=return_value)
+    agent._provider = MagicMock()
+    agent._provider.acompletion = mock
+    return mock
 
 
 @pytest.mark.asyncio
@@ -35,87 +53,71 @@ async def test_agent_creation():
 
 
 @pytest.mark.asyncio
-async def test_agent_simple_calculation(mock_litellm_response):
+async def test_agent_simple_calculation():
     """Test agent can do basic calculation and return final_answer."""
 
-    # Mock litellm.acompletion to return a response with final_answer
-    with patch("litellm.acompletion", new_callable=AsyncMock) as mock_acompletion:
-        mock_acompletion.return_value = mock_litellm_response("""Thought: I'll calculate 5 + 3 using Python.
+    agent = TsugiteAgent(
+        model_string="openai:gpt-4o-mini",
+        tools=[],
+        instructions="",
+        max_turns=5,
+    )
+
+    mock = _patch_provider(agent, return_value=_mock_response("""Thought: I'll calculate 5 + 3 using Python.
 
 ```python
 result = 5 + 3
 final_answer(result)
-```""")
+```"""))
 
-        agent = TsugiteAgent(
-            model_string="openai:gpt-4o-mini",
-            tools=[],
-            instructions="",
-            max_turns=5,
-        )
-
-        result = await agent.run("What is 5 + 3?")
-
-        # Should return the final answer (8)
-        assert result == 8
-
-        # Verify litellm was called
-        mock_acompletion.assert_called_once()
+    result = await agent.run("What is 5 + 3?")
+    assert result == 8
+    mock.assert_called_once()
 
 
 @pytest.mark.asyncio
-async def test_agent_multi_step_reasoning(mock_litellm_response):
+async def test_agent_multi_step_reasoning():
     """Test agent can do multi-step reasoning."""
+
+    agent = TsugiteAgent(
+        model_string="openai:gpt-4o-mini",
+        tools=[],
+        instructions="",
+        max_turns=5,
+    )
 
     call_count = 0
 
     async def mock_acompletion(*args, **kwargs):
         nonlocal call_count
         call_count += 1
-
         if call_count == 1:
-            # First step: Set a variable
-            return mock_litellm_response("""Thought: I'll start by setting x to 5.
+            return _mock_response("""Thought: I'll start by setting x to 5.
 
 ```python
 x = 5
 print(f"x = {x}")
 ```""")
-        elif call_count == 2:
-            # Second step: Use the variable and call final_answer
-            return mock_litellm_response("""Thought: Now I'll multiply x by 2 and return the result.
+        else:
+            return _mock_response("""Thought: Now I'll multiply x by 2 and return the result.
 
 ```python
 result = x * 2
 final_answer(result)
 ```""")
 
-    with patch("litellm.acompletion", new=mock_acompletion):
-        agent = TsugiteAgent(
-            model_string="openai:gpt-4o-mini",
-            tools=[],
-            instructions="",
-            max_turns=5,
-        )
+    _patch_provider(agent, side_effect=mock_acompletion)
+    result = await agent.run("Calculate 5 * 2")
 
-        result = await agent.run("Calculate 5 * 2")
-
-        # Should return 10
-        assert result == 10
-
-        # Should have taken 2 steps
-        assert len(agent.memory.steps) == 2
-
-        # Check first step
-        assert "x = 5" in agent.memory.steps[0].code
-        assert "x = 5" in agent.memory.steps[0].output
-
-        # Check second step
-        assert "result = x * 2" in agent.memory.steps[1].code
+    assert result == 10
+    assert len(agent.memory.steps) == 2
+    assert "x = 5" in agent.memory.steps[0].code
+    assert "x = 5" in agent.memory.steps[0].output
+    assert "result = x * 2" in agent.memory.steps[1].code
 
 
 @pytest.mark.asyncio
-async def test_agent_with_tools(mock_litellm_response):
+async def test_agent_with_tools():
     """Test agent can use tools."""
 
     def multiply(a: int, b: int) -> int:
@@ -124,197 +126,172 @@ async def test_agent_with_tools(mock_litellm_response):
 
     tool = create_tool_from_function(multiply)
 
-    with patch("litellm.acompletion", new_callable=AsyncMock) as mock_acompletion:
-        mock_acompletion.return_value = mock_litellm_response("""Thought: I'll use the multiply tool.
+    agent = TsugiteAgent(
+        model_string="openai:gpt-4o-mini",
+        tools=[tool],
+        instructions="",
+        max_turns=5,
+    )
+
+    _patch_provider(agent, return_value=_mock_response("""Thought: I'll use the multiply tool.
 
 ```python
 result = multiply(5, 3)
 final_answer(result)
-```""")
+```"""))
 
-        agent = TsugiteAgent(
-            model_string="openai:gpt-4o-mini",
-            tools=[tool],
-            instructions="",
-            max_turns=5,
-        )
-
-        # Inject the tool into the executor namespace so it can be called
-        agent.executor.namespace["multiply"] = tool.function
-
-        result = await agent.run("What is 5 * 3?")
-
-        # Should return 15
-        assert result == 15
+    agent.executor.namespace["multiply"] = tool.function
+    result = await agent.run("What is 5 * 3?")
+    assert result == 15
 
 
 @pytest.mark.asyncio
-async def test_agent_max_turns_reached(mock_litellm_response):
+async def test_agent_max_turns_reached():
     """Test agent raises error when max_turns is reached."""
 
-    with patch("litellm.acompletion", new_callable=AsyncMock) as mock_acompletion:
-        # Always return code without final_answer
-        mock_acompletion.return_value = mock_litellm_response("""Thought: Still working...
+    agent = TsugiteAgent(
+        model_string="openai:gpt-4o-mini",
+        tools=[],
+        instructions="",
+        max_turns=3,
+    )
+
+    _patch_provider(agent, return_value=_mock_response("""Thought: Still working...
 
 ```python
 x = 1
 print(x)
-```""")
+```"""))
 
-        agent = TsugiteAgent(
-            model_string="openai:gpt-4o-mini",
-            tools=[],
-            instructions="",
-            max_turns=3,
-        )
+    with pytest.raises(RuntimeError) as exc_info:
+        await agent.run("Some task")
 
-        # Should raise RuntimeError
-        with pytest.raises(RuntimeError) as exc_info:
-            await agent.run("Some task")
-
-        assert "max_turns" in str(exc_info.value)
-        assert "3" in str(exc_info.value)
+    assert "max_turns" in str(exc_info.value)
+    assert "3" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
-async def test_agent_return_full_result(mock_litellm_response):
+async def test_agent_return_full_result():
     """Test agent can return full result with metadata."""
 
-    with patch("litellm.acompletion", new_callable=AsyncMock) as mock_acompletion:
-        mock_acompletion.return_value = mock_litellm_response("""Thought: Calculate the answer.
+    agent = TsugiteAgent(
+        model_string="openai:gpt-4o-mini",
+        tools=[],
+        instructions="",
+        max_turns=5,
+    )
+
+    _patch_provider(agent, return_value=_mock_response("""Thought: Calculate the answer.
 
 ```python
 final_answer(42)
-```""")
+```"""))
 
-        agent = TsugiteAgent(
-            model_string="openai:gpt-4o-mini",
-            tools=[],
-            instructions="",
-            max_turns=5,
-        )
+    result = await agent.run("What is the answer?", return_full_result=True)
 
-        result = await agent.run("What is the answer?", return_full_result=True)
-
-        # Should return AgentResult
-        assert isinstance(result, AgentResult)
-        assert result.output == 42
-        assert result.token_usage == 100
-        assert result.steps is not None
+    assert isinstance(result, AgentResult)
+    assert result.output == 42
+    assert result.token_usage == 100
+    assert result.steps is not None
 
 
 @pytest.mark.asyncio
-async def test_agent_reasoning_model_support(mock_litellm_response):
+async def test_agent_reasoning_model_support():
     """Test agent supports reasoning models with reasoning_effort."""
 
-    with patch("litellm.acompletion", new_callable=AsyncMock) as mock_acompletion:
-        mock_acompletion.return_value = mock_litellm_response(
-            """Thought: Using reasoning to solve this.
+    agent = TsugiteAgent(
+        model_string="openai:o1",
+        tools=[],
+        instructions="",
+        max_turns=5,
+        model_kwargs={"reasoning_effort": "high"},
+    )
+
+    _patch_provider(agent, return_value=_mock_response(
+        """Thought: Using reasoning to solve this.
 
 ```python
 final_answer(100)
 ```""",
-            reasoning_content="[Hidden reasoning process...]",
-        )
+        reasoning_content="[Hidden reasoning process...]",
+    ))
 
-        agent = TsugiteAgent(
-            model_string="openai:o1",
-            tools=[],
-            instructions="",
-            max_turns=5,
-            model_kwargs={"reasoning_effort": "high"},
-        )
+    await agent.run("Solve this problem")
 
-        await agent.run("Solve this problem")
-
-        # Should capture reasoning content
-        assert len(agent.memory.reasoning_history) == 1
-        assert "[Hidden reasoning process...]" in agent.memory.reasoning_history[0]
-
-        # Should have called litellm with reasoning_effort
-        call_kwargs = mock_acompletion.call_args[1]
-        assert "reasoning_effort" in call_kwargs
-        assert call_kwargs["reasoning_effort"] == "high"
+    # Should capture reasoning content
+    assert len(agent.memory.reasoning_history) == 1
+    assert "[Hidden reasoning process...]" in agent.memory.reasoning_history[0]
 
 
 @pytest.mark.asyncio
-async def test_agent_model_kwargs_passed_to_litellm(mock_litellm_response):
-    """Test that model_kwargs are passed to litellm.acompletion."""
+async def test_agent_model_kwargs_passed_to_provider():
+    """Test that model_kwargs are passed to provider.acompletion."""
 
-    with patch("litellm.acompletion", new_callable=AsyncMock) as mock_acompletion:
-        mock_acompletion.return_value = mock_litellm_response("""Thought: Done.
+    agent = TsugiteAgent(
+        model_string="openai:gpt-4o-mini",
+        tools=[],
+        instructions="",
+        max_turns=5,
+        model_kwargs={
+            "temperature": 0.7,
+            "max_tokens": 1000,
+            "response_format": {"type": "json_object"},
+        },
+    )
+
+    mock = _patch_provider(agent, return_value=_mock_response("""Thought: Done.
 
 ```python
 final_answer("test")
-```""")
+```"""))
 
-        agent = TsugiteAgent(
-            model_string="openai:gpt-4o-mini",
-            tools=[],
-            instructions="",
-            max_turns=5,
-            model_kwargs={
-                "temperature": 0.7,
-                "max_tokens": 1000,
-                "response_format": {"type": "json_object"},
-            },
-        )
+    await agent.run("Task")
 
-        await agent.run("Task")
-
-        # Verify kwargs were passed
-        call_kwargs = mock_acompletion.call_args[1]
-        assert call_kwargs["temperature"] == 0.7
-        assert call_kwargs["max_tokens"] == 1000
-        assert call_kwargs["response_format"] == {"type": "json_object"}
+    # Verify kwargs were passed
+    call_kwargs = mock.call_args[1]
+    assert call_kwargs["temperature"] == 0.7
+    assert call_kwargs["max_tokens"] == 1000
+    assert call_kwargs["response_format"] == {"type": "json_object"}
 
 
 @pytest.mark.asyncio
-async def test_agent_error_handling(mock_litellm_response):
+async def test_agent_error_handling():
     """Test agent handles code execution errors."""
+
+    agent = TsugiteAgent(
+        model_string="openai:gpt-4o-mini",
+        tools=[],
+        instructions="",
+        max_turns=5,
+    )
 
     call_count = 0
 
     async def mock_acompletion(*args, **kwargs):
         nonlocal call_count
         call_count += 1
-
         if call_count == 1:
-            # First step: Code with error
-            return mock_litellm_response("""Thought: Try to divide by zero.
+            return _mock_response("""Thought: Try to divide by zero.
 
 ```python
 result = 1 / 0
 print(result)
 ```""")
-        elif call_count == 2:
-            # Second step: Fix the error
-            return mock_litellm_response("""Thought: That failed. Let me try a different approach.
+        else:
+            return _mock_response("""Thought: That failed. Let me try a different approach.
 
 ```python
 result = 1 / 1
 final_answer(result)
 ```""")
 
-    with patch("litellm.acompletion", new=mock_acompletion):
-        agent = TsugiteAgent(
-            model_string="openai:gpt-4o-mini",
-            tools=[],
-            instructions="",
-            max_turns=5,
-        )
+    _patch_provider(agent, side_effect=mock_acompletion)
+    result = await agent.run("Calculate something")
 
-        result = await agent.run("Calculate something")
-
-        # Should have recovered from error
-        assert result == 1.0
-
-        # Check that first step has error
-        assert agent.memory.steps[0].error is not None
-        assert "ZeroDivisionError" in agent.memory.steps[0].error
-
-        # Check that second step succeeded
-        assert agent.memory.steps[1].error is None
+    assert result == 1.0
+    assert agent.memory.steps[0].error is not None
+    assert "ZeroDivisionError" in agent.memory.steps[0].error
+    assert agent.memory.steps[1].error is None
 
 
 @pytest.mark.asyncio
@@ -336,14 +313,9 @@ async def test_agent_build_system_prompt():
 
     prompt = agent._build_system_prompt()
 
-    # Check that prompt includes tool definition
     assert "search" in prompt
     assert "Search for information" in prompt
-
-    # Check that prompt includes instructions
     assert "You are an expert researcher." in prompt
-
-    # Check that prompt has basic structure (XML execution results)
     assert "tsugite_execution_result" in prompt
     assert "final_answer" in prompt
     assert "```python" in prompt
@@ -359,40 +331,30 @@ async def test_agent_parse_response():
         max_turns=5,
     )
 
-    # Mock response object
-    response = MagicMock()
-    response.choices = [MagicMock()]
-
-    # Test parsing thought and code
-    response.choices[0].message.content = """Thought: I need to calculate this.
+    parsed = agent._parse_response_from_text("""Thought: I need to calculate this.
 
 ```python
 x = 5 + 3
 print(x)
-```"""
-
-    parsed = agent._parse_response(response)
+```""")
 
     assert "calculate" in parsed.thought.lower()
     assert "x = 5 + 3" in parsed.code
     assert "print(x)" in parsed.code
 
-    # Test parsing with final_answer
-    response.choices[0].message.content = """Thought: Return the result.
+    parsed = agent._parse_response_from_text("""Thought: Return the result.
 
 ```python
 final_answer(42)
-```"""
-
-    parsed = agent._parse_response(response)
+```""")
 
     assert "result" in parsed.thought.lower()
     assert "final_answer(42)" in parsed.code
 
 
 @pytest.mark.asyncio
-async def test_agent_litellm_params():
-    """Test that LiteLLM params are pre-computed correctly."""
+async def test_agent_model_kwargs():
+    """Test that model_kwargs are correctly filtered for reasoning models."""
     agent = TsugiteAgent(
         model_string="openai:gpt-4o-mini",
         tools=[],
@@ -400,9 +362,7 @@ async def test_agent_litellm_params():
         max_turns=5,
     )
 
-    # Should have pre-computed litellm_params with model key
-    assert "model" in agent.litellm_params
-    assert agent.litellm_params["model"] == "openai/gpt-4o-mini"
+    assert agent._model_id == "gpt-4o-mini"
 
     # Test with reasoning model - should filter unsupported params
     agent_o1 = TsugiteAgent(
@@ -414,9 +374,9 @@ async def test_agent_litellm_params():
     )
 
     # Temperature should be filtered out for o1
-    assert "temperature" not in agent_o1.litellm_params
+    assert "temperature" not in agent_o1._model_kwargs
     # reasoning_effort should be kept
-    assert agent_o1.litellm_params.get("reasoning_effort") == "high"
+    assert agent_o1._model_kwargs.get("reasoning_effort") == "high"
 
 
 @pytest.mark.asyncio
@@ -429,10 +389,8 @@ async def test_agent_build_messages():
         max_turns=5,
     )
 
-    # Set task
     agent.memory.add_task("Calculate 5 + 3")
 
-    # Add a step (with xml_observation for new format)
     agent.memory.add_step(
         thought="I'll use Python to calculate",
         code="result = 5 + 3\nprint(result)",
@@ -443,23 +401,14 @@ async def test_agent_build_messages():
 
     messages = agent._build_messages()
 
-    # Should have system, user (task), assistant (code), user (observation)
     assert len(messages) == 4
-
-    # Check system message
     assert messages[0]["role"] == "system"
     assert "tsugite_execution_result" in messages[0]["content"]
-
-    # Check task
     assert messages[1]["role"] == "user"
     assert messages[1]["content"] == "Calculate 5 + 3"
-
-    # Check assistant response (just code, no Thought prefix)
     assert messages[2]["role"] == "assistant"
     assert "```python" in messages[2]["content"]
     assert "result = 5 + 3" in messages[2]["content"]
-
-    # Check observation (XML format)
     assert messages[3]["role"] == "user"
     assert "<tsugite_execution_result" in messages[3]["content"]
     assert "<output>8</output>" in messages[3]["content"]
@@ -477,7 +426,6 @@ async def test_agent_build_messages_no_code_includes_thought():
 
     agent.memory.add_task("Hello")
 
-    # Simulate a step where the LLM responded with text but no code
     agent.memory.add_step(
         thought="I want to greet the user but forgot to use a code block.",
         code="",
@@ -488,7 +436,6 @@ async def test_agent_build_messages_no_code_includes_thought():
 
     messages = agent._build_messages()
 
-    # Assistant message should contain the thought, not an empty code block
     assistant_msg = messages[2]
     assert assistant_msg["role"] == "assistant"
     assert "```python" not in assistant_msg["content"]
@@ -496,70 +443,31 @@ async def test_agent_build_messages_no_code_includes_thought():
 
 
 @pytest.mark.asyncio
-async def test_agent_extract_reasoning_content():
-    """Test extracting reasoning content from responses."""
-    agent = TsugiteAgent(
-        model_string="openai:o1",
-        tools=[],
-        instructions="",
-        max_turns=5,
-    )
-
-    # Mock response with reasoning_content
-    response = MagicMock()
-    response.choices = [MagicMock()]
-    response.choices[0].message.reasoning_content = "Deep thinking process..."
-
-    reasoning = agent._extract_reasoning_content(response)
-    assert reasoning == "Deep thinking process..."
-
-    # Mock response without reasoning_content
-    response2 = MagicMock()
-    response2.choices = [MagicMock()]
-    response2.choices[0].message = MagicMock(spec=["content"])  # No reasoning_content
-
-    reasoning2 = agent._extract_reasoning_content(response2)
-    assert reasoning2 is None
-
-
-@pytest.mark.asyncio
 async def test_agent_custom_executor():
     """Test agent can use custom executor."""
 
-    # Create mock executor
     mock_executor = MagicMock()
     mock_executor.execute = AsyncMock(return_value=MagicMock(output="custom output", error=None, final_answer=42))
     mock_executor.namespace = {}
 
-    with patch("litellm.acompletion", new_callable=AsyncMock) as mock_acompletion:
-        mock_acompletion.return_value = MagicMock(
-            choices=[
-                MagicMock(
-                    message=MagicMock(
-                        content="""Thought: Test.
+    agent = TsugiteAgent(
+        model_string="openai:gpt-4o-mini",
+        tools=[],
+        instructions="",
+        max_turns=5,
+        executor=mock_executor,
+    )
+
+    _patch_provider(agent, return_value=_mock_response("""Thought: Test.
 
 ```python
 final_answer(42)
-```"""
-                    )
-                )
-            ],
-            usage=MagicMock(total_tokens=50),
-        )
+```"""))
 
-        agent = TsugiteAgent(
-            model_string="openai:gpt-4o-mini",
-            tools=[],
-            instructions="",
-            max_turns=5,
-            executor=mock_executor,
-        )
+    result = await agent.run("Test task")
 
-        result = await agent.run("Test task")
-
-        # Should use custom executor
-        mock_executor.execute.assert_called_once()
-        assert result == 42
+    mock_executor.execute.assert_called_once()
+    assert result == 42
 
 
 def test_build_budget_tag():
@@ -571,13 +479,11 @@ def test_build_budget_tag():
         max_turns=10,
     )
 
-    # No tokens used yet
     tag = agent._build_budget_tag(0)
     assert '<tsugite_budget turn="1" max_turns="10" />' in tag
     assert "tokens_used" not in tag
     assert "warning" not in tag
 
-    # With tokens
     agent.total_tokens = 5000
     tag = agent._build_budget_tag(4)
     assert 'turn="5"' in tag
@@ -585,86 +491,73 @@ def test_build_budget_tag():
     assert 'tokens_used="5000"' in tag
     assert "warning" not in tag
 
-    # Near the limit (1 turn remaining)
     tag = agent._build_budget_tag(8)
     assert 'turn="9"' in tag
     assert 'warning="approaching turn limit, wrap up soon"' in tag
 
-    # Last turn (0 remaining)
     tag = agent._build_budget_tag(9)
     assert 'turn="10"' in tag
     assert "warning=" in tag
 
 
 @pytest.mark.asyncio
-async def test_budget_tag_in_observations(mock_litellm_response):
+async def test_budget_tag_in_observations():
     """Test that observations include the budget tag with accumulated tokens."""
+
+    agent = TsugiteAgent(
+        model_string="openai:gpt-4o-mini",
+        tools=[],
+        instructions="",
+        max_turns=5,
+    )
+
     call_count = 0
 
     async def mock_acompletion(*args, **kwargs):
         nonlocal call_count
         call_count += 1
-
         if call_count == 1:
-            return mock_litellm_response("""Thought: Step 1.
+            return _mock_response("""Thought: Step 1.
 
 ```python
 x = 42
 print(x)
 ```""")
         else:
-            return mock_litellm_response("""Thought: Done.
+            return _mock_response("""Thought: Done.
 
 ```python
 final_answer(x)
 ```""")
 
-    with patch("litellm.acompletion", new=mock_acompletion):
-        agent = TsugiteAgent(
-            model_string="openai:gpt-4o-mini",
-            tools=[],
-            instructions="",
-            max_turns=5,
-        )
+    _patch_provider(agent, side_effect=mock_acompletion)
+    result = await agent.run("Test task")
+    assert result == 42
 
-        result = await agent.run("Test task")
-        assert result == 42
+    step1_output = agent.memory.steps[0].output
+    assert "<tsugite_budget" in step1_output
+    assert 'turn="1"' in step1_output
+    assert 'max_turns="5"' in step1_output
+    assert 'tokens_used="100"' in step1_output
 
-        # First step observation should contain budget tag in both output and xml_observation
-        step1_output = agent.memory.steps[0].output
-        assert "<tsugite_budget" in step1_output
-        assert 'turn="1"' in step1_output
-        assert 'max_turns="5"' in step1_output
-        # Mock returns 100 tokens per call
-        assert 'tokens_used="100"' in step1_output
+    step1_xml = agent.memory.steps[0].xml_observation
+    assert "<tsugite_budget" in step1_xml
+    assert 'turn="1"' in step1_xml
 
-        # Budget tag must also be in xml_observation (what the LLM actually sees)
-        step1_xml = agent.memory.steps[0].xml_observation
-        assert "<tsugite_budget" in step1_xml
-        assert 'turn="1"' in step1_xml
-
-        # Token accumulation should work
-        assert agent.total_tokens == 200  # 100 per call * 2 calls
+    assert agent.total_tokens == 200  # 100 per call * 2 calls
 
 
 def test_tool_execution_no_task_warnings():
-    """Test that calling async tools from sync context doesn't produce Task warnings.
-
-    This tests the fix for the issue where tool execution would create asyncio
-    Tasks that were never awaited, producing warning messages like:
-    - '💡 <Task pending name='Task-7' coro=<Tool.execute()>>'
-    - 'Task exception was never retrieved'
-    """
+    """Test that calling async tools from sync context doesn't produce Task warnings."""
     import asyncio
     import sys
     from io import StringIO
 
     from tsugite.core.tools import Tool
 
-    # Create async tool (like real tools)
     async def async_search(query: str) -> str:
         """Search for information"""
-        await asyncio.sleep(0.001)  # Simulate async work
+        await asyncio.sleep(0.001)
         return f"Results for: {query}"
 
     tool = Tool(
@@ -678,7 +571,6 @@ def test_tool_execution_no_task_warnings():
         function=async_search,
     )
 
-    # Create agent and inject tool
     agent = TsugiteAgent(
         model_string="openai:gpt-4o-mini",
         tools=[tool],
@@ -686,26 +578,17 @@ def test_tool_execution_no_task_warnings():
         max_turns=5,
     )
 
-    # Capture stderr to check for Task warnings
     old_stderr = sys.stderr
     stderr_capture = StringIO()
     sys.stderr = stderr_capture
 
     try:
-        # Call the tool from sync context (simulating what exec() does)
-        # This should NOT produce Task warnings
         result = agent.executor.namespace["async_search"](query="test")
-
-        # Verify result is correct
         assert result == "Results for: test"
-
     finally:
         sys.stderr = old_stderr
 
-    # Check that no Task warnings were produced
     stderr_output = stderr_capture.getvalue()
-
-    # Filter out unrelated warnings (like litellm cleanup)
     filtered_stderr = "\n".join(
         line
         for line in stderr_output.split("\n")
@@ -719,18 +602,13 @@ def test_tool_execution_no_task_warnings():
 
 
 def test_tool_exception_propagation_from_async():
-    """Test that exceptions from async tools are properly propagated.
-
-    This ensures that when an async tool raises an exception, it's properly
-    raised in the sync context rather than being lost or creating warnings.
-    """
+    """Test that exceptions from async tools are properly propagated."""
     import asyncio
     import sys
     from io import StringIO
 
     from tsugite.core.tools import Tool
 
-    # Create async tool that raises exception
     async def failing_tool(value: str) -> str:
         """Tool that fails on purpose"""
         await asyncio.sleep(0.001)
@@ -747,7 +625,6 @@ def test_tool_exception_propagation_from_async():
         function=failing_tool,
     )
 
-    # Create agent and inject tool
     agent = TsugiteAgent(
         model_string="openai:gpt-4o-mini",
         tools=[tool],
@@ -755,23 +632,17 @@ def test_tool_exception_propagation_from_async():
         max_turns=5,
     )
 
-    # Capture stderr
     old_stderr = sys.stderr
     stderr_capture = StringIO()
     sys.stderr = stderr_capture
 
     try:
-        # Call the tool and expect exception
         with pytest.raises(RuntimeError) as exc_info:
             agent.executor.namespace["failing_tool"](value="test")
-
-        # Verify exception message
         assert "Tool failed with value: test" in str(exc_info.value)
-
     finally:
         sys.stderr = old_stderr
 
-    # Check that no "exception was never retrieved" warnings appeared
     stderr_output = stderr_capture.getvalue()
     filtered_stderr = "\n".join(
         line for line in stderr_output.split("\n") if "failing_tool" in line or "never retrieved" in line

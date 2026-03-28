@@ -1,4 +1,4 @@
-"""Core agent implementation with direct LiteLLM integration."""
+"""Core agent implementation with plugin-based provider system."""
 
 from .agent import AgentResult, TsugiteAgent
 from .executor import ExecutionResult, LocalExecutor

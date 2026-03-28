@@ -1,12 +1,12 @@
 [project]
 name = "tsugite-cli"
-version = "0.9.4"
+version = "0.10.0"
 description = "Micro-agent runner for task automation using markdown definitions"
 authors = [{ name = "Justyn Shull" }]
 requires-python = ">=3.11"
 readme = "README.md"
 license = { file = "LICENSE" }
-keywords = ["agents", "automation", "cli", "jinja2", "litellm"]
+keywords = ["agents", "automation", "cli", "jinja2"]
 dependencies = [
   "typer>=0.12",
   "jinja2>=3.1",
@@ -18,8 +18,7 @@ dependencies = [
   "questionary>=2.1.1",
   "youtube-transcript-api>=0.6.0",
   "html2text>=2020.1.16",
-  "litellm>=1.77.7,<1.82.7",       # pinned: 1.82.7+ compromised (supply chain attack 2026-03-24)
-  "nest-asyncio>=1.6.0",
+  "tiktoken>=0.7.0",
   "pydantic>=2.12.3",
   "pathspec>=0.11.0",
   "prompt-toolkit>=3.0.43",

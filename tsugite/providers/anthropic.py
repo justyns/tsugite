@@ -1,0 +1,238 @@
+"""Anthropic Messages API provider."""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import re
+from typing import Any, AsyncIterator
+
+import httpx
+
+from .base import CompletionResponse, ModelInfo, StreamChunk, Usage, default_count_tokens
+from .model_registry import calculate_cost, get_model_info as _get_model_info
+
+logger = logging.getLogger(__name__)
+
+API_BASE = "https://api.anthropic.com"
+API_VERSION = "2023-06-01"
+
+_KNOWN_MODELS = [
+    "claude-opus-4-6",
+    "claude-sonnet-4-6",
+    "claude-3-5-sonnet-20241022",
+    "claude-3-5-haiku-20241022",
+    "claude-3-haiku-20240307",
+    "claude-haiku-4-5-20251001",
+]
+
+
+class AnthropicProvider:
+    """Provider for the Anthropic Messages API."""
+
+    def __init__(self, name: str = "anthropic", api_key: str | None = None, api_base: str | None = None):
+        self.name = name
+        self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
+        self.api_base = (api_base or API_BASE).rstrip("/")
+        self._client: httpx.AsyncClient | None = None
+
+    def _get_client(self) -> httpx.AsyncClient:
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(timeout=300)
+        return self._client
+
+    def _build_headers(self) -> dict[str, str]:
+        headers = {
+            "Content-Type": "application/json",
+            "anthropic-version": API_VERSION,
+        }
+        if self.api_key:
+            headers["x-api-key"] = self.api_key
+        return headers
+
+    async def acompletion(
+        self,
+        messages: list[dict],
+        model: str,
+        stream: bool = False,
+        **kwargs: Any,
+    ) -> CompletionResponse | AsyncIterator[StreamChunk]:
+        system, translated = _translate_messages(messages)
+
+        body: dict[str, Any] = {
+            "model": model,
+            "messages": translated,
+            "max_tokens": kwargs.pop("max_tokens", 8192),
+            "stream": stream,
+        }
+        if system:
+            body["system"] = system
+
+        for key in ("temperature", "top_p", "top_k", "stop_sequences", "metadata"):
+            if key in kwargs:
+                body[key] = kwargs[key]
+
+        url = f"{self.api_base}/v1/messages"
+        headers = self._build_headers()
+
+        if stream:
+            return self._stream(url, headers, body)
+
+        client = self._get_client()
+        resp = await client.post(url, json=body, headers=headers)
+        resp.raise_for_status()
+        return self._parse_response(resp.json(), model)
+
+    async def _stream(self, url: str, headers: dict, body: dict) -> AsyncIterator[StreamChunk]:
+        client = self._get_client()
+        async with client.stream("POST", url, json=body, headers=headers) as resp:
+            resp.raise_for_status()
+            async for line in resp.aiter_lines():
+                if not line.startswith("data: "):
+                    continue
+                try:
+                    data = json.loads(line[6:])
+                except json.JSONDecodeError:
+                    continue
+
+                event_type = data.get("type")
+                if event_type == "content_block_delta":
+                    delta = data.get("delta", {})
+                    if delta.get("type") == "text_delta":
+                        yield StreamChunk(content=delta.get("text", ""))
+                elif event_type == "message_stop":
+                    yield StreamChunk(content="", done=True)
+                    return
+
+    def _parse_response(self, data: dict, model: str) -> CompletionResponse:
+        content_blocks = data.get("content", [])
+        text_parts = []
+        reasoning_parts = []
+
+        for block in content_blocks:
+            if block.get("type") == "text":
+                text_parts.append(block.get("text", ""))
+            elif block.get("type") == "thinking":
+                reasoning_parts.append(block.get("thinking", ""))
+
+        usage_data = data.get("usage", {})
+        usage = Usage(
+            prompt_tokens=usage_data.get("input_tokens", 0),
+            completion_tokens=usage_data.get("output_tokens", 0),
+            total_tokens=usage_data.get("input_tokens", 0) + usage_data.get("output_tokens", 0),
+            cache_creation_input_tokens=usage_data.get("cache_creation_input_tokens"),
+            cache_read_input_tokens=usage_data.get("cache_read_input_tokens"),
+        )
+
+        return CompletionResponse(
+            content="\n".join(text_parts),
+            reasoning_content="\n".join(reasoning_parts) if reasoning_parts else None,
+            usage=usage,
+            cost=calculate_cost(self.name, model, usage),
+            raw=data,
+        )
+
+    def count_tokens(self, text: str, model: str) -> int:
+        return default_count_tokens(text, model)
+
+    def get_model_info(self, model: str) -> ModelInfo | None:
+        return _get_model_info(self.name, model)
+
+    async def list_models(self) -> list[str]:
+        return list(_KNOWN_MODELS)
+
+
+def _translate_messages(messages: list[dict]) -> tuple[str | None, list[dict]]:
+    """Translate OpenAI-format messages to Anthropic format.
+
+    Returns (system_prompt, messages).
+    """
+    system = None
+    translated = []
+
+    for msg in messages:
+        role = msg.get("role", "user")
+
+        if role == "system":
+            system = _extract_text(msg.get("content", ""))
+            continue
+
+        content = msg.get("content", "")
+        if isinstance(content, str):
+            translated.append({"role": _map_role(role), "content": content})
+        elif isinstance(content, list):
+            translated.append({"role": _map_role(role), "content": _translate_content_blocks(content)})
+        else:
+            translated.append({"role": _map_role(role), "content": str(content)})
+
+    return system, translated
+
+
+def _map_role(role: str) -> str:
+    return "assistant" if role == "assistant" else "user"
+
+
+def _extract_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(
+            block if isinstance(block, str) else block.get("text", "")
+            for block in content
+            if isinstance(block, str) or block.get("type") == "text"
+        )
+    return str(content)
+
+
+_DATA_URI_RE = re.compile(r"data:([\w/]+);base64,(.+)", re.DOTALL)
+
+
+def _translate_content_blocks(blocks: list) -> list[dict]:
+    """Translate OpenAI-format content blocks to Anthropic format."""
+    translated = []
+
+    for block in blocks:
+        if isinstance(block, str):
+            translated.append({"type": "text", "text": block})
+            continue
+
+        block_type = block.get("type", "")
+
+        if block_type == "text":
+            translated.append({"type": "text", "text": block.get("text", "")})
+
+        elif block_type == "image_url":
+            url = block.get("image_url", {}).get("url", "")
+            match = _DATA_URI_RE.match(url)
+            if match:
+                translated.append({
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": match.group(1), "data": match.group(2)},
+                })
+            else:
+                translated.append({"type": "image", "source": {"type": "url", "url": url}})
+
+        elif block_type == "file":
+            file_data_uri = block.get("file", {}).get("file_data", "")
+            if file_data_uri:
+                match = _DATA_URI_RE.match(file_data_uri)
+                if match:
+                    translated.append({
+                        "type": "document",
+                        "source": {"type": "base64", "media_type": match.group(1), "data": match.group(2)},
+                    })
+
+        elif block_type == "input_audio":
+            translated.append({"type": "text", "text": "[Audio attachment — not supported by this provider]"})
+
+    return translated
+
+
+def create_provider(name: str = "anthropic", **kwargs: Any) -> AnthropicProvider:
+    """Factory function — same interface as external plugin entry points."""
+    return AnthropicProvider(
+        name=name,
+        api_key=kwargs.get("api_key"),
+        api_base=kwargs.get("api_base"),
+    )

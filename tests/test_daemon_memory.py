@@ -1,7 +1,7 @@
 """Tests for daemon memory helpers."""
 
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -23,6 +23,7 @@ from tsugite.daemon.memory import (
     summarize_session,
 )
 from tsugite.history.models import Turn
+from tsugite.providers.base import CompletionResponse, Usage
 
 
 @pytest.fixture
@@ -30,6 +31,20 @@ def predictable_tokens():
     """Mock _count_tokens to return len//4 for predictable tests."""
     with patch("tsugite.daemon.memory._count_tokens", side_effect=lambda text, model: len(text) // 4):
         yield
+
+
+def _mock_provider_response(content: str = "Summary") -> CompletionResponse:
+    """Create a mock provider CompletionResponse."""
+    return CompletionResponse(content=content, usage=Usage(total_tokens=50), cost=0.001)
+
+
+def _mock_provider(return_value=None, side_effect=None):
+    """Create a mock provider with acompletion set up."""
+    provider = MagicMock()
+    provider.acompletion = AsyncMock(return_value=return_value, side_effect=side_effect)
+    provider.count_tokens = MagicMock(return_value=10)
+    provider.get_model_info = MagicMock(return_value=None)
+    return provider
 
 
 class TestInferCompactionModel:
@@ -60,14 +75,6 @@ class TestInferCompactionModel:
             assert infer_compaction_model("smart") == "anthropic:claude-3-haiku-20240307"
 
 
-def _mock_llm_response(content: str = "Summary") -> AsyncMock:
-    """Create a mock LLM response with the given content."""
-    response = AsyncMock()
-    response.choices = [AsyncMock()]
-    response.choices[0].message.content = content
-    return response
-
-
 class TestMessageText:
     def test_string_content(self):
         assert _message_text({"role": "user", "content": "hello"}) == "hello"
@@ -92,32 +99,40 @@ class TestMessageText:
 
 
 class TestCountTokens:
-    def test_uses_litellm_when_available(self):
-        with patch("litellm.token_counter", return_value=42):
+    def test_uses_provider(self):
+        mock_prov = _mock_provider()
+        mock_prov.count_tokens.return_value = 42
+        with patch("tsugite.models.get_provider_and_model", return_value=("openai", mock_prov, "gpt-4o-mini")):
             result = _count_tokens("hello world", "openai:gpt-4o-mini")
         assert result == 42
 
     def test_falls_back_on_error(self):
-        with patch("litellm.token_counter", side_effect=Exception("no tokenizer")):
+        with patch("tsugite.models.get_provider_and_model", side_effect=Exception("no provider")):
             result = _count_tokens("hello world test", "openai:gpt-4o-mini")
         assert result == len("hello world test") // 4
 
 
 class TestGetContextLimit:
-    def test_returns_litellm_value(self):
-        with patch("litellm.get_model_info", return_value={"max_input_tokens": 200_000}):
+    def test_returns_provider_value(self):
+        from tsugite.providers.base import ModelInfo
+
+        mock_prov = _mock_provider()
+        mock_prov.get_model_info.return_value = ModelInfo(max_input_tokens=200_000)
+        with patch("tsugite.models.get_provider_and_model", return_value=("openai", mock_prov, "gpt-4o-mini")):
             assert get_context_limit("openai:gpt-4o-mini") == 200_000
 
     def test_fallback_on_error(self):
-        with patch("litellm.get_model_info", side_effect=Exception("unknown")):
+        with patch("tsugite.models.get_provider_and_model", side_effect=Exception("unknown")):
             assert get_context_limit("ollama:llama3:8b", fallback=32_000) == 32_000
 
     def test_fallback_to_default(self):
-        with patch("litellm.get_model_info", side_effect=Exception("unknown")):
+        with patch("tsugite.models.get_provider_and_model", side_effect=Exception("unknown")):
             assert get_context_limit("ollama:llama3:8b") == DEFAULT_CONTEXT_LIMIT
 
-    def test_fallback_when_no_max_input_tokens(self):
-        with patch("litellm.get_model_info", return_value={}):
+    def test_fallback_when_no_model_info(self):
+        mock_prov = _mock_provider()
+        mock_prov.get_model_info.return_value = None
+        with patch("tsugite.models.get_provider_and_model", return_value=("openai", mock_prov, "gpt-4o-mini")):
             assert get_context_limit("openai:gpt-4o-mini", fallback=64_000) == 64_000
 
 
@@ -138,18 +153,14 @@ class TestChunkMessages:
         assert chunks[0] == messages
 
     def test_splits_when_exceeds_budget(self):
-        # Each message ~"USER: " + 100 chars = ~106 chars -> ~26 tokens
         messages = [{"role": "user", "content": "x" * 100} for _ in range(10)]
-        # Budget of 60 tokens fits ~2 messages per chunk
         chunks = _chunk_messages(messages, 60, "openai:gpt-4o-mini")
         assert len(chunks) > 1
-        # All messages accounted for
         total = sum(len(c) for c in chunks)
         assert total == 10
 
     def test_truncates_oversized_message(self):
         messages = [{"role": "user", "content": "x" * 10000}]
-        # Budget of 10 tokens = ~40 chars, message is way over
         chunks = _chunk_messages(messages, 10, "openai:gpt-4o-mini")
         assert len(chunks) == 1
         assert len(chunks[0][0]["content"]) == 40  # 10 * 4
@@ -164,7 +175,8 @@ class TestChunkMessages:
 @pytest.mark.asyncio
 async def test_summarize_chunk():
     messages = [{"role": "user", "content": "hello"}]
-    with patch("litellm.acompletion", new_callable=AsyncMock, return_value=_mock_llm_response("Chunk summary")):
+    mock_prov = _mock_provider(return_value=_mock_provider_response("Chunk summary"))
+    with patch("tsugite.models.get_provider_and_model", return_value=("openai", mock_prov, "gpt-4o-mini")):
         result = await _summarize_chunk(messages, "openai:gpt-4o-mini")
     assert result == "Chunk summary"
 
@@ -172,7 +184,8 @@ async def test_summarize_chunk():
 @pytest.mark.asyncio
 async def test_combine_summaries():
     summaries = ["Summary A", "Summary B"]
-    with patch("litellm.acompletion", new_callable=AsyncMock, return_value=_mock_llm_response("Combined")):
+    mock_prov = _mock_provider(return_value=_mock_provider_response("Combined"))
+    with patch("tsugite.models.get_provider_and_model", return_value=("openai", mock_prov, "gpt-4o-mini")):
         result = await _combine_summaries(summaries, "openai:gpt-4o-mini")
     assert result == "Combined"
 
@@ -181,31 +194,29 @@ async def test_combine_summaries():
 async def test_summarize_session_passes_model():
     messages = [{"role": "user", "content": "hello"}]
 
+    mock_prov = _mock_provider(return_value=_mock_provider_response("Summary of conversation"))
     with (
         patch("tsugite.daemon.memory.get_context_limit", return_value=128_000),
-        patch(
-            "litellm.acompletion", new_callable=AsyncMock, return_value=_mock_llm_response("Summary of conversation")
-        ) as mock_llm,
+        patch("tsugite.models.get_provider_and_model", return_value=("anthropic", mock_prov, "claude-3-haiku-20240307")),
     ):
         result = await summarize_session(messages, model="anthropic:claude-3-haiku-20240307")
 
     assert result == "Summary of conversation"
-    call_kwargs = mock_llm.call_args[1]
-    assert "anthropic/" in call_kwargs["model"]
+    mock_prov.acompletion.assert_called_once()
 
 
 @pytest.mark.asyncio
 async def test_summarize_session_default_model():
     messages = [{"role": "user", "content": "hello"}]
 
+    mock_prov = _mock_provider(return_value=_mock_provider_response())
     with (
         patch("tsugite.daemon.memory.get_context_limit", return_value=128_000),
-        patch("litellm.acompletion", new_callable=AsyncMock, return_value=_mock_llm_response()) as mock_llm,
+        patch("tsugite.models.get_provider_and_model", return_value=("openai", mock_prov, "gpt-4o-mini")),
     ):
         await summarize_session(messages)
 
-    call_kwargs = mock_llm.call_args[1]
-    assert "openai/" in call_kwargs["model"]
+    mock_prov.acompletion.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -219,15 +230,16 @@ async def test_summarize_session_single_chunk():
     """Single chunk should make exactly 1 LLM call."""
     messages = [{"role": "user", "content": "hi"}]
 
+    mock_prov = _mock_provider(return_value=_mock_provider_response("Single"))
     with (
         patch("tsugite.daemon.memory.get_context_limit", return_value=128_000),
         patch("tsugite.daemon.memory._count_tokens", return_value=10),
-        patch("litellm.acompletion", new_callable=AsyncMock, return_value=_mock_llm_response("Single")) as mock_llm,
+        patch("tsugite.models.get_provider_and_model", return_value=("openai", mock_prov, "gpt-4o-mini")),
     ):
         result = await summarize_session(messages)
 
     assert result == "Single"
-    assert mock_llm.call_count == 1
+    assert mock_prov.acompletion.call_count == 1
 
 
 @pytest.mark.asyncio
@@ -235,14 +247,15 @@ async def test_summarize_session_multiple_chunks():
     """Multiple chunks should make N+1 LLM calls (N chunks + 1 combine)."""
     messages = [{"role": "user", "content": "x" * 400} for _ in range(3)]
 
+    mock_prov = _mock_provider(return_value=_mock_provider_response())
     with (
         patch("tsugite.daemon.memory.get_context_limit", return_value=160),
         patch("tsugite.daemon.memory._count_tokens", return_value=100),
-        patch("litellm.acompletion", new_callable=AsyncMock, return_value=_mock_llm_response()) as mock_llm,
+        patch("tsugite.models.get_provider_and_model", return_value=("openai", mock_prov, "gpt-4o-mini")),
     ):
         result = await summarize_session(messages)
 
-    assert mock_llm.call_count == 4  # 3 chunks + 1 combine
+    assert mock_prov.acompletion.call_count == 4  # 3 chunks + 1 combine
     assert result == "Summary"
 
 
@@ -251,9 +264,10 @@ async def test_summarize_session_backward_compatible():
     """Old callers without max_context_tokens should still work."""
     messages = [{"role": "user", "content": "hello"}]
 
+    mock_prov = _mock_provider(return_value=_mock_provider_response("OK"))
     with (
         patch("tsugite.daemon.memory.get_context_limit", return_value=128_000),
-        patch("litellm.acompletion", new_callable=AsyncMock, return_value=_mock_llm_response("OK")),
+        patch("tsugite.models.get_provider_and_model", return_value=("openai", mock_prov, "gpt-4o-mini")),
     ):
         result = await summarize_session(messages, model="openai:gpt-4o-mini")
 
@@ -265,10 +279,11 @@ async def test_summarize_session_passes_max_context_tokens():
     """max_context_tokens should be forwarded as fallback."""
     messages = [{"role": "user", "content": "hello"}]
 
+    mock_prov = _mock_provider(return_value=_mock_provider_response("OK"))
     with (
         patch("tsugite.daemon.memory.get_context_limit", return_value=32_000) as mock_limit,
         patch("tsugite.daemon.memory._count_tokens", return_value=5),
-        patch("litellm.acompletion", new_callable=AsyncMock, return_value=_mock_llm_response("OK")),
+        patch("tsugite.models.get_provider_and_model", return_value=("ollama", mock_prov, "llama3:8b")),
     ):
         await summarize_session(messages, model="ollama:llama3:8b", max_context_tokens=32_000)
 
@@ -325,7 +340,6 @@ class TestSplitTurnsForCompaction:
 
     def test_partial_split(self):
         turns = [_make_turn("x" * 200) for _ in range(10)]
-        # Small budget forces split — only a few recent turns kept
         old, recent = split_turns_for_compaction(turns, "openai:gpt-4o-mini", 50)
         assert len(old) > 0
         assert len(recent) >= MIN_RETAINED_TURNS
@@ -333,7 +347,6 @@ class TestSplitTurnsForCompaction:
 
     def test_min_retained_respected(self):
         turns = [_make_turn("x" * 200) for _ in range(5)]
-        # Budget of 1 token — can't fit anything, but min_retained forces keeping 2
         old, recent = split_turns_for_compaction(turns, "openai:gpt-4o-mini", 1)
         assert len(recent) >= 2
         assert old + recent == turns
@@ -389,30 +402,29 @@ class TestExtractFilePathsFromTurns:
 class TestLlmCompleteErrorHandling:
     @pytest.mark.asyncio
     async def test_llm_call_failure_raises_runtime_error(self):
-        with patch("litellm.acompletion", new_callable=AsyncMock, side_effect=Exception("connection refused")):
+        mock_prov = _mock_provider(side_effect=Exception("connection refused"))
+        with patch("tsugite.models.get_provider_and_model", return_value=("openai", mock_prov, "gpt-4o-mini")):
             with pytest.raises(RuntimeError, match=r"LLM call failed.*connection refused"):
                 await _llm_complete("system", "user", "openai:gpt-4o-mini")
 
     @pytest.mark.asyncio
     async def test_empty_response_raises_runtime_error(self):
-        response = _mock_llm_response("")
-        # Override: empty string content
-        response.choices[0].message.content = ""
-        with patch("litellm.acompletion", new_callable=AsyncMock, return_value=response):
+        mock_prov = _mock_provider(return_value=_mock_provider_response(""))
+        with patch("tsugite.models.get_provider_and_model", return_value=("openai", mock_prov, "gpt-4o-mini")):
             with pytest.raises(RuntimeError, match=r"LLM returned empty response"):
                 await _llm_complete("system", "user", "openai:gpt-4o-mini")
 
     @pytest.mark.asyncio
     async def test_none_response_raises_runtime_error(self):
-        response = _mock_llm_response("ok")
-        response.choices[0].message.content = None
-        with patch("litellm.acompletion", new_callable=AsyncMock, return_value=response):
+        mock_prov = _mock_provider(return_value=CompletionResponse(content=None))
+        with patch("tsugite.models.get_provider_and_model", return_value=("openai", mock_prov, "gpt-4o-mini")):
             with pytest.raises(RuntimeError, match=r"LLM returned empty response"):
                 await _llm_complete("system", "user", "openai:gpt-4o-mini")
 
     @pytest.mark.asyncio
     async def test_successful_call_returns_content(self):
-        with patch("litellm.acompletion", new_callable=AsyncMock, return_value=_mock_llm_response("hello")):
+        mock_prov = _mock_provider(return_value=_mock_provider_response("hello"))
+        with patch("tsugite.models.get_provider_and_model", return_value=("openai", mock_prov, "gpt-4o-mini")):
             result = await _llm_complete("system", "user", "openai:gpt-4o-mini")
         assert result == "hello"
 

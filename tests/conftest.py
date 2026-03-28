@@ -10,14 +10,7 @@ from typing import Generator
 
 import pytest
 
-# Suppress RuntimeWarnings from litellm's async cleanup
-# These warnings occur during test teardown and are not actionable in our tests
-warnings.filterwarnings("ignore", category=RuntimeWarning, module="litellm")
 warnings.filterwarnings("ignore", message="coroutine.*was never awaited")
-
-# Configure Python warnings module to suppress uncaught RuntimeWarnings at module level
-if not sys.warnoptions:
-    warnings.simplefilter("ignore", RuntimeWarning)
 
 
 @pytest.fixture(autouse=True)
@@ -437,37 +430,51 @@ def mcp_config_factory():
 
 @pytest.fixture
 def mock_litellm_response():
-    """Create a mock LiteLLM response for agent tests.
+    """Create a mock provider CompletionResponse for agent tests.
 
     This fixture provides a factory function that creates mock LLM responses
-    with customizable content and reasoning. Consolidates duplicate fixtures
-    from test_agent.py and test_agent_ui_events.py.
+    with customizable content and reasoning.
 
     Returns:
-        Factory function that creates mock response objects
+        Factory function that creates CompletionResponse objects
     """
-    from unittest.mock import MagicMock
+    from tsugite.providers.base import CompletionResponse, Usage
 
     def _create_response(content: str, reasoning_content: str = None):
         """Factory to create mock responses with different content."""
-        response = MagicMock()
-        response.choices = [MagicMock()]
-        response.choices[0].message = MagicMock(spec=[])
-        response.choices[0].message.content = content
-
-        # Add reasoning content if provided
-        if reasoning_content:
-            response.choices[0].message.reasoning_content = reasoning_content
-
-        # Add token usage with spec to prevent auto-creation of attributes
-        # This prevents MagicMock from auto-creating completion_tokens_details
-        # which would trigger REASONING_TOKENS events in tests
-        response.usage = MagicMock(spec=["total_tokens"])
-        response.usage.total_tokens = 100
-
-        return response
+        return CompletionResponse(
+            content=content,
+            reasoning_content=reasoning_content,
+            usage=Usage(total_tokens=100),
+            cost=0.001,
+        )
 
     return _create_response
+
+
+@pytest.fixture
+def mock_provider():
+    """Create a mock provider and patch the registry to return it.
+
+    Usage:
+        def test_something(mock_provider):
+            mock_provider.acompletion.return_value = CompletionResponse(content="hello")
+            agent = TsugiteAgent(model_string="openai:gpt-4o-mini", ...)
+            # agent._provider will be the mock_provider
+    """
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from tsugite.providers.base import ModelInfo
+
+    provider = MagicMock()
+    provider.name = "openai"
+    provider.acompletion = AsyncMock()
+    provider.count_tokens = MagicMock(return_value=10)
+    provider.get_model_info = MagicMock(return_value=ModelInfo(max_input_tokens=128_000))
+    provider.list_models = AsyncMock(return_value=[])
+
+    with patch("tsugite.providers.get_provider", return_value=provider):
+        yield provider
 
 
 def mock_agent_execution_result(

@@ -1,16 +1,28 @@
 """Tests for TsugiteAgent UI event integration."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from tsugite.core.agent import TsugiteAgent
 from tsugite.events import EventBus, EventType
+from tsugite.providers.base import CompletionResponse, Usage
+
+
+def _resp(content: str, reasoning_content: str = None, reasoning_tokens: int = None) -> CompletionResponse:
+    usage = Usage(total_tokens=100, reasoning_tokens=reasoning_tokens)
+    return CompletionResponse(content=content, reasoning_content=reasoning_content, usage=usage, cost=0.001)
+
+
+def _patch_provider(agent, side_effect=None, return_value=None):
+    mock = AsyncMock(side_effect=side_effect, return_value=return_value)
+    agent._provider = MagicMock()
+    agent._provider.acompletion = mock
+    return mock
 
 
 @pytest.fixture
 def mock_ui_handler():
-    """Create a mock UI handler that tracks events."""
     handler = MagicMock()
     handler.events = []
 
@@ -23,412 +35,318 @@ def mock_ui_handler():
 
 @pytest.fixture
 def event_bus_with_handler(mock_ui_handler):
-    """Create an EventBus with the mock handler subscribed."""
     bus = EventBus()
     bus.subscribe(mock_ui_handler.handle_event)
     return bus, mock_ui_handler
 
 
 @pytest.mark.asyncio
-async def test_ui_event_task_start(event_bus_with_handler, mock_litellm_response):
-    event_bus, mock_ui_handler = event_bus_with_handler
-    """Test that TASK_START event is triggered when agent starts."""
+async def test_ui_event_task_start(event_bus_with_handler):
     event_bus, mock_ui_handler = event_bus_with_handler
 
-    with patch("litellm.acompletion", new_callable=AsyncMock) as mock_acompletion:
-        mock_acompletion.return_value = mock_litellm_response("""Thought: Calculate the answer.
+    agent = TsugiteAgent(
+        model_string="openai:gpt-4o-mini", tools=[], instructions="", max_turns=5,
+        event_bus=event_bus, model_name="gpt-4o-mini",
+    )
+    _patch_provider(agent, return_value=_resp("""Thought: Calculate the answer.
 
 ```python
 final_answer(42)
-```""")
+```"""))
 
-        agent = TsugiteAgent(
-            model_string="openai:gpt-4o-mini",
-            tools=[],
-            instructions="",
-            max_turns=5,
-            event_bus=event_bus,
-            model_name="gpt-4o-mini",
-        )
+    await agent.run("Test task")
 
-        await agent.run("Test task")
-
-        # Verify TASK_START was triggered
-        task_start_events = [e for e in mock_ui_handler.events if e["event"] == EventType.TASK_START]
-        assert len(task_start_events) == 1
-        assert task_start_events[0]["event_obj"].task == "Test task"
-        assert task_start_events[0]["event_obj"].model == "gpt-4o-mini"
+    task_start_events = [e for e in mock_ui_handler.events if e["event"] == EventType.TASK_START]
+    assert len(task_start_events) == 1
+    assert task_start_events[0]["event_obj"].task == "Test task"
+    assert task_start_events[0]["event_obj"].model == "gpt-4o-mini"
 
 
 @pytest.mark.asyncio
-async def test_ui_event_step_start(event_bus_with_handler, mock_litellm_response):
+async def test_ui_event_step_start(event_bus_with_handler):
     event_bus, mock_ui_handler = event_bus_with_handler
-    """Test that STEP_START event is triggered for each step."""
 
     call_count = 0
 
     async def mock_acompletion(*args, **kwargs):
         nonlocal call_count
         call_count += 1
-
         if call_count == 1:
-            return mock_litellm_response("""Thought: First step.
+            return _resp("""Thought: First step.
 
 ```python
 x = 5
 print(x)
 ```""")
-        elif call_count == 2:
-            return mock_litellm_response("""Thought: Second step.
+        else:
+            return _resp("""Thought: Second step.
 
 ```python
 final_answer(x * 2)
 ```""")
 
-    with patch("litellm.acompletion", new=mock_acompletion):
-        agent = TsugiteAgent(
-            model_string="openai:gpt-4o-mini",
-            tools=[],
-            instructions="",
-            max_turns=5,
-            event_bus=event_bus,
-        )
+    agent = TsugiteAgent(
+        model_string="openai:gpt-4o-mini", tools=[], instructions="", max_turns=5,
+        event_bus=event_bus,
+    )
+    _patch_provider(agent, side_effect=mock_acompletion)
 
-        await agent.run("Test task")
+    await agent.run("Test task")
 
-        # Verify STEP_START was triggered twice
-        step_start_events = [e for e in mock_ui_handler.events if e["event"] == EventType.STEP_START]
-        assert len(step_start_events) == 2
-        assert step_start_events[0]["event_obj"].step == 1
-        assert step_start_events[1]["event_obj"].step == 2
+    step_start_events = [e for e in mock_ui_handler.events if e["event"] == EventType.STEP_START]
+    assert len(step_start_events) == 2
+    assert step_start_events[0]["event_obj"].step == 1
+    assert step_start_events[1]["event_obj"].step == 2
 
 
 @pytest.mark.asyncio
-async def test_ui_event_code_execution(event_bus_with_handler, mock_litellm_response):
+async def test_ui_event_code_execution(event_bus_with_handler):
     event_bus, mock_ui_handler = event_bus_with_handler
-    """Test that CODE_EXECUTION event is triggered before code execution."""
 
-    with patch("litellm.acompletion", new_callable=AsyncMock) as mock_acompletion:
-        mock_acompletion.return_value = mock_litellm_response("""Thought: Execute code.
+    agent = TsugiteAgent(
+        model_string="openai:gpt-4o-mini", tools=[], instructions="", max_turns=5,
+        event_bus=event_bus,
+    )
+    _patch_provider(agent, return_value=_resp("""Thought: Execute code.
 
 ```python
 result = 5 + 3
 final_answer(result)
-```""")
+```"""))
 
-        agent = TsugiteAgent(
-            model_string="openai:gpt-4o-mini",
-            tools=[],
-            instructions="",
-            max_turns=5,
-            event_bus=event_bus,
-        )
+    await agent.run("Test task")
 
-        await agent.run("Test task")
-
-        # Verify CODE_EXECUTION was triggered
-        code_exec_events = [e for e in mock_ui_handler.events if e["event"] == EventType.CODE_EXECUTION]
-        assert len(code_exec_events) == 1
-        assert "result = 5 + 3" in code_exec_events[0]["event_obj"].code
-        assert "final_answer(result)" in code_exec_events[0]["event_obj"].code
+    code_exec_events = [e for e in mock_ui_handler.events if e["event"] == EventType.CODE_EXECUTION]
+    assert len(code_exec_events) == 1
+    assert "result = 5 + 3" in code_exec_events[0]["event_obj"].code
+    assert "final_answer(result)" in code_exec_events[0]["event_obj"].code
 
 
 @pytest.mark.asyncio
-async def test_ui_event_observation(event_bus_with_handler, mock_litellm_response):
+async def test_ui_event_observation(event_bus_with_handler):
     event_bus, mock_ui_handler = event_bus_with_handler
-    """Test that OBSERVATION event is triggered after code execution."""
 
-    with patch("litellm.acompletion", new_callable=AsyncMock) as mock_acompletion:
-        mock_acompletion.return_value = mock_litellm_response("""Thought: Print something.
+    agent = TsugiteAgent(
+        model_string="openai:gpt-4o-mini", tools=[], instructions="", max_turns=5,
+        event_bus=event_bus,
+    )
+    _patch_provider(agent, return_value=_resp("""Thought: Print something.
 
 ```python
 print("Hello, World!")
 final_answer("done")
-```""")
+```"""))
 
-        agent = TsugiteAgent(
-            model_string="openai:gpt-4o-mini",
-            tools=[],
-            instructions="",
-            max_turns=5,
-            event_bus=event_bus,
-        )
+    await agent.run("Test task")
 
-        await agent.run("Test task")
-
-        # Verify OBSERVATION was triggered
-        observation_events = [e for e in mock_ui_handler.events if e["event"] == EventType.OBSERVATION]
-        assert len(observation_events) == 1
-        assert "Hello, World!" in observation_events[0]["event_obj"].observation
+    observation_events = [e for e in mock_ui_handler.events if e["event"] == EventType.OBSERVATION]
+    assert len(observation_events) == 1
+    assert "Hello, World!" in observation_events[0]["event_obj"].observation
 
 
 @pytest.mark.asyncio
-async def test_ui_event_final_answer(event_bus_with_handler, mock_litellm_response):
+async def test_ui_event_final_answer(event_bus_with_handler):
     event_bus, mock_ui_handler = event_bus_with_handler
-    """Test that FINAL_ANSWER event is triggered when agent completes."""
 
-    with patch("litellm.acompletion", new_callable=AsyncMock) as mock_acompletion:
-        mock_acompletion.return_value = mock_litellm_response("""Thought: Return the answer.
+    agent = TsugiteAgent(
+        model_string="openai:gpt-4o-mini", tools=[], instructions="", max_turns=5,
+        event_bus=event_bus,
+    )
+    _patch_provider(agent, return_value=_resp("""Thought: Return the answer.
 
 ```python
 final_answer("The answer is 42")
-```""")
+```"""))
 
-        agent = TsugiteAgent(
-            model_string="openai:gpt-4o-mini",
-            tools=[],
-            instructions="",
-            max_turns=5,
-            event_bus=event_bus,
-        )
+    await agent.run("Test task")
 
-        await agent.run("Test task")
-
-        # Verify FINAL_ANSWER was triggered
-        final_answer_events = [e for e in mock_ui_handler.events if e["event"] == EventType.FINAL_ANSWER]
-        assert len(final_answer_events) == 1
-        assert final_answer_events[0]["event_obj"].answer == "The answer is 42"
+    final_answer_events = [e for e in mock_ui_handler.events if e["event"] == EventType.FINAL_ANSWER]
+    assert len(final_answer_events) == 1
+    assert final_answer_events[0]["event_obj"].answer == "The answer is 42"
 
 
 @pytest.mark.asyncio
-async def test_ui_event_error_on_execution_failure(event_bus_with_handler, mock_litellm_response):
+async def test_ui_event_error_on_execution_failure(event_bus_with_handler):
     event_bus, mock_ui_handler = event_bus_with_handler
-    """Test that WARNING event is triggered when code execution fails (with retry)."""
 
-    # First call: code with error
-    # Second call: fix the error
     call_count = 0
 
     async def mock_acompletion(*args, **kwargs):
         nonlocal call_count
         call_count += 1
-
         if call_count == 1:
-            return mock_litellm_response("""Thought: Try to divide by zero.
+            return _resp("""Thought: Try to divide by zero.
 
 ```python
 result = 1 / 0
 ```""")
         else:
-            return mock_litellm_response("""Thought: Fix the error.
+            return _resp("""Thought: Fix the error.
 
 ```python
 final_answer(1)
 ```""")
 
-    with patch("litellm.acompletion", new=mock_acompletion):
-        agent = TsugiteAgent(
-            model_string="openai:gpt-4o-mini",
-            tools=[],
-            instructions="",
-            max_turns=5,
-            event_bus=event_bus,
-        )
+    agent = TsugiteAgent(
+        model_string="openai:gpt-4o-mini", tools=[], instructions="", max_turns=5,
+        event_bus=event_bus,
+    )
+    _patch_provider(agent, side_effect=mock_acompletion)
 
-        await agent.run("Test task")
+    await agent.run("Test task")
 
-        # Verify WARNING was triggered for execution failure (with retry)
-        warning_events = [e for e in mock_ui_handler.events if e["event"] == EventType.WARNING]
-        assert len(warning_events) == 1
-        assert "ZeroDivisionError" in warning_events[0]["event_obj"].message
-        assert "will retry" in warning_events[0]["event_obj"].message
+    warning_events = [e for e in mock_ui_handler.events if e["event"] == EventType.WARNING]
+    assert len(warning_events) == 1
+    assert "ZeroDivisionError" in warning_events[0]["event_obj"].message
+    assert "will retry" in warning_events[0]["event_obj"].message
 
 
 @pytest.mark.asyncio
-async def test_ui_event_error_on_max_turns(event_bus_with_handler, mock_litellm_response):
+async def test_ui_event_error_on_max_turns(event_bus_with_handler):
     event_bus, mock_ui_handler = event_bus_with_handler
-    """Test that ERROR event is triggered when max_turns is reached."""
 
-    with patch("litellm.acompletion", new_callable=AsyncMock) as mock_acompletion:
-        # Always return code without final_answer
-        mock_acompletion.return_value = mock_litellm_response("""Thought: Still working...
+    agent = TsugiteAgent(
+        model_string="openai:gpt-4o-mini", tools=[], instructions="", max_turns=2,
+        event_bus=event_bus,
+    )
+    _patch_provider(agent, return_value=_resp("""Thought: Still working...
 
 ```python
 x = 1
 print(x)
-```""")
+```"""))
 
-        agent = TsugiteAgent(
-            model_string="openai:gpt-4o-mini",
-            tools=[],
-            instructions="",
-            max_turns=2,
-            event_bus=event_bus,
-        )
+    with pytest.raises(RuntimeError):
+        await agent.run("Test task")
 
-        with pytest.raises(RuntimeError):
-            await agent.run("Test task")
-
-        # Verify ERROR was triggered
-        error_events = [e for e in mock_ui_handler.events if e["event"] == EventType.ERROR]
-        assert len(error_events) == 1
-        assert "max_turns" in error_events[0]["event_obj"].error
-        assert error_events[0]["event_obj"].error_type == "RuntimeError"
+    error_events = [e for e in mock_ui_handler.events if e["event"] == EventType.ERROR]
+    assert len(error_events) == 1
+    assert "max_turns" in error_events[0]["event_obj"].error
+    assert error_events[0]["event_obj"].error_type == "RuntimeError"
 
 
 @pytest.mark.asyncio
-async def test_ui_event_reasoning_content(event_bus_with_handler, mock_litellm_response):
+async def test_ui_event_reasoning_content(event_bus_with_handler):
     event_bus, mock_ui_handler = event_bus_with_handler
-    """Test that REASONING_CONTENT event is triggered for reasoning models."""
 
-    with patch("litellm.acompletion", new_callable=AsyncMock) as mock_acompletion:
-        mock_acompletion.return_value = mock_litellm_response(
-            """Thought: Solve this.
+    agent = TsugiteAgent(
+        model_string="anthropic:claude-3-7-sonnet", tools=[], instructions="", max_turns=5,
+        event_bus=event_bus,
+    )
+    _patch_provider(agent, return_value=_resp(
+        """Thought: Solve this.
 
 ```python
 final_answer(100)
 ```""",
-            reasoning_content="Deep thinking process here...",
-        )
+        reasoning_content="Deep thinking process here...",
+    ))
 
-        agent = TsugiteAgent(
-            model_string="anthropic:claude-3-7-sonnet",
-            tools=[],
-            instructions="",
-            max_turns=5,
-            event_bus=event_bus,
-        )
+    await agent.run("Test task")
 
-        await agent.run("Test task")
-
-        # Verify REASONING_CONTENT was triggered
-        reasoning_events = [e for e in mock_ui_handler.events if e["event"] == EventType.REASONING_CONTENT]
-        assert len(reasoning_events) == 1
-        assert reasoning_events[0]["event_obj"].content == "Deep thinking process here..."
-        assert reasoning_events[0]["event_obj"].step == 1
+    reasoning_events = [e for e in mock_ui_handler.events if e["event"] == EventType.REASONING_CONTENT]
+    assert len(reasoning_events) == 1
+    assert reasoning_events[0]["event_obj"].content == "Deep thinking process here..."
+    assert reasoning_events[0]["event_obj"].step == 1
 
 
 @pytest.mark.asyncio
-async def test_ui_event_reasoning_tokens(event_bus_with_handler, mock_litellm_response):
+async def test_ui_event_reasoning_tokens(event_bus_with_handler):
     event_bus, mock_ui_handler = event_bus_with_handler
-    """Test that REASONING_TOKENS event is triggered for o1/o3 models."""
 
-    response = mock_litellm_response("""Thought: Solve this.
+    agent = TsugiteAgent(
+        model_string="openai:o1", tools=[], instructions="", max_turns=5,
+        event_bus=event_bus,
+    )
+    _patch_provider(agent, return_value=_resp(
+        """Thought: Solve this.
 
 ```python
 final_answer(100)
-```""")
-    # Add reasoning token details (o1/o3 format)
-    response.usage.completion_tokens_details = MagicMock()
-    response.usage.completion_tokens_details.reasoning_tokens = 256
+```""",
+        reasoning_tokens=256,
+    ))
 
-    with patch("litellm.acompletion", new_callable=AsyncMock) as mock_acompletion:
-        mock_acompletion.return_value = response
+    await agent.run("Test task")
 
-        agent = TsugiteAgent(
-            model_string="openai:o1",
-            tools=[],
-            instructions="",
-            max_turns=5,
-            event_bus=event_bus,
-        )
-
-        await agent.run("Test task")
-
-        # Verify REASONING_TOKENS was triggered
-        reasoning_token_events = [e for e in mock_ui_handler.events if e["event"] == EventType.REASONING_TOKENS]
-        assert len(reasoning_token_events) == 1
-        assert reasoning_token_events[0]["event_obj"].tokens == 256
-        assert reasoning_token_events[0]["event_obj"].step == 1
+    reasoning_token_events = [e for e in mock_ui_handler.events if e["event"] == EventType.REASONING_TOKENS]
+    assert len(reasoning_token_events) == 1
+    assert reasoning_token_events[0]["event_obj"].tokens == 256
+    assert reasoning_token_events[0]["event_obj"].step == 1
 
 
 @pytest.mark.asyncio
-async def test_agent_without_ui_handler(mock_litellm_response):
-    """Test that agent works correctly without a UI handler."""
-
-    with patch("litellm.acompletion", new_callable=AsyncMock) as mock_acompletion:
-        mock_acompletion.return_value = mock_litellm_response("""Thought: Calculate.
+async def test_agent_without_ui_handler():
+    agent = TsugiteAgent(
+        model_string="openai:gpt-4o-mini", tools=[], instructions="", max_turns=5,
+        event_bus=None,
+    )
+    _patch_provider(agent, return_value=_resp("""Thought: Calculate.
 
 ```python
 final_answer(42)
-```""")
+```"""))
 
-        # Create agent without ui_handler
-        agent = TsugiteAgent(
-            model_string="openai:gpt-4o-mini",
-            tools=[],
-            instructions="",
-            max_turns=5,
-            event_bus=None,  # No UI handler
-        )
-
-        # Should work fine without errors
-        result = await agent.run("Test task")
-        assert result == 42
+    result = await agent.run("Test task")
+    assert result == 42
 
 
 @pytest.mark.asyncio
-async def test_ui_event_order(event_bus_with_handler, mock_litellm_response):
+async def test_ui_event_order(event_bus_with_handler):
     event_bus, mock_ui_handler = event_bus_with_handler
-    """Test that UI events are triggered in the correct order."""
 
-    with patch("litellm.acompletion", new_callable=AsyncMock) as mock_acompletion:
-        mock_acompletion.return_value = mock_litellm_response("""Thought: Calculate.
+    agent = TsugiteAgent(
+        model_string="openai:gpt-4o-mini", tools=[], instructions="", max_turns=5,
+        event_bus=event_bus,
+    )
+    _patch_provider(agent, return_value=_resp("""Thought: Calculate.
 
 ```python
 print("Hello")
 final_answer(42)
-```""")
+```"""))
 
-        agent = TsugiteAgent(
-            model_string="openai:gpt-4o-mini",
-            tools=[],
-            instructions="",
-            max_turns=5,
-            event_bus=event_bus,
-        )
+    await agent.run("Test task")
 
-        await agent.run("Test task")
+    event_types = [e["event"] for e in mock_ui_handler.events]
 
-        # Extract event types in order
-        event_types = [e["event"] for e in mock_ui_handler.events]
-
-        # Verify order: TASK_START -> STEP_START -> LLM_MESSAGE -> CODE_EXECUTION -> OBSERVATION -> FINAL_ANSWER
-        assert event_types[0] == EventType.TASK_START
-        assert event_types[1] == EventType.STEP_START
-        assert event_types[2] == EventType.LLM_MESSAGE  # LLM reasoning is now shown before code execution
-        assert event_types[3] == EventType.CODE_EXECUTION
-        assert event_types[4] == EventType.OBSERVATION
-        assert event_types[5] == EventType.FINAL_ANSWER
+    assert event_types[0] == EventType.TASK_START
+    assert event_types[1] == EventType.STEP_START
+    assert event_types[2] == EventType.LLM_MESSAGE
+    assert event_types[3] == EventType.CODE_EXECUTION
+    assert event_types[4] == EventType.OBSERVATION
+    assert event_types[5] == EventType.FINAL_ANSWER
 
 
 @pytest.mark.asyncio
-async def test_ui_event_error_on_no_code_generation(event_bus_with_handler, mock_litellm_response):
+async def test_ui_event_error_on_no_code_generation(event_bus_with_handler):
     event_bus, mock_ui_handler = event_bus_with_handler
-    """Test that ERROR event is triggered when LLM doesn't generate code."""
 
-    # First call: LLM only provides thought, no code
-    # Second call: LLM provides proper format
     call_count = 0
 
     async def mock_acompletion(*args, **kwargs):
         nonlocal call_count
         call_count += 1
-
         if call_count == 1:
-            return mock_litellm_response(
+            return _resp(
                 """Thought: I'm thinking about this problem and how to solve it, but I'm not providing any code."""
             )
         else:
-            return mock_litellm_response("""Thought: Now I'll provide code.
+            return _resp("""Thought: Now I'll provide code.
 
 ```python
 final_answer(42)
 ```""")
 
-    with patch("litellm.acompletion", new=mock_acompletion):
-        agent = TsugiteAgent(
-            model_string="openai:gpt-4o-mini",
-            tools=[],
-            instructions="",
-            max_turns=5,
-            event_bus=event_bus,
-        )
+    agent = TsugiteAgent(
+        model_string="openai:gpt-4o-mini", tools=[], instructions="", max_turns=5,
+        event_bus=event_bus,
+    )
+    _patch_provider(agent, side_effect=mock_acompletion)
 
-        await agent.run("Test task")
+    await agent.run("Test task")
 
-        # Verify ERROR was triggered for missing code
-        error_events = [e for e in mock_ui_handler.events if e["event"] == EventType.ERROR]
-        assert len(error_events) == 1
-        assert "LLM did not generate code" in error_events[0]["event_obj"].error
-        assert error_events[0]["event_obj"].error_type == "Format Error"
+    error_events = [e for e in mock_ui_handler.events if e["event"] == EventType.ERROR]
+    assert len(error_events) == 1
+    assert "LLM did not generate code" in error_events[0]["event_obj"].error
+    assert error_events[0]["event_obj"].error_type == "Format Error"

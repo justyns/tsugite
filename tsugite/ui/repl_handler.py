@@ -3,7 +3,6 @@
 import threading
 from typing import Optional
 
-import litellm
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
@@ -393,21 +392,27 @@ class ReplUIHandler:
         return any(keyword in text.lower() for keyword in error_keywords)
 
     def _get_model_context_limit(self, model: str) -> Optional[int]:
-        """Get context limit for a model from LiteLLM's database.
+        """Get context limit for a model from the model registry.
 
         Args:
-            model: Model identifier (e.g., "gpt-4", "claude-3-5-sonnet-20241022")
+            model: Model identifier (e.g., "openai:gpt-4", "anthropic:claude-sonnet-4-6")
 
         Returns:
             Context limit in tokens, or None if unknown
         """
-        # Strip provider prefix (e.g., "openai:gpt-4" -> "gpt-4")
-        model_name = model.split(":")[-1] if ":" in model else model
+        from tsugite.providers.model_registry import get_model_info
 
-        # Exact match in LiteLLM's model database
-        model_info = litellm.model_cost.get(model_name)
-        if model_info and "max_input_tokens" in model_info:
-            return model_info["max_input_tokens"]
+        try:
+            from tsugite.models import get_model_id, parse_model_string, resolve_model_alias
+
+            resolved = resolve_model_alias(model)
+            provider, model_name, _ = parse_model_string(resolved)
+            model_id = get_model_id(resolved)
+            info = get_model_info(provider, model_id)
+            if info:
+                return info.max_input_tokens
+        except (ValueError, Exception):
+            pass
 
         return None
 

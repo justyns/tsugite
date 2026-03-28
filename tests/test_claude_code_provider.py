@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from tsugite.models import _CLAUDE_CODE_MODEL_MAP, get_model_params, parse_model_string
+from tsugite.models import _CLAUDE_CODE_MODEL_MAP, get_model_id, parse_model_string
 
 # ── Model parsing tests ──
 
@@ -23,39 +23,17 @@ class TestClaudeCodeModelParams:
         assert provider == "claude_code"
         assert model == "claude-sonnet-4-6"
 
-    def test_get_model_params_claude_code(self):
-        params = get_model_params("claude_code:sonnet")
-        assert params["model"] == "sonnet"
-        assert params["_provider"] == "claude_code"
+    def test_model_id_maps_short_names(self):
+        assert get_model_id("claude_code:sonnet") == "claude-sonnet-4-6"
+        assert get_model_id("claude_code:opus") == "claude-opus-4-6"
+        assert get_model_id("claude_code:haiku") == "claude-haiku-4-5-20251001"
 
-    def test_get_model_params_claude_code_opus(self):
-        params = get_model_params("claude_code:opus")
-        assert params["model"] == "opus"
-        assert params["_provider"] == "claude_code"
+    def test_model_id_full_id_passthrough(self):
+        assert get_model_id("claude_code:claude-sonnet-4-6") == "claude-sonnet-4-6"
 
-    def test_get_model_params_claude_code_haiku(self):
-        params = get_model_params("claude_code:haiku")
-        assert params["model"] == "haiku"
-        assert params["_provider"] == "claude_code"
-
-    def test_get_model_params_preserves_kwargs(self):
-        params = get_model_params("claude_code:sonnet", temperature=0.5)
-        assert params["_provider"] == "claude_code"
-        assert params["temperature"] == 0.5
-
-    def test_get_model_params_full_model_id(self):
-        params = get_model_params("claude_code:claude-sonnet-4-6")
-        assert params["model"] == "claude-sonnet-4-6"
-        assert params["_provider"] == "claude_code"
-
-    def test_litellm_model_mapping_short_names(self):
+    def test_model_map_completeness(self):
         for short, full in _CLAUDE_CODE_MODEL_MAP.items():
-            params = get_model_params(f"claude_code:{short}")
-            assert params["_litellm_model"] == full
-
-    def test_litellm_model_mapping_full_id_passthrough(self):
-        params = get_model_params("claude_code:claude-sonnet-4-6")
-        assert params["_litellm_model"] == "claude-sonnet-4-6"
+            assert get_model_id(f"claude_code:{short}") == full
 
 
 # ── ClaudeCodeProcess tests ──
@@ -312,18 +290,17 @@ class TestClaudeCodeAgentIntegration:
             instructions="test",
         )
         assert agent._is_claude_code is True
-        assert agent._claude_code_model == "sonnet"
+        assert agent._claude_code_model == "claude-sonnet-4-6"
 
     def test_agent_non_claude_code_provider(self):
         from tsugite.core.agent import TsugiteAgent
 
-        with patch("litellm.acompletion"):
-            agent = TsugiteAgent(
-                model_string="openai:gpt-4o-mini",
-                tools=[],
-                instructions="test",
-            )
-            assert agent._is_claude_code is False
+        agent = TsugiteAgent(
+            model_string="openai:gpt-4o-mini",
+            tools=[],
+            instructions="test",
+        )
+        assert agent._is_claude_code is False
 
     @pytest.mark.asyncio
     async def test_agent_run_uses_claude_code_process(self):
@@ -562,12 +539,11 @@ class TestClaudeCodeContextLimit:
         limit = get_context_limit("claude_code:haiku")
         assert limit == 200_000
 
-    def test_context_limit_claude_code_ignores_litellm(self):
+    def test_context_limit_claude_code_from_registry(self):
         from tsugite.daemon.memory import get_context_limit
 
-        with patch("litellm.get_model_info", side_effect=Exception("should not be called")):
-            limit = get_context_limit("claude_code:opus")
-            assert limit == 1_000_000
+        limit = get_context_limit("claude_code:opus")
+        assert limit == 1_000_000
 
     @pytest.mark.asyncio
     async def test_context_window_flows_to_agent_result(self):

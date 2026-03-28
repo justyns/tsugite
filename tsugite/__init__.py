@@ -3,7 +3,6 @@
 import logging
 import os
 import sys
-import warnings
 
 __version__ = "0.1.0"
 
@@ -14,6 +13,3 @@ logging.basicConfig(
     format="%(levelname)s: %(name)s: %(message)s",
     stream=sys.stderr,
 )
-
-# Suppress LiteLLM's harmless async cleanup warning
-warnings.filterwarnings("ignore", message=".*close_litellm_async_clients.*", category=RuntimeWarning)

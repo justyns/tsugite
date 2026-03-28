@@ -76,57 +76,31 @@ def infer_compaction_model(agent_model: str) -> str:
     return compact if compact is not None else resolved
 
 
-def _resolve_litellm_model(model: str) -> str:
-    """Resolve a tsugite model string to the litellm-compatible model ID.
-
-    For claude_code provider, maps short names (sonnet, opus) to full model IDs
-    that litellm recognizes. For other providers, returns the model ID as-is.
-    """
-    from tsugite.models import get_model_params
-
-    params = get_model_params(model)
-    return params.get("_litellm_model", params["model"])
-
-
-_CLAUDE_CODE_CONTEXT_LIMITS = {
-    "claude-opus-4-6": 1_000_000,
-    "claude-sonnet-4-6": 1_000_000,
-    "claude-haiku-4-5-20251001": 200_000,
-}
-_CLAUDE_CODE_DEFAULT_CONTEXT_LIMIT = 200_000
-
-
 def get_context_limit(model: str, fallback: int | None = None) -> int:
-    """Get context limit for a model via litellm.
+    """Get context limit for a model via the provider system.
 
-    Priority: claude_code provider override -> litellm model info -> fallback -> DEFAULT_CONTEXT_LIMIT.
+    Priority: provider model_info -> fallback -> DEFAULT_CONTEXT_LIMIT.
     """
-    from tsugite.models import get_model_params
+    from tsugite.models import get_provider_and_model
 
-    params = get_model_params(model)
-    if params.get("_provider") == "claude_code":
-        litellm_model = params.get("_litellm_model", params["model"])
-        return _CLAUDE_CODE_CONTEXT_LIMITS.get(litellm_model, _CLAUDE_CODE_DEFAULT_CONTEXT_LIMIT)
-
-    from litellm import get_model_info
-
-    litellm_model = params.get("_litellm_model", params["model"])
     try:
-        info = get_model_info(litellm_model)
-        limit = info.get("max_input_tokens")
-        if limit is not None:
-            return limit
+        provider_name, provider, model_id = get_provider_and_model(model)
+        info = provider.get_model_info(model_id)
+        if info and info.max_input_tokens:
+            return info.max_input_tokens
     except Exception:
         pass
+
     return fallback if fallback is not None else DEFAULT_CONTEXT_LIMIT
 
 
 def _count_tokens(text: str, model: str) -> int:
-    """Count tokens using litellm, falling back to len//4."""
-    try:
-        from litellm import token_counter
+    """Count tokens using the provider, falling back to len//4."""
+    from tsugite.models import get_provider_and_model
 
-        return token_counter(model=_resolve_litellm_model(model), text=text)
+    try:
+        _, provider, model_id = get_provider_and_model(model)
+        return provider.count_tokens(text, model_id)
     except Exception:
         return len(text) // 4
 
@@ -191,28 +165,25 @@ def _chunk_messages(messages: list[dict], max_chunk_tokens: int, model: str) -> 
 
 async def _llm_complete(system_prompt: str, user_content: str, model: str) -> str:
     """Send a system+user message pair to the LLM and return the response text."""
-    from tsugite.models import get_model_params
+    from tsugite.models import get_provider_and_model, parse_model_string, resolve_model_alias
 
-    params = get_model_params(model)
+    resolved = resolve_model_alias(model)
+    provider_name, _, _ = parse_model_string(resolved)
 
     try:
-        if params.get("_provider") == "claude_code":
+        if provider_name == "claude_code":
             from tsugite.core.claude_code import claude_code_complete
+            from tsugite.models import get_model_id
 
-            content = await claude_code_complete(
-                system_prompt, user_content, _resolve_litellm_model(model)
-            )
+            content = await claude_code_complete(system_prompt, user_content, get_model_id(model))
         else:
-            from litellm import acompletion
-
+            _, provider, model_id = get_provider_and_model(model)
             messages = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content},
             ]
-            litellm_params = get_model_params(model, messages=messages)
-            litellm_params = {k: v for k, v in litellm_params.items() if not k.startswith("_")}
-            response = await acompletion(**litellm_params)
-            content = response.choices[0].message.content
+            response = await provider.acompletion(messages=messages, model=model_id)
+            content = response.content
     except Exception as e:
         raise RuntimeError(f"LLM call failed ({model}): {e}") from e
 

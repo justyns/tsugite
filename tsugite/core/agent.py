@@ -1,8 +1,4 @@
-"""Core agent implementation using LiteLLM directly.
-
-A simpler, more direct implementation that gives us full control over
-model parameters and reasoning model support.
-"""
+"""Core agent implementation"""
 
 import asyncio
 import logging
@@ -110,7 +106,7 @@ class TurnResult:
     code: str
     step_cost: float
     content_blocks: Dict[str, str] = field(default_factory=dict)
-    response: Optional[Any] = None  # LiteLLM response object (not set for claude_code path)
+    response: Optional[Any] = None
 
 
 @dataclass
@@ -133,8 +129,8 @@ class AgentResult:
 class TsugiteAgent:
     """Custom agent that uses Thought/Code/Observation loop.
 
-    Provides direct access to LiteLLM features including reasoning models,
-    custom parameters, and full control over the execution loop.
+    Supports reasoning models, custom parameters, and full control over
+    the execution loop via pluggable provider backends.
 
     Example:
         agent = TsugiteAgent(
@@ -172,14 +168,14 @@ class TsugiteAgent:
             instructions: Additional instructions to append to system prompt
             max_turns: Maximum number of reasoning turns (think-act cycles) before giving up
             executor: Code executor (microsandbox or local). If None, uses LocalExecutor
-            model_kwargs: Extra parameters for LiteLLM (reasoning_effort, response_format, etc.)
+            model_kwargs: Extra parameters for the provider (reasoning_effort, response_format, etc.)
             event_bus: Optional EventBus for broadcasting events
             model_name: Optional display name for the model (for UI)
             attachments: List of Attachment objects for multi-modal inputs
             skills: List of Skill objects for loaded skills
             previous_messages: List of previous conversation messages (user/assistant pairs)
         """
-        from tsugite.models import get_model_params
+        from tsugite.models import get_model_kwargs, get_provider_and_model
 
         self.model_string = model_string
         self.tools = tools
@@ -203,11 +199,11 @@ class TsugiteAgent:
 
         self._inject_tools_into_executor()
 
-        self.litellm_params = get_model_params(model_string, **(model_kwargs or {}))
+        self._provider_name, self._provider, self._model_id = get_provider_and_model(model_string)
+        self._model_kwargs = get_model_kwargs(model_string, **(model_kwargs or {}))
 
-        # Detect claude_code provider
-        self._is_claude_code = self.litellm_params.get("_provider") == "claude_code"
-        self._claude_code_model = self.litellm_params.get("model") if self._is_claude_code else None
+        self._is_claude_code = self._provider_name == "claude_code"
+        self._claude_code_model = self._model_id if self._is_claude_code else None
         self._claude_code_session_id: Optional[str] = None
         self._claude_code_last_turn_tokens: int = 0
         self._claude_code_context_tokens: int = 0
@@ -418,7 +414,7 @@ class TsugiteAgent:
                 if self._is_claude_code:
                     turn = await self._claude_code_turn(claude_process, messages, turn_num, stream)
                 else:
-                    turn = await self._litellm_turn(messages, turn_num, stream)
+                    turn = await self._provider_turn(messages, turn_num, stream)
 
                 thought, code, response = turn.thought, turn.code, turn.response
                 logger.debug(
@@ -663,7 +659,7 @@ class TsugiteAgent:
                 if self._is_claude_code:
                     turn = await self._claude_code_turn(claude_process, messages, self.max_turns, stream)
                 else:
-                    turn = await self._litellm_turn(messages, self.max_turns, stream)
+                    turn = await self._provider_turn(messages, self.max_turns, stream)
 
                 if turn.code and turn.code.strip():
                     exec_result = await self.executor.execute(turn.code)
@@ -779,65 +775,61 @@ class TsugiteAgent:
             content_blocks=parsed.content_blocks,
         )
 
-    async def _litellm_turn(self, messages, turn_num, stream) -> TurnResult:
-        """Execute one turn via LiteLLM."""
-        import litellm
-        import sniffio
-
-        sniffio.current_async_library_cvar.set("asyncio")
+    async def _provider_turn(self, messages, turn_num, stream) -> TurnResult:
+        """Execute one turn via the provider system."""
+        from tsugite.providers.base import CompletionResponse as ProviderResponse
 
         if stream:
             accumulated_content = ""
-            response = None
-            stream_params = {**self.litellm_params, "stream": True}
-            stream_response = await litellm.acompletion(messages=messages, **stream_params)
+            result = await self._provider.acompletion(
+                messages=messages, model=self._model_id, stream=True, **self._model_kwargs
+            )
 
-            async for chunk in stream_response:
-                if hasattr(chunk, "choices") and len(chunk.choices) > 0:
-                    delta = chunk.choices[0].delta
-                    if hasattr(delta, "content") and delta.content:
-                        chunk_text = delta.content
-                        accumulated_content += chunk_text
-                        if self.event_bus:
-                            self.event_bus.emit(StreamChunkEvent(chunk=chunk_text))
-                response = chunk
+            async for chunk in result:
+                if chunk.content:
+                    accumulated_content += chunk.content
+                    if self.event_bus:
+                        self.event_bus.emit(StreamChunkEvent(chunk=chunk.content))
 
             if self.event_bus:
                 self.event_bus.emit(StreamCompleteEvent())
 
             parsed = self._parse_response_from_text(accumulated_content)
-        else:
-            response = await litellm.acompletion(messages=messages, **self.litellm_params)
-            parsed = self._parse_response(response)
+
+            # Streaming doesn't return usage/cost — estimate if needed
+            return TurnResult(
+                thought=parsed.thought,
+                code=parsed.code,
+                step_cost=0.0,
+                content_blocks=parsed.content_blocks,
+                response=None,
+            )
+
+        response: ProviderResponse = await self._provider.acompletion(
+            messages=messages, model=self._model_id, stream=False, **self._model_kwargs
+        )
+        parsed = self._parse_response_from_text(response.content)
 
         # Track cost
-        step_cost = 0.0
-        if hasattr(response, "_hidden_params") and "response_cost" in response._hidden_params:
-            step_cost = response._hidden_params["response_cost"]
-        if step_cost is not None:
-            self.total_cost += step_cost
+        step_cost = response.cost or 0.0
+        self.total_cost += step_cost
 
         # Track cumulative tokens
-        if response and response.usage:
-            self.total_tokens += getattr(response.usage, "total_tokens", 0) or 0
+        if response.usage:
+            self.total_tokens += response.usage.total_tokens
 
         # Extract reasoning content
-        reasoning_content = self._extract_reasoning_content(response)
-        if reasoning_content:
-            self.memory.add_reasoning(reasoning_content)
+        if response.reasoning_content:
+            self.memory.add_reasoning(response.reasoning_content)
             if self.event_bus:
-                self.event_bus.emit(ReasoningContentEvent(content=reasoning_content, step=turn_num + 1))
+                self.event_bus.emit(ReasoningContentEvent(content=response.reasoning_content, step=turn_num + 1))
 
-        if response.usage and hasattr(response.usage, "completion_tokens_details"):
-            details = response.usage.completion_tokens_details
-            if hasattr(details, "reasoning_tokens") and details.reasoning_tokens:
-                if self.event_bus:
-                    self.event_bus.emit(ReasoningTokensEvent(tokens=details.reasoning_tokens, step=turn_num + 1))
+        if response.usage and response.usage.reasoning_tokens:
+            if self.event_bus:
+                self.event_bus.emit(ReasoningTokensEvent(tokens=response.usage.reasoning_tokens, step=turn_num + 1))
 
-        if self.event_bus and not stream:
-            display_content = (
-                parsed.thought if parsed.thought else (response.choices[0].message.content if response.choices else "")
-            )
+        if self.event_bus:
+            display_content = parsed.thought if parsed.thought else response.content
             if display_content and display_content.strip():
                 self.event_bus.emit(
                     LLMMessageEvent(content=display_content, title=f"Turn {turn_num + 1} Reasoning", step=turn_num + 1)
@@ -852,13 +844,13 @@ class TsugiteAgent:
         )
 
     def _format_attachment(self, attachment: Attachment) -> Optional[Dict]:
-        """Format an attachment for LiteLLM based on its content type.
+        """Format an attachment for the provider based on its content type.
 
         Args:
             attachment: Attachment object to format
 
         Returns:
-            Formatted content block for LiteLLM, or None if invalid
+            Formatted content block for the provider, or None if invalid
         """
         if attachment.content_type == AttachmentContentType.TEXT:
             # Text attachment - wrap in XML tags
@@ -870,7 +862,7 @@ class TsugiteAgent:
         elif attachment.content_type == AttachmentContentType.IMAGE:
             # Image attachment
             if attachment.source_url:
-                # URL reference - let LiteLLM fetch it
+                # URL reference
                 return {
                     "type": "image_url",
                     "image_url": {
@@ -890,7 +882,7 @@ class TsugiteAgent:
         elif attachment.content_type == AttachmentContentType.AUDIO:
             # Audio attachment
             if attachment.source_url:
-                # URL reference - let LiteLLM fetch it
+                # URL reference
                 # Note: Some models may not support audio URLs directly
                 return {
                     "type": "input_audio",
@@ -913,7 +905,7 @@ class TsugiteAgent:
         elif attachment.content_type == AttachmentContentType.DOCUMENT:
             # Document attachment (PDF, etc.)
             if attachment.source_url:
-                # URL reference - let LiteLLM fetch it
+                # URL reference
                 return {
                     "type": "file",
                     "file": {
@@ -1125,13 +1117,13 @@ class TsugiteAgent:
         Reserves 50% of context for: Claude Code's own system prompt, tsugite's
         system prompt, attachments/skills, current task, and multi-step headroom.
         """
-        from tsugite.daemon.memory import _CLAUDE_CODE_CONTEXT_LIMITS
+        from tsugite.providers.model_registry import get_model_info
 
         if self._claude_code_context_window:
             context_limit = self._claude_code_context_window
         else:
-            litellm_model = self.litellm_params.get("_litellm_model", self._claude_code_model or "")
-            context_limit = _CLAUDE_CODE_CONTEXT_LIMITS.get(litellm_model, 200_000)
+            info = get_model_info("claude_code", self._claude_code_model or "")
+            context_limit = info.max_input_tokens if info else 200_000
 
         return context_limit // 2
 
@@ -1144,13 +1136,6 @@ class TsugiteAgent:
         if self.max_turns - turn <= 2:
             parts.append('warning="approaching turn limit, wrap up soon"')
         return f"\n<tsugite_budget {' '.join(parts)} />"
-
-    def _parse_response(self, response) -> ParsedResponse:
-        """Parse LLM response into thought, code, and content blocks."""
-        if not response.choices:
-            return ParsedResponse(thought="", code="", content_blocks=[])
-        content = response.choices[0].message.content or ""
-        return self._parse_response_from_text(content)
 
     def _parse_response_from_text(self, content: str) -> ParsedResponse:
         """Parse text content into thought, code, and content blocks."""
@@ -1179,21 +1164,6 @@ class TsugiteAgent:
 
         return ParsedResponse(thought=thought, code=code, content_blocks=content_blocks)
 
-    def _extract_reasoning_content(self, response) -> Optional[str]:
-        """Extract reasoning content from response (for o1/o3/Claude thinking).
-
-        Returns:
-            str: Reasoning content if present, None otherwise
-        """
-        try:
-            if hasattr(response, "choices") and len(response.choices) > 0:
-                choice = response.choices[0]
-                if hasattr(choice.message, "reasoning_content"):
-                    return choice.message.reasoning_content
-        except (AttributeError, IndexError):
-            pass
-
-        return None
 
 
 def build_tools_section(tools: List[Tool]) -> str:
