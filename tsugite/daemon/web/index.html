@@ -1096,6 +1096,125 @@
       </template>
     </div>
   </div>
+
+  <div class="view" x-show="$store.app.view === 'usage'" x-data="usageView" x-cloak>
+    <div class="view-scroll">
+      <div class="section-header">
+        <h2>Usage & Cost</h2>
+        <div style="display:flex;gap:6px;align-items:center">
+          <select x-model="sinceDays" @change="load()">
+            <option value="7">7 days</option>
+            <option value="30">30 days</option>
+            <option value="90">90 days</option>
+            <option value="365">1 year</option>
+          </select>
+          <select x-model="period" @change="load()">
+            <option value="day">Daily</option>
+            <option value="week">Weekly</option>
+            <option value="month">Monthly</option>
+          </select>
+        </div>
+      </div>
+
+      <template x-if="loading">
+        <div class="empty-state"><span class="spinner"></span> Loading usage data...</div>
+      </template>
+      <template x-if="error">
+        <div class="msg error" x-text="error" style="margin:16px auto"></div>
+      </template>
+
+      <template x-if="!loading && !error && totals">
+        <div>
+          <div class="card-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px">
+            <div class="card" style="text-align:center">
+              <div style="font-size:28px;font-weight:700;color:var(--accent)" x-text="totals.runs"></div>
+              <div class="card-meta">Runs</div>
+            </div>
+            <div class="card" style="text-align:center">
+              <div style="font-size:28px;font-weight:700;color:var(--ctp-green)" x-text="fmtTokens(totals.total_tokens)"></div>
+              <div class="card-meta">Tokens</div>
+            </div>
+            <div class="card" style="text-align:center">
+              <div style="font-size:28px;font-weight:700;color:var(--ctp-peach)" x-text="fmtCost(totals.total_cost)"></div>
+              <div class="card-meta">Cost</div>
+            </div>
+          </div>
+
+          <template x-if="dailySummary.length > 0">
+            <div class="card" style="margin-bottom:20px;overflow:hidden">
+              <h3>Cost Trend</h3>
+              <div style="display:flex;align-items:flex-end;gap:2px;height:120px;padding-top:12px">
+                <template x-for="row in dailySummary" :key="row.period">
+                  <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;min-width:0" :title="barLabel(row) + ': ' + fmtCost(row.total_cost) + ' (' + row.runs + ' runs)'">
+                    <div style="width:100%;border-radius:3px 3px 0 0;background:var(--accent);min-height:2px;transition:height 0.3s ease" :style="'height:' + barPct(row.total_cost)"></div>
+                  </div>
+                </template>
+              </div>
+              <div style="display:flex;gap:2px;margin-top:4px">
+                <template x-for="(row, i) in dailySummary" :key="'l'+row.period">
+                  <div style="flex:1;text-align:center;font-size:9px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" x-text="i % Math.max(1, Math.floor(dailySummary.length / 8)) === 0 ? barLabel(row) : ''"></div>
+                </template>
+              </div>
+            </div>
+          </template>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+            <div class="card">
+              <h3>Top Agents</h3>
+              <template x-if="topAgents.length === 0"><div class="card-meta">No data</div></template>
+              <table class="data-table" x-show="topAgents.length > 0">
+                <thead><tr><th>Agent</th><th style="text-align:right">Runs</th><th style="text-align:right">Cost</th></tr></thead>
+                <tbody>
+                  <template x-for="row in topAgents" :key="row.agent">
+                    <tr>
+                      <td x-text="row.agent || '(unknown)'"></td>
+                      <td style="text-align:right" x-text="row.runs"></td>
+                      <td style="text-align:right" x-text="fmtCost(row.total_cost)"></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+            <div class="card">
+              <h3>Top Models</h3>
+              <template x-if="topModels.length === 0"><div class="card-meta">No data</div></template>
+              <table class="data-table" x-show="topModels.length > 0">
+                <thead><tr><th>Model</th><th style="text-align:right">Tokens</th><th style="text-align:right">Cost</th></tr></thead>
+                <tbody>
+                  <template x-for="row in topModels" :key="row.model">
+                    <tr>
+                      <td x-text="row.model || '(unknown)'"></td>
+                      <td style="text-align:right" x-text="fmtTokens(row.total_tokens)"></td>
+                      <td style="text-align:right" x-text="fmtCost(row.total_cost)"></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <template x-if="dailySummary.length > 0">
+            <div class="card">
+              <h3>Detail</h3>
+              <table class="data-table">
+                <thead><tr><th>Period</th><th style="text-align:right">Runs</th><th style="text-align:right">Tokens</th><th style="text-align:right">Cost</th></tr></thead>
+                <tbody>
+                  <template x-for="row in [...dailySummary].reverse()" :key="'d'+row.period">
+                    <tr>
+                      <td x-text="barLabel(row)"></td>
+                      <td style="text-align:right" x-text="row.runs"></td>
+                      <td style="text-align:right" x-text="fmtTokens(row.total_tokens)"></td>
+                      <td style="text-align:right" x-text="fmtCost(row.total_cost)"></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+          </template>
+        </div>
+      </template>
+    </div>
+  </div>
 </main>
 
 <!-- Settings modal -->

@@ -7,6 +7,7 @@ import webhookView from './views/webhooks.js';
 import fileEditorView from './views/file-editor.js';
 import workspaceView from './views/workspace.js';
 import kvstoreView from './views/kvstore.js';
+import usageView from './views/usage.js';
 
 window.Alpine = Alpine;
 window.tsugiteApi = { get, post, patch };
@@ -16,7 +17,7 @@ const initialHash = location.hash.slice(1);
 const initialView = legacyViews[initialHash] || initialHash || localStorage.getItem('tsugite-view') || 'dashboard';
 
 Alpine.store('app', {
-  tabs: ['dashboard','conversations','workspace','agents','skills','schedules','webhooks','kvstore'],
+  tabs: ['dashboard','conversations','workspace','agents','skills','schedules','webhooks','kvstore','usage'],
   agents: [],
   selectedAgent: localStorage.getItem('tsugite-agent') || null,
   view: initialView,
@@ -38,6 +39,7 @@ Alpine.data('agentFileView', fileEditorView('agents', 'agent-files'));
 Alpine.data('skillFileView', fileEditorView('skills', 'skill-files'));
 Alpine.data('workspaceView', workspaceView);
 Alpine.data('kvstoreView', kvstoreView);
+Alpine.data('usageView', usageView);
 
 window.addEventListener('hashchange', () => {
   const hash = location.hash.slice(1);
