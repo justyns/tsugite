@@ -6,7 +6,8 @@ import logging
 from typing import Any, AsyncIterator
 
 from .base import CompletionResponse, ModelInfo, StreamChunk, Usage, default_count_tokens
-from .model_registry import get_model_info as _get_model_info, register_models
+from .model_registry import get_model_info as _get_model_info
+from .model_registry import register_models
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ class ClaudeCodeProvider:
         self.name = name
         self._process = None
         self._turn_count = 0
+        self._resolved_model: str | None = None
 
         # Context set via set_context()
         self._attachments = []
@@ -78,6 +80,7 @@ class ClaudeCodeProvider:
         from tsugite.core.claude_code import ClaudeCodeProcess
 
         resolved_model = _ALIASES.get(model, model)
+        self._resolved_model = resolved_model
 
         if self._process is None:
             self._process = ClaudeCodeProcess()
@@ -185,11 +188,9 @@ class ClaudeCodeProvider:
 
         if self._previous_messages and not self._resume_session:
             budget = self._get_history_budget()
-            trimmed = self._trim_to_budget(previous_messages, budget)
-            dropped = len(previous_messages) - len(trimmed)
-            history_lines = [
-                f"{msg.get('role', 'unknown').capitalize()}: {msg.get('content', '')}" for msg in trimmed
-            ]
+            trimmed = self._trim_to_budget(self._previous_messages, budget)
+            dropped = len(self._previous_messages) - len(trimmed)
+            history_lines = [f"{msg.get('role', 'unknown').capitalize()}: {msg.get('content', '')}" for msg in trimmed]
             header = "<conversation_history"
             if dropped > 0:
                 header += f' note="{dropped} older messages omitted for context"'
@@ -212,7 +213,7 @@ class ClaudeCodeProvider:
         return "\n".join(parts)
 
     def _get_history_budget(self) -> int:
-        info = self.get_model_info(self._process._model if self._process else "sonnet")
+        info = self.get_model_info(self._resolved_model) if self._resolved_model else None
         context_limit = info.max_input_tokens if info else 200_000
         return context_limit // 2
 

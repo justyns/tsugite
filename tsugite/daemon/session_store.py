@@ -13,6 +13,16 @@ from dataclasses import fields as dataclass_fields
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
+
+
+def _parse_ts(ts: str | None) -> datetime | None:
+    """Parse an ISO timestamp string to datetime, handling Z and +00:00 formats."""
+    if not ts:
+        return None
+    try:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
 from typing import Optional
 from uuid import uuid4
 
@@ -165,7 +175,11 @@ class SessionStore:
                 session_id = self._interactive_index[key]
                 if session_id in self._sessions:
                     session = self._sessions[session_id]
-                    if session.status in (SessionStatus.CANCELLED.value, SessionStatus.COMPLETED.value, SessionStatus.FAILED.value):
+                    if session.status in (
+                        SessionStatus.CANCELLED.value,
+                        SessionStatus.COMPLETED.value,
+                        SessionStatus.FAILED.value,
+                    ):
                         session.status = SessionStatus.ACTIVE.value
                         self._mark_dirty()
                     return session
@@ -323,7 +337,10 @@ class SessionStore:
         status: Optional[str] = None,
         user_id: Optional[str] = None,
         limit: int = 0,
+        updated_since: Optional[str] = None,
     ) -> list[Session]:
+        _updated_since_dt = _parse_ts(updated_since)
+        _epoch = datetime.min.replace(tzinfo=timezone.utc)
         with self._lock:
             results = [
                 s
@@ -333,6 +350,7 @@ class SessionStore:
                 and (not parent_id or s.parent_id == parent_id)
                 and (not status or s.status == status)
                 and (not user_id or s.user_id == user_id)
+                and (not _updated_since_dt or (_parse_ts(s.last_active) or _epoch) >= _updated_since_dt)
             ]
             if limit:
                 results.sort(key=lambda s: s.last_active or s.created_at, reverse=True)
@@ -396,6 +414,39 @@ class SessionStore:
         result = asdict(session)
         result["event_count"] = self.event_count(session_id)
         return result
+
+    def session_events_since(self, session_id: str, since: Optional[str] = None) -> list[dict]:
+        """Return events for a session, optionally filtered to those after a timestamp."""
+        events = self.read_events(session_id)
+        if not since:
+            return events
+        since_dt = _parse_ts(since)
+        if not since_dt:
+            return events
+        return [e for e in events if (_parse_ts(e.get("timestamp")) or datetime.min.replace(tzinfo=timezone.utc)) > since_dt]
+
+    def session_summary(self, session_id: str) -> dict:
+        """Return a summary dict for a session including event stats."""
+        with self._lock:
+            if session_id not in self._sessions:
+                raise ValueError(f"Session '{session_id}' not found")
+            session = self._sessions[session_id]
+            events = self.read_events(session_id)
+        tools_used = sorted({e["name"] for e in events if e.get("type") == "tool_call" and "name" in e})
+
+        summary: dict = {
+            "id": session.id,
+            "agent": session.agent,
+            "source": session.source,
+            "status": session.status,
+            "prompt": session.prompt or "",
+            "result": session.result or "",
+            "event_count": len(events),
+            "tools_used": tools_used,
+        }
+        if session.error:
+            summary["error"] = session.error
+        return summary
 
     # ── Thread lookup ──
 

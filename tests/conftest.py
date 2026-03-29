@@ -2,7 +2,6 @@
 
 import asyncio
 import shutil
-import sys
 import tempfile
 import warnings
 from pathlib import Path
@@ -288,13 +287,14 @@ def spawn_agent_tool(reset_tool_registry, request):
 def interactive_tools(reset_tool_registry):
     """Register interactive tools for testing."""
     from tsugite.tools import tool
-    from tsugite.tools.interactive import ask_user, ask_user_batch, final_answer, send_message
+    from tsugite.tools.interactive import ask_user, ask_user_batch, final_answer, react_to_message, send_message
 
     # Re-register the tools after registry reset
     tool(ask_user)
     tool(ask_user_batch)
     tool(final_answer)
     tool(send_message)
+    tool(react_to_message)
 
 
 @pytest.fixture
