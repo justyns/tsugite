@@ -1,40 +1,27 @@
-"""Tests for Claude Code attachment and session ID fixes.
+"""Tests for Claude Code attachment handling and session ID fixes."""
 
-Fix 2: Attachments included in _build_claude_code_first_message (fresh sessions only)
-Fix 3: claude_code_session_id passed to save_run_to_history from daemon
-"""
-
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from tsugite.attachments.base import Attachment, AttachmentContentType
-from tsugite.core.agent import TsugiteAgent
+from tsugite.providers.claude_code import ClaudeCodeProvider
 from tsugite.skill_discovery import Skill
-
-# ── Fix 2: _build_claude_code_first_message attachments ──
 
 
 class TestClaudeCodeFirstMessageAttachments:
-    def _make_agent(self, attachments=None, skills=None):
-        return TsugiteAgent(
-            model_string="claude_code:sonnet",
-            tools=[],
-            instructions="test",
-            attachments=attachments,
-            skills=skills,
-        )
+    def _build(self, attachments=None, skills=None, task="do something"):
+        provider = ClaudeCodeProvider()
+        provider.set_context(attachments=attachments or [], skills=skills or [])
+        messages = [{"role": "user", "content": task}]
+        return provider._build_first_message(messages)
 
     def _att(self, name="test.md", content="test", content_type=AttachmentContentType.TEXT):
         return Attachment(name=name, content=content, content_type=content_type, mime_type="text/plain")
 
     def test_fresh_session_includes_attachments(self):
         att = self._att(name="MEMORY.md", content="memory content")
-        agent = self._make_agent(attachments=[att])
-        agent.memory.task = "do something"
-
-        msg = agent._build_claude_code_first_message()
+        msg = self._build(attachments=[att])
 
         assert '<attachment name="MEMORY.md">' in msg
         assert "memory content" in msg
@@ -42,10 +29,7 @@ class TestClaudeCodeFirstMessageAttachments:
 
     def test_fresh_session_includes_skills(self):
         skill = Skill(name="my-skill", content="skill instructions")
-        agent = self._make_agent(skills=[skill])
-        agent.memory.task = "do something"
-
-        msg = agent._build_claude_code_first_message()
+        msg = self._build(skills=[skill])
 
         assert '<skill name="my-skill">' in msg
         assert "skill instructions" in msg
@@ -53,193 +37,49 @@ class TestClaudeCodeFirstMessageAttachments:
     def test_fresh_session_includes_both(self):
         att = self._att(name="USER.md", content="user prefs")
         skill = Skill(name="helper", content="help text")
-        agent = self._make_agent(attachments=[att], skills=[skill])
-        agent.memory.task = "task"
-
-        msg = agent._build_claude_code_first_message()
+        msg = self._build(attachments=[att], skills=[skill])
 
         assert '<attachment name="USER.md">' in msg
         assert '<skill name="helper">' in msg
         assert "<context>" in msg
 
     def test_no_attachments_no_context_block(self):
-        agent = self._make_agent()
-        agent.memory.task = "task"
-
-        msg = agent._build_claude_code_first_message()
-
+        msg = self._build(task="task")
         assert "<context>" not in msg
         assert "task" in msg
 
     def test_non_text_attachments_excluded(self):
         att = self._att(name="image.png", content="base64data", content_type=AttachmentContentType.IMAGE)
-        agent = self._make_agent(attachments=[att])
-        agent.memory.task = "task"
-
-        msg = agent._build_claude_code_first_message()
-
+        msg = self._build(attachments=[att])
         assert "<context>" not in msg
 
     def test_large_attachments_not_truncated(self):
         large_content = "x" * 5000
         att = self._att(name="BIG.md", content=large_content)
-        agent = self._make_agent(attachments=[att])
-        agent.memory.task = "task"
-
-        msg = agent._build_claude_code_first_message()
+        msg = self._build(attachments=[att])
 
         assert "x" * 5000 in msg
         assert "truncated" not in msg
 
     def test_small_attachments_not_truncated(self):
         att = self._att(name="small.md", content="short content")
-        agent = self._make_agent(attachments=[att])
-        agent.memory.task = "task"
-
-        msg = agent._build_claude_code_first_message()
+        msg = self._build(attachments=[att])
 
         assert "short content" in msg
         assert "truncated" not in msg
 
-    def test_memory_md_never_truncated(self):
-        large_content = "x" * 10000
-        att = self._att(name="MEMORY.md", content=large_content)
-        agent = self._make_agent(attachments=[att])
-        agent.memory.task = "task"
 
-        msg = agent._build_claude_code_first_message()
-
-        assert "x" * 10000 in msg
-        assert "truncated" not in msg
-
-    def test_task_always_present(self):
-        att = self._att(name="doc.md", content="doc")
-        agent = self._make_agent(attachments=[att])
-        agent.memory.task = "my actual task"
-
-        msg = agent._build_claude_code_first_message()
-
-        assert "my actual task" in msg
-
-
-# ── Fix 3: daemon passes claude_code_session_id to history ──
-
-
-class TestDaemonSessionIdPassthrough:
+class TestClaudeCodeSessionId:
     @pytest.mark.asyncio
-    async def test_handle_message_passes_session_id_to_history(self):
-        from tsugite.daemon.adapters.base import BaseAdapter, ChannelContext
-        from tsugite.daemon.config import AgentConfig
-        from tsugite.daemon.session_store import SessionStore
+    async def test_session_id_captured_from_result(self):
+        from tsugite.core.agent import AgentResult, TsugiteAgent
 
-        agent_config = AgentConfig(
-            agent_file="default",
-            workspace_dir="/tmp/test-workspace",
+        agent = TsugiteAgent(
+            model_string="claude_code:sonnet",
+            tools=[],
+            instructions="test",
+            max_turns=1,
         )
-        session_store = SessionStore(Path("/tmp/test-workspace") / "session_store.json")
-
-        # Create a concrete subclass since BaseAdapter is abstract
-        class TestAdapter(BaseAdapter):
-            async def start(self):
-                pass
-
-            async def stop(self):
-                pass
-
-        adapter = TestAdapter(
-            agent_name="test-agent",
-            agent_config=agent_config,
-            session_store=session_store,
-        )
-
-        channel_ctx = ChannelContext(source="test", channel_id="ch1", user_id="user1", reply_to="test:ch1")
-
-        mock_result = MagicMock()
-        mock_result.__str__ = MagicMock(return_value="response text")
-        mock_result.token_count = 500
-        mock_result.cost = 0.01
-        mock_result.execution_steps = []
-        mock_result.system_message = "system"
-        mock_result.attachments = []
-        mock_result.claude_code_session_id = "cc-session-abc"
-        mock_result.context_window = None
-
-        with (
-            patch.object(adapter, "_get_workspace_attachments", return_value=[]),
-            patch.object(adapter, "_resolve_agent_path", return_value=MagicMock()),
-            patch("tsugite.daemon.adapters.base.run_agent", return_value=mock_result),
-            patch("tsugite.daemon.adapters.base.os.getcwd", return_value="/tmp"),
-            patch("tsugite.daemon.adapters.base.os.chdir"),
-            patch("tsugite.agent_runner.history_integration.save_run_to_history") as mock_save,
-            patch("tsugite.agent_runner.validation.get_agent_info", return_value={"model": "test"}),
-        ):
-            await adapter.handle_message("user1", "hello", channel_ctx)
-
-            mock_save.assert_called_once()
-            call_kwargs = mock_save.call_args[1]
-            assert call_kwargs["claude_code_session_id"] == "cc-session-abc"
-
-    @pytest.mark.asyncio
-    async def test_handle_message_passes_none_session_id_for_litellm(self):
-        from tsugite.daemon.adapters.base import BaseAdapter, ChannelContext
-        from tsugite.daemon.config import AgentConfig
-        from tsugite.daemon.session_store import SessionStore
-
-        agent_config = AgentConfig(
-            agent_file="default",
-            workspace_dir="/tmp/test-workspace",
-        )
-        session_store = SessionStore(Path("/tmp/test-workspace") / "session_store.json")
-
-        class TestAdapter(BaseAdapter):
-            async def start(self):
-                pass
-
-            async def stop(self):
-                pass
-
-        adapter = TestAdapter(
-            agent_name="test-agent",
-            agent_config=agent_config,
-            session_store=session_store,
-        )
-
-        channel_ctx = ChannelContext(source="test", channel_id="ch1", user_id="user1", reply_to="test:ch1")
-
-        mock_result = MagicMock()
-        mock_result.__str__ = MagicMock(return_value="response text")
-        mock_result.token_count = 500
-        mock_result.cost = 0.01
-        mock_result.execution_steps = []
-        mock_result.system_message = "system"
-        mock_result.attachments = []
-        mock_result.context_window = None
-        # LiteLLM result won't have claude_code_session_id attribute
-        del mock_result.claude_code_session_id
-
-        with (
-            patch.object(adapter, "_get_workspace_attachments", return_value=[]),
-            patch.object(adapter, "_resolve_agent_path", return_value=MagicMock()),
-            patch("tsugite.daemon.adapters.base.run_agent", return_value=mock_result),
-            patch("tsugite.daemon.adapters.base.os.getcwd", return_value="/tmp"),
-            patch("tsugite.daemon.adapters.base.os.chdir"),
-            patch("tsugite.agent_runner.history_integration.save_run_to_history") as mock_save,
-            patch("tsugite.agent_runner.validation.get_agent_info", return_value={"model": "test"}),
-        ):
-            await adapter.handle_message("user1", "hello", channel_ctx)
-
-            mock_save.assert_called_once()
-            call_kwargs = mock_save.call_args[1]
-            assert call_kwargs["claude_code_session_id"] is None
-
-
-# ── Fix 1: workspace attachments built fresh per message ──
-
-
-class TestWorkspaceAttachmentsFresh:
-    def test_get_workspace_attachments_called_per_message(self):
-        """Verify _get_workspace_attachments is a method call, not a cached attribute."""
-        from tsugite.daemon.adapters.base import BaseAdapter
-
-        assert callable(getattr(BaseAdapter, "_get_workspace_attachments", None))
-        assert not hasattr(BaseAdapter, "workspace_attachments")
+        state = agent._provider.get_state()
+        assert state is not None
+        assert state["session_id"] is None

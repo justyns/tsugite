@@ -76,8 +76,7 @@ def save_run_to_history(
     attachments: Optional[List[Attachment]] = None,
     channel_metadata: Optional[dict] = None,
     duration_ms: Optional[int] = None,
-    claude_code_session_id: Optional[str] = None,
-    claude_code_compacted: bool = False,
+    provider_state: Optional[dict] = None,
     status: str = "success",
     error_message: Optional[str] = None,
 ) -> Optional[str]:
@@ -97,7 +96,7 @@ def save_run_to_history(
         attachments: List of Attachment objects
         channel_metadata: Optional channel routing metadata
         duration_ms: Execution duration in milliseconds
-        claude_code_session_id: Claude Code session ID to store in turn metadata
+        provider_state: Optional provider state dict to store in turn metadata
 
     Returns:
         Session ID if saved, None if history disabled or failed
@@ -147,12 +146,9 @@ def save_run_to_history(
 
         functions_called = _extract_functions_called(execution_steps) if execution_steps else []
 
-        # Merge claude_code session info into metadata if present
         metadata = dict(channel_metadata) if channel_metadata else {}
-        if claude_code_session_id:
-            metadata["claude_code_session_id"] = claude_code_session_id
-        if claude_code_compacted:
-            metadata["claude_code_compacted"] = True
+        if provider_state:
+            metadata["provider_state"] = provider_state
 
         # Write accumulated hook execution records before the turn
         from tsugite.hooks import drain_all_executions
@@ -255,16 +251,19 @@ def get_claude_code_session_info(conversation_id: str) -> Optional["ClaudeCodeSe
 
         for record in reversed(records):
             if isinstance(record, Turn) and record.metadata:
-                session_id = record.metadata.get("claude_code_session_id")
+                # Check new format first, then legacy
+                ps = record.metadata.get("provider_state")
+                if ps:
+                    session_id = ps.get("session_id")
+                else:
+                    session_id = record.metadata.get("claude_code_session_id")
                 if not session_id:
                     continue
-                # If this turn is a retained turn from before compaction
-                # (carried over with stale session ID), skip it
                 if compaction_idx >= 0:
                     turn_idx = records.index(record)
                     if turn_idx <= compaction_idx:
                         continue
-                compacted = record.metadata.get("claude_code_compacted", False)
+                compacted = ps.get("compacted", False) if ps else record.metadata.get("claude_code_compacted", False)
                 return ClaudeCodeSessionInfo(session_id, compacted)
         return None
     except Exception:

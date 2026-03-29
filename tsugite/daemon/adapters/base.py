@@ -249,8 +249,7 @@ class BaseAdapter(ABC):
         execution_steps=None,
         system_prompt=None,
         attachments=None,
-        claude_code_session_id=None,
-        claude_code_compacted=False,
+        provider_state=None,
         status="success",
         error_message=None,
     ):
@@ -270,8 +269,7 @@ class BaseAdapter(ABC):
                 channel_metadata=metadata,
                 system_prompt=system_prompt,
                 attachments=attachments,
-                claude_code_session_id=claude_code_session_id,
-                claude_code_compacted=claude_code_compacted,
+                provider_state=provider_state,
                 status=status,
                 error_message=error_message,
             )
@@ -505,13 +503,13 @@ class BaseAdapter(ABC):
             execution_steps=getattr(result, "execution_steps", None),
             system_prompt=getattr(result, "system_message", None),
             attachments=getattr(result, "attachments", None),
-            claude_code_session_id=getattr(result, "claude_code_session_id", None),
-            claude_code_compacted=getattr(result, "claude_code_compacted", False),
+            provider_state=getattr(result, "provider_state", None),
         )
 
-        if result.context_window:
-            self.session_store.update_context_limit(self.agent_name, result.context_window)
-            self.agent_config.context_limit = result.context_window
+        ps = getattr(result, "provider_state", None) or {}
+        if ps.get("context_window"):
+            self.session_store.update_context_limit(self.agent_name, ps["context_window"])
+            self.agent_config.context_limit = ps["context_window"]
 
         self.session_store.update_token_count(conv_id, result.token_count or 0)
 

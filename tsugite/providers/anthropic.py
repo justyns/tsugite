@@ -175,6 +175,15 @@ class AnthropicProvider:
     def get_model_info(self, model: str) -> ModelInfo | None:
         return _get_model_info(self.name, model)
 
+    def set_context(self, **kwargs: Any) -> None:
+        pass
+
+    def get_state(self) -> dict | None:
+        return None
+
+    async def stop(self) -> None:
+        pass
+
     async def list_models(self) -> list[str]:
         return [k.split("/", 1)[1] for k in _ANTHROPIC_MODELS]
 

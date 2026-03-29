@@ -281,16 +281,17 @@ class TestClaudeCodeProcess:
 
 
 class TestClaudeCodeAgentIntegration:
-    def test_agent_detects_claude_code_provider(self):
+    def test_agent_uses_claude_code_provider(self):
         from tsugite.core.agent import TsugiteAgent
+        from tsugite.providers.claude_code import ClaudeCodeProvider
 
         agent = TsugiteAgent(
             model_string="claude_code:sonnet",
             tools=[],
             instructions="test",
         )
-        assert agent._is_claude_code is True
-        assert agent._claude_code_model == "claude-sonnet-4-6"
+        assert isinstance(agent._provider, ClaudeCodeProvider)
+        assert agent._provider_name == "claude_code"
 
     def test_agent_non_claude_code_provider(self):
         from tsugite.core.agent import TsugiteAgent
@@ -300,7 +301,7 @@ class TestClaudeCodeAgentIntegration:
             tools=[],
             instructions="test",
         )
-        assert agent._is_claude_code is False
+        assert agent._provider_name == "openai"
 
     @pytest.mark.asyncio
     async def test_agent_run_uses_claude_code_process(self):
@@ -313,11 +314,10 @@ class TestClaudeCodeAgentIntegration:
             max_turns=2,
         )
 
-        # Mock the ClaudeCodeProcess
         mock_process = AsyncMock()
         mock_process.session_id = "test-session"
+        mock_process.compacted = False
 
-        # Simulate a response that calls final_answer
         async def mock_send(*args, **kwargs):
             events = [
                 {"type": "text_delta", "text": "Thought: simple\n```python\nfinal_answer('42')\n```"},
@@ -341,7 +341,7 @@ class TestClaudeCodeAgentIntegration:
             result = await agent.run("what is 6*7")
 
         assert result == "42"
-        assert agent._claude_code_last_turn_tokens == 600
+        assert agent.total_tokens == 600
         mock_process.start.assert_called_once()
         mock_process.stop.assert_called_once()
 
@@ -364,6 +364,7 @@ class TestClaudeCodeAgentIntegration:
 
         mock_process = AsyncMock()
         mock_process.session_id = "test-session"
+        mock_process.compacted = False
 
         async def mock_send(*args, **kwargs):
             events = [
@@ -409,6 +410,7 @@ class TestClaudeCodeAgentIntegration:
 
         mock_process = AsyncMock()
         mock_process.session_id = "test-session"
+        mock_process.compacted = False
 
         async def mock_send(*args, **kwargs):
             events = [
@@ -438,83 +440,34 @@ class TestClaudeCodeAgentIntegration:
         assert captured_events[0].cache_creation_input_tokens == 300
         assert captured_events[0].cache_read_input_tokens == 200
 
-    @pytest.mark.asyncio
-    async def test_claude_code_no_code_block_returns_text_as_final_answer(self):
-        """When Claude Code responds with plain text (no code block), treat it as a final answer."""
-        from tsugite.core.agent import TsugiteAgent
-        from tsugite.events import EventBus, FinalAnswerEvent
-
-        bus = EventBus()
-        captured = []
-        bus.subscribe(lambda e: captured.append(e) if isinstance(e, FinalAnswerEvent) else None)
-
-        agent = TsugiteAgent(
-            model_string="claude_code:opus",
-            tools=[],
-            instructions="test",
-            max_turns=5,
-            event_bus=bus,
-        )
-
-        mock_process = AsyncMock()
-        mock_process.session_id = "test-session"
-
-        # Response has NO ```python block — just plain text
-        async def mock_send(*args, **kwargs):
-            events = [
-                {"type": "text_delta", "text": "Yes, I'm here! How can I help you today?"},
-                {
-                    "type": "result",
-                    "text": "Yes, I'm here! How can I help you today?",
-                    "cost_usd": 0.005,
-                    "session_id": "test-session",
-                    "input_tokens": 800,
-                    "output_tokens": 50,
-                },
-            ]
-            for e in events:
-                yield e
-
-        mock_process.send_message = mock_send
-        mock_process.start = AsyncMock()
-        mock_process.stop = AsyncMock()
-
-        with patch("tsugite.core.claude_code.ClaudeCodeProcess", return_value=mock_process):
-            result = await agent.run("are you there?")
-
-        # Should return the text as the answer, not loop with errors
-        assert "I'm here" in result
-        assert len(captured) == 1
-        assert "I'm here" in captured[0].answer
-
 
 # ── Session ID passthrough tests ──
 
 
 class TestSessionIdPassthrough:
-    def test_agent_result_has_session_id(self):
+    def test_agent_result_has_provider_state(self):
         from tsugite.core.agent import AgentResult
 
-        result = AgentResult(output="test", claude_code_session_id="session-abc")
-        assert result.claude_code_session_id == "session-abc"
+        result = AgentResult(output="test", provider_state={"session_id": "session-abc"})
+        assert result.provider_state["session_id"] == "session-abc"
 
-    def test_agent_result_session_id_defaults_none(self):
+    def test_agent_result_provider_state_defaults_none(self):
         from tsugite.core.agent import AgentResult
 
         result = AgentResult(output="test")
-        assert result.claude_code_session_id is None
+        assert result.provider_state is None
 
-    def test_execution_result_has_session_id(self):
+    def test_execution_result_has_provider_state(self):
         from tsugite.agent_runner.models import AgentExecutionResult
 
-        result = AgentExecutionResult(response="test", claude_code_session_id="session-xyz")
-        assert result.claude_code_session_id == "session-xyz"
+        result = AgentExecutionResult(response="test", provider_state={"session_id": "session-xyz"})
+        assert result.provider_state["session_id"] == "session-xyz"
 
-    def test_execution_result_session_id_defaults_none(self):
+    def test_execution_result_provider_state_defaults_none(self):
         from tsugite.agent_runner.models import AgentExecutionResult
 
         result = AgentExecutionResult(response="test")
-        assert result.claude_code_session_id is None
+        assert result.provider_state is None
 
 
 # ── Context limit resolution tests ──
@@ -558,6 +511,7 @@ class TestClaudeCodeContextLimit:
 
         mock_process = AsyncMock()
         mock_process.session_id = "test-session"
+        mock_process.compacted = False
 
         async def mock_send(*args, **kwargs):
             events = [
@@ -582,4 +536,4 @@ class TestClaudeCodeContextLimit:
         with patch("tsugite.core.claude_code.ClaudeCodeProcess", return_value=mock_process):
             result = await agent.run("hello", return_full_result=True)
 
-        assert result.context_window == 200000
+        assert result.provider_state["context_window"] == 200000

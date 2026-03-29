@@ -472,6 +472,9 @@ def mock_provider():
     provider.count_tokens = MagicMock(return_value=10)
     provider.get_model_info = MagicMock(return_value=ModelInfo(max_input_tokens=128_000))
     provider.list_models = AsyncMock(return_value=[])
+    provider.stop = AsyncMock()
+    provider.get_state = MagicMock(return_value=None)
+    provider.set_context = MagicMock()
 
     with patch("tsugite.providers.get_provider", return_value=provider):
         yield provider

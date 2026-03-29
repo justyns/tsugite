@@ -67,6 +67,16 @@ class Provider(Protocol):
 
     async def list_models(self) -> list[str]: ...
 
+    def set_context(self, **kwargs: Any) -> None:
+        """Pass session context to the provider. No-op for stateless providers."""
+
+    def get_state(self) -> dict | None:
+        """Return provider-specific session state, or None for stateless providers."""
+        return None
+
+    async def stop(self) -> None:
+        """Clean up resources. No-op for stateless providers."""
+
 
 def default_count_tokens(text: str, model: str) -> int:
     """Shared token counting using tiktoken with cached encodings."""

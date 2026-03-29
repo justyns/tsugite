@@ -246,6 +246,15 @@ class OpenAICompatProvider:
     def get_model_info(self, model: str) -> ModelInfo | None:
         return _get_model_info(self.name, model)
 
+    def set_context(self, **kwargs: Any) -> None:
+        pass
+
+    def get_state(self) -> dict | None:
+        return None
+
+    async def stop(self) -> None:
+        pass
+
     async def list_models(self) -> list[str]:
         try:
             client = self._get_client()

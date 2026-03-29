@@ -118,9 +118,7 @@ class AgentResult:
     cost: Optional[float] = None
     steps: Optional[List[StepResult]] = None
     error: Optional[str] = None
-    claude_code_session_id: Optional[str] = None
-    claude_code_compacted: bool = False
-    context_window: Optional[int] = None
+    provider_state: Optional[Dict] = None
 
     def __str__(self) -> str:
         return self.output if self.output else self.error if self.error else ""
@@ -202,15 +200,13 @@ class TsugiteAgent:
         self._provider_name, self._provider, self._model_id = get_provider_and_model(model_string)
         self._model_kwargs = get_model_kwargs(model_string, **(model_kwargs or {}))
 
-        self._is_claude_code = self._provider_name == "claude_code"
-        self._claude_code_model = self._model_id if self._is_claude_code else None
-        self._claude_code_session_id: Optional[str] = None
-        self._claude_code_last_turn_tokens: int = 0
-        self._claude_code_context_tokens: int = 0
-        self._claude_code_context_window: Optional[int] = None
-        self._claude_code_cache_creation_tokens: int = 0
-        self._claude_code_cache_read_tokens: int = 0
-        self._claude_code_compacted: bool = False
+        self._provider.set_context(
+            resume_session=resume_session,
+            resume_after_compaction=resume_after_compaction,
+            attachments=self.attachments,
+            skills=self.skills,
+            previous_messages=self.previous_messages,
+        )
 
     def _run_async_in_sync_context(self, coro):
         """Run async coroutine in synchronous context, handling event loop properly.
@@ -382,17 +378,6 @@ class TsugiteAgent:
         if self.event_bus:
             self.event_bus.emit(TaskStartEvent(task=task, model=self.model_name))
 
-        # Start claude_code subprocess if needed
-        claude_process = None
-        if self._is_claude_code:
-            from .claude_code import ClaudeCodeProcess
-
-            claude_process = ClaudeCodeProcess()
-            await claude_process.start(
-                model=self._claude_code_model,
-                system_prompt=self._build_system_prompt(),
-                resume_session=self._resume_session,
-            )
         # Main agent loop
         try:
             for turn_num in range(self.max_turns):
@@ -411,10 +396,7 @@ class TsugiteAgent:
                 last_msg = messages[-1]["content"] if messages else ""
                 logger.debug("Turn %d sending %d messages (last: %.200s)", turn_num + 1, len(messages), last_msg)
 
-                if self._is_claude_code:
-                    turn = await self._claude_code_turn(claude_process, messages, turn_num, stream)
-                else:
-                    turn = await self._provider_turn(messages, turn_num, stream)
+                turn = await self._provider_turn(messages, turn_num, stream)
 
                 thought, code, response = turn.thought, turn.code, turn.response
                 logger.debug(
@@ -466,41 +448,6 @@ class TsugiteAgent:
                             self.event_bus.emit(ObservationEvent(observation=observation))
                 else:
                     # No code to execute
-
-                    # Claude Code subprocess may respond with plain text instead of a code block,
-                    # especially when workspace attachments add conversational context that overrides
-                    # the code-block instruction. Treat the text as a final answer rather than looping.
-                    if self._is_claude_code:
-                        answer = (thought or "").strip() or "(no response)"
-                        self.memory.add_final_answer(answer)
-
-                        total_tokens = (
-                            self._claude_code_last_turn_tokens if self._claude_code_last_turn_tokens else None
-                        )
-                        if self.event_bus:
-                            self.event_bus.emit(
-                                FinalAnswerEvent(
-                                    answer=answer,
-                                    turns=turn_num + 1,
-                                    tokens=total_tokens,
-                                    cost=self.total_cost if self.total_cost > 0 else None,
-                                )
-                            )
-                            duration = time.time() - start_time
-                            cache_creation_tokens = self._claude_code_cache_creation_tokens or None
-                            cache_read_tokens = self._claude_code_cache_read_tokens or None
-                            self.event_bus.emit(
-                                CostSummaryEvent(
-                                    tokens=total_tokens,
-                                    cost=self.total_cost if self.total_cost > 0 else None,
-                                    model=self.model_name,
-                                    duration_seconds=duration,
-                                    cached_tokens=None,
-                                    cache_creation_input_tokens=cache_creation_tokens,
-                                    cache_read_input_tokens=cache_read_tokens,
-                                )
-                            )
-                        return answer
 
                     from .executor import ExecutionResult
 
@@ -575,13 +522,7 @@ class TsugiteAgent:
                     # Agent is done!
                     self.memory.add_final_answer(exec_result.final_answer)
 
-                    # Trigger final answer event
-                    if response and response.usage:
-                        total_tokens = response.usage.total_tokens
-                    elif self._is_claude_code and self._claude_code_last_turn_tokens:
-                        total_tokens = self._claude_code_last_turn_tokens
-                    else:
-                        total_tokens = None
+                    total_tokens = self.total_tokens if self.total_tokens > 0 else None
 
                     if self.event_bus:
                         self.event_bus.emit(
@@ -595,7 +536,6 @@ class TsugiteAgent:
 
                         duration = time.time() - start_time
 
-                        # Extract cache-related fields (supported by OpenAI, Anthropic, Bedrock, Deepseek)
                         cached_tokens = None
                         cache_creation_tokens = None
                         cache_read_tokens = None
@@ -603,9 +543,11 @@ class TsugiteAgent:
                             cached_tokens = getattr(response.usage, "cached_tokens", None)
                             cache_creation_tokens = getattr(response.usage, "cache_creation_input_tokens", None)
                             cache_read_tokens = getattr(response.usage, "cache_read_input_tokens", None)
-                        elif self._is_claude_code:
-                            cache_creation_tokens = self._claude_code_cache_creation_tokens or None
-                            cache_read_tokens = self._claude_code_cache_read_tokens or None
+                        else:
+                            pstate = self._provider.get_state()
+                            if pstate:
+                                cache_creation_tokens = pstate.get("cache_creation_tokens") or None
+                                cache_read_tokens = pstate.get("cache_read_tokens") or None
 
                         self.event_bus.emit(
                             CostSummaryEvent(
@@ -619,19 +561,13 @@ class TsugiteAgent:
                             )
                         )
 
-                    if claude_process:
-                        self._claude_code_session_id = claude_process.session_id
-
                     if return_full_result:
-                        context_tokens = self._claude_code_context_tokens or total_tokens
                         return AgentResult(
                             output=exec_result.final_answer,
-                            token_usage=context_tokens,
+                            token_usage=total_tokens,
                             cost=self.total_cost if self.total_cost > 0 else None,
                             steps=self.memory.steps,
-                            claude_code_session_id=self._claude_code_session_id,
-                            claude_code_compacted=self._claude_code_compacted,
-                            context_window=self._claude_code_context_window,
+                            provider_state=self._provider.get_state(),
                         )
                     return exec_result.final_answer
 
@@ -656,25 +592,19 @@ class TsugiteAgent:
             self.tools = []
             try:
                 messages = self._build_messages()
-                if self._is_claude_code:
-                    turn = await self._claude_code_turn(claude_process, messages, self.max_turns, stream)
-                else:
-                    turn = await self._provider_turn(messages, self.max_turns, stream)
+                turn = await self._provider_turn(messages, self.max_turns, stream)
 
                 if turn.code and turn.code.strip():
                     exec_result = await self.executor.execute(turn.code)
                     if exec_result.final_answer is not None:
                         self.memory.add_final_answer(exec_result.final_answer)
-                        if claude_process:
-                            self._claude_code_session_id = claude_process.session_id
                         if return_full_result:
                             return AgentResult(
                                 output=exec_result.final_answer,
                                 token_usage=None,
                                 cost=self.total_cost if self.total_cost > 0 else None,
                                 steps=self.memory.steps,
-                                claude_code_session_id=self._claude_code_session_id,
-                                context_window=self._claude_code_context_window,
+                                provider_state=self._provider.get_state(),
                             )
                         return exec_result.final_answer
             except Exception:
@@ -698,82 +628,12 @@ class TsugiteAgent:
                     cost=self.total_cost,
                     steps=self.memory.steps,
                     error=error_msg,
-                    claude_code_session_id=self._claude_code_session_id,
-                    context_window=self._claude_code_context_window,
+                    provider_state=self._provider.get_state(),
                 )
 
             raise RuntimeError(error_msg)
         finally:
-            if claude_process:
-                self._claude_code_session_id = claude_process.session_id
-                self._claude_code_compacted = claude_process.compacted
-                await claude_process.stop()
-
-    async def _claude_code_turn(self, process, messages, turn_num, stream) -> TurnResult:
-        """Execute one turn via Claude Code subprocess."""
-        # Build user content for this turn
-        if turn_num == 0:
-            # First turn: include previous conversation context (for --continue)
-            user_content = self._build_claude_code_first_message()
-        else:
-            # Subsequent turns: subprocess has context, just send the new observation
-            user_content = messages[-1]["content"] if messages else ""
-
-        logger.info(
-            "Claude Code turn %d: sending ~%d chars (~%d est tokens)",
-            turn_num + 1, len(user_content), len(user_content) // 4,
-        )
-
-        accumulated = ""
-        step_cost = 0.0
-
-        async for event in process.send_message(user_content):
-            if event["type"] == "text_delta":
-                accumulated += event["text"]
-                if stream and self.event_bus:
-                    self.event_bus.emit(StreamChunkEvent(chunk=event["text"]))
-            elif event["type"] == "result":
-                if not accumulated:
-                    accumulated = event.get("text", "")
-                step_cost = event.get("cost_usd") or 0.0
-                self.total_cost += step_cost
-                self._claude_code_session_id = event.get("session_id", self._claude_code_session_id)
-                input_tokens = event.get("input_tokens") or 0
-                cache_creation = event.get("cache_creation_input_tokens") or 0
-                cache_read = event.get("cache_read_input_tokens") or 0
-                output_tokens = event.get("output_tokens") or 0
-                turn_total = input_tokens + cache_creation + cache_read + output_tokens
-                self._claude_code_last_turn_tokens = turn_total
-                self._claude_code_context_tokens = input_tokens + cache_creation + cache_read
-                self._claude_code_cache_creation_tokens += cache_creation
-                self._claude_code_cache_read_tokens += cache_read
-                self.total_tokens += turn_total
-                if event.get("context_window"):
-                    self._claude_code_context_window = event["context_window"]
-
-        if stream and self.event_bus:
-            self.event_bus.emit(StreamCompleteEvent())
-
-        if accumulated.strip().lower() == "prompt is too long":
-            raise RuntimeError(f"Claude Code prompt too long (session={self._claude_code_session_id})")
-
-        parsed = self._parse_response_from_text(accumulated)
-
-        # If no code block was found, preserve the raw text as thought so the
-        # caller can use it (e.g. treat plain-text responses as final answers).
-        thought = parsed.thought if parsed.thought or parsed.code else accumulated.strip()
-
-        if self.event_bus and not stream and thought.strip():
-            self.event_bus.emit(
-                LLMMessageEvent(content=thought, title=f"Turn {turn_num + 1} Reasoning", step=turn_num + 1)
-            )
-
-        return TurnResult(
-            thought=thought,
-            code=parsed.code,
-            step_cost=step_cost,
-            content_blocks=parsed.content_blocks,
-        )
+            await self._provider.stop()
 
     async def _provider_turn(self, messages, turn_num, stream) -> TurnResult:
         """Execute one turn via the provider system."""
@@ -947,7 +807,7 @@ class TsugiteAgent:
         blocks = []
         text_parts = ["<context>"]
 
-        model_info = self._provider.get_model_info(self._model_id) if not self._is_claude_code else None
+        model_info = self._provider.get_model_info(self._model_id)
         model_supports_vision = model_info.supports_vision if model_info else True
 
         for att in self.attachments:
@@ -1057,86 +917,10 @@ class TsugiteAgent:
 
         return messages
 
-    def _build_claude_code_first_message(self) -> str:
-        """Build first message for claude_code subprocess, including context and history.
-
-        Claude Code receives the system prompt via --system-prompt-file, but attachments
-        and skills are normally sent as a context turn in _build_messages(). Since that
-        turn is skipped for the claude_code path, we inline attachment/skill content here.
-
-        When resuming a Claude Code session, history is skipped (Claude Code already has
-        it). Attachments are included on fresh sessions and after Claude Code compaction
-        (which may have lost them), but skipped on regular resumes to avoid accumulation.
-        """
-        parts = []
-
-        # Include attachments on fresh sessions or after compaction (may have been lost)
-        include_context = not self._resume_session or self._resume_after_compaction
-
-        if include_context:
-            context_parts = []
-            for att in self.attachments:
-                if att.content_type == AttachmentContentType.TEXT:
-                    limit = _attachment_char_limit(att.name)
-                    if limit == 0:
-                        continue
-                    content = att.content
-                    if limit is not None and len(content) > limit:
-                        content = content[:limit] + "\n... (truncated)"
-                    context_parts.append(f'<attachment name="{att.name}">')
-                    context_parts.append(content)
-                    context_parts.append("</attachment>")
-            for skill in self.skills:
-                content = skill.content
-                if len(content) > 4000:
-                    content = content[:4000] + "\n... (truncated)"
-                context_parts.append(f'<skill name="{skill.name}">')
-                context_parts.append(content)
-                context_parts.append("</skill>")
-            if context_parts:
-                parts.append("<context>\n" + "\n".join(context_parts) + "\n</context>\n")
-
-        # Only serialize history for fresh sessions. Resumed sessions already have
-        # the conversation in Claude Code's internal state.
-        if self.previous_messages and not self._resume_session:
-            trimmed = _trim_messages_to_token_budget(
-                self.previous_messages,
-                self._get_claude_code_history_budget(),
-            )
-            dropped = len(self.previous_messages) - len(trimmed)
-            history_lines = [
-                f"{msg.get('role', 'unknown').capitalize()}: {msg.get('content', '')}" for msg in trimmed
-            ]
-            header = "<conversation_history"
-            if dropped > 0:
-                header += f' note="{dropped} older messages omitted for context"'
-                logger.info("Trimmed %d of %d previous messages to fit history budget", dropped, len(self.previous_messages))
-            header += ">"
-            parts.append(header + "\n" + "\n\n".join(history_lines) + "\n</conversation_history>\n")
-
-        # Add the current task
-        parts.append(self.memory.task)
-        return "\n".join(parts)
-
     def _build_system_prompt(self) -> str:
         """Build system prompt that teaches LLM how to solve tasks."""
         return build_system_prompt(self.tools, self.instructions)
 
-    def _get_claude_code_history_budget(self) -> int:
-        """Get token budget for conversation history in claude_code first message.
-
-        Reserves 50% of context for: Claude Code's own system prompt, tsugite's
-        system prompt, attachments/skills, current task, and multi-step headroom.
-        """
-        from tsugite.providers.model_registry import get_model_info
-
-        if self._claude_code_context_window:
-            context_limit = self._claude_code_context_window
-        else:
-            info = get_model_info("claude_code", self._claude_code_model or "")
-            context_limit = info.max_input_tokens if info else 200_000
-
-        return context_limit // 2
 
     def _build_budget_tag(self, turn_num: int) -> str:
         """Build XML budget tag showing turn and token usage for the LLM."""

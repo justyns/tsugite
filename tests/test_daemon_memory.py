@@ -442,29 +442,24 @@ class TestInferCompactionModelClaudeCode:
 
 class TestLlmCompleteClaudeCodeRouting:
     @pytest.mark.asyncio
-    async def test_routes_to_claude_code_complete(self):
-        with patch(
-            "tsugite.core.claude_code.claude_code_complete",
-            new_callable=AsyncMock,
-            return_value="claude code result",
-        ) as mock_cc:
+    async def test_routes_through_provider(self):
+        mock_prov = _mock_provider(return_value=_mock_provider_response("claude code result"))
+        with patch("tsugite.models.get_provider_and_model", return_value=("claude_code", mock_prov, "claude-sonnet-4-6")):
             result = await _llm_complete("system", "user", "claude_code:sonnet")
         assert result == "claude code result"
-        mock_cc.assert_called_once_with("system", "user", "claude-sonnet-4-6")
+        mock_prov.acompletion.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_claude_code_empty_response_raises(self):
-        with patch("tsugite.core.claude_code.claude_code_complete", new_callable=AsyncMock, return_value=""):
+        mock_prov = _mock_provider(return_value=_mock_provider_response(""))
+        with patch("tsugite.models.get_provider_and_model", return_value=("claude_code", mock_prov, "claude-haiku-4-5-20251001")):
             with pytest.raises(RuntimeError, match=r"LLM returned empty response"):
                 await _llm_complete("system", "user", "claude_code:haiku")
 
     @pytest.mark.asyncio
     async def test_claude_code_error_raises_runtime_error(self):
-        with patch(
-            "tsugite.core.claude_code.claude_code_complete",
-            new_callable=AsyncMock,
-            side_effect=Exception("cli not found"),
-        ):
+        mock_prov = _mock_provider(side_effect=Exception("cli not found"))
+        with patch("tsugite.models.get_provider_and_model", return_value=("claude_code", mock_prov, "claude-sonnet-4-6")):
             with pytest.raises(RuntimeError, match=r"LLM call failed.*cli not found"):
                 await _llm_complete("system", "user", "claude_code:sonnet")
 

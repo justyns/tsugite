@@ -18,6 +18,9 @@ def _patch_provider(agent, side_effect=None, return_value=None):
     mock = AsyncMock(side_effect=side_effect, return_value=return_value)
     agent._provider = MagicMock()
     agent._provider.acompletion = mock
+    agent._provider.stop = AsyncMock()
+    agent._provider.get_state = MagicMock(return_value=None)
+    agent._provider.set_context = MagicMock()
     return mock
 
 

@@ -580,9 +580,7 @@ async def _execute_agent_with_prompt(
                     execution_steps=steps_list,
                     system_message=prepared.system_message,
                     attachments=prepared.attachments,
-                    claude_code_session_id=result.claude_code_session_id,
-                    claude_code_compacted=result.claude_code_compacted,
-                    context_window=result.context_window,
+                    provider_state=result.provider_state,
                 )
             else:
                 return AgentExecutionResult(
