@@ -193,7 +193,9 @@ def history_list(
 
         console.print(table)
 
-        console.print("\n[dim]Use 'tsugite history show ID' to view details, 'tsugite history search QUERY' to search[/dim]")
+        console.print(
+            "\n[dim]Use 'tsugite history show ID' to view details, 'tsugite history search QUERY' to search[/dim]"
+        )
 
     except Exception as e:
         console.print(f"[red]Failed to list conversations: {e}[/red]")

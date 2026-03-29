@@ -79,10 +79,7 @@ class TestApplyCacheControlToMessages:
 
     def test_custom_max_markers(self):
         """Test with a custom max_markers value."""
-        messages = [
-            {"role": "user", "content": f"Turn {i}"}
-            for i in range(10)
-        ]
+        messages = [{"role": "user", "content": f"Turn {i}"} for i in range(10)]
         result = apply_cache_control_to_messages(messages, max_markers=3)
 
         cached_count = sum(1 for msg in result if "cache_control" in msg)

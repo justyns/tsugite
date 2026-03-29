@@ -329,12 +329,12 @@ def _ensure_tools_loaded():
     from . import history as history  # noqa: E402, F401
     from . import http as http  # noqa: E402, F401
     from . import interactive as interactive  # noqa: E402, F401
+    from . import kv as kv  # noqa: E402, F401
     from . import notify as notify  # noqa: E402, F401
     from . import schedule as schedule  # noqa: E402, F401
     from . import sessions as sessions  # noqa: E402, F401
     from . import shell as shell  # noqa: E402, F401
     from . import skills as skills  # noqa: E402, F401
-    from . import kv as kv  # noqa: E402, F401
 
     if shutil.which("tmux"):
         from . import tmux as tmux  # noqa: E402, F401

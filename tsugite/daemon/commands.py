@@ -99,7 +99,9 @@ async def cmd_bg(adapter: BaseAdapter, prompt: str, agent: str | None = None) ->
     description="Compact the current conversation to free context space",
     params=[
         CommandParam("user_id", str, "User whose session to compact"),
-        CommandParam("message", str, "Extra instructions for compaction (e.g. remember/forget specific things)", required=False),
+        CommandParam(
+            "message", str, "Extra instructions for compaction (e.g. remember/forget specific things)", required=False
+        ),
     ],
 )
 async def cmd_compact(adapter: BaseAdapter, user_id: str, message: str | None = None) -> str:

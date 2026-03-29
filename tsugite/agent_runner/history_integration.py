@@ -196,6 +196,7 @@ def _build_turn_messages(
                 content_blocks = getattr(step, "content_blocks", None) or {}
                 if content_blocks:
                     from tsugite.core.content_blocks import serialize_content_blocks
+
                     assistant_msg += f"\n\n{serialize_content_blocks(content_blocks)}"
                 messages.append({"role": "assistant", "content": assistant_msg})
             if xml_observation:

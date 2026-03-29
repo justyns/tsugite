@@ -10,7 +10,8 @@ from typing import Any, AsyncIterator
 import httpx
 
 from .base import CompletionResponse, ModelInfo, StreamChunk, Usage, default_count_tokens
-from .model_registry import calculate_cost, get_model_info as _get_model_info, register_models
+from .model_registry import calculate_cost, register_models
+from .model_registry import get_model_info as _get_model_info
 
 logger = logging.getLogger(__name__)
 

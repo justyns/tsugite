@@ -48,14 +48,21 @@ async def test_ui_event_task_start(event_bus_with_handler):
     event_bus, mock_ui_handler = event_bus_with_handler
 
     agent = TsugiteAgent(
-        model_string="openai:gpt-4o-mini", tools=[], instructions="", max_turns=5,
-        event_bus=event_bus, model_name="gpt-4o-mini",
+        model_string="openai:gpt-4o-mini",
+        tools=[],
+        instructions="",
+        max_turns=5,
+        event_bus=event_bus,
+        model_name="gpt-4o-mini",
     )
-    _patch_provider(agent, return_value=_resp("""Thought: Calculate the answer.
+    _patch_provider(
+        agent,
+        return_value=_resp("""Thought: Calculate the answer.
 
 ```python
 final_answer(42)
-```"""))
+```"""),
+    )
 
     await agent.run("Test task")
 
@@ -89,7 +96,10 @@ final_answer(x * 2)
 ```""")
 
     agent = TsugiteAgent(
-        model_string="openai:gpt-4o-mini", tools=[], instructions="", max_turns=5,
+        model_string="openai:gpt-4o-mini",
+        tools=[],
+        instructions="",
+        max_turns=5,
         event_bus=event_bus,
     )
     _patch_provider(agent, side_effect=mock_acompletion)
@@ -107,15 +117,21 @@ async def test_ui_event_code_execution(event_bus_with_handler):
     event_bus, mock_ui_handler = event_bus_with_handler
 
     agent = TsugiteAgent(
-        model_string="openai:gpt-4o-mini", tools=[], instructions="", max_turns=5,
+        model_string="openai:gpt-4o-mini",
+        tools=[],
+        instructions="",
+        max_turns=5,
         event_bus=event_bus,
     )
-    _patch_provider(agent, return_value=_resp("""Thought: Execute code.
+    _patch_provider(
+        agent,
+        return_value=_resp("""Thought: Execute code.
 
 ```python
 result = 5 + 3
 final_answer(result)
-```"""))
+```"""),
+    )
 
     await agent.run("Test task")
 
@@ -130,15 +146,21 @@ async def test_ui_event_observation(event_bus_with_handler):
     event_bus, mock_ui_handler = event_bus_with_handler
 
     agent = TsugiteAgent(
-        model_string="openai:gpt-4o-mini", tools=[], instructions="", max_turns=5,
+        model_string="openai:gpt-4o-mini",
+        tools=[],
+        instructions="",
+        max_turns=5,
         event_bus=event_bus,
     )
-    _patch_provider(agent, return_value=_resp("""Thought: Print something.
+    _patch_provider(
+        agent,
+        return_value=_resp("""Thought: Print something.
 
 ```python
 print("Hello, World!")
 final_answer("done")
-```"""))
+```"""),
+    )
 
     await agent.run("Test task")
 
@@ -152,14 +174,20 @@ async def test_ui_event_final_answer(event_bus_with_handler):
     event_bus, mock_ui_handler = event_bus_with_handler
 
     agent = TsugiteAgent(
-        model_string="openai:gpt-4o-mini", tools=[], instructions="", max_turns=5,
+        model_string="openai:gpt-4o-mini",
+        tools=[],
+        instructions="",
+        max_turns=5,
         event_bus=event_bus,
     )
-    _patch_provider(agent, return_value=_resp("""Thought: Return the answer.
+    _patch_provider(
+        agent,
+        return_value=_resp("""Thought: Return the answer.
 
 ```python
 final_answer("The answer is 42")
-```"""))
+```"""),
+    )
 
     await agent.run("Test task")
 
@@ -191,7 +219,10 @@ final_answer(1)
 ```""")
 
     agent = TsugiteAgent(
-        model_string="openai:gpt-4o-mini", tools=[], instructions="", max_turns=5,
+        model_string="openai:gpt-4o-mini",
+        tools=[],
+        instructions="",
+        max_turns=5,
         event_bus=event_bus,
     )
     _patch_provider(agent, side_effect=mock_acompletion)
@@ -209,15 +240,21 @@ async def test_ui_event_error_on_max_turns(event_bus_with_handler):
     event_bus, mock_ui_handler = event_bus_with_handler
 
     agent = TsugiteAgent(
-        model_string="openai:gpt-4o-mini", tools=[], instructions="", max_turns=2,
+        model_string="openai:gpt-4o-mini",
+        tools=[],
+        instructions="",
+        max_turns=2,
         event_bus=event_bus,
     )
-    _patch_provider(agent, return_value=_resp("""Thought: Still working...
+    _patch_provider(
+        agent,
+        return_value=_resp("""Thought: Still working...
 
 ```python
 x = 1
 print(x)
-```"""))
+```"""),
+    )
 
     with pytest.raises(RuntimeError):
         await agent.run("Test task")
@@ -233,17 +270,23 @@ async def test_ui_event_reasoning_content(event_bus_with_handler):
     event_bus, mock_ui_handler = event_bus_with_handler
 
     agent = TsugiteAgent(
-        model_string="anthropic:claude-3-7-sonnet", tools=[], instructions="", max_turns=5,
+        model_string="anthropic:claude-3-7-sonnet",
+        tools=[],
+        instructions="",
+        max_turns=5,
         event_bus=event_bus,
     )
-    _patch_provider(agent, return_value=_resp(
-        """Thought: Solve this.
+    _patch_provider(
+        agent,
+        return_value=_resp(
+            """Thought: Solve this.
 
 ```python
 final_answer(100)
 ```""",
-        reasoning_content="Deep thinking process here...",
-    ))
+            reasoning_content="Deep thinking process here...",
+        ),
+    )
 
     await agent.run("Test task")
 
@@ -258,17 +301,23 @@ async def test_ui_event_reasoning_tokens(event_bus_with_handler):
     event_bus, mock_ui_handler = event_bus_with_handler
 
     agent = TsugiteAgent(
-        model_string="openai:o1", tools=[], instructions="", max_turns=5,
+        model_string="openai:o1",
+        tools=[],
+        instructions="",
+        max_turns=5,
         event_bus=event_bus,
     )
-    _patch_provider(agent, return_value=_resp(
-        """Thought: Solve this.
+    _patch_provider(
+        agent,
+        return_value=_resp(
+            """Thought: Solve this.
 
 ```python
 final_answer(100)
 ```""",
-        reasoning_tokens=256,
-    ))
+            reasoning_tokens=256,
+        ),
+    )
 
     await agent.run("Test task")
 
@@ -281,14 +330,20 @@ final_answer(100)
 @pytest.mark.asyncio
 async def test_agent_without_ui_handler():
     agent = TsugiteAgent(
-        model_string="openai:gpt-4o-mini", tools=[], instructions="", max_turns=5,
+        model_string="openai:gpt-4o-mini",
+        tools=[],
+        instructions="",
+        max_turns=5,
         event_bus=None,
     )
-    _patch_provider(agent, return_value=_resp("""Thought: Calculate.
+    _patch_provider(
+        agent,
+        return_value=_resp("""Thought: Calculate.
 
 ```python
 final_answer(42)
-```"""))
+```"""),
+    )
 
     result = await agent.run("Test task")
     assert result == 42
@@ -299,15 +354,21 @@ async def test_ui_event_order(event_bus_with_handler):
     event_bus, mock_ui_handler = event_bus_with_handler
 
     agent = TsugiteAgent(
-        model_string="openai:gpt-4o-mini", tools=[], instructions="", max_turns=5,
+        model_string="openai:gpt-4o-mini",
+        tools=[],
+        instructions="",
+        max_turns=5,
         event_bus=event_bus,
     )
-    _patch_provider(agent, return_value=_resp("""Thought: Calculate.
+    _patch_provider(
+        agent,
+        return_value=_resp("""Thought: Calculate.
 
 ```python
 print("Hello")
 final_answer(42)
-```"""))
+```"""),
+    )
 
     await agent.run("Test task")
 
@@ -342,7 +403,10 @@ final_answer(42)
 ```""")
 
     agent = TsugiteAgent(
-        model_string="openai:gpt-4o-mini", tools=[], instructions="", max_turns=5,
+        model_string="openai:gpt-4o-mini",
+        tools=[],
+        instructions="",
+        max_turns=5,
         event_bus=event_bus,
     )
     _patch_provider(agent, side_effect=mock_acompletion)

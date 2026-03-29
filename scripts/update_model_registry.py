@@ -5,7 +5,6 @@ Usage:
     uv run python scripts/update_model_registry.py
 """
 
-import json
 import re
 import sys
 from pathlib import Path
@@ -124,7 +123,7 @@ def replace_generated_block(file_path: Path, provider: str, new_block: str) -> s
 
     # Find existing manual keys (outside the generated block) for duplicate detection
     before_block = content[:begin_idx]
-    after_block = content[end_idx + len(end_marker):]
+    after_block = content[end_idx + len(end_marker) :]
     manual_keys = set()
     for match in re.finditer(r'"' + re.escape(provider) + r'/([^"]+)"', before_block + after_block):
         manual_keys.add(match.group(1))
@@ -141,7 +140,7 @@ def replace_generated_block(file_path: Path, provider: str, new_block: str) -> s
         f"{end_marker}"
     )
 
-    new_content = content[:begin_idx] + replacement + content[end_idx + len(end_marker):]
+    new_content = content[:begin_idx] + replacement + content[end_idx + len(end_marker) :]
     file_path.write_text(new_content)
     return manual_keys
 

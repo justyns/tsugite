@@ -461,7 +461,10 @@ class DiscordAdapter(BaseAdapter):
                 synced = len(self.bot.tree.get_commands())
                 logger.info(
                     "Discord bot '%s' logged in as %s (agent: %s, %d app commands synced)",
-                    bot_config.name, self.bot.user, agent_name, synced,
+                    bot_config.name,
+                    self.bot.user,
+                    agent_name,
+                    synced,
                 )
             except Exception as e:
                 logger.error("Failed to sync app commands for '%s': %s", bot_config.name, e)
@@ -534,7 +537,9 @@ class DiscordAdapter(BaseAdapter):
         for p in visible_params:
             ann = Optional[p.type] if not p.required else p.type
             default = inspect.Parameter.empty if p.required else None
-            sig_params.append(inspect.Parameter(p.name, inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=ann, default=default))
+            sig_params.append(
+                inspect.Parameter(p.name, inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=ann, default=default)
+            )
 
         async def callback(interaction: discord.Interaction, **kwargs):
             await interaction.response.defer()

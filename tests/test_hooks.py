@@ -784,9 +784,7 @@ class TestHookRuleValidation:
         assert rule.run is None
 
     def test_agent_with_model_and_max_turns(self):
-        rule = HookRule.model_validate(
-            {"type": "agent", "agent": "test.md", "model": "sonnet", "max_turns": 5}
-        )
+        rule = HookRule.model_validate({"type": "agent", "agent": "test.md", "model": "sonnet", "max_turns": 5})
         assert rule.hook_model == "sonnet"
         assert rule.max_turns == 5
 
@@ -846,9 +844,7 @@ class TestExecuteAgentHook:
 
     @pytest.mark.asyncio
     async def test_agent_passes_model_and_max_turns(self, tmp_path):
-        rule = HookRule.model_validate(
-            {"type": "agent", "agent": "test.md", "model": "haiku", "max_turns": 2}
-        )
+        rule = HookRule.model_validate({"type": "agent", "agent": "test.md", "model": "haiku", "max_turns": 2})
         mock_result = AgentExecutionResult(response="ok")
         with (
             patch(_PATCH_FIND, return_value=tmp_path / "test.md"),
@@ -937,10 +933,7 @@ class TestSyncGuardAgentHooks:
 class TestFirePreMessageAgentHooks:
     async def test_agent_hook_via_fire_pre_message(self, tmp_workspace):
         (tmp_workspace / ".tsugite" / "hooks.yaml").write_text(
-            "hooks:\n  pre_message:\n"
-            "    - type: agent\n"
-            "      agent: rag.md\n"
-            "      capture_as: rag_context\n"
+            "hooks:\n  pre_message:\n    - type: agent\n      agent: rag.md\n      capture_as: rag_context\n"
         )
         mock_result = AgentExecutionResult(response="relevant context")
         with (

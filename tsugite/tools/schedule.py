@@ -54,6 +54,7 @@ def _validate_agent(agent: str) -> None:
 def _resolve_agent(agent: Optional[str]) -> str:
     """Resolve agent name, falling back to the current agent or 'default'."""
     from tsugite.agent_runner.helpers import resolve_current_agent
+
     return resolve_current_agent(agent)
 
 

@@ -1,6 +1,6 @@
 """Tests for TsugiteAgent."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -66,12 +66,15 @@ async def test_agent_simple_calculation():
         max_turns=5,
     )
 
-    mock = _patch_provider(agent, return_value=_mock_response("""Thought: I'll calculate 5 + 3 using Python.
+    mock = _patch_provider(
+        agent,
+        return_value=_mock_response("""Thought: I'll calculate 5 + 3 using Python.
 
 ```python
 result = 5 + 3
 final_answer(result)
-```"""))
+```"""),
+    )
 
     result = await agent.run("What is 5 + 3?")
     assert result == 8
@@ -136,12 +139,15 @@ async def test_agent_with_tools():
         max_turns=5,
     )
 
-    _patch_provider(agent, return_value=_mock_response("""Thought: I'll use the multiply tool.
+    _patch_provider(
+        agent,
+        return_value=_mock_response("""Thought: I'll use the multiply tool.
 
 ```python
 result = multiply(5, 3)
 final_answer(result)
-```"""))
+```"""),
+    )
 
     agent.executor.namespace["multiply"] = tool.function
     result = await agent.run("What is 5 * 3?")
@@ -159,12 +165,15 @@ async def test_agent_max_turns_reached():
         max_turns=3,
     )
 
-    _patch_provider(agent, return_value=_mock_response("""Thought: Still working...
+    _patch_provider(
+        agent,
+        return_value=_mock_response("""Thought: Still working...
 
 ```python
 x = 1
 print(x)
-```"""))
+```"""),
+    )
 
     with pytest.raises(RuntimeError) as exc_info:
         await agent.run("Some task")
@@ -184,11 +193,14 @@ async def test_agent_return_full_result():
         max_turns=5,
     )
 
-    _patch_provider(agent, return_value=_mock_response("""Thought: Calculate the answer.
+    _patch_provider(
+        agent,
+        return_value=_mock_response("""Thought: Calculate the answer.
 
 ```python
 final_answer(42)
-```"""))
+```"""),
+    )
 
     result = await agent.run("What is the answer?", return_full_result=True)
 
@@ -210,14 +222,17 @@ async def test_agent_reasoning_model_support():
         model_kwargs={"reasoning_effort": "high"},
     )
 
-    _patch_provider(agent, return_value=_mock_response(
-        """Thought: Using reasoning to solve this.
+    _patch_provider(
+        agent,
+        return_value=_mock_response(
+            """Thought: Using reasoning to solve this.
 
 ```python
 final_answer(100)
 ```""",
-        reasoning_content="[Hidden reasoning process...]",
-    ))
+            reasoning_content="[Hidden reasoning process...]",
+        ),
+    )
 
     await agent.run("Solve this problem")
 
@@ -242,11 +257,14 @@ async def test_agent_model_kwargs_passed_to_provider():
         },
     )
 
-    mock = _patch_provider(agent, return_value=_mock_response("""Thought: Done.
+    mock = _patch_provider(
+        agent,
+        return_value=_mock_response("""Thought: Done.
 
 ```python
 final_answer("test")
-```"""))
+```"""),
+    )
 
     await agent.run("Task")
 
@@ -461,11 +479,14 @@ async def test_agent_custom_executor():
         executor=mock_executor,
     )
 
-    _patch_provider(agent, return_value=_mock_response("""Thought: Test.
+    _patch_provider(
+        agent,
+        return_value=_mock_response("""Thought: Test.
 
 ```python
 final_answer(42)
-```"""))
+```"""),
+    )
 
     result = await agent.run("Test task")
 

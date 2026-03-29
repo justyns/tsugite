@@ -11,7 +11,8 @@ from typing import Any, AsyncIterator
 import httpx
 
 from .base import CompletionResponse, ModelInfo, StreamChunk, Usage, default_count_tokens
-from .model_registry import calculate_cost, get_model_info as _get_model_info, register_models
+from .model_registry import calculate_cost, register_models
+from .model_registry import get_model_info as _get_model_info
 
 logger = logging.getLogger(__name__)
 
@@ -251,10 +252,12 @@ def _translate_content_blocks(blocks: list) -> list[dict]:
             url = block.get("image_url", {}).get("url", "")
             match = _DATA_URI_RE.match(url)
             if match:
-                translated.append({
-                    "type": "image",
-                    "source": {"type": "base64", "media_type": match.group(1), "data": match.group(2)},
-                })
+                translated.append(
+                    {
+                        "type": "image",
+                        "source": {"type": "base64", "media_type": match.group(1), "data": match.group(2)},
+                    }
+                )
             else:
                 translated.append({"type": "image", "source": {"type": "url", "url": url}})
 
@@ -263,10 +266,12 @@ def _translate_content_blocks(blocks: list) -> list[dict]:
             if file_data_uri:
                 match = _DATA_URI_RE.match(file_data_uri)
                 if match:
-                    translated.append({
-                        "type": "document",
-                        "source": {"type": "base64", "media_type": match.group(1), "data": match.group(2)},
-                    })
+                    translated.append(
+                        {
+                            "type": "document",
+                            "source": {"type": "base64", "media_type": match.group(1), "data": match.group(2)},
+                        }
+                    )
 
         elif block_type == "input_audio":
             translated.append({"type": "text", "text": "[Audio attachment — not supported by this provider]"})

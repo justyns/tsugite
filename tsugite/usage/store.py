@@ -95,9 +95,19 @@ class UsageStore:
                 duration_ms, cache_creation_tokens, cache_read_tokens
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                timestamp, session_id, agent, model, source, schedule_name,
-                input_tokens, output_tokens, total_tokens, cost_usd,
-                duration_ms, cache_creation_tokens, cache_read_tokens,
+                timestamp,
+                session_id,
+                agent,
+                model,
+                source,
+                schedule_name,
+                input_tokens,
+                output_tokens,
+                total_tokens,
+                cost_usd,
+                duration_ms,
+                cache_creation_tokens,
+                cache_read_tokens,
             ),
         )
         conn.commit()
@@ -139,7 +149,12 @@ class UsageStore:
         limit: int = 100,
     ) -> list[dict]:
         where, params = self._build_where(
-            agent=agent, model=model, source=source, session_id=session_id, since=since, until=until,
+            agent=agent,
+            model=model,
+            source=source,
+            session_id=session_id,
+            since=since,
+            until=until,
         )
         sql = f"SELECT * FROM usage {where} ORDER BY timestamp DESC LIMIT ?"
         params.append(limit)
@@ -153,7 +168,11 @@ class UsageStore:
         since: str | None = None,
     ) -> list[dict]:
         """Aggregate usage by time period ('day', 'week', 'month')."""
-        date_exprs = {"day": "date(timestamp)", "week": "strftime('%Y-W%W', timestamp)", "month": "strftime('%Y-%m', timestamp)"}
+        date_exprs = {
+            "day": "date(timestamp)",
+            "week": "strftime('%Y-W%W', timestamp)",
+            "month": "strftime('%Y-%m', timestamp)",
+        }
         date_expr = date_exprs.get(period, "date(timestamp)")
 
         where, params = self._build_where(agent=agent, since=since)

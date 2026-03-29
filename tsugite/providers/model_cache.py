@@ -100,9 +100,7 @@ def get_provider_models_sync(provider_name: str, refresh: bool = False) -> list[
     return asyncio.run(get_provider_models(provider_name, refresh=refresh))
 
 
-async def get_all_models(
-    providers: list[str] | None = None, refresh: bool = False
-) -> dict[str, list[dict[str, Any]]]:
+async def get_all_models(providers: list[str] | None = None, refresh: bool = False) -> dict[str, list[dict[str, Any]]]:
     """Get models from all (or specified) providers.
 
     Returns {provider_name: [{"name": str, "info": ModelInfo | None}, ...]}.

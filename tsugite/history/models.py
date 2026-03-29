@@ -141,6 +141,4 @@ class SessionStatus(BaseModel):
 
 
 # Type alias for any record type
-SessionRecord = (
-    SessionMeta | ContextSnapshot | ContextUpdate | Turn | CompactionSummary | HookExecution | SessionStatus
-)
+SessionRecord = SessionMeta | ContextSnapshot | ContextUpdate | Turn | CompactionSummary | HookExecution | SessionStatus

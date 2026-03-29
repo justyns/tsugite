@@ -3,7 +3,6 @@
 import os
 import tempfile
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -25,11 +24,7 @@ class TestExtractContentBlocks:
         assert "More text" in cleaned
 
     def test_multiple_content_blocks(self):
-        text = (
-            '<content name="a">alpha</content>\n'
-            "middle\n"
-            '<content name="b">beta</content>'
-        )
+        text = '<content name="a">alpha</content>\nmiddle\n<content name="b">beta</content>'
         cleaned, blocks = extract_content_blocks(text)
         assert blocks == {"a": "alpha", "b": "beta"}
         assert "middle" in cleaned

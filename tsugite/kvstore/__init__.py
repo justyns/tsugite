@@ -30,6 +30,7 @@ def _create_backend(config: dict | None = None) -> KVBackend:
 
     if name == "sqlite":
         from .sqlite import SqliteKVBackend
+
         return SqliteKVBackend()
 
     for ep in importlib.metadata.entry_points(group="tsugite.kvstore"):

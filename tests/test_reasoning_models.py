@@ -1,6 +1,6 @@
 """Tests for reasoning model support and parameter filtering."""
 
-from tsugite.models import get_model_kwargs, get_model_id, is_reasoning_model_without_stop_support
+from tsugite.models import get_model_id, get_model_kwargs, is_reasoning_model_without_stop_support
 
 
 class TestReasoningModelDetection:

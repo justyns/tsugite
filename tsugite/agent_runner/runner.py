@@ -772,9 +772,7 @@ async def run_agent_async(
     ui_handler = get_ui_handler(custom_logger)
     if ui_handler and hasattr(ui_handler, "_emit"):
         on_status = lambda msg: ui_handler._emit("hook_status", {"message": msg})
-        on_hook_result = lambda ex: ui_handler._emit(
-            "hook_execution", ex.model_dump(exclude={"type", "timestamp"})
-        )
+        on_hook_result = lambda ex: ui_handler._emit("hook_execution", ex.model_dump(exclude={"type", "timestamp"}))
 
     hook_vars = await fire_pre_message_hooks(
         hooks_dir,
@@ -800,7 +798,11 @@ async def run_agent_async(
         if session_info:
             claude_code_resume_session = session_info.session_id
             claude_code_resume_after_compaction = session_info.compacted
-            logger.info("Resuming Claude Code session %s (compacted=%s)", claude_code_resume_session, claude_code_resume_after_compaction)
+            logger.info(
+                "Resuming Claude Code session %s (compacted=%s)",
+                claude_code_resume_session,
+                claude_code_resume_after_compaction,
+            )
         else:
             logger.debug("No Claude Code session to resume for %s", continue_conversation_id)
 
@@ -862,7 +864,9 @@ async def run_agent_async(
             )
         except (RuntimeError, AgentExecutionError) as e:
             err_str = str(e).lower()
-            if claude_code_resume_session and ("process ended" in err_str or "no conversation found" in err_str or "prompt too long" in err_str):
+            if claude_code_resume_session and (
+                "process ended" in err_str or "no conversation found" in err_str or "prompt too long" in err_str
+            ):
                 logger.warning("Claude Code resume failed (%s), retrying with full history", e)
                 try:
                     previous_messages = load_and_apply_history(continue_conversation_id)

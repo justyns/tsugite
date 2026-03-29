@@ -13,7 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from tsugite.history import SessionStorage, get_history_dir, list_session_files
-from tsugite.history.models import SessionMeta, Turn
+from tsugite.history.models import Turn
 from tsugite.usage.store import UsageStore
 
 

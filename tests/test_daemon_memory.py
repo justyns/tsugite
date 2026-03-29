@@ -197,7 +197,9 @@ async def test_summarize_session_passes_model():
     mock_prov = _mock_provider(return_value=_mock_provider_response("Summary of conversation"))
     with (
         patch("tsugite.daemon.memory.get_context_limit", return_value=128_000),
-        patch("tsugite.models.get_provider_and_model", return_value=("anthropic", mock_prov, "claude-3-haiku-20240307")),
+        patch(
+            "tsugite.models.get_provider_and_model", return_value=("anthropic", mock_prov, "claude-3-haiku-20240307")
+        ),
     ):
         result = await summarize_session(messages, model="anthropic:claude-3-haiku-20240307")
 
@@ -444,7 +446,9 @@ class TestLlmCompleteClaudeCodeRouting:
     @pytest.mark.asyncio
     async def test_routes_through_provider(self):
         mock_prov = _mock_provider(return_value=_mock_provider_response("claude code result"))
-        with patch("tsugite.models.get_provider_and_model", return_value=("claude_code", mock_prov, "claude-sonnet-4-6")):
+        with patch(
+            "tsugite.models.get_provider_and_model", return_value=("claude_code", mock_prov, "claude-sonnet-4-6")
+        ):
             result = await _llm_complete("system", "user", "claude_code:sonnet")
         assert result == "claude code result"
         mock_prov.acompletion.assert_called_once()
@@ -452,14 +456,19 @@ class TestLlmCompleteClaudeCodeRouting:
     @pytest.mark.asyncio
     async def test_claude_code_empty_response_raises(self):
         mock_prov = _mock_provider(return_value=_mock_provider_response(""))
-        with patch("tsugite.models.get_provider_and_model", return_value=("claude_code", mock_prov, "claude-haiku-4-5-20251001")):
+        with patch(
+            "tsugite.models.get_provider_and_model",
+            return_value=("claude_code", mock_prov, "claude-haiku-4-5-20251001"),
+        ):
             with pytest.raises(RuntimeError, match=r"LLM returned empty response"):
                 await _llm_complete("system", "user", "claude_code:haiku")
 
     @pytest.mark.asyncio
     async def test_claude_code_error_raises_runtime_error(self):
         mock_prov = _mock_provider(side_effect=Exception("cli not found"))
-        with patch("tsugite.models.get_provider_and_model", return_value=("claude_code", mock_prov, "claude-sonnet-4-6")):
+        with patch(
+            "tsugite.models.get_provider_and_model", return_value=("claude_code", mock_prov, "claude-sonnet-4-6")
+        ):
             with pytest.raises(RuntimeError, match=r"LLM call failed.*cli not found"):
                 await _llm_complete("system", "user", "claude_code:sonnet")
 

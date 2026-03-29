@@ -280,16 +280,12 @@ class Gateway:
 
         # Start compaction scheduler for agents with auto_compact config
         agents_with_auto_compact = {
-            name: cfg
-            for name, cfg in self.config.agents.items()
-            if cfg.auto_compact and cfg.auto_compact.schedule
+            name: cfg for name, cfg in self.config.agents.items() if cfg.auto_compact and cfg.auto_compact.schedule
         }
         if agents_with_auto_compact and http_adapters:
             from tsugite.daemon.compaction_scheduler import CompactionScheduler
 
-            self._compaction_scheduler = CompactionScheduler(
-                agents_with_auto_compact, session_store, http_adapters
-            )
+            self._compaction_scheduler = CompactionScheduler(agents_with_auto_compact, session_store, http_adapters)
             tasks.append(self._compaction_scheduler.start())
             logger.info(
                 "Compaction scheduler enabled for %d agent(s)",
@@ -416,6 +412,7 @@ async def run_daemon(
     _configure_logging(config)
 
     from tsugite.kvstore import configure_from_daemon
+
     configure_from_daemon(config)
 
     gateway = Gateway(config, config_path=config_path)

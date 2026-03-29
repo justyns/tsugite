@@ -30,9 +30,7 @@ def _strip_ansi(text: str) -> str:
 
 def _validate_name(name: str) -> None:
     if not VALID_NAME_RE.match(name):
-        raise ValueError(
-            f"Invalid session name '{name}': only alphanumeric, hyphens, and underscores allowed"
-        )
+        raise ValueError(f"Invalid session name '{name}': only alphanumeric, hyphens, and underscores allowed")
 
 
 def _session_exists(prefixed_name: str) -> bool:
@@ -305,7 +303,4 @@ def get_tmux_sessions() -> list:
     """
     if not shutil.which("tmux"):
         return []
-    return [
-        {"name": s["name"], "status": s["status"], "command": s["command"]}
-        for s in _list_managed_sessions()
-    ]
+    return [{"name": s["name"], "status": s["status"], "command": s["command"]} for s in _list_managed_sessions()]

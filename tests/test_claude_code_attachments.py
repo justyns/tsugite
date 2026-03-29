@@ -1,7 +1,5 @@
 """Tests for Claude Code attachment handling and session ID fixes."""
 
-from unittest.mock import MagicMock, patch
-
 import pytest
 
 from tsugite.attachments.base import Attachment, AttachmentContentType
@@ -72,7 +70,7 @@ class TestClaudeCodeFirstMessageAttachments:
 class TestClaudeCodeSessionId:
     @pytest.mark.asyncio
     async def test_session_id_captured_from_result(self):
-        from tsugite.core.agent import AgentResult, TsugiteAgent
+        from tsugite.core.agent import TsugiteAgent
 
         agent = TsugiteAgent(
             model_string="claude_code:sonnet",

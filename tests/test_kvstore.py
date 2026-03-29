@@ -91,6 +91,7 @@ class TestResolveNamespace:
 
     def test_agent_fallback(self):
         from tsugite.agent_runner.helpers import clear_current_agent, set_current_agent
+
         set_current_agent("test-agent")
         try:
             assert _resolve_namespace(None) == "test-agent"

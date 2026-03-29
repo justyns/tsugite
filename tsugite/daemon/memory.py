@@ -251,7 +251,7 @@ async def generate_session_title(messages: list[dict], model: str) -> str:
         _llm_complete(TITLE_SYSTEM_PROMPT, convo_text, model),
         timeout=TITLE_TIMEOUT,
     )
-    return title.strip().strip('"\'')[:80]
+    return title.strip().strip("\"'")[:80]
 
 
 async def compute_session_title(

@@ -12,7 +12,6 @@ logger = logging.getLogger(__name__)
 
 
 class OllamaProvider(OpenAICompatProvider):
-
     async def list_models(self) -> list[str]:
         from .model_registry import register_model
 

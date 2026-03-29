@@ -639,8 +639,16 @@ def run(
             stderr_console.rule(f"[bold cyan]🚀 Starting {execution_type.title()} Execution[/bold cyan]")
             stderr_console.print()
 
-        def _save_history(result_str="", token_count=None, cost=None, execution_steps=None,
-                        system_prompt=None, attachments=None, status="success", error_message=None):
+        def _save_history(
+            result_str="",
+            token_count=None,
+            cost=None,
+            execution_steps=None,
+            system_prompt=None,
+            attachments=None,
+            status="success",
+            error_message=None,
+        ):
             if not history_opts.enabled:
                 return
             try:

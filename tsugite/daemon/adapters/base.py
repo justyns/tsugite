@@ -666,7 +666,9 @@ class BaseAdapter(ABC):
             old_messages.extend(msg for turn in old_turns for msg in turn.messages)
 
             if instructions:
-                old_messages.append({"role": "user", "content": f"<compaction_instructions>{instructions}</compaction_instructions>"})
+                old_messages.append(
+                    {"role": "user", "content": f"<compaction_instructions>{instructions}</compaction_instructions>"}
+                )
 
             try:
                 summary = await summarize_session(

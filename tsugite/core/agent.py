@@ -907,6 +907,7 @@ class TsugiteAgent:
                 # No code — show what the LLM actually said so it sees its own response
                 assistant_msg = step.thought if step.thought else "(empty response)"
             from tsugite.core.content_blocks import serialize_content_blocks
+
             cb_str = serialize_content_blocks(step.content_blocks)
             if cb_str:
                 assistant_msg += f"\n\n{cb_str}"
@@ -920,7 +921,6 @@ class TsugiteAgent:
     def _build_system_prompt(self) -> str:
         """Build system prompt that teaches LLM how to solve tasks."""
         return build_system_prompt(self.tools, self.instructions)
-
 
     def _build_budget_tag(self, turn_num: int) -> str:
         """Build XML budget tag showing turn and token usage for the LLM."""
@@ -958,7 +958,6 @@ class TsugiteAgent:
                 code = cleaned[code_start:code_end].strip()
 
         return ParsedResponse(thought=thought, code=code, content_blocks=content_blocks)
-
 
 
 def build_tools_section(tools: List[Tool]) -> str:

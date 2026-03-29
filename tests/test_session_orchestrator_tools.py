@@ -1,8 +1,6 @@
 """Tests for new session tools: session_events_since, session_summary, updated_since filter."""
 
-import json
-from datetime import datetime, timezone, timedelta
-from pathlib import Path
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -136,8 +134,12 @@ class TestSessionSummary:
 
     def test_summary_with_error(self, store):
         session = Session(
-            id="error-session", agent="test", source="background",
-            status="failed", prompt="fail task", error="Something broke",
+            id="error-session",
+            agent="test",
+            source="background",
+            status="failed",
+            prompt="fail task",
+            error="Something broke",
         )
         store.create_session(session)
 

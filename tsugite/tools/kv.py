@@ -7,6 +7,7 @@ from ..tools import tool
 
 def _resolve_namespace(namespace: Optional[str]) -> str:
     from tsugite.agent_runner.helpers import resolve_current_agent
+
     return resolve_current_agent(namespace)
 
 
@@ -22,6 +23,7 @@ def kv_get(key: str, namespace: Optional[str] = None) -> str:
         The stored value, or a message if not found
     """
     from tsugite.kvstore import get_backend
+
     ns = _resolve_namespace(namespace)
     value = get_backend().get(ns, key)
     if value is None:
@@ -43,6 +45,7 @@ def kv_set(key: str, value: str, namespace: Optional[str] = None, ttl_seconds: O
         Confirmation message
     """
     from tsugite.kvstore import get_backend
+
     ns = _resolve_namespace(namespace)
     get_backend().set(ns, key, value, ttl_seconds)
     return f"Set '{key}' in namespace '{ns}'"
@@ -60,6 +63,7 @@ def kv_delete(key: str, namespace: Optional[str] = None) -> str:
         Confirmation message
     """
     from tsugite.kvstore import get_backend
+
     ns = _resolve_namespace(namespace)
     deleted = get_backend().delete(ns, key)
     if deleted:
@@ -79,6 +83,7 @@ def kv_list(namespace: Optional[str] = None, prefix: str = "") -> str:
         Newline-separated list of keys, or a message if empty
     """
     from tsugite.kvstore import get_backend
+
     ns = _resolve_namespace(namespace)
     keys = get_backend().list_keys(ns, prefix)
     if not keys:

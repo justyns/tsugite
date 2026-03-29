@@ -38,12 +38,10 @@ def list_models(
     """List available models from all providers."""
     import asyncio
 
-    from tsugite.providers.model_cache import get_all_models, get_provider_models
+    from tsugite.providers.model_cache import get_all_models
 
     if provider:
-        models_by_provider = asyncio.run(
-            get_all_models(providers=[provider], refresh=refresh)
-        )
+        models_by_provider = asyncio.run(get_all_models(providers=[provider], refresh=refresh))
     else:
         models_by_provider = asyncio.run(get_all_models(refresh=refresh))
 

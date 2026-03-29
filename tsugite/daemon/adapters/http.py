@@ -410,17 +410,27 @@ class HTTPServer:
             return err
         from tsugite.daemon.commands import get_commands
 
-        return JSONResponse({"commands": [
+        return JSONResponse(
             {
-                "name": cmd.name,
-                "description": cmd.description,
-                "params": [
-                    {"name": p.name, "type": p.type.__name__, "description": p.description, "required": p.required, **({"choices": p.choices} if p.choices else {})}
-                    for p in cmd.params
-                ],
+                "commands": [
+                    {
+                        "name": cmd.name,
+                        "description": cmd.description,
+                        "params": [
+                            {
+                                "name": p.name,
+                                "type": p.type.__name__,
+                                "description": p.description,
+                                "required": p.required,
+                                **({"choices": p.choices} if p.choices else {}),
+                            }
+                            for p in cmd.params
+                        ],
+                    }
+                    for cmd in get_commands().values()
+                ]
             }
-            for cmd in get_commands().values()
-        ]})
+        )
 
     async def _run_command(self, request: Request) -> JSONResponse:
         adapter, err = self._get_adapter(request)
@@ -454,6 +464,7 @@ class HTTPServer:
 
     def _get_usage_store(self):
         from tsugite.usage import get_usage_store
+
         return get_usage_store()
 
     def _parse_limit(self, request: Request, default: int = 10, cap: int = 100) -> int:
@@ -662,9 +673,7 @@ class HTTPServer:
             attachments.append(entry)
         return JSONResponse({"attachments": attachments})
 
-    def _collect_turns(
-        self, session_id: str, limit: int = 0
-    ) -> tuple[list, str | None, str | None]:
+    def _collect_turns(self, session_id: str, limit: int = 0) -> tuple[list, str | None, str | None]:
         """Collect turns from a session and its compaction chain.
 
         Args:
@@ -823,12 +832,14 @@ class HTTPServer:
                 turn_data["messages"] = item.messages
             result_turns.append(turn_data)
 
-        return JSONResponse({
-            "conversation_id": conversation_id,
-            "turns": result_turns,
-            "compaction_summary": compaction_summary,
-            "compacted_from": compacted_from,
-        })
+        return JSONResponse(
+            {
+                "conversation_id": conversation_id,
+                "turns": result_turns,
+                "compaction_summary": compaction_summary,
+                "compacted_from": compacted_from,
+            }
+        )
 
     async def _compact(self, request: Request) -> JSONResponse:
         adapter, err = self._get_adapter(request)
@@ -1874,12 +1885,14 @@ class HTTPServer:
         if err := self._check_auth(request):
             return err
         from tsugite.kvstore import get_backend
+
         return JSONResponse({"namespaces": get_backend().list_namespaces()})
 
     async def _kv_keys(self, request: Request) -> JSONResponse:
         if err := self._check_auth(request):
             return err
         from tsugite.kvstore import get_backend
+
         namespace = request.path_params["namespace"]
         prefix = request.query_params.get("prefix", "")
         keys = get_backend().list_keys(namespace, prefix)
@@ -1889,6 +1902,7 @@ class HTTPServer:
         if err := self._check_auth(request):
             return err
         from tsugite.kvstore import get_backend
+
         namespace = request.path_params["namespace"]
         key = request.path_params["key"]
         result = get_backend().get_with_metadata(namespace, key)

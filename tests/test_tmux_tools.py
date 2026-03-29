@@ -310,9 +310,7 @@ class TestListManagedSessions:
 class TestTmuxList:
     @patch("tsugite.tools.tmux.subprocess.run")
     def test_list_delegates_to_shared_helper(self, mock_run, mock_metadata):
-        mock_run.return_value = _make_run_result(
-            stdout="tsu-project1\tbash\ntsu-project2\thtop\n"
-        )
+        mock_run.return_value = _make_run_result(stdout="tsu-project1\tbash\ntsu-project2\thtop\n")
 
         result = tmux_list()
 

@@ -4,12 +4,11 @@ import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
 import yaml
 
 from tsugite.daemon.compaction_scheduler import CompactionScheduler
 from tsugite.daemon.config import AgentConfig, AutoCompactConfig, load_daemon_config
-from tsugite.daemon.session_store import Session, SessionSource, SessionStatus, SessionStore
+from tsugite.daemon.session_store import SessionStore
 
 
 def _make_session_store(tmp_path, agent="test-agent"):
@@ -28,9 +27,7 @@ def _make_scheduler(tmp_path, adapter, store, min_turns=1):
         agent_file="default",
         auto_compact=AutoCompactConfig(schedule="0 0 * * *", min_turns=min_turns),
     )
-    return CompactionScheduler(
-        {"test-agent": agent_config}, store, {"test-agent": adapter}
-    ), agent_config
+    return CompactionScheduler({"test-agent": agent_config}, store, {"test-agent": adapter}), agent_config
 
 
 class TestAutoCompactConfig:
@@ -108,9 +105,7 @@ class TestCompactionScheduler:
         scheduler, agent_config = _make_scheduler(tmp_path, adapter, store, min_turns=5)
 
         # message_count is 0, min_turns is 5 → should skip
-        asyncio.get_event_loop().run_until_complete(
-            scheduler._check_agent("test-agent", agent_config)
-        )
+        asyncio.get_event_loop().run_until_complete(scheduler._check_agent("test-agent", agent_config))
         adapter._compact_session.assert_not_called()
 
     def test_check_agent_compacts_when_enough_turns(self, tmp_path):
@@ -123,9 +118,7 @@ class TestCompactionScheduler:
         adapter = _make_adapter()
         scheduler, agent_config = _make_scheduler(tmp_path, adapter, store)
 
-        asyncio.get_event_loop().run_until_complete(
-            scheduler._check_agent("test-agent", agent_config)
-        )
+        asyncio.get_event_loop().run_until_complete(scheduler._check_agent("test-agent", agent_config))
         adapter._compact_session.assert_called_once_with(session.id)
 
     def test_check_agent_skips_if_already_compacting(self, tmp_path):
@@ -138,9 +131,7 @@ class TestCompactionScheduler:
         adapter = _make_adapter()
         scheduler, agent_config = _make_scheduler(tmp_path, adapter, store)
 
-        asyncio.get_event_loop().run_until_complete(
-            scheduler._check_agent("test-agent", agent_config)
-        )
+        asyncio.get_event_loop().run_until_complete(scheduler._check_agent("test-agent", agent_config))
         adapter._compact_session.assert_not_called()
 
         store.end_compaction("user1", "test-agent")
@@ -150,9 +141,7 @@ class TestCompactionScheduler:
         adapter = _make_adapter()
         scheduler, agent_config = _make_scheduler(tmp_path, adapter, store)
 
-        asyncio.get_event_loop().run_until_complete(
-            scheduler._check_agent("test-agent", agent_config)
-        )
+        asyncio.get_event_loop().run_until_complete(scheduler._check_agent("test-agent", agent_config))
         adapter._compact_session.assert_not_called()
 
     def test_check_agent_no_adapter(self, tmp_path):
@@ -166,13 +155,9 @@ class TestCompactionScheduler:
             agent_file="default",
             auto_compact=AutoCompactConfig(schedule="0 0 * * *", min_turns=1),
         )
-        scheduler = CompactionScheduler(
-            {"test-agent": agent_config}, store, {}
-        )
+        scheduler = CompactionScheduler({"test-agent": agent_config}, store, {})
 
-        asyncio.get_event_loop().run_until_complete(
-            scheduler._check_agent("test-agent", agent_config)
-        )
+        asyncio.get_event_loop().run_until_complete(scheduler._check_agent("test-agent", agent_config))
 
     def test_compaction_failure_handled(self, tmp_path):
         store = _make_session_store(tmp_path)
@@ -184,9 +169,7 @@ class TestCompactionScheduler:
         adapter._compact_session.side_effect = RuntimeError("boom")
         scheduler, agent_config = _make_scheduler(tmp_path, adapter, store)
 
-        asyncio.get_event_loop().run_until_complete(
-            scheduler._check_agent("test-agent", agent_config)
-        )
+        asyncio.get_event_loop().run_until_complete(scheduler._check_agent("test-agent", agent_config))
 
         assert not store.is_compacting("user1", "test-agent")
 
