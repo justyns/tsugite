@@ -49,6 +49,7 @@ from .run import _unpack_execution_result  # noqa: E402, F401
 from .serve import serve_app  # noqa: E402
 from .models import models_app  # noqa: E402
 from .tools import tools_app  # noqa: E402
+from .usage import usage_app  # noqa: E402
 from .validate import validate_command  # noqa: E402
 from .workspace import workspace_app  # noqa: E402
 
@@ -64,5 +65,6 @@ app.add_typer(plugin_app, name="plugin")
 app.add_typer(history_app, name="history")
 app.add_typer(workspace_app, name="workspace")
 app.add_typer(models_app, name="models")
+app.add_typer(usage_app, name="usage")
 app.command("init")(init)
 app.command("validate")(validate_command)

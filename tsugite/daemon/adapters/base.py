@@ -514,6 +514,21 @@ class BaseAdapter(ABC):
         self.session_store.update_token_count(conv_id, result.token_count or 0)
 
         try:
+            from tsugite.usage import get_usage_store
+
+            get_usage_store().record(
+                session_id=conv_id,
+                agent=self.agent_name,
+                model=self.resolve_model(),
+                source=channel_context.source if channel_context else "daemon",
+                total_tokens=result.token_count or 0,
+                cost_usd=result.cost,
+                duration_ms=getattr(result, "duration_ms", None),
+            )
+        except Exception as e:
+            logger.debug("Failed to record usage: %s", e)
+
+        try:
             session = self.session_store.get_session(conv_id)
             if session and session.message_count <= 1 and not session.title:
                 asyncio.ensure_future(self._auto_title_session(conv_id, message, str(result)))

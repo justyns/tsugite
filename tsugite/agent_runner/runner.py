@@ -552,6 +552,19 @@ async def _execute_agent_with_prompt(
         # Extract and display reasoning content if present
         _extract_reasoning_content(agent, custom_logger)
 
+        try:
+            from tsugite.usage import get_usage_store
+
+            get_usage_store().record(
+                agent=prepared.agent_config.name,
+                model=model_string,
+                source="cli",
+                total_tokens=agent.total_tokens,
+                cost_usd=agent.total_cost if agent.total_cost > 0 else None,
+            )
+        except Exception as e:
+            logger.debug("Failed to record usage: %s", e)
+
         # Return appropriate format
         if exec_options.return_token_usage:
             from tsugite.core.agent import AgentResult
