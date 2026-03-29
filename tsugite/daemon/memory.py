@@ -165,25 +165,16 @@ def _chunk_messages(messages: list[dict], max_chunk_tokens: int, model: str) -> 
 
 async def _llm_complete(system_prompt: str, user_content: str, model: str) -> str:
     """Send a system+user message pair to the LLM and return the response text."""
-    from tsugite.models import get_provider_and_model, parse_model_string, resolve_model_alias
-
-    resolved = resolve_model_alias(model)
-    provider_name, _, _ = parse_model_string(resolved)
+    from tsugite.models import get_provider_and_model
 
     try:
-        if provider_name == "claude_code":
-            from tsugite.core.claude_code import claude_code_complete
-            from tsugite.models import get_model_id
-
-            content = await claude_code_complete(system_prompt, user_content, get_model_id(model))
-        else:
-            _, provider, model_id = get_provider_and_model(model)
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_content},
-            ]
-            response = await provider.acompletion(messages=messages, model=model_id)
-            content = response.content
+        _, provider, model_id = get_provider_and_model(model)
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content},
+        ]
+        response = await provider.acompletion(messages=messages, model=model_id)
+        content = response.content
     except Exception as e:
         raise RuntimeError(f"LLM call failed ({model}): {e}") from e
 

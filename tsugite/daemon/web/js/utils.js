@@ -47,6 +47,19 @@ export function renderMarkdown(text) {
   return text;
 }
 
+export function fmtTokens(n) {
+  if (!n) return '-';
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
+  if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K';
+  return String(n);
+}
+
+export function fmtCost(c) {
+  if (c == null) return '-';
+  if (c < 0.01) return '$' + c.toFixed(4);
+  return '$' + c.toFixed(2);
+}
+
 export function formatFileSize(bytes) {
   if (bytes == null) return '';
   if (bytes < 1024) return `${bytes} B`;
