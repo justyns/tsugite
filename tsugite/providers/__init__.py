@@ -17,8 +17,8 @@ logger = logging.getLogger(__name__)
 # Built-in provider module paths — same structure as external plugins
 _BUILTIN_PROVIDERS: dict[str, str] = {
     "openai": "tsugite.providers.openai_compat",
-    "ollama": "tsugite.providers.openai_compat",
-    "openrouter": "tsugite.providers.openai_compat",
+    "ollama": "tsugite.providers.ollama",
+    "openrouter": "tsugite.providers.openrouter",
     "together": "tsugite.providers.openai_compat",
     "mistral": "tsugite.providers.openai_compat",
     "github_copilot": "tsugite.providers.openai_compat",

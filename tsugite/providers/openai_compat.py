@@ -95,15 +95,6 @@ _PROVIDER_CONFIGS: dict[str, dict[str, Any]] = {
         "api_base": "https://api.openai.com/v1",
         "api_key_env": "OPENAI_API_KEY",
     },
-    "ollama": {
-        "api_base_env": "OLLAMA_BASE_URL",
-        "api_base_default": "http://localhost:11434/v1",
-        "api_key": "ollama",
-    },
-    "openrouter": {
-        "api_base": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
-    },
     "together": {
         "api_base": "https://api.together.xyz/v1",
         "api_key_env": "TOGETHER_API_KEY",
@@ -256,116 +247,15 @@ class OpenAICompatProvider:
         return _get_model_info(self.name, model)
 
     async def list_models(self) -> list[str]:
-        headers = self._build_headers()
         try:
             client = self._get_client()
-            if self.name == "ollama":
-                return await self._list_ollama_models(client, headers)
-            if self.name == "openrouter":
-                return await self._list_openrouter_models(client, headers)
-
+            headers = self._build_headers()
             resp = await client.get(f"{self.api_base}/models", headers=headers)
             resp.raise_for_status()
             return [m["id"] for m in resp.json().get("data", [])]
         except Exception as e:
             logger.debug("Failed to list models for %s: %s", self.name, e)
             return []
-
-    async def _list_ollama_models(self, client: httpx.AsyncClient, headers: dict) -> list[str]:
-        """List Ollama chat models, registering context lengths and capabilities from /api/show."""
-        from .model_registry import register_model
-
-        base = self.api_base.replace("/v1", "")
-        resp = await client.get(f"{base}/api/tags", headers=headers)
-        resp.raise_for_status()
-        all_names = [m["name"] for m in resp.json().get("models", [])]
-
-        chat_models = []
-        for name in all_names:
-            try:
-                show_resp = await client.post(f"{base}/api/show", json={"name": name}, headers=headers)
-                if show_resp.status_code != 200:
-                    chat_models.append(name)
-                    continue
-
-                data = show_resp.json()
-                caps = data.get("capabilities") or []
-
-                # Filter: only include models that support completion (chat)
-                if caps and "completion" not in caps:
-                    continue
-
-                model_info_dict = data.get("model_info", {})
-
-                # Context length from {arch}.context_length
-                ctx_len = None
-                for key, val in model_info_dict.items():
-                    if key.endswith(".context_length") and isinstance(val, int):
-                        ctx_len = val
-                        break
-
-                if not ctx_len:
-                    for line in data.get("parameters", "").splitlines():
-                        if "num_ctx" in line:
-                            try:
-                                ctx_len = int(line.split()[-1])
-                            except (ValueError, IndexError):
-                                pass
-
-                info = ModelInfo(
-                    max_input_tokens=ctx_len or 128_000,
-                    supports_vision="vision" in caps,
-                )
-                register_model("ollama", name, info)
-                chat_models.append(name)
-            except Exception:
-                chat_models.append(name)
-
-        return chat_models
-
-    async def _list_openrouter_models(self, client: httpx.AsyncClient, headers: dict) -> list[str]:
-        """List OpenRouter models with rich metadata from their API."""
-        from .model_registry import register_model
-
-        resp = await client.get(f"{self.api_base}/models", headers=headers)
-        resp.raise_for_status()
-        models = resp.json().get("data", [])
-
-        chat_models = []
-        for m in models:
-            model_id = m.get("id", "")
-            arch = m.get("architecture", {})
-            input_mods = arch.get("input_modalities", [])
-            output_mods = arch.get("output_modalities", [])
-
-            # Only include text-generating models
-            if "text" not in output_mods:
-                continue
-
-            pricing = m.get("pricing", {})
-            top = m.get("top_provider", {})
-
-            prompt_cost = float(pricing.get("prompt", 0))
-            completion_cost = float(pricing.get("completion", 0))
-
-            # Negative prices are OpenRouter's sentinel for "variable/unknown"
-            if prompt_cost < 0:
-                prompt_cost = 0
-            if completion_cost < 0:
-                completion_cost = 0
-
-            info = ModelInfo(
-                max_input_tokens=m.get("context_length") or 128_000,
-                max_output_tokens=top.get("max_completion_tokens"),
-                input_cost_per_million=round(prompt_cost * 1_000_000, 4) if prompt_cost else None,
-                output_cost_per_million=round(completion_cost * 1_000_000, 4) if completion_cost else None,
-                supports_vision="image" in input_mods,
-                supports_audio="audio" in input_mods,
-            )
-            register_model("openrouter", model_id, info)
-            chat_models.append(model_id)
-
-        return chat_models
 
 
 def create_provider(name: str = "openai", **kwargs: Any) -> OpenAICompatProvider:
