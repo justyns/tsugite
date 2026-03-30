@@ -1,161 +1,148 @@
 # tsugite
 
-Tsugite (Japanese: 継ぎ手, the art of joinery in woodworking) is a developer-facing agentic CLI.
+Tsugite (継ぎ手) is an agent framework where you define AI agents as markdown files and run them from the CLI, a web UI, or through scheduled tasks.
 
-Define AI agents as markdown files with YAML frontmatter. Chain multiple steps together, pass data between them, and use any LLM (OpenAI, Anthropic, Ollama, etc).
+I built it because none of the existing agent frameworks did what I wanted.  I needed something self-hosted, model-agnostic, and simple enough that an agent is just a text file I can edit and version control.
 
-## Installation
+Originally it was meant to be a framework for micro-agents inspired by [ESA](https://github.com/meain/esa), but has grown a lot since that goal.
 
-```bash
-# Recommended: Install with uv
-uv tool install tsugite-cli
+## What an agent looks like
 
-# Alternative: Install with pipx
-pipx install tsugite-cli
+A simple "hello world" agent looks like:
 
-# Or with pip
-pip install tsugite-cli
+```markdown
+---
+name: morning-brief
+model: anthropic:claude-sonnet-4-20250514
+tools: [web_search, fetch_text, write_file, final_answer]
+---
+
+You are a morning briefing assistant.
+
+Current date: {{ now() }}
+User location: {{ env("LOCATION", "unknown") }}
+
+Check the weather, scan top news, and write a short briefing.
+Use final_answer() to return the result.
 ```
 
-**Note:** The package name is `tsugite-cli`, but the command is `tsugite` (or `tsu` for short).
-
-## Quick Start
+YAML frontmatter for config, markdown body for instructions, Jinja for dynamic context.  Run it with:
 
 ```bash
-# Run an agent
-tsugite run examples/simple_variable_injection.md "test it"
+tsu run +morning-brief "what's happening today"
+```
 
-# Create your own agent
-cat > my_agent.md << 'EOF'
----
-name: hello
-model: openai:gpt-4o-mini
----
+## Key ideas
 
-Task: {{ user_prompt }}
+- **Agents are markdown.** A basic agent is just markdown with yaml frontmatter.  Advanced agents are still just markdown but can use jinja templating and a special `<!--tsu -->` syntax.
+- **Code execution over tool-calling.** Inspired by [smolagents](https://github.com/huggingface/smolagents).  Instead of using native tool calling, LLMs write python code.  Tools are exposed as python functions.
+- **Any LLM.** Plugin interface to add support for additional LLM providers.  Built-in we have openai-compatible apis, ollama, anthropic, and claude code.
+- **Workspaces.** Each workspace is a persistent directory with agents, skills, memory files, and config.  The agent runs inside its workspace and can read/write files, spawn sub-agents, manage schedules, and persist state across conversations.  Workspaces are entirely optional.
+- **CLI and/or Daemon with a Web UI** Use `tsu run` commands for cli-only, or run `tsu daemon` for a daemon that supports scheduled tasks, a web ui, and some other neat things.
 
-Just say hello and use final_answer() to return your greeting.
-EOF
+## Install
 
-tsugite run my_agent.md "greet the user"
+```bash
+uv tool install tsugite-cli    # recommended
+pipx install tsugite-cli       # alternative
+pip install tsugite-cli        # or plain pip
+```
+
+The package is `tsugite-cli`, the command is `tsugite` (or `tsu` for short).
+
+## Quick start
+
+```bash
+# Initialize a workspace
+tsu init my-workspace
+cd my-workspace
+
+# Run the built-in default agent
+tsu run +default "summarize the files in this directory"
+
+# Run an agent file directly
+tsu run my-agent.md "do the thing"
+
+# Start the web UI
+tsu serve
 ```
 
 ## Features
 
-- **Multi-step workflows** - Chain steps with `<!-- tsu:step -->`, pass data between them
-- **Variable injection** - Step outputs automatically available as Python variables
-- **Multiple LLM providers** - OpenAI, Anthropic, Ollama, Google, GitHub Copilot
-- **MCP integration** - Connect to Model Context Protocol servers
-- **Temperature control** - Set per-step model parameters
-- **Copy-paste friendly output** - `--plain` flag or auto-detection for pipe/redirect
+- **Multi-step workflows** with `<!-- tsu:step -->` to chain steps and pass data between them
+- **Scheduling** built-in cron for recurring agent tasks (daily summaries, monitoring, etc.)
+- **Web UI** for conversations, with Discord as an alternative interface
+- **Sub-agents** that can spawn other agents for specific subtasks
+- **Skills** reusable knowledge files agents can load on demand, mostly compatible with [agentskills.io](https://agentskills.io/)
+- **Hooks** that fire shell commands on lifecycle events (post-tool, pre-message, pre/post-compact)
+- **Sandbox** (linux only) via bubblewrap with filesystem and network isolation
+- **KV store** for persistent agent state
+- **MCP** integration for connecting to MCP servers
 
-## CLI Options
+## Agents in more detail
 
-```bash
-# Plain output (no box-drawing characters, copy-paste friendly)
-tsugite run +assistant "task" --plain
+Agents support YAML frontmatter for configuration:
 
-# Auto-detection: plain mode activates when piped or NO_COLOR is set
-tsugite run +assistant "task" | grep result
-
-# Headless mode for scripts (result to stdout, progress to stderr)
-tsugite run +assistant "task" --headless
-
-# Continue latest conversation (auto-detects agent)
-tsugite run --continue "follow-up prompt"
-
-# Continue specific conversation
-tsugite run --continue --conversation-id CONV_ID "follow-up prompt"
-tsugite chat --continue CONV_ID
-
-# View conversation history
-tsugite history list
-tsugite history show CONV_ID
+```yaml
+---
+name: code-reviewer
+model: anthropic:claude-sonnet-4-20250514
+max_turns: 15
+tools: [read_file, list_files, web_search, final_answer]
+auto_load_skills: [coding-standards]
+---
 ```
+
+You can restrict which tools an agent has access to, set turn limits, auto-load skills, attach context files, and extend other agents.  TODO: See `docs/` for the full spec.
+
+Multi-step agents use `<!--tsu -->` comments as directives:
+
+```markdown
+<!-- tsu:step name="research" model="openai:gpt-4o" -->
+Research the topic and save findings to a variable.
+
+<!-- tsu:step name="write" -->
+Using the research from the previous step, write a summary.
+The variable `research` is available as a Python variable.
+```
+
+For a complete example, check the built-in [default agent](tsugite/builtin_agents/default.md).
 
 ## Sandbox
 
-Agent code can run inside a [bubblewrap](https://github.com/containers/bubblewrap) sandbox with filesystem and network isolation.
+On Linux only (for now), agent code runs inside a [bubblewrap](https://github.com/containers/bubblewrap) sandbox when you pass `--sandbox`:
 
 ```bash
-# Sandbox with specific domains allowed
-tsu run +default "task" --sandbox --allow-domain "github.com" --allow-domain "*.openai.com"
-
-# Full network isolation
+tsu run +default "task" --sandbox --allow-domain "github.com"
 tsu run +default "task" --sandbox --no-network
 ```
 
-**How it works:**
+Filesystem access is limited to the workspace.  Network goes through a filtering proxy that only allows domains you specify.
 
-```
-CLI --sandbox --allow-domain "*.github.com"
- └─ SubprocessExecutor writes harness script
-     └─ bwrap --unshare-pid --unshare-net --die-with-parent ...
-         └─ TCP↔UDS bridge (HTTP_PROXY → Unix socket)
-             └─ ConnectProxy filters CONNECT requests by domain:port
-```
+## Config and Data Directories
 
-**Default mounts:**
+All paths follow [XDG Base Directory](https://specifications.freedesktop.org/basedir-spec/latest/) conventions and can be overridden with the standard environment variables.
 
-- Read-only: `/usr`, `/lib`, `/lib64`, `/bin`, `/sbin`, `/etc/ssl`, `/etc/resolv.conf`, CA certs, Python venv + `sys.path`
-- Read-write: workspace directory, internal state directory
-- Tmpfs: `/tmp` (fresh each run)
+| Path                                   | Default                              | Contents                                     |
+|----------------------------------------|--------------------------------------|----------------------------------------------|
+| `$XDG_CONFIG_HOME/tsugite/`            | `~/.config/tsugite/`                 | `config.json`, `mcp.json`, `daemon.yaml`     |
+| `$XDG_DATA_HOME/tsugite/history/`      | `~/.local/share/tsugite/history/`    | Session history (JSONL per session)          |
+| `$XDG_DATA_HOME/tsugite/daemon/`       | `~/.local/share/tsugite/daemon/`     | Daemon state                                 |
+| `$XDG_DATA_HOME/tsugite/secrets/`      | `~/.local/share/tsugite/secrets/`    | Encrypted secrets (`secrets.db`)             |
+| `$XDG_DATA_HOME/tsugite/kvstore/`      | `~/.local/share/tsugite/kvstore/`    | Key-value store (`kv.db`)                    |
+| `$XDG_DATA_HOME/tsugite/usage/`        | `~/.local/share/tsugite/usage/`      | Usage (cost and token) tracking (`usage.db`) |
+| `$XDG_DATA_HOME/tsugite/workspaces/`   | `~/.local/share/tsugite/workspaces/` | Workspace directories                        |
+| `$XDG_CACHE_HOME/tsugite/attachments/` | `~/.cache/tsugite/attachments/`      | Attachment cache                             |
 
-Extra bind mounts can be added programmatically via `SandboxConfig.extra_ro_binds` and `extra_rw_binds`, but these are not yet exposed through CLI flags or agent frontmatter.
-
-**Network:**
-- Network is namespace-isolated; outbound HTTP/HTTPS goes through a filtering CONNECT proxy
-- Direct connections to bare IP addresses are always blocked
-- `--no-network` skips the proxy entirely — no connectivity at all
-
-**`--allow-domain` syntax:**
-
-| Pattern | Allows |
-|---|---|
-| `github.com` | ports 80, 443 |
-| `github.com:22` | port 22 only |
-| `*.github.com:8080` | port 8080 on subdomains |
-| `*:*` | all domains, all ports |
-
-## Hooks
-
-Hooks fire shell commands at lifecycle points. Configure in `.tsugite/hooks.yaml`:
-
-```yaml
-hooks:
-  post_tool:
-    - tools: [write_file]
-      run: git add {{ path }}
-      wait: true
-
-  pre_message:
-    - run: uridx search "{{ message }}" --limit 5
-      capture_as: rag_context
-    - run: cat memory/preferences.md
-      capture_as: user_preferences
-
-  pre_compact:
-    - run: ./scripts/extract-facts.sh {{ turns_file }}
-      wait: true
-
-  post_compact:
-    - run: echo "Compacted {{ turns_compacted }} turns"
-```
-
-**Hook fields:** `run` (Jinja2 shell command), `tools` (tool filter, `post_tool` only), `match` (Jinja2 condition), `wait` (block until done), `capture_as` (capture stdout into a template variable, implies `wait`).
-
-**Hook types:**
-- **`post_tool`** — After successful tool calls. Context: `tool`, plus tool arguments.
-- **`pre_message`** — Before agent execution. Context: `message`, `user_id`, `agent_name`. Use `capture_as` to inject results into agent templates as `{{ var_name }}`.
-- **`pre_compact`** / **`post_compact`** — Around session compaction. Context: `conversation_id`, `user_id`, `agent_name`, `turns_file`, `turn_count`.
 
 ## Development
 
 ```bash
-# Clone and install for development
 git clone https://github.com/justyns/tsugite.git
 cd tsugite
 uv sync --dev
 ```
 
-See `examples/` for working agents and `CLAUDE.md` for AI-generated documentation.
+## Status
+
+This is a personal project I use daily.  It works for my use cases but isn't polished for general consumption yet.  Issues and PRs welcome, but set expectations accordingly.  Documentation is very sparse because I keep changing things.
