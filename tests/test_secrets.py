@@ -1,7 +1,6 @@
 """Tests for the secrets system: backends, registry, masking, tools, CLI."""
 
 import logging
-import os
 import sqlite3
 import stat
 
@@ -12,7 +11,6 @@ from tsugite.secrets.env import EnvSecretBackend
 from tsugite.secrets.exec import ExecSecretBackend
 from tsugite.secrets.file import FileSecretBackend
 from tsugite.secrets.registry import SecretRegistry
-
 
 # -- Fixtures --
 
