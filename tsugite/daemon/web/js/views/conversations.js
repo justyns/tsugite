@@ -30,6 +30,7 @@ export default () => ({
   turns: [],
   compactionSummary: null,
   compactedFrom: null,
+  compactionReason: null,
   _debounceTimer: null,
   _scrollTimer: null,
   availableCommands: [],
@@ -197,6 +198,7 @@ export default () => ({
     this.turns = [];
     this.compactionSummary = null;
     this.compactedFrom = null;
+    this.compactionReason = null;
 
     const isInteractive = session.source === 'interactive' &&
       (session.user_id === this.userId || session.conversation_id === this.userId);
@@ -221,11 +223,12 @@ export default () => ({
       const data = await get(histUrl);
       this.compactionSummary = data.compaction_summary || null;
       this.compactedFrom = data.compacted_from || null;
+      this.compactionReason = data.compaction_reason || null;
       if (!data.turns || data.turns.length === 0) return;
       let pendingHooks = [];
       for (const turn of data.turns) {
         if (turn.type === 'compaction') {
-          this._allHistoryMessages.push({ type: 'compaction', summary: turn.summary || null });
+          this._allHistoryMessages.push({ type: 'compaction', summary: turn.summary || null, reason: turn.reason || null });
           continue;
         }
         if (turn.type === 'hook_execution') {
@@ -968,6 +971,7 @@ export default () => ({
     this.turns = [];
     this.compactionSummary = null;
     this.compactedFrom = null;
+    this.compactionReason = null;
     this.isActiveSession = true;
   },
 

@@ -321,6 +321,31 @@ class TestCompactionSummary:
         assert summaries[0].summary == "Previous conversation was about testing."
         assert summaries[0].previous_turns == 10
 
+    def test_record_compaction_summary_with_reason(self, tmp_path, monkeypatch):
+        """Test recording compaction summary with reason."""
+        monkeypatch.setattr("tsugite.history.storage.get_history_dir", lambda: tmp_path)
+        monkeypatch.setattr("tsugite.history.storage.get_machine_name", lambda: "test_machine")
+
+        storage = SessionStorage.create(
+            agent_name="test_agent",
+            model="openai:gpt-4o",
+            compacted_from="old_session_123",
+        )
+
+        storage.record_compaction_summary(
+            summary="Summary text.",
+            previous_turns=5,
+            reason="scheduled",
+        )
+
+        records = storage.load_records()
+
+        from tsugite.history.models import CompactionSummary
+
+        summaries = [r for r in records if isinstance(r, CompactionSummary)]
+        assert len(summaries) == 1
+        assert summaries[0].compaction_reason == "scheduled"
+
 
 class TestPruneOldTurnContent:
     """Tests for prune_old_turn_content."""

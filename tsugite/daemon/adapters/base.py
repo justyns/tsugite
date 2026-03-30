@@ -417,7 +417,7 @@ class BaseAdapter(ABC):
             if self.session_store.needs_compaction(conv_id) or self.session_store.is_compacting(
                 user_id, self.agent_name
             ):
-                conv_id = await self._run_compaction(user_id, conv_id, custom_logger)
+                conv_id = await self._run_compaction(user_id, conv_id, custom_logger, reason="token_threshold")
 
         metadata = channel_context.to_dict()
         metadata["daemon_agent"] = self.agent_name
@@ -478,7 +478,7 @@ class BaseAdapter(ABC):
         except AgentExecutionError as e:
             if "prompt too long" in str(e).lower() and not conv_id_override:
                 logger.warning("[%s] Prompt too long, auto-compacting and retrying", self.agent_name)
-                conv_id = await self._run_compaction(user_id, conv_id, custom_logger)
+                conv_id = await self._run_compaction(user_id, conv_id, custom_logger, reason="prompt_too_long")
                 ctx = contextvars.copy_context()
                 result = await asyncio.to_thread(ctx.run, run_in_workspace)
             else:
@@ -558,13 +558,15 @@ class BaseAdapter(ABC):
         "Preserve their details precisely in the summary."
     )
 
-    async def _run_compaction(self, user_id: str, conv_id: str, custom_logger: Optional[HasUIHandler] = None) -> str:
+    async def _run_compaction(
+        self, user_id: str, conv_id: str, custom_logger: Optional[HasUIHandler] = None, reason: str | None = None
+    ) -> str:
         """Run session compaction and return the new conv_id."""
         self._emit_ui(custom_logger, "compacting")
         if self.session_store.begin_compaction(user_id, self.agent_name):
             self._broadcast_compaction(self.agent_name, started=True)
             try:
-                await self._compact_session(conv_id)
+                await self._compact_session(conv_id, reason=reason)
             finally:
                 self.session_store.end_compaction(user_id, self.agent_name)
                 self._broadcast_compaction(self.agent_name, started=False)
@@ -578,7 +580,7 @@ class BaseAdapter(ABC):
             self.event_bus.emit("session_update", {"action": "compacted", "id": session.id})
         return session.id
 
-    async def _compact_session(self, session_id: str, instructions: str | None = None) -> None:
+    async def _compact_session(self, session_id: str, instructions: str | None = None, reason: str | None = None) -> None:
         """Compact session when approaching context limit.
 
         Uses a sliding window: recent turns are kept verbatim while older
@@ -691,7 +693,7 @@ class BaseAdapter(ABC):
                 session_path=new_session_path,
             )
 
-            new_storage.record_compaction_summary(summary, len(old_turns), retained_turns=len(recent_turns))
+            new_storage.record_compaction_summary(summary, len(old_turns), retained_turns=len(recent_turns), reason=reason)
             new_storage.write_turns(recent_turns)
 
             post_compact_execs = await fire_compact_hooks(

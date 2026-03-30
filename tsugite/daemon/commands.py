@@ -117,7 +117,7 @@ async def cmd_compact(adapter: BaseAdapter, user_id: str, message: str | None = 
     old_id = session.id
     adapter._broadcast_compaction(adapter.agent_name, started=True)
     try:
-        await adapter._compact_session(session.id, instructions=message)
+        await adapter._compact_session(session.id, instructions=message, reason="manual")
     except Exception as e:
         return f"Compaction failed: {e}"
     finally:

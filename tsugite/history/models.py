@@ -12,6 +12,8 @@ from typing import Annotated, Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
+CompactionReason = Literal["token_threshold", "prompt_too_long", "scheduled", "manual"]
+
 
 def _parse_iso_datetime(v):
     if v is None:
@@ -111,6 +113,7 @@ class CompactionSummary(BaseModel):
     summary: str = Field(..., description="LLM-generated summary of previous conversation")
     previous_turns: int = Field(..., description="Number of turns in the compacted session")
     retained_turns: int = Field(default=0, description="Number of recent turns kept verbatim after compaction")
+    compaction_reason: Optional[CompactionReason] = Field(default=None)
 
 
 class HookExecution(BaseModel):

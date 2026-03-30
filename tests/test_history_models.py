@@ -450,6 +450,31 @@ class TestCompactionSummary:
         summary = CompactionSummary.model_validate(data)
         assert summary.retained_turns == 0
 
+    def test_compaction_summary_with_reason(self):
+        """Test compaction summary with reason field."""
+        summary = CompactionSummary(
+            summary="Summary text",
+            previous_turns=20,
+            compaction_reason="token_threshold",
+        )
+        assert summary.compaction_reason == "token_threshold"
+
+        data = summary.model_dump(mode="json")
+        assert data["compaction_reason"] == "token_threshold"
+
+        restored = CompactionSummary.model_validate(data)
+        assert restored.compaction_reason == "token_threshold"
+
+    def test_compaction_summary_reason_backward_compat(self):
+        """Old records without compaction_reason should default to None."""
+        data = {
+            "type": "compaction_summary",
+            "summary": "Old summary",
+            "previous_turns": 10,
+        }
+        summary = CompactionSummary.model_validate(data)
+        assert summary.compaction_reason is None
+
 
 class TestDatetimeHandling:
     """Tests for datetime parsing across all models."""

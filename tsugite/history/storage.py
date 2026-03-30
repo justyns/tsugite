@@ -22,6 +22,7 @@ from tsugite.config import get_xdg_data_path, load_config
 
 from .models import (
     AttachmentRef,
+    CompactionReason,
     CompactionSummary,
     ContextSnapshot,
     ContextUpdate,
@@ -524,15 +525,20 @@ class SessionStorage:
         self._status = status
         self._error_message = error_message
 
-    def record_compaction_summary(self, summary: str, previous_turns: int, retained_turns: int = 0) -> None:
+    def record_compaction_summary(
+        self, summary: str, previous_turns: int, retained_turns: int = 0, reason: CompactionReason | None = None
+    ) -> None:
         """Record compaction summary.
 
         Args:
             summary: LLM-generated summary of previous conversation
             previous_turns: Number of turns in compacted session
             retained_turns: Number of recent turns kept verbatim
+            reason: Why compaction was triggered
         """
-        record = CompactionSummary(summary=summary, previous_turns=previous_turns, retained_turns=retained_turns)
+        record = CompactionSummary(
+            summary=summary, previous_turns=previous_turns, retained_turns=retained_turns, compaction_reason=reason
+        )
         self._write_record(record)
 
     @property

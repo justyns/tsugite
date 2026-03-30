@@ -676,7 +676,7 @@ class HTTPServer:
             attachments.append(entry)
         return JSONResponse({"attachments": attachments})
 
-    def _collect_turns(self, session_id: str, limit: int = 0) -> tuple[list, str | None, str | None]:
+    def _collect_turns(self, session_id: str, limit: int = 0) -> tuple[list, str | None, str | None, str | None]:
         """Collect turns from a session and its compaction chain.
 
         Args:
@@ -686,8 +686,8 @@ class HTTPServer:
                    collected.
 
         Returns:
-            (turns, compaction_summary, compacted_from) where the latter two
-            come from the current session's metadata/records.
+            (turns, compaction_summary, compacted_from, compaction_reason)
+            where the latter three come from the current session's metadata/records.
         """
         history_dir = get_history_dir()
         visited: set[str] = set()
@@ -717,9 +717,10 @@ class HTTPServer:
             except Exception:
                 break
 
-        # Extract compaction summary/compacted_from from the newest session
+        # Extract compaction summary/compacted_from/reason from the newest session
         compaction_summary = None
         compacted_from = None
+        compaction_reason = None
         if chain:
             newest_storage, newest_records, _ = chain[0]
             if newest_storage._meta:
@@ -728,6 +729,7 @@ class HTTPServer:
                 cs = next((r for r in newest_records if isinstance(r, CompactionSummary)), None)
                 if cs:
                     compaction_summary = cs.summary
+                    compaction_reason = cs.compaction_reason
 
         # Iterate oldest-first (reversed chain) and append for chronological order
         collected: list = []
@@ -765,7 +767,10 @@ class HTTPServer:
             collected.extend(turns_and_hooks)
 
             if comp_summary:
-                collected.append({"marker": "compaction", "summary": comp_summary.summary})
+                marker = {"marker": "compaction", "summary": comp_summary.summary}
+                if comp_summary.compaction_reason:
+                    marker["reason"] = comp_summary.compaction_reason
+                collected.append(marker)
 
         if limit > 0:
             turn_count = 0
@@ -776,7 +781,7 @@ class HTTPServer:
                         collected = collected[i + 1 :]
                         break
 
-        return collected, compaction_summary, compacted_from
+        return collected, compaction_summary, compacted_from, compaction_reason
 
     async def _history(self, request: Request) -> JSONResponse:
         adapter, err = self._get_adapter(request)
@@ -796,7 +801,7 @@ class HTTPServer:
             session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
             conversation_id = session.id
 
-        turns, compaction_summary, compacted_from = self._collect_turns(conversation_id, limit=limit)
+        turns, compaction_summary, compacted_from, compaction_reason = self._collect_turns(conversation_id, limit=limit)
 
         result_turns = []
         for item in turns:
@@ -804,6 +809,8 @@ class HTTPServer:
                 entry = {"type": "compaction"}
                 if item.get("summary"):
                     entry["summary"] = item["summary"]
+                if item.get("reason"):
+                    entry["reason"] = item["reason"]
                 result_turns.append(entry)
                 continue
             if isinstance(item, HookExecution):
@@ -841,6 +848,7 @@ class HTTPServer:
                 "turns": result_turns,
                 "compaction_summary": compaction_summary,
                 "compacted_from": compacted_from,
+                "compaction_reason": compaction_reason,
             }
         )
 
@@ -870,7 +878,7 @@ class HTTPServer:
         adapter._broadcast_compaction(agent_name, started=True)
         try:
             instructions = body.get("instructions")
-            await adapter._compact_session(session.id, instructions=instructions)
+            await adapter._compact_session(session.id, instructions=instructions, reason="manual")
         except Exception as e:
             msg = str(e) or repr(e)
             logger.exception("Compaction failed for agent %s", adapter.agent_name)

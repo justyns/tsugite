@@ -119,7 +119,7 @@ class TestCompactionScheduler:
         scheduler, agent_config = _make_scheduler(tmp_path, adapter, store)
 
         asyncio.get_event_loop().run_until_complete(scheduler._check_agent("test-agent", agent_config))
-        adapter._compact_session.assert_called_once_with(session.id)
+        adapter._compact_session.assert_called_once_with(session.id, reason="scheduled")
 
     def test_check_agent_skips_if_already_compacting(self, tmp_path):
         store = _make_session_store(tmp_path)

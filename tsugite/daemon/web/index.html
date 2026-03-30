@@ -240,9 +240,12 @@
                 <div class="compaction-banner">
                   <div class="compaction-banner-header">
                     <strong>Previous conversation summary</strong>
-                    <template x-if="compactedFrom">
-                      <a href="#" @click.prevent="selectSession({conversation_id: compactedFrom})" class="compaction-banner-link">view previous session</a>
-                    </template>
+                    <span>
+                      <template x-if="compactionReason"><span class="badge badge-muted" x-text="compactionReason"></span></template>
+                      <template x-if="compactedFrom">
+                        <a href="#" @click.prevent="selectSession({conversation_id: compactedFrom})" class="compaction-banner-link">view previous session</a>
+                      </template>
+                    </span>
                   </div>
                   <div class="msg agent compaction-body" x-html="renderHtml(compactionSummary)"></div>
                 </div>
@@ -253,12 +256,12 @@
                     <div class="history-sep">
                       <template x-if="msg.summary">
                         <details>
-                          <summary>session compacted</summary>
+                          <summary>session compacted <template x-if="msg.reason"><span class="badge badge-muted" x-text="msg.reason"></span></template></summary>
                           <div class="msg agent compaction-body" x-html="renderHtml(msg.summary)"></div>
                         </details>
                       </template>
                       <template x-if="!msg.summary">
-                        <span>session compacted</span>
+                        <span>session compacted <template x-if="msg.reason"><span class="badge badge-muted" x-text="msg.reason"></span></template></span>
                       </template>
                     </div>
                   </template>
@@ -492,11 +495,11 @@
                     <div class="history-sep">
                       <template x-if="turn.summary">
                         <details>
-                          <summary>session compacted</summary>
+                          <summary>session compacted <template x-if="turn.reason"><span class="badge badge-muted" x-text="turn.reason"></span></template></summary>
                           <div class="msg agent compaction-body" x-html="renderHtml(turn.summary)"></div>
                         </details>
                       </template>
-                      <template x-if="!turn.summary"><span>session compacted</span></template>
+                      <template x-if="!turn.summary"><span>session compacted <template x-if="turn.reason"><span class="badge badge-muted" x-text="turn.reason"></span></template></span></template>
                     </div>
                   </template>
                   <template x-if="turn.type !== 'compaction'">

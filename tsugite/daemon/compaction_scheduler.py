@@ -123,7 +123,7 @@ class CompactionScheduler:
             )
 
             try:
-                await adapter._compact_session(session.id)
+                await adapter._compact_session(session.id, reason="scheduled")
                 logger.info("[%s] Scheduled compaction completed", agent_name)
             except Exception:
                 logger.exception("[%s] Scheduled compaction failed", agent_name)
