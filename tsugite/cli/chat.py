@@ -31,9 +31,14 @@ def chat(
         None, "--workspace", "-w", help="Workspace directory (auto-loads PERSONA.md, USER.md, MEMORY.md)"
     ),
     no_workspace: bool = typer.Option(False, "--no-workspace", help="Disable workspace (ignore default workspace)"),
+    no_secrets: bool = typer.Option(False, "--no-secrets", help="Skip secrets backend initialization"),
 ):
     """Start an interactive chat session with an agent."""
+    from tsugite.secrets import init_cli as init_secrets
+
     from . import console
+
+    init_secrets(no_secrets)
 
     # Validate flag combinations
     if workspace and no_workspace:

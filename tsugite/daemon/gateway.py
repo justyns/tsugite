@@ -411,9 +411,11 @@ async def run_daemon(
 
     _configure_logging(config)
 
-    from tsugite.kvstore import configure_from_daemon
+    from tsugite.kvstore import configure_from_daemon as configure_kv
+    from tsugite.secrets import configure_from_daemon as configure_secrets
 
-    configure_from_daemon(config)
+    configure_kv(config)
+    configure_secrets(config)
 
     gateway = Gateway(config, config_path=config_path)
     await gateway.start()

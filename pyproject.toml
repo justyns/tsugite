@@ -24,6 +24,7 @@ dependencies = [
   "prompt-toolkit>=3.0.43",
   "portalocker>=2.8.0",
   "tzlocal>=5.3.1",
+  "cryptography>=46.0.5",
 ]
 
 [project.optional-dependencies]

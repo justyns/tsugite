@@ -211,7 +211,6 @@ def config_set(
 
     Examples:
         tsugite config set auto-context-enabled true
-        tsugite config set auto-context-enabled false
     """
     from tsugite.config import get_config_path, update_config
 

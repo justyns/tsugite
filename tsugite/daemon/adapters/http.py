@@ -388,6 +388,9 @@ class HTTPServer:
             Route("/api/push/vapid-key", self._push_vapid_key, methods=["GET"]),
             Route("/api/push/subscribe", self._push_subscribe, methods=["POST"]),
             Route("/api/push/unsubscribe", self._push_unsubscribe, methods=["POST"]),
+            Route("/api/secrets", self._secrets_list, methods=["GET"]),
+            Route("/api/secrets/{name:path}", self._secrets_set, methods=["POST"]),
+            Route("/api/secrets/{name:path}", self._secrets_delete, methods=["DELETE"]),
             Route("/api/kv/namespaces", self._kv_namespaces, methods=["GET"]),
             Route("/api/kv/{namespace}/keys", self._kv_keys, methods=["GET"]),
             Route("/api/kv/{namespace}/keys/{key:path}", self._kv_get, methods=["GET"]),
@@ -1880,6 +1883,43 @@ class HTTPServer:
             return JSONResponse({"error": "missing endpoint"}, status_code=400)
         self.push_store.unsubscribe(endpoint)
         return JSONResponse({"status": "unsubscribed"})
+
+    async def _secrets_list(self, request: Request) -> JSONResponse:
+        if err := self._check_auth(request):
+            return err
+        from tsugite.secrets import get_backend
+
+        return JSONResponse({"secrets": get_backend().list_names()})
+
+    async def _secrets_set(self, request: Request) -> JSONResponse:
+        if err := self._check_auth(request):
+            return err
+        from tsugite.secrets import get_backend
+
+        name = request.path_params["name"]
+        body = await request.json()
+        value = body.get("value")
+        if not value:
+            return JSONResponse({"error": "value is required"}, status_code=400)
+        try:
+            get_backend().set(name, value)
+        except NotImplementedError:
+            return JSONResponse({"error": "backend does not support writing"}, status_code=400)
+        return JSONResponse({"status": "ok", "name": name})
+
+    async def _secrets_delete(self, request: Request) -> JSONResponse:
+        if err := self._check_auth(request):
+            return err
+        from tsugite.secrets import get_backend
+
+        name = request.path_params["name"]
+        try:
+            deleted = get_backend().delete(name)
+        except NotImplementedError:
+            return JSONResponse({"error": "backend does not support deletion"}, status_code=400)
+        if not deleted:
+            return JSONResponse({"error": "secret not found"}, status_code=404)
+        return JSONResponse({"status": "ok", "name": name})
 
     async def _kv_namespaces(self, request: Request) -> JSONResponse:
         if err := self._check_auth(request):

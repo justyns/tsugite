@@ -59,7 +59,18 @@ class AgentConfig(BaseModel):
     visibility: str = "public"  # Agent visibility: public, private, internal
     spawnable: bool = True  # Whether this agent can be spawned by other agents
     network: Optional[Dict[str, Any]] = None  # Network hints for sandbox proxy allowlist
-    run_if: Optional[str] = None  # Jinja expression guard: agent skipped if falsy
+    allowed_secrets: List[str] = Field(default_factory=list)  # Per-agent secret allowlist (empty = all allowed)
+    run_if: Optional[str] = Field(
+        default=None,
+        description="Jinja expression guard evaluated after prefetch. Agent is skipped if the expression evaluates to a falsy value. Has access to prefetch variables and built-in helpers (file_exists, read_text, env, now, etc.).",
+        json_schema_extra={
+            "examples": [
+                "inbox_count | int > 0",
+                "file_exists('/tmp/trigger.flag')",
+                "env.get('ENABLE_AGENT') == 'true'",
+            ]
+        },
+    )
 
     @field_validator("visibility", mode="after")
     @classmethod

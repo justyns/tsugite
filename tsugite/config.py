@@ -95,6 +95,14 @@ def get_xdg_data_path(subdir: str = "") -> Path:
     return path
 
 
+class SecretsConfig(BaseModel):
+    """Secrets backend configuration. Extra fields are passed to the backend."""
+
+    model_config = ConfigDict(extra="allow")
+
+    provider: str = "env"
+
+
 class Config(BaseModel):
     """Tsugite configuration."""
 
@@ -115,6 +123,7 @@ class Config(BaseModel):
     auto_context_files: List[str] = Field(default_factory=lambda: [".tsugite/CONTEXT.md", "AGENTS.md", "CLAUDE.md"])
     auto_context_include_global: bool = True
     skill_paths: List[str] = Field(default_factory=list)
+    secrets: Optional[SecretsConfig] = None
 
 
 def get_config_path() -> Path:

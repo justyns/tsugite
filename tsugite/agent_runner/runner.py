@@ -25,6 +25,7 @@ from .helpers import (
     get_display_console,
     get_ui_handler,
     print_step_progress,
+    set_allowed_secrets,
     set_current_agent,
     set_multistep_ui_context,
 )
@@ -823,6 +824,7 @@ async def run_agent_async(
 
     # Set current agent in thread-local storage for spawn_agent tracking
     set_current_agent(agent_config.name)
+    set_allowed_secrets(agent_config.allowed_secrets)
 
     try:
         # Prepare agent using unified preparation pipeline
@@ -1351,6 +1353,7 @@ async def _run_multistep_agent_impl(
 
     # Set current agent in thread-local storage for spawn_agent tracking
     set_current_agent(agent.config.name)
+    set_allowed_secrets(agent.config.allowed_secrets)
 
     try:
         # Extract steps from raw markdown (before any rendering)

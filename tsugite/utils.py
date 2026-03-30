@@ -86,7 +86,9 @@ def execute_shell_command(command: str, timeout: int = 30, shell: bool = True) -
         if result.returncode != 0:
             output += f"\n[Exit code: {result.returncode}]"
 
-        return output or "[No output]"
+        from tsugite.secrets.registry import get_registry
+
+        return get_registry().mask(output) or "[No output]"
 
     except subprocess.TimeoutExpired as exc:
         raise RuntimeError(f"Command timed out after {timeout} seconds") from exc

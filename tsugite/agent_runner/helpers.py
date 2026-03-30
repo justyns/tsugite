@@ -16,6 +16,7 @@ _current_agent_context = threading.local()
 # Module-level storage for allowed agents (single-threaded CLI execution)
 # Subagents run in separate processes, so this doesn't need to be thread-local
 _allowed_agents: Optional[List[str]] = None
+_allowed_secrets: Optional[List[str]] = None
 
 
 def set_current_agent(name: str) -> None:
@@ -33,6 +34,15 @@ def resolve_current_agent(explicit: Optional[str] = None, default: str = "defaul
     if explicit is not None:
         return explicit
     return get_current_agent() or default
+
+
+def set_allowed_secrets(secrets: Optional[List[str]]) -> None:
+    global _allowed_secrets
+    _allowed_secrets = secrets
+
+
+def get_allowed_secrets() -> Optional[List[str]]:
+    return _allowed_secrets
 
 
 def clear_current_agent() -> None:

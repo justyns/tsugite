@@ -23,6 +23,8 @@ def _parse_ts(ts: str | None) -> datetime | None:
         return datetime.fromisoformat(ts.replace("Z", "+00:00"))
     except (ValueError, TypeError):
         return None
+
+
 from typing import Optional
 from uuid import uuid4
 
@@ -423,7 +425,9 @@ class SessionStore:
         since_dt = _parse_ts(since)
         if not since_dt:
             return events
-        return [e for e in events if (_parse_ts(e.get("timestamp")) or datetime.min.replace(tzinfo=timezone.utc)) > since_dt]
+        return [
+            e for e in events if (_parse_ts(e.get("timestamp")) or datetime.min.replace(tzinfo=timezone.utc)) > since_dt
+        ]
 
     def session_summary(self, session_id: str) -> dict:
         """Return a summary dict for a session including event stats."""

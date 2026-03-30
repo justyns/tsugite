@@ -49,8 +49,12 @@ class ExecutionResult:
         """
         from xml.sax.saxutils import escape
 
+        from tsugite.secrets.registry import get_registry
+
+        _mask = get_registry().mask
+
         # Check for truncation first (before building attrs)
-        output = self.output or ""
+        output = _mask(self.output or "")
         max_bytes = max_output_kb * 1024
         if len(output) > max_bytes:
             output = output[:max_bytes]
@@ -67,21 +71,21 @@ class ExecutionResult:
         parts.append(f"<output>{escape(output)}</output>")
 
         if self.error:
-            parts.append(f"<error>{escape(self.error)}</error>")
+            parts.append(f"<error>{escape(_mask(self.error))}</error>")
             # Include traceback from stderr (last 10 lines)
             if self.stderr:
-                tb_lines = self.stderr.strip().split("\n")[-10:]
+                tb_lines = _mask(self.stderr).strip().split("\n")[-10:]
                 parts.append(f"<traceback>{escape(chr(10).join(tb_lines))}</traceback>")
 
         if self.truncated_to:
             parts.append(f"<truncated_to>{escape(self.truncated_to)}</truncated_to>")
 
         if self.variables_set:
-            var_list = ", ".join(f"{escape(k)}={escape(v)}" for k, v in self.variables_set.items())
+            var_list = ", ".join(f"{escape(k)}={escape(_mask(v))}" for k, v in self.variables_set.items())
             parts.append(f"<variables_set>{var_list}</variables_set>")
 
         if self.final_answer is not None:
-            parts.append(f"<final_answer>{escape(str(self.final_answer))}</final_answer>")
+            parts.append(f"<final_answer>{escape(_mask(str(self.final_answer)))}</final_answer>")
 
         parts.append("</tsugite_execution_result>")
         return "\n".join(parts)

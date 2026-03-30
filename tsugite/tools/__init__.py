@@ -129,19 +129,19 @@ def get_tool(name: str) -> ToolInfo:
     return _tools[name]
 
 
-def call_tool(name: str, **kwargs) -> Any:
+def call_tool(tool_name: str, **kwargs) -> Any:
     """Call a tool with the given arguments."""
-    tool_info = get_tool(name)
+    tool_info = get_tool(tool_name)
 
     # Validate required parameters
     for param_name, param_info in tool_info.parameters.items():
         if param_info["required"] and param_name not in kwargs:
-            raise ValueError(f"Invalid parameter '{param_name}': missing for tool '{name}'")
+            raise ValueError(f"Invalid parameter '{param_name}': missing for tool '{tool_name}'")
 
     try:
         return tool_info.func(**kwargs)
     except Exception as e:
-        raise RuntimeError(f"Tool '{name}' failed to execute: {e}")
+        raise RuntimeError(f"Tool '{tool_name}' failed to execute: {e}")
 
 
 def list_tools() -> List[str]:
@@ -169,7 +169,7 @@ def get_tools_by_category(category: str) -> List[str]:
     return sorted(category_tools)
 
 
-_OPTIONAL_CATEGORIES = {"schedule", "notify", "sessions", "kv", "tmux"}
+_OPTIONAL_CATEGORIES = {"schedule", "notify", "sessions", "kv", "secrets", "tmux"}
 
 
 def _expand_single_spec(spec: str, strict: bool = True) -> List[str]:
@@ -332,6 +332,7 @@ def _ensure_tools_loaded():
     from . import kv as kv  # noqa: E402, F401
     from . import notify as notify  # noqa: E402, F401
     from . import schedule as schedule  # noqa: E402, F401
+    from . import secrets as secrets  # noqa: E402, F401
     from . import sessions as sessions  # noqa: E402, F401
     from . import shell as shell  # noqa: E402, F401
     from . import skills as skills  # noqa: E402, F401

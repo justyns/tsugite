@@ -84,6 +84,13 @@
       "title": "Auto Load Skills",
       "type": "array"
     },
+    "skill_paths": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Skill Paths",
+      "type": "array"
+    },
     "instructions": {
       "default": "",
       "title": "Instructions",
@@ -195,6 +202,13 @@
       "default": null,
       "title": "Network"
     },
+    "allowed_secrets": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Allowed Secrets",
+      "type": "array"
+    },
     "run_if": {
       "anyOf": [
         {
@@ -205,13 +219,13 @@
         }
       ],
       "default": null,
-      "title": "Run If",
       "description": "Jinja expression guard evaluated after prefetch. Agent is skipped if the expression evaluates to a falsy value. Has access to prefetch variables and built-in helpers (file_exists, read_text, env, now, etc.).",
       "examples": [
         "inbox_count | int > 0",
         "file_exists('/tmp/trigger.flag')",
         "env.get('ENABLE_AGENT') == 'true'"
-      ]
+      ],
+      "title": "Run If"
     }
   },
   "required": [

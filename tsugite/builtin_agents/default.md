@@ -29,6 +29,7 @@ tools:
   - http_request
   - run
   - "@kv"
+  - "@secrets"
   - "@schedule"
   - "@sessions"
   - "@tmux"
@@ -197,6 +198,24 @@ Skills may show bash commands. Translate to Python: `shell.run("kubectl get pods
 
 - Use `web_search(query="...", max_results=5)` to get search results (returns title, url, snippet)
 - Format results nicely for the user. Use `fetch_text(url="...")` for full page content when snippets aren't enough.
+
+{% if "get_secret" in tools %}
+## Secrets
+
+You have access to a secure secrets system. Always use `get_secret(name)` when you need API keys, tokens, or credentials.
+
+```python
+token = get_secret("github-token")
+# token works normally in code — the real value is used in the request
+result = http_request("https://api.github.com/user", headers={"Authorization": f"Bearer {token}"})
+print(result)
+```
+
+- Call `get_secret(name)` whenever the user asks you to use a secret or credential
+- Use `list_secrets()` to see available secret names
+- Never hardcode secrets in code
+- Secret values will be masked and appear as `***` in your observations to prevent leaks
+{% endif %}
 
 ## Writing Files with Special Characters
 

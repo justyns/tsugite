@@ -426,7 +426,9 @@ class TsugiteAgent:
 
                     # Trigger observation event
                     if self.event_bus:
-                        observation = exec_result.output
+                        from tsugite.secrets.registry import get_registry
+
+                        observation = get_registry().mask(exec_result.output)
 
                         if exec_result.error:
                             # Mark that this turn had an error (for recovery UX)

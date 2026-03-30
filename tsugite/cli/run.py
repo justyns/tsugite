@@ -296,6 +296,7 @@ def run(
         help="Domain(s) allowed in sandbox, with optional port (e.g. github.com, *.example.com:8080). Default ports: 80, 443",
     ),
     no_network: bool = typer.Option(False, "--no-network", help="Sandbox with no network access at all"),
+    no_secrets: bool = typer.Option(False, "--no-secrets", help="Skip secrets backend initialization"),
 ):
     """Run an agent with the given prompt.
 
@@ -310,9 +311,12 @@ def run(
     """
     from tsugite.agent_runner import get_agent_info, run_agent
     from tsugite.md_agents import validate_agent_execution
+    from tsugite.secrets import init_cli as init_secrets
     from tsugite.utils import should_use_plain_output
 
     from . import console
+
+    init_secrets(no_secrets)
 
     # Validate flag combinations
     if new_session and continue_conversation:
