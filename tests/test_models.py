@@ -3,7 +3,7 @@
 import pytest
 
 from tsugite.config import Config, update_config
-from tsugite.models import parse_model_string, resolve_model_alias
+from tsugite.models import parse_model_string, resolve_effective_model, resolve_model_alias
 
 
 def test_parse_model_string():
@@ -54,3 +54,26 @@ def test_resolve_model_alias_nonexistent(tmp_path, monkeypatch):
 
     resolved = resolve_model_alias("nonexistent")
     assert resolved == "nonexistent"
+
+
+def test_resolve_effective_model_override_wins(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    assert resolve_effective_model("openai:gpt-4", "ollama:llama3") == "openai:gpt-4"
+
+
+def test_resolve_effective_model_agent_model(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    assert resolve_effective_model(None, "ollama:llama3") == "ollama:llama3"
+
+
+def test_resolve_effective_model_config_default(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    config_path = tmp_path / "tsugite" / "config.json"
+    update_config(config_path, lambda cfg: setattr(cfg, "default_model", "anthropic:claude-3-haiku"))
+    assert resolve_effective_model(None, None) == "anthropic:claude-3-haiku"
+
+
+def test_resolve_effective_model_none_when_nothing_set(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    assert resolve_effective_model(None, None) is None

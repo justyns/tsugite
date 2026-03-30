@@ -46,6 +46,20 @@ class TestBuiltinAgentPathHandling:
         assert "spawn_agent" in info["tools"]
         assert info["prefetch_count"] == 2  # list_agents + get_skills_for_template
 
+    def test_get_agent_info_returns_model_raw(self, tmp_path):
+        """get_agent_info includes model_raw with the unformatted model string."""
+        agent_path = tmp_path / "test.md"
+        agent_path.write_text("---\nname: test\nmodel: openai:gpt-4\ntools: []\n---\nHello\n{{ user_prompt }}")
+        info = get_agent_info(agent_path)
+        assert info["model_raw"] == "openai:gpt-4"
+
+    def test_get_agent_info_model_raw_none_when_unset(self, tmp_path):
+        """model_raw is None when agent has no model set."""
+        agent_path = tmp_path / "test.md"
+        agent_path.write_text("---\nname: test\ntools: []\n---\nHello\n{{ user_prompt }}")
+        info = get_agent_info(agent_path)
+        assert info["model_raw"] is None
+
     @patch("tsugite.agent_runner.runner.TsugiteAgent")
     @patch("tsugite.core.tools.create_tool_from_tsugite")
     def test_run_agent_with_builtin(self, mock_create_tool, mock_agent_class):

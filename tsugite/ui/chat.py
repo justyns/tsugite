@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from tsugite.config import load_config
 from tsugite.md_agents import parse_agent_file
+from tsugite.models import resolve_effective_model
 from tsugite.ui import CustomUILogger
 
 if TYPE_CHECKING:
@@ -74,6 +75,7 @@ class ChatManager:
 
         # Load agent and tools for /tools command
         self.available_tools: List[Any] = []
+        self._agent_config = None
         try:
             agent = parse_agent_file(agent_path)
             self._agent_config = agent.config
@@ -98,7 +100,7 @@ class ChatManager:
                 from tsugite.history import SessionStorage
 
                 agent = parse_agent_file(agent_path)
-                model = model_override or agent.config.model or "unknown"
+                model = resolve_effective_model(model_override, agent.config.model) or "unknown"
 
                 storage = SessionStorage.create(
                     agent_name=agent.config.name or agent_path.stem,
@@ -337,6 +339,7 @@ class ChatManager:
         """Get session statistics."""
         total_tokens = sum(turn.token_count for turn in self.conversation_history if turn.token_count)
         total_cost = sum(turn.cost for turn in self.conversation_history if turn.cost)
+        agent_model = self._agent_config.model if self._agent_config else None
 
         return {
             "total_turns": len(self.conversation_history),
@@ -344,5 +347,5 @@ class ChatManager:
             "total_cost": total_cost if total_cost > 0 else None,
             "session_duration": (datetime.now() - self.session_start).total_seconds(),
             "agent": str(self.agent_path),
-            "model": self.model_override or "default",
+            "model": resolve_effective_model(self.model_override, agent_model) or "unknown",
         }

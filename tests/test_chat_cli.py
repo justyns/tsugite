@@ -2,6 +2,7 @@
 
 import pytest
 
+from tsugite.config import update_config
 from tsugite.ui.chat import ChatManager
 
 
@@ -71,11 +72,11 @@ Assistant: {{ turn.agent_response }}
     def test_chat_cli_loads_agent_info(self, test_agent):
         """Test that chat CLI can load agent info without crashing."""
         from tsugite.md_agents import parse_agent_file
+        from tsugite.models import resolve_effective_model
 
-        # This is what run_chat_cli does
         agent = parse_agent_file(test_agent)
         agent_name = agent.config.name or test_agent.stem
-        model = agent.config.model or "default"
+        model = resolve_effective_model(agent_model=agent.config.model) or "unknown"
 
         assert agent_name == "test_chat"
         assert model == "ollama:qwen2.5-coder:7b"
@@ -83,12 +84,11 @@ Assistant: {{ turn.agent_response }}
     def test_chat_cli_with_model_override(self, test_agent):
         """Test agent info loading with model override."""
         from tsugite.md_agents import parse_agent_file
+        from tsugite.models import resolve_effective_model
 
         agent = parse_agent_file(test_agent)
-        model_override = "ollama:custom-model"
-
         agent_name = agent.config.name or test_agent.stem
-        model = model_override or agent.config.model or "default"
+        model = resolve_effective_model("ollama:custom-model", agent.config.model) or "unknown"
 
         assert agent_name == "test_chat"
         assert model == "ollama:custom-model"
@@ -166,3 +166,21 @@ Assistant: {{ turn.agent_response }}
         expected_total = sum(turn.token_count for turn in manager.conversation_history if turn.token_count)
         assert stats["total_tokens"] == expected_total
         assert stats["total_tokens"] == 45
+
+    def test_get_stats_model_from_agent_config(self, test_agent):
+        """get_stats returns agent config model, not 'default'."""
+        manager = ChatManager(agent_path=test_agent, model_override=None)
+        stats = manager.get_stats()
+        assert stats["model"] == "ollama:qwen2.5-coder:7b"
+        assert stats["model"] != "default"
+
+    def test_get_stats_model_no_model_uses_config_default(self, tmp_path, monkeypatch):
+        """get_stats falls back to config default, not 'default' string."""
+        agent_path = tmp_path / "no_model.md"
+        agent_path.write_text("---\nname: no_model\ntools: []\n---\nHello\n{{ user_prompt }}")
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+        config_path = tmp_path / "tsugite" / "config.json"
+        update_config(config_path, lambda cfg: setattr(cfg, "default_model", "openai:gpt-4"))
+        manager = ChatManager(agent_path=agent_path, model_override=None)
+        stats = manager.get_stats()
+        assert stats["model"] == "openai:gpt-4"

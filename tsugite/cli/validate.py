@@ -114,7 +114,7 @@ def validate_command(
             details = ""
             if verbose and result["config"]:
                 config = result["config"]
-                details = f"name={config.name}, model={config.model or 'default'}, tools={len(config.tools)}"
+                details = f"name={config.name}, model={config.model or 'unknown'}, tools={len(config.tools)}"
         else:
             status = "[red]✗ Invalid[/red]"
             details = f"[red]{result['error']}[/red]" if result["error"] else "[red]Unknown error[/red]"

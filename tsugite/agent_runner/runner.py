@@ -13,6 +13,7 @@ from tsugite.core.agent import TsugiteAgent
 from tsugite.core.executor import LocalExecutor
 from tsugite.exceptions import AgentExecutionError
 from tsugite.md_agents import AgentConfig, parse_agent_file
+from tsugite.models import resolve_effective_model
 from tsugite.options import ExecutionOptions
 from tsugite.renderer import AgentRenderer
 from tsugite.utils import is_interactive
@@ -121,12 +122,7 @@ def _get_model_string(model_override: Optional[str], agent_config: AgentConfig) 
     Raises:
         RuntimeError: If no model is specified anywhere
     """
-    model_string = model_override or agent_config.model
-    if not model_string:
-        from tsugite.config import load_config
-
-        config = load_config()
-        model_string = config.default_model
+    model_string = resolve_effective_model(model_override, agent_config.model)
 
     if not model_string:
         raise RuntimeError(
@@ -1670,7 +1666,7 @@ def preview_multistep_agent(
     output(f"File: {agent_path.name}")
     output(f"Prompt: {prompt}")
     output(f"Steps: {len(steps)}")
-    output(f"Model: {agent.config.model or 'default'}")
+    output(f"Model: {resolve_effective_model(agent_model=agent.config.model) or 'unknown'}")
     output(f"Tools: {', '.join(agent.config.tools) if agent.config.tools else 'None'}")
     output("")
 

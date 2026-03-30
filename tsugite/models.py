@@ -16,6 +16,23 @@ _CLAUDE_CODE_MODEL_MAP = {
 }
 
 
+def resolve_effective_model(
+    model_override: Optional[str] = None,
+    agent_model: Optional[str] = None,
+) -> Optional[str]:
+    """Resolve the effective model from override -> agent config -> global default.
+
+    Returns None if no model is configured anywhere.
+    """
+    model = model_override or agent_model
+    if not model:
+        from tsugite.config import load_config
+
+        config = load_config()
+        model = config.default_model
+    return model
+
+
 def resolve_model_alias(model_string: str) -> str:
     """Resolve a model alias to its full model string.
 

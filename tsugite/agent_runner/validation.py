@@ -54,6 +54,7 @@ def get_agent_info(agent_path: Path) -> Dict[str, Any]:
             "name": agent_config.name,
             "description": agent_config.description or "No description",
             "model": model_display,
+            "model_raw": agent_config.model,
             "max_turns": agent_config.max_turns,
             "tools": agent_config.tools,
             "prefetch_count": (len(agent_config.prefetch) if agent_config.prefetch else 0),

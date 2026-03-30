@@ -14,6 +14,7 @@ from rich.panel import Panel
 
 from tsugite.config import get_xdg_data_path
 from tsugite.md_agents import parse_agent_file
+from tsugite.models import resolve_effective_model
 from tsugite.ui import CustomUILogger
 from tsugite.ui.chat import ChatManager
 
@@ -103,7 +104,7 @@ def run_repl_chat(
     # Parse agent info
     agent = parse_agent_file(agent_path)
     agent_name = agent.config.name or agent_path.stem
-    model = exec_options.model_override or agent.config.model or "default"
+    model = resolve_effective_model(exec_options.model_override, agent.config.model) or "unknown"
 
     # Show welcome banner
     show_welcome_banner(console, agent_name, model, history_options.continue_id)

@@ -221,20 +221,23 @@ class BaseAdapter(ABC):
     def resolve_model(self) -> str:
         """Resolve the effective model name, returning 'unknown' on failure.
 
-        Prefers daemon config model override, then falls back to the agent file's model.
+        Checks: daemon config model -> agent file model -> global config default.
         """
-        if self.agent_config.model:
-            return self.agent_config.model
+        from tsugite.models import resolve_effective_model
 
-        from tsugite.agent_runner.validation import get_agent_info
+        agent_model = self.agent_config.model
+        if not agent_model:
+            agent_path = self._resolve_agent_path()
+            if agent_path:
+                try:
+                    from tsugite.md_agents import parse_agent_file
 
-        agent_path = self._resolve_agent_path()
-        if not agent_path:
-            return "unknown"
-        try:
-            return get_agent_info(agent_path).get("model", "unknown")
-        except Exception:
-            return "unknown"
+                    agent = parse_agent_file(agent_path)
+                    agent_model = agent.config.model
+                except Exception:
+                    pass
+
+        return resolve_effective_model(agent_model=agent_model) or "unknown"
 
     def _save_history(
         self,
@@ -596,7 +599,8 @@ class BaseAdapter(ABC):
         from tsugite.history.models import CompactionSummary
         from tsugite.hooks import fire_compact_hooks
 
-        model = self.agent_config.compaction_model or infer_compaction_model(self.resolve_model())
+        resolved_model = self.resolve_model()
+        model = self.agent_config.compaction_model or infer_compaction_model(resolved_model)
 
         old_conv_id = session_id
         old_session_path = get_history_dir() / f"{old_conv_id}.jsonl"
@@ -657,7 +661,7 @@ class BaseAdapter(ABC):
             ]
             if functions_used:
                 meta_parts.append(f"  <tools_used>{', '.join(functions_used)}</tools_used>")
-            meta_parts.append(f"  <model>{self.resolve_model()}</model>")
+            meta_parts.append(f"  <model>{resolved_model}</model>")
             if file_paths:
                 meta_parts.append(f"  <files_accessed>{', '.join(file_paths)}</files_accessed>")
             meta_parts.append("</session_metadata>")
@@ -682,7 +686,7 @@ class BaseAdapter(ABC):
             new_session_path = get_history_dir() / f"{new_session.id}.jsonl"
             new_storage = SessionStorage.create(
                 agent_name=self.agent_name,
-                model=self.agent_config.agent_file,
+                model=resolved_model,
                 compacted_from=old_conv_id,
                 session_path=new_session_path,
             )

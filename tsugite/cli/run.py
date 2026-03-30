@@ -558,6 +558,7 @@ def run(
 
         # Set up event bus in context for attachment loading
         from tsugite.events import EventBus
+        from tsugite.models import resolve_effective_model
         from tsugite.ui_context import set_ui_context
 
         event_bus = EventBus()
@@ -594,7 +595,7 @@ def run(
                 "Agent": agent_file.name,
                 "Task": prompt,
                 "Directory": str(Path.cwd()),
-                "Model": exec_opts.model_override or agent_info.get("model", "unknown"),
+                "Model": resolve_effective_model(exec_opts.model_override, agent_info.get("model_raw")) or "unknown",
                 "Instructions": instruction_label,
                 "Tools": ", ".join(agent_info.get("tools", [])),
             }
@@ -663,7 +664,7 @@ def run(
                     agent_name=agent_info["name"],
                     prompt=prompt,
                     result=result_str,
-                    model=exec_opts.model_override or agent_info.get("model", "default"),
+                    model=resolve_effective_model(exec_opts.model_override, agent_info.get("model_raw")) or "unknown",
                     token_count=token_count,
                     cost=cost,
                     execution_steps=execution_steps,
