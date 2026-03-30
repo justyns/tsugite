@@ -167,13 +167,16 @@ cython_debug/
 benchmark_results/
 test_output/
 .claude/settings.local.json
+std*.txt
+secrets/*
 
 
 # TODO: temp - I need to clean up the docs
-docs/
+docs-old/
 examples/
 agents/
 .claude/
 .tsugite/
 benchmarks/
+docker-compose.test.yml
 #### TODO ^^^
