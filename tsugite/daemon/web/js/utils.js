@@ -9,9 +9,13 @@ export function renderMarkdown(text) {
     return `\x00CB${codeBlocks.length - 1}\x00`;
   });
 
-  text = escapeHtml(text);
+  const inlineCode = [];
+  text = text.replace(/`([^`]+)`/g, (_, code) => {
+    inlineCode.push(`<code>${escapeHtml(code)}</code>`);
+    return `\x00IC${inlineCode.length - 1}\x00`;
+  });
 
-  text = text.replace(/`([^`]+)`/g, '<code>$1</code>');
+  text = escapeHtml(text);
   text = text.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
   text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
   text = text.replace(/\*(.+?)\*/g, '<em>$1</em>');
@@ -43,6 +47,7 @@ export function renderMarkdown(text) {
     return `<p>${block.replace(/\n/g, '<br>')}</p>`;
   }).join('\n');
 
+  text = text.replace(/\x00IC(\d+)\x00/g, (_, i) => inlineCode[i]);
   text = text.replace(/\x00CB(\d+)\x00/g, (_, i) => codeBlocks[i]);
   return text;
 }
