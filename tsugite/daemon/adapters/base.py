@@ -534,7 +534,7 @@ class BaseAdapter(ABC):
         try:
             session = self.session_store.get_session(conv_id)
             if session and session.message_count <= 1 and not session.title:
-                asyncio.ensure_future(self._auto_title_session(conv_id, message, str(result)))
+                asyncio.create_task(self._auto_title_session(conv_id, message, str(result)))
         except Exception as e:
             logger.debug("Auto-title check failed for session '%s': %s", conv_id, e)
 

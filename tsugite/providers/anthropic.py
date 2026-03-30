@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -54,12 +55,21 @@ class AnthropicProvider:
         self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
         self.api_base = (api_base or API_BASE).rstrip("/")
         self._client: httpx.AsyncClient | None = None
+        self._client_loop = None
 
         register_models(_ANTHROPIC_MODELS)
 
     def _get_client(self) -> httpx.AsyncClient:
-        if self._client is None or self._client.is_closed:
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+
+        if self._client is None or self._client.is_closed or self._client_loop is not current_loop:
+            if self._client is not None and not self._client.is_closed:
+                self._client.close()
             self._client = httpx.AsyncClient(timeout=300)
+            self._client_loop = current_loop
         return self._client
 
     def _build_headers(self) -> dict[str, str]:

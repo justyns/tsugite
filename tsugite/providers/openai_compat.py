@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -130,13 +131,22 @@ class OpenAICompatProvider:
         self.api_key = api_key
         self.extra_headers = extra_headers or {}
         self._client: httpx.AsyncClient | None = None
+        self._client_loop = None
 
         if name == "openai":
             register_models(_OPENAI_MODELS)
 
     def _get_client(self) -> httpx.AsyncClient:
-        if self._client is None or self._client.is_closed:
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+
+        if self._client is None or self._client.is_closed or self._client_loop is not current_loop:
+            if self._client is not None and not self._client.is_closed:
+                self._client.close()
             self._client = httpx.AsyncClient(timeout=300)
+            self._client_loop = current_loop
         return self._client
 
     def _build_headers(self) -> dict[str, str]:

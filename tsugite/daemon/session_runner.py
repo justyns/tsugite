@@ -76,7 +76,7 @@ class SessionRunner:
         progress = LoggingProgressHandler(self._store, session.id)
         progress._emit("session_start", {"agent": session.agent, "prompt": session.prompt[:200]})
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         task = loop.create_task(self._run_session(session, progress))
         self._active_tasks[session.id] = task
         task.add_done_callback(lambda t: self._active_tasks.pop(session.id, None))
@@ -127,7 +127,7 @@ class SessionRunner:
                 result=result_str,
             )
             if not session.title:
-                asyncio.ensure_future(self._auto_title_background_session(session, result_str, adapter))
+                asyncio.create_task(self._auto_title_background_session(session, result_str, adapter))
             progress._emit("session_complete", {"result_preview": result_str[:500]})
             if self._event_bus:
                 self._event_bus.emit("session_update", {"action": "completed", "id": session.id})
