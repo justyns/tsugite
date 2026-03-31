@@ -474,6 +474,15 @@ class TsugiteAgent:
                             f"{self._consecutive_format_errors} consecutive format errors"
                         )
                         logger.warning(error_msg)
+                        if self.event_bus:
+                            self.event_bus.emit(
+                                WarningEvent(
+                                    message=(
+                                        f"Format error loop detected ({self._consecutive_format_errors} "
+                                        "consecutive errors). Will retry with a fresh session."
+                                    ),
+                                )
+                            )
                         if return_full_result:
                             return AgentResult(
                                 output=None,
