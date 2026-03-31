@@ -642,6 +642,63 @@ def schedule_show(
         console.print(f"  error:    [red]{data['last_error']}[/red]")
 
 
+token_app = typer.Typer(help="Manage API authentication tokens")
+daemon_app.add_typer(token_app, name="token")
+
+
+def _get_tokens_path() -> Path:
+    from tsugite.daemon.auth import TOKENS_FILENAME
+
+    return get_xdg_data_path("daemon") / TOKENS_FILENAME
+
+
+@token_app.command("create")
+def token_create(
+    name: str = typer.Option("", "--name", "-n", help="Name for the token (for identification)"),
+):
+    """Create a new admin API token."""
+    from tsugite.daemon.auth import TokenStore
+
+    store = TokenStore(_get_tokens_path())
+    t, raw = store.create_admin_token(name=name)
+    print(raw)
+    err = Console(stderr=True)
+    err.print(f"  name:    {name or '(unnamed)'}")
+    err.print(f"  prefix:  {t.prefix}")
+    err.print(f"  created: {t.created_at}")
+    err.print("[dim]Save this token — it cannot be retrieved later.[/dim]")
+
+
+@token_app.command("list")
+def token_list():
+    """List all admin API tokens."""
+    from tsugite.daemon.auth import TokenStore
+
+    store = TokenStore(_get_tokens_path())
+    tokens = store.list_admin_tokens()
+    if not tokens:
+        console.print("[dim]No tokens configured.[/dim]")
+        return
+    for t in tokens:
+        name = t.identity.removeprefix("admin:")
+        console.print(f"  {t.prefix}...  [bold]{name or '(unnamed)'}[/bold]  created: {t.created_at}")
+
+
+@token_app.command("revoke")
+def token_revoke(
+    name_or_prefix: str = typer.Argument(help="Token name or prefix to revoke"),
+):
+    """Revoke an admin API token."""
+    from tsugite.daemon.auth import TokenStore
+
+    store = TokenStore(_get_tokens_path())
+    if store.revoke_admin_token(name_or_prefix):
+        console.print(f"[green]Token '{name_or_prefix}' revoked.[/green]")
+    else:
+        console.print(f"[red]No token found matching '{name_or_prefix}'.[/red]")
+        raise typer.Exit(1)
+
+
 @daemon_app.callback(invoke_without_command=True)
 def daemon_main(
     ctx: typer.Context,

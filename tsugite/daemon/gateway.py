@@ -214,12 +214,30 @@ class Gateway:
                 )
 
             if http_adapters:
+                from tsugite.daemon.auth import TOKENS_FILENAME, TokenStore
                 from tsugite.daemon.webhook_store import WebhookStore
 
                 webhook_store = WebhookStore(self.config.state_dir / "webhooks.json")
+                self._token_store = TokenStore(self.config.state_dir / TOKENS_FILENAME)
+
+                # Auto-generate an admin token on first startup
+                if not self._token_store.has_admin_tokens():
+                    st, raw = self._token_store.create_admin_token(name="auto-generated")
+                    logger.info("Auto-generated admin token: %s", raw)
+                    logger.info("Save this token, it cannot be retrieved later.")
+                else:
+                    count = len(self._token_store.list_admin_tokens())
+                    logger.info("HTTP auth enabled (%d admin token(s))", count)
+
+                self._tsugite_api_url = f"http://127.0.0.1:{self.config.http.port}"
 
                 self._http_server = HTTPServer(
-                    self.config.http, http_adapters, webhook_store, self.config.agents, gateway=self
+                    self.config.http,
+                    http_adapters,
+                    webhook_store,
+                    self.config.agents,
+                    gateway=self,
+                    token_store=self._token_store,
                 )
 
                 # Wire up event_bus on adapters so they can broadcast compaction state
@@ -252,7 +270,12 @@ class Gateway:
 
             schedules_path = self.config.state_dir / "schedules.json"
             self._scheduler_adapter = SchedulerAdapter(
-                http_adapters, schedules_path, self.config.notification_channels, identity_map
+                http_adapters,
+                schedules_path,
+                self.config.notification_channels,
+                identity_map,
+                token_store=self._token_store,
+                tsugite_api_url=self._tsugite_api_url,
             )
             tasks.append(self._scheduler_adapter.start())
             if self._http_server:

@@ -311,6 +311,8 @@ class BaseAdapter(ABC):
             ctx["schedule_id"] = meta.get("schedule_id", "")
             ctx["has_notify_tool"] = meta.get("notify_tool", False)
         ctx["running_tasks"] = meta.get("running_tasks", [])
+        ctx["tsugite_url"] = meta.get("tsugite_url", "")
+        ctx["tsugite_token"] = meta.get("tsugite_token", "")
 
         # Session context
         ctx["is_session"] = channel_context.source == "session"

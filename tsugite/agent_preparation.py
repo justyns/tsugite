@@ -267,6 +267,8 @@ class AgentPreparer:
             "schedule_id": context.get("schedule_id", ""),
             "has_notify_tool": context.get("has_notify_tool", False),
             "running_tasks": context.get("running_tasks", []),
+            "tsugite_url": context.get("tsugite_url", ""),
+            "tsugite_token": context.get("tsugite_token", ""),
             "tools": agent_config.tools,
             # Subagent context
             "is_subagent": context.get("is_subagent", False),

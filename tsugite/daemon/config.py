@@ -78,7 +78,6 @@ class HTTPConfig(BaseModel):
     enabled: bool = False
     host: str = "127.0.0.1"
     port: int = 8374
-    auth_tokens: List[str] = Field(default_factory=list)
     max_workspace_file_size: int = 1024 * 1024  # 1MB
 
 
@@ -136,10 +135,6 @@ def load_daemon_config(path: Optional[Path] = None) -> DaemonConfig:
 
     for bot in data.get("discord_bots", []):
         _expand_env_vars(bot, "token")
-
-    http_data = data.get("http")
-    if http_data and "auth_tokens" in http_data:
-        http_data["auth_tokens"] = [os.path.expandvars(t) for t in http_data["auth_tokens"]]
 
     for agent_data in data.get("agents", {}).values():
         if "workspace_dir" in agent_data:

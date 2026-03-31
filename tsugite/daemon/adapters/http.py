@@ -297,13 +297,14 @@ class HTTPServer:
         webhook_store: WebhookStore,
         agent_configs: dict[str, AgentConfig],
         gateway=None,
+        token_store=None,
     ):
         self.config = config
         self.adapters = adapters
         self.webhook_store = webhook_store
         self.agent_configs = agent_configs
         self.gateway = gateway
-        self._auth_tokens = set(config.auth_tokens)
+        self._token_store = token_store
         self._server = None
         self.scheduler = None  # Set by Gateway after SchedulerAdapter is created
         self.session_runner = None  # Set by Gateway after SessionRunner is created
@@ -315,14 +316,23 @@ class HTTPServer:
         self.app = self._build_app()
 
     def _check_auth(self, request: Request) -> Optional[JSONResponse]:
-        if not self._auth_tokens:
-            return None
         token = request.headers.get("authorization", "").removeprefix("Bearer ")
         if not token:
             token = request.query_params.get("token", "")
-        if token not in self._auth_tokens:
-            return JSONResponse({"error": "unauthorized"}, status_code=401)
-        return None
+
+        path = request.url.path
+
+        if token and self._token_store:
+            valid, identity = self._token_store.validate(token)
+            if valid:
+                logger.debug("auth ok (%s) path=%s", identity, path)
+                return None
+
+        if token:
+            logger.warning("auth failed (invalid token) path=%s", path)
+        else:
+            logger.warning("auth failed (no token) path=%s", path)
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
 
     def _get_adapter(self, request: Request) -> tuple[Optional[HTTPAgentAdapter], Optional[JSONResponse]]:
         """Authenticate and resolve the agent adapter from the request.
@@ -1868,9 +1878,8 @@ class HTTPServer:
         return JSONResponse({"public_key": self.vapid_public_key})
 
     async def _push_subscribe(self, request: Request) -> JSONResponse:
-        auth_err = self._check_auth(request)
-        if auth_err:
-            return auth_err
+        if err := self._check_auth(request):
+            return err
         if not self.push_store:
             return JSONResponse({"error": "web push not configured"}, status_code=404)
         body = await request.json()
@@ -1880,9 +1889,8 @@ class HTTPServer:
         return JSONResponse({"status": "subscribed"})
 
     async def _push_unsubscribe(self, request: Request) -> JSONResponse:
-        auth_err = self._check_auth(request)
-        if auth_err:
-            return auth_err
+        if err := self._check_auth(request):
+            return err
         if not self.push_store:
             return JSONResponse({"error": "web push not configured"}, status_code=404)
         body = await request.json()

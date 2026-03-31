@@ -25,12 +25,7 @@ def agent_config(tmp_workspace):
 
 @pytest.fixture
 def http_config():
-    return HTTPConfig(enabled=True, host="127.0.0.1", port=8374, auth_tokens=["test-token"])
-
-
-@pytest.fixture
-def http_config_no_auth():
-    return HTTPConfig(enabled=True, host="127.0.0.1", port=8374, auth_tokens=[])
+    return HTTPConfig(enabled=True, host="127.0.0.1", port=8374)
 
 
 @pytest.fixture
@@ -59,33 +54,35 @@ def webhook_store(tmp_path):
 
 
 @pytest.fixture
-def server(http_config, mock_adapter, webhook_store, agent_config):
+def token_store(tmp_path):
+    from tsugite.daemon.auth import TokenStore
+
+    store = TokenStore(tmp_path / "tokens.json")
+    store.create_admin_token(name="test-token")
+    return store
+
+
+@pytest.fixture
+def test_token(token_store):
+    """Return a valid raw admin token for use in test requests."""
+    _st, raw = token_store.create_admin_token(name="test-request-token")
+    return raw
+
+
+@pytest.fixture
+def server(http_config, mock_adapter, webhook_store, agent_config, token_store):
     return HTTPServer(
         config=http_config,
         adapters={"test-agent": mock_adapter},
         webhook_store=webhook_store,
         agent_configs={"test-agent": agent_config},
-    )
-
-
-@pytest.fixture
-def server_no_auth(http_config_no_auth, mock_adapter, webhook_store, agent_config):
-    return HTTPServer(
-        config=http_config_no_auth,
-        adapters={"test-agent": mock_adapter},
-        webhook_store=webhook_store,
-        agent_configs={"test-agent": agent_config},
+        token_store=token_store,
     )
 
 
 @pytest.fixture
 def client(server):
     return TestClient(server.app)
-
-
-@pytest.fixture
-def client_no_auth(server_no_auth):
-    return TestClient(server_no_auth.app)
 
 
 class TestHealthEndpoint:
@@ -102,8 +99,8 @@ class TestHealthEndpoint:
 
 
 class TestAgentsEndpoint:
-    def test_list_agents_with_auth(self, client):
-        resp = client.get("/api/agents", headers={"Authorization": "Bearer test-token"})
+    def test_list_agents_with_auth(self, client, test_token):
+        resp = client.get("/api/agents", headers={"Authorization": f"Bearer {test_token}"})
         assert resp.status_code == 200
         data = resp.json()
         assert len(data["agents"]) == 1
@@ -117,17 +114,13 @@ class TestAgentsEndpoint:
         resp = client.get("/api/agents", headers={"Authorization": "Bearer wrong"})
         assert resp.status_code == 401
 
-    def test_list_agents_no_auth_mode(self, client_no_auth):
-        resp = client_no_auth.get("/api/agents")
-        assert resp.status_code == 200
-
 
 class TestChatEndpoint:
-    def test_chat_unknown_agent(self, client):
+    def test_chat_unknown_agent(self, client, test_token):
         resp = client.post(
             "/api/agents/nonexistent/chat",
             json={"message": "hello"},
-            headers={"Authorization": "Bearer test-token"},
+            headers={"Authorization": f"Bearer {test_token}"},
         )
         assert resp.status_code == 404
 
@@ -135,19 +128,19 @@ class TestChatEndpoint:
         resp = client.post("/api/agents/test-agent/chat", json={"message": "hello"})
         assert resp.status_code == 401
 
-    def test_chat_empty_message(self, client):
+    def test_chat_empty_message(self, client, test_token):
         resp = client.post(
             "/api/agents/test-agent/chat",
             json={"message": ""},
-            headers={"Authorization": "Bearer test-token"},
+            headers={"Authorization": f"Bearer {test_token}"},
         )
         assert resp.status_code == 400
 
-    def test_chat_invalid_json(self, client):
+    def test_chat_invalid_json(self, client, test_token):
         resp = client.post(
             "/api/agents/test-agent/chat",
             content=b"not json",
-            headers={"Authorization": "Bearer test-token", "Content-Type": "application/json"},
+            headers={"Authorization": f"Bearer {test_token}", "Content-Type": "application/json"},
         )
         assert resp.status_code == 400
 
@@ -185,32 +178,26 @@ class TestWebhookEndpoint:
 
 
 class TestHistoryEndpoint:
-    def test_history_empty_for_new_user(self, client):
+    def test_history_empty_for_new_user(self, client, test_token):
         resp = client.get(
             "/api/agents/test-agent/history?user_id=brand-new-user",
-            headers={"Authorization": "Bearer test-token"},
+            headers={"Authorization": f"Bearer {test_token}"},
         )
         assert resp.status_code == 200
         data = resp.json()
         assert data["turns"] == []
         assert "conversation_id" in data
 
-    def test_history_unknown_agent(self, client):
+    def test_history_unknown_agent(self, client, test_token):
         resp = client.get(
             "/api/agents/nonexistent/history?user_id=someone",
-            headers={"Authorization": "Bearer test-token"},
+            headers={"Authorization": f"Bearer {test_token}"},
         )
         assert resp.status_code == 404
 
     def test_history_unauthorized(self, client):
         resp = client.get("/api/agents/test-agent/history?user_id=someone")
         assert resp.status_code == 401
-
-    def test_history_no_auth_mode(self, client_no_auth):
-        resp = client_no_auth.get("/api/agents/test-agent/history?user_id=someone")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["turns"] == []
 
 
 class TestWebUI:
@@ -241,7 +228,6 @@ class TestHTTPConfig:
         assert config.enabled is False
         assert config.host == "127.0.0.1"
         assert config.port == 8374
-        assert config.auth_tokens == []
 
     def test_webhook_entry(self):
         from tsugite.daemon.webhook_store import WebhookEntry

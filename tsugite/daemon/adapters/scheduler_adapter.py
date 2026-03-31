@@ -9,6 +9,7 @@ from pathlib import Path
 
 from tsugite.agent_runner.models import AgentSkippedError
 from tsugite.daemon.adapters.base import BaseAdapter, ChannelContext
+from tsugite.daemon.auth import TokenStore
 from tsugite.daemon.config import NotificationChannelConfig
 from tsugite.daemon.scheduler import RunResult, ScheduleEntry, Scheduler
 from tsugite.daemon.session_store import Session, SessionSource, SessionStatus
@@ -29,10 +30,14 @@ class SchedulerAdapter:
         schedules_path: Path,
         notification_channels: dict[str, NotificationChannelConfig] | None = None,
         identity_map: dict[str, str] | None = None,
+        token_store: TokenStore | None = None,
+        tsugite_api_url: str = "",
     ):
         self._adapters = adapters
         self._notification_channels = notification_channels or {}
         self._identity_map = identity_map or {}
+        self._token_store = token_store
+        self._tsugite_api_url = tsugite_api_url
         self.scheduler = Scheduler(schedules_path, self._run_agent, script_callback=self._run_script)
 
     async def start(self):
@@ -158,6 +163,13 @@ class SchedulerAdapter:
                 raise FileNotFoundError(f"Agent file not found: {entry.agent_file}")
             metadata["agent_file_override"] = str(resolved)
 
+        # Issue a temporary token for this scheduled task
+        temp_token = ""
+        if self._token_store:
+            temp_token = self._token_store.issue(agent=entry.agent, schedule_id=entry.id)
+        metadata["tsugite_url"] = self._tsugite_api_url
+        metadata["tsugite_token"] = temp_token
+
         channel_context = ChannelContext(
             source="scheduler",
             channel_id=None,
@@ -193,6 +205,9 @@ class SchedulerAdapter:
                 except Exception as notify_err:
                     logger.error("Failure notification for schedule '%s' failed: %s", entry.id, notify_err)
             raise
+        finally:
+            if temp_token and self._token_store:
+                self._token_store.revoke(temp_token)
 
         self._update_run_session(conv_id, entry, status=SessionStatus.COMPLETED.value, result=result[:2000])
         logger.info("Schedule '%s' agent '%s' completed", entry.id, entry.agent)
