@@ -220,11 +220,8 @@ class Gateway:
                 webhook_store = WebhookStore(self.config.state_dir / "webhooks.json")
                 self._token_store = TokenStore(self.config.state_dir / TOKENS_FILENAME)
 
-                # Auto-generate an admin token on first startup
                 if not self._token_store.has_admin_tokens():
-                    st, raw = self._token_store.create_admin_token(name="auto-generated")
-                    logger.info("Auto-generated admin token: %s", raw)
-                    logger.info("Save this token, it cannot be retrieved later.")
+                    logger.warning("No API tokens configured. Run: tsugite daemon token create")
                 else:
                     count = len(self._token_store.list_admin_tokens())
                     logger.info("HTTP auth enabled (%d admin token(s))", count)
