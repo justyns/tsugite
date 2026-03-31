@@ -192,6 +192,7 @@ class TsugiteAgent:
         self.total_cost = 0.0
         self.total_tokens = 0
         self._previous_turn_had_error = False
+        self._consecutive_format_errors = 0
 
         self.tool_map = {tool.name: tool for tool in tools}
 
@@ -412,6 +413,7 @@ class TsugiteAgent:
 
                 # Only execute code if the LLM actually generated some
                 if code and code.strip():
+                    self._consecutive_format_errors = 0
                     # Trigger code execution event
                     if self.event_bus:
                         self.event_bus.emit(CodeExecutionEvent(code=code))
@@ -464,6 +466,24 @@ class TsugiteAgent:
                                 step=turn_num + 1,
                             )
                         )
+
+                    self._consecutive_format_errors += 1
+                    if self._consecutive_format_errors >= 3:
+                        error_msg = (
+                            f"Agent stuck in format_error_loop after "
+                            f"{self._consecutive_format_errors} consecutive format errors"
+                        )
+                        logger.warning(error_msg)
+                        if return_full_result:
+                            return AgentResult(
+                                output=None,
+                                token_usage=None,
+                                cost=self.total_cost,
+                                steps=self.memory.steps,
+                                error=error_msg,
+                                provider_state=self._provider.get_state(),
+                            )
+                        raise RuntimeError(error_msg)
 
                     correction_msg = (
                         "Format Error: You must respond with a Python code block.\n\n"

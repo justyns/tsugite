@@ -183,6 +183,61 @@ print(x)
 
 
 @pytest.mark.asyncio
+async def test_agent_format_error_loop_bails_early():
+    """Test agent bails out after 3 consecutive format errors instead of burning all turns."""
+
+    agent = TsugiteAgent(
+        model_string="openai:gpt-4o-mini",
+        tools=[],
+        instructions="",
+        max_turns=20,
+    )
+
+    # Model responds with plain text (no code block) every turn
+    _patch_provider(
+        agent,
+        return_value=_mock_response("I'm responding in plain text without a code block."),
+    )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        await agent.run("Some task")
+
+    assert "format_error_loop" in str(exc_info.value)
+    # Should bail after 3 format errors, not burn all 20 turns
+    assert len(agent.memory.steps) <= 3
+
+
+@pytest.mark.asyncio
+async def test_agent_format_error_resets_on_valid_code():
+    """Test format error counter resets when model produces valid code."""
+
+    agent = TsugiteAgent(
+        model_string="openai:gpt-4o-mini",
+        tools=[],
+        instructions="",
+        max_turns=10,
+    )
+
+    responses = [
+        # 2 format errors
+        _mock_response("plain text"),
+        _mock_response("plain text again"),
+        # Valid code — resets counter
+        _mock_response("Thought: ok\n\n```python\nprint('hi')\n```"),
+        # 2 more format errors
+        _mock_response("more plain text"),
+        _mock_response("still plain"),
+        # Valid code again — resets counter
+        _mock_response("Thought: done\n\n```python\nfinal_answer('done')\n```"),
+    ]
+
+    _patch_provider(agent, side_effect=responses)
+
+    result = await agent.run("Some task")
+    assert result == "done"
+
+
+@pytest.mark.asyncio
 async def test_agent_return_full_result():
     """Test agent can return full result with metadata."""
 
