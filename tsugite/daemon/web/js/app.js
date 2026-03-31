@@ -1,5 +1,5 @@
 import Alpine from 'https://cdn.jsdelivr.net/npm/alpinejs@3/dist/module.esm.js';
-import { get, post, patch, connectEvents } from './api.js';
+import { get, post, patch, connectEvents, onAuthRequired } from './api.js';
 import conversationsView from './views/conversations.js';
 import dashboardView from './views/dashboard.js';
 import scheduleView from './views/schedules.js';
@@ -23,6 +23,7 @@ Alpine.store('app', {
   view: initialView,
   theme: localStorage.getItem('tsugite_theme') || 'frappe',
   userId: localStorage.getItem('tsugite_user_id') || 'web-user-1',
+  authRequired: !localStorage.getItem('tsugite_token'),
   showSettings: false,
   menuOpen: false,
   lastEvent: null,
@@ -56,28 +57,41 @@ Alpine.effect(() => {
   if (store.selectedAgent) localStorage.setItem('tsugite-agent', store.selectedAgent);
 });
 
+let _es = null;
+
+onAuthRequired(() => {
+  const store = Alpine.store('app');
+  if (store.authRequired) return;
+  store.authRequired = true;
+  if (_es) { _es.close(); _es = null; }
+});
+
 async function loadAgents() {
-  try {
-    const data = await get('/api/agents');
-    const store = Alpine.store('app');
-    store.agents = data.agents || [];
-    if (store.agents.length && !store.selectedAgent) {
-      store.selectedAgent = store.agents[0].name;
-    }
-  } catch { /* ignore */ }
+  const data = await get('/api/agents');
+  const store = Alpine.store('app');
+  store.agents = data.agents || [];
+  store.authRequired = false;
+  if (store.agents.length && !store.selectedAgent) {
+    store.selectedAgent = store.agents[0].name;
+  }
+  connectSSE();
+}
+window.tsugiteLoadAgents = loadAgents;
+
+function connectSSE() {
+  if (_es) return;
+  _es = connectEvents((event) => {
+    Alpine.store('app').lastEvent = { ...event, _ts: Date.now() };
+  });
+  _es.onopen = () => {
+    loadAgents().catch(() => {});
+    Alpine.store('app').lastEvent = { type: 'reconnect', _ts: Date.now() };
+  };
 }
 
-loadAgents();
-
-// SSE event stream — push updates to Alpine store
-const _es = connectEvents((event) => {
-  Alpine.store('app').lastEvent = { ...event, _ts: Date.now() };
-});
-_es.onopen = () => {
-  // On reconnect, refresh agents to catch up
-  loadAgents();
-  Alpine.store('app').lastEvent = { type: 'reconnect', _ts: Date.now() };
-};
+if (localStorage.getItem('tsugite_token')) {
+  loadAgents().catch(() => {});
+}
 
 // In standalone PWA mode, force external links to open in the system browser
 // target="_blank" alone is unreliable across platforms (especially iOS Safari)

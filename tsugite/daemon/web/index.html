@@ -1220,6 +1220,43 @@
   </div>
 </main>
 
+<!-- Auth prompt -->
+<div class="auth-gate" :class="{ open: $store.app.authRequired }"
+     x-data="{ authToken: '', authError: '', checking: false, shake: false }">
+  <div class="auth-card">
+    <div class="auth-icon">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+      </svg>
+    </div>
+    <h2>Tsugite</h2>
+    <p class="auth-hint">Paste your API token to connect</p>
+    <div class="auth-input-wrap" :class="{ shake: shake }">
+      <input type="password" x-model="authToken" placeholder="tsu_..."
+             @keydown.enter="$refs.authSubmit.click()"
+             @animationend="shake = false"
+             autofocus>
+    </div>
+    <div class="auth-error" x-show="authError" x-text="authError" x-transition.opacity></div>
+    <button class="auth-btn" x-ref="authSubmit" :disabled="checking || !authToken.trim()" @click="
+      checking = true; authError = '';
+      localStorage.setItem('tsugite_token', authToken.trim());
+      window.tsugiteLoadAgents().then(() => {
+        checking = false;
+      }).catch(() => {
+        authError = 'Invalid or expired token';
+        shake = true;
+        localStorage.removeItem('tsugite_token');
+        checking = false;
+      });
+    ">
+      <span x-show="!checking">Connect</span>
+      <span x-show="checking" class="auth-spinner"></span>
+    </button>
+    <p class="auth-footer">Generate a token with <code>tsugite daemon token create</code></p>
+  </div>
+</div>
+
 <!-- Settings modal -->
 <div class="modal-backdrop" :class="{ open: $store.app.showSettings }" @click.self="$store.app.showSettings = false"
      x-data="{ token: '', userId: '', tempTheme: '', tempModel: '', loadedModel: '', pushSubscribed: false, pushLoading: false }"
@@ -1227,7 +1264,7 @@
   <div class="modal-content">
     <h2>Settings</h2>
     <label>API Token</label>
-    <input type="password" x-model="token" placeholder="Bearer token (leave empty if no auth)">
+    <input type="password" x-model="token" placeholder="tsu_...">
     <label>User ID</label>
     <input type="text" x-model="userId" placeholder="web-user-1">
     <label>Theme</label>

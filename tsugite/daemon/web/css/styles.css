@@ -106,6 +106,26 @@ main { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
 #stop-btn { background: none; color: var(--error); border: 1px solid var(--error); }
 #stop-btn:hover { background: var(--error); color: var(--btn-text); }
 
+/* Auth gate */
+.auth-gate { display: none; position: fixed; inset: 0; z-index: 20; align-items: center; justify-content: center; background: var(--bg); }
+.auth-gate.open { display: flex; }
+.auth-card { text-align: center; width: 90%; max-width: 340px; }
+.auth-icon { color: var(--muted); margin-bottom: 16px; }
+.auth-card h2 { font-size: 20px; font-weight: 600; margin-bottom: 6px; letter-spacing: -0.02em; }
+.auth-hint { font-size: 13px; color: var(--muted); margin-bottom: 24px; }
+.auth-input-wrap input { width: 100%; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; font-size: 15px; font-family: monospace; text-align: center; letter-spacing: 0.5px; transition: border-color 0.15s; }
+.auth-input-wrap input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent); }
+.auth-input-wrap input::placeholder { font-family: monospace; opacity: 0.4; }
+.auth-input-wrap.shake { animation: auth-shake 0.4s ease; }
+@keyframes auth-shake { 20%, 60% { transform: translateX(-6px); } 40%, 80% { transform: translateX(6px); } }
+.auth-error { font-size: 13px; color: var(--error); margin-top: 10px; }
+.auth-btn { width: 100%; margin-top: 16px; padding: 11px; border-radius: 8px; border: none; background: var(--accent); color: var(--btn-text); font-size: 14px; font-weight: 600; cursor: pointer; transition: opacity 0.15s; }
+.auth-btn:hover:not(:disabled) { opacity: 0.9; }
+.auth-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.auth-spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--btn-text); border-top-color: transparent; border-radius: 50%; animation: spin 0.6s linear infinite; vertical-align: middle; }
+.auth-footer { font-size: 12px; color: var(--muted); margin-top: 20px; opacity: 0.6; }
+.auth-footer code { font-size: 11px; background: var(--surface); padding: 2px 6px; border-radius: 4px; }
+
 /* Modals */
 .modal-backdrop { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 10; align-items: center; justify-content: center; }
 .modal-backdrop.open { display: flex; }
