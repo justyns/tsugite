@@ -317,8 +317,6 @@ class HTTPServer:
 
     def _check_auth(self, request: Request) -> Optional[JSONResponse]:
         token = request.headers.get("authorization", "").removeprefix("Bearer ")
-        if not token:
-            token = request.query_params.get("token", "")
 
         path = request.url.path
 

@@ -37,14 +37,55 @@ export { del_ as del };
 
 export function streamPost(path, body) { return request('POST', path, body, true); }
 
+export async function* parseSSE(responseOrReader) {
+  const reader = responseOrReader.body ? responseOrReader.body.getReader() : responseOrReader;
+  const decoder = new TextDecoder();
+  let buf = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const lines = buf.split('\n');
+    buf = lines.pop();
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      let parsed;
+      try { parsed = JSON.parse(line.slice(6)); } catch { continue; }
+      yield parsed;
+    }
+  }
+}
+
 export function connectEvents(onEvent) {
-  const token = getToken();
-  const url = token ? `/api/events?token=${encodeURIComponent(token)}` : '/api/events';
-  const es = new EventSource(url);
-  es.onmessage = (e) => {
-    try { onEvent(JSON.parse(e.data)); } catch { /* ignore parse errors */ }
-  };
-  return es;
+  let running = true;
+  const controller = new AbortController();
+
+  async function connect() {
+    while (running) {
+      try {
+        const resp = await fetch('/api/events', {
+          headers: authHeaders(),
+          signal: controller.signal,
+        });
+        if (resp.status === 401) {
+          running = false;
+          if (_onAuthRequired) _onAuthRequired();
+          return;
+        }
+        if (!resp.ok) throw new Error(resp.statusText);
+        for await (const event of parseSSE(resp)) {
+          onEvent(event);
+        }
+      } catch (e) {
+        if (!running) return;
+      }
+      await new Promise(r => setTimeout(r, 3000));
+      if (running) onEvent({ type: 'reconnect' });
+    }
+  }
+
+  connect();
+  return { close() { running = false; controller.abort(); } };
 }
 
 export async function uploadFiles(path, files) {

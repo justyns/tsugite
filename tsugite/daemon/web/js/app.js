@@ -81,12 +81,11 @@ window.tsugiteLoadAgents = loadAgents;
 function connectSSE() {
   if (_es) return;
   _es = connectEvents((event) => {
+    if (event.type === 'reconnect') {
+      loadAgents().catch(() => {});
+    }
     Alpine.store('app').lastEvent = { ...event, _ts: Date.now() };
   });
-  _es.onopen = () => {
-    loadAgents().catch(() => {});
-    Alpine.store('app').lastEvent = { type: 'reconnect', _ts: Date.now() };
-  };
 }
 
 if (localStorage.getItem('tsugite_token')) {

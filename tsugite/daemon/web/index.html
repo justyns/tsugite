@@ -1242,7 +1242,7 @@
       checking = true; authError = '';
       localStorage.setItem('tsugite_token', authToken.trim());
       window.tsugiteLoadAgents().then(() => {
-        checking = false;
+        location.reload();
       }).catch(() => {
         authError = 'Invalid or expired token';
         shake = true;

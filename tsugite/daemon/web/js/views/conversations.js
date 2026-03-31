@@ -1,4 +1,4 @@
-import { get, post, patch, streamPost, uploadFiles } from '../api.js';
+import { get, post, patch, streamPost, uploadFiles, parseSSE } from '../api.js';
 import { escapeHtml, renderMarkdown, scrollToBottom, formatDate, formatFileSize, stateBadgeClass, contentBlockHtml, truncate } from '../utils.js';
 
 export default () => ({
@@ -691,22 +691,9 @@ export default () => ({
       const resp = await streamPost(`/api/agents/${agent}/chat`, chatBody);
       const reader = resp.body.getReader();
       this._activeReader = reader;
-      const decoder = new TextDecoder();
-      let buffer = '';
       let gotResult = false;
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop();
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          let event;
-          try { event = JSON.parse(line.slice(6)); } catch { continue; }
-
+      for await (const event of parseSSE(reader)) {
           if (event.type === 'done') {
             break;
           } else if (event.type === 'cancelled') {
@@ -751,7 +738,6 @@ export default () => ({
           } else {
             this._handleProgressEvent(progressIdx, event);
           }
-        }
       }
 
       reader.cancel().catch(() => {});
