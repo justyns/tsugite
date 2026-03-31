@@ -32,6 +32,8 @@ class ClaudeCodeProvider:
     Call stop() to clean up the subprocess when done.
     """
 
+    cacheable = False
+
     def __init__(self, name: str = "claude_code"):
         self.name = name
         self._process = None

@@ -52,6 +52,7 @@ class ModelInfo:
 @runtime_checkable
 class Provider(Protocol):
     name: str
+    cacheable: bool
 
     async def acompletion(
         self,

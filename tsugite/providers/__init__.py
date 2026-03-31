@@ -62,7 +62,8 @@ def get_provider(name: str) -> Provider:
         # Fallback: treat unknown providers as OpenAI-compatible
         provider = _load_builtin_provider(name, fallback=True)
 
-    _cache[name] = provider
+    if getattr(provider, "cacheable", True):
+        _cache[name] = provider
     return provider
 
 
