@@ -24,6 +24,8 @@ _BUILTIN_PROVIDERS: dict[str, str] = {
     "github_copilot": "tsugite.providers.openai_compat",
     "anthropic": "tsugite.providers.anthropic",
     "claude_code": "tsugite.providers.claude_code",
+    "fireworks": "tsugite.providers.openai_compat",
+    "cerebras": "tsugite.providers.openai_compat",
 }
 
 _cache: dict[str, Provider] = {}

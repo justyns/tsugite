@@ -113,6 +113,14 @@ _PROVIDER_CONFIGS: dict[str, dict[str, Any]] = {
             "Copilot-Integration-Id": "vscode-chat",
         },
     },
+    "fireworks": {
+        "api_base": "https://api.fireworks.ai/inference/v1",
+        "api_key_env": "FIREWORKS_API_KEY",
+    },
+    "cerebras": {
+        "api_base": "https://api.cerebras.ai/v1",
+        "api_key_env": "CEREBRAS_API_KEY",
+    },
 }
 
 
