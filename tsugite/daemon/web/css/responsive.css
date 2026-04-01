@@ -8,6 +8,8 @@
   .turn-item { min-height: 44px; }
   .form-group input, .form-group select, .form-group textarea { min-height: 44px; }
   .ask-buttons button { min-height: 44px; padding: 10px 18px; }
+  .paste-banner-actions button { min-height: 44px; padding: 10px 18px; }
+  .paste-modal .modal-actions button { min-height: 44px; padding: 10px 18px; }
 }
 
 /* Tablet breakpoint — stack two-pane layouts, scroll nav */
@@ -68,6 +70,17 @@
     gap: 4px 12px;
     padding: 4px 12px;
   }
+}
+
+/* Paste modal full-screen on small viewports */
+@media (max-width: 600px) {
+  .paste-modal .modal-content { width: 100%; max-width: none; height: 100%; max-height: none; border-radius: 0; display: flex; flex-direction: column; }
+  .paste-modal textarea { flex: 1; min-height: 0; }
+  .paste-modal .modal-actions { flex-direction: column; }
+  .paste-modal .modal-actions button { width: 100%; }
+  .paste-banner { flex-direction: column; align-items: stretch; gap: 8px; }
+  .paste-banner-actions { flex-direction: column; }
+  .paste-banner-actions button { width: 100%; }
 }
 
 /* Mobile breakpoint */

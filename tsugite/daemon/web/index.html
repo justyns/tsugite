@@ -406,6 +406,14 @@
 
             <div class="drag-overlay" x-show="isDragging" x-cloak>Drop files to attach</div>
 
+            <div class="paste-banner" x-show="showPasteBanner" x-cloak>
+              <span>Large paste detected (<span x-text="pendingPasteText.length"></span> chars)</span>
+              <div class="paste-banner-actions">
+                <button class="btn-sm" @click="acceptPasteAsFile()">Attach as file</button>
+                <button class="btn-sm btn-cancel" @click="dismissPasteBanner()">Paste normally</button>
+              </div>
+            </div>
+
             <div class="pending-files" x-show="pendingFiles.length > 0">
               <template x-for="(pf, fi) in pendingFiles" :key="fi">
                 <div class="pending-file">
@@ -432,13 +440,15 @@
                 </template>
               </div>
               <button class="attach-btn" @click="openFilePicker()" title="Attach files">📎</button>
+              <button class="attach-btn" @click="openPasteModal()" title="Paste text as attachment">📋</button>
               <input type="file" multiple x-ref="fileInput" @change="onFileInputChange($event)" style="display:none">
               <button class="attach-btn" @click="expandedInput = !expandedInput" :title="expandedInput ? 'Collapse editor' : 'Expand editor'" x-text="expandedInput ? '⤓' : '⤢'"></button>
               <textarea id="message-input" x-model="messageText" rows="1"
                         :class="{ 'input-expanded': expandedInput }"
                         placeholder="Send a message..." autofocus
                         @keydown="onInputKeydown($event)" @input="if (!expandedInput) autoResize($event); onInputChange()"
-                        @keydown.escape="expandedInput = false"></textarea>
+                        @keydown.escape="expandedInput = false"
+                        @paste="onPaste($event)"></textarea>
               <span class="input-hint" x-text="expandedInput ? 'Escape to collapse' : 'Shift+Enter for newline'"></span>
               <button id="send-btn" x-show="!sending" @click="sendMessage()">Send</button>
               <button id="stop-btn" x-show="sending" @click="cancelChat()">Stop</button>
@@ -545,6 +555,21 @@
             </div>
           </div>
         </template>
+      </div>
+    </div>
+
+    <!-- Paste text modal -->
+    <div class="modal-backdrop paste-modal" :class="{ open: showPasteModal }" @click.self="closePasteModal()" @keydown.escape.window="if(showPasteModal) closePasteModal()">
+      <div class="modal-content">
+        <h2>Paste text as attachment</h2>
+        <label for="paste-modal-filename">Filename</label>
+        <input id="paste-modal-filename" type="text" x-model="pasteModalFilename" placeholder="pasted-text.txt">
+        <label for="paste-modal-text">Content</label>
+        <textarea id="paste-modal-text" x-ref="pasteModalText" class="paste-modal-text" x-model="pasteModalText" rows="10" placeholder="Paste or type text here..."></textarea>
+        <div class="modal-actions">
+          <button class="btn-cancel" @click="closePasteModal()">Cancel</button>
+          <button class="btn-primary" @click="confirmPasteModal()" :disabled="!pasteModalText.trim()">Attach</button>
+        </div>
       </div>
     </div>
 

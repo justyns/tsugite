@@ -22,6 +22,11 @@ export default () => ({
   pendingFiles: [],
   isDragging: false,
   expandedInput: false,
+  showPasteBanner: false,
+  pendingPasteText: '',
+  showPasteModal: false,
+  pasteModalText: '',
+  pasteModalFilename: '',
   allSessions: [],
   selectedSessionId: null,
   isActiveSession: true,
@@ -622,6 +627,61 @@ export default () => ({
   onDrop(e) {
     this.isDragging = false;
     if (e.dataTransfer?.files?.length) this.addFiles(e.dataTransfer.files);
+  },
+
+  _pasteTimestamp() {
+    const d = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+  },
+
+  pasteAsAttachment(text, filename) {
+    if (!filename) filename = `pasted-${this._pasteTimestamp()}.txt`;
+    this.addFiles([new File([text], filename, { type: 'text/plain' })]);
+  },
+
+  _resetPasteState() {
+    this.showPasteBanner = false;
+    this.showPasteModal = false;
+    this.pendingPasteText = '';
+    this.pasteModalText = '';
+    this.pasteModalFilename = '';
+  },
+
+  onPaste(e) {
+    const text = e.clipboardData?.getData('text/plain');
+    if (!text || (text.length <= 500 && text.split('\n').length <= 11)) return;
+    e.preventDefault();
+    this.pendingPasteText = text;
+    this.showPasteBanner = true;
+  },
+
+  acceptPasteAsFile() {
+    this.pasteAsAttachment(this.pendingPasteText);
+    this._resetPasteState();
+  },
+
+  dismissPasteBanner() {
+    this.messageText += this.pendingPasteText;
+    this._resetPasteState();
+  },
+
+  openPasteModal() {
+    this._resetPasteState();
+    this.pasteModalFilename = `pasted-${this._pasteTimestamp()}.txt`;
+    this.showPasteModal = true;
+    this.$nextTick(() => this.$refs.pasteModalText?.focus());
+  },
+
+  confirmPasteModal() {
+    if (!this.pasteModalText.trim()) return;
+    const filename = this.pasteModalFilename.trim() || `pasted-${this._pasteTimestamp()}.txt`;
+    this.pasteAsAttachment(this.pasteModalText, filename);
+    this._resetPasteState();
+  },
+
+  closePasteModal() {
+    this._resetPasteState();
   },
 
   async sendMessage() {
