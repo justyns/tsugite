@@ -79,3 +79,14 @@ def emit_skill_unloaded_event(skill_name: str) -> None:
     from tsugite.events import SkillUnloadedEvent
 
     _emit(SkillUnloadedEvent(skill_name=skill_name))
+
+
+def emit_secret_access_event(name: str) -> None:
+    """Emit SecretAccessEvent if event bus is available.
+
+    Args:
+        name: Name of the secret that was accessed
+    """
+    from tsugite.events import SecretAccessEvent
+
+    _emit(SecretAccessEvent(name=name))

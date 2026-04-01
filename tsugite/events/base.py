@@ -48,6 +48,9 @@ class EventType(IntEnum):
     # Reaction events
     REACTION = 29
 
+    # Secret events
+    SECRET_ACCESS = 30
+
 
 class BaseEvent(BaseModel):
     """Base class for all UI events."""

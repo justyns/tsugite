@@ -15,6 +15,7 @@ from tsugite.events import (
     LLMMessageEvent,
     ObservationEvent,
     ReactionEvent,
+    SecretAccessEvent,
     SkillLoadedEvent,
     SkillLoadFailedEvent,
     SkillUnloadedEvent,
@@ -51,6 +52,7 @@ class JSONLUIHandler:
     - SkillLoadedEvent    → {"type": "skill_loaded", "name": str, "description": str}
     - SkillLoadFailedEvent→ {"type": "warning", "message": "Failed to load skill '{name}': {error}"}
     - SkillUnloadedEvent  → {"type": "skill_unloaded", "name": str}
+    - SecretAccessEvent   → {"type": "secret_access", "name": str}
 
     Success/Failure Patterns:
     - Successful tool: {"type": "tool_result", "tool": "read_file", "success": true, "output": "..."}
@@ -75,6 +77,7 @@ class JSONLUIHandler:
         ToolResultEvent: "_handle_tool_result",
         InfoEvent: "_handle_info",
         ReactionEvent: "_handle_reaction",
+        SecretAccessEvent: "_handle_secret_access",
     }
 
     def handle_event(self, event: BaseEvent) -> None:
@@ -137,6 +140,9 @@ class JSONLUIHandler:
                 "operation": event.operation,
             },
         )
+
+    def _handle_secret_access(self, event: SecretAccessEvent) -> None:
+        self._emit("secret_access", {"name": event.name})
 
     def _handle_tool_call(self, event: ToolCallEvent) -> None:
         self._emit("tool_call", {"tool": event.tool_name, "arguments": event.arguments, "step": event.step})

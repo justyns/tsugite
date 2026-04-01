@@ -17,6 +17,7 @@ from .events import (
     ReactionEvent,
     ReasoningContentEvent,
     ReasoningTokensEvent,
+    SecretAccessEvent,
     SkillLoadedEvent,
     SkillLoadFailedEvent,
     SkillUnloadedEvent,
@@ -60,6 +61,7 @@ __all__ = [
     "StepProgressEvent",
     "FileReadEvent",
     "FileWriteEvent",
+    "SecretAccessEvent",
     # Audit
     "ToolCallEvent",
     "ToolResultEvent",

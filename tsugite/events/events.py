@@ -277,6 +277,13 @@ class FileWriteEvent(BaseEvent):
     operation: str  # "tool_call"
 
 
+class SecretAccessEvent(BaseEvent):
+    """Secret access notification."""
+
+    event_type: EventType = Field(default=EventType.SECRET_ACCESS, frozen=True)
+    name: str
+
+
 # ============================================================================
 # Audit Events
 # ============================================================================

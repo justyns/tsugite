@@ -30,7 +30,12 @@ def get_secret(name: str) -> str:
         raise RuntimeError(f"Secret '{name}' not found")
 
     registry = get_registry()
-    return registry.register(name, value, agent=agent_name)
+    result = registry.register(name, value, agent=agent_name)
+
+    from tsugite.events.helpers import emit_secret_access_event
+
+    emit_secret_access_event(name)
+    return result
 
 
 @tool(parent_only=True)
