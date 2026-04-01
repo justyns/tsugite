@@ -1039,6 +1039,10 @@ class HTTPServer:
             names = ", ".join(workspace_only_files)
             message += f"\n\n[Uploaded files available in workspace: {names}]"
 
+        if uploaded_attachments:
+            names = ", ".join(a.name for a in uploaded_attachments)
+            message += f"\n\n[Attached files (content included below, saved to uploads/): {names}]"
+
         metadata = {"client_ip": request.client.host if request.client else "unknown"}
         if uploaded_attachments:
             metadata["uploaded_attachments"] = uploaded_attachments

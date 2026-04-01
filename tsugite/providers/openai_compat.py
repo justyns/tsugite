@@ -151,8 +151,6 @@ class OpenAICompatProvider:
             current_loop = None
 
         if self._client is None or self._client.is_closed or self._client_loop is not current_loop:
-            if self._client is not None and not self._client.is_closed:
-                self._client.close()
             self._client = httpx.AsyncClient(timeout=300)
             self._client_loop = current_loop
         return self._client
