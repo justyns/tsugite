@@ -3,8 +3,6 @@
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
-import pytest
-
 from tsugite.daemon.auth import TokenStore
 
 
@@ -87,8 +85,6 @@ class TestAdminTokens:
         path = tmp_path / "tokens.json"
         store = TokenStore(path)
         store.create_admin_token(name="perm-test")
-
-        import stat
 
         mode = path.stat().st_mode & 0o777
         assert mode == 0o600

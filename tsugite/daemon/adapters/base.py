@@ -582,7 +582,9 @@ class BaseAdapter(ABC):
             self.event_bus.emit("session_update", {"action": "compacted", "id": session.id})
         return session.id
 
-    async def _compact_session(self, session_id: str, instructions: str | None = None, reason: str | None = None) -> None:
+    async def _compact_session(
+        self, session_id: str, instructions: str | None = None, reason: str | None = None
+    ) -> None:
         """Compact session when approaching context limit.
 
         Uses a sliding window: recent turns are kept verbatim while older
@@ -695,7 +697,9 @@ class BaseAdapter(ABC):
                 session_path=new_session_path,
             )
 
-            new_storage.record_compaction_summary(summary, len(old_turns), retained_turns=len(recent_turns), reason=reason)
+            new_storage.record_compaction_summary(
+                summary, len(old_turns), retained_turns=len(recent_turns), reason=reason
+            )
             new_storage.write_turns(recent_turns)
 
             post_compact_execs = await fire_compact_hooks(
