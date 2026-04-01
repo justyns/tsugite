@@ -8,7 +8,24 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
+import html2text
 import yaml
+
+
+def convert_html_to_markdown(html: str) -> str:
+    """Convert HTML to markdown using html2text.
+
+    Args:
+        html: HTML string to convert
+
+    Returns:
+        Markdown-formatted string
+    """
+    h = html2text.HTML2Text()
+    h.ignore_links = False
+    h.ignore_images = False
+    h.body_width = 0
+    return h.handle(html)
 
 
 def parse_yaml_frontmatter(content: str, label: str = "content") -> Tuple[Dict[str, Any], str]:

@@ -8,6 +8,7 @@ import httpx
 from ddgs import DDGS
 
 from tsugite.tools import tool
+from tsugite.utils import convert_html_to_markdown
 
 
 @dataclass
@@ -74,6 +75,8 @@ def fetch_text(
     method: str = "GET",
     headers: Optional[Dict[str, str]] = None,
     timeout: int = 30,
+    strip_html: bool = True,
+    extract_article: bool = False,
 ) -> str:
     """Fetch text content from a URL.
 
@@ -82,9 +85,22 @@ def fetch_text(
         method: HTTP method
         headers: Optional HTTP headers
         timeout: Request timeout in seconds
+        strip_html: Convert HTML to markdown (preserves headings, lists, links)
+        extract_article: Extract article content only (strips nav/ads/boilerplate), implies strip_html
     """
     try:
-        return _simple_request(url, method, headers, timeout).text
+        response = _simple_request(url, method, headers, timeout)
+        text = response.text
+        content_type = response.headers.get("content-type", "")
+
+        if "text/html" not in content_type or (not strip_html and not extract_article):
+            return text
+
+        if extract_article:
+            from readability import Document
+
+            text = Document(text).summary()
+        return convert_html_to_markdown(text)
     except httpx.TimeoutException as exc:
         raise RuntimeError(f"Request timed out after {timeout} seconds") from exc
     except httpx.HTTPStatusError as e:

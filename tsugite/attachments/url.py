@@ -5,6 +5,7 @@ import urllib.request
 from urllib.parse import urlparse
 
 from tsugite.attachments.base import Attachment, AttachmentContentType, AttachmentHandler
+from tsugite.utils import convert_html_to_markdown
 
 logger = logging.getLogger(__name__)
 
@@ -120,19 +121,8 @@ class GenericURLHandler(AttachmentHandler):
                 with urllib.request.urlopen(source, timeout=30) as response:
                     content = response.read().decode("utf-8")
 
-                # If HTML, convert to markdown
                 if "text/html" in content_type:
-                    try:
-                        import html2text
-
-                        h = html2text.HTML2Text()
-                        h.ignore_links = False
-                        h.ignore_images = False
-                        h.body_width = 0  # Don't wrap lines
-                        content = h.handle(content)
-                    except ImportError:
-                        # Fall back to raw HTML if html2text not available
-                        pass
+                    content = convert_html_to_markdown(content)
 
                 mime_type = content_type.split(";")[0].strip() if content_type else "text/plain"
                 return Attachment(

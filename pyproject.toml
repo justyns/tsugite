@@ -25,6 +25,7 @@ dependencies = [
   "portalocker>=2.8.0",
   "tzlocal>=5.3.1",
   "cryptography>=46.0.5",
+  "readability-lxml>=0.8",
 ]
 
 [project.optional-dependencies]

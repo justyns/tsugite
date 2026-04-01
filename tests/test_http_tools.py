@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
-from tsugite.tools.http import HttpResponse, http_request, web_search
+from tsugite.tools.http import HttpResponse, fetch_text, http_request, web_search
 
 
 @pytest.fixture
@@ -209,6 +209,92 @@ def test_http_request_non_json_response(mock_httpx_client):
 
     assert result.body == "plain text response"
     assert result.status_code == 200
+
+
+# --- fetch_text tests ---
+
+SAMPLE_HTML = "<html><head><title>Test</title></head><body><h1>Hello</h1><p>World</p></body></html>"
+
+SAMPLE_ARTICLE_HTML = """<html><head><title>My Article</title></head><body>
+<nav>Menu items</nav>
+<article><h1>Article Title</h1><p>This is the main article content with enough text to be recognized.</p>
+<p>Another paragraph of substantial content for the readability algorithm to detect.</p></article>
+<footer>Footer stuff</footer>
+</body></html>"""
+
+
+def test_fetch_text_default_strips_html(mock_httpx_client):
+    """Default fetch_text strips HTML (strip_html=True by default)."""
+    mock_httpx_client.request.return_value = _mock_response(
+        200, text=SAMPLE_HTML, headers={"content-type": "text/html"}
+    )
+    result = fetch_text("https://example.com")
+    assert "<h1>" not in result
+    assert "Hello" in result
+
+
+def test_fetch_text_raw_html_when_strip_disabled(mock_httpx_client):
+    """strip_html=False returns raw HTML."""
+    mock_httpx_client.request.return_value = _mock_response(
+        200, text=SAMPLE_HTML, headers={"content-type": "text/html"}
+    )
+    result = fetch_text("https://example.com", strip_html=False)
+    assert "<h1>Hello</h1>" in result
+
+
+def test_fetch_text_strip_html(mock_httpx_client):
+    """strip_html=True converts HTML to markdown."""
+    mock_httpx_client.request.return_value = _mock_response(
+        200, text=SAMPLE_HTML, headers={"content-type": "text/html"}
+    )
+    result = fetch_text("https://example.com", strip_html=True)
+    assert "<h1>" not in result
+    assert "Hello" in result
+    assert "World" in result
+
+
+def test_fetch_text_strip_html_non_html_passthrough(mock_httpx_client):
+    """strip_html=True with non-HTML content-type returns raw text."""
+    mock_httpx_client.request.return_value = _mock_response(
+        200, text='{"key": "value"}', headers={"content-type": "application/json"}
+    )
+    result = fetch_text("https://example.com", strip_html=True)
+    assert result == '{"key": "value"}'
+
+
+def test_fetch_text_extract_article(mock_httpx_client):
+    """extract_article=True extracts article content."""
+    mock_httpx_client.request.return_value = _mock_response(
+        200, text=SAMPLE_ARTICLE_HTML, headers={"content-type": "text/html; charset=utf-8"}
+    )
+    result = fetch_text("https://example.com", extract_article=True)
+    assert "main article content" in result
+    assert "<nav>" not in result
+    assert "<footer>" not in result
+
+
+def test_fetch_text_extract_article_non_html_passthrough(mock_httpx_client):
+    """extract_article=True with non-HTML content-type returns raw text."""
+    plain = "Just plain text"
+    mock_httpx_client.request.return_value = _mock_response(200, text=plain, headers={"content-type": "text/plain"})
+    result = fetch_text("https://example.com", extract_article=True)
+    assert result == plain
+
+
+def test_fetch_text_extract_article_takes_precedence(mock_httpx_client):
+    """When both flags set, extract_article takes precedence."""
+    mock_httpx_client.request.return_value = _mock_response(
+        200, text=SAMPLE_ARTICLE_HTML, headers={"content-type": "text/html"}
+    )
+    result = fetch_text("https://example.com", strip_html=True, extract_article=True)
+    assert "main article content" in result
+
+
+def test_fetch_text_timeout_error(mock_httpx_client):
+    """fetch_text raises RuntimeError on timeout."""
+    mock_httpx_client.request.side_effect = httpx.TimeoutException("timed out")
+    with pytest.raises(RuntimeError, match="Request timed out"):
+        fetch_text("https://example.com")
 
 
 def test_http_request_returns_headers(mock_httpx_client):
