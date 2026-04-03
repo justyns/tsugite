@@ -391,6 +391,9 @@
                   <template x-if="part.isLink === 'skills'">
                     <span class="att-link" @click="showSkills = true" x-text="part.value"></span>
                   </template>
+                  <template x-if="part.isLink === 'context'">
+                    <span class="att-link" @click="openPromptInspector()" x-text="part.value"></span>
+                  </template>
                   <template x-if="!part.isLink">
                     <span x-text="part.value"></span>
                   </template>
@@ -632,6 +635,61 @@
         <div class="modal-actions">
           <button class="btn-cancel" @click="showSkills = false">Close</button>
         </div>
+      </div>
+    </div>
+
+    <!-- Prompt inspector modal -->
+    <div class="modal-backdrop" :class="{ open: inspectingSnapshot }" @click.self="inspectingSnapshot = null" @keydown.escape.window="if(inspectingSnapshot) inspectingSnapshot = null">
+      <div class="modal-content prompt-inspector">
+        <h2>Prompt Inspector</h2>
+        <template x-if="inspectingSnapshot">
+          <div>
+            <div class="token-bar">
+              <template x-for="cat in ['system','context','history','task','steps']" :key="cat">
+                <template x-if="inspectingSnapshot.token_breakdown[cat] > 0">
+                  <div class="token-segment" :class="'token-' + cat"
+                       :style="'width:' + (inspectingSnapshot.token_breakdown[cat] / inspectingSnapshot.token_breakdown.total * 100) + '%'"
+                       :title="cat + ': ~' + inspectingSnapshot.token_breakdown[cat] + ' tokens'">
+                  </div>
+                </template>
+              </template>
+            </div>
+            <div class="token-legend">
+              <template x-for="cat in ['system','context','history','task','steps']" :key="cat">
+                <template x-if="inspectingSnapshot.token_breakdown[cat] > 0">
+                  <span class="token-legend-item">
+                    <span class="token-dot" :class="'token-' + cat"></span>
+                    <span x-text="cat"></span>
+                    <span class="token-count" x-text="inspectingSnapshot.token_breakdown[cat] < 1000 ? inspectingSnapshot.token_breakdown[cat] : (inspectingSnapshot.token_breakdown[cat] / 1000).toFixed(1) + 'k'"></span>
+                  </span>
+                </template>
+              </template>
+              <span class="token-legend-item" style="font-weight:600">
+                ~<span x-text="(inspectingSnapshot.token_breakdown.total / 1000).toFixed(1) + 'k'"></span> tokens
+              </span>
+            </div>
+            <template x-if="inspectingSnapshot.messages && inspectingSnapshot.messages.length">
+              <div class="prompt-messages">
+                <template x-for="(m, mi) in inspectingSnapshot.messages" :key="mi">
+                  <details class="prompt-msg" x-data="{ get text() { const c = m.content; if (typeof c === 'string') return c; if (Array.isArray(c)) return c.map(b => b.text || JSON.stringify(b)).join('\\n'); return JSON.stringify(c, null, 2); } }">
+                    <summary>
+                      <span class="badge" :class="{'badge-accent': m.role === 'assistant', 'badge-muted': m.role === 'system'}" x-text="m.role"></span>
+                      <span class="token-count" x-text="'~' + (Math.round(text.length / 4) < 1000 ? Math.round(text.length / 4) : (Math.round(text.length / 4) / 1000).toFixed(1) + 'k') + ' tokens'"></span>
+                      <span style="color:var(--muted);font-size:11px;margin-left:4px" x-text="text.substring(0, 80) + (text.length > 80 ? '...' : '')"></span>
+                    </summary>
+                    <pre class="prompt-msg-content"><code x-text="text"></code></pre>
+                  </details>
+                </template>
+              </div>
+            </template>
+            <template x-if="!inspectingSnapshot.messages || !inspectingSnapshot.messages.length">
+              <p style="color:var(--muted);font-size:13px">Raw messages only available during a live session.</p>
+            </template>
+            <div class="modal-actions">
+              <button class="btn-cancel" @click="inspectingSnapshot = null">Close</button>
+            </div>
+          </div>
+        </template>
       </div>
     </div>
   </div>

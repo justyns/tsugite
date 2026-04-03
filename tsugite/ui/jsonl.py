@@ -14,6 +14,7 @@ from tsugite.events import (
     InfoEvent,
     LLMMessageEvent,
     ObservationEvent,
+    PromptSnapshotEvent,
     ReactionEvent,
     SecretAccessEvent,
     SkillLoadedEvent,
@@ -78,6 +79,7 @@ class JSONLUIHandler:
         InfoEvent: "_handle_info",
         ReactionEvent: "_handle_reaction",
         SecretAccessEvent: "_handle_secret_access",
+        PromptSnapshotEvent: "_handle_prompt_snapshot",
     }
 
     def handle_event(self, event: BaseEvent) -> None:
@@ -164,6 +166,9 @@ class JSONLUIHandler:
 
     def _handle_reaction(self, event: ReactionEvent) -> None:
         self._emit("reaction", {"emoji": event.emoji, "message_id": event.message_id})
+
+    def _handle_prompt_snapshot(self, event: PromptSnapshotEvent) -> None:
+        self._emit("prompt_snapshot", {"token_breakdown": event.token_breakdown})
 
     def _emit(self, event_type: str, data: Dict[str, Any]) -> None:
         """Print JSONL event to stdout.

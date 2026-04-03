@@ -11,7 +11,7 @@ Error Handling Patterns:
    - Used for: Format errors, max turns exceeded, critical failures
 """
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import Field
 
@@ -282,6 +282,19 @@ class SecretAccessEvent(BaseEvent):
 
     event_type: EventType = Field(default=EventType.SECRET_ACCESS, frozen=True)
     name: str
+
+
+# ============================================================================
+# Debug/Inspection Events
+# ============================================================================
+
+
+class PromptSnapshotEvent(BaseEvent):
+    """Full messages array sent to LLM with per-category token breakdown."""
+
+    event_type: EventType = Field(default=EventType.PROMPT_SNAPSHOT, frozen=True)
+    messages: List[Dict[str, Any]] = Field(default_factory=list)
+    token_breakdown: Dict[str, Any] = Field(default_factory=dict)
 
 
 # ============================================================================

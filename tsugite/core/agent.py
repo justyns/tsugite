@@ -48,11 +48,22 @@ def _attachment_char_limit(name: str) -> int | None:
     return None
 
 
+CONTEXT_ACK = "Context loaded."
+
+
+def estimate_content_tokens(content) -> int:
+    """Rough token estimate for message content (string or multipart blocks)."""
+    if isinstance(content, str):
+        return len(content) // 4
+    if isinstance(content, list):
+        return sum(len(b.get("text", "")) // 4 if isinstance(b, dict) else 25 for b in content)
+    return 100
+
+
 def _trim_messages_to_token_budget(messages: List[Dict], budget_tokens: int) -> List[Dict]:
     """Keep the most recent messages that fit within a token budget.
 
-    Walks from newest to oldest, estimating tokens as len(content) // 4.
-    Returns messages in original order.
+    Walks from newest to oldest. Returns messages in original order.
     """
     if not messages:
         return messages
@@ -60,8 +71,7 @@ def _trim_messages_to_token_budget(messages: List[Dict], budget_tokens: int) -> 
     kept_indices = []
     used = 0
     for i in range(len(messages) - 1, -1, -1):
-        content = messages[i].get("content", "")
-        est_tokens = len(content) // 4 if isinstance(content, str) else 100
+        est_tokens = estimate_content_tokens(messages[i].get("content", ""))
         if used + est_tokens > budget_tokens and kept_indices:
             break
         used += est_tokens
@@ -396,6 +406,16 @@ class TsugiteAgent:
                 messages = self._build_messages()
                 last_msg = messages[-1]["content"] if messages else ""
                 logger.debug("Turn %d sending %d messages (last: %.200s)", turn_num + 1, len(messages), last_msg)
+
+                if self.event_bus:
+                    from tsugite.events import PromptSnapshotEvent
+
+                    self.event_bus.emit(
+                        PromptSnapshotEvent(
+                            messages=messages,
+                            token_breakdown=self._compute_token_breakdown(messages),
+                        )
+                    )
 
                 turn = await self._provider_turn(messages, turn_num, stream)
 
@@ -920,7 +940,7 @@ class TsugiteAgent:
         context = self._build_context_turn()
         if context:
             messages.append({"role": "user", "content": context, "cache_control": {"type": "ephemeral"}})
-            messages.append({"role": "assistant", "content": "Context loaded.", "cache_control": {"type": "ephemeral"}})
+            messages.append({"role": "assistant", "content": CONTEXT_ACK, "cache_control": {"type": "ephemeral"}})
 
         # 3. Previous conversation messages (if continuing a conversation)
         if self.previous_messages:
@@ -948,6 +968,45 @@ class TsugiteAgent:
             messages.append({"role": "user", "content": self._build_observation(step)})
 
         return messages
+
+    def _compute_token_breakdown(self, messages: List[Dict]) -> Dict[str, int]:
+        """Categorize messages and estimate tokens per category."""
+        est = estimate_content_tokens
+        breakdown = {"system": 0, "context": 0, "history": 0, "task": 0, "steps": 0}
+
+        i = 0
+        n = len(messages)
+
+        if i < n and messages[i].get("role") == "system":
+            breakdown["system"] = est(messages[i].get("content", ""))
+            i += 1
+
+        if i + 1 < n and messages[i + 1].get("content") == CONTEXT_ACK:
+            breakdown["context"] = est(messages[i].get("content", "")) + est(CONTEXT_ACK)
+            i += 2
+
+        task_content = self.memory.task if self.memory else None
+        while i < n:
+            if messages[i].get("role") == "user" and messages[i].get("content") == task_content:
+                break
+            content = messages[i].get("content", "")
+            text = content if isinstance(content, str) else ""
+            if text.startswith("<context>") or text.startswith("<context_update>"):
+                breakdown["context"] += est(content)
+            else:
+                breakdown["history"] += est(content)
+            i += 1
+
+        if i < n:
+            breakdown["task"] = est(messages[i].get("content", ""))
+            i += 1
+
+        while i < n:
+            breakdown["steps"] += est(messages[i].get("content", ""))
+            i += 1
+
+        breakdown["total"] = sum(breakdown.values())
+        return breakdown
 
     def _build_system_prompt(self) -> str:
         """Build system prompt that teaches LLM how to solve tasks."""

@@ -22,6 +22,7 @@ export default () => ({
   attachments: [],
   showSkills: false,
   loadedSkills: [],
+  inspectingSnapshot: null,
 
   // Getters must stay here — spread loses get descriptors
   get userId() {
@@ -83,7 +84,7 @@ export default () => ({
       const tk = (info.tokens / 1000).toFixed(1);
       const lk = (info.context_limit / 1000).toFixed(0);
       const pct = ((info.tokens / info.context_limit) * 100).toFixed(0);
-      parts.push({ label: 'Context', value: `${tk}k / ${lk}k (${pct}%)` });
+      parts.push({ label: 'Context', value: `${tk}k / ${lk}k (${pct}%)`, isLink: 'context' });
     }
     if (info.message_count != null) parts.push({ label: 'Messages', value: String(info.message_count) });
     if (info.attachments?.length) parts.push({ label: 'Attachments', value: `${info.attachments.length} file${info.attachments.length > 1 ? 's' : ''}`, isLink: 'attachments' });
@@ -200,6 +201,17 @@ export default () => ({
       message_count: event.message_count,
       attachments: event.attachments,
     };
+  },
+
+  async openPromptInspector() {
+    const agent = this.$store.app.selectedAgent;
+    if (!agent) return;
+    try {
+      let url = `/api/agents/${agent}/prompt-snapshot?user_id=${encodeURIComponent(this.userId)}`;
+      if (this.selectedSessionId) url += `&session_id=${encodeURIComponent(this.selectedSessionId)}`;
+      const data = await get(url);
+      if (data.prompt_snapshot) this.inspectingSnapshot = data.prompt_snapshot;
+    } catch { /* ignore */ }
   },
 
   async openAttachments() {

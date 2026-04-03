@@ -51,6 +51,9 @@ class EventType(IntEnum):
     # Secret events
     SECRET_ACCESS = 30
 
+    # Debug/inspection events
+    PROMPT_SNAPSHOT = 31
+
 
 class BaseEvent(BaseModel):
     """Base class for all UI events."""

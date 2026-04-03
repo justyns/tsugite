@@ -12,7 +12,7 @@ from dataclasses import fields as dataclass_fields
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from starlette.applications import Starlette
 from starlette.requests import Request
@@ -202,12 +202,23 @@ class SSEProgressHandler(JSONLUIHandler):
         self.done = False
         self.has_final = False
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._persist_event: Optional[Callable] = None
 
     def set_loop(self, loop: asyncio.AbstractEventLoop):
         self._loop = loop
 
+    def set_event_persister(self, fn: Callable):
+        """Set a callback to persist select events to the session event log."""
+        self._persist_event = fn
+
+    latest_prompt_messages: Optional[list] = None
+
     def handle_event(self, event: BaseEvent) -> None:
         """Handle event from agent thread — schedule onto the event loop."""
+        from tsugite.events import PromptSnapshotEvent
+
+        if isinstance(event, PromptSnapshotEvent) and event.messages:
+            self.latest_prompt_messages = event.messages
         super().handle_event(event)
 
     def _emit(self, event_type: str, data: dict[str, Any]) -> None:
@@ -225,6 +236,9 @@ class SSEProgressHandler(JSONLUIHandler):
                 self._loop.call_soon_threadsafe(self.queue.put_nowait, payload)
         else:
             self.queue.put_nowait(payload)
+
+        if event_type == "prompt_snapshot" and self._persist_event:
+            self._persist_event(payload)
 
     def signal_done(self):
         """Set done and wake up the generator."""
@@ -319,6 +333,7 @@ class HTTPServer:
         self.vapid_public_key = None  # Set by Gateway if web-push is configured
         self._active_backends: dict[tuple[str, str], HTTPInteractionBackend] = {}
         self._active_chat_tasks: dict[tuple[str, str], asyncio.Task] = {}
+        self._active_progress: dict[tuple[str, str], SSEProgressHandler] = {}
         self.event_bus = SSEBroadcaster()
         self.app = self._build_app()
 
@@ -365,6 +380,7 @@ class HTTPServer:
             Route("/api/agents/{agent}/status", self._status, methods=["GET"]),
             Route("/api/agents/{agent}/attachments", self._attachments, methods=["GET"]),
             Route("/api/agents/{agent}/history", self._history, methods=["GET"]),
+            Route("/api/agents/{agent}/prompt-snapshot", self._prompt_snapshot, methods=["GET"]),
             Route("/api/agents/{agent}/config", self._update_agent_config, methods=["PATCH"]),
             Route("/api/agents/{agent}/compact", self._compact, methods=["POST"]),
             Route("/api/agents/{agent}/respond", self._respond, methods=["POST"]),
@@ -818,12 +834,10 @@ class HTTPServer:
 
         turns, compaction_summary, compacted_from, compaction_reason = self._collect_turns(conversation_id, limit=limit)
 
-        # Read reaction events from session event log and group by turn timestamp
-        reaction_events = [
-            e
-            for e in adapter.session_store.read_events(conversation_id)
-            if e.get("type") == "reaction" and e.get("emoji")
-        ]
+        # Read events from session event log for reactions and prompt snapshots
+        all_events = adapter.session_store.read_events(conversation_id)
+        reaction_events = [e for e in all_events if e.get("type") == "reaction" and e.get("emoji")]
+        snapshot_events = [e for e in all_events if e.get("type") == "prompt_snapshot"] if detail else []
         # Build list of (turn_timestamp, turn_index) for matching
         turn_timestamps = []
         turn_index = 0
@@ -833,16 +847,31 @@ class HTTPServer:
             ts = item.timestamp.isoformat() if item.timestamp else ""
             turn_timestamps.append((ts, turn_index))
             turn_index += 1
-        # Assign each reaction to the most recent turn before it
-        reactions_by_turn: dict[int, list[str]] = {}
-        for re_event in reaction_events:
-            re_ts = re_event.get("timestamp", "")
-            assigned = -1
+
+        # Assign events to the most recent turn before them
+        def _assign_to_turns(events):
+            by_turn: dict[int, list] = {}
+            for ev in events:
+                ev_ts = ev.get("timestamp", "")
+                assigned = -1
+                for ts, idx in turn_timestamps:
+                    if ts and ts <= ev_ts:
+                        assigned = idx
+                if assigned >= 0:
+                    by_turn.setdefault(assigned, []).append(ev)
+            return by_turn
+
+        reactions_by_turn = {k: [e["emoji"] for e in v] for k, v in _assign_to_turns(reaction_events).items()}
+
+        # Snapshots are emitted BEFORE the LLM call, so their timestamp is earlier
+        # than the turn's. Assign each snapshot to the next turn after it.
+        snapshots_by_turn: dict[int, dict] = {}
+        for ev in snapshot_events:
+            ev_ts = ev.get("timestamp", "")
             for ts, idx in turn_timestamps:
-                if ts and ts <= re_ts:
-                    assigned = idx
-            if assigned >= 0:
-                reactions_by_turn.setdefault(assigned, []).append(re_event["emoji"])
+                if ts and ts >= ev_ts:
+                    snapshots_by_turn[idx] = ev
+                    break
 
         result_turns = []
         real_turn_index = 0
@@ -885,6 +914,11 @@ class HTTPServer:
             turn_reactions = reactions_by_turn.get(real_turn_index)
             if turn_reactions:
                 turn_data["reactions"] = turn_reactions
+            snapshot = snapshots_by_turn.get(real_turn_index)
+            if snapshot:
+                turn_data["prompt_snapshot"] = {
+                    "token_breakdown": snapshot.get("token_breakdown", {}),
+                }
             real_turn_index += 1
             result_turns.append(turn_data)
 
@@ -897,6 +931,54 @@ class HTTPServer:
                 "compaction_reason": compaction_reason,
             }
         )
+
+    async def _prompt_snapshot(self, request: Request) -> JSONResponse:
+        """Return the latest prompt snapshot for the current session.
+
+        Includes full messages from the live progress handler if available,
+        otherwise just the token breakdown from the persisted event log.
+        """
+        adapter, err = self._get_adapter(request)
+        if err:
+            return err
+
+        user_id = adapter.resolve_http_user(request.query_params.get("user_id", "web-anonymous"))
+        agent_name = request.path_params["agent"]
+
+        # Check live progress handler for full messages
+        backend_key = (agent_name, user_id)
+        live_progress = self._active_progress.get(backend_key)
+        if live_progress and live_progress.latest_prompt_messages:
+            # Reconstruct breakdown from persisted event log
+            session_id = request.query_params.get("session_id")
+            if not session_id:
+                session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
+                session_id = session.id
+            events = adapter.session_store.read_events(session_id)
+            snapshots = [e for e in events if e.get("type") == "prompt_snapshot"]
+            breakdown = snapshots[-1].get("token_breakdown", {}) if snapshots else {}
+            return JSONResponse(
+                {
+                    "prompt_snapshot": {
+                        "messages": live_progress.latest_prompt_messages,
+                        "token_breakdown": breakdown,
+                    }
+                }
+            )
+
+        # Fallback: breakdown only from event log
+        session_id = request.query_params.get("session_id")
+        if not session_id:
+            session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
+            session_id = session.id
+
+        events = adapter.session_store.read_events(session_id)
+        snapshots = [e for e in events if e.get("type") == "prompt_snapshot"]
+        if not snapshots:
+            return JSONResponse({"prompt_snapshot": None})
+
+        latest = snapshots[-1]
+        return JSONResponse({"prompt_snapshot": {"token_breakdown": latest.get("token_breakdown", {})}})
 
     async def _compact(self, request: Request) -> JSONResponse:
         adapter, err = self._get_adapter(request)
@@ -1099,12 +1181,23 @@ class HTTPServer:
 
         progress = SSEProgressHandler()
         progress.set_loop(asyncio.get_running_loop())
+        session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
+        progress.set_event_persister(
+            lambda payload: adapter.session_store.append_event(
+                session.id,
+                {
+                    **payload,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+        )
         custom_logger = SimpleNamespace(ui_handler=progress)
 
         interaction_backend = HTTPInteractionBackend(progress)
         backend_key = (agent_name, user_id)
         interaction_backend.pending_message = message
         self._active_backends[backend_key] = interaction_backend
+        self._active_progress[backend_key] = progress
 
         async def run_agent():
             from tsugite.interaction import set_interaction_backend

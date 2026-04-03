@@ -14,6 +14,7 @@ from .events import (
     InfoEvent,
     LLMMessageEvent,
     ObservationEvent,
+    PromptSnapshotEvent,
     ReactionEvent,
     ReasoningContentEvent,
     ReasoningTokensEvent,
@@ -62,6 +63,8 @@ __all__ = [
     "FileReadEvent",
     "FileWriteEvent",
     "SecretAccessEvent",
+    # Debug/Inspection
+    "PromptSnapshotEvent",
     # Audit
     "ToolCallEvent",
     "ToolResultEvent",
