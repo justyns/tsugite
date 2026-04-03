@@ -14,14 +14,14 @@ export const streamingMixin = {
     }, 150);
   },
 
-  _pushDetailStep(prog, summary, contentHtml) {
+  _pushDetailStep(prog, summary, content) {
     const follow = this.$store.app.autoFollow;
     if (follow && prog._lastOpenIdx != null) {
       const prev = prog.steps[prog._lastOpenIdx];
       if (prev?.hasDetails) prev.open = false;
     }
     const idx = prog.steps.length;
-    prog.steps.push({ hasDetails: true, summary, content: contentHtml, open: follow });
+    prog.steps.push({ hasDetails: true, summary, content, open: follow });
     if (follow) {
       prog._lastOpenIdx = idx;
       this._scrollThrottled();
@@ -177,7 +177,7 @@ export const streamingMixin = {
     } else if (event.type === 'thought') {
       prog.statusText = 'Thinking...';
       if (event.content) {
-        this._pushDetailStep(prog, 'thought', escapeHtml(event.content));
+        this._pushDetailStep(prog, 'thought', event.content);
       }
     } else if (event.type === 'error') {
       prog.steps.push({ html: `<span class="err">${escapeHtml(event.error)}</span>` });
@@ -188,7 +188,7 @@ export const streamingMixin = {
       const summary = this._hookStepHtml(event.name, event.phase, event.exit_code);
       const output = [event.stdout, event.stderr].filter(Boolean).join('\n');
       if (output) {
-        this._pushDetailStep(prog, summary, escapeHtml(output));
+        this._pushDetailStep(prog, summary, output);
       } else {
         prog.steps.push({ html: summary });
       }
@@ -198,7 +198,7 @@ export const streamingMixin = {
     } else if (event.type === 'content_block') {
       prog.steps.push({ html: contentBlockHtml(event.name, event.content || '') });
     } else if (event.type === 'code') {
-      this._pushDetailStep(prog, `<code>code</code>`, escapeHtml(event.content || ''));
+      this._pushDetailStep(prog, `<code>code</code>`, event.content || '');
     } else if (event.type === 'tool_result') {
       const isCodeResult = event.tool === 'unknown';
       if (!isCodeResult) prog.toolCount++;
@@ -206,7 +206,7 @@ export const streamingMixin = {
       const label = isCodeResult ? 'output' : event.tool;
       const output = event.output || event.error || '';
       if (output) {
-        this._pushDetailStep(prog, `<code>${escapeHtml(label)}</code> <span class="${cls}">${cls}</span>`, escapeHtml(output));
+        this._pushDetailStep(prog, `<code>${escapeHtml(label)}</code> <span class="${cls}">${cls}</span>`, output);
       } else {
         prog.steps.push({ html: `<code>${escapeHtml(label)}</code> <span class="${cls}">${cls}</span>` });
       }

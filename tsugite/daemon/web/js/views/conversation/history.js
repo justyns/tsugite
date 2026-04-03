@@ -57,7 +57,7 @@ export const historyMixin = {
           const summary = this._hookStepHtml(h.name, h.phase, h.exit_code);
           const output = [h.stdout, h.stderr].filter(Boolean).join('\n');
           if (output) {
-            steps.push({ hasDetails: true, summary, content: escapeHtml(output), open: false });
+            steps.push({ hasDetails: true, summary, content: output, open: false });
           } else {
             steps.push({ html: summary });
           }
@@ -66,9 +66,9 @@ export const historyMixin = {
         if (turn.messages) {
           for (const item of this.extractMessages(turn)) {
             if (item.type === 'tool_call') {
-              steps.push({ hasDetails: true, summary: `<code>${escapeHtml(item.name)}</code>`, content: escapeHtml(truncate(item.args)), open: false });
+              steps.push({ hasDetails: true, summary: `<code>${escapeHtml(item.name)}</code>`, content: truncate(item.args), open: false });
             } else if (item.type === 'tool_result') {
-              steps.push({ hasDetails: true, summary: `<code>${escapeHtml(item.name || 'result')}</code>`, content: escapeHtml(item.content), open: false });
+              steps.push({ hasDetails: true, summary: `<code>${escapeHtml(item.name || 'result')}</code>`, content: item.content, open: false });
             }
           }
         }
