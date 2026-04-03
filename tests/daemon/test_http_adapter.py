@@ -217,6 +217,77 @@ class TestHistoryEndpoint:
         resp = client.get("/api/agents/test-agent/history?user_id=someone")
         assert resp.status_code == 401
 
+    def test_history_includes_reactions(self, client, test_token, mock_adapter, tmp_path):
+        """Reactions from session event log should appear in history turns."""
+        from tsugite.history.models import Turn
+        from tsugite.history.storage import SessionStorage
+
+        session = mock_adapter.session_store.get_or_create_interactive("web-anonymous", "test-agent")
+        session_id = session.id
+        history_dir = tmp_path / "history"
+        history_dir.mkdir()
+        session_path = history_dir / f"{session_id}.jsonl"
+
+        storage = SessionStorage.create("test-agent", model="test", session_path=session_path)
+        storage.record_turn(
+            messages=[{"role": "user", "content": "hello"}, {"role": "assistant", "content": "hi"}],
+            final_answer="hi",
+        )
+
+        # Get the turn timestamp so reaction comes after it
+        turn = next(r for r in storage.load_records() if isinstance(r, Turn))
+        reaction_ts = turn.timestamp.isoformat().replace("+00:00", "") + ".100000+00:00"
+
+        mock_adapter.session_store.append_event(session_id, {
+            "type": "reaction", "emoji": "👍", "message_id": None,
+            "timestamp": reaction_ts,
+        })
+
+        # The session_id from create() differs from session.id, so we need to
+        # rename the file to match the session_id the adapter expects
+        session_path.rename(history_dir / f"{session_id}.jsonl")
+
+        with patch("tsugite.daemon.adapters.http.get_history_dir", return_value=history_dir):
+            resp = client.get(
+                "/api/agents/test-agent/history?user_id=web-anonymous",
+                headers={"Authorization": f"Bearer {test_token}"},
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        turn_data = [t for t in data["turns"] if t.get("user")]
+        assert len(turn_data) == 1
+        assert turn_data[0].get("reactions") == ["👍"]
+
+    def test_history_no_reactions_when_none(self, client, test_token, mock_adapter, tmp_path):
+        """Turns without reactions should not have a reactions field."""
+        from tsugite.history.storage import SessionStorage
+
+        session = mock_adapter.session_store.get_or_create_interactive("web-anonymous", "test-agent")
+        session_id = session.id
+        history_dir = tmp_path / "history"
+        history_dir.mkdir()
+        session_path = history_dir / f"{session_id}.jsonl"
+
+        storage = SessionStorage.create("test-agent", model="test", session_path=session_path)
+        storage.record_turn(
+            messages=[{"role": "user", "content": "hello"}, {"role": "assistant", "content": "hi"}],
+            final_answer="hi",
+        )
+        session_path.rename(history_dir / f"{session_id}.jsonl")
+
+        with patch("tsugite.daemon.adapters.http.get_history_dir", return_value=history_dir):
+            resp = client.get(
+                "/api/agents/test-agent/history?user_id=web-anonymous",
+                headers={"Authorization": f"Bearer {test_token}"},
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        turn_data = [t for t in data["turns"] if t.get("user")]
+        assert len(turn_data) == 1
+        assert "reactions" not in turn_data[0]
+
 
 class TestWebUI:
     def test_serve_ui(self, client):

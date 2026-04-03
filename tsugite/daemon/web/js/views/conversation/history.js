@@ -50,7 +50,11 @@ export const historyMixin = {
           pendingHooks.push(turn);
           continue;
         }
-        if (turn.user) this._allHistoryMessages.push({ type: 'user', text: turn.user });
+        if (turn.user) {
+          const msg = { type: 'user', text: turn.user };
+          if (turn.reactions) msg.reactions = turn.reactions;
+          this._allHistoryMessages.push(msg);
+        }
 
         const steps = [];
         for (const h of pendingHooks) {

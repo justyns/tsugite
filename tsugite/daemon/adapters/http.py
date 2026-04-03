@@ -811,7 +811,33 @@ class HTTPServer:
 
         turns, compaction_summary, compacted_from, compaction_reason = self._collect_turns(conversation_id, limit=limit)
 
+        # Read reaction events from session event log and group by turn timestamp
+        reaction_events = [
+            e for e in adapter.session_store.read_events(conversation_id)
+            if e.get("type") == "reaction" and e.get("emoji")
+        ]
+        # Build list of (turn_timestamp, turn_index) for matching
+        turn_timestamps = []
+        turn_index = 0
+        for item in turns:
+            if isinstance(item, dict) or isinstance(item, HookExecution):
+                continue
+            ts = item.timestamp.isoformat() if item.timestamp else ""
+            turn_timestamps.append((ts, turn_index))
+            turn_index += 1
+        # Assign each reaction to the most recent turn before it
+        reactions_by_turn: dict[int, list[str]] = {}
+        for re_event in reaction_events:
+            re_ts = re_event.get("timestamp", "")
+            assigned = -1
+            for ts, idx in turn_timestamps:
+                if ts and ts <= re_ts:
+                    assigned = idx
+            if assigned >= 0:
+                reactions_by_turn.setdefault(assigned, []).append(re_event["emoji"])
+
         result_turns = []
+        real_turn_index = 0
         for item in turns:
             if isinstance(item, dict) and item.get("marker") == "compaction":
                 entry = {"type": "compaction"}
@@ -848,6 +874,10 @@ class HTTPServer:
                 turn_data["content_blocks"] = content_blocks
             if detail:
                 turn_data["messages"] = item.messages
+            turn_reactions = reactions_by_turn.get(real_turn_index)
+            if turn_reactions:
+                turn_data["reactions"] = turn_reactions
+            real_turn_index += 1
             result_turns.append(turn_data)
 
         return JSONResponse(
