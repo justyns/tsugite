@@ -215,7 +215,14 @@ class SSEProgressHandler(JSONLUIHandler):
             self.has_final = True
         payload = {"type": event_type, **data}
         if self._loop and self._loop.is_running():
-            self._loop.call_soon_threadsafe(self.queue.put_nowait, payload)
+            try:
+                running_loop = asyncio.get_running_loop()
+            except RuntimeError:
+                running_loop = None
+            if running_loop is self._loop:
+                self.queue.put_nowait(payload)
+            else:
+                self._loop.call_soon_threadsafe(self.queue.put_nowait, payload)
         else:
             self.queue.put_nowait(payload)
 

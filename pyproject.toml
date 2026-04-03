@@ -81,6 +81,7 @@ norecursedirs = [
   '*.egg',
   '_*',
   'integration',
+  'e2e',
 ]
 
 [tool.coverage.run]
@@ -117,6 +118,7 @@ dev = [
   "pytest>=8.4.2",
   "pytest-asyncio>=0.23.0",
   "pytest-cov>=6.0.0",
+  "pytest-playwright>=0.7.2",
   "pytest-xdist>=3.5.0",
   "ruff>=0.1",
   "vulture>=2.14",
