@@ -19,10 +19,19 @@ logger = logging.getLogger(__name__)
 
 # Context var for per-session state
 _current_session_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("current_session_id", default=None)
+_current_chain_depth: contextvars.ContextVar[int] = contextvars.ContextVar("chain_depth", default=0)
 
 
 def get_current_session_id() -> Optional[str]:
     return _current_session_id.get()
+
+
+def get_current_chain_depth() -> int:
+    return _current_chain_depth.get()
+
+
+def set_current_chain_depth(depth: int) -> None:
+    _current_chain_depth.set(depth)
 
 
 class LoggingProgressHandler:
@@ -66,6 +75,10 @@ class SessionRunner:
     @property
     def store(self) -> SessionStore:
         return self._store
+
+    def is_session_running(self, session_id: str) -> bool:
+        task = self._active_tasks.get(session_id)
+        return task is not None and not task.done()
 
     def start_session(self, session: Session) -> Session:
         session.status = SessionStatus.RUNNING.value
@@ -175,7 +188,9 @@ class SessionRunner:
             task.cancel()
         self._store.update_session(session_id, status=SessionStatus.CANCELLED.value)
 
-    async def reply_to_session(self, session_id: str, message: str) -> str:
+    async def reply_to_session(
+        self, session_id: str, message: str, source: str = "session", metadata: dict | None = None,
+    ) -> str:
         """Send a follow-up message to an existing session."""
         session = self._store.get_session(session_id)
 
@@ -183,12 +198,16 @@ class SessionRunner:
         if not adapter:
             raise ValueError(f"No adapter for agent '{session.agent}' (session '{session_id}')")
 
+        meta = {"conv_id_override": session_id, "session_id": session_id}
+        if metadata:
+            meta.update(metadata)
+
         channel_context = ChannelContext(
-            source="session",
+            source=source,
             channel_id=None,
             user_id=f"session:{session_id}",
             reply_to=f"session:{session_id}",
-            metadata={"conv_id_override": session_id, "session_id": session_id},
+            metadata=meta,
         )
 
         result = await adapter.handle_message(

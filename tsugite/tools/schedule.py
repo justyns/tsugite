@@ -370,6 +370,7 @@ def background_task(
     execution_type: str = "agent",
     command: Optional[str] = None,
     script_timeout: int = 60,
+    on_complete: Optional[dict] = None,
 ) -> dict:
     """Launch a background task that auto-replies with results when complete.
 
@@ -394,6 +395,8 @@ def background_task(
         execution_type: "agent" (default) runs an LLM agent, "script" runs a shell command directly.
         command: Shell command to execute when execution_type is "script".
         script_timeout: Max seconds for script execution (default: 60).
+        on_complete: Completion callback. Currently supports {"action": "reply"} to auto-reply
+            to the originating session when the task finishes, allowing the agent to chain work.
 
     Returns:
         Dict with status and generated task ID
@@ -405,11 +408,20 @@ def background_task(
         if not prompt:
             raise ValueError("'prompt' is required when execution_type is 'agent'")
 
+    if on_complete and (not isinstance(on_complete, dict) or on_complete.get("action") != "reply"):
+        raise ValueError("on_complete must be {'action': 'reply'}")
+
     _validate_notify(notify, notify_tool)
     agent = _resolve_agent(agent)
     _validate_agent(agent)
 
     from tsugite.daemon.scheduler import ScheduleEntry
+    from tsugite.daemon.session_runner import get_current_chain_depth, get_current_session_id
+
+    originating_session_id = get_current_session_id() if on_complete else None
+    if on_complete and not originating_session_id:
+        raise ValueError("on_complete requires a session context (daemon mode)")
+    chain_depth = get_current_chain_depth() if on_complete else 0
 
     task_id = f"bg-{uuid4().hex[:8]}"
     # run_at in the past so it's immediately eligible
@@ -430,6 +442,9 @@ def background_task(
         execution_type=execution_type,
         command=command,
         script_timeout=script_timeout,
+        originating_session_id=originating_session_id,
+        on_complete=on_complete,
+        chain_depth=chain_depth,
     )
     _call(_scheduler.add, entry)
     _call(_scheduler.fire_now, task_id)

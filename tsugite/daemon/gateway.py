@@ -296,6 +296,8 @@ class Gateway:
             if self._http_server:
                 self._http_server.session_runner = self._session_runner
             set_session_runner(self._session_runner, asyncio.get_running_loop())
+            if self._scheduler_adapter:
+                self._scheduler_adapter.set_session_runner(self._session_runner)
             logger.info("Session runner enabled")
 
         # Start compaction scheduler for agents with auto_compact config

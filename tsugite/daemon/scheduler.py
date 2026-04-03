@@ -52,6 +52,10 @@ class ScheduleEntry:
     # Per-run session isolation
     session_id: str | None = None  # If set, reuse this session across runs; otherwise each run gets a unique session
     run_history: list[dict] = field(default_factory=list)  # Last N runs [{timestamp, status, error, session_id}]
+    # Completion callbacks
+    originating_session_id: str | None = None  # Session that spawned this task
+    on_complete: dict | None = None  # {"action": "reply"} to auto-reply on completion
+    chain_depth: int = 0  # How many chained completions deep (safety limit)
 
     def __post_init__(self):
         if not self.created_at:

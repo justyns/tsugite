@@ -21,6 +21,9 @@ logger = logging.getLogger(__name__)
 _MAX_RESULT_CHARS = 4000
 
 
+MAX_CHAIN_DEPTH = 5
+
+
 class SchedulerAdapter:
     """Integrates the Scheduler with the daemon, executing agents via existing adapters."""
 
@@ -38,7 +41,12 @@ class SchedulerAdapter:
         self._identity_map = identity_map or {}
         self._token_store = token_store
         self._tsugite_api_url = tsugite_api_url
+        self._session_runner = None
         self.scheduler = Scheduler(schedules_path, self._run_agent, script_callback=self._run_script)
+
+    def set_session_runner(self, session_runner) -> None:
+        """Set the SessionRunner reference (called after both are constructed)."""
+        self._session_runner = session_runner
 
     async def start(self):
         await self.scheduler.start()
@@ -227,6 +235,8 @@ class SchedulerAdapter:
                 if entry.inject_history:
                     await self._inject_into_user_sessions(adapter, entry, truncated, resolved_channels)
 
+        await self._handle_on_complete(entry, result)
+
         return RunResult(output=result, session_id=conv_id)
 
     async def _auto_reply(
@@ -297,16 +307,19 @@ class SchedulerAdapter:
                 logger.error("Failed to inject history for schedule '%s' user '%s': %s", entry.id, canonical, e)
 
     @staticmethod
-    def _record_synthetic_turn(adapter: BaseAdapter, user_id: str, entry: ScheduleEntry, result: str) -> None:
-        """Write a synthetic turn into the user's session JSONL."""
+    def _get_session_storage(session_id: str, adapter: BaseAdapter) -> "SessionStorage":
         from tsugite.history import SessionStorage, get_history_dir
 
-        session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
-        session_id = session.id
         session_path = get_history_dir() / f"{session_id}.jsonl"
-        storage = SessionStorage.get_or_create(
-            session_id, adapter.agent_name, adapter.resolve_model(), session_path=session_path
+        return SessionStorage.get_or_create(
+            session_id, adapter.agent_name, adapter.resolve_model(), session_path=session_path,
         )
+
+    @staticmethod
+    def _record_synthetic_turn(adapter: BaseAdapter, user_id: str, entry: ScheduleEntry, result: str) -> None:
+        """Write a synthetic turn into the user's session JSONL."""
+        session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
+        storage = SchedulerAdapter._get_session_storage(session.id, adapter)
 
         messages = [
             {
@@ -326,3 +339,75 @@ class SchedulerAdapter:
             final_answer=result,
             metadata={"synthetic": True, "schedule_id": entry.id},
         )
+
+
+    async def _handle_on_complete(self, entry: ScheduleEntry, result: str) -> None:
+        """Handle on_complete callback after a background task finishes."""
+        if not entry.on_complete or entry.on_complete.get("action") != "reply":
+            return
+
+        session_id = entry.originating_session_id
+        if not session_id or not self._session_runner:
+            logger.warning("on_complete for '%s' skipped: no session runner or originating session", entry.id)
+            return
+
+        if entry.chain_depth >= MAX_CHAIN_DEPTH:
+            logger.warning(
+                "Chain depth %d reached max %d for task '%s', skipping auto-reply",
+                entry.chain_depth, MAX_CHAIN_DEPTH, entry.id,
+            )
+            return
+
+        truncated = result[:_MAX_RESULT_CHARS]
+        prompt_summary = entry.prompt[:200] + ("…" if len(entry.prompt) > 200 else "")
+        message = (
+            f'<background_task_complete id="{entry.id}" chain_depth="{entry.chain_depth}">\n'
+            f"  <prompt>{prompt_summary}</prompt>\n"
+            f"  <result>\n{truncated}\n  </result>\n"
+            "</background_task_complete>"
+        )
+
+        # If the session is mid-turn, inject into history so the agent sees it next turn.
+        # Otherwise, reply directly to wake the agent.
+        if self._session_runner.is_session_running(session_id):
+            try:
+                await self._inject_completion_into_history(session_id, entry, message)
+            except Exception as e:
+                logger.error("Failed to inject completion history for task '%s': %s", entry.id, e)
+            return
+
+        from tsugite.daemon.session_runner import set_current_chain_depth
+
+        set_current_chain_depth(entry.chain_depth + 1)
+        try:
+            await self._session_runner.reply_to_session(
+                session_id, message,
+                source="completion_callback",
+                metadata={"schedule_id": entry.id, "completion_callback": True},
+            )
+        except Exception as e:
+            logger.error("on_complete reply to session '%s' failed: %s", session_id, e)
+        finally:
+            set_current_chain_depth(0)
+
+    async def _inject_completion_into_history(
+        self, session_id: str, entry: ScheduleEntry, message: str,
+    ) -> None:
+        """Write a completion result as a synthetic turn into the session's JSONL."""
+
+        def _write():
+            adapter = self._adapters.get(entry.agent) or next(iter(self._adapters.values()), None)
+            if not adapter:
+                return
+            storage = self._get_session_storage(session_id, adapter)
+            messages = [
+                {"role": "user", "content": message},
+                {"role": "assistant", "content": f"Background task {entry.id} completed. Result noted."},
+            ]
+            storage.record_turn(
+                messages=messages,
+                final_answer=message,
+                metadata={"synthetic": True, "schedule_id": entry.id, "completion_callback": True},
+            )
+
+        await asyncio.to_thread(_write)
