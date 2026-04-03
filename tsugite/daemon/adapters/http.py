@@ -1509,9 +1509,13 @@ class HTTPServer:
 
     async def _webhook(self, request: Request) -> JSONResponse:
         token = request.path_params["token"]
+        client_ip = request.client.host if request.client else "unknown"
         webhook = self.webhook_store.get(token)
         if not webhook:
+            logger.warning("Webhook rejected: invalid token [%s] from %s", token[:8], client_ip)
             return JSONResponse({"error": "invalid webhook token"}, status_code=404)
+
+        logger.info("Received webhook [%s] from %s", token[:8], client_ip)
 
         if webhook.agent not in self.agent_configs:
             return JSONResponse({"error": "webhook agent not configured"}, status_code=500)
@@ -1525,6 +1529,14 @@ class HTTPServer:
             payload_data = json.loads(raw)
         except (json.JSONDecodeError, UnicodeDecodeError):
             payload_data = raw.decode("utf-8", errors="replace")
+
+        event_type = ""
+        if isinstance(payload_data, dict):
+            event_type = payload_data.get("event") or payload_data.get("type") or payload_data.get("action") or ""
+        logger.info(
+            "Webhook [%s] source: %s | event: %s | agent: %s",
+            token[:8], webhook.source, event_type or "unknown", webhook.agent,
+        )
 
         agent_config = self.agent_configs[webhook.agent]
         inbox_dir = agent_config.workspace_dir / "inbox" / "webhooks"
@@ -1540,6 +1552,7 @@ class HTTPServer:
             "payload": payload_data,
         }
         (inbox_dir / filename).write_text(json.dumps(envelope, indent=2, default=str))
+        logger.info("Webhook [%s] saved to inbox: %s", token[:8], filename)
 
         return JSONResponse({"status": "accepted", "file": filename}, status_code=202)
 

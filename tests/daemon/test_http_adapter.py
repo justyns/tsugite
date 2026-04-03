@@ -176,6 +176,24 @@ class TestWebhookEndpoint:
         )
         assert resp.status_code == 202
 
+    def test_webhook_logs_receipt(self, client, caplog):
+        import logging
+
+        with caplog.at_level(logging.INFO, logger="tsugite.daemon.adapters.http"):
+            client.post("/webhook/whk_test", json={"event": "push"})
+
+        assert any("Received webhook [whk_test" in r.message for r in caplog.records)
+        assert any("source: forgejo | event: push" in r.message for r in caplog.records)
+        assert any("saved to inbox" in r.message for r in caplog.records)
+
+    def test_webhook_logs_invalid_token(self, client, caplog):
+        import logging
+
+        with caplog.at_level(logging.WARNING, logger="tsugite.daemon.adapters.http"):
+            client.post("/webhook/bad-token", json={"data": 1})
+
+        assert any("invalid token [bad-toke" in r.message for r in caplog.records)
+
 
 class TestHistoryEndpoint:
     def test_history_empty_for_new_user(self, client, test_token):
