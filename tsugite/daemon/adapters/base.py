@@ -421,6 +421,11 @@ class BaseAdapter(ABC):
             ):
                 conv_id = await self._run_compaction(user_id, conv_id, custom_logger, reason="token_threshold")
 
+        from tsugite.daemon.session_runner import get_current_session_id, set_current_session_id
+
+        if get_current_session_id() is None:
+            set_current_session_id(conv_id)
+
         metadata = channel_context.to_dict()
         metadata["daemon_agent"] = self.agent_name
 

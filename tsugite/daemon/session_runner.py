@@ -30,6 +30,10 @@ def get_current_chain_depth() -> int:
     return _current_chain_depth.get()
 
 
+def set_current_session_id(session_id: str) -> None:
+    _current_session_id.set(session_id)
+
+
 def set_current_chain_depth(depth: int) -> None:
     _current_chain_depth.set(depth)
 
@@ -123,7 +127,7 @@ class SessionRunner:
             metadata=metadata,
         )
 
-        _current_session_id.set(session.id)
+        set_current_session_id(session.id)
         set_interaction_backend(NonInteractiveBackend())
 
         try:

@@ -1,6 +1,7 @@
 """Tests for background task completion callbacks (on_complete feature)."""
 
 import asyncio
+import contextvars
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Thread
@@ -8,12 +9,18 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from tsugite.agent_runner.models import AgentExecutionResult
+from tsugite.daemon.adapters.base import BaseAdapter, ChannelContext
 from tsugite.daemon.adapters.scheduler_adapter import MAX_CHAIN_DEPTH, SchedulerAdapter
+from tsugite.daemon.config import AgentConfig
 from tsugite.daemon.scheduler import ScheduleEntry
 from tsugite.daemon.session_runner import (
     SessionRunner,
+    _current_session_id,
     get_current_chain_depth,
+    get_current_session_id,
     set_current_chain_depth,
+    set_current_session_id,
 )
 from tsugite.daemon.session_store import Session, SessionSource, SessionStatus, SessionStore
 
@@ -385,3 +392,75 @@ class TestChainDepthContextVar:
         set_current_chain_depth(3)
         assert get_current_chain_depth() == 3
         set_current_chain_depth(0)
+
+
+class TestSessionIdContextVar:
+    def test_default_none(self):
+        assert get_current_session_id() is None
+
+    def test_roundtrip(self):
+        set_current_session_id("session-xyz")
+        assert get_current_session_id() == "session-xyz"
+        _current_session_id.set(None)
+
+
+# --- handle_message sets session_id contextvar ---
+
+
+class _StubAdapter(BaseAdapter):
+    async def start(self):
+        pass
+
+    async def stop(self):
+        pass
+
+
+class TestHandleMessageSetsSessionId:
+    """Verify handle_message populates _current_session_id for tools like background_task."""
+
+    @pytest.fixture(autouse=True)
+    def _reset_session_id(self):
+        yield
+        _current_session_id.set(None)
+
+    @pytest.fixture
+    def adapter(self, tmp_path):
+        store = SessionStore(tmp_path / "sessions.json", context_limits={"bot": 128000})
+        config = AgentConfig(workspace_dir=tmp_path, agent_file="default")
+        return _StubAdapter("bot", config, store)
+
+    @pytest.mark.asyncio
+    async def test_sets_session_id_when_not_preset(self, adapter, tmp_path):
+        """HTTP/Discord path: handle_message should set _current_session_id to conv_id."""
+        captured_session_id = None
+
+        def fake_run_agent(**kwargs):
+            nonlocal captured_session_id
+            captured_session_id = get_current_session_id()
+            return AgentExecutionResult(response="ok")
+
+        ctx = ChannelContext(source="http", channel_id=None, user_id="user1", reply_to="http:user1")
+
+        with patch("tsugite.daemon.adapters.base.run_agent", side_effect=fake_run_agent):
+            await adapter.handle_message("user1", "hello", ctx)
+
+        assert captured_session_id is not None, "_current_session_id was not set inside run_agent"
+
+    @pytest.mark.asyncio
+    async def test_does_not_overwrite_preset_session_id(self, adapter, tmp_path):
+        """Session runner path: pre-set session_id must not be overwritten."""
+        captured_session_id = None
+
+        def fake_run_agent(**kwargs):
+            nonlocal captured_session_id
+            captured_session_id = get_current_session_id()
+            return AgentExecutionResult(response="ok")
+
+        set_current_session_id("scheduler-session-99")
+
+        ctx = ChannelContext(source="session", channel_id=None, user_id="user1", reply_to="session:user1")
+
+        with patch("tsugite.daemon.adapters.base.run_agent", side_effect=fake_run_agent):
+            await adapter.handle_message("user1", "hello", ctx)
+
+        assert captured_session_id == "scheduler-session-99"
