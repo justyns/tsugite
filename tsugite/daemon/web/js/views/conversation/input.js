@@ -2,7 +2,8 @@ import { get, post } from '../../api.js';
 
 export const inputMixin = {
   _mobileQuery: null,
-  expandedInput: false,
+  showExpandModal: false,
+  expandModalText: '',
   messageText: '',
   availableCommands: [],
   showCommandSuggestions: false,
@@ -25,10 +26,7 @@ export const inputMixin = {
   selectCommand(cmd) {
     this.messageText = `/${cmd.name} `;
     this.showCommandSuggestions = false;
-    this.$nextTick(() => {
-      const input = document.getElementById('message-input');
-      if (input) input.focus();
-    });
+    this.$nextTick(() => this.$refs.messageInput?.focus());
   },
 
   _parseCommand(text) {
@@ -102,17 +100,44 @@ export const inputMixin = {
     }
   },
 
+  _resizeTextarea(ta) {
+    const maxH = parseInt(getComputedStyle(ta).maxHeight) || 150;
+    ta.style.height = 'auto';
+    ta.style.height = Math.min(ta.scrollHeight, maxH) + 'px';
+  },
+
   autoResize(e) {
-    const maxH = parseInt(getComputedStyle(e.target).maxHeight) || 150;
-    e.target.style.height = 'auto';
-    e.target.style.height = Math.min(e.target.scrollHeight, maxH) + 'px';
+    this._resizeTextarea(e.target);
   },
 
   _resetInputHeight() {
-    this.expandedInput = false;
     this.$nextTick(() => {
-      const ta = document.getElementById('message-input');
+      const ta = this.$refs.messageInput;
       if (ta) ta.style.height = 'auto';
+    });
+  },
+
+  openExpandModal() {
+    this.expandModalText = this.messageText;
+    this.showExpandModal = true;
+    this.$nextTick(() => this.$refs.expandModalText?.focus());
+  },
+
+  closeExpandModal() {
+    this.showExpandModal = false;
+    this.expandModalText = '';
+  },
+
+  confirmExpandModal() {
+    this.messageText = this.expandModalText;
+    this.expandModalText = '';
+    this.showExpandModal = false;
+    this.$nextTick(() => {
+      const ta = this.$refs.messageInput;
+      if (ta) {
+        this._resizeTextarea(ta);
+        ta.focus();
+      }
     });
   },
 };

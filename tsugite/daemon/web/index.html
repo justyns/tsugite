@@ -439,17 +439,17 @@
                   </div>
                 </template>
               </div>
-              <button class="attach-btn" @click="openFilePicker()" title="Attach files">📎</button>
-              <button class="attach-btn" @click="openPasteModal()" title="Paste text as attachment">📋</button>
-              <input type="file" multiple x-ref="fileInput" @change="onFileInputChange($event)" style="display:none">
-              <button class="attach-btn" @click="expandedInput = !expandedInput" :title="expandedInput ? 'Collapse editor' : 'Expand editor'" x-text="expandedInput ? '⤓' : '⤢'"></button>
-              <textarea id="message-input" x-model="messageText" rows="1"
-                        :class="{ 'input-expanded': expandedInput }"
+              <div class="input-toolbar">
+                <button class="attach-btn" @click="openFilePicker()" title="Attach files">📎</button>
+                <button class="attach-btn" @click="openPasteModal()" title="Paste text as attachment">📋</button>
+                <input type="file" multiple x-ref="fileInput" @change="onFileInputChange($event)" style="display:none">
+                <button class="attach-btn" @click="openExpandModal()" title="Expand editor">⤢</button>
+              </div>
+              <textarea id="message-input" x-ref="messageInput" x-model="messageText" rows="1"
                         placeholder="Send a message..." autofocus
-                        @keydown="onInputKeydown($event)" @input="if (!expandedInput) autoResize($event); onInputChange()"
-                        @keydown.escape="expandedInput = false"
+                        @keydown="onInputKeydown($event)" @input="autoResize($event); onInputChange()"
                         @paste="onPaste($event)"></textarea>
-              <span class="input-hint" x-text="expandedInput ? 'Escape to collapse' : 'Shift+Enter for newline'"></span>
+              <span class="input-hint">Shift+Enter for newline</span>
               <button id="send-btn" x-show="!sending" @click="sendMessage()">Send</button>
               <button id="stop-btn" x-show="sending" @click="cancelChat()">Stop</button>
             </div>
@@ -569,6 +569,18 @@
         <div class="modal-actions">
           <button class="btn-cancel" @click="closePasteModal()">Cancel</button>
           <button class="btn-primary" @click="confirmPasteModal()" :disabled="!pasteModalText.trim()">Attach</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Expand editor modal -->
+    <div class="modal-backdrop expand-modal" :class="{ open: showExpandModal }" @click.self="closeExpandModal()" @keydown.escape.window="if(showExpandModal) closeExpandModal()">
+      <div class="modal-content">
+        <h2>Edit message</h2>
+        <textarea x-ref="expandModalText" class="expand-modal-text" x-model="expandModalText" rows="10" placeholder="Type your message..."></textarea>
+        <div class="modal-actions">
+          <button class="btn-cancel" @click="closeExpandModal()">Cancel</button>
+          <button class="btn-primary" @click="confirmExpandModal()">Done</button>
         </div>
       </div>
     </div>
