@@ -5,20 +5,20 @@ import logging
 import time
 
 logger = logging.getLogger(__name__)
-from pathlib import Path
-from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from pathlib import Path  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
+from typing import TYPE_CHECKING, Any, Dict, List, Optional  # noqa: E402
 
-from tsugite.core.agent import TsugiteAgent
-from tsugite.core.executor import LocalExecutor
-from tsugite.exceptions import AgentExecutionError
-from tsugite.md_agents import AgentConfig, parse_agent_file
-from tsugite.models import resolve_effective_model
-from tsugite.options import ExecutionOptions
-from tsugite.renderer import AgentRenderer
-from tsugite.utils import is_interactive
+from tsugite.core.agent import TsugiteAgent  # noqa: E402
+from tsugite.core.executor import LocalExecutor  # noqa: E402
+from tsugite.exceptions import AgentExecutionError  # noqa: E402
+from tsugite.md_agents import AgentConfig, parse_agent_file  # noqa: E402
+from tsugite.models import resolve_effective_model  # noqa: E402
+from tsugite.options import ExecutionOptions  # noqa: E402
+from tsugite.renderer import AgentRenderer  # noqa: E402
+from tsugite.utils import is_interactive  # noqa: E402
 
-from .helpers import (
+from .helpers import (  # noqa: E402
     _stderr_console,
     clear_allowed_agents,
     clear_current_agent,
@@ -30,8 +30,8 @@ from .helpers import (
     set_current_agent,
     set_multistep_ui_context,
 )
-from .metrics import StepMetrics, display_step_metrics
-from .models import AgentExecutionResult
+from .metrics import StepMetrics, display_step_metrics  # noqa: E402
+from .models import AgentExecutionResult  # noqa: E402
 
 # Display constants for truncating long output
 MAX_VARIABLE_PREVIEW_LENGTH = 100  # Max characters to show in variable documentation
@@ -764,12 +764,17 @@ async def run_agent_async(
     hooks_dir = workspace.path if workspace else (path_context.effective_cwd if path_context else Path.cwd())
     hook_message = context.pop("raw_message", prompt)
 
-    on_status = None
-    on_hook_result = None
     ui_handler = get_ui_handler(custom_logger)
     if ui_handler and hasattr(ui_handler, "_emit"):
-        on_status = lambda msg: ui_handler._emit("hook_status", {"message": msg})
-        on_hook_result = lambda ex: ui_handler._emit("hook_execution", ex.model_dump(exclude={"type", "timestamp"}))
+
+        def on_status(msg):
+            return ui_handler._emit("hook_status", {"message": msg})
+
+        def on_hook_result(ex):
+            return ui_handler._emit("hook_execution", ex.model_dump(exclude={"type", "timestamp"}))
+    else:
+        on_status = None
+        on_hook_result = None
 
     hook_vars = await fire_pre_message_hooks(
         hooks_dir,

@@ -193,7 +193,11 @@ class SessionRunner:
         self._store.update_session(session_id, status=SessionStatus.CANCELLED.value)
 
     async def reply_to_session(
-        self, session_id: str, message: str, source: str = "session", metadata: dict | None = None,
+        self,
+        session_id: str,
+        message: str,
+        source: str = "session",
+        metadata: dict | None = None,
     ) -> str:
         """Send a follow-up message to an existing session."""
         session = self._store.get_session(session_id)

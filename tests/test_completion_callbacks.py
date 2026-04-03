@@ -1,7 +1,6 @@
 """Tests for background task completion callbacks (on_complete feature)."""
 
 import asyncio
-import contextvars
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Thread
@@ -23,7 +22,6 @@ from tsugite.daemon.session_runner import (
     set_current_session_id,
 )
 from tsugite.daemon.session_store import Session, SessionSource, SessionStatus, SessionStore
-
 
 # --- Fixtures & helpers ---
 
@@ -71,7 +69,8 @@ def _make_entry(on_complete=None, originating_session_id=None, chain_depth=0, **
 
 def _create_session(session_store, session_id="session-abc"):
     session = Session(
-        id=session_id, agent="bot",
+        id=session_id,
+        agent="bot",
         source=SessionSource.INTERACTIVE.value,
         status=SessionStatus.ACTIVE.value,
     )
@@ -93,7 +92,8 @@ class TestHandleOnComplete:
     async def test_noop_when_action_not_reply(self, session_store, mock_session_runner):
         sa, _ = _make_sa(mock_session_runner)
         await sa._handle_on_complete(
-            _make_entry(on_complete={"action": "webhook"}, originating_session_id="s"), "result",
+            _make_entry(on_complete={"action": "webhook"}, originating_session_id="s"),
+            "result",
         )
         mock_session_runner.reply_to_session.assert_not_awaited()
 
@@ -101,7 +101,8 @@ class TestHandleOnComplete:
     async def test_noop_without_originating_session(self, session_store, mock_session_runner):
         sa, _ = _make_sa(mock_session_runner)
         await sa._handle_on_complete(
-            _make_entry(on_complete={"action": "reply"}, originating_session_id=None), "result",
+            _make_entry(on_complete={"action": "reply"}, originating_session_id=None),
+            "result",
         )
         mock_session_runner.reply_to_session.assert_not_awaited()
 
@@ -109,7 +110,8 @@ class TestHandleOnComplete:
     async def test_noop_without_session_runner(self, session_store):
         sa, _ = _make_sa(session_runner=None)
         await sa._handle_on_complete(
-            _make_entry(on_complete={"action": "reply"}, originating_session_id="s"), "result",
+            _make_entry(on_complete={"action": "reply"}, originating_session_id="s"),
+            "result",
         )
 
     @pytest.mark.asyncio
@@ -132,7 +134,7 @@ class TestHandleOnComplete:
         """Unlike the old idle check, cold sessions now get replies too."""
         sa, _ = _make_sa(mock_session_runner)
         old_time = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
-        session = _create_session(session_store, session_id="session-abc")
+        _create_session(session_store, session_id="session-abc")
         session_store.update_session("session-abc", last_active=old_time)
         entry = _make_entry(on_complete={"action": "reply"}, originating_session_id="session-abc")
 
@@ -158,8 +160,10 @@ class TestHandleOnComplete:
         sa, _ = _make_sa(mock_session_runner)
         _create_session(session_store, session_id="session-abc")
         entry = _make_entry(
-            on_complete={"action": "reply"}, originating_session_id="session-abc",
-            prompt="analyze the logs", chain_depth=1,
+            on_complete={"action": "reply"},
+            originating_session_id="session-abc",
+            prompt="analyze the logs",
+            chain_depth=1,
         )
 
         await sa._handle_on_complete(entry, "found 3 errors")
@@ -176,7 +180,8 @@ class TestHandleOnComplete:
         _create_session(session_store, session_id="session-abc")
         long_prompt = "x" * 300
         entry = _make_entry(
-            on_complete={"action": "reply"}, originating_session_id="session-abc",
+            on_complete={"action": "reply"},
+            originating_session_id="session-abc",
             prompt=long_prompt,
         )
 
@@ -195,7 +200,8 @@ class TestChainDepth:
     async def test_skips_at_max_depth(self, session_store, mock_session_runner):
         sa, _ = _make_sa(mock_session_runner)
         entry = _make_entry(
-            on_complete={"action": "reply"}, originating_session_id="session-abc",
+            on_complete={"action": "reply"},
+            originating_session_id="session-abc",
             chain_depth=MAX_CHAIN_DEPTH,
         )
         await sa._handle_on_complete(entry, "result")
@@ -206,7 +212,8 @@ class TestChainDepth:
         sa, _ = _make_sa(mock_session_runner)
         _create_session(session_store, session_id="session-abc")
         entry = _make_entry(
-            on_complete={"action": "reply"}, originating_session_id="session-abc",
+            on_complete={"action": "reply"},
+            originating_session_id="session-abc",
             chain_depth=MAX_CHAIN_DEPTH - 1,
         )
         await sa._handle_on_complete(entry, "result")
@@ -226,7 +233,9 @@ class TestChainDepth:
 
         mock_session_runner.reply_to_session = capture
         entry = _make_entry(
-            on_complete={"action": "reply"}, originating_session_id="session-abc", chain_depth=2,
+            on_complete={"action": "reply"},
+            originating_session_id="session-abc",
+            chain_depth=2,
         )
         await sa._handle_on_complete(entry, "result")
         assert captured == 3
@@ -236,7 +245,9 @@ class TestChainDepth:
         sa, _ = _make_sa(mock_session_runner)
         _create_session(session_store, session_id="session-abc")
         entry = _make_entry(
-            on_complete={"action": "reply"}, originating_session_id="session-abc", chain_depth=3,
+            on_complete={"action": "reply"},
+            originating_session_id="session-abc",
+            chain_depth=3,
         )
         await sa._handle_on_complete(entry, "result")
         assert get_current_chain_depth() == 0
@@ -247,7 +258,9 @@ class TestChainDepth:
         _create_session(session_store, session_id="session-abc")
         mock_session_runner.reply_to_session = AsyncMock(side_effect=RuntimeError("boom"))
         entry = _make_entry(
-            on_complete={"action": "reply"}, originating_session_id="session-abc", chain_depth=3,
+            on_complete={"action": "reply"},
+            originating_session_id="session-abc",
+            chain_depth=3,
         )
         await sa._handle_on_complete(entry, "result")
         assert get_current_chain_depth() == 0

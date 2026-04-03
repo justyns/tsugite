@@ -8,9 +8,9 @@ from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator  # noqa: E402
 
-from .utils import parse_yaml_frontmatter
+from .utils import parse_yaml_frontmatter  # noqa: E402
 
 
 def _parse_directive_attribute(

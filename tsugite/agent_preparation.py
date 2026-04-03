@@ -7,10 +7,10 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-from tsugite.attachments.base import Attachment
-from tsugite.core.tools import Tool
-from tsugite.md_agents import Agent, AgentConfig
-from tsugite.skill_discovery import Skill
+from tsugite.attachments.base import Attachment  # noqa: E402
+from tsugite.core.tools import Tool  # noqa: E402
+from tsugite.md_agents import Agent, AgentConfig  # noqa: E402
+from tsugite.skill_discovery import Skill  # noqa: E402
 
 if TYPE_CHECKING:
     from tsugite.workspace import Workspace

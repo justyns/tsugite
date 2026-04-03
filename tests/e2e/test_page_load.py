@@ -21,14 +21,16 @@ def test_agent_selector_populated(authenticated_page):
     assert "test-agent" in agents
 
 
-@pytest.mark.parametrize("tab", ["dashboard", "conversations", "workspace", "schedules", "webhooks", "kvstore", "usage"])
+@pytest.mark.parametrize(
+    "tab", ["dashboard", "conversations", "workspace", "schedules", "webhooks", "kvstore", "usage"]
+)
 def test_tab_loads_without_errors(authenticated_page, tab):
     """Each main tab should load without JS errors."""
     page = authenticated_page
     errors = []
     page.on("pageerror", lambda exc: errors.append(str(exc)))
 
-    page.locator(f"nav button", has_text=tab.capitalize()).click()
+    page.locator("nav button", has_text=tab.capitalize()).click()
     page.wait_for_function(f"Alpine.store('app').view === '{tab}'", timeout=3000)
     page.wait_for_timeout(500)  # let any async init settle
 

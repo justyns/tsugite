@@ -820,7 +820,8 @@ class HTTPServer:
 
         # Read reaction events from session event log and group by turn timestamp
         reaction_events = [
-            e for e in adapter.session_store.read_events(conversation_id)
+            e
+            for e in adapter.session_store.read_events(conversation_id)
             if e.get("type") == "reaction" and e.get("emoji")
         ]
         # Build list of (turn_timestamp, turn_index) for matching
@@ -1289,7 +1290,7 @@ class HTTPServer:
             return err
         schedule_id = request.path_params["schedule_id"]
         try:
-            entry = self.scheduler.get(schedule_id)
+            self.scheduler.get(schedule_id)
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=404)
         self.scheduler.fire_now(schedule_id)
@@ -1572,7 +1573,10 @@ class HTTPServer:
             event_type = payload_data.get("event") or payload_data.get("type") or payload_data.get("action") or ""
         logger.info(
             "Webhook [%s] source: %s | event: %s | agent: %s",
-            token[:8], webhook.source, event_type or "unknown", webhook.agent,
+            token[:8],
+            webhook.source,
+            event_type or "unknown",
+            webhook.agent,
         )
 
         agent_config = self.agent_configs[webhook.agent]

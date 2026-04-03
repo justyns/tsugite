@@ -238,10 +238,15 @@ class TestHistoryEndpoint:
         turn = next(r for r in storage.load_records() if isinstance(r, Turn))
         reaction_ts = turn.timestamp.isoformat().replace("+00:00", "") + ".100000+00:00"
 
-        mock_adapter.session_store.append_event(session_id, {
-            "type": "reaction", "emoji": "👍", "message_id": None,
-            "timestamp": reaction_ts,
-        })
+        mock_adapter.session_store.append_event(
+            session_id,
+            {
+                "type": "reaction",
+                "emoji": "👍",
+                "message_id": None,
+                "timestamp": reaction_ts,
+            },
+        )
 
         # The session_id from create() differs from session.id, so we need to
         # rename the file to match the session_id the adapter expects

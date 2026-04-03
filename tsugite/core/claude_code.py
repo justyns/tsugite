@@ -45,7 +45,7 @@ class ClaudeCodeProcess:
     """
 
     def __init__(self):
-        self._process: asyncio.subprocess.Process | None = None
+        self._process: asyncio.subprocess.Process | None = None  # pylint: disable=no-member
         self._session_id: str | None = None
         self._system_prompt_file: str | None = None
         self._stderr_lines: list[str] = []

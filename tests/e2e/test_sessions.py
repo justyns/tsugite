@@ -9,7 +9,7 @@ def test_create_and_switch_sessions(authenticated_page, e2e_session_store, mock_
     user_id = page.evaluate("Alpine.store('app').userId")
 
     # Create two sessions
-    s1 = e2e_session_store.get_or_create_interactive(user_id, "test-agent")
+    e2e_session_store.get_or_create_interactive(user_id, "test-agent")
     from tsugite.daemon.session_store import Session, SessionSource
     from tsugite.history.storage import generate_session_id
 

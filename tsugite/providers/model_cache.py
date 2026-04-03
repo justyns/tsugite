@@ -61,7 +61,7 @@ def _info_to_dict(info: ModelInfo | None) -> dict | None:
 def _dict_to_info(d: dict | None) -> ModelInfo | None:
     if not d:
         return None
-    return ModelInfo(**{k: v for k, v in d.items() if k in ModelInfo.__dataclass_fields__})
+    return ModelInfo(**{k: v for k, v in d.items() if k in ModelInfo.__dataclass_fields__})  # pylint: disable=no-member
 
 
 async def get_provider_models(provider_name: str, refresh: bool = False) -> list[dict[str, Any]]:

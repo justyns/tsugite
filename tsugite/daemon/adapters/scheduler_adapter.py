@@ -312,7 +312,10 @@ class SchedulerAdapter:
 
         session_path = get_history_dir() / f"{session_id}.jsonl"
         return SessionStorage.get_or_create(
-            session_id, adapter.agent_name, adapter.resolve_model(), session_path=session_path,
+            session_id,
+            adapter.agent_name,
+            adapter.resolve_model(),
+            session_path=session_path,
         )
 
     @staticmethod
@@ -340,7 +343,6 @@ class SchedulerAdapter:
             metadata={"synthetic": True, "schedule_id": entry.id},
         )
 
-
     async def _handle_on_complete(self, entry: ScheduleEntry, result: str) -> None:
         """Handle on_complete callback after a background task finishes."""
         if not entry.on_complete or entry.on_complete.get("action") != "reply":
@@ -354,7 +356,9 @@ class SchedulerAdapter:
         if entry.chain_depth >= MAX_CHAIN_DEPTH:
             logger.warning(
                 "Chain depth %d reached max %d for task '%s', skipping auto-reply",
-                entry.chain_depth, MAX_CHAIN_DEPTH, entry.id,
+                entry.chain_depth,
+                MAX_CHAIN_DEPTH,
+                entry.id,
             )
             return
 
@@ -381,7 +385,8 @@ class SchedulerAdapter:
         set_current_chain_depth(entry.chain_depth + 1)
         try:
             await self._session_runner.reply_to_session(
-                session_id, message,
+                session_id,
+                message,
                 source="completion_callback",
                 metadata={"schedule_id": entry.id, "completion_callback": True},
             )
@@ -391,7 +396,10 @@ class SchedulerAdapter:
             set_current_chain_depth(0)
 
     async def _inject_completion_into_history(
-        self, session_id: str, entry: ScheduleEntry, message: str,
+        self,
+        session_id: str,
+        entry: ScheduleEntry,
+        message: str,
     ) -> None:
         """Write a completion result as a synthetic turn into the session's JSONL."""
 

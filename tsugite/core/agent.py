@@ -8,8 +8,8 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-from tsugite.attachments.base import Attachment, AttachmentContentType
-from tsugite.events import (
+from tsugite.attachments.base import Attachment, AttachmentContentType  # noqa: E402
+from tsugite.events import (  # noqa: E402
     CodeExecutionEvent,
     ContentBlockEvent,
     CostSummaryEvent,
@@ -28,12 +28,12 @@ from tsugite.events import (
     ToolResultEvent,
     WarningEvent,
 )
-from tsugite.skill_discovery import Skill
+from tsugite.skill_discovery import Skill  # noqa: E402
 
-from .content_blocks import extract_content_blocks
-from .executor import LocalExecutor
-from .memory import AgentMemory, StepResult
-from .tools import Tool
+from .content_blocks import extract_content_blocks  # noqa: E402
+from .executor import LocalExecutor  # noqa: E402
+from .memory import AgentMemory, StepResult  # noqa: E402
+from .tools import Tool  # noqa: E402
 
 # Agent execution constants
 DEFAULT_MAX_TURNS = 10  # Default maximum reasoning iterations before timeout

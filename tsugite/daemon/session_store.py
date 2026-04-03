@@ -25,10 +25,10 @@ def _parse_ts(ts: str | None) -> datetime | None:
         return None
 
 
-from typing import Optional
-from uuid import uuid4
+from typing import Optional  # noqa: E402
+from uuid import uuid4  # noqa: E402
 
-from tsugite.history import SessionStorage, Turn, generate_session_id, get_history_dir
+from tsugite.history import SessionStorage, Turn, generate_session_id, get_history_dir  # noqa: E402
 
 logger = logging.getLogger(__name__)
 

@@ -138,7 +138,7 @@ def test_http_request_put_string_body(mock_httpx_client):
     """PUT with string body uses content kwarg."""
     mock_httpx_client.request.return_value = _mock_response(200, text="updated")
 
-    result = http_request("https://api.example.com/items/1", method="PUT", body="raw data")
+    http_request("https://api.example.com/items/1", method="PUT", body="raw data")
 
     call_kwargs = mock_httpx_client.request.call_args
     assert call_kwargs.kwargs["method"] == "PUT"

@@ -41,9 +41,15 @@ def _seed_history(e2e_adapter, e2e_tmp, user_id, turns, reactions=None):
         last_turn = [r for r in records if isinstance(r, Turn)][-1]
         reaction_ts = last_turn.timestamp.isoformat().replace("+00:00", "") + ".100000+00:00"
         for emoji in reactions:
-            e2e_adapter.session_store.append_event(session.id, {
-                "type": "reaction", "emoji": emoji, "message_id": None, "timestamp": reaction_ts,
-            })
+            e2e_adapter.session_store.append_event(
+                session.id,
+                {
+                    "type": "reaction",
+                    "emoji": emoji,
+                    "message_id": None,
+                    "timestamp": reaction_ts,
+                },
+            )
 
     return history_dir, session
 
@@ -55,9 +61,9 @@ def test_history_reactions_persist_across_reload(authenticated_page, mock_chat, 
     page.wait_for_function("Alpine.store('app').view === 'conversations'", timeout=3000)
 
     user_id = page.evaluate("Alpine.store('app').userId")
-    history_dir, _ = _seed_history(e2e_adapter, e2e_tmp, user_id,
-                                   turns=[("seeded message", "seeded response")],
-                                   reactions=["✅"])
+    history_dir, _ = _seed_history(
+        e2e_adapter, e2e_tmp, user_id, turns=[("seeded message", "seeded response")], reactions=["✅"]
+    )
 
     with patch("tsugite.daemon.adapters.http.get_history_dir", return_value=history_dir):
         page.reload()
@@ -104,21 +110,23 @@ def test_compaction_banner_displayed(authenticated_page, e2e_adapter, e2e_tmp):
     page = authenticated_page
     user_id = page.evaluate("Alpine.store('app').userId")
 
-    history_dir, session = _seed_history(e2e_adapter, e2e_tmp, user_id,
-                                         turns=[("after compaction", "response")])
+    history_dir, session = _seed_history(e2e_adapter, e2e_tmp, user_id, turns=[("after compaction", "response")])
 
     # Write a compaction summary record into the history file
     actual_path = history_dir / f"{session.id}.jsonl"
     import json
+
     with open(actual_path, "r") as f:
         lines = f.readlines()
-    compaction_record = json.dumps({
-        "type": "compaction_summary",
-        "summary": "Previously discussed project architecture and deployment strategy.",
-        "previous_turns": 5,
-        "retained_turns": 0,
-        "compaction_reason": "token_threshold",
-    })
+    compaction_record = json.dumps(
+        {
+            "type": "compaction_summary",
+            "summary": "Previously discussed project architecture and deployment strategy.",
+            "previous_turns": 5,
+            "retained_turns": 0,
+            "compaction_reason": "token_threshold",
+        }
+    )
     lines.insert(1, compaction_record + "\n")
     with open(actual_path, "w") as f:
         f.writelines(lines)

@@ -4,7 +4,6 @@ import asyncio
 import socket
 import threading
 import time
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest

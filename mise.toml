@@ -1,0 +1,22 @@
+[tasks.lint]
+description = "Fix and format with ruff"
+run = [
+    "uv run ruff check --fix --show-fixes",
+    "uv run ruff format",
+]
+
+[tasks.check]
+description = "Pylint errors only"
+run = "uv run pylint tsugite -E"
+
+[tasks.test]
+description = "Run unit/integration tests"
+run = "uv run pytest"
+
+[tasks.e2e]
+description = "Run Playwright E2E tests"
+run = "uv run pytest tests/e2e/ -x -v --override-ini='addopts='"
+
+[tasks.ci]
+description = "Lint, check, and test"
+depends = ["lint", "check", "test"]
