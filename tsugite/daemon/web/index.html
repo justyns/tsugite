@@ -639,42 +639,71 @@
     </div>
 
     <!-- Prompt inspector modal -->
-    <div class="modal-backdrop" :class="{ open: inspectingSnapshot }" @click.self="inspectingSnapshot = null" @keydown.escape.window="if(inspectingSnapshot) inspectingSnapshot = null">
+    <div class="modal-backdrop" :class="{ open: inspectingSnapshot }" @click.self="inspectingSnapshot = null" @keydown.escape.window="if(inspectingSnapshot) inspectingSnapshot = null"
+         x-data="{ ftok(n) { return n < 1000 ? n : (n / 1000).toFixed(1) + 'k'; } }">
       <div class="modal-content prompt-inspector">
         <h2>Prompt Inspector</h2>
-        <template x-if="inspectingSnapshot">
+        <template x-if="inspectingSnapshot && inspectingSnapshot.token_breakdown">
           <div>
+            <!-- Token bar -->
             <div class="token-bar">
-              <template x-for="cat in ['system','context','history','task','steps']" :key="cat">
-                <template x-if="inspectingSnapshot.token_breakdown[cat] > 0">
-                  <div class="token-segment" :class="'token-' + cat"
-                       :style="'width:' + (inspectingSnapshot.token_breakdown[cat] / inspectingSnapshot.token_breakdown.total * 100) + '%'"
-                       :title="cat + ': ~' + inspectingSnapshot.token_breakdown[cat] + ' tokens'">
+              <template x-for="cat in (inspectingSnapshot.token_breakdown.categories || [])" :key="cat.name">
+                <template x-if="cat.tokens > 0">
+                  <div class="token-segment" :class="'token-' + cat.name"
+                       :style="'width:' + (cat.tokens / inspectingSnapshot.token_breakdown.total * 100) + '%'"
+                       :title="cat.name + ': ~' + cat.tokens + ' tokens'">
                   </div>
                 </template>
               </template>
             </div>
-            <div class="token-legend">
-              <template x-for="cat in ['system','context','history','task','steps']" :key="cat">
-                <template x-if="inspectingSnapshot.token_breakdown[cat] > 0">
-                  <span class="token-legend-item">
-                    <span class="token-dot" :class="'token-' + cat"></span>
-                    <span x-text="cat"></span>
-                    <span class="token-count" x-text="inspectingSnapshot.token_breakdown[cat] < 1000 ? inspectingSnapshot.token_breakdown[cat] : (inspectingSnapshot.token_breakdown[cat] / 1000).toFixed(1) + 'k'"></span>
-                  </span>
+
+            <!-- Category breakdown -->
+            <div class="pi-categories">
+              <template x-for="cat in (inspectingSnapshot.token_breakdown.categories || [])" :key="cat.name">
+                <template x-if="cat.tokens > 0">
+                  <div class="pi-cat">
+                    <template x-if="cat.items && cat.items.length">
+                      <details>
+                        <summary class="pi-cat-row">
+                          <span class="token-dot" :class="'token-' + cat.name"></span>
+                          <span class="pi-cat-name" x-text="cat.name + ' (' + cat.items.length + ')'"></span>
+                          <span class="pi-cat-tokens" x-text="'~' + ftok(cat.tokens)"></span>
+                        </summary>
+                        <div class="pi-items">
+                          <template x-for="item in cat.items" :key="item.name">
+                            <div class="pi-item">
+                              <span x-text="item.name"></span>
+                              <span class="token-count" x-text="ftok(item.tokens)"></span>
+                            </div>
+                          </template>
+                        </div>
+                      </details>
+                    </template>
+                    <template x-if="!cat.items || !cat.items.length">
+                      <div class="pi-cat-row">
+                        <span class="token-dot" :class="'token-' + cat.name"></span>
+                        <span class="pi-cat-name" x-text="cat.name"></span>
+                        <span class="pi-cat-tokens" x-text="'~' + ftok(cat.tokens)"></span>
+                      </div>
+                    </template>
+                  </div>
                 </template>
               </template>
-              <span class="token-legend-item" style="font-weight:600">
-                ~<span x-text="(inspectingSnapshot.token_breakdown.total / 1000).toFixed(1) + 'k'"></span> tokens
-              </span>
+              <div class="pi-cat-row" style="font-weight:600;border-top:1px solid var(--border);padding-top:8px;margin-top:4px">
+                <span>Total</span>
+                <span x-text="'~' + ftok(inspectingSnapshot.token_breakdown.total) + ' tokens'"></span>
+              </div>
             </div>
+
+            <!-- Raw messages (live session only) -->
             <template x-if="inspectingSnapshot.messages && inspectingSnapshot.messages.length">
               <div class="prompt-messages">
+                <h3 style="font-size:13px;color:var(--muted);margin:12px 0 4px">Raw Messages</h3>
                 <template x-for="(m, mi) in inspectingSnapshot.messages" :key="mi">
                   <details class="prompt-msg" x-data="{ get text() { const c = m.content; if (typeof c === 'string') return c; if (Array.isArray(c)) return c.map(b => b.text || JSON.stringify(b)).join('\\n'); return JSON.stringify(c, null, 2); } }">
                     <summary>
                       <span class="badge" :class="{'badge-accent': m.role === 'assistant', 'badge-muted': m.role === 'system'}" x-text="m.role"></span>
-                      <span class="token-count" x-text="'~' + (Math.round(text.length / 4) < 1000 ? Math.round(text.length / 4) : (Math.round(text.length / 4) / 1000).toFixed(1) + 'k') + ' tokens'"></span>
+                      <span class="token-count" x-text="'~' + ftok(Math.round(text.length / 4)) + ' tokens'"></span>
                       <span style="color:var(--muted);font-size:11px;margin-left:4px" x-text="text.substring(0, 80) + (text.length > 80 ? '...' : '')"></span>
                     </summary>
                     <pre class="prompt-msg-content"><code x-text="text"></code></pre>
@@ -683,7 +712,7 @@
               </div>
             </template>
             <template x-if="!inspectingSnapshot.messages || !inspectingSnapshot.messages.length">
-              <p style="color:var(--muted);font-size:13px">Raw messages only available during a live session.</p>
+              <p style="color:var(--muted);font-size:13px;margin-top:12px">Raw messages only available during a live session.</p>
             </template>
             <div class="modal-actions">
               <button class="btn-cancel" @click="inspectingSnapshot = null">Close</button>

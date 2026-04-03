@@ -267,18 +267,24 @@ main { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
 
 /* Prompt inspector (opened via Context link in status bar) */
 .prompt-inspector { max-width: 800px; max-height: 85vh; overflow-y: auto; }
-.token-bar { display: flex; height: 20px; border-radius: 4px; overflow: hidden; margin-bottom: 8px; border: 1px solid var(--border); }
+.token-bar { display: flex; height: 16px; border-radius: 4px; overflow: hidden; margin-bottom: 12px; border: 1px solid var(--border); }
 .token-segment { min-width: 2px; }
-.token-system { background: var(--ctp-mauve, #c6a0f6); }
-.token-context { background: var(--ctp-blue, #8aadf4); }
-.token-history { background: var(--ctp-green, #a6da95); }
-.token-task { background: var(--ctp-peach, #f5a97f); }
-.token-steps { background: var(--ctp-yellow, #eed49f); }
-.token-legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; margin-bottom: 16px; }
-.token-legend-item { display: flex; align-items: center; gap: 4px; }
-.token-dot { width: 10px; height: 10px; border-radius: 2px; }
+.token-instructions { background: var(--ctp-mauve, #c6a0f6); }
+.token-tools { background: var(--ctp-blue, #8aadf4); }
+.token-attachments { background: var(--ctp-teal, #8bd5ca); }
+.token-skills { background: var(--ctp-green, #a6da95); }
+.token-history { background: var(--ctp-peach, #f5a97f); }
+.token-task { background: var(--ctp-yellow, #eed49f); }
+.token-steps { background: var(--ctp-flamingo, #f0c6c6); }
+.token-dot { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
 .token-count { color: var(--muted); font-size: 11px; }
-.prompt-messages { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.pi-categories { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+.pi-cat-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+.pi-cat-name { flex: 1; }
+.pi-cat-tokens { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.pi-items { padding-left: 22px; font-size: 12px; color: var(--muted); }
+.pi-item { display: flex; justify-content: space-between; padding: 1px 0; }
+.prompt-messages { display: flex; flex-direction: column; gap: 4px; }
 .prompt-msg summary { cursor: pointer; padding: 4px 8px; font-size: 13px; display: flex; align-items: center; gap: 8px; }
 .prompt-msg summary:hover { background: var(--bg); border-radius: 4px; }
 .prompt-msg-content { max-height: 400px; overflow: auto; font-size: 12px; padding: 8px; background: var(--bg); border-radius: 4px; white-space: pre-wrap; word-break: break-word; margin: 4px 0; }

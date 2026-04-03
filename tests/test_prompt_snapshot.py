@@ -36,62 +36,77 @@ class _FakeAgent:
 
     _compute_token_breakdown = TsugiteAgent._compute_token_breakdown
 
-    def __init__(self, task=""):
-        class M:
-            pass
+    def __init__(self, task="", tools=None, attachments=None, skills=None):
+        from types import SimpleNamespace
 
-        self.memory = M()
-        self.memory.task = task
+        self.memory = SimpleNamespace(task=task)
+        self.instructions = "test instructions"
+        self.tools = tools or []
+        self.attachments = attachments or []
+        self.skills = skills or []
+
+
+def _cat(result, name):
+    """Get a category dict from a breakdown result by name."""
+    return next((c for c in result["categories"] if c["name"] == name), {"tokens": 0, "items": []})
 
 
 class TestComputeTokenBreakdown:
-    def test_system_only(self):
+    def test_has_categories_and_total(self):
         messages = [{"role": "system", "content": "x" * 400}]
         result = _FakeAgent()._compute_token_breakdown(messages)
-        assert result["system"] == 100
-        assert result["total"] == 100
+        assert "categories" in result
+        assert "total" in result
+        assert result["total"] > 0
 
-    def test_full_prompt_structure(self):
+    def test_instructions_category(self):
+        messages = [{"role": "system", "content": "x" * 400}]
+        result = _FakeAgent()._compute_token_breakdown(messages)
+        assert _cat(result, "instructions")["tokens"] > 0
+
+    def test_tools_with_items(self):
+        from unittest.mock import MagicMock
+
+        tool = MagicMock()
+        tool.name = "read_file"
+        tool.to_code_prompt.return_value = "x" * 200
+        messages = [{"role": "system", "content": "sys"}, {"role": "user", "content": "task"}]
+        result = _FakeAgent(task="task", tools=[tool])._compute_token_breakdown(messages)
+        tools_cat = _cat(result, "tools")
+        assert tools_cat["tokens"] == 50
+        assert len(tools_cat["items"]) == 1
+        assert tools_cat["items"][0]["name"] == "read_file"
+
+    def test_attachments_with_items(self):
+        from types import SimpleNamespace
+
+        att = SimpleNamespace(name="README.md", content="x" * 400)
+        messages = [{"role": "system", "content": "sys"}, {"role": "user", "content": "task"}]
+        result = _FakeAgent(task="task", attachments=[att])._compute_token_breakdown(messages)
+        att_cat = _cat(result, "attachments")
+        assert att_cat["tokens"] == 100
+        assert att_cat["items"][0]["name"] == "README.md"
+
+    def test_history_and_task(self):
         messages = [
-            {"role": "system", "content": "x" * 400},
+            {"role": "system", "content": "sys"},
             {"role": "user", "content": "x" * 200},
             {"role": "assistant", "content": CONTEXT_ACK},
             {"role": "user", "content": "x" * 100},
             {"role": "assistant", "content": "x" * 100},
-            {"role": "user", "content": "task content here"},
-            {"role": "assistant", "content": "```python\ncode\n```"},
-            {"role": "user", "content": "<observation>result</observation>"},
-        ]
-        result = _FakeAgent(task="task content here")._compute_token_breakdown(messages)
-        assert result["system"] == 100
-        assert result["context"] > 0
-        assert result["history"] > 0
-        assert result["task"] > 0
-        assert result["steps"] > 0
-        assert result["total"] == sum(v for k, v in result.items() if k != "total")
-
-    def test_no_context_turn(self):
-        messages = [
-            {"role": "system", "content": "sys"},
-            {"role": "user", "content": "hello"},
-        ]
-        result = _FakeAgent(task="hello")._compute_token_breakdown(messages)
-        assert result["context"] == 0
-        assert result["history"] == 0
-        assert result["task"] > 0
-
-    def test_context_update_counted_as_context(self):
-        messages = [
-            {"role": "system", "content": "sys"},
-            {"role": "user", "content": "<context>attachments</context>"},
-            {"role": "assistant", "content": CONTEXT_ACK},
-            {"role": "user", "content": "<context_update>new file</context_update>"},
-            {"role": "assistant", "content": "Context updated."},
             {"role": "user", "content": "my task"},
         ]
         result = _FakeAgent(task="my task")._compute_token_breakdown(messages)
-        assert result["context"] > 0
-        assert result["history"] > 0  # "Context updated." assistant msg
+        assert _cat(result, "history")["tokens"] > 0
+        assert _cat(result, "task")["tokens"] > 0
+
+    def test_total_is_sum_of_categories(self):
+        messages = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "task"},
+        ]
+        result = _FakeAgent(task="task")._compute_token_breakdown(messages)
+        assert result["total"] == sum(c["tokens"] for c in result["categories"])
 
 
 class TestJSONLHandler:

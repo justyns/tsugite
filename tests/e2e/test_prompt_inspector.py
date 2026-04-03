@@ -3,7 +3,22 @@
 _SAMPLE_SNAPSHOT = (
     "prompt_snapshot",
     {
-        "token_breakdown": {"system": 5, "context": 0, "history": 0, "task": 2, "steps": 0, "total": 7},
+        "token_breakdown": {
+            "categories": [
+                {"name": "instructions", "tokens": 100, "items": []},
+                {
+                    "name": "tools",
+                    "tokens": 200,
+                    "items": [{"name": "read_file", "tokens": 120}, {"name": "write_file", "tokens": 80}],
+                },
+                {"name": "attachments", "tokens": 0, "items": []},
+                {"name": "skills", "tokens": 0, "items": []},
+                {"name": "history", "tokens": 0, "items": []},
+                {"name": "task", "tokens": 50, "items": []},
+                {"name": "steps", "tokens": 0, "items": []},
+            ],
+            "total": 350,
+        },
     },
 )
 
@@ -24,7 +39,10 @@ def test_context_link_opens_inspector(chat_page, mock_chat):
 
     page.wait_for_selector(".prompt-inspector", timeout=3000)
     assert page.locator(".token-bar").is_visible()
-    assert page.locator(".token-legend").is_visible()
+    assert page.locator(".pi-categories").is_visible()
+
+    # Should show categories with items
+    assert page.locator(".pi-cat").count() >= 2
 
     # Close modal
     page.locator(".prompt-inspector .btn-cancel").click()

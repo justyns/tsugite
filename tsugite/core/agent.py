@@ -969,44 +969,74 @@ class TsugiteAgent:
 
         return messages
 
-    def _compute_token_breakdown(self, messages: List[Dict]) -> Dict[str, int]:
-        """Categorize messages and estimate tokens per category."""
+    def _compute_token_breakdown(self, messages: List[Dict]) -> Dict:
+        """Compute per-category token breakdown with individual item details."""
         est = estimate_content_tokens
-        breakdown = {"system": 0, "context": 0, "history": 0, "task": 0, "steps": 0}
+        categories = []
 
+        # Instructions (system prompt minus tools)
+        instructions_tokens = est(self.instructions) if self.instructions else 0
+        categories.append({"name": "instructions", "tokens": instructions_tokens, "items": []})
+
+        # Tools — per-tool breakdown
+        tool_items = []
+        for tool in self.tools:
+            tok = est(tool.to_code_prompt())
+            tool_items.append({"name": tool.name, "tokens": tok})
+        tool_items.sort(key=lambda x: x["tokens"], reverse=True)
+        tools_total = sum(t["tokens"] for t in tool_items)
+        categories.append({"name": "tools", "tokens": tools_total, "items": tool_items})
+
+        # Attachments — per-attachment breakdown
+        att_items = []
+        for att in self.attachments or []:
+            tok = est(att.content) if att.content else 0
+            att_items.append({"name": att.name, "tokens": tok})
+        att_total = sum(a["tokens"] for a in att_items)
+        categories.append({"name": "attachments", "tokens": att_total, "items": att_items})
+
+        # Skills — per-skill breakdown
+        skill_items = []
+        for skill in self.skills or []:
+            tok = est(skill.content) if skill.content else 0
+            skill_items.append({"name": skill.name, "tokens": tok})
+        skills_total = sum(s["tokens"] for s in skill_items)
+        categories.append({"name": "skills", "tokens": skills_total, "items": skill_items})
+
+        # History — walk messages between context turn and task
+        history_tokens = 0
         i = 0
         n = len(messages)
-
         if i < n and messages[i].get("role") == "system":
-            breakdown["system"] = est(messages[i].get("content", ""))
             i += 1
-
         if i + 1 < n and messages[i + 1].get("content") == CONTEXT_ACK:
-            breakdown["context"] = est(messages[i].get("content", "")) + est(CONTEXT_ACK)
             i += 2
-
         task_content = self.memory.task if self.memory else None
         while i < n:
             if messages[i].get("role") == "user" and messages[i].get("content") == task_content:
                 break
             content = messages[i].get("content", "")
             text = content if isinstance(content, str) else ""
-            if text.startswith("<context>") or text.startswith("<context_update>"):
-                breakdown["context"] += est(content)
-            else:
-                breakdown["history"] += est(content)
+            if not (text.startswith("<context>") or text.startswith("<context_update>")):
+                history_tokens += est(content)
             i += 1
+        categories.append({"name": "history", "tokens": history_tokens, "items": []})
 
+        # Task
+        task_tokens = est(task_content) if task_content else 0
+        categories.append({"name": "task", "tokens": task_tokens, "items": []})
+
+        # Steps
+        steps_tokens = 0
         if i < n:
-            breakdown["task"] = est(messages[i].get("content", ""))
-            i += 1
-
+            i += 1  # skip task message
         while i < n:
-            breakdown["steps"] += est(messages[i].get("content", ""))
+            steps_tokens += est(messages[i].get("content", ""))
             i += 1
+        categories.append({"name": "steps", "tokens": steps_tokens, "items": []})
 
-        breakdown["total"] = sum(breakdown.values())
-        return breakdown
+        total = sum(c["tokens"] for c in categories)
+        return {"categories": categories, "total": total}
 
     def _build_system_prompt(self) -> str:
         """Build system prompt that teaches LLM how to solve tasks."""
