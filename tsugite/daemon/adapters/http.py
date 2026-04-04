@@ -240,7 +240,7 @@ class SSEProgressHandler(JSONLUIHandler):
         else:
             self.queue.put_nowait(payload)
 
-        if event_type == "prompt_snapshot" and self._persist_event:
+        if event_type in ("prompt_snapshot", "reaction") and self._persist_event:
             self._persist_event(payload)
 
     def signal_done(self):
