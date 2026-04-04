@@ -152,6 +152,37 @@ async def cmd_status(adapter: BaseAdapter, user_id: str) -> str:
 
 
 @adapter_command(
+    name="context",
+    description="Show prompt context breakdown by category",
+    params=[CommandParam("user_id", str, "User to check context for")],
+)
+async def cmd_context(adapter: BaseAdapter, user_id: str) -> str:
+    """Show per-category token breakdown from the latest prompt snapshot."""
+    session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
+    events = adapter.session_store.read_events(session.id)
+    snapshots = [e for e in events if e.get("type") == "prompt_snapshot" and e.get("token_breakdown")]
+    if not snapshots:
+        return "No context data available yet. Send a message first."
+
+    breakdown = snapshots[-1]["token_breakdown"]
+    categories = breakdown.get("categories", [])
+    total = breakdown.get("total", 0)
+
+    def fmt(n):
+        return f"{n:,}" if n < 1000 else f"{n / 1000:.1f}k"
+
+    lines = [f"Context Breakdown (~{fmt(total)} tokens)"]
+    for cat in categories:
+        if cat["tokens"] == 0:
+            continue
+        name = cat["name"]
+        if cat.get("items"):
+            name += f" ({len(cat['items'])})"
+        lines.append(f"  {name:<20} {fmt(cat['tokens']):>6}")
+    return "\n".join(lines)
+
+
+@adapter_command(
     name="sessions",
     description="List active and recent background sessions",
     params=[CommandParam("status", str, "Filter by status (running, completed, failed)", required=False)],
