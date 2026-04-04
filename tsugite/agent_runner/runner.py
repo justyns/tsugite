@@ -366,6 +366,7 @@ async def _execute_agent_with_prompt(
     path_context: Optional[Any] = None,
     claude_code_resume_session: Optional[str] = None,
     claude_code_resume_after_compaction: bool = False,
+    hook_vars: Optional[Dict[str, str]] = None,
 ) -> str | AgentExecutionResult:
     """Execute agent with a prepared agent.
 
@@ -865,6 +866,7 @@ async def run_agent_async(
                 path_context=path_context,
                 claude_code_resume_session=claude_code_resume_session,
                 claude_code_resume_after_compaction=claude_code_resume_after_compaction,
+                hook_vars=hook_vars,
             )
         except (RuntimeError, AgentExecutionError) as e:
             err_str = str(e).lower()
@@ -887,6 +889,7 @@ async def run_agent_async(
                     custom_logger=custom_logger,
                     previous_messages=previous_messages,
                     path_context=path_context,
+                    hook_vars=hook_vars,
                 )
             raise
     finally:
