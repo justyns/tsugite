@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
-from tsugite.tools.http import HttpResponse, fetch_text, http_request, web_search
+from tsugite.tools.http import HttpResponse, _default_headers, fetch_text, http_request, web_search
 
 
 @pytest.fixture
@@ -307,3 +307,45 @@ def test_http_request_returns_headers(mock_httpx_client):
 
     assert "x-request-id" in result.headers
     assert result.headers["x-request-id"] == "abc123"
+
+
+# --- User-Agent tests ---
+
+
+def test_default_headers_sets_user_agent():
+    """Default headers include User-Agent."""
+    headers = _default_headers()
+    assert "User-Agent" in headers
+    assert headers["User-Agent"].startswith("Tsugite/")
+
+
+def test_default_headers_preserves_custom_user_agent():
+    """Caller-provided User-Agent is not overwritten."""
+    headers = _default_headers({"User-Agent": "Custom/1.0"})
+    assert headers["User-Agent"] == "Custom/1.0"
+
+
+def test_default_headers_disabled_user_agent():
+    """User-Agent is omitted when config sets user_agent to empty string."""
+    with patch("tsugite.user_agent.get_user_agent", return_value=None):
+        headers = _default_headers()
+        assert "User-Agent" not in headers
+
+
+def test_default_headers_custom_config_user_agent():
+    """User-Agent uses config value when set."""
+    with patch("tsugite.user_agent.get_user_agent", return_value="MyBot/2.0"):
+        headers = _default_headers()
+        assert headers["User-Agent"] == "MyBot/2.0"
+
+
+def test_request_sends_user_agent(mock_httpx_client):
+    """HTTP requests include User-Agent header."""
+    mock_httpx_client.request.return_value = _mock_response(200, {"ok": True})
+
+    http_request("https://api.example.com/test", method="GET")
+
+    call_kwargs = mock_httpx_client.request.call_args
+    sent_headers = call_kwargs.kwargs["headers"]
+    assert "User-Agent" in sent_headers
+    assert sent_headers["User-Agent"].startswith("Tsugite/")

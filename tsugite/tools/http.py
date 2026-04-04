@@ -7,8 +7,16 @@ from typing import Any, Dict, Optional, Union
 import httpx
 from ddgs import DDGS
 
+from tsugite.user_agent import set_user_agent_header
 from tsugite.tools import tool
 from tsugite.utils import convert_html_to_markdown
+
+
+def _default_headers(headers: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    """Return headers with User-Agent set if not already provided."""
+    merged = dict(headers) if headers else {}
+    set_user_agent_header(merged)
+    return merged
 
 
 @dataclass
@@ -35,7 +43,7 @@ def _simple_request(
         kwargs["content"] = body
 
     with httpx.Client(timeout=timeout) as client:
-        response = client.request(method=method.upper(), url=url, headers=headers or {}, **kwargs)
+        response = client.request(method=method.upper(), url=url, headers=_default_headers(headers), **kwargs)
         response.raise_for_status()
         return response
 
@@ -158,7 +166,7 @@ def download_file(url: str, local_path: str, timeout: int = 60) -> str:
         timeout: Request timeout in seconds
     """
     try:
-        with httpx.Client(timeout=timeout) as client:
+        with httpx.Client(timeout=timeout, headers=_default_headers()) as client:
             with client.stream("GET", url) as response:
                 response.raise_for_status()
 
@@ -188,7 +196,7 @@ def check_url(url: str, timeout: int = 10) -> Dict[str, Any]:
         timeout: Request timeout in seconds
     """
     try:
-        with httpx.Client(timeout=timeout) as client:
+        with httpx.Client(timeout=timeout, headers=_default_headers()) as client:
             response = client.head(url, follow_redirects=True)
 
             return {

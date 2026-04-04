@@ -124,6 +124,7 @@ class Config(BaseModel):
     auto_context_include_global: bool = True
     skill_paths: List[str] = Field(default_factory=list)
     secrets: Optional[SecretsConfig] = None
+    user_agent: Optional[str] = None
 
 
 def get_config_path() -> Path:

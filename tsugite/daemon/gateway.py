@@ -82,8 +82,11 @@ async def _send_webhook(config, message: str) -> dict:
     """Send a notification via webhook."""
     import httpx
 
+    from tsugite.user_agent import set_user_agent_header
+
     body = config.body_template.replace("{message}", message) if config.body_template else message
     headers = dict(config.headers)
+    set_user_agent_header(headers)
 
     if not config.body_template:
         headers.setdefault("Content-Type", "text/plain")

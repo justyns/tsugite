@@ -10,6 +10,8 @@ from typing import Any, AsyncIterator
 
 import httpx
 
+from tsugite.user_agent import set_user_agent_header
+
 from .base import CompletionResponse, ModelInfo, StreamChunk, Usage, default_count_tokens
 from .model_registry import calculate_cost, register_models
 from .model_registry import get_model_info as _get_model_info
@@ -156,7 +158,9 @@ class OpenAICompatProvider:
         return self._client
 
     def _build_headers(self) -> dict[str, str]:
-        headers = {"Content-Type": "application/json", **self.extra_headers}
+        headers: dict[str, str] = {"Content-Type": "application/json"}
+        set_user_agent_header(headers)
+        headers.update(self.extra_headers)
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
         return headers

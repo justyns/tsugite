@@ -11,6 +11,8 @@ from typing import Any, AsyncIterator
 
 import httpx
 
+from tsugite.user_agent import set_user_agent_header
+
 from .base import CompletionResponse, ModelInfo, StreamChunk, Usage, default_count_tokens
 from .model_registry import calculate_cost, register_models
 from .model_registry import get_model_info as _get_model_info
@@ -77,6 +79,7 @@ class AnthropicProvider:
             "Content-Type": "application/json",
             "anthropic-version": API_VERSION,
         }
+        set_user_agent_header(headers)
         if self.api_key:
             headers["x-api-key"] = self.api_key
         return headers
