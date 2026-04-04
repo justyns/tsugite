@@ -167,6 +167,7 @@ class TsugiteAgent:
         previous_messages: List[Dict] = None,
         resume_session: Optional[str] = None,
         resume_after_compaction: bool = False,
+        hook_vars: Optional[Dict[str, str]] = None,
     ):
         """Initialize the agent.
 
@@ -182,6 +183,7 @@ class TsugiteAgent:
             attachments: List of Attachment objects for multi-modal inputs
             skills: List of Skill objects for loaded skills
             previous_messages: List of previous conversation messages (user/assistant pairs)
+            hook_vars: Dict of pre_message hook captured outputs (e.g. rag_context)
         """
         from tsugite.models import get_model_kwargs, get_provider_and_model
 
@@ -196,6 +198,7 @@ class TsugiteAgent:
         self.attachments = attachments or []
         self.skills = skills or []
         self.previous_messages = previous_messages or []
+        self.hook_vars = hook_vars or {}
         self._resume_session = resume_session
         self._resume_after_compaction = resume_after_compaction
 
@@ -420,6 +423,18 @@ class TsugiteAgent:
                 turn = await self._provider_turn(messages, turn_num, stream)
 
                 thought, code, response = turn.thought, turn.code, turn.response
+
+                # Update the inspector snapshot with the LLM response (copy, don't mutate)
+                if self.event_bus and (thought or code):
+                    from tsugite.events import PromptSnapshotEvent
+
+                    parts = []
+                    if thought:
+                        parts.append(thought)
+                    if code:
+                        parts.append(f"```python\n{code}\n```")
+                    updated = messages + [{"role": "assistant", "content": "\n\n".join(parts)}]
+                    self.event_bus.emit(PromptSnapshotEvent(messages=updated))
                 logger.debug(
                     "Turn %d response (cost=%.4f): %.200s", turn_num + 1, turn.step_cost, (thought or "")[:200]
                 )
@@ -989,7 +1004,7 @@ class TsugiteAgent:
 
         # Attachments — per-attachment breakdown
         att_items = []
-        for att in self.attachments or []:
+        for att in self.attachments:
             tok = est(att.content) if att.content else 0
             att_items.append({"name": att.name, "tokens": tok})
         att_total = sum(a["tokens"] for a in att_items)
@@ -997,11 +1012,19 @@ class TsugiteAgent:
 
         # Skills — per-skill breakdown
         skill_items = []
-        for skill in self.skills or []:
+        for skill in self.skills:
             tok = est(skill.content) if skill.content else 0
             skill_items.append({"name": skill.name, "tokens": tok})
         skills_total = sum(s["tokens"] for s in skill_items)
         categories.append({"name": "skills", "tokens": skills_total, "items": skill_items})
+
+        # Hooks (pre_message hook captured output like rag_context)
+        hook_items = []
+        for name, content in self.hook_vars.items():
+            tok = est(content) if content else 0
+            hook_items.append({"name": name, "tokens": tok})
+        hooks_total = sum(h["tokens"] for h in hook_items)
+        categories.append({"name": "hooks", "tokens": hooks_total, "items": hook_items})
 
         # History — walk messages between context turn and task
         history_tokens = 0

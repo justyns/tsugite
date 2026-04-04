@@ -36,7 +36,7 @@ class _FakeAgent:
 
     _compute_token_breakdown = TsugiteAgent._compute_token_breakdown
 
-    def __init__(self, task="", tools=None, attachments=None, skills=None):
+    def __init__(self, task="", tools=None, attachments=None, skills=None, hook_vars=None):
         from types import SimpleNamespace
 
         self.memory = SimpleNamespace(task=task)
@@ -44,6 +44,7 @@ class _FakeAgent:
         self.tools = tools or []
         self.attachments = attachments or []
         self.skills = skills or []
+        self.hook_vars = hook_vars or {}
 
 
 def _cat(result, name):

@@ -217,8 +217,11 @@ class SSEProgressHandler(JSONLUIHandler):
         """Handle event from agent thread — schedule onto the event loop."""
         from tsugite.events import PromptSnapshotEvent
 
-        if isinstance(event, PromptSnapshotEvent) and event.messages:
-            self.latest_prompt_messages = event.messages
+        if isinstance(event, PromptSnapshotEvent):
+            if event.messages:
+                self.latest_prompt_messages = event.messages
+            if not event.token_breakdown:
+                return  # Messages-only update, don't emit SSE or persist
         super().handle_event(event)
 
     def _emit(self, event_type: str, data: dict[str, Any]) -> None:

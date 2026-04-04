@@ -273,6 +273,7 @@ main { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
 .token-tools { background: var(--ctp-blue, #8aadf4); }
 .token-attachments { background: var(--ctp-teal, #8bd5ca); }
 .token-skills { background: var(--ctp-green, #a6da95); }
+.token-hooks { background: var(--ctp-lavender, #b7bdf8); }
 .token-history { background: var(--ctp-peach, #f5a97f); }
 .token-task { background: var(--ctp-yellow, #eed49f); }
 .token-steps { background: var(--ctp-flamingo, #f0c6c6); }

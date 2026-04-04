@@ -528,6 +528,7 @@ async def _execute_agent_with_prompt(
             previous_messages=previous_messages,
             resume_session=claude_code_resume_session,
             resume_after_compaction=claude_code_resume_after_compaction,
+            hook_vars=hook_vars,
         )
 
         # Set event_bus in context so tools can access it during execution
