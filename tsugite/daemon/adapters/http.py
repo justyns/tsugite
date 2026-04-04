@@ -435,6 +435,7 @@ class HTTPServer:
             Route("/api/usage/models", self._usage_models, methods=["GET"]),
             Route("/api/usage/total", self._usage_total, methods=["GET"]),
             Mount("/static", app=StaticFiles(directory=str(WEB_DIR)), name="static"),
+            Route("/sw.js", self._serve_sw, methods=["GET"]),
             Route("/", self._serve_ui, methods=["GET"]),
         ]
         return Starlette(routes=routes)
@@ -2135,6 +2136,12 @@ class HTTPServer:
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
         )
+
+    async def _serve_sw(self, request: Request) -> Response:
+        sw_path = WEB_DIR / "sw.js"
+        if not sw_path.exists():
+            return JSONResponse({"error": "service worker not found"}, status_code=404)
+        return Response(sw_path.read_bytes(), media_type="application/javascript")
 
     async def _serve_ui(self, request: Request) -> Response:
         ui_path = WEB_DIR / "index.html"

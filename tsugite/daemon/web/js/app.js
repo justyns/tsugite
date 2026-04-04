@@ -112,7 +112,7 @@ if (window.matchMedia('(display-mode: standalone)').matches || navigator.standal
 
 // Service worker + push notifications
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/static/sw.js').catch(() => {});
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
 }
 
 window.tsugiteSubscribePush = async function() {
