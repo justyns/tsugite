@@ -333,6 +333,7 @@ def _ensure_tools_loaded():
     from . import notify as notify  # noqa: E402, F401
     from . import schedule as schedule  # noqa: E402, F401
     from . import secrets as secrets  # noqa: E402, F401
+    from . import scratchpad as scratchpad  # noqa: E402, F401
     from . import sessions as sessions  # noqa: E402, F401
     from . import shell as shell  # noqa: E402, F401
     from . import skills as skills  # noqa: E402, F401

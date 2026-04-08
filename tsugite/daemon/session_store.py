@@ -89,6 +89,7 @@ class Session:
     notify: list[str] = field(default_factory=list)
 
     title: Optional[str] = None
+    scratchpad: str = ""
 
     def __post_init__(self):
         if not self.id:
@@ -234,6 +235,7 @@ class SessionStore:
                 user_id=old_session.user_id,
                 parent_id=old_session.parent_id,
                 metadata={k: v for k, v in old_session.metadata.items() if k in READ_ONLY_METADATA_KEYS},
+                scratchpad=old_session.scratchpad,
             )
 
             self._sessions[new_id] = new_session

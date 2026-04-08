@@ -454,6 +454,22 @@ class BaseAdapter(ABC):
                 if channel_context.metadata and channel_context.metadata.get("uploaded_attachments"):
                     attachments.extend(channel_context.metadata.pop("uploaded_attachments"))
 
+                try:
+                    _session = self.session_store.get_session(conv_id)
+                    if _session.scratchpad:
+                        from tsugite.attachments.base import Attachment, AttachmentContentType
+
+                        attachments.append(
+                            Attachment(
+                                name="scratchpad",
+                                content=_session.scratchpad,
+                                content_type=AttachmentContentType.TEXT,
+                                mime_type="text/markdown",
+                            )
+                        )
+                except Exception:
+                    pass
+
                 return run_agent(
                     agent_path=agent_path,
                     prompt=enriched_prompt,

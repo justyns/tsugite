@@ -402,6 +402,8 @@ class HTTPServer:
             Route("/api/sessions/{session_id}/metadata", self._api_get_metadata, methods=["GET"]),
             Route("/api/sessions/{session_id}/metadata", self._api_update_metadata, methods=["PATCH"]),
             Route("/api/sessions/{session_id}/metadata/{key}", self._api_delete_metadata, methods=["DELETE"]),
+            Route("/api/sessions/{session_id}/scratchpad", self._api_get_scratchpad, methods=["GET"]),
+            Route("/api/sessions/{session_id}/scratchpad", self._api_update_scratchpad, methods=["PUT"]),
             Route("/api/sessions/{session_id}", self._api_get_session, methods=["GET"]),
             Route("/api/sessions/{session_id}", self._api_update_session, methods=["PATCH"]),
             Route("/api/sessions/{session_id}/cancel", self._api_cancel_session, methods=["POST"]),
@@ -1642,6 +1644,40 @@ class HTTPServer:
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         return JSONResponse({"ok": True, "metadata": session.metadata or {}})
+
+    async def _api_get_scratchpad(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_sessions(request):
+            return err
+        session_id = request.path_params["session_id"]
+        try:
+            session = self.session_runner.store.get_session(session_id)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+        return JSONResponse({"scratchpad": session.scratchpad})
+
+    async def _api_update_scratchpad(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_sessions(request):
+            return err
+        session_id = request.path_params["session_id"]
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+        content = body.get("content", "")
+        if not isinstance(content, str):
+            return JSONResponse({"error": "content must be a string"}, status_code=400)
+        from tsugite.tools.scratchpad import SCRATCHPAD_HARD_LIMIT
+
+        if len(content) > SCRATCHPAD_HARD_LIMIT:
+            return JSONResponse(
+                {"error": f"Content exceeds hard limit of {SCRATCHPAD_HARD_LIMIT} chars"}, status_code=400
+            )
+        try:
+            self.session_runner.store.update_session(session_id, scratchpad=content)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        self.event_bus.emit("session_update", {"action": "scratchpad_updated", "id": session_id})
+        return JSONResponse({"ok": True, "scratchpad": content})
 
     async def _list_webhooks(self, request: Request) -> JSONResponse:
         if err := self._check_auth(request):
