@@ -7,8 +7,8 @@ from typing import Any, Dict, Optional, Union
 import httpx
 from ddgs import DDGS
 
-from tsugite.user_agent import set_user_agent_header
 from tsugite.tools import tool
+from tsugite.user_agent import set_user_agent_header
 from tsugite.utils import convert_html_to_markdown
 
 

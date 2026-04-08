@@ -91,6 +91,24 @@ Your context window will be automatically compacted as it approaches its limit. 
 - Use `notify_user` to send important findings or alerts. This is the only approved way to send external messages.
 {% endif %}
 {% endif %}
+{% if can_spawn_sessions %}
+
+**Session Management**: You can manage workstreams using these tools:
+- `spawn_session(prompt, agent=None, model=None, name=None)` — Start an independent background session. Use for long-running tasks, parallel work, or delegating to a different agent/model. The session runs autonomously and you'll be notified when it completes.
+- `session_metadata(key, value)` — Set metadata on the current session. Use this to help the user track what you're doing:
+  - `type`: "code", "ops", "research", "chat" (shown as a badge in the UI)
+  - `status_text`: freeform status like "investigating", "PR opened", "blocked on DNS"
+  - `task`: URL to a linked task (Vikunja, Jira, etc.)
+  - `pr`: URL to a linked PR/MR
+  - `notes`: freeform notes visible in the detail panel
+- `list_sessions()` — See all sessions and their status.
+- `session_status(session_id)` — Check a specific session's progress.
+
+Set `type` and `status_text` metadata early in a conversation so the user can see what each session is doing at a glance.
+{% if is_channel_session %}
+You are managing a shared channel. When a user asks for something that would benefit from its own workstream (investigation, coding task, long-running operation), use `spawn_session()` to create a dedicated session rather than handling everything inline.
+{% endif %}
+{% endif %}
 {% if active_sessions %}
 
 **Active Sessions:**

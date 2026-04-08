@@ -1,6 +1,7 @@
 /* Touch targets for coarse pointers (mobile, tablets) */
 @media (pointer: coarse) {
   .btn-sm { min-height: 44px; min-width: 44px; padding: 8px 14px; }
+  .session-chip { font-size: 12px; padding: 4px 8px; min-height: 28px; display: inline-flex; align-items: center; }
   #status-bar .btn-sm { min-height: 36px; min-width: 36px; padding: 4px 10px; }
   .tab-bar button { min-height: 44px; padding: 8px 12px; }
   .settings-btn { min-height: 44px; }

@@ -13,6 +13,10 @@ from dataclasses import fields as dataclass_fields
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
+from typing import Optional
+from uuid import uuid4
+
+from tsugite.history import SessionStorage, Turn, generate_session_id, get_history_dir
 
 
 def _parse_ts(ts: str | None) -> datetime | None:
@@ -25,12 +29,20 @@ def _parse_ts(ts: str | None) -> datetime | None:
         return None
 
 
-from typing import Optional  # noqa: E402
-from uuid import uuid4  # noqa: E402
-
-from tsugite.history import SessionStorage, Turn, generate_session_id, get_history_dir  # noqa: E402
-
 logger = logging.getLogger(__name__)
+
+
+READ_ONLY_METADATA_KEYS = frozenset(
+    {
+        "source",
+        "user_id",
+        "thread_id",
+        "channel_id",
+        "parent_session_id",
+        "created_at",
+        "started_at",
+    }
+)
 
 
 class SessionSource(str, Enum):
@@ -50,6 +62,7 @@ class SessionStatus(str, Enum):
     FAILED = "failed"
     CANCELLED = "cancelled"
 
+_TERMINAL_STATUSES = (SessionStatus.CANCELLED.value, SessionStatus.COMPLETED.value, SessionStatus.FAILED.value)
 
 @dataclass
 class Session:
@@ -114,6 +127,9 @@ class SessionStore:
         # Index: platform_thread_id -> session_id for fast thread lookup
         self._thread_index: dict[str, str] = {}
 
+        # Index: (channel_id, agent) -> session_id for channel session lookup
+        self._channel_index: dict[tuple[str, str], str] = {}
+
         # Per-session compaction locks: (user_id, agent) -> Event
         # Event is unset while compaction is in progress, set when done.
         self._compaction_events: dict[tuple[str, str], threading.Event] = {}
@@ -168,7 +184,7 @@ class SessionStore:
         with self._lock:
             return (user_id, agent) in self._compaction_events
 
-    # ── Interactive session management (replaces SessionManager) ──
+    # ── Interactive session management ──
 
     def get_or_create_interactive(self, user_id: str, agent: str) -> Session:
         with self._lock:
@@ -176,31 +192,19 @@ class SessionStore:
             if key in self._interactive_index:
                 session_id = self._interactive_index[key]
                 if session_id in self._sessions:
-                    session = self._sessions[session_id]
-                    if session.status in (
-                        SessionStatus.CANCELLED.value,
-                        SessionStatus.COMPLETED.value,
-                        SessionStatus.FAILED.value,
-                    ):
-                        session.status = SessionStatus.ACTIVE.value
+                    existing = self._sessions[session_id]
+                    if existing.status in _TERMINAL_STATUSES:
+                        existing.status = SessionStatus.ACTIVE.value
                         self._mark_dirty()
-                    return session
+                    return existing
 
-            # Create new interactive session
             conv_id = f"daemon_{agent}_{user_id}"
             session = Session(
-                id=conv_id,
-                agent=agent,
-                source=SessionSource.INTERACTIVE.value,
-                user_id=user_id,
-                title="Main Session",
+                id=conv_id, agent=agent, source=SessionSource.INTERACTIVE.value, user_id=user_id, title="Main Session"
             )
-
-            # Estimate tokens from existing history
             tokens, msg_count = self._estimate_tokens(conv_id)
             session.cumulative_tokens = tokens
             session.message_count = msg_count
-
             self._sessions[conv_id] = session
             self._interactive_index[key] = conv_id
             self._save()
@@ -296,13 +300,12 @@ class SessionStore:
 
     def _prune_background_sessions(self, agent: str) -> None:
         """Remove oldest completed background/spawned sessions beyond MAX_BACKGROUND_SESSIONS. Must hold lock."""
-        terminal = (SessionStatus.COMPLETED.value, SessionStatus.FAILED.value, SessionStatus.CANCELLED.value)
         children = [
             s
             for s in self._sessions.values()
             if s.agent == agent
             and s.source in (SessionSource.BACKGROUND.value, SessionSource.SPAWNED.value)
-            and s.status in terminal
+            and s.status in _TERMINAL_STATUSES
         ]
         if len(children) <= self.MAX_BACKGROUND_SESSIONS:
             return
@@ -328,7 +331,7 @@ class SessionStore:
                     raise ValueError(f"Unknown field '{key}'")
                 setattr(session, key, value)
             session.last_active = datetime.now(timezone.utc).isoformat()
-            self._save()
+            self._mark_dirty()
             return session
 
     def list_sessions(
@@ -452,6 +455,78 @@ class SessionStore:
             summary["error"] = session.error
         return summary
 
+    # ── Metadata CRUD ──
+
+    def set_metadata(self, session_id: str, key: str, value) -> Session:
+        """Set a single metadata key. Raises ValueError for read-only keys."""
+        return self.set_metadata_bulk(session_id, {key: value})
+
+    def set_metadata_bulk(self, session_id: str, updates: dict) -> Session:
+        """Set multiple metadata keys. Rejects entire batch if any key is read-only."""
+        read_only = READ_ONLY_METADATA_KEYS & updates.keys()
+        if read_only:
+            raise ValueError(f"Cannot set read-only metadata key(s): {', '.join(sorted(read_only))}")
+        with self._lock:
+            if session_id not in self._sessions:
+                raise ValueError(f"Session '{session_id}' not found")
+            session = self._sessions[session_id]
+            session.metadata.update(updates)
+            session.last_active = datetime.now(timezone.utc).isoformat()
+            self._mark_dirty()
+            return session
+
+    def delete_metadata(self, session_id: str, key: str) -> Session:
+        """Delete a metadata key. Raises ValueError for read-only or missing keys."""
+        if key in READ_ONLY_METADATA_KEYS:
+            raise ValueError(f"Cannot delete read-only metadata key: {key}")
+        with self._lock:
+            if session_id not in self._sessions:
+                raise ValueError(f"Session '{session_id}' not found")
+            session = self._sessions[session_id]
+            if key not in session.metadata:
+                raise ValueError(f"Key '{key}' not found in metadata")
+            del session.metadata[key]
+            session.last_active = datetime.now(timezone.utc).isoformat()
+            self._mark_dirty()
+            return session
+
+    # ── Channel session index ──
+
+    def get_or_create_channel_session(self, channel_id: str, agent: str, user_id: str) -> Session:
+        with self._lock:
+            key = (channel_id, agent)
+            if key in self._channel_index:
+                session_id = self._channel_index[key]
+                if session_id in self._sessions:
+                    existing = self._sessions[session_id]
+                    if existing.status in _TERMINAL_STATUSES:
+                        existing.status = SessionStatus.ACTIVE.value
+                        self._mark_dirty()
+                    return existing
+
+            conv_id = f"channel_{agent}_{channel_id}"
+            session = Session(
+                id=conv_id,
+                agent=agent,
+                source=SessionSource.INTERACTIVE.value,
+                user_id=user_id,
+                metadata={"channel_id": channel_id},
+            )
+            tokens, msg_count = self._estimate_tokens(conv_id)
+            session.cumulative_tokens = tokens
+            session.message_count = msg_count
+            self._sessions[conv_id] = session
+            self._channel_index[key] = conv_id
+            self._save()
+            return session
+
+    def find_by_channel(self, channel_id: str, agent: str) -> Optional[Session]:
+        with self._lock:
+            session_id = self._channel_index.get((channel_id, agent))
+            if session_id:
+                return self._sessions.get(session_id)
+        return None
+
     # ── Thread lookup ──
 
     def find_by_thread(self, platform_thread_id: str) -> Optional[Session]:
@@ -481,6 +556,9 @@ class SessionStore:
                         self._interactive_index[key] = sid
                 if session.platform_thread_id:
                     self._thread_index[session.platform_thread_id] = sid
+                channel_id = session.metadata.get("channel_id") if session.metadata else None
+                if channel_id:
+                    self._channel_index[(channel_id, session.agent)] = sid
         except (json.JSONDecodeError, TypeError, KeyError) as e:
             logger.error("Failed to load session store from %s: %s", self._path, e)
 

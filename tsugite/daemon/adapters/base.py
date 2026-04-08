@@ -317,29 +317,19 @@ class BaseAdapter(ABC):
         # Session context
         ctx["is_session"] = channel_context.source == "session"
         ctx["session_id"] = meta.get("session_id", "") if ctx["is_session"] else ""
+        ctx["is_channel_session"] = bool(meta.get("channel_session"))
+        ctx["can_spawn_sessions"] = True  # Always true in daemon mode
 
-        # Single pass over sessions for orchestrator awareness
         window_minutes = meta.get("heartbeat_window", 10)
-        now = datetime.now(timezone.utc)
-        active_sessions = []
-        recent_completions = []
-        for s in self.session_store.list_sessions():
-            if s.status == "running":
-                active_sessions.append(
-                    {
-                        "id": s.id,
-                        "agent": s.agent,
-                        "status": s.status,
-                        "prompt": (s.prompt or "")[:100],
-                        "source": s.source,
-                    }
-                )
-            elif s.status in ("completed", "failed") and _is_recent(s.last_active, minutes=window_minutes, now=now):
-                recent_completions.append(
-                    {"id": s.id, "agent": s.agent, "status": s.status, "result": (s.result or "")[:200]}
-                )
-        ctx["active_sessions"] = active_sessions
-        ctx["recent_completions"] = recent_completions
+        since = (datetime.now(timezone.utc) - timedelta(minutes=window_minutes)).isoformat()
+        ctx["active_sessions"] = [
+            {"id": s.id, "agent": s.agent, "status": s.status, "prompt": (s.prompt or "")[:100], "source": s.source}
+            for s in self.session_store.list_sessions(status="running")
+        ]
+        ctx["recent_completions"] = [
+            {"id": s.id, "agent": s.agent, "status": s.status, "result": (s.result or "")[:200]}
+            for s in self.session_store.list_sessions(status="completed", updated_since=since)
+        ]
 
         return ctx
 
@@ -361,7 +351,11 @@ class BaseAdapter(ABC):
         except Exception:
             timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         try:
-            session = self.session_store.get_or_create_interactive(user_id, self.agent_name)
+            conv_id_override = (channel_context.metadata or {}).get("conv_id_override")
+            if conv_id_override:
+                session = self.session_store.get_session(conv_id_override)
+            else:
+                session = self.session_store.get_or_create_interactive(user_id, self.agent_name)
             tokens_used = session.cumulative_tokens
         except Exception:
             tokens_used = 0

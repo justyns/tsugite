@@ -106,28 +106,35 @@
     <div class="view-scroll two-pane" style="height:100%; overflow:hidden">
       <!-- Session sidebar -->
       <div class="pane-sidebar" :class="{ 'sidebar-open': sidebarOpen, 'mobile-hidden': selectedSessionId }">
-        <div class="section-header"><h2>Sessions</h2></div>
+        <div class="section-header" style="display:flex;align-items:center;justify-content:space-between">
+          <h2>Sessions</h2>
+          <button class="btn-sm" @click="newSession()" title="New conversation" style="padding:2px 8px;font-size:12px">+</button>
+        </div>
         <template x-if="loading">
           <div class="empty-state"><span class="spinner"></span></div>
         </template>
-        <input type="text" x-model="sessionFilter" placeholder="Filter sessions..." class="session-filter"
-               x-show="!loading && allSessions.length > 0">
+        <!-- Filter bar -->
+        <div class="session-filter-bar" x-show="!loading && allSessions.length > 0">
+          <input type="text" x-model="sessionFilter" placeholder="Filter..." class="session-filter" style="flex:1" aria-label="Filter sessions">
+        </div>
         <div class="turn-list">
-          <!-- Interactive sessions (always show header with + button) -->
+          <!-- Active sessions -->
           <template x-if="!loading">
             <div>
-              <div class="session-group-header" style="display:flex;align-items:center;justify-content:space-between">
-                <span>Interactive</span>
-                <button class="btn-sm" @click="newSession()" title="New conversation" style="padding:2px 8px;font-size:12px">+</button>
+              <div class="session-group-header">
+                Active
+                <span class="badge badge-muted" style="font-size:10px;margin-left:4px"
+                      x-text="groupedSessions.active.length" x-show="groupedSessions.active.length > 0"></span>
               </div>
-              <template x-for="s in groupedSessions.interactive" :key="s.conversation_id || s.id">
+              <template x-if="groupedSessions.active.length === 0">
+                <div class="turn-item" style="opacity:0.5;font-style:italic">No active sessions</div>
+              </template>
+              <template x-for="s in groupedSessions.active" :key="s.conversation_id || s.id">
                 <div class="turn-item" :class="{ active: selectedSessionId === (s.conversation_id || s.id) }"
-                     @click="selectSession(s)">
+                     @click="selectSession(s)" tabindex="0" role="button" @keydown.enter="selectSession(s)">
                   <div class="item-row">
                     <span class="status-dot" :style="{ background: statusDotColor(s.state) }"></span>
-                    <template x-if="s.is_default">
-                      <span style="font-size:9px;color:var(--accent);flex-shrink:0" title="Default session">&#9679;</span>
-                    </template>
+                    <span class="source-icon" x-text="sourceIcon(s.source)" :title="s.source"></span>
                     <template x-if="editingSessionId === s.id && !s.is_default">
                       <input class="session-title-input" type="text" x-model="editingTitle"
                              @blur="saveTitle(s)" @keydown.enter="saveTitle(s)" @keydown.escape="editingSessionId = null"
@@ -142,25 +149,36 @@
                       </span>
                     </template>
                   </div>
+                  <div class="session-chips" x-show="metadataChips(s).length > 0">
+                    <template x-for="chip in metadataChips(s).filter(c => c.href)" :key="chip.label">
+                      <a class="session-chip" :class="chip.cls" :href="chip.href" target="_blank"
+                         x-text="chip.label" @click.stop></a>
+                    </template>
+                    <template x-for="chip in metadataChips(s).filter(c => !c.href)" :key="chip.label">
+                      <span class="session-chip" :class="chip.cls" x-text="chip.label"></span>
+                    </template>
+                  </div>
+                  <div class="session-preview" x-text="lastMessagePreview(s)" x-show="lastMessagePreview(s)"></div>
                   <div class="turn-meta" x-text="formatDate(s.last_active || s.created_at)"></div>
                 </div>
               </template>
             </div>
           </template>
 
-          <!-- Scheduled sessions -->
-          <template x-if="groupedSessions.scheduled.length > 0 || groupedSessions.scheduledHidden > 0">
+          <!-- Recent sessions -->
+          <template x-if="groupedSessions.recent.length > 0 || groupedSessions.recentHidden > 0">
             <details>
               <summary class="session-group-header">
-                Scheduled
+                Recent
                 <span class="badge badge-muted" style="font-size:10px;margin-left:4px"
-                      x-text="groupedSessions.scheduledTotal"></span>
+                      x-text="groupedSessions.recentTotal"></span>
               </summary>
-              <template x-for="s in groupedSessions.scheduled" :key="s.conversation_id || s.id">
+              <template x-for="s in groupedSessions.recent" :key="s.conversation_id || s.id">
                 <div class="turn-item" :class="{ active: selectedSessionId === (s.conversation_id || s.id) }"
-                     @click="selectSession(s)">
+                     @click="selectSession(s)" tabindex="0" role="button" @keydown.enter="selectSession(s)">
                   <div class="item-row">
                     <span class="status-dot" :style="{ background: statusDotColor(s.state) }"></span>
+                    <span class="source-icon" x-text="sourceIcon(s.source)" :title="s.source"></span>
                     <template x-if="editingSessionId === s.id">
                       <input class="session-title-input" type="text" x-model="editingTitle"
                              @blur="saveTitle(s)" @keydown.enter="saveTitle(s)" @keydown.escape="editingSessionId = null"
@@ -173,44 +191,22 @@
                       </span>
                     </template>
                   </div>
+                  <div class="session-chips" x-show="metadataChips(s).length > 0">
+                    <template x-for="chip in metadataChips(s).filter(c => c.href)" :key="chip.label">
+                      <a class="session-chip" :class="chip.cls" :href="chip.href" target="_blank"
+                         x-text="chip.label" @click.stop></a>
+                    </template>
+                    <template x-for="chip in metadataChips(s).filter(c => !c.href)" :key="chip.label">
+                      <span class="session-chip" :class="chip.cls" x-text="chip.label"></span>
+                    </template>
+                  </div>
                   <div class="turn-meta" x-text="formatDate(s.last_active || s.created_at)"></div>
                 </div>
               </template>
-              <template x-if="groupedSessions.scheduledHidden > 0">
+              <template x-if="groupedSessions.recentHidden > 0">
                 <div class="turn-item" style="opacity:0.6;font-style:italic;cursor:pointer"
-                     @click="showCompletedScheduled = !showCompletedScheduled">
-                  <span x-text="showCompletedScheduled ? 'Hide completed' : groupedSessions.scheduledHidden + ' completed (click to show)'"></span>
-                </div>
-              </template>
-            </details>
-          </template>
-
-          <!-- Background sessions -->
-          <template x-if="groupedSessions.background.length > 0">
-            <details>
-              <summary class="session-group-header">
-                Background
-                <span class="badge badge-muted" style="font-size:10px;margin-left:4px"
-                      x-text="groupedSessions.background.length"></span>
-              </summary>
-              <template x-for="s in groupedSessions.background" :key="s.conversation_id || s.id">
-                <div class="turn-item" :class="{ active: selectedSessionId === (s.conversation_id || s.id) }"
-                     @click="selectSession(s)">
-                  <div class="item-row">
-                    <span class="status-dot" :style="{ background: statusDotColor(s.state) }"></span>
-                    <template x-if="editingSessionId === s.id">
-                      <input class="session-title-input" type="text" x-model="editingTitle"
-                             @blur="saveTitle(s)" @keydown.enter="saveTitle(s)" @keydown.escape="editingSessionId = null"
-                             @click.stop>
-                    </template>
-                    <template x-if="editingSessionId !== s.id">
-                      <span class="session-label-row">
-                        <span x-text="sessionLabel(s)" class="session-label"></span>
-                        <span class="session-edit-btn" @click="startEditTitle(s, $event)" title="Rename">&#9998;</span>
-                      </span>
-                    </template>
-                  </div>
-                  <div class="turn-meta" x-text="formatDate(s.last_active || s.created_at)"></div>
+                     @click="showRecentHidden = !showRecentHidden">
+                  <span x-text="showRecentHidden ? 'Show less' : groupedSessions.recentHidden + ' more (click to show)'"></span>
                 </div>
               </template>
             </details>
@@ -225,6 +221,62 @@
           <span x-text="sidebarOpen ? 'Hide Sessions' : 'Sessions'"></span>
         </button>
         <button class="mobile-back-btn" @click="backToSessions()">&#8592; Sessions</button>
+
+        <!-- Context bar -->
+        <div class="context-bar" x-show="selectedSessionId && selectedSessionMeta" x-cloak>
+          <div class="context-bar-top">
+            <h3 class="context-title" @click="startEditTitle(selectedSessionMeta, $event)"
+                @keydown.enter="startEditTitle(selectedSessionMeta, $event)"
+                tabindex="0" role="button"
+                x-text="selectedSessionMeta?.title || sessionLabel(selectedSessionMeta)" title="Click to rename"></h3>
+          </div>
+          <div class="context-chips" x-show="(selectedSessionMeta?.metadata||{}).type || (selectedSessionMeta?.metadata||{}).status_text || (selectedSessionMeta?.metadata||{}).task || (selectedSessionMeta?.metadata||{}).pr">
+            <template x-if="(selectedSessionMeta?.metadata||{}).type">
+              <span class="session-chip chip-type" x-text="selectedSessionMeta.metadata.type"></span>
+            </template>
+            <template x-if="(selectedSessionMeta?.metadata||{}).status_text">
+              <span class="session-chip chip-status" x-text="selectedSessionMeta.metadata.status_text"></span>
+            </template>
+            <template x-if="(selectedSessionMeta?.metadata||{}).task">
+              <a class="session-chip chip-link" :href="selectedSessionMeta.metadata.task" target="_blank">Task</a>
+            </template>
+            <template x-if="(selectedSessionMeta?.metadata||{}).pr">
+              <a class="session-chip chip-link" :href="selectedSessionMeta.metadata.pr" target="_blank">PR</a>
+            </template>
+          </div>
+          <div class="context-meta-row">
+            <span x-text="selectedSessionMeta?.agent || $store.app.selectedAgent"></span>
+            <template x-if="statusInfo?.model">
+              <span class="badge badge-muted" x-text="statusInfo.model"></span>
+            </template>
+            <template x-if="statusInfo?.tokens != null && statusInfo?.context_limit">
+              <div class="context-meter" @click="openPromptInspector()" title="Click for prompt details" style="cursor:pointer">
+                <div class="context-meter-bar">
+                  <div class="context-meter-fill"
+                       :style="'width:' + Math.min(100, (statusInfo.tokens / statusInfo.context_limit) * 100) + '%'"
+                       :class="{ 'meter-warn': statusInfo.tokens / statusInfo.context_limit > 0.8 }"></div>
+                </div>
+                <span class="context-meter-label"
+                      x-text="(statusInfo.tokens/1000).toFixed(1) + 'k / ' + (statusInfo.context_limit/1000).toFixed(0) + 'k'"></span>
+              </div>
+            </template>
+            <template x-if="(selectedSessionMeta?.metadata||{}).working_dir">
+              <span class="context-workdir" x-text="selectedSessionMeta.metadata.working_dir" title="Working directory"></span>
+            </template>
+          </div>
+          <div style="display:flex;gap:6px;margin-top:4px" x-show="selectedSessionMeta && !isActiveSession">
+            <template x-if="canCancel(selectedSessionMeta)">
+              <button class="btn-sm" style="color:var(--error)" @click="cancelSession(selectedSessionMeta)">Cancel</button>
+            </template>
+            <template x-if="canComplete(selectedSessionMeta)">
+              <button class="btn-sm" @click="completeSession(selectedSessionMeta)">Complete</button>
+            </template>
+            <template x-if="canRestart(selectedSessionMeta)">
+              <button class="btn-sm" @click="restartSession(selectedSessionMeta)">Restart</button>
+            </template>
+          </div>
+        </div>
+
         <template x-if="!selectedSessionId">
           <div class="empty-state">
             <div>Select a session or</div>
@@ -459,39 +511,19 @@
           </div>
         </template>
 
-        <!-- Non-interactive session: read-only history -->
+        <!-- Non-interactive session: history + optional reply -->
         <template x-if="selectedSessionId && !isActiveSession">
+          <div style="display:flex;flex-direction:column;flex:1;min-height:0">
           <div style="overflow-y:auto;flex:1">
-            <!-- Session metadata header -->
-            <template x-if="selectedSessionMeta">
+            <template x-if="selectedSessionMeta && turns.length === 0">
               <div style="margin-bottom:12px">
-                <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
-                  <span class="badge" :class="stateBadge(selectedSessionMeta.state)" x-text="selectedSessionMeta.state"></span>
-                  <span class="badge badge-muted" x-text="selectedSessionMeta.source || 'background'" style="font-weight:normal"></span>
-                  <template x-if="selectedSessionMeta.model">
-                    <span style="font-size:11px;color:var(--muted)" x-text="selectedSessionMeta.model"></span>
-                  </template>
-                  <span style="font-size:11px;color:var(--muted)" x-text="formatDate(selectedSessionMeta.created_at)"></span>
-                  <div style="display:flex;gap:6px;margin-left:auto">
-                    <template x-if="canCancel(selectedSessionMeta)">
-                      <button class="btn-sm danger" @click="cancelSession(selectedSessionMeta)">Cancel</button>
-                    </template>
-                    <template x-if="canComplete(selectedSessionMeta)">
-                      <button class="btn-sm" @click="completeSession(selectedSessionMeta)">Mark Complete</button>
-                    </template>
-                    <template x-if="canRestart(selectedSessionMeta)">
-                      <button class="btn-sm" @click="restartSession(selectedSessionMeta)">Restart</button>
-                    </template>
-                  </div>
-                </div>
-                <div style="font-size:11px;color:var(--muted);margin-bottom:8px;word-break:break-all" x-text="selectedSessionMeta.id || selectedSessionMeta.conversation_id"></div>
                 <template x-if="selectedSessionMeta.prompt">
                   <div class="msg user" x-html="renderHtml(selectedSessionMeta.prompt)"></div>
                 </template>
                 <template x-if="selectedSessionMeta.error">
                   <div class="msg error" x-text="selectedSessionMeta.error" style="margin-top:8px"></div>
                 </template>
-                <template x-if="selectedSessionMeta.result && turns.length === 0">
+                <template x-if="selectedSessionMeta.result">
                   <div class="msg agent" x-html="renderHtml(selectedSessionMeta.result)" style="margin-top:8px"></div>
                 </template>
               </div>
@@ -556,6 +588,18 @@
                 </div>
               </template>
             </div>
+          </div>
+          <!-- Reply input for running spawned/background sessions -->
+          <template x-if="selectedSessionMeta?.state === 'running' || selectedSessionMeta?.state === 'active'">
+            <div id="input-area" style="border-top:1px solid var(--border);padding:8px 16px">
+              <div class="input-row">
+                <textarea x-model="messageText" placeholder="Send a follow-up message..."
+                          @keydown.enter.prevent="if(!$event.shiftKey) sendMessage()"
+                          rows="1" :disabled="sending"></textarea>
+                <button class="btn-sm" x-show="!sending" @click="sendMessage()">Send</button>
+              </div>
+            </div>
+          </template>
           </div>
         </template>
       </div>
@@ -720,6 +764,7 @@
           </div>
         </template>
       </div>
+
     </div>
   </div>
 

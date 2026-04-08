@@ -76,7 +76,6 @@ def start_session(
 
     if agent is None:
         from tsugite.agent_runner.helpers import get_current_agent
-
         agent = get_current_agent() or "default"
 
     session = Session(
@@ -88,9 +87,14 @@ def start_session(
         agent_file=agent_file,
         notify=notify or [],
     )
-
     result = _call(_session_runner.start_session, session)
     return asdict(result)
+
+
+def get_current_session_id():
+    from tsugite.daemon.session_runner import get_current_session_id as _get
+
+    return _get()
 
 
 @tool(require_daemon=True)
@@ -177,21 +181,26 @@ def rename_session(session_id: str, title: str) -> dict:
 
 
 @tool(require_daemon=True)
-def session_spawn(
+def spawn_session(
     prompt: str,
     agent: Optional[str] = None,
+    model: Optional[str] = None,
+    agent_file: Optional[str] = None,
     name: Optional[str] = None,
     parent_session_id: Optional[str] = None,
     notify: Optional[list[str]] = None,
 ) -> dict:
-    """Spawn a new long-running session with parent linkage.
+    """Spawn a new background session that runs independently.
 
-    Unlike start_session, spawned sessions are meant for long-running agent-managed
-    workstreams that may outlive the current conversation.
+    Creates a new session with its own conversation history, visible in the web UI.
+    The parent session is notified when the spawned session completes.
+    Use this instead of spawn_agent when running in daemon mode.
 
     Args:
         prompt: Task instruction for the spawned session.
         agent: Agent name. Defaults to the current agent.
+        model: Optional model override (e.g. "anthropic:claude-sonnet-4-20250514").
+        agent_file: Agent file name or path to use instead of the default.
         name: Human-readable name for the session (used as session ID prefix).
         parent_session_id: Parent session ID for tracking lineage.
         notify: Notification channels for result delivery.
@@ -203,19 +212,46 @@ def session_spawn(
 
     if agent is None:
         from tsugite.agent_runner.helpers import get_current_agent
-
         agent = get_current_agent() or "default"
 
-    session_id = f"spawn-{name}" if name else ""
+    if parent_session_id is None:
+        parent_session_id = get_current_session_id()
 
     session = Session(
-        id=session_id,
+        id=f"spawn-{name}" if name else "",
         agent=agent,
         source=SessionSource.SPAWNED.value,
         prompt=prompt,
+        model=model,
+        agent_file=agent_file,
         parent_id=parent_session_id,
         notify=notify or [],
     )
-
     result = _call(_session_runner.start_session, session)
     return asdict(result)
+
+
+@tool(require_daemon=True)
+def session_metadata(key: str, value: Optional[str] = None, session_id: Optional[str] = None) -> dict:
+    """Set, update, or delete a metadata key on a session.
+
+    Args:
+        key: Metadata key to set or delete.
+        value: Value to set. Pass None to delete the key.
+        session_id: Target session. Defaults to the current session.
+
+    Returns:
+        Dict with session_id and updated metadata.
+    """
+    if session_id is None:
+        session_id = get_current_session_id()
+    if not session_id:
+        return {"error": "No active session"}
+    try:
+        if value is None:
+            session = _call(_session_runner.delete_session_metadata, session_id, key)
+        else:
+            session = _call(_session_runner.update_session_metadata, session_id, {key: value})
+        return {"session_id": session_id, "metadata": session.metadata}
+    except ValueError as e:
+        return {"error": str(e)}

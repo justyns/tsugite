@@ -192,9 +192,10 @@ main { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
 
 /* Session groups */
 .session-group-header { padding: 6px 12px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); border-bottom: 1px solid var(--border); cursor: pointer; user-select: none; }
-.session-filter { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 12px; font-family: inherit; margin-bottom: 8px; box-sizing: border-box; }
+.session-filter { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 12px; font-family: inherit; box-sizing: border-box; }
 .session-filter:focus { outline: none; border-color: var(--accent); }
 .session-filter::placeholder { color: var(--muted); }
+.session-filter-bar { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
 .status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 .item-row { display: flex; align-items: center; gap: 6px; }
 .session-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -204,6 +205,32 @@ main { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
 .turn-item:hover .session-edit-btn { opacity: 0.7; }
 .session-edit-btn:hover { opacity: 1 !important; color: var(--accent); }
 .session-title-input { background: var(--surface); color: var(--text); border: 1px solid var(--accent); border-radius: 4px; padding: 1px 4px; font-size: 13px; width: 100%; outline: none; }
+
+/* Source icons */
+.source-icon { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 3px; background: var(--code-bg); font-size: 10px; font-weight: 700; font-family: monospace; flex-shrink: 0; color: var(--muted); }
+
+/* Metadata chips */
+.session-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.session-chip { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 8px; background: var(--code-bg); color: var(--text); white-space: nowrap; }
+.chip-type { background: color-mix(in srgb, var(--accent) 15%, transparent); }
+.chip-status { background: color-mix(in srgb, var(--ctp-yellow, #e5c890) 15%, transparent); }
+.chip-link { color: var(--accent); text-decoration: none; cursor: pointer; }
+.chip-link:hover { text-decoration: underline; }
+.session-preview { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+
+/* Context bar */
+.context-bar { padding: 8px 16px; background: var(--surface); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.context-bar-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.context-title { font-size: 15px; font-weight: 600; cursor: pointer; border-bottom: 1px dashed transparent; margin: 0; }
+.context-title:hover { border-bottom-color: var(--muted); }
+.context-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.context-meta-row { display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: 12px; color: var(--muted); }
+.context-meter { display: flex; align-items: center; gap: 6px; }
+.context-meter-bar { width: 80px; height: 6px; background: var(--code-bg); border-radius: 3px; overflow: hidden; }
+.context-meter-fill { height: 100%; background: var(--ok); border-radius: 3px; transition: width 0.3s; }
+.context-meter-fill.meter-warn { background: var(--ctp-yellow, #e5c890); }
+.context-meter-label { font-size: 11px; }
+.context-workdir { font-family: monospace; font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 250px; }
 
 /* Turn list (history view) */
 .turn-list { display: flex; flex-direction: column; gap: 8px; }

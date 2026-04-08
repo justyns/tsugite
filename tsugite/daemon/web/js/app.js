@@ -12,9 +12,15 @@ import usageView from './views/usage.js';
 window.Alpine = Alpine;
 window.tsugiteApi = { get, post, patch };
 
+function parseHash(hash) {
+  const [view, query] = hash.split('?');
+  const params = new URLSearchParams(query || '');
+  return { view: view || '', sessionId: params.get('session') || '' };
+}
+
 const legacyViews = { chat: 'conversations', sessions: 'conversations', history: 'conversations' };
-const initialHash = location.hash.slice(1);
-const initialView = legacyViews[initialHash] || initialHash || localStorage.getItem('tsugite-view') || 'dashboard';
+const initialParsed = parseHash(location.hash.slice(1));
+const initialView = legacyViews[initialParsed.view] || initialParsed.view || localStorage.getItem('tsugite-view') || 'dashboard';
 
 Alpine.store('app', {
   tabs: ['dashboard','conversations','workspace','agents','skills','schedules','webhooks','kvstore','usage'],
@@ -27,7 +33,7 @@ Alpine.store('app', {
   showSettings: false,
   menuOpen: false,
   lastEvent: null,
-  viewSessionId: null,
+  viewSessionId: initialParsed.sessionId || null,
   pendingWorkspaceFiles: [],
   autoFollow: localStorage.getItem('tsugite_auto_follow') !== 'false',
 });
@@ -43,8 +49,10 @@ Alpine.data('kvstoreView', kvstoreView);
 Alpine.data('usageView', usageView);
 
 window.addEventListener('hashchange', () => {
-  const hash = location.hash.slice(1);
-  if (hash) Alpine.store('app').view = legacyViews[hash] || hash;
+  const { view, sessionId } = parseHash(location.hash.slice(1));
+  const store = Alpine.store('app');
+  if (view) store.view = legacyViews[view] || view;
+  if (sessionId) store.viewSessionId = sessionId;
 });
 
 Alpine.start();
@@ -53,7 +61,8 @@ Alpine.start();
 Alpine.effect(() => {
   const store = Alpine.store('app');
   localStorage.setItem('tsugite-view', store.view);
-  if (location.hash.slice(1) !== store.view) location.hash = store.view;
+  const currentView = parseHash(location.hash.slice(1)).view;
+  if (currentView !== store.view) location.hash = store.view;
   if (store.selectedAgent) localStorage.setItem('tsugite-agent', store.selectedAgent);
 });
 

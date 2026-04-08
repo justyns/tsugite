@@ -24,7 +24,7 @@ _SAMPLE_SNAPSHOT = (
 
 
 def test_context_link_opens_inspector(chat_page, mock_chat):
-    """Clicking the Context stat in the status bar opens the prompt inspector modal."""
+    """Clicking the context meter in the context bar opens the prompt inspector modal."""
     mock_chat("Done!", events=[_SAMPLE_SNAPSHOT])
 
     page = chat_page
@@ -34,8 +34,11 @@ def test_context_link_opens_inspector(chat_page, mock_chat):
 
     page.wait_for_selector(".msg.agent", timeout=15000)
 
-    context_link = page.locator("#status-bar .att-link", has_text="k /")
-    context_link.click()
+    context_meter = page.locator(".context-meter")
+    if context_meter.is_visible():
+        context_meter.click()
+    else:
+        page.locator("#status-bar .att-link", has_text="k /").click()
 
     page.wait_for_selector(".prompt-inspector", timeout=3000)
     assert page.locator(".token-bar").is_visible()

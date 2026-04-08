@@ -7,7 +7,7 @@ export const sessionsMixin = {
   isActiveSession: true,
   selectedSessionMeta: null,
   sidebarOpen: false,
-  showCompletedScheduled: false,
+  showRecentHidden: false,
   sessionFilter: '',
   editingSessionId: null,
   editingTitle: '',
@@ -33,7 +33,7 @@ export const sessionsMixin = {
 
   autoSelectInteractive() {
     const g = this.groupedSessions;
-    const first = g.interactive[0] || g.scheduled[0] || g.background[0];
+    const first = g.active[0] || g.recent[0];
     if (first) this.selectSession(first);
   },
 
@@ -43,7 +43,11 @@ export const sessionsMixin = {
     this.selectedSessionId = convId;
     this.selectedSessionMeta = session;
     this.messages = [];
+    this.statusInfo = {};
     this.resetHistory();
+
+    const hash = `conversations?session=${encodeURIComponent(convId)}`;
+    if (location.hash.slice(1) !== hash) location.hash = hash;
 
     this.isActiveSession = this._isMyInteractive(session);
 
@@ -158,8 +162,36 @@ export const sessionsMixin = {
   },
 
   statusDotColor(state) {
-    if (state === 'active' || state === 'running') return 'var(--ok)';
+    if (state === 'running') return 'var(--ok)';
+    if (state === 'active') return 'var(--ctp-yellow, var(--ok))';
     if (state === 'error' || state === 'failed') return 'var(--error)';
     return 'var(--muted)';
+  },
+
+  sourceIcon(source) {
+    return { interactive: 'I', web: 'W', discord: 'D', cli: '>', schedule: 'S',
+             background: 'B', spawned: 'P' }[source] || '?';
+  },
+
+  metadataChips(s) {
+    const meta = s.metadata || {};
+    const chips = [];
+    if (meta.type) chips.push({ label: meta.type, cls: 'chip-type' });
+    if (meta.status_text) chips.push({ label: meta.status_text, cls: 'chip-status' });
+    if (meta.task) chips.push({ label: 'Task', href: meta.task, cls: 'chip-link' });
+    if (meta.pr) chips.push({ label: 'PR', href: meta.pr, cls: 'chip-link' });
+    return chips;
+  },
+
+  lastMessagePreview(s) {
+    return (s.result || s.prompt || '').slice(0, 60) || '';
+  },
+
+  _matchesFilters(s) {
+    if (this.sessionFilter) {
+      const text = [s.title, s.label, s.id, s.conversation_id, s.source, s.state].filter(Boolean).join(' ');
+      if (!text.toLowerCase().includes(this.sessionFilter.toLowerCase())) return false;
+    }
+    return true;
   },
 };

@@ -295,7 +295,11 @@ class Gateway:
             from tsugite.tools.sessions import set_session_runner
 
             event_bus = self._http_server.event_bus if self._http_server else None
-            self._session_runner = SessionRunner(session_store, http_adapters, event_bus=event_bus)
+            self._session_runner = SessionRunner(
+                session_store,
+                http_adapters,
+                event_bus=event_bus,
+            )
             if self._http_server:
                 self._http_server.session_runner = self._session_runner
             set_session_runner(self._session_runner, asyncio.get_running_loop())

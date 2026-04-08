@@ -23,7 +23,6 @@ export default () => ({
   showSkills: false,
   loadedSkills: [],
   inspectingSnapshot: null,
-
   // Getters must stay here — spread loses get descriptors
   get userId() {
     return this.$store.app.userId;
@@ -38,54 +37,37 @@ export default () => ({
   },
 
   get groupedSessions() {
-    const userId = this.userId;
-    const filter = this.sessionFilter.toLowerCase();
-    const interactive = [];
-    const scheduled = [];
-    const background = [];
+    const active = [];
+    const recent = [];
 
     for (const s of this.allSessions) {
-      if (filter) {
-        const text = (s.title || '') + (s.label || '') + (s.id || '') + (s.conversation_id || '') + (s.source || '') + (s.state || '');
-        if (!text.toLowerCase().includes(filter)) continue;
-      }
-      if (this._isMyInteractive(s)) {
-        interactive.push(s);
-      } else if (s.source === 'schedule' || (s.id && s.id.startsWith('sched_'))) {
-        scheduled.push(s);
+      if (!this._matchesFilters(s)) continue;
+      const state = s.state;
+      if (state === 'active' || state === 'running') {
+        active.push(s);
       } else {
-        background.push(s);
+        recent.push(s);
       }
     }
 
     const byDate = (a, b) => (b.last_active || b.created_at || '').localeCompare(a.last_active || a.created_at || '');
-    interactive.sort(byDate);
-    scheduled.sort(byDate);
-    background.sort(byDate);
+    active.sort(byDate);
+    recent.sort(byDate);
 
-    const filteredScheduled = this.showCompletedScheduled
-      ? scheduled
-      : scheduled.filter(s => s.state === 'active' || s.state === 'running');
+    const maxRecent = 10;
+    const visibleRecent = this.showRecentHidden ? recent : recent.slice(0, maxRecent);
 
     return {
-      interactive,
-      scheduled: filteredScheduled,
-      scheduledTotal: scheduled.length,
-      scheduledHidden: scheduled.length - filteredScheduled.length,
-      background,
+      active,
+      recent: visibleRecent,
+      recentTotal: recent.length,
+      recentHidden: recent.length - visibleRecent.length,
     };
   },
 
   get statusParts() {
     const info = this.statusInfo;
     const parts = [];
-    if (info.model) parts.push({ label: 'Model', value: info.model });
-    if (info.tokens != null && info.context_limit) {
-      const tk = (info.tokens / 1000).toFixed(1);
-      const lk = (info.context_limit / 1000).toFixed(0);
-      const pct = ((info.tokens / info.context_limit) * 100).toFixed(0);
-      parts.push({ label: 'Context', value: `${tk}k / ${lk}k (${pct}%)`, isLink: 'context' });
-    }
     if (info.message_count != null) parts.push({ label: 'Messages', value: String(info.message_count) });
     if (info.attachments?.length) parts.push({ label: 'Attachments', value: `${info.attachments.length} file${info.attachments.length > 1 ? 's' : ''}`, isLink: 'attachments' });
     if (this.loadedSkills.length) parts.push({ label: 'Skills', value: `${this.loadedSkills.length} loaded`, isLink: 'skills' });
@@ -108,20 +90,32 @@ export default () => ({
     }
     this.$watch('$store.app.lastEvent', (ev) => {
       if (!ev) return;
-      if (ev.type === 'history_update' && ev.agent === this.$store.app.selectedAgent) {
+      const d = ev.data || {};
+
+      if (ev.type === 'history_update' && d.agent === this.$store.app.selectedAgent) {
         if (this.isActiveSession) this._debouncedLoadHistory();
       }
       if (ev.type === 'session_update') {
-        if (ev.action === 'titled' && ev.title) {
-          const s = this.allSessions.find(x => x.id === ev.id);
-          if (s) { s.title = ev.title; return; }
+        if (d.action === 'titled' && d.title) {
+          const s = this.allSessions.find(x => x.id === d.id);
+          if (s) { s.title = d.title; return; }
+        }
+        if (d.action === 'metadata_updated' && d.id && d.metadata) {
+          const s = this.allSessions.find(x => x.id === d.id);
+          if (s) {
+            s.metadata = { ...(s.metadata || {}), ...d.metadata };
+            if (this.selectedSessionId === (s.conversation_id || s.id)) {
+              this.selectedSessionMeta = { ...this.selectedSessionMeta, metadata: s.metadata };
+            }
+            return;
+          }
         }
         this._debouncedLoadSessions();
       }
-      if (ev.type === 'compaction_started' && ev.agent === this.$store.app.selectedAgent) {
+      if (ev.type === 'compaction_started' && d.agent === this.$store.app.selectedAgent) {
         this.compacting = true;
       }
-      if (ev.type === 'compaction_finished' && ev.agent === this.$store.app.selectedAgent) {
+      if (ev.type === 'compaction_finished' && d.agent === this.$store.app.selectedAgent) {
         this.compacting = false;
         if (this.isActiveSession) this.reload();
       }
@@ -180,7 +174,9 @@ export default () => ({
     const agent = this.$store.app.selectedAgent;
     if (!agent) return;
     try {
-      const data = await get(`/api/agents/${agent}/status?user_id=${encodeURIComponent(this.userId)}`);
+      let statusUrl = `/api/agents/${agent}/status?user_id=${encodeURIComponent(this.userId)}`;
+      if (this.selectedSessionId) statusUrl += `&session_id=${encodeURIComponent(this.selectedSessionId)}`;
+      const data = await get(statusUrl);
       this.statusInfo = data;
       if (data.compacting !== undefined) this.compacting = data.compacting;
       if (data.busy && data.pending_message && !this.sending &&

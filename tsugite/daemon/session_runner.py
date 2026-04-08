@@ -90,6 +90,9 @@ class SessionRunner:
             session.source = SessionSource.BACKGROUND.value
         session = self._store.create_session(session)
 
+        if self._event_bus:
+            self._event_bus.emit("session_update", {"action": "created", "id": session.id})
+
         progress = LoggingProgressHandler(self._store, session.id)
         progress._emit("session_start", {"agent": session.agent, "prompt": session.prompt[:200]})
 
@@ -114,6 +117,7 @@ class SessionRunner:
 
         metadata = {
             "session_id": session.id,
+            "conv_id_override": session.id,
             "model_override": session.model,
         }
         if session.agent_file:
@@ -138,7 +142,7 @@ class SessionRunner:
                 custom_logger=custom_logger,
             )
             result_str = str(result)
-            self._store.update_session(
+            updated = self._store.update_session(
                 session.id,
                 status=SessionStatus.COMPLETED.value,
                 result=result_str,
@@ -153,9 +157,16 @@ class SessionRunner:
 
             if self._notify_callback:
                 try:
-                    await self._notify_callback(self._store.get_session(session.id), result_str)
+                    await self._notify_callback(updated, result_str)
                 except Exception as e:
                     logger.error("Session '%s' notify callback failed: %s", session.id, e)
+
+            if session.parent_id:
+                try:
+                    summary = f"Session '{session.title or session.id}' completed: {result_str[:500]}"
+                    await self.reply_to_session(session.parent_id, summary, source="session_completion")
+                except Exception as e:
+                    logger.warning("Failed to notify parent session '%s': %s", session.parent_id, e)
 
         except asyncio.CancelledError:
             self._store.update_session(session.id, status=SessionStatus.CANCELLED.value)
@@ -169,12 +180,30 @@ class SessionRunner:
             if self._event_bus:
                 self._event_bus.emit("session_update", {"action": "failed", "id": session.id})
             logger.error("Session '%s' failed: %s", session.id, e)
+        finally:
+            self._store.flush()
 
     def rename_session(self, session_id: str, title: str) -> Session:
         session = self._store.update_session(session_id, title=title)
         if self._event_bus:
             self._event_bus.emit("session_update", {"action": "titled", "id": session_id, "title": title})
         return session
+
+    def update_session_metadata(self, session_id: str, updates: dict) -> Session:
+        session = self._store.set_metadata_bulk(session_id, updates)
+        self._emit_metadata_event(session_id, session.metadata)
+        return session
+
+    def delete_session_metadata(self, session_id: str, key: str) -> Session:
+        session = self._store.delete_metadata(session_id, key)
+        self._emit_metadata_event(session_id, session.metadata)
+        return session
+
+    def _emit_metadata_event(self, session_id: str, metadata: dict) -> None:
+        if self._event_bus:
+            self._event_bus.emit(
+                "session_update", {"action": "metadata_updated", "id": session_id, "metadata": metadata}
+            )
 
     async def _auto_title_background_session(self, session: Session, result_str: str, adapter) -> None:
         try:
@@ -225,6 +254,8 @@ class SessionRunner:
         )
 
         self._store.update_session(session_id, last_active=datetime.now(timezone.utc).isoformat())
+        if self._event_bus:
+            self._event_bus.emit("history_update", {"agent": session.agent})
         return result
 
     def get_active_sessions(self) -> list[Session]:

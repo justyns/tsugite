@@ -565,6 +565,7 @@ class DiscordAdapter(BaseAdapter):
     async def _process_message(self, message, user_msg: str, bot_name: str):
         """Process a message in an isolated task."""
         is_thread = isinstance(message.channel, discord.Thread)
+        is_dm = isinstance(message.channel, discord.DMChannel)
         thread_id = str(message.channel.id) if is_thread else None
 
         channel_context = ChannelContext(
@@ -588,6 +589,7 @@ class DiscordAdapter(BaseAdapter):
                 user_id = self.resolve_user(str(message.author.id), channel_context)
                 parent_session = self.session_store.get_or_create_interactive(user_id, self.agent_name)
 
+                parent_channel_id = getattr(message.channel, "parent_id", None)
                 thread_session = Session(
                     id="",
                     agent=self.agent_name,
@@ -595,10 +597,23 @@ class DiscordAdapter(BaseAdapter):
                     user_id=user_id,
                     parent_id=parent_session.id,
                     platform_thread_id=thread_id,
-                    metadata={"thread_name": getattr(message.channel, "name", "")},
+                    metadata={
+                        "thread_name": getattr(message.channel, "name", ""),
+                        "channel_id": str(parent_channel_id) if parent_channel_id else None,
+                        "thread_id": thread_id,
+                    },
                 )
                 self.session_store.create_session(thread_session)
                 channel_context.metadata["conv_id_override"] = thread_session.id
+
+        if not is_thread and not is_dm and message.guild:
+            user_id = self.resolve_user(str(message.author.id), channel_context)
+            channel_session = self.session_store.get_or_create_channel_session(
+                channel_id=str(message.channel.id),
+                agent=self.agent_name,
+                user_id=user_id,
+            )
+            channel_context.metadata["conv_id_override"] = channel_session.id
 
         loop = asyncio.get_running_loop()
         progress = DiscordProgressHandler(message.channel, loop, trigger_message=message)

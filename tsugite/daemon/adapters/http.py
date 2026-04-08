@@ -399,6 +399,9 @@ class HTTPServer:
             Route("/api/schedules/{schedule_id}/sessions", self._schedule_sessions, methods=["GET"]),
             Route("/api/sessions", self._api_list_sessions, methods=["GET"]),
             Route("/api/sessions", self._api_start_session, methods=["POST"]),
+            Route("/api/sessions/{session_id}/metadata", self._api_get_metadata, methods=["GET"]),
+            Route("/api/sessions/{session_id}/metadata", self._api_update_metadata, methods=["PATCH"]),
+            Route("/api/sessions/{session_id}/metadata/{key}", self._api_delete_metadata, methods=["DELETE"]),
             Route("/api/sessions/{session_id}", self._api_get_session, methods=["GET"]),
             Route("/api/sessions/{session_id}", self._api_update_session, methods=["PATCH"]),
             Route("/api/sessions/{session_id}/cancel", self._api_cancel_session, methods=["POST"]),
@@ -605,6 +608,7 @@ class HTTPServer:
                     "result": s.result,
                     "title": s.title,
                     "is_default": default_ids.get(user_id) == s.id,
+                    "metadata": s.metadata or {},
                 }
             )
 
@@ -642,7 +646,14 @@ class HTTPServer:
             return err
 
         user_id = adapter.resolve_http_user(request.query_params.get("user_id", "web-anonymous"))
-        session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
+        session_id = request.query_params.get("session_id")
+        if session_id:
+            try:
+                session = adapter.session_store.get_session(session_id)
+            except ValueError:
+                session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
+        else:
+            session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
 
         backend_key = (adapter.agent_name, user_id)
         backend = self._active_backends.get(backend_key)
@@ -655,6 +666,7 @@ class HTTPServer:
                 "threshold": adapter.session_store.get_compaction_threshold(adapter.agent_name),
                 "message_count": session.message_count,
                 "compacting": adapter.session_store.is_compacting(user_id, adapter.agent_name),
+                "metadata": session.metadata or {},
                 "busy": backend is not None,
                 "pending_message": backend.pending_message if backend else None,
                 "attachments": [
@@ -1457,6 +1469,7 @@ class HTTPServer:
                         "updated_at": s.last_active,
                         "error": s.error,
                         "title": s.title,
+                        "metadata": s.metadata or {},
                     }
                     for s in sessions
                 ]
@@ -1592,6 +1605,43 @@ class HTTPServer:
             return JSONResponse({"error": str(e)}, status_code=404)
         events = self.session_runner.store.read_events(session_id)
         return JSONResponse({"events": events})
+
+    async def _api_get_metadata(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_sessions(request):
+            return err
+        session_id = request.path_params["session_id"]
+        try:
+            session = self.session_runner.store.get_session(session_id)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+        return JSONResponse({"metadata": session.metadata or {}})
+
+    async def _api_update_metadata(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_sessions(request):
+            return err
+        session_id = request.path_params["session_id"]
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+        if not isinstance(body, dict):
+            return JSONResponse({"error": "Body must be a JSON object"}, status_code=400)
+        try:
+            session = self.session_runner.update_session_metadata(session_id, body)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        return JSONResponse({"ok": True, "metadata": session.metadata or {}})
+
+    async def _api_delete_metadata(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_sessions(request):
+            return err
+        session_id = request.path_params["session_id"]
+        key = request.path_params["key"]
+        try:
+            session = self.session_runner.delete_session_metadata(session_id, key)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        return JSONResponse({"ok": True, "metadata": session.metadata or {}})
 
     async def _list_webhooks(self, request: Request) -> JSONResponse:
         if err := self._check_auth(request):
