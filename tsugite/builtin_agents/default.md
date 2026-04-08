@@ -31,6 +31,7 @@ tools:
   - "@kv"
   - "@secrets"
   - "@schedule"
+  - "@scratchpad"
   - "@sessions"
   - "@tmux"
 auto_load_skills:
