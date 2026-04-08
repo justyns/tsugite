@@ -775,8 +775,21 @@ class DiscordAdapter(BaseAdapter):
         await thread.edit(archived=True)
 
     async def start(self):
-        """Start Discord bot."""
-        await self.bot.start(self.bot_config.token)
+        """Start Discord bot with retry on transient errors."""
+        max_retries = 5
+        backoff = 5
+        for attempt in range(max_retries):
+            try:
+                await self.bot.start(self.bot_config.token)
+                break
+            except (discord.errors.DiscordServerError, OSError) as e:
+                if attempt < max_retries - 1:
+                    delay = backoff * (2 ** attempt)
+                    logger.warning("Discord connection failed (attempt %d/%d): %s — retrying in %ds", attempt + 1, max_retries, e, delay)
+                    await asyncio.sleep(delay)
+                else:
+                    logger.error("Discord adapter failed after %d retries", max_retries)
+                    raise
 
     async def stop(self):
         """Stop Discord bot and clean up resources."""

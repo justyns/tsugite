@@ -353,7 +353,10 @@ class Gateway:
         adapter_count = len(self.adapters) + (1 if self._http_server else 0)
         logger.info("Starting %d adapter(s)...", adapter_count)
         try:
-            await asyncio.gather(*tasks)
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for result in results:
+                if isinstance(result, Exception):
+                    logger.error("Adapter failed: %s", result)
         except KeyboardInterrupt:
             logger.info("Shutting down...")
         finally:

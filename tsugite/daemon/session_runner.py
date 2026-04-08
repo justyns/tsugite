@@ -49,8 +49,9 @@ class LoggingProgressHandler:
         """Handle BaseEvent from EventBus — delegate to JSONLUIHandler's logic."""
         from tsugite.ui.jsonl import JSONLUIHandler
 
-        # Reuse JSONLUIHandler's event->_emit dispatch
-        JSONLUIHandler.handle_event(self, event)
+        handler_name = JSONLUIHandler._DISPATCH.get(type(event))
+        if handler_name:
+            getattr(JSONLUIHandler, handler_name)(self, event)
 
     def _emit(self, event_type: str, data: dict[str, Any]) -> None:
         event = {"type": event_type, "timestamp": datetime.now(timezone.utc).isoformat(), **data}
