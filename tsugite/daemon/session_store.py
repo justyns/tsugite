@@ -88,9 +88,6 @@ class Session:
     agent_file: Optional[str] = None
     notify: list[str] = field(default_factory=list)
 
-    # Platform thread mapping
-    platform_thread_id: Optional[str] = None
-
     title: Optional[str] = None
 
     def __post_init__(self):
@@ -236,15 +233,18 @@ class SessionStore:
                 source=old_session.source,
                 user_id=old_session.user_id,
                 parent_id=old_session.parent_id,
-                platform_thread_id=old_session.platform_thread_id,
+                metadata={k: v for k, v in old_session.metadata.items() if k in READ_ONLY_METADATA_KEYS},
             )
 
             self._sessions[new_id] = new_session
 
-            # Update interactive index if this was an interactive session
+            # Update indexes
             if old_session.user_id and old_session.source == SessionSource.INTERACTIVE.value:
                 key = (old_session.user_id, old_session.agent)
                 self._interactive_index[key] = new_id
+            thread_id = new_session.metadata.get("thread_id")
+            if thread_id:
+                self._thread_index[thread_id] = new_id
 
             # Mark old session as completed
             old_session.status = SessionStatus.COMPLETED.value
@@ -275,8 +275,9 @@ class SessionStore:
 
             if session.source == SessionSource.INTERACTIVE.value and session.user_id:
                 self._interactive_index[(session.user_id, session.agent)] = session.id
-            if session.platform_thread_id:
-                self._thread_index[session.platform_thread_id] = session.id
+            thread_id = session.metadata.get("thread_id")
+            if thread_id:
+                self._thread_index[thread_id] = session.id
 
             if session.source == SessionSource.SCHEDULE.value and session.parent_id:
                 self._prune_schedule_sessions(session.parent_id)
@@ -545,6 +546,12 @@ class SessionStore:
             data = json.loads(self._path.read_text())
             valid_fields = {f.name for f in dataclass_fields(Session)}
             for sid, sdata in data.get("sessions", {}).items():
+                # Migrate platform_thread_id -> metadata["thread_id"]
+                old_thread_id = sdata.pop("platform_thread_id", None)
+                if old_thread_id:
+                    meta = sdata.get("metadata") or {}
+                    meta.setdefault("thread_id", old_thread_id)
+                    sdata["metadata"] = meta
                 sdata = {k: v for k, v in sdata.items() if k in valid_fields}
                 self._sessions[sid] = Session(**sdata)
             # Rebuild indexes
@@ -554,8 +561,9 @@ class SessionStore:
                     existing_id = self._interactive_index.get(key)
                     if not existing_id or session.last_active > self._sessions[existing_id].last_active:
                         self._interactive_index[key] = sid
-                if session.platform_thread_id:
-                    self._thread_index[session.platform_thread_id] = sid
+                thread_id = session.metadata.get("thread_id") if session.metadata else None
+                if thread_id:
+                    self._thread_index[thread_id] = sid
                 channel_id = session.metadata.get("channel_id") if session.metadata else None
                 if channel_id:
                     self._channel_index[(channel_id, session.agent)] = sid

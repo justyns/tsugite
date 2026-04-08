@@ -596,7 +596,6 @@ class DiscordAdapter(BaseAdapter):
                     source=SessionSource.INTERACTIVE.value,
                     user_id=user_id,
                     parent_id=parent_session.id,
-                    platform_thread_id=thread_id,
                     metadata={
                         "thread_name": getattr(message.channel, "name", ""),
                         "channel_id": str(parent_channel_id) if parent_channel_id else None,
