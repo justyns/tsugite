@@ -126,6 +126,7 @@ export const sessionsMixin = {
   },
 
   sessionLabel(s) {
+    if (!s) return 'unknown';
     if (s.title) return s.title;
     if (this._isMyInteractive(s)) {
       return s.label || s.agent || 'Interactive';
