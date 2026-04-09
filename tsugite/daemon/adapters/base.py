@@ -351,6 +351,7 @@ class BaseAdapter(ABC):
         except Exception:
             timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         session_meta_xml = ""
+        scratchpad_xml = ""
         try:
             conv_id_override = (channel_context.metadata or {}).get("conv_id_override")
             if conv_id_override:
@@ -363,6 +364,8 @@ class BaseAdapter(ABC):
                 if user_meta:
                     entries = "\n".join(f"    {k}={v}" for k, v in user_meta.items())
                     session_meta_xml = f"\n  <session_metadata>\n{entries}\n  </session_metadata>"
+            if session.scratchpad:
+                scratchpad_xml = f"\n  <scratchpad>\n{session.scratchpad}\n  </scratchpad>"
         except Exception:
             tokens_used = 0
 
@@ -372,7 +375,7 @@ class BaseAdapter(ABC):
   <source>{channel_context.source}</source>
   <user_id>{channel_context.user_id}</user_id>
   <context_tokens_used>{tokens_used}</context_tokens_used>
-  <context_limit>{self.agent_config.context_limit}</context_limit>{session_meta_xml}
+  <context_limit>{self.agent_config.context_limit}</context_limit>{session_meta_xml}{scratchpad_xml}
 </message_context>
 
 {message}"""
@@ -459,22 +462,6 @@ class BaseAdapter(ABC):
                 attachments = list(self._get_workspace_attachments())
                 if channel_context.metadata and channel_context.metadata.get("uploaded_attachments"):
                     attachments.extend(channel_context.metadata.pop("uploaded_attachments"))
-
-                try:
-                    _session = self.session_store.get_session(conv_id)
-                    if _session.scratchpad:
-                        from tsugite.attachments.base import Attachment, AttachmentContentType
-
-                        attachments.append(
-                            Attachment(
-                                name="scratchpad",
-                                content=_session.scratchpad,
-                                content_type=AttachmentContentType.TEXT,
-                                mime_type="text/markdown",
-                            )
-                        )
-                except Exception:
-                    pass
 
                 return run_agent(
                     agent_path=agent_path,
