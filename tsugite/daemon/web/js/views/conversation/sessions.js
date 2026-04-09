@@ -51,9 +51,9 @@ export const sessionsMixin = {
 
     this.isActiveSession = this._isMyInteractive(session);
 
+    this.loadStatus();
     if (this.isActiveSession) {
       this.loadHistory();
-      this.loadStatus();
     } else {
       this.loadDetailHistory();
     }

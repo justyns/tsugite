@@ -183,4 +183,13 @@
     max-width: 100%;
   }
 
+  /* Context bar: stack meta row items */
+  .context-meta-row {
+    flex-wrap: wrap;
+  }
+  .context-workdir {
+    max-width: 100%;
+    flex-basis: 100%;
+  }
+
 }
