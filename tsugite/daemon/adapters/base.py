@@ -18,7 +18,7 @@ from tzlocal import get_localzone
 from tsugite.agent_inheritance import find_agent_file
 from tsugite.agent_runner import run_agent
 from tsugite.daemon.config import AgentConfig
-from tsugite.daemon.session_store import SessionStore
+from tsugite.daemon.session_store import READ_ONLY_METADATA_KEYS, SessionStore
 from tsugite.exceptions import AgentExecutionError
 from tsugite.options import ExecutionOptions
 
@@ -350,6 +350,7 @@ class BaseAdapter(ABC):
             timestamp = now.strftime("%Y-%m-%d %H:%M:%S ") + tz_label
         except Exception:
             timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        session_meta_xml = ""
         try:
             conv_id_override = (channel_context.metadata or {}).get("conv_id_override")
             if conv_id_override:
@@ -357,6 +358,11 @@ class BaseAdapter(ABC):
             else:
                 session = self.session_store.get_or_create_interactive(user_id, self.agent_name)
             tokens_used = session.cumulative_tokens
+            if session.metadata:
+                user_meta = {k: v for k, v in session.metadata.items() if k not in READ_ONLY_METADATA_KEYS}
+                if user_meta:
+                    entries = "\n".join(f"    {k}={v}" for k, v in user_meta.items())
+                    session_meta_xml = f"\n  <session_metadata>\n{entries}\n  </session_metadata>"
         except Exception:
             tokens_used = 0
 
@@ -366,7 +372,7 @@ class BaseAdapter(ABC):
   <source>{channel_context.source}</source>
   <user_id>{channel_context.user_id}</user_id>
   <context_tokens_used>{tokens_used}</context_tokens_used>
-  <context_limit>{self.agent_config.context_limit}</context_limit>
+  <context_limit>{self.agent_config.context_limit}</context_limit>{session_meta_xml}
 </message_context>
 
 {message}"""
