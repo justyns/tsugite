@@ -101,6 +101,15 @@ if (localStorage.getItem('tsugite_token')) {
   loadAgents().catch(() => {});
 }
 
+// When the PWA resumes from background (mobile suspend, tab switch),
+// reconnect SSE and reload agents to ensure fresh state.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  if (!localStorage.getItem('tsugite_token')) return;
+  if (_es) { _es.close(); _es = null; }
+  loadAgents().catch(() => {});
+});
+
 // In standalone PWA mode, force external links to open in the system browser
 // target="_blank" alone is unreliable across platforms (especially iOS Safari)
 if (window.matchMedia('(display-mode: standalone)').matches || navigator.standalone) {
