@@ -226,6 +226,15 @@ class AgentPreparer:
                 deduped.append(att)
         all_attachments = deduped
 
+        # Step 0c: Set up workspace-aware skill manager so tools see workspace skills
+        from tsugite.config import load_config as _load_config
+        from tsugite.tools.skills import SkillManager, set_skill_manager
+
+        _config = _load_config()
+        extra_skill_paths = (agent_config.skill_paths or []) + (_config.skill_paths or [])
+        _skill_manager = SkillManager(workspace=workspace, extra_paths=extra_skill_paths or None)
+        set_skill_manager(_skill_manager)
+
         # Step 1: Execute prefetch tools
         prefetch_context = {}
         if agent_config.prefetch:
@@ -362,15 +371,11 @@ class AgentPreparer:
 
         skills = []
         if auto_load_skills:
-            from tsugite.config import load_config
             from tsugite.events.events import SkillLoadFailedEvent
-            from tsugite.tools.skills import SkillManager
 
-            extra_skill_paths = agent_config.skill_paths + load_config().skill_paths
-            skill_manager = SkillManager(extra_paths=extra_skill_paths or None)
             for skill_name in auto_load_skills:
                 # Attempt to load skill (returns message string for agents/tools)
-                result = skill_manager.load_skill(skill_name)
+                result = _skill_manager.load_skill(skill_name)
 
                 # Emit error event if skill loading failed
                 if result.startswith("Failed") or result.startswith("Skill '"):
@@ -378,7 +383,7 @@ class AgentPreparer:
                         event_bus.emit(SkillLoadFailedEvent(skill_name=skill_name, error_message=result))
 
             # Get all successfully loaded skills as Skill objects
-            loaded_skills_dict = skill_manager.get_loaded_skills()
+            loaded_skills_dict = _skill_manager.get_loaded_skills()
             skills = [Skill(name=name, content=content) for name, content in loaded_skills_dict.items()]
 
         # Step 8: Build system message (what LLM actually sees)

@@ -180,11 +180,14 @@ class SkillManager:
 _default_skill_manager: Optional[SkillManager] = None
 
 
-def get_skill_manager() -> SkillManager:
+def get_skill_manager(workspace=None) -> SkillManager:
     """Get or create the default skill manager instance.
 
     This is a temporary helper for backward compatibility.
     In the future, skill managers will be created per agent/session.
+
+    Args:
+        workspace: Optional workspace for skill discovery fallback
 
     Returns:
         Default SkillManager instance
@@ -194,7 +197,7 @@ def get_skill_manager() -> SkillManager:
         from tsugite.config import load_config
 
         config = load_config()
-        _default_skill_manager = SkillManager(extra_paths=config.skill_paths or None)
+        _default_skill_manager = SkillManager(workspace=workspace, extra_paths=config.skill_paths or None)
     return _default_skill_manager
 
 
