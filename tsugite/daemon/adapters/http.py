@@ -1187,6 +1187,17 @@ class HTTPServer:
 
         session_id = body.get("session_id")
         if session_id:
+            from tsugite.daemon.session_store import _TERMINAL_STATUSES
+
+            try:
+                target = adapter.session_store.get_session(session_id)
+                if target.status in _TERMINAL_STATUSES:
+                    return JSONResponse(
+                        {"error": f"Session is {target.status}. Start a new session to continue."},
+                        status_code=409,
+                    )
+            except ValueError:
+                pass
             metadata["conv_id_override"] = session_id
 
         channel_context = ChannelContext(

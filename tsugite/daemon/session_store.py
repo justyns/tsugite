@@ -187,16 +187,16 @@ class SessionStore:
     def get_or_create_interactive(self, user_id: str, agent: str) -> Session:
         with self._lock:
             key = (user_id, agent)
+            is_replacement = False
             if key in self._interactive_index:
                 session_id = self._interactive_index[key]
                 if session_id in self._sessions:
                     existing = self._sessions[session_id]
-                    if existing.status in _TERMINAL_STATUSES:
-                        existing.status = SessionStatus.ACTIVE.value
-                        self._mark_dirty()
-                    return existing
+                    if existing.status not in _TERMINAL_STATUSES:
+                        return existing
+                    is_replacement = True
 
-            conv_id = f"daemon_{agent}_{user_id}"
+            conv_id = f"daemon_{agent}_{user_id}_{uuid4().hex[:6]}" if is_replacement else f"daemon_{agent}_{user_id}"
             session = Session(
                 id=conv_id, agent=agent, source=SessionSource.INTERACTIVE.value, user_id=user_id, title="Main Session"
             )
@@ -498,16 +498,16 @@ class SessionStore:
     def get_or_create_channel_session(self, channel_id: str, agent: str, user_id: str) -> Session:
         with self._lock:
             key = (channel_id, agent)
+            is_replacement = False
             if key in self._channel_index:
                 session_id = self._channel_index[key]
                 if session_id in self._sessions:
                     existing = self._sessions[session_id]
-                    if existing.status in _TERMINAL_STATUSES:
-                        existing.status = SessionStatus.ACTIVE.value
-                        self._mark_dirty()
-                    return existing
+                    if existing.status not in _TERMINAL_STATUSES:
+                        return existing
+                    is_replacement = True
 
-            conv_id = f"channel_{agent}_{channel_id}"
+            conv_id = f"channel_{agent}_{channel_id}_{uuid4().hex[:6]}" if is_replacement else f"channel_{agent}_{channel_id}"
             session = Session(
                 id=conv_id,
                 agent=agent,
