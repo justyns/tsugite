@@ -76,6 +76,7 @@ def start_session(
 
     if agent is None:
         from tsugite.agent_runner.helpers import get_current_agent
+
         agent = get_current_agent() or "default"
 
     session = Session(
@@ -212,6 +213,7 @@ def spawn_session(
 
     if agent is None:
         from tsugite.agent_runner.helpers import get_current_agent
+
         agent = get_current_agent() or "default"
 
     if parent_session_id is None:

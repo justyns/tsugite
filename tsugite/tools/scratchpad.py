@@ -1,13 +1,11 @@
 """Session-scoped scratchpad tools for maintaining working state across compaction."""
 
+from . import sessions as _sessions_mod
 from . import tool
 from .sessions import get_current_session_id
 
 SCRATCHPAD_SOFT_LIMIT = 4000
 SCRATCHPAD_HARD_LIMIT = 8000
-
-# Access session runner via module attribute (set by daemon at startup)
-from . import sessions as _sessions_mod
 
 
 def _get_session(session_id: str):

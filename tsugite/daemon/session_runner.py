@@ -183,7 +183,9 @@ class SessionRunner:
                         source="session_cancelled",
                     )
                 except Exception as notify_err:
-                    logger.warning("Failed to notify parent session '%s' of cancellation: %s", session.parent_id, notify_err)
+                    logger.warning(
+                        "Failed to notify parent session '%s' of cancellation: %s", session.parent_id, notify_err
+                    )
         except Exception as e:
             updated = self._store.update_session(session.id, status=SessionStatus.FAILED.value, error=str(e))
             progress._emit("session_error", {"error": str(e)})

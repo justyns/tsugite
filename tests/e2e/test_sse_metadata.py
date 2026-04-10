@@ -7,7 +7,7 @@ def test_metadata_update_via_sse(chat_page):
 
     page.wait_for_selector(".context-bar", timeout=5000)
 
-    session_id = page.evaluate("""
+    page.evaluate("""
         (() => {
             const items = document.querySelectorAll('.turn-item.active');
             if (items.length) return items[0].getAttribute('x-data') || 'unknown';

@@ -784,8 +784,14 @@ class DiscordAdapter(BaseAdapter):
                 break
             except (discord.errors.DiscordServerError, OSError) as e:
                 if attempt < max_retries - 1:
-                    delay = backoff * (2 ** attempt)
-                    logger.warning("Discord connection failed (attempt %d/%d): %s — retrying in %ds", attempt + 1, max_retries, e, delay)
+                    delay = backoff * (2**attempt)
+                    logger.warning(
+                        "Discord connection failed (attempt %d/%d): %s — retrying in %ds",
+                        attempt + 1,
+                        max_retries,
+                        e,
+                        delay,
+                    )
                     await asyncio.sleep(delay)
                 else:
                     logger.error("Discord adapter failed after %d retries", max_retries)

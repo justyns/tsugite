@@ -62,7 +62,9 @@ class SessionStatus(str, Enum):
     FAILED = "failed"
     CANCELLED = "cancelled"
 
+
 _TERMINAL_STATUSES = (SessionStatus.CANCELLED.value, SessionStatus.COMPLETED.value, SessionStatus.FAILED.value)
+
 
 @dataclass
 class Session:
@@ -507,7 +509,9 @@ class SessionStore:
                         return existing
                     is_replacement = True
 
-            conv_id = f"channel_{agent}_{channel_id}_{uuid4().hex[:6]}" if is_replacement else f"channel_{agent}_{channel_id}"
+            conv_id = (
+                f"channel_{agent}_{channel_id}_{uuid4().hex[:6]}" if is_replacement else f"channel_{agent}_{channel_id}"
+            )
             session = Session(
                 id=conv_id,
                 agent=agent,
