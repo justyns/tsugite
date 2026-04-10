@@ -729,7 +729,8 @@ class TsugiteAgent:
 
             if final_chunk and final_chunk.usage:
                 self.total_tokens += final_chunk.usage.total_tokens
-                self.last_input_tokens = final_chunk.usage.prompt_tokens
+                u = final_chunk.usage
+                self.last_input_tokens = u.prompt_tokens + (u.cache_creation_input_tokens or 0) + (u.cache_read_input_tokens or 0)
                 step_cost = final_chunk.cost or 0.0
                 self.total_cost += step_cost
 
@@ -755,7 +756,8 @@ class TsugiteAgent:
         # Track cumulative tokens
         if response.usage:
             self.total_tokens += response.usage.total_tokens
-            self.last_input_tokens = response.usage.prompt_tokens
+            u = response.usage
+            self.last_input_tokens = u.prompt_tokens + (u.cache_creation_input_tokens or 0) + (u.cache_read_input_tokens or 0)
 
         # Extract reasoning content
         if response.reasoning_content:
