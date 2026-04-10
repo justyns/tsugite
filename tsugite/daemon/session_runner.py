@@ -175,12 +175,32 @@ class SessionRunner:
             if self._event_bus:
                 self._event_bus.emit("session_update", {"action": "cancelled", "id": session.id})
             logger.info("Session '%s' cancelled", session.id)
+            if session.parent_id:
+                try:
+                    await self.reply_to_session(
+                        session.parent_id,
+                        f"Session '{session.title or session.id}' was cancelled",
+                        source="session_cancelled",
+                    )
+                except Exception as notify_err:
+                    logger.warning("Failed to notify parent session '%s' of cancellation: %s", session.parent_id, notify_err)
         except Exception as e:
-            self._store.update_session(session.id, status=SessionStatus.FAILED.value, error=str(e))
+            updated = self._store.update_session(session.id, status=SessionStatus.FAILED.value, error=str(e))
             progress._emit("session_error", {"error": str(e)})
             if self._event_bus:
                 self._event_bus.emit("session_update", {"action": "failed", "id": session.id})
             logger.error("Session '%s' failed: %s", session.id, e)
+            if self._notify_callback:
+                try:
+                    await self._notify_callback(updated, f"FAILED: {str(e)[:500]}")
+                except Exception as notify_err:
+                    logger.error("Session '%s' failure notify callback failed: %s", session.id, notify_err)
+            if session.parent_id:
+                try:
+                    error_summary = f"Session '{session.title or session.id}' failed: {str(e)[:500]}"
+                    await self.reply_to_session(session.parent_id, error_summary, source="session_failed")
+                except Exception as notify_err:
+                    logger.warning("Failed to notify parent session '%s' of failure: %s", session.parent_id, notify_err)
         finally:
             self._store.flush()
 
