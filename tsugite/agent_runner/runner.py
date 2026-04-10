@@ -593,6 +593,7 @@ async def _execute_agent_with_prompt(
                     system_message=prepared.system_message,
                     attachments=prepared.attachments,
                     provider_state=result.provider_state,
+                    last_input_tokens=result.last_input_tokens,
                 )
             else:
                 return AgentExecutionResult(

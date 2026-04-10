@@ -129,6 +129,7 @@ class AgentResult:
     steps: Optional[List[StepResult]] = None
     error: Optional[str] = None
     provider_state: Optional[Dict] = None
+    last_input_tokens: Optional[int] = None
 
     def __str__(self) -> str:
         return self.output if self.output else self.error if self.error else ""
@@ -204,6 +205,7 @@ class TsugiteAgent:
 
         self.total_cost = 0.0
         self.total_tokens = 0
+        self.last_input_tokens = 0
         self._previous_turn_had_error = False
         self._consecutive_format_errors = 0
 
@@ -634,6 +636,7 @@ class TsugiteAgent:
                             cost=self.total_cost if self.total_cost > 0 else None,
                             steps=self.memory.steps,
                             provider_state=self._provider.get_state(),
+                            last_input_tokens=self.last_input_tokens if self.last_input_tokens > 0 else None,
                         )
                     return exec_result.final_answer
 
@@ -726,6 +729,7 @@ class TsugiteAgent:
 
             if final_chunk and final_chunk.usage:
                 self.total_tokens += final_chunk.usage.total_tokens
+                self.last_input_tokens = final_chunk.usage.prompt_tokens
                 step_cost = final_chunk.cost or 0.0
                 self.total_cost += step_cost
 
@@ -751,6 +755,7 @@ class TsugiteAgent:
         # Track cumulative tokens
         if response.usage:
             self.total_tokens += response.usage.total_tokens
+            self.last_input_tokens = response.usage.prompt_tokens
 
         # Extract reasoning content
         if response.reasoning_content:

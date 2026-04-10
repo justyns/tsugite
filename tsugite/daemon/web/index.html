@@ -250,7 +250,7 @@
               <span class="badge badge-muted" x-text="statusInfo.model"></span>
             </template>
             <template x-if="statusInfo?.tokens != null && statusInfo?.context_limit">
-              <div class="context-meter" @click="openPromptInspector()" title="Click for prompt details" style="cursor:pointer">
+              <div class="context-meter" @click="openPromptInspector()" title="Current context window usage (click for breakdown)" style="cursor:pointer">
                 <div class="context-meter-bar">
                   <div class="context-meter-fill"
                        :style="'width:' + Math.min(100, (statusInfo.tokens / statusInfo.context_limit) * 100) + '%'"

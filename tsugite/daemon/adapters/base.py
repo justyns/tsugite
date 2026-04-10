@@ -524,7 +524,9 @@ class BaseAdapter(ABC):
             self.session_store.update_context_limit(self.agent_name, ps["context_window"])
             self.agent_config.context_limit = ps["context_window"]
 
-        self.session_store.update_token_count(conv_id, result.token_count or 0)
+        last_input = getattr(result, "last_input_tokens", None)
+        context_tokens = last_input if isinstance(last_input, int) and last_input > 0 else (result.token_count or 0)
+        self.session_store.update_token_count(conv_id, context_tokens)
 
         try:
             from tsugite.usage import get_usage_store
