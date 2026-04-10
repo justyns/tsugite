@@ -539,6 +539,8 @@ class BaseAdapter(ABC):
                 total_tokens=result.token_count or 0,
                 cost_usd=result.cost,
                 duration_ms=getattr(result, "duration_ms", None),
+                cache_creation_tokens=ps.get("cache_creation_tokens", 0),
+                cache_read_tokens=ps.get("cache_read_tokens", 0),
             )
         except Exception as e:
             logger.debug("Failed to record usage: %s", e)

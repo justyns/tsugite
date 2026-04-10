@@ -206,6 +206,8 @@ class TsugiteAgent:
         self.total_cost = 0.0
         self.total_tokens = 0
         self.last_input_tokens = 0
+        self.cache_creation_tokens = 0
+        self.cache_read_tokens = 0
         self._previous_turn_had_error = False
         self._consecutive_format_errors = 0
 
@@ -424,7 +426,7 @@ class TsugiteAgent:
 
                 turn = await self._provider_turn(messages, turn_num, stream)
 
-                thought, code, response = turn.thought, turn.code, turn.response
+                thought, code = turn.thought, turn.code
 
                 # Update the inspector snapshot with the LLM response (copy, don't mutate)
                 if self.event_bus and (thought or code):
@@ -604,28 +606,14 @@ class TsugiteAgent:
 
                         duration = time.time() - start_time
 
-                        cached_tokens = None
-                        cache_creation_tokens = None
-                        cache_read_tokens = None
-                        if response and response.usage:
-                            cached_tokens = getattr(response.usage, "cached_tokens", None)
-                            cache_creation_tokens = getattr(response.usage, "cache_creation_input_tokens", None)
-                            cache_read_tokens = getattr(response.usage, "cache_read_input_tokens", None)
-                        else:
-                            pstate = self._provider.get_state()
-                            if pstate:
-                                cache_creation_tokens = pstate.get("cache_creation_tokens") or None
-                                cache_read_tokens = pstate.get("cache_read_tokens") or None
-
                         self.event_bus.emit(
                             CostSummaryEvent(
                                 tokens=total_tokens,
                                 cost=self.total_cost if self.total_cost > 0 else None,
                                 model=self.model_name,
                                 duration_seconds=duration,
-                                cached_tokens=cached_tokens,
-                                cache_creation_input_tokens=cache_creation_tokens,
-                                cache_read_input_tokens=cache_read_tokens,
+                                cache_creation_input_tokens=self.cache_creation_tokens or None,
+                                cache_read_input_tokens=self.cache_read_tokens or None,
                             )
                         )
 
@@ -728,13 +716,7 @@ class TsugiteAgent:
                 self.event_bus.emit(StreamCompleteEvent())
 
             if final_chunk and final_chunk.usage:
-                self.total_tokens += final_chunk.usage.total_tokens
-                u = final_chunk.usage
-                self.last_input_tokens = (
-                    u.prompt_tokens + (u.cache_creation_input_tokens or 0) + (u.cache_read_input_tokens or 0)
-                )
-                step_cost = final_chunk.cost or 0.0
-                self.total_cost += step_cost
+                step_cost = self._accumulate_usage(final_chunk.usage, final_chunk.cost or 0.0)
 
             parsed = self._parse_response_from_text(accumulated_content)
 
@@ -751,17 +733,12 @@ class TsugiteAgent:
         )
         parsed = self._parse_response_from_text(response.content)
 
-        # Track cost
+        # Track cost and cumulative tokens
         step_cost = response.cost or 0.0
-        self.total_cost += step_cost
-
-        # Track cumulative tokens
         if response.usage:
-            self.total_tokens += response.usage.total_tokens
-            u = response.usage
-            self.last_input_tokens = (
-                u.prompt_tokens + (u.cache_creation_input_tokens or 0) + (u.cache_read_input_tokens or 0)
-            )
+            self._accumulate_usage(response.usage, step_cost)
+        else:
+            self.total_cost += step_cost
 
         # Extract reasoning content
         if response.reasoning_content:
@@ -1085,6 +1062,20 @@ class TsugiteAgent:
         if self.max_turns - turn <= 2:
             parts.append('warning="approaching turn limit, wrap up soon"')
         return f"\n<tsugite_budget {' '.join(parts)} />"
+
+    def _accumulate_usage(self, usage, cost: float = 0.0) -> float:
+        """Update cumulative token/cost counters from a usage object.
+
+        Returns the step cost for caller convenience.
+        """
+        self.total_tokens += usage.total_tokens
+        self.last_input_tokens = (
+            usage.prompt_tokens + (usage.cache_creation_input_tokens or 0) + (usage.cache_read_input_tokens or 0)
+        )
+        self.cache_creation_tokens += usage.cache_creation_input_tokens or 0
+        self.cache_read_tokens += usage.cache_read_input_tokens or 0
+        self.total_cost += cost
+        return cost
 
     def _parse_response_from_text(self, content: str) -> ParsedResponse:
         """Parse text content into thought, code, and content blocks."""

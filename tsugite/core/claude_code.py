@@ -216,8 +216,17 @@ class ClaudeCodeProcess:
                 logger.debug("Result received (cost=$%s, %sms): %.200s", cost, duration, result_text)
 
                 # Prefer usage from result event, fall back to last assistant event
-                result_usage = event.get("usage") or self._last_usage
-                model_usage = event.get("modelUsage") or {}
+                result_usage = event.get("usage")
+                if not result_usage:
+                    logger.debug("Result event missing usage; falling back to assistant event usage (cache tokens may be lost)")
+                    result_usage = self._last_usage
+
+                # modelUsage is keyed by model name, e.g. {"claude-sonnet-4-6": {"contextWindow": 200000}}
+                context_window = None
+                for model_data in (event.get("modelUsage") or {}).values():
+                    context_window = model_data.get("contextWindow")
+                    if context_window:
+                        break
 
                 yield {
                     "type": "result",
@@ -229,7 +238,7 @@ class ClaudeCodeProcess:
                     "cache_creation_input_tokens": result_usage.get("cache_creation_input_tokens") or 0,
                     "cache_read_input_tokens": result_usage.get("cache_read_input_tokens") or 0,
                     "output_tokens": result_usage.get("output_tokens") or 0,
-                    "context_window": model_usage.get("contextWindow"),
+                    "context_window": context_window,
                 }
                 return
 

@@ -560,6 +560,8 @@ async def _execute_agent_with_prompt(
                 source="cli",
                 total_tokens=agent.total_tokens,
                 cost_usd=agent.total_cost if agent.total_cost > 0 else None,
+                cache_creation_tokens=agent.cache_creation_tokens,
+                cache_read_tokens=agent.cache_read_tokens,
             )
         except Exception as e:
             logger.debug("Failed to record usage: %s", e)

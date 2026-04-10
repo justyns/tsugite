@@ -53,6 +53,7 @@ class ClaudeCodeProvider:
         self._context_window: int | None = None
         self._cache_creation_tokens: int = 0
         self._cache_read_tokens: int = 0
+        self._cumulative_cost: float = 0.0
 
         register_models(_CLAUDE_CODE_MODELS)
 
@@ -120,7 +121,7 @@ class ClaudeCodeProvider:
             elif event["type"] == "result":
                 if not accumulated:
                     accumulated = event.get("text", "")
-                cost = event.get("cost_usd") or 0.0
+                cost = self._cost_delta(event.get("cost_usd") or 0.0)
                 usage = self._extract_usage(event)
 
         return CompletionResponse(
@@ -138,10 +139,16 @@ class ClaudeCodeProvider:
             if event["type"] == "text_delta":
                 yield StreamChunk(content=event["text"])
             elif event["type"] == "result":
-                cost = event.get("cost_usd") or 0.0
+                cost = self._cost_delta(event.get("cost_usd") or 0.0)
                 usage = self._extract_usage(event)
 
         yield StreamChunk(content="", done=True, usage=usage, cost=cost)
+
+    def _cost_delta(self, cumulative_cost: float) -> float:
+        """Convert Claude CLI's cumulative cost to a per-turn delta."""
+        delta = cumulative_cost - self._cumulative_cost
+        self._cumulative_cost = cumulative_cost
+        return max(delta, 0.0)
 
     def _extract_usage(self, event: dict) -> Usage:
         """Extract usage from a subprocess result event and update session state."""

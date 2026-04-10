@@ -537,3 +537,290 @@ class TestClaudeCodeContextLimit:
             result = await agent.run("hello", return_full_result=True)
 
         assert result.provider_state["context_window"] == 200000
+
+
+# ── Cost and token tracking bug tests ──
+
+
+class TestClaudeCodeCostTracking:
+    """Tests for cost delta calculation — Claude CLI reports cumulative cost."""
+
+    @pytest.mark.asyncio
+    async def test_cost_is_delta_not_cumulative(self):
+        """total_cost_usd from Claude CLI is cumulative; provider must return per-turn delta."""
+        from tsugite.providers.claude_code import ClaudeCodeProvider
+
+        provider = ClaudeCodeProvider()
+        mock_process = AsyncMock()
+        mock_process.session_id = "test-session"
+        mock_process.compacted = False
+
+        turn_costs = [0.005, 0.010, 0.015]  # Cumulative costs from CLI
+        call_count = 0
+
+        original_send = None
+
+        async def mock_send(*args, **kwargs):
+            nonlocal call_count
+            cost = turn_costs[call_count]
+            call_count += 1
+            events = [
+                {
+                    "type": "result",
+                    "text": f"answer {call_count}",
+                    "cost_usd": cost,
+                    "session_id": "test-session",
+                    "input_tokens": 500,
+                    "output_tokens": 50,
+                },
+            ]
+            for e in events:
+                yield e
+
+        mock_process.send_message = mock_send
+        mock_process.start = AsyncMock()
+        mock_process.stop = AsyncMock()
+
+        with patch("tsugite.core.claude_code.ClaudeCodeProcess", return_value=mock_process):
+            # Turn 1
+            resp1 = await provider.acompletion(
+                messages=[{"role": "system", "content": "test"}, {"role": "user", "content": "q1"}],
+                model="sonnet",
+                stream=False,
+            )
+            # Turn 2
+            resp2 = await provider.acompletion(
+                messages=[{"role": "user", "content": "q2"}], model="sonnet", stream=False
+            )
+            # Turn 3
+            resp3 = await provider.acompletion(
+                messages=[{"role": "user", "content": "q3"}], model="sonnet", stream=False
+            )
+            await provider.stop()
+
+        # Each response cost should be the per-turn delta, not cumulative
+        assert resp1.cost == pytest.approx(0.005)
+        assert resp2.cost == pytest.approx(0.005)  # 0.010 - 0.005
+        assert resp3.cost == pytest.approx(0.005)  # 0.015 - 0.010
+
+    @pytest.mark.asyncio
+    async def test_cost_delta_streaming(self):
+        """Cost delta works correctly in streaming mode too."""
+        from tsugite.providers.claude_code import ClaudeCodeProvider
+
+        provider = ClaudeCodeProvider()
+        mock_process = AsyncMock()
+        mock_process.session_id = "test-session"
+        mock_process.compacted = False
+
+        turn_costs = [0.005, 0.012]
+        call_count = 0
+
+        async def mock_send(*args, **kwargs):
+            nonlocal call_count
+            cost = turn_costs[call_count]
+            call_count += 1
+            events = [
+                {"type": "text_delta", "text": "hello"},
+                {
+                    "type": "result",
+                    "text": "hello",
+                    "cost_usd": cost,
+                    "session_id": "test-session",
+                    "input_tokens": 500,
+                    "output_tokens": 50,
+                },
+            ]
+            for e in events:
+                yield e
+
+        mock_process.send_message = mock_send
+        mock_process.start = AsyncMock()
+        mock_process.stop = AsyncMock()
+
+        with patch("tsugite.core.claude_code.ClaudeCodeProcess", return_value=mock_process):
+            # Turn 1 streaming
+            chunks1 = []
+            async for chunk in await provider.acompletion(
+                messages=[{"role": "system", "content": "test"}, {"role": "user", "content": "q1"}],
+                model="sonnet",
+                stream=True,
+            ):
+                chunks1.append(chunk)
+
+            # Turn 2 streaming
+            chunks2 = []
+            async for chunk in await provider.acompletion(
+                messages=[{"role": "user", "content": "q2"}], model="sonnet", stream=True
+            ):
+                chunks2.append(chunk)
+
+            await provider.stop()
+
+        final1 = [c for c in chunks1 if c.done][0]
+        final2 = [c for c in chunks2 if c.done][0]
+
+        assert final1.cost == pytest.approx(0.005)
+        assert final2.cost == pytest.approx(0.007)  # 0.012 - 0.005
+
+
+class TestClaudeCodeContextWindow:
+    """Tests for contextWindow extraction from nested modelUsage."""
+
+    @pytest.mark.asyncio
+    async def test_context_window_extracted_from_nested_model_usage(self):
+        """modelUsage is keyed by model name; contextWindow is inside the nested dict."""
+        from tsugite.core.claude_code import ClaudeCodeProcess
+
+        process = ClaudeCodeProcess()
+
+        events = [
+            json.dumps(
+                {
+                    "type": "result",
+                    "subtype": "success",
+                    "result": "ok",
+                    "total_cost_usd": 0.005,
+                    "duration_ms": 500,
+                    "session_id": "s1",
+                    "usage": {"input_tokens": 1500, "output_tokens": 5},
+                    "modelUsage": {
+                        "claude-sonnet-4-6": {
+                            "inputTokens": 1500,
+                            "outputTokens": 5,
+                            "contextWindow": 200000,
+                            "maxOutputTokens": 32000,
+                        }
+                    },
+                }
+            ),
+        ]
+
+        mock_proc = AsyncMock()
+        mock_proc.stdin = AsyncMock()
+        mock_proc.stderr = AsyncMock()
+        mock_proc.stderr.readline = AsyncMock(return_value=b"")
+        mock_proc.stdout = AsyncMock()
+        event_iter = iter(events)
+
+        async def mock_readline():
+            try:
+                return (next(event_iter) + "\n").encode()
+            except StopIteration:
+                return b""
+
+        mock_proc.stdout.readline = mock_readline
+        process._process = mock_proc
+        process._session_id = "s1"
+
+        collected = []
+        async for event in process.send_message("test"):
+            collected.append(event)
+
+        results = [e for e in collected if e["type"] == "result"]
+        assert len(results) == 1
+        assert results[0]["context_window"] == 200000
+
+    @pytest.mark.asyncio
+    async def test_context_window_none_when_no_model_usage(self):
+        """context_window should be None when modelUsage is missing."""
+        from tsugite.core.claude_code import ClaudeCodeProcess
+
+        process = ClaudeCodeProcess()
+
+        events = [
+            json.dumps(
+                {
+                    "type": "result",
+                    "subtype": "success",
+                    "result": "ok",
+                    "total_cost_usd": 0.005,
+                    "duration_ms": 500,
+                    "session_id": "s1",
+                    "usage": {"input_tokens": 1500, "output_tokens": 5},
+                }
+            ),
+        ]
+
+        mock_proc = AsyncMock()
+        mock_proc.stdin = AsyncMock()
+        mock_proc.stderr = AsyncMock()
+        mock_proc.stderr.readline = AsyncMock(return_value=b"")
+        mock_proc.stdout = AsyncMock()
+        event_iter = iter(events)
+
+        async def mock_readline():
+            try:
+                return (next(event_iter) + "\n").encode()
+            except StopIteration:
+                return b""
+
+        mock_proc.stdout.readline = mock_readline
+        process._process = mock_proc
+        process._session_id = "s1"
+
+        collected = []
+        async for event in process.send_message("test"):
+            collected.append(event)
+
+        results = [e for e in collected if e["type"] == "result"]
+        assert results[0]["context_window"] is None
+
+
+class TestClaudeCodeMultiTurnTokens:
+    """Tests for multi-turn token tracking through the agent."""
+
+    @pytest.mark.asyncio
+    async def test_multi_turn_total_tokens_is_sum(self):
+        """total_tokens should be the sum of all turns' tokens."""
+        from tsugite.core.agent import TsugiteAgent
+
+        agent = TsugiteAgent(
+            model_string="claude_code:sonnet",
+            tools=[],
+            instructions="test",
+            max_turns=5,
+        )
+
+        turn_data = [
+            {"input": 1500, "output": 50, "code": "x = 1\nprint(x)"},
+            {"input": 1550, "output": 50, "code": "final_answer('done')"},
+        ]
+        call_count = 0
+
+        mock_process = AsyncMock()
+        mock_process.session_id = "test-session"
+        mock_process.compacted = False
+
+        async def mock_send(*args, **kwargs):
+            nonlocal call_count
+            td = turn_data[call_count]
+            call_count += 1
+            code = td["code"]
+            events = [
+                {"type": "text_delta", "text": f"Thought: step\n```python\n{code}\n```"},
+                {
+                    "type": "result",
+                    "text": "",
+                    "cost_usd": 0.005 * call_count,
+                    "session_id": "test-session",
+                    "input_tokens": td["input"],
+                    "output_tokens": td["output"],
+                },
+            ]
+            for e in events:
+                yield e
+
+        mock_process.send_message = mock_send
+        mock_process.start = AsyncMock()
+        mock_process.stop = AsyncMock()
+
+        with patch("tsugite.core.claude_code.ClaudeCodeProcess", return_value=mock_process):
+            result = await agent.run("test", return_full_result=True)
+
+        # total_tokens = sum of all turns
+        expected_total = (1500 + 50) + (1550 + 50)
+        assert agent.total_tokens == expected_total
+
+        # last_input_tokens = last turn's input only
+        assert agent.last_input_tokens == 1550
