@@ -1076,6 +1076,13 @@
               <input x-model="form.id" placeholder="my-schedule" :disabled="!!editingId">
             </div>
             <div class="form-group">
+              <label>Execution Type</label>
+              <select x-model="form.execution_type">
+                <option value="agent">Agent</option>
+                <option value="script">Script</option>
+              </select>
+            </div>
+            <div class="form-group" x-show="form.execution_type !== 'script'">
               <label>Agent</label>
               <select x-model="form.agent">
                 <option value="">Select agent...</option>
@@ -1085,11 +1092,21 @@
               </select>
             </div>
           </div>
-          <div class="form-group">
+          <div class="form-group" x-show="form.execution_type === 'script'">
+            <label>Command</label>
+            <textarea x-model="form.command" rows="2" placeholder="Shell command to execute..." style="resize:vertical;font-family:monospace"></textarea>
+          </div>
+          <div class="form-group" x-show="form.execution_type !== 'script'">
             <label>Prompt</label>
             <textarea x-model="form.prompt" rows="2" placeholder="Task for the agent..." style="resize:vertical"></textarea>
           </div>
-          <div class="form-row">
+          <div class="form-row" x-show="form.execution_type === 'script'">
+            <div class="form-group">
+              <label>Script Timeout (seconds)</label>
+              <input x-model="form.script_timeout" type="number" min="1" placeholder="60">
+            </div>
+          </div>
+          <div class="form-row" x-show="form.execution_type !== 'script'">
             <div class="form-group">
               <label>Model</label>
               <input x-model="form.model" placeholder="e.g. openai:gpt-4o-mini">
@@ -1151,10 +1168,13 @@
                   </td>
                 </template>
                 <template x-if="row.type === 'schedule'">
-                  <td x-text="row.data.agent"></td>
+                  <td>
+                    <span x-show="row.data.execution_type !== 'script'" x-text="row.data.agent"></span>
+                    <code x-show="row.data.execution_type === 'script'" x-text="(row.data.command || '').substring(0, 40)" style="font-size:12px"></code>
+                  </td>
                 </template>
                 <template x-if="row.type === 'schedule'">
-                  <td x-text="row.data.schedule_type"></td>
+                  <td x-text="row.data.execution_type === 'script' ? 'script / ' + row.data.schedule_type : row.data.schedule_type"></td>
                 </template>
                 <template x-if="row.type === 'schedule'">
                   <td><span class="badge" :class="statusBadge(row.data)" x-text="statusLabel(row.data)"></span></td>

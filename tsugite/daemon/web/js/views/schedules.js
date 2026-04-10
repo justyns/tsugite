@@ -1,7 +1,7 @@
 import { get, post, patch, del } from '../api.js';
 import { formatDate, stateBadgeClass } from '../utils.js';
 
-const emptyForm = () => ({ id: '', agent: '', prompt: '', schedule_type: 'cron', cron_expr: '', run_at: '', timezone: 'UTC', model: '', agent_file: '', max_turns: '' });
+const emptyForm = () => ({ id: '', agent: '', prompt: '', schedule_type: 'cron', cron_expr: '', run_at: '', timezone: 'UTC', model: '', agent_file: '', max_turns: '', execution_type: 'agent', command: '', script_timeout: 60 });
 
 export default () => ({
   schedules: [],
@@ -71,6 +71,9 @@ export default () => ({
       model: s.model || '',
       agent_file: s.agent_file || '',
       max_turns: s.max_turns || '',
+      execution_type: s.execution_type || 'agent',
+      command: s.command || '',
+      script_timeout: s.script_timeout || 60,
     };
     this.showForm = true;
   },
@@ -85,13 +88,19 @@ export default () => ({
     this.error = null;
     if (this.editingId) {
       const body = {};
-      if (this.form.prompt) body.prompt = this.form.prompt;
+      body.execution_type = this.form.execution_type;
+      if (this.form.execution_type === 'script') {
+        if (this.form.command) body.command = this.form.command;
+        if (this.form.script_timeout) body.script_timeout = parseInt(this.form.script_timeout, 10);
+      } else {
+        if (this.form.prompt) body.prompt = this.form.prompt;
+        if (this.form.model) body.model = this.form.model;
+        if (this.form.agent_file) body.agent_file = this.form.agent_file;
+        if (this.form.max_turns) body.max_turns = parseInt(this.form.max_turns, 10);
+      }
       if (this.form.schedule_type === 'cron' && this.form.cron_expr) body.cron_expr = this.form.cron_expr;
       if (this.form.schedule_type === 'once' && this.form.run_at) body.run_at = this.form.run_at;
       if (this.form.timezone) body.timezone = this.form.timezone;
-      if (this.form.model) body.model = this.form.model;
-      if (this.form.agent_file) body.agent_file = this.form.agent_file;
-      if (this.form.max_turns) body.max_turns = parseInt(this.form.max_turns, 10);
       try {
         await patch(`/api/schedules/${this.editingId}`, body);
         this.cancelForm();
@@ -106,10 +115,21 @@ export default () => ({
       } else {
         delete body.cron_expr;
       }
-      if (!body.model) delete body.model;
-      if (!body.agent_file) delete body.agent_file;
-      if (body.max_turns) body.max_turns = parseInt(body.max_turns, 10);
-      else delete body.max_turns;
+      if (body.execution_type === 'script') {
+        delete body.prompt;
+        delete body.model;
+        delete body.agent_file;
+        delete body.max_turns;
+        if (body.script_timeout) body.script_timeout = parseInt(body.script_timeout, 10);
+        else delete body.script_timeout;
+      } else {
+        delete body.command;
+        delete body.script_timeout;
+        if (!body.model) delete body.model;
+        if (!body.agent_file) delete body.agent_file;
+        if (body.max_turns) body.max_turns = parseInt(body.max_turns, 10);
+        else delete body.max_turns;
+      }
       try {
         await post('/api/schedules', body);
         this.cancelForm();

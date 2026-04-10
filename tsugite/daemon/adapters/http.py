@@ -1380,6 +1380,9 @@ class HTTPServer:
             "model",
             "agent_file",
             "max_turns",
+            "execution_type",
+            "command",
+            "script_timeout",
         }
         fields = {k: v for k, v in body.items() if k in allowed}
         if not fields:
