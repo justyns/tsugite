@@ -76,7 +76,6 @@ tsu serve
 - **Skills** reusable knowledge files agents can load on demand, mostly compatible with [agentskills.io](https://agentskills.io/)
 - **Hooks** that fire shell commands on lifecycle events (post-tool, pre-message, pre/post-compact)
 - **Sandbox** (linux only) via bubblewrap with filesystem and network isolation
-- **KV store** for persistent agent state
 - **MCP** integration for connecting to MCP servers
 
 ## Agents in more detail
@@ -129,7 +128,6 @@ All paths follow [XDG Base Directory](https://specifications.freedesktop.org/bas
 | `$XDG_DATA_HOME/tsugite/history/`      | `~/.local/share/tsugite/history/`    | Session history (JSONL per session)          |
 | `$XDG_DATA_HOME/tsugite/daemon/`       | `~/.local/share/tsugite/daemon/`     | Daemon state                                 |
 | `$XDG_DATA_HOME/tsugite/secrets/`      | `~/.local/share/tsugite/secrets/`    | Encrypted secrets (`secrets.db`)             |
-| `$XDG_DATA_HOME/tsugite/kvstore/`      | `~/.local/share/tsugite/kvstore/`    | Key-value store (`kv.db`)                    |
 | `$XDG_DATA_HOME/tsugite/usage/`        | `~/.local/share/tsugite/usage/`      | Usage (cost and token) tracking (`usage.db`) |
 | `$XDG_DATA_HOME/tsugite/workspaces/`   | `~/.local/share/tsugite/workspaces/` | Workspace directories                        |
 | `$XDG_CACHE_HOME/tsugite/attachments/` | `~/.cache/tsugite/attachments/`      | Attachment cache                             |

@@ -28,7 +28,6 @@ tools:
   - fetch_text
   - http_request
   - run
-  - "@kv"
   - "@secrets"
   - "@schedule"
   - "@scratchpad"

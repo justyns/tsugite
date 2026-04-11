@@ -132,7 +132,7 @@ tools: ["*_file", "web_*"]
 tools: ["@fs", "-delete_file", "-remove_directory"]
 ```
 
-Built-in categories include `@fs`, `@http`, `@shell`, `@kv`, `@secrets`, `@schedule`, `@notify`, `@sessions`, `@tmux`.
+Built-in categories include `@fs`, `@http`, `@shell`, `@secrets`, `@schedule`, `@notify`, `@sessions`, `@tmux`.
 
 ## Inheritance
 
