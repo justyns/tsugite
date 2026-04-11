@@ -866,30 +866,23 @@ class HTTPServer:
             turn_timestamps.append((ts, turn_index))
             turn_index += 1
 
-        # Assign events to the most recent turn before them
-        def _assign_to_turns(events):
-            by_turn: dict[int, list] = {}
-            for ev in events:
-                ev_ts = ev.get("timestamp", "")
-                assigned = -1
-                for ts, idx in turn_timestamps:
-                    if ts and ts <= ev_ts:
-                        assigned = idx
-                if assigned >= 0:
-                    by_turn.setdefault(assigned, []).append(ev)
-            return by_turn
-
-        reactions_by_turn = {k: [e["emoji"] for e in v] for k, v in _assign_to_turns(reaction_events).items()}
-
-        # Snapshots are emitted BEFORE the LLM call, so their timestamp is earlier
-        # than the turn's. Assign each snapshot to the next turn after it.
-        snapshots_by_turn: dict[int, dict] = {}
-        for ev in snapshot_events:
-            ev_ts = ev.get("timestamp", "")
+        def _find_turn_for_event(ev_ts: str) -> int | None:
             for ts, idx in turn_timestamps:
                 if ts and ts >= ev_ts:
-                    snapshots_by_turn[idx] = ev
-                    break
+                    return idx
+            return None
+
+        reactions_by_turn: dict[int, list[str]] = {}
+        for ev in reaction_events:
+            idx = _find_turn_for_event(ev.get("timestamp", ""))
+            if idx is not None:
+                reactions_by_turn.setdefault(idx, []).append(ev["emoji"])
+
+        snapshots_by_turn: dict[int, dict] = {}
+        for ev in snapshot_events:
+            idx = _find_turn_for_event(ev.get("timestamp", ""))
+            if idx is not None:
+                snapshots_by_turn[idx] = ev
 
         result_turns = []
         real_turn_index = 0

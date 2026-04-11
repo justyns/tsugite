@@ -1,6 +1,7 @@
 """Tests for the HTTP API adapter."""
 
 import json
+from datetime import timedelta
 from unittest.mock import patch
 
 import pytest
@@ -234,9 +235,9 @@ class TestHistoryEndpoint:
             final_answer="hi",
         )
 
-        # Get the turn timestamp so reaction comes after it
         turn = next(r for r in storage.load_records() if isinstance(r, Turn))
-        reaction_ts = turn.timestamp.isoformat().replace("+00:00", "") + ".100000+00:00"
+        reaction_dt = turn.timestamp - timedelta(milliseconds=500)
+        reaction_ts = reaction_dt.isoformat()
 
         mock_adapter.session_store.append_event(
             session_id,
