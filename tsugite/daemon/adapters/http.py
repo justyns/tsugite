@@ -909,11 +909,21 @@ class HTTPServer:
                         _, blocks = extract_content_blocks(content)
                         content_blocks.update(blocks)
 
+            # Count sub-turns (assistant messages) and total tool invocations
+            sub_turn_count = 0
+            tool_call_count = 0
+            for msg in item.messages:
+                if msg.get("role") == "assistant":
+                    sub_turn_count += 1
+                    for tc in msg.get("tool_calls", []):
+                        tool_call_count += 1
             turn_data = {
                 "user": user_msg,
                 "assistant": item.final_answer or "",
                 "timestamp": item.timestamp.isoformat() if item.timestamp else None,
                 "tools_used": item.functions_called or [],
+                "turn_count": max(sub_turn_count, 1),
+                "tool_count": tool_call_count,
             }
             if content_blocks:
                 turn_data["content_blocks"] = content_blocks

@@ -82,7 +82,7 @@ export const historyMixin = {
           }
         }
         if (steps.length > 0) {
-          this._allHistoryMessages.push({ type: 'progress-done', steps, turnCount: turn.turn_count || 1, toolCount: turn.tools_used?.length || 0 });
+          this._allHistoryMessages.push({ type: 'progress-done', steps, turnCount: turn.turn_count || 1, toolCount: turn.tool_count || turn.tools_used?.length || 0 });
         }
         if (turn.assistant) {
           this._allHistoryMessages.push({ type: 'agent', text: turn.assistant });
