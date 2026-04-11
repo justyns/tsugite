@@ -51,17 +51,23 @@ export const sessionsMixin = {
 
     this.isActiveSession = this._isMyInteractive(session);
 
+    this._sessionProgress = null;
     this.loadStatus();
     if (this.isActiveSession) {
       this.loadHistory();
     } else {
       this.loadDetailHistory();
+      if (session.state === 'running') {
+        this._sessionProgress = { type: 'progress', steps: [], statusText: 'Running...', turnCount: 0, toolCount: 0 };
+        this.messages.push(this._sessionProgress);
+      }
     }
   },
 
   backToSessions() {
     this.selectedSessionId = null;
     this.selectedSessionMeta = null;
+    this._sessionProgress = null;
     this.messages = [];
     this.resetHistory();
     this.isActiveSession = true;

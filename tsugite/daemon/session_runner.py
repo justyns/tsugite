@@ -39,11 +39,12 @@ def set_current_chain_depth(depth: int) -> None:
 
 
 class LoggingProgressHandler:
-    """Wraps SSE event emission to also append events to the session JSONL log."""
+    """Wraps SSE event emission to also append events to the session JSONL log and broadcast via SSE."""
 
-    def __init__(self, store: SessionStore, session_id: str):
+    def __init__(self, store: SessionStore, session_id: str, broadcaster=None):
         self._store = store
         self._session_id = session_id
+        self._broadcaster = broadcaster
 
     def handle_event(self, event) -> None:
         """Handle BaseEvent from EventBus — delegate to JSONLUIHandler's logic."""
@@ -56,6 +57,11 @@ class LoggingProgressHandler:
     def _emit(self, event_type: str, data: dict[str, Any]) -> None:
         event = {"type": event_type, "timestamp": datetime.now(timezone.utc).isoformat(), **data}
         self._store.append_event(self._session_id, event)
+        if self._broadcaster:
+            self._broadcaster.emit(
+                "session_event",
+                {"session_id": self._session_id, "event_type": event_type, **data},
+            )
 
 
 NotifyCallback = Callable[[Session, str], Coroutine[Any, Any, None]]
@@ -94,7 +100,7 @@ class SessionRunner:
         if self._event_bus:
             self._event_bus.emit("session_update", {"action": "created", "id": session.id})
 
-        progress = LoggingProgressHandler(self._store, session.id)
+        progress = LoggingProgressHandler(self._store, session.id, broadcaster=self._event_bus)
         progress._emit("session_start", {"agent": session.agent, "prompt": session.prompt[:200]})
 
         loop = asyncio.get_running_loop()

@@ -6,6 +6,8 @@ import { attachmentsMixin } from './conversation/attachments.js';
 import { streamingMixin } from './conversation/streaming.js';
 import { inputMixin } from './conversation/input.js';
 
+const SESSION_END_EVENTS = new Set(['session_complete', 'session_error', 'session_cancelled']);
+
 export default () => ({
   ...sessionsMixin,
   ...historyMixin,
@@ -111,6 +113,9 @@ export default () => ({
           }
         }
         this._debouncedLoadSessions();
+      }
+      if (ev.type === 'session_event') {
+        this._handleSessionEvent(d);
       }
       if (ev.type === 'compaction_started' && d.agent === this.$store.app.selectedAgent) {
         this.compacting = true;
@@ -264,5 +269,41 @@ export default () => ({
       const el = this.$refs.messages;
       if (el) scrollToBottom(el);
     });
+  },
+
+  _sessionProgress: null,
+
+  _handleSessionEvent(d) {
+    if (!this.selectedSessionId || this.isActiveSession) return;
+    if (d.session_id !== this.selectedSessionId) return;
+
+    const evType = d.event_type;
+
+    if (!this._sessionProgress) {
+      this._sessionProgress = { type: 'progress', steps: [], statusText: 'Working...', turnCount: 0, toolCount: 0 };
+      this.messages.push(this._sessionProgress);
+    }
+
+    if (SESSION_END_EVENTS.has(evType)) {
+      this._sessionProgress.type = 'progress-done';
+      if (evType === 'session_error') {
+        this._sessionProgress.failed = true;
+        this._sessionProgress.errorText = d.error || 'Session failed';
+      }
+      this._sessionProgress = null;
+      this._debouncedLoadSessions();
+      if (evType === 'session_complete' && d.result_preview) {
+        this.messages.push({ type: 'agent', text: d.result_preview });
+      }
+      this._scrollThrottled();
+      return;
+    }
+
+    const progressIdx = this.messages.indexOf(this._sessionProgress);
+    if (progressIdx >= 0) {
+      const { session_id, event_type, ...rest } = d;
+      this._handleProgressEvent(progressIdx, { type: evType, ...rest });
+      this._scrollThrottled();
+    }
   },
 });
