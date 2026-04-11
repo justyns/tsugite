@@ -6,7 +6,7 @@ from typing import Dict, List, Optional
 
 from tsugite import renderer
 from tsugite.renderer import AgentRenderer
-from tsugite.skill_discovery import SkillMeta, build_skill_index, scan_skills
+from tsugite.skill_discovery import SkillMeta, build_skill_index, match_triggered_skills, scan_skills
 from tsugite.tools import tool
 from tsugite.utils import parse_yaml_frontmatter
 
@@ -166,6 +166,23 @@ class SkillManager:
             Dict mapping skill names to rendered content
         """
         return self._loaded_skills.copy()
+
+    def get_triggered_skills(self, message: str, max_skills: int = 3) -> List[str]:
+        """Find skills that should auto-load based on trigger keywords in the message.
+
+        Args:
+            message: User message to scan for trigger keywords
+            max_skills: Maximum number of triggered skills to return
+
+        Returns:
+            List of skill names that matched
+        """
+        self._ensure_registry_initialized()
+        already_loaded = set(self._loaded_skills.keys())
+        matched = match_triggered_skills(
+            message, list(self._skill_registry.values()), already_loaded, max_skills
+        )
+        return [skill.name for skill in matched]
 
     def clear_loaded_skills(self):
         """Clear all loaded skills.

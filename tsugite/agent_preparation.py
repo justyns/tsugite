@@ -366,25 +366,29 @@ class AgentPreparer:
         except Exception as e:
             raise RuntimeError(f"Failed to create tools: {e}") from e
 
-        # Step 7: Load auto_load_skills
+        # Step 7: Load auto_load_skills and trigger-matched skills
+        from tsugite.events.events import SkillLoadFailedEvent
+
         auto_load_skills = list(agent_config.auto_load_skills or [])
 
-        skills = []
-        if auto_load_skills:
-            from tsugite.events.events import SkillLoadFailedEvent
+        for skill_name in auto_load_skills:
+            result = _skill_manager.load_skill(skill_name)
+            if result.startswith("Failed") or result.startswith("Skill '"):
+                if event_bus:
+                    event_bus.emit(SkillLoadFailedEvent(skill_name=skill_name, error_message=result))
 
-            for skill_name in auto_load_skills:
-                # Attempt to load skill (returns message string for agents/tools)
-                result = _skill_manager.load_skill(skill_name)
+        # Step 7b: Auto-load skills whose triggers match the user prompt
+        triggered_skill_names = _skill_manager.get_triggered_skills(prompt)
+        for skill_name in triggered_skill_names:
+            logger.info(f"Trigger-loading skill '{skill_name}' based on user prompt")
+            result = _skill_manager.load_skill(skill_name)
+            if result.startswith("Failed") or result.startswith("Skill '"):
+                if event_bus:
+                    event_bus.emit(SkillLoadFailedEvent(skill_name=skill_name, error_message=result))
 
-                # Emit error event if skill loading failed
-                if result.startswith("Failed") or result.startswith("Skill '"):
-                    if event_bus:
-                        event_bus.emit(SkillLoadFailedEvent(skill_name=skill_name, error_message=result))
-
-            # Get all successfully loaded skills as Skill objects
-            loaded_skills_dict = _skill_manager.get_loaded_skills()
-            skills = [Skill(name=name, content=content) for name, content in loaded_skills_dict.items()]
+        # Get all successfully loaded skills as Skill objects
+        loaded_skills_dict = _skill_manager.get_loaded_skills()
+        skills = [Skill(name=name, content=content) for name, content in loaded_skills_dict.items()]
 
         # Step 8: Build system message (what LLM actually sees)
         system_message = build_system_prompt(tools, combined_instructions)

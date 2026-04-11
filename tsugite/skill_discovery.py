@@ -5,9 +5,10 @@ and builds an index for efficient discovery.
 """
 
 import logging
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Set
 
 from tsugite.utils import parse_yaml_frontmatter
 
@@ -21,6 +22,7 @@ class SkillMeta:
     name: str
     description: str
     path: Path
+    triggers: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -121,6 +123,7 @@ def scan_skills(workspace=None, extra_paths: Optional[List[str]] = None) -> List
                     name=skill_name,
                     description=frontmatter.get("description", ""),
                     path=skill_file,
+                    triggers=frontmatter.get("triggers", []),
                 )
 
                 skills.append(skill)
@@ -132,6 +135,45 @@ def scan_skills(workspace=None, extra_paths: Optional[List[str]] = None) -> List
                 continue
 
     return skills
+
+
+_WORD_SPLIT = re.compile(r"\W+")
+
+
+def match_triggered_skills(
+    message: str,
+    skills: List[SkillMeta],
+    already_loaded: Set[str] | None = None,
+    max_skills: int = 3,
+) -> List[SkillMeta]:
+    """Find skills whose trigger keywords appear in the message.
+
+    Uses word-boundary matching (case-insensitive). Skills are ranked by
+    number of matching triggers so more specific matches come first.
+
+    Args:
+        message: User message to scan for trigger keywords
+        skills: All available skills to check
+        already_loaded: Skill names to skip (already loaded)
+        max_skills: Maximum number of skills to return
+
+    Returns:
+        List of matching SkillMeta objects, up to max_skills
+    """
+    already_loaded = already_loaded or set()
+    message_words = set(_WORD_SPLIT.split(message.lower()))
+    matches = []
+
+    for skill in skills:
+        if not skill.triggers or skill.name in already_loaded:
+            continue
+
+        match_count = sum(1 for t in skill.triggers if t.lower() in message_words)
+        if match_count > 0:
+            matches.append((match_count, skill))
+
+    matches.sort(key=lambda x: x[0], reverse=True)
+    return [skill for _, skill in matches[:max_skills]]
 
 
 def build_skill_index(skills: List[SkillMeta]) -> str:

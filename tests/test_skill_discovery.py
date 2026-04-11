@@ -8,6 +8,7 @@ from tsugite.skill_discovery import (
     SkillMeta,
     build_skill_index,
     get_builtin_skills_path,
+    match_triggered_skills,
     scan_skills,
 )
 
@@ -401,3 +402,143 @@ class TestScanSkillsExtraPaths:
         names_none = {s.name for s in skills_none}
         names_empty = {s.name for s in skills_empty}
         assert names_none == names_empty
+
+
+class TestMatchTriggeredSkills:
+    """Test trigger-based skill matching."""
+
+    def _make_skill(self, name, triggers=None):
+        return SkillMeta(
+            name=name,
+            description=f"{name} skill",
+            path=Path(f"/skills/{name}.md"),
+            triggers=triggers or [],
+        )
+
+    def test_basic_trigger_match(self):
+        skills = [self._make_skill("weather", triggers=["weather", "forecast"])]
+        result = match_triggered_skills("What's the weather today?", skills)
+        assert len(result) == 1
+        assert result[0].name == "weather"
+
+    def test_case_insensitive(self):
+        skills = [self._make_skill("weather", triggers=["weather"])]
+        result = match_triggered_skills("WEATHER report please", skills)
+        assert len(result) == 1
+
+    def test_word_boundary_no_substring(self):
+        """'weather' trigger should NOT match 'weathering'."""
+        skills = [self._make_skill("weather", triggers=["weather"])]
+        result = match_triggered_skills("The weathering of rocks is interesting", skills)
+        assert len(result) == 0
+
+    def test_word_boundary_matches_punctuation(self):
+        """Trigger should match when adjacent to punctuation."""
+        skills = [self._make_skill("weather", triggers=["weather"])]
+        result = match_triggered_skills("How's the weather?", skills)
+        assert len(result) == 1
+
+    def test_no_triggers_skipped(self):
+        skills = [self._make_skill("basic", triggers=[])]
+        result = match_triggered_skills("anything at all", skills)
+        assert len(result) == 0
+
+    def test_no_match(self):
+        skills = [self._make_skill("weather", triggers=["weather", "forecast"])]
+        result = match_triggered_skills("Tell me about Python", skills)
+        assert len(result) == 0
+
+    def test_multiple_skills_matched(self):
+        skills = [
+            self._make_skill("weather", triggers=["weather"]),
+            self._make_skill("travel", triggers=["trip", "travel"]),
+        ]
+        result = match_triggered_skills("What's the weather for my trip?", skills)
+        assert len(result) == 2
+
+    def test_max_skills_cap(self):
+        skills = [
+            self._make_skill(f"skill{i}", triggers=[f"word{i}"])
+            for i in range(5)
+        ]
+        message = "word0 word1 word2 word3 word4"
+        result = match_triggered_skills(message, skills, max_skills=3)
+        assert len(result) == 3
+
+    def test_already_loaded_skipped(self):
+        skills = [
+            self._make_skill("weather", triggers=["weather"]),
+            self._make_skill("news", triggers=["news"]),
+        ]
+        result = match_triggered_skills(
+            "weather and news", skills, already_loaded={"weather"}
+        )
+        assert len(result) == 1
+        assert result[0].name == "news"
+
+    def test_ranked_by_match_count(self):
+        """Skills with more trigger matches should rank higher."""
+        skills = [
+            self._make_skill("general", triggers=["info"]),
+            self._make_skill("weather", triggers=["weather", "forecast", "rain"]),
+        ]
+        result = match_triggered_skills(
+            "What's the weather forecast for rain today? I need info.", skills
+        )
+        assert len(result) == 2
+        assert result[0].name == "weather"  # 3 matches vs 1
+
+    def test_empty_message(self):
+        skills = [self._make_skill("weather", triggers=["weather"])]
+        result = match_triggered_skills("", skills)
+        assert len(result) == 0
+
+    def test_empty_skills_list(self):
+        result = match_triggered_skills("weather forecast", [])
+        assert len(result) == 0
+
+    def test_scan_skills_parses_triggers(self, tmp_path, monkeypatch):
+        """Triggers field in YAML frontmatter is parsed by scan_skills."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("HOME", str(tmp_path))
+
+        skills_dir = tmp_path / ".tsugite" / "skills"
+        skills_dir.mkdir(parents=True)
+
+        skill_file = skills_dir / "weather.md"
+        skill_file.write_text("""---
+name: weather
+description: Weather skill
+triggers:
+  - weather
+  - forecast
+  - temperature
+---
+Weather content here.
+""")
+
+        skills = scan_skills()
+        weather = [s for s in skills if s.name == "weather"]
+        assert len(weather) == 1
+        assert weather[0].triggers == ["weather", "forecast", "temperature"]
+
+    def test_scan_skills_no_triggers_defaults_empty(self, tmp_path, monkeypatch):
+        """Skills without triggers field default to empty list."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("HOME", str(tmp_path))
+
+        skills_dir = tmp_path / ".tsugite" / "skills"
+        skills_dir.mkdir(parents=True)
+
+        skill_file = skills_dir / "basic.md"
+        skill_file.write_text("""---
+name: basic
+description: Basic skill
+---
+Content.
+""")
+
+        skills = scan_skills()
+        basic = [s for s in skills if s.name == "basic"]
+        assert len(basic) == 1
+        assert basic[0].triggers == []
