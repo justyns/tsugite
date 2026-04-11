@@ -1,12 +1,10 @@
 import Alpine from 'https://cdn.jsdelivr.net/npm/alpinejs@3/dist/module.esm.js';
 import { get, post, patch, connectEvents, onAuthRequired } from './api.js';
 import conversationsView from './views/conversations.js';
-import dashboardView from './views/dashboard.js';
 import scheduleView from './views/schedules.js';
 import webhookView from './views/webhooks.js';
 import fileEditorView from './views/file-editor.js';
 import workspaceView from './views/workspace.js';
-import kvstoreView from './views/kvstore.js';
 import usageView from './views/usage.js';
 
 window.Alpine = Alpine;
@@ -20,10 +18,10 @@ function parseHash(hash) {
 
 const legacyViews = { chat: 'conversations', sessions: 'conversations', history: 'conversations' };
 const initialParsed = parseHash(location.hash.slice(1));
-const initialView = legacyViews[initialParsed.view] || initialParsed.view || localStorage.getItem('tsugite-view') || 'dashboard';
+const initialView = legacyViews[initialParsed.view] || initialParsed.view || localStorage.getItem('tsugite-view') || 'conversations';
 
 Alpine.store('app', {
-  tabs: ['dashboard','conversations','workspace','agents','skills','schedules','webhooks','kvstore','usage'],
+  tabs: ['conversations','workspace','agents','skills','schedules','webhooks','usage'],
   agents: [],
   selectedAgent: localStorage.getItem('tsugite-agent') || null,
   view: initialView,
@@ -39,13 +37,11 @@ Alpine.store('app', {
 });
 
 Alpine.data('conversationsView', conversationsView);
-Alpine.data('dashboardView', dashboardView);
 Alpine.data('scheduleView', scheduleView);
 Alpine.data('webhookView', webhookView);
 Alpine.data('agentFileView', fileEditorView('agents', 'agent-files'));
 Alpine.data('skillFileView', fileEditorView('skills', 'skill-files'));
 Alpine.data('workspaceView', workspaceView);
-Alpine.data('kvstoreView', kvstoreView);
 Alpine.data('usageView', usageView);
 
 window.addEventListener('hashchange', () => {

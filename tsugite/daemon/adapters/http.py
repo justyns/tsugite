@@ -430,9 +430,6 @@ class HTTPServer:
             Route("/api/secrets", self._secrets_list, methods=["GET"]),
             Route("/api/secrets/{name:path}", self._secrets_set, methods=["POST"]),
             Route("/api/secrets/{name:path}", self._secrets_delete, methods=["DELETE"]),
-            Route("/api/kv/namespaces", self._kv_namespaces, methods=["GET"]),
-            Route("/api/kv/{namespace}/keys", self._kv_keys, methods=["GET"]),
-            Route("/api/kv/{namespace}/keys/{key:path}", self._kv_get, methods=["GET"]),
             Route("/api/commands", self._list_commands, methods=["GET"]),
             Route("/api/agents/{agent}/commands/{command_name}", self._run_command, methods=["POST"]),
             Route("/api/usage/summary", self._usage_summary, methods=["GET"]),
@@ -2183,34 +2180,6 @@ class HTTPServer:
             return JSONResponse({"error": "secret not found"}, status_code=404)
         return JSONResponse({"status": "ok", "name": name})
 
-    async def _kv_namespaces(self, request: Request) -> JSONResponse:
-        if err := self._check_auth(request):
-            return err
-        from tsugite.kvstore import get_backend
-
-        return JSONResponse({"namespaces": get_backend().list_namespaces()})
-
-    async def _kv_keys(self, request: Request) -> JSONResponse:
-        if err := self._check_auth(request):
-            return err
-        from tsugite.kvstore import get_backend
-
-        namespace = request.path_params["namespace"]
-        prefix = request.query_params.get("prefix", "")
-        keys = get_backend().list_keys(namespace, prefix)
-        return JSONResponse({"namespace": namespace, "keys": keys})
-
-    async def _kv_get(self, request: Request) -> JSONResponse:
-        if err := self._check_auth(request):
-            return err
-        from tsugite.kvstore import get_backend
-
-        namespace = request.path_params["namespace"]
-        key = request.path_params["key"]
-        result = get_backend().get_with_metadata(namespace, key)
-        if result is None:
-            return JSONResponse({"error": "key not found"}, status_code=404)
-        return JSONResponse({"namespace": namespace, "key": key, **result})
 
     async def _events(self, request: Request) -> Response:
         if err := self._check_auth(request):

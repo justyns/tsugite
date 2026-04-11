@@ -156,12 +156,6 @@ main { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
 .data-table td { padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
 .data-table tr:hover td { background: var(--bg); }
 
-/* Cards (dashboard) */
-.card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
-.card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
-.card h3 { font-size: 15px; margin-bottom: 8px; }
-.card .card-meta { font-size: 12px; color: var(--muted); line-height: 1.8; }
-
 /* Badges */
 .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
 .badge-ok { background: var(--ok); color: var(--btn-text); }
@@ -288,9 +282,6 @@ main { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
 .two-pane { display: flex; gap: 16px; }
 .pane-sidebar { width: 280px; flex-shrink: 0; overflow-y: auto; }
 .pane-detail { flex: 1; min-width: 0; }
-
-/* KV Store value display */
-.kv-value { background: var(--code-bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 12px; font-size: 13px; white-space: pre-wrap; word-break: break-all; max-height: 70vh; overflow: auto; }
 
 /* Prompt inspector (opened via Context link in status bar) */
 .prompt-inspector { max-width: 800px; max-height: 85vh; overflow-y: auto; }

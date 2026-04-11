@@ -1,55 +1,73 @@
-"""Cached model discovery using KVStore with TTL."""
+"""Cached model discovery using a JSON file with TTL."""
 
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
+import time
 from dataclasses import asdict
+from pathlib import Path
 from typing import Any
 
 from .base import ModelInfo
 
 logger = logging.getLogger(__name__)
 
-CACHE_NAMESPACE = "model_cache"
 CACHE_TTL = 86400  # 24 hours
 
 
-def _get_store():
-    from tsugite.kvstore.sqlite import SqliteKVBackend
+def _cache_path() -> Path:
+    from tsugite.config import get_xdg_cache_path
 
-    return SqliteKVBackend()
+    return get_xdg_cache_path() / "models.json"
+
+
+def _read_all() -> dict:
+    path = _cache_path()
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text())
+    except Exception as e:
+        logger.debug("Cache read failed: %s", e)
+        return {}
+
+
+def _write_all(data: dict) -> None:
+    try:
+        path = _cache_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data))
+    except Exception as e:
+        logger.debug("Cache write failed: %s", e)
 
 
 def _read_cache(provider_name: str) -> list[dict] | None:
-    try:
-        store = _get_store()
-        raw = store.get(CACHE_NAMESPACE, provider_name)
-        if raw:
-            return json.loads(raw)
-    except Exception as e:
-        logger.debug("Cache read failed for %s: %s", provider_name, e)
+    data = _read_all()
+    entry = data.get(provider_name)
+    if entry and (time.time() - entry.get("cached_at", 0)) < CACHE_TTL:
+        return entry.get("models")
     return None
 
 
 def _write_cache(provider_name: str, models: list[dict]) -> None:
-    try:
-        store = _get_store()
-        store.set(CACHE_NAMESPACE, provider_name, json.dumps(models), ttl_seconds=CACHE_TTL)
-    except Exception as e:
-        logger.debug("Cache write failed for %s: %s", provider_name, e)
+    data = _read_all()
+    data[provider_name] = {"models": models, "cached_at": time.time()}
+    _write_all(data)
 
 
 def clear_model_cache(provider_name: str | None = None) -> None:
     """Clear cached model lists. If provider_name is None, clear all."""
     try:
-        store = _get_store()
         if provider_name:
-            store.delete(CACHE_NAMESPACE, provider_name)
+            data = _read_all()
+            data.pop(provider_name, None)
+            _write_all(data)
         else:
-            for key in store.list_keys(CACHE_NAMESPACE):
-                store.delete(CACHE_NAMESPACE, key)
+            path = _cache_path()
+            if path.exists():
+                path.unlink()
     except Exception as e:
         logger.debug("Cache clear failed: %s", e)
 
@@ -88,7 +106,6 @@ async def get_provider_models(provider_name: str, refresh: bool = False) -> list
         info = provider.get_model_info(name)
         enriched.append({"name": name, "info": info})
 
-    # Cache as serializable dicts
     cache_data = [{"name": m["name"], "info": _info_to_dict(m["info"])} for m in enriched]
     _write_cache(provider_name, cache_data)
 

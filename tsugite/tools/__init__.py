@@ -169,7 +169,7 @@ def get_tools_by_category(category: str) -> List[str]:
     return sorted(category_tools)
 
 
-_OPTIONAL_CATEGORIES = {"schedule", "notify", "scratchpad", "sessions", "kv", "secrets", "tmux"}
+_OPTIONAL_CATEGORIES = {"schedule", "notify", "scratchpad", "sessions", "secrets", "tmux"}
 
 
 def _expand_single_spec(spec: str, strict: bool = True) -> List[str]:
@@ -329,7 +329,6 @@ def _ensure_tools_loaded():
     from . import history as history  # noqa: E402, F401
     from . import http as http  # noqa: E402, F401
     from . import interactive as interactive  # noqa: E402, F401
-    from . import kv as kv  # noqa: E402, F401
     from . import notify as notify  # noqa: E402, F401
     from . import schedule as schedule  # noqa: E402, F401
     from . import scratchpad as scratchpad  # noqa: E402, F401

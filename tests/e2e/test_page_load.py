@@ -22,7 +22,7 @@ def test_agent_selector_populated(authenticated_page):
 
 
 @pytest.mark.parametrize(
-    "tab", ["dashboard", "conversations", "workspace", "schedules", "webhooks", "kvstore", "usage"]
+    "tab", ["conversations", "workspace", "schedules", "webhooks", "usage"]
 )
 def test_tab_loads_without_errors(authenticated_page, tab):
     """Each main tab should load without JS errors."""

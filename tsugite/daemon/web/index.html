@@ -47,57 +47,6 @@
 </div>
 
 <main>
-  <!-- Dashboard -->
-  <div class="view" x-show="$store.app.view === 'dashboard'" x-data="dashboardView" x-cloak>
-    <div class="view-scroll">
-      <template x-if="loading">
-        <div class="empty-state"><span class="spinner"></span> Loading...</div>
-      </template>
-      <template x-if="error">
-        <div class="msg error" x-text="error" style="margin:16px auto"></div>
-      </template>
-      <template x-if="!loading && !error">
-        <div>
-          <div class="section-header"><h2>Agents</h2></div>
-          <div class="card-grid">
-            <template x-for="card in agentCards" :key="card.name">
-              <div class="card">
-                <h3>
-                  <span x-text="card.name"></span>
-                  <template x-if="card.running_tasks > 0">
-                    <span class="badge badge-accent" style="margin-left:8px;font-size:11px"><span class="spinner" style="width:10px;height:10px;margin-right:4px"></span> running</span>
-                  </template>
-                </h3>
-                <div class="card-meta">
-                  <div>Model: <span x-text="card.model || 'unknown'"></span></div>
-                  <div>Context: <span x-text="contextDisplay(card)"></span></div>
-                  <div>Messages: <span x-text="card.message_count || 0"></span></div>
-                </div>
-              </div>
-            </template>
-          </div>
-          <template x-if="upcomingSchedules.length > 0">
-            <div style="margin-top:24px">
-              <div class="section-header"><h2>Upcoming Schedules</h2></div>
-              <table class="data-table">
-                <thead><tr><th>ID</th><th>Agent</th><th>Next Run</th></tr></thead>
-                <tbody>
-                  <template x-for="s in upcomingSchedules" :key="s.id">
-                    <tr>
-                      <td x-text="s.id"></td>
-                      <td x-text="s.agent"></td>
-                      <td x-text="formatDate(s.next_run)"></td>
-                    </tr>
-                  </template>
-                </tbody>
-              </table>
-            </div>
-          </template>
-        </div>
-      </template>
-    </div>
-  </div>
-
   <!-- Conversations -->
   <div class="view" x-show="$store.app.view === 'conversations'" x-data="conversationsView" x-cloak
        @dragover.prevent @dragenter.prevent="onDragEnter($event)"
@@ -839,69 +788,6 @@
             </template>
             <textarea x-model="content"
                       style="flex:1;min-height:300px;font-family:monospace;font-size:13px;resize:vertical;background:var(--surface0);color:var(--text);border:1px solid var(--surface2);border-radius:6px;padding:12px;tab-size:2"></textarea>
-          </div>
-        </template>
-      </div>
-    </div>
-  </div>
-
-  <!-- KV Store Browser -->
-  <div class="view" x-show="$store.app.view === 'kvstore'" x-data="kvstoreView" x-cloak>
-    <div class="view-scroll two-pane" style="height:100%; overflow:hidden">
-      <div class="pane-sidebar" :class="{ 'sidebar-open': sidebarOpen }">
-        <div class="section-header"><h2>KV Store</h2></div>
-        <template x-if="loading">
-          <div class="empty-state"><span class="spinner"></span></div>
-        </template>
-        <template x-if="!loading && namespaces.length === 0">
-          <div class="empty-state">No namespaces</div>
-        </template>
-        <div class="turn-list">
-          <template x-for="ns in namespaces" :key="ns">
-            <div class="turn-item" :class="{ active: selectedNamespace === ns }" @click="selectNamespace(ns)">
-              <span x-text="ns"></span>
-            </div>
-          </template>
-        </div>
-        <template x-if="selectedNamespace">
-          <div style="padding:8px 12px">
-            <div class="section-header" style="margin-top:8px"><h3>Keys</h3></div>
-            <div class="form-group" style="margin-bottom:8px">
-              <input type="text" x-model="prefix" @input.debounce.300ms="loadKeys()" placeholder="Filter by prefix..."
-                     style="font-size:12px;padding:4px 8px">
-            </div>
-            <template x-if="keys.length === 0">
-              <div class="turn-meta">No keys</div>
-            </template>
-            <div class="turn-list">
-              <template x-for="k in keys" :key="k">
-                <div class="turn-item" :class="{ active: selectedKey === k }" @click="selectKey(k)">
-                  <span x-text="k" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
-                </div>
-              </template>
-            </div>
-          </div>
-        </template>
-      </div>
-      <div class="pane-detail">
-        <button class="sidebar-toggle" @click="sidebarOpen = !sidebarOpen">
-          <span class="sidebar-toggle-arrow" :class="{ open: sidebarOpen }">▾</span>
-          <span x-text="sidebarOpen ? 'Hide' : 'Browse'"></span>
-        </button>
-        <template x-if="error">
-          <div class="msg error" x-text="error"></div>
-        </template>
-        <template x-if="!selectedKey">
-          <div class="empty-state">Select a namespace and key to view its value</div>
-        </template>
-        <template x-if="keyData">
-          <div style="padding:16px">
-            <div class="card-meta" style="margin-bottom:12px">
-              <span>Namespace:</span> <strong x-text="keyData.namespace"></strong>
-              <span style="margin-left:16px">Key:</span> <strong x-text="keyData.key"></strong>
-              <span style="margin-left:16px">Expires:</span> <span x-text="formatExpiry(keyData.expires_at)"></span>
-            </div>
-            <pre class="kv-value" x-text="formatValue(keyData.value)"></pre>
           </div>
         </template>
       </div>
