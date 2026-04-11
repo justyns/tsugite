@@ -790,6 +790,19 @@ async def run_agent_async(
     )
     context.update(hook_vars)
 
+    # Fire pre_context_build hooks (plugin hooks can inject extra context)
+    from tsugite.hooks import fire_hooks
+
+    pre_ctx_results = await fire_hooks(
+        hooks_dir,
+        "pre_context_build",
+        {"message": hook_message, "agent_name": agent_path.stem, **context},
+        interactive=is_interactive(),
+        on_status=on_status,
+        on_result=on_hook_result,
+    )
+    context.update(pre_ctx_results.captured)
+
     # Load conversation history if continuing
     previous_messages = []
     claude_code_resume_session = None
@@ -845,6 +858,27 @@ async def run_agent_async(
             attachments=attachments,
             path_context=path_context,
         )
+
+        # Fire post_context_build hooks
+        post_ctx_results = await fire_hooks(
+            hooks_dir,
+            "post_context_build",
+            {
+                "message": hook_message,
+                "agent_name": agent_path.stem,
+                "system_message": prepared.system_message[:500] if prepared.system_message else "",
+                "rendered_prompt": prepared.rendered_prompt[:500] if prepared.rendered_prompt else "",
+                "tools": [t.name for t in prepared.tools] if prepared.tools else [],
+            },
+            interactive=is_interactive(),
+            on_status=on_status,
+            on_result=on_hook_result,
+        )
+        if post_ctx_results.captured:
+            if "system_message" in post_ctx_results.captured:
+                prepared.system_message = post_ctx_results.captured["system_message"]
+            if "rendered_prompt" in post_ctx_results.captured:
+                prepared.rendered_prompt = post_ctx_results.captured["rendered_prompt"]
 
         # Short-circuit if run_if guard evaluated to false
         if prepared.skipped:

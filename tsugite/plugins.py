@@ -10,7 +10,10 @@ GROUP_TOOLS = "tsugite.tools"
 GROUP_ADAPTERS = "tsugite.adapters"
 GROUP_PROVIDERS = "tsugite.providers"
 GROUP_SECRETS = "tsugite.secrets"
-PLUGIN_GROUPS = (GROUP_TOOLS, GROUP_ADAPTERS, GROUP_PROVIDERS, GROUP_SECRETS)
+GROUP_HOOKS = "tsugite.hooks"
+PLUGIN_GROUPS = (GROUP_TOOLS, GROUP_ADAPTERS, GROUP_PROVIDERS, GROUP_SECRETS, GROUP_HOOKS)
+
+_plugin_hooks: dict[str, list] = {}
 
 
 @dataclass
@@ -71,6 +74,39 @@ def load_tool_plugins(plugin_config: dict | None = None) -> list[PluginInfo]:
             logger.warning("Failed to load tool plugin '%s': %s", ep.name, e)
             results.append(PluginInfo.from_entry_point(ep, GROUP_TOOLS, error=str(e)))
     return results
+
+
+
+def load_hook_plugins(plugin_config: dict | None = None) -> list[PluginInfo]:
+    """Discover and register hook plugins.
+
+    Each entry point should resolve to a callable that returns
+    dict[str, list[HookRule]] mapping phase names to hook rules.
+    """
+    global _plugin_hooks
+    results = []
+    for ep, cfg, enabled in _iter_plugins(GROUP_HOOKS, plugin_config):
+        if not enabled:
+            results.append(PluginInfo.from_entry_point(ep, GROUP_HOOKS, enabled=False))
+            logger.debug("Hook plugin '%s' disabled, skipping", ep.name)
+            continue
+        try:
+            register_fn = ep.load()
+            hooks = register_fn(cfg)
+            for phase, rules in hooks.items():
+                _plugin_hooks.setdefault(phase, []).extend(rules)
+            results.append(PluginInfo.from_entry_point(ep, GROUP_HOOKS, loaded=True))
+            hook_summary = ", ".join(f"{phase}({len(rules)})" for phase, rules in hooks.items())
+            logger.info("Loaded hook plugin '%s': %s", ep.name, hook_summary)
+        except Exception as e:
+            logger.warning("Failed to load hook plugin '%s': %s", ep.name, e)
+            results.append(PluginInfo.from_entry_point(ep, GROUP_HOOKS, error=str(e)))
+    return results
+
+
+def get_plugin_hooks() -> dict[str, list]:
+    """Return all registered plugin hooks, keyed by phase name."""
+    return _plugin_hooks
 
 
 def load_adapter_plugins(

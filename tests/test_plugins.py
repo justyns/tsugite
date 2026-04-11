@@ -2,7 +2,8 @@
 
 from unittest.mock import MagicMock, patch
 
-from tsugite.plugins import discover_plugins, load_adapter_plugins, load_tool_plugins
+from tsugite.hooks import HookRule
+from tsugite.plugins import discover_plugins, load_adapter_plugins, load_hook_plugins, load_tool_plugins
 
 
 def _make_entry_point(name, value, group):
@@ -172,3 +173,98 @@ class TestLoadAdapterPlugins:
         info, adapter = results[0]
         assert adapter is None
         assert "connection failed" in info.error
+
+
+class TestLoadHookPlugins:
+    def setup_method(self):
+        """Reset plugin hooks state between tests."""
+        import tsugite.plugins
+
+        tsugite.plugins._plugin_hooks = {}
+
+    def test_registers_hooks(self):
+        async def my_hook(ctx):
+            return "hello"
+
+        rules = {"pre_context_build": [HookRule(type="python", hook_callable=my_hook, name="test")]}
+        register_fn = MagicMock(return_value=rules)
+        ep = _make_entry_point("test-hooks", "test_hooks:register", "tsugite.hooks")
+        ep.load.return_value = register_fn
+
+        with patch("tsugite.plugins.importlib.metadata.entry_points", return_value=[ep]):
+            results = load_hook_plugins()
+
+        register_fn.assert_called_once_with({})
+        assert len(results) == 1
+        assert results[0].loaded is True
+
+        from tsugite.plugins import get_plugin_hooks
+
+        hooks = get_plugin_hooks()
+        assert "pre_context_build" in hooks
+        assert len(hooks["pre_context_build"]) == 1
+
+    def test_skips_disabled(self):
+        ep = _make_entry_point("test-hooks", "test_hooks:register", "tsugite.hooks")
+
+        with patch("tsugite.plugins.importlib.metadata.entry_points", return_value=[ep]):
+            results = load_hook_plugins(plugin_config={"test-hooks": {"enabled": False}})
+
+        ep.load.assert_not_called()
+        assert results[0].enabled is False
+
+    def test_graceful_failure(self):
+        ep = _make_entry_point("bad-hooks", "bad_hooks:register", "tsugite.hooks")
+        ep.load.side_effect = ImportError("no such module")
+
+        with patch("tsugite.plugins.importlib.metadata.entry_points", return_value=[ep]):
+            results = load_hook_plugins()
+
+        assert results[0].loaded is False
+        assert "no such module" in results[0].error
+
+    def test_passes_config(self):
+        register_fn = MagicMock(return_value={})
+        ep = _make_entry_point("uridx", "uridx:register_hooks", "tsugite.hooks")
+        ep.load.return_value = register_fn
+
+        config = {"uridx": {"api_url": "http://localhost:8080"}}
+        with patch("tsugite.plugins.importlib.metadata.entry_points", return_value=[ep]):
+            load_hook_plugins(plugin_config=config)
+
+        register_fn.assert_called_once_with({"api_url": "http://localhost:8080"})
+
+    def test_multiple_plugins_merged(self):
+        async def hook_a(ctx):
+            pass
+
+        async def hook_b(ctx):
+            pass
+
+        register_a = MagicMock(return_value={
+            "pre_context_build": [HookRule(type="python", hook_callable=hook_a, name="a")],
+        })
+        register_b = MagicMock(return_value={
+            "pre_context_build": [HookRule(type="python", hook_callable=hook_b, name="b")],
+            "session_end": [HookRule(type="python", hook_callable=hook_b, name="b-end")],
+        })
+
+        ep_a = _make_entry_point("plugin-a", "a:register", "tsugite.hooks")
+        ep_a.load.return_value = register_a
+        ep_b = _make_entry_point("plugin-b", "b:register", "tsugite.hooks")
+        ep_b.load.return_value = register_b
+
+        with patch("tsugite.plugins.importlib.metadata.entry_points", return_value=[ep_a, ep_b]):
+            load_hook_plugins()
+
+        from tsugite.plugins import get_plugin_hooks
+
+        hooks = get_plugin_hooks()
+        assert len(hooks["pre_context_build"]) == 2
+        assert len(hooks["session_end"]) == 1
+
+    def test_discovers_hook_plugins(self):
+        ep = _make_entry_point("uridx", "uridx:register_hooks", "tsugite.hooks")
+        with patch("tsugite.plugins.importlib.metadata.entry_points", side_effect=_mock_entry_points([ep])):
+            result = discover_plugins()
+        assert any(p.group == "tsugite.hooks" for p in result)

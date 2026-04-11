@@ -169,6 +169,19 @@ def save_run_to_history(
 
         storage.record_status(status, error_message)
 
+        # Fire session_end hooks
+        from tsugite.hooks import fire_hooks_background
+
+        fire_hooks_background("session_end", {
+            "session_id": storage.session_id,
+            "agent_name": agent_name,
+            "result": result[:500] if result else "",
+            "model": model,
+            "tokens": token_count,
+            "cost": cost,
+            "status": status,
+        })
+
         return storage.session_id
 
     except Exception as e:

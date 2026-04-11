@@ -942,3 +942,185 @@ class TestFirePreMessageAgentHooks:
         ):
             result = await fire_pre_message_hooks(tmp_workspace, {"message": "test"})
         assert result == {"rag_context": "relevant context"}
+
+
+class TestPythonHookRule:
+    def test_valid_python_hook(self):
+        def my_hook(ctx):
+            return "hello"
+
+        rule = HookRule(type="python", hook_callable=my_hook, name="test")
+        assert rule.type == "python"
+        assert rule.hook_callable is my_hook
+
+    def test_python_hook_requires_callable(self):
+        with pytest.raises(ValueError, match="python hooks require 'hook_callable'"):
+            HookRule(type="python", name="test")
+
+    def test_python_hook_forbids_run(self):
+        with pytest.raises(ValueError, match="python hooks cannot have 'run'"):
+            HookRule(type="python", hook_callable=lambda ctx: None, run="echo hi")
+
+    def test_python_hook_forbids_agent(self):
+        with pytest.raises(ValueError, match="python hooks cannot have 'agent'"):
+            HookRule(type="python", hook_callable=lambda ctx: None, agent="test.md")
+
+
+@pytest.mark.asyncio
+class TestExecutePythonHook:
+    async def test_sync_callable(self):
+        from tsugite.hooks import _execute_python_hook
+
+        def my_hook(ctx):
+            return f"got {ctx['key']}"
+
+        rule = HookRule(type="python", hook_callable=my_hook, name="sync-test")
+        result = await _execute_python_hook(rule, {"key": "value"})
+        assert result.exit_code == 0
+        assert result.stdout == "got value"
+
+    async def test_async_callable(self):
+        from tsugite.hooks import _execute_python_hook
+
+        async def my_hook(ctx):
+            return f"async {ctx['key']}"
+
+        rule = HookRule(type="python", hook_callable=my_hook, name="async-test")
+        result = await _execute_python_hook(rule, {"key": "value"})
+        assert result.exit_code == 0
+        assert result.stdout == "async value"
+
+    async def test_none_return(self):
+        from tsugite.hooks import _execute_python_hook
+
+        async def my_hook(ctx):
+            pass
+
+        rule = HookRule(type="python", hook_callable=my_hook, name="none-test")
+        result = await _execute_python_hook(rule, {})
+        assert result.exit_code == 0
+        assert result.stdout == ""
+
+    async def test_exception_handled(self):
+        from tsugite.hooks import _execute_python_hook
+
+        async def bad_hook(ctx):
+            raise RuntimeError("boom")
+
+        rule = HookRule(type="python", hook_callable=bad_hook, name="bad-test")
+        result = await _execute_python_hook(rule, {})
+        assert result.exit_code == -1
+        assert "boom" in result.stderr
+
+
+@pytest.mark.asyncio
+class TestRenderAndExecuteAsyncPython:
+    async def test_python_hook_in_async_execute(self):
+        async def my_hook(ctx):
+            return "python result"
+
+        rules = [HookRule(type="python", hook_callable=my_hook, name="test", capture_as="output")]
+        results = await _render_and_execute_async(_jinja_env, rules, {}, Path("/tmp"))
+        assert results.captured == {"output": "python result"}
+        assert len(results.executions) == 1
+        assert results.executions[0].exit_code == 0
+
+    async def test_python_hook_respects_match(self):
+        call_count = 0
+
+        async def my_hook(ctx):
+            nonlocal call_count
+            call_count += 1
+
+        rules = [HookRule(type="python", hook_callable=my_hook, name="test", match="{{ false }}")]
+        await _render_and_execute_async(_jinja_env, rules, {}, Path("/tmp"))
+        assert call_count == 0
+
+    async def test_python_hook_respects_only_interactive(self):
+        call_count = 0
+
+        async def my_hook(ctx):
+            nonlocal call_count
+            call_count += 1
+
+        rules = [HookRule(type="python", hook_callable=my_hook, name="test", only_interactive=True)]
+        await _render_and_execute_async(_jinja_env, rules, {}, Path("/tmp"), interactive=False)
+        assert call_count == 0
+
+    async def test_mixed_shell_and_python(self):
+        async def py_hook(ctx):
+            return "from python"
+
+        rules = [
+            HookRule(run="echo from shell", capture_as="shell_out"),
+            HookRule(type="python", hook_callable=py_hook, name="py", capture_as="py_out"),
+        ]
+        with patch("tsugite.hooks.subprocess.run", return_value=_ok_result(stdout="from shell")):
+            results = await _render_and_execute_async(_jinja_env, rules, {}, Path("/tmp"))
+        assert results.captured == {"shell_out": "from shell", "py_out": "from python"}
+        assert len(results.executions) == 2
+
+
+class TestHooksConfigNewPhases:
+    def test_new_phases_default_empty(self):
+        config = HooksConfig()
+        assert config.pre_context_build == []
+        assert config.post_context_build == []
+        assert config.pre_tool_call == []
+        assert config.pre_response == []
+        assert config.post_response == []
+        assert config.session_end == []
+
+    def test_merge_adds_rules(self):
+        config = HooksConfig(post_tool=[HookRule(tools=["*"], run="echo existing")])
+
+        async def new_hook(ctx):
+            pass
+
+        config.merge({
+            "pre_context_build": [HookRule(type="python", hook_callable=new_hook, name="test")],
+            "post_tool": [HookRule(tools=["write_file"], run="echo added")],
+        })
+        assert len(config.pre_context_build) == 1
+        assert len(config.post_tool) == 2
+
+    def test_merge_warns_on_unknown_phase(self, caplog):
+        config = HooksConfig()
+        config.merge({"nonexistent_phase": [HookRule(run="echo hi")]})
+        assert "Unknown hook phase" in caplog.text
+
+    def test_new_phases_from_yaml(self, tmp_workspace):
+        (tmp_workspace / ".tsugite" / "hooks.yaml").write_text(
+            "hooks:\n  pre_context_build:\n    - run: echo before context\n      capture_as: extra_ctx\n"
+            "  session_end:\n    - run: echo done\n"
+        )
+        config = load_hooks_config(tmp_workspace)
+        assert len(config.pre_context_build) == 1
+        assert config.pre_context_build[0].capture_as == "extra_ctx"
+        assert len(config.session_end) == 1
+
+
+class TestHookHandlerPreToolCall:
+    def _make_handler(self, pre_tool_call=None, post_tool=None, workspace_dir=None):
+        config = HooksConfig(
+            pre_tool_call=pre_tool_call or [],
+            post_tool=post_tool or [],
+        )
+        return HookHandler(config, workspace_dir or Path("/tmp/test"))
+
+    def test_fires_pre_tool_call_shell_hooks(self):
+        handler = self._make_handler(
+            pre_tool_call=[HookRule(tools=["write_file"], run="echo before")]
+        )
+        with patch("tsugite.hooks.subprocess.run", return_value=_ok_result()) as mock_run:
+            handler.handle_event(ToolCallEvent(tool_name="write_file", arguments={"path": "test.md"}))
+            mock_run.assert_called_once()
+            assert "before" in mock_run.call_args[0][0]
+
+    def test_pre_tool_call_skips_non_matching_tool(self):
+        handler = self._make_handler(
+            pre_tool_call=[HookRule(tools=["write_file"], run="echo before")]
+        )
+        with patch("tsugite.hooks.subprocess.run") as mock_run:
+            handler.handle_event(ToolCallEvent(tool_name="read_file", arguments={}))
+            mock_run.assert_not_called()

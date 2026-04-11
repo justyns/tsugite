@@ -1,6 +1,7 @@
-"""Workspace hooks — fire shell commands after tool calls and lifecycle events."""
+"""Workspace hooks - fire shell commands after tool calls and lifecycle events."""
 
 import asyncio
+import inspect
 import json
 import logging
 import os
@@ -31,11 +32,11 @@ _jinja_env.filters["shell_quote"] = shlex.quote
 
 
 class HookRule(BaseModel):
-    """A hook rule — used for post_tool, pre_compact, post_compact, and pre_message hooks."""
+    """A hook rule - used for all hook phases (post_tool, pre_message, pre_context_build, etc.)."""
 
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, arbitrary_types_allowed=True)
 
-    type: Literal["shell", "agent"] = "shell"
+    type: Literal["shell", "agent", "python"] = "shell"
     tools: list[str] = Field(default_factory=list)
     match: Optional[str] = None
     run: Optional[Union[str, list[str]]] = None
@@ -47,6 +48,7 @@ class HookRule(BaseModel):
     agent: Optional[str] = None
     hook_model: Optional[str] = Field(default=None, alias="model")
     max_turns: Optional[int] = None
+    hook_callable: Optional[Callable] = Field(default=None, exclude=True)
 
     @model_validator(mode="after")
     def _validate_type_fields(self) -> "HookRule":
@@ -60,6 +62,13 @@ class HookRule(BaseModel):
                 raise ValueError("agent hooks require 'agent'")
             if self.run is not None:
                 raise ValueError("agent hooks cannot have 'run'")
+        elif self.type == "python":
+            if self.hook_callable is None:
+                raise ValueError("python hooks require 'hook_callable'")
+            if self.run is not None:
+                raise ValueError("python hooks cannot have 'run'")
+            if self.agent is not None:
+                raise ValueError("python hooks cannot have 'agent'")
         return self
 
 
@@ -90,21 +99,45 @@ class HooksConfig(BaseModel):
     pre_compact: list[HookRule] = Field(default_factory=list)
     post_compact: list[HookRule] = Field(default_factory=list)
     pre_message: list[HookRule] = Field(default_factory=list)
+    pre_context_build: list[HookRule] = Field(default_factory=list)
+    post_context_build: list[HookRule] = Field(default_factory=list)
+    pre_tool_call: list[HookRule] = Field(default_factory=list)
+    pre_response: list[HookRule] = Field(default_factory=list)
+    post_response: list[HookRule] = Field(default_factory=list)
+    session_end: list[HookRule] = Field(default_factory=list)
+
+    def merge(self, other: "dict[str, list[HookRule]]") -> None:
+        """Append hook rules from another source (e.g. plugins) into this config."""
+        for phase, rules in other.items():
+            phase_list = getattr(self, phase, None)
+            if phase_list is not None:
+                phase_list.extend(rules)
+            else:
+                logger.warning("Unknown hook phase '%s', skipping", phase)
 
 
 def load_hooks_config(workspace_dir: Path) -> Optional[HooksConfig]:
-    """Load hooks config from .tsugite/hooks.yaml. Returns None if missing."""
+    """Load hooks config from .tsugite/hooks.yaml, merged with plugin hooks."""
+    from tsugite.plugins import get_plugin_hooks
+
     hooks_path = workspace_dir / ".tsugite" / "hooks.yaml"
-    if not hooks_path.exists():
+    plugin_hooks = get_plugin_hooks()
+
+    yaml_config = None
+    if hooks_path.exists():
+        with open(hooks_path, encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+        if data and "hooks" in data:
+            yaml_config = HooksConfig.model_validate(data["hooks"])
+
+    if not yaml_config and not plugin_hooks:
         return None
 
-    with open(hooks_path, encoding="utf-8") as f:
-        data = yaml.safe_load(f)
+    config = yaml_config or HooksConfig()
+    if plugin_hooks:
+        config.merge(plugin_hooks)
 
-    if not data or "hooks" not in data:
-        return None
-
-    return HooksConfig.model_validate(data["hooks"])
+    return config
 
 
 def _match_passes(jinja_env: jinja2.Environment, match_expr: str, context: dict[str, Any]) -> bool:
@@ -216,6 +249,34 @@ async def _execute_agent_hook(
         return HookResult(exit_code=-1, stdout="", stderr=str(e), duration_ms=elapsed)
 
 
+async def _execute_python_hook(
+    rule: HookRule,
+    context: dict[str, Any],
+) -> HookResult:
+    """Run a Python callable hook. Returns structured result."""
+    start = time.monotonic()
+    try:
+        fn = rule.hook_callable
+        logger.info("Hook python fired: %s", rule.name or fn.__name__)
+        if inspect.iscoroutinefunction(fn):
+            result = await asyncio.wait_for(fn(context), timeout=HOOK_TIMEOUT)
+        else:
+            result = await asyncio.wait_for(asyncio.to_thread(fn, context), timeout=HOOK_TIMEOUT)
+        elapsed = _elapsed_ms(start)
+        stdout = str(result).strip() if result is not None else ""
+        return HookResult(exit_code=0, stdout=stdout, stderr="", duration_ms=elapsed)
+    except asyncio.TimeoutError:
+        elapsed = _elapsed_ms(start)
+        label = rule.name or "python hook"
+        logger.warning("Hook python timed out after %ds: %s", HOOK_TIMEOUT, label)
+        return HookResult(exit_code=-1, stdout="", stderr=f"Timed out after {HOOK_TIMEOUT}s", duration_ms=elapsed)
+    except Exception as e:
+        elapsed = _elapsed_ms(start)
+        label = rule.name or "python hook"
+        logger.warning("Hook python error (%s): %s", label, e)
+        return HookResult(exit_code=-1, stdout="", stderr=str(e), duration_ms=elapsed)
+
+
 class HookResults(NamedTuple):
     """Combined results from executing hook rules."""
 
@@ -283,8 +344,8 @@ def _render_and_execute(
     captured: dict[str, str] = {}
     executions: list[HookExecution] = []
     for rule in rules:
-        if rule.type == "agent":
-            logger.warning("Agent hooks are not supported in sync execution (phase=%s), skipping", phase)
+        if rule.type in ("agent", "python"):
+            logger.warning("%s hooks are not supported in sync execution (phase=%s), skipping", rule.type, phase)
             continue
         if rule.only_interactive and not interactive:
             continue
@@ -334,6 +395,9 @@ async def _render_and_execute_async(
         if rule.type == "agent":
             hook_result = await _execute_agent_hook(rule, context, cwd)
             cmd_str = f"agent:{rule.agent}"
+        elif rule.type == "python":
+            hook_result = await _execute_python_hook(rule, context)
+            cmd_str = f"python:{rule.name or rule.hook_callable.__name__}"
         else:
             rendered = _render_shell_rule(jinja_env, rule, context, base_env)
             if rendered is None:
@@ -351,8 +415,24 @@ async def _render_and_execute_async(
     return HookResults(captured=captured, executions=executions)
 
 
+def _log_task_exception(task: asyncio.Task) -> None:
+    if not task.cancelled() and task.exception():
+        logger.warning("Background hook task failed: %s", task.exception())
+
+
+def fire_hooks_background(phase: str, context: dict[str, Any], workspace_dir: Path | None = None) -> None:
+    """Fire hooks for a phase as a background task."""
+    workspace_dir = workspace_dir or Path.cwd()
+    try:
+        loop = asyncio.get_running_loop()
+        task = loop.create_task(fire_hooks(workspace_dir, phase, context))
+        task.add_done_callback(_log_task_exception)
+    except RuntimeError:
+        logger.debug("No running event loop; %s hooks not scheduled", phase)
+
+
 class HookHandler:
-    """Event handler that fires shell commands after successful tool calls."""
+    """Event handler that fires hooks on tool call events."""
 
     def __init__(self, config: HooksConfig, workspace_dir: Path, interactive: bool = True):
         self.config = config
@@ -364,21 +444,46 @@ class HookHandler:
     def handle_event(self, event: BaseEvent) -> None:
         if isinstance(event, ToolCallEvent):
             self._pending = (event.tool_name, event.arguments)
+            self._fire_pre_tool_call(event.tool_name, event.arguments)
         elif isinstance(event, ToolResultEvent):
             if event.success and self._pending:
-                self._fire_hooks(*self._pending)
+                self._fire_post_tool(*self._pending)
             self._pending = None
 
-    def _fire_hooks(self, tool_name: str, arguments: dict[str, Any]) -> None:
+    def _build_tool_context(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         context: dict[str, Any] = {"tool": tool_name, **arguments}
-
         if "path" in arguments:
             try:
                 context["path"] = str(Path(arguments["path"]).resolve().relative_to(self.workspace_dir.resolve()))
             except ValueError:
                 pass
+        return context
 
+    def _fire_pre_tool_call(self, tool_name: str, arguments: dict[str, Any]) -> None:
+        context = self._build_tool_context(tool_name, arguments)
+        rules = [r for r in self.config.pre_tool_call if tool_name in r.tools or "*" in r.tools]
+        if not rules:
+            return
+        # Python/agent hooks need async
+        has_async = any(r.type in ("python", "agent") for r in rules)
+        if has_async:
+            try:
+                loop = asyncio.get_running_loop()
+                task = loop.create_task(
+                    _render_and_execute_async(_jinja_env, rules, context, self.workspace_dir, interactive=self.interactive, phase="pre_tool_call")
+                )
+                task.add_done_callback(_log_task_exception)
+            except RuntimeError:
+                logger.debug("No running event loop; pre_tool_call hooks not scheduled")
+        else:
+            results = _render_and_execute(_jinja_env, rules, context, self.workspace_dir, interactive=self.interactive, phase="pre_tool_call")
+            self._executions.extend(results.executions)
+
+    def _fire_post_tool(self, tool_name: str, arguments: dict[str, Any]) -> None:
+        context = self._build_tool_context(tool_name, arguments)
         tool_rules = [rule for rule in self.config.post_tool if tool_name in rule.tools or "*" in rule.tools]
+        if not tool_rules:
+            return
         results = _render_and_execute(
             _jinja_env,
             tool_rules,
@@ -405,7 +510,7 @@ def setup_hook_handler(workspace_dir: Path, event_bus: "EventBus", interactive: 
     """Load hooks config and subscribe handler to event_bus if rules exist."""
     global _active_handler
     config = load_hooks_config(workspace_dir)
-    if config and config.post_tool:
+    if config and (config.post_tool or config.pre_tool_call):
         _active_handler = HookHandler(config, workspace_dir, interactive=interactive)
         event_bus.subscribe(_active_handler.handle_event)
     else:
@@ -422,9 +527,16 @@ def drain_all_executions() -> list[HookExecution]:
     return execs
 
 
-async def _fire_hooks(
+HookPhase = Literal[
+    "post_tool", "pre_compact", "post_compact", "pre_message",
+    "pre_context_build", "post_context_build", "pre_tool_call",
+    "pre_response", "post_response", "session_end",
+]
+
+
+async def fire_hooks(
     workspace_dir: Path,
-    phase: str,
+    phase: HookPhase,
     context: dict[str, Any],
     interactive: bool = True,
     on_status: Optional[Callable[[str], None]] = None,
@@ -462,7 +574,7 @@ async def fire_compact_hooks(
     interactive: bool = True,
 ) -> list[HookExecution]:
     """Fire pre_compact or post_compact hooks. Returns execution records."""
-    results = await _fire_hooks(workspace_dir, phase, context, interactive=interactive)
+    results = await fire_hooks(workspace_dir, phase, context, interactive=interactive)
     return results.executions
 
 
@@ -475,7 +587,7 @@ async def fire_pre_message_hooks(
 ) -> dict[str, str]:
     """Fire pre_message hooks, returning captured variables. Executions are accumulated internally."""
     global _pre_message_executions
-    results = await _fire_hooks(
+    results = await fire_hooks(
         workspace_dir, "pre_message", context, interactive=interactive, on_status=on_status, on_result=on_result
     )
     _pre_message_executions.extend(results.executions)

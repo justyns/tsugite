@@ -593,6 +593,17 @@ class TsugiteAgent:
                     self.memory.add_final_answer(exec_result.final_answer)
 
                     total_tokens = self.total_tokens if self.total_tokens > 0 else None
+                    response_context = {
+                        "answer": str(exec_result.final_answer)[:500],
+                        "turns": turn_num + 1,
+                        "tokens": total_tokens,
+                        "cost": self.total_cost if self.total_cost > 0 else None,
+                    }
+
+                    # Fire pre_response hooks
+                    from tsugite.hooks import fire_hooks_background
+
+                    fire_hooks_background("pre_response", response_context)
 
                     if self.event_bus:
                         self.event_bus.emit(
@@ -616,6 +627,9 @@ class TsugiteAgent:
                                 cache_read_input_tokens=self.cache_read_tokens or None,
                             )
                         )
+
+                    # Fire post_response hooks
+                    fire_hooks_background("post_response", response_context)
 
                     if return_full_result:
                         return AgentResult(
