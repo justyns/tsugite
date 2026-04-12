@@ -178,10 +178,6 @@
 
   .input-toolbar { display: flex; gap: 8px; width: 100%; order: -1; }
 
-  /* Tool calls section wider on mobile */
-  .tool-calls-section {
-    max-width: 100%;
-  }
 
   /* Context bar: stack meta row items */
   .context-meta-row {

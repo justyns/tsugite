@@ -53,14 +53,10 @@ export const sessionsMixin = {
 
     this._sessionProgress = null;
     this.loadStatus();
-    if (this.isActiveSession) {
-      this.loadHistory();
-    } else {
-      this.loadDetailHistory();
-      if (session.state === 'running') {
-        this._sessionProgress = { type: 'progress', steps: [], statusText: 'Running...', turnCount: 0, toolCount: 0 };
-        this.messages.push(this._sessionProgress);
-      }
+    this.loadHistory();
+    if (!this.isActiveSession && session.state === 'running') {
+      this._sessionProgress = { type: 'progress', steps: [], statusText: 'Running...', turnCount: 0, toolCount: 0 };
+      this.messages.push(this._sessionProgress);
     }
   },
 
@@ -117,6 +113,10 @@ export const sessionsMixin = {
     } catch (e) {
       this.messages.push({ type: 'error', text: `Restart failed: ${e.message}` });
     }
+  },
+
+  isSessionInputVisible() {
+    return this.isActiveSession || this.selectedSessionMeta?.state === 'running' || this.selectedSessionMeta?.state === 'active';
   },
 
   canCancel(s) {

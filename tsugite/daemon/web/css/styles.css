@@ -233,12 +233,6 @@ main { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
 .turn-item.active { border-color: var(--accent); background: var(--bg); }
 .turn-item .turn-meta { color: var(--muted); font-size: 12px; margin-top: 4px; }
 
-/* Tool calls in history */
-.tool-calls-section { margin: 4px 0; max-width: 80%; }
-.tool-calls-summary { font-size: 12px; color: var(--muted); cursor: pointer; padding: 4px 0; }
-.tool-call-item { margin: 4px 0 4px 12px; }
-.tool-call-name, .tool-result-name { font-size: 12px; cursor: pointer; color: var(--muted); }
-.tool-call-args { font-size: 11px; background: var(--code-bg); padding: 8px; border-radius: 6px; overflow-x: auto; white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow-y: auto; margin: 4px 0; }
 
 /* Ask user forms */
 .ask-user-form { border: 1px solid var(--accent); }

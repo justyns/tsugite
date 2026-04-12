@@ -6,7 +6,6 @@ export const historyMixin = {
   _historyLoaded: 0,
   HISTORY_PAGE_SIZE: 20,
   hasMoreHistory: false,
-  turns: [],
   compactionSummary: null,
   compactedFrom: null,
   compactionReason: null,
@@ -22,7 +21,6 @@ export const historyMixin = {
     this._allHistoryMessages = [];
     this._historyLoaded = 0;
     this.hasMoreHistory = false;
-    this.turns = [];
     this.compactionSummary = null;
     this.compactedFrom = null;
     this.compactionReason = null;
@@ -39,68 +37,65 @@ export const historyMixin = {
       this.compactionSummary = data.compaction_summary || null;
       this.compactedFrom = data.compacted_from || null;
       this.compactionReason = data.compaction_reason || null;
-      if (!data.turns || data.turns.length === 0) return;
-      let pendingHooks = [];
-      for (const turn of data.turns) {
-        if (turn.type === 'compaction') {
-          this._allHistoryMessages.push({ type: 'compaction', summary: turn.summary || null, reason: turn.reason || null });
-          continue;
-        }
-        if (turn.type === 'hook_execution') {
-          pendingHooks.push(turn);
-          continue;
-        }
-        if (turn.user) {
-          const msg = { type: 'user', text: turn.user };
-          if (turn.reactions) msg.reactions = turn.reactions;
-          this._allHistoryMessages.push(msg);
-        }
-
-        const steps = [];
-        for (const h of pendingHooks) {
-          const summary = this._hookStepHtml(h.name, h.phase, h.exit_code);
-          const output = [h.stdout, h.stderr].filter(Boolean).join('\n');
-          if (output) {
-            steps.push({ hasDetails: true, summary, content: output, open: false });
-          } else {
-            steps.push({ html: summary });
+      if (data.turns?.length) {
+        let pendingHooks = [];
+        for (const turn of data.turns) {
+          if (turn.type === 'compaction') {
+            this._allHistoryMessages.push({ type: 'compaction', summary: turn.summary || null, reason: turn.reason || null });
+            continue;
           }
-        }
-        pendingHooks = [];
-        if (turn.messages) {
-          for (const item of this.extractMessages(turn)) {
-            if (item.type === 'tool_call') {
-              steps.push({ hasDetails: true, summary: `<code>${escapeHtml(item.name)}</code>`, content: truncate(item.args), open: false });
-            } else if (item.type === 'tool_result') {
-              steps.push({ hasDetails: true, summary: `<code>${escapeHtml(item.name || 'result')}</code>`, content: item.content, open: false });
+          if (turn.type === 'hook_execution') {
+            pendingHooks.push(turn);
+            continue;
+          }
+          if (turn.user) {
+            const msg = { type: 'user', text: turn.user };
+            if (turn.reactions) msg.reactions = turn.reactions;
+            this._allHistoryMessages.push(msg);
+          }
+
+          const steps = [];
+          for (const h of pendingHooks) {
+            const summary = this._hookStepHtml(h.name, h.phase, h.exit_code);
+            const output = [h.stdout, h.stderr].filter(Boolean).join('\n');
+            if (output) {
+              steps.push({ hasDetails: true, summary, content: output, open: false });
+            } else {
+              steps.push({ html: summary });
             }
           }
-        }
-        if (turn.content_blocks && Object.keys(turn.content_blocks).length) {
-          for (const [name, content] of Object.entries(turn.content_blocks)) {
-            steps.push({ html: contentBlockHtml(name, content) });
+          pendingHooks = [];
+          if (turn.messages) {
+            for (const item of this.extractMessages(turn)) {
+              if (item.type === 'tool_call') {
+                steps.push({ hasDetails: true, summary: `<code>${escapeHtml(item.name)}</code>`, content: truncate(item.args), open: false });
+              } else if (item.type === 'tool_result') {
+                steps.push({ hasDetails: true, summary: `<code>${escapeHtml(item.name || 'result')}</code>`, content: item.content, open: false });
+              }
+            }
+          }
+          if (turn.content_blocks && Object.keys(turn.content_blocks).length) {
+            for (const [name, content] of Object.entries(turn.content_blocks)) {
+              steps.push({ html: contentBlockHtml(name, content) });
+            }
+          }
+          if (steps.length > 0) {
+            this._allHistoryMessages.push({ type: 'progress-done', steps, turnCount: turn.turn_count || 1, toolCount: turn.tool_count || turn.tools_used?.length || 0 });
+          }
+          if (turn.assistant) {
+            this._allHistoryMessages.push({ type: 'agent', text: turn.assistant });
           }
         }
-        if (steps.length > 0) {
-          this._allHistoryMessages.push({ type: 'progress-done', steps, turnCount: turn.turn_count || 1, toolCount: turn.tool_count || turn.tools_used?.length || 0 });
-        }
-        if (turn.assistant) {
-          this._allHistoryMessages.push({ type: 'agent', text: turn.assistant });
-        }
+        this._showRecentHistory();
+      } else if (this.selectedSessionMeta) {
+        const meta = this.selectedSessionMeta;
+        if (meta.prompt) this._allHistoryMessages.push({ type: 'user', text: meta.prompt });
+        if (meta.error) this._allHistoryMessages.push({ type: 'error', text: meta.error });
+        if (meta.result) this._allHistoryMessages.push({ type: 'agent', text: meta.result });
+        this._showRecentHistory();
       }
-      this._showRecentHistory();
     } catch { /* ignore */ }
     this.scrollMessages();
-  },
-
-  async loadDetailHistory() {
-    const agent = this.$store.app.selectedAgent;
-    if (!agent || !this.selectedSessionId) return;
-    try {
-      let url = `/api/agents/${agent}/history?detail=true&session_id=${encodeURIComponent(this.selectedSessionId)}`;
-      const data = await get(url);
-      this.turns = data.turns || [];
-    } catch { /* ignore */ }
   },
 
   _showRecentHistory() {

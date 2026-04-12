@@ -233,8 +233,8 @@
           </div>
         </template>
 
-        <!-- Active interactive session: full chat UI -->
-        <template x-if="selectedSessionId && isActiveSession">
+        <!-- Session chat UI -->
+        <template x-if="selectedSessionId">
           <div style="display:flex;flex-direction:column;flex:1;min-height:0">
             <div id="messages" x-ref="messages">
               <template x-if="compactionSummary">
@@ -382,7 +382,7 @@
               </template>
             </div>
 
-            <div id="status-bar" x-show="statusParts.length > 0">
+            <div id="status-bar" x-show="isActiveSession && statusParts.length > 0">
               <template x-for="(part, i) in statusParts" :key="i">
                 <span>
                   <span class="status-label" x-text="part.label + ':'"></span>
@@ -408,6 +408,7 @@
               <button class="btn-sm" x-show="!compacting && !sending && !selectedSessionMeta?.is_default" @click="completeSession(selectedSessionMeta)">Mark Complete</button>
             </div>
 
+            <div x-show="isSessionInputVisible()">
             <div class="drag-overlay" x-show="isDragging" x-cloak>Drop files to attach</div>
 
             <div class="paste-banner" x-show="showPasteBanner" x-cloak>
@@ -457,100 +458,10 @@
               <button id="send-btn" x-show="!sending" @click="sendMessage()">Send</button>
               <button id="stop-btn" x-show="sending" @click="cancelChat()">Stop</button>
             </div>
+            </div>
           </div>
         </template>
 
-        <!-- Non-interactive session: history + optional reply -->
-        <template x-if="selectedSessionId && !isActiveSession">
-          <div style="display:flex;flex-direction:column;flex:1;min-height:0">
-          <div style="overflow-y:auto;flex:1">
-            <template x-if="selectedSessionMeta && turns.length === 0">
-              <div style="margin-bottom:12px">
-                <template x-if="selectedSessionMeta.prompt">
-                  <div class="msg user" x-html="renderHtml(selectedSessionMeta.prompt)"></div>
-                </template>
-                <template x-if="selectedSessionMeta.error">
-                  <div class="msg error" x-text="selectedSessionMeta.error" style="margin-top:8px"></div>
-                </template>
-                <template x-if="selectedSessionMeta.result">
-                  <div class="msg agent" x-html="renderHtml(selectedSessionMeta.result)" style="margin-top:8px"></div>
-                </template>
-              </div>
-            </template>
-
-            <!-- Turn history with tool call details -->
-            <template x-if="turns.length === 0">
-              <div class="empty-state">No turns in this session</div>
-            </template>
-            <div style="display:flex;flex-direction:column;gap:12px">
-              <template x-for="(turn, i) in turns" :key="i">
-                <div>
-                  <template x-if="turn.type === 'compaction'">
-                    <div class="history-sep">
-                      <template x-if="turn.summary">
-                        <details>
-                          <summary>session compacted <template x-if="turn.reason"><span class="badge badge-muted" x-text="turn.reason"></span></template></summary>
-                          <div class="msg agent compaction-body" x-html="renderHtml(turn.summary)"></div>
-                        </details>
-                      </template>
-                      <template x-if="!turn.summary"><span>session compacted <template x-if="turn.reason"><span class="badge badge-muted" x-text="turn.reason"></span></template></span></template>
-                    </div>
-                  </template>
-                  <template x-if="turn.type !== 'compaction'">
-                    <div>
-                      <template x-if="turn.user">
-                        <div class="msg user" x-html="renderHtml(turn.user)"></div>
-                      </template>
-                      <template x-if="extractMessages(turn).length > 0">
-                        <div class="tool-calls-section">
-                          <details>
-                            <summary class="tool-calls-summary">
-                              <span x-text="(() => { const calls = extractMessages(turn).filter(m => m.type === 'tool_call'); const n = calls.length; const label = calls.some(m => m.name === 'code') ? 'code execution' : 'tool call'; return n + ' ' + label + (n !== 1 ? 's' : ''); })()"></span>
-                            </summary>
-                            <template x-for="(m, mi) in extractMessages(turn)" :key="mi">
-                              <div class="tool-call-item">
-                                <template x-if="m.type === 'tool_call'">
-                                  <details>
-                                    <summary class="tool-call-name"><span class="badge badge-accent" x-text="m.name === 'code' ? 'Code' : m.name"></span></summary>
-                                    <pre class="tool-call-args" x-text="m.args"></pre>
-                                  </details>
-                                </template>
-                                <template x-if="m.type === 'tool_result'">
-                                  <details>
-                                    <summary class="tool-result-name">Result<template x-if="m.name"> (<span x-text="m.name"></span>)</template></summary>
-                                    <pre class="tool-call-args" x-text="m.content"></pre>
-                                  </details>
-                                </template>
-                              </div>
-                            </template>
-                          </details>
-                        </div>
-                      </template>
-                      <template x-if="turn.assistant">
-                        <div class="msg agent" x-html="renderHtml(turn.assistant)"></div>
-                      </template>
-                      <template x-if="turn.timestamp">
-                        <div style="text-align:right;font-size:11px;color:var(--muted);margin-top:2px" x-text="formatDate(turn.timestamp)"></div>
-                      </template>
-                    </div>
-                  </template>
-                </div>
-              </template>
-            </div>
-          </div>
-          <!-- Reply input for running spawned/background sessions -->
-          <template x-if="selectedSessionMeta?.state === 'running' || selectedSessionMeta?.state === 'active'">
-            <div id="input-area" style="border-top:1px solid var(--border);padding:8px 16px">
-              <div class="input-row">
-                <textarea x-model="messageText" placeholder="Send a follow-up message..."
-                          @keydown.enter.prevent="if(!$event.shiftKey) sendMessage()"
-                          rows="1" :disabled="sending"></textarea>
-                <button class="btn-sm" x-show="!sending" @click="sendMessage()">Send</button>
-              </div>
-            </div>
-          </template>
-          </div>
-        </template>
       </div>
     </div>
 
