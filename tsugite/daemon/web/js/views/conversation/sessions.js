@@ -39,6 +39,7 @@ export const sessionsMixin = {
 
   selectSession(session) {
     this.sidebarOpen = false;
+    this._saveDraftNow();
     const convId = session.conversation_id || session.id;
     this.selectedSessionId = convId;
     this.selectedSessionMeta = session;
@@ -54,6 +55,7 @@ export const sessionsMixin = {
     this._sessionProgress = null;
     this.loadStatus();
     this.loadHistory();
+    this._restoreDraft();
     if (!this.isActiveSession && session.state === 'running') {
       this._sessionProgress = { type: 'progress', steps: [], statusText: 'Running...', turnCount: 0, toolCount: 0 };
       this.messages.push(this._sessionProgress);
@@ -61,6 +63,7 @@ export const sessionsMixin = {
   },
 
   backToSessions() {
+    this._saveDraftNow();
     this.selectedSessionId = null;
     this.selectedSessionMeta = null;
     this._sessionProgress = null;

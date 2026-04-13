@@ -138,6 +138,7 @@ export default () => ({
   },
 
   destroy() {
+    if (this._draftTimer) clearTimeout(this._draftTimer);
     if (this._debounceTimer) clearTimeout(this._debounceTimer);
     if (this._scrollTimer) clearTimeout(this._scrollTimer);
     if (this._historyDebounceTimer) clearTimeout(this._historyDebounceTimer);

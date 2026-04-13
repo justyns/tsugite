@@ -2,6 +2,7 @@ import { get, post } from '../../api.js';
 
 export const inputMixin = {
   _mobileQuery: null,
+  _draftTimer: null,
   showExpandModal: false,
   expandModalText: '',
   messageText: '',
@@ -18,9 +19,39 @@ export const inputMixin = {
     }
   },
 
+  _draftKey() {
+    return `tsugite_draft_${this.selectedSessionId || 'new'}`;
+  },
+
+  _saveDraft() {
+    clearTimeout(this._draftTimer);
+    this._draftTimer = setTimeout(() => this._saveDraftNow(), 300);
+  },
+
+  _saveDraftNow() {
+    clearTimeout(this._draftTimer);
+    const key = this._draftKey();
+    if (this.messageText) {
+      localStorage.setItem(key, this.messageText);
+    } else {
+      localStorage.removeItem(key);
+    }
+  },
+
+  _restoreDraft() {
+    const saved = localStorage.getItem(this._draftKey());
+    this.messageText = saved || '';
+  },
+
+  _clearDraft() {
+    clearTimeout(this._draftTimer);
+    localStorage.removeItem(this._draftKey());
+  },
+
   onInputChange() {
     this.showCommandSuggestions = this.messageText.startsWith('/') && !this.messageText.includes(' ') && this.filteredCommands.length > 0;
     this.commandSelectedIndex = 0;
+    this._saveDraft();
   },
 
   selectCommand(cmd) {
@@ -132,6 +163,7 @@ export const inputMixin = {
     this.messageText = this.expandModalText;
     this.expandModalText = '';
     this.showExpandModal = false;
+    this._saveDraft();
     this.$nextTick(() => {
       const ta = this.$refs.messageInput;
       if (ta) {

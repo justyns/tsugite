@@ -37,6 +37,7 @@ export const streamingMixin = {
     if (parsed && !this.pendingFiles.length) {
       this.sending = true;
       this.messageText = '';
+      this._clearDraft();
       this._resetInputHeight();
       this.showCommandSuggestions = false;
       this.messages.push({ type: 'user', text: msg });
@@ -55,6 +56,7 @@ export const streamingMixin = {
 
     this.sending = true;
     this.messageText = '';
+    this._clearDraft();
     this._resetInputHeight();
 
     let uploadedFiles = [];
