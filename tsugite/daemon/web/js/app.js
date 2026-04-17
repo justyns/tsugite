@@ -126,7 +126,30 @@ if (window.matchMedia('(display-mode: standalone)').matches || navigator.standal
 
 // Service worker + push notifications
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js').catch(() => {});
+  navigator.serviceWorker.register('/sw.js').then((reg) => {
+    const notifyIfWaiting = (worker) => {
+      if (worker && worker.state === 'installed' && navigator.serviceWorker.controller) {
+        window.dispatchEvent(new CustomEvent('tsugite:update-available'));
+      }
+    };
+    notifyIfWaiting(reg.waiting);
+    reg.addEventListener('updatefound', () => {
+      const nw = reg.installing;
+      if (!nw) return;
+      nw.addEventListener('statechange', () => notifyIfWaiting(nw));
+    });
+    let reloading = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (reloading) return;
+      reloading = true;
+      location.reload();
+    });
+    window.tsugiteApplyUpdate = () => {
+      const w = reg.waiting || reg.installing;
+      if (w) w.postMessage({ type: 'SKIP_WAITING' });
+      else location.reload();
+    };
+  }).catch(() => {});
 }
 
 window.tsugiteSubscribePush = async function() {

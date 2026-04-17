@@ -308,3 +308,14 @@ main { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
 .sidebar-toggle { display: none; }
 .mobile-back-btn { display: none; }
 .input-hint { display: none; }
+
+/* App-update toast */
+.update-toast {
+  position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 10px;
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 12px; font-size: 13px; box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+  z-index: 1000;
+}
+.update-toast .btn-dismiss { padding: 3px 8px; font-size: 14px; line-height: 1; }

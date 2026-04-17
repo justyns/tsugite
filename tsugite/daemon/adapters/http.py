@@ -37,6 +37,30 @@ from tsugite.utils import parse_yaml_frontmatter
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
+
+def _web_assets_version() -> str:
+    """Latest mtime across web assets, as an int string. Changes when any file changes."""
+    latest = 0.0
+    for p in WEB_DIR.rglob("*"):
+        if p.is_file():
+            latest = max(latest, p.stat().st_mtime)
+    return str(int(latest))
+
+
+class _NoCacheStaticFiles(StaticFiles):
+    """StaticFiles that asks browsers to revalidate JS/CSS/JSON on each load.
+
+    Relies on Starlette's built-in ETag/Last-Modified handling for 304s.
+    """
+
+    _REVALIDATE_SUFFIXES = (".js", ".mjs", ".css", ".json", ".map")
+
+    def file_response(self, full_path, stat_result, scope, status_code=200):
+        response = super().file_response(full_path, stat_result, scope, status_code)
+        if str(full_path).endswith(self._REVALIDATE_SUFFIXES):
+            response.headers["Cache-Control"] = "no-cache, must-revalidate"
+        return response
+
 MAX_TEXT_ATTACH_SIZE = 50 * 1024  # 50KB — ~12K tokens
 MAX_BINARY_ATTACH_SIZE = 10 * 1024 * 1024  # 10MB
 MAX_UPLOAD_TOTAL = 100 * 1024 * 1024  # 100MB per request
@@ -436,7 +460,7 @@ class HTTPServer:
             Route("/api/usage/agents", self._usage_agents, methods=["GET"]),
             Route("/api/usage/models", self._usage_models, methods=["GET"]),
             Route("/api/usage/total", self._usage_total, methods=["GET"]),
-            Mount("/static", app=StaticFiles(directory=str(WEB_DIR)), name="static"),
+            Mount("/static", app=_NoCacheStaticFiles(directory=str(WEB_DIR)), name="static"),
             Route("/sw.js", self._serve_sw, methods=["GET"]),
             Route("/", self._serve_ui, methods=["GET"]),
         ]
@@ -2213,7 +2237,11 @@ class HTTPServer:
         sw_path = WEB_DIR / "sw.js"
         if not sw_path.exists():
             return JSONResponse({"error": "service worker not found"}, status_code=404)
-        return Response(sw_path.read_bytes(), media_type="application/javascript")
+        # Prepend a version constant derived from the web dir's latest mtime so the
+        # browser treats the SW as updated whenever any web asset changes.
+        version = _web_assets_version()
+        body = f'const SW_VERSION = "{version}";\n'.encode() + sw_path.read_bytes()
+        return Response(body, media_type="application/javascript", headers={"Cache-Control": "no-cache"})
 
     async def _serve_ui(self, request: Request) -> Response:
         ui_path = WEB_DIR / "index.html"

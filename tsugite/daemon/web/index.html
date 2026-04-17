@@ -1206,6 +1206,15 @@
   </div>
 </main>
 
+<!-- App-update toast: shown when a new service worker has installed -->
+<div class="update-toast" x-data="{ show: false }"
+     @tsugite:update-available.window="show = true"
+     x-show="show" x-transition.opacity style="display:none">
+  <span>New version available</span>
+  <button class="btn-sm" @click="window.tsugiteApplyUpdate && window.tsugiteApplyUpdate()">Reload</button>
+  <button class="btn-sm btn-dismiss" @click="show = false" aria-label="Dismiss">&times;</button>
+</div>
+
 <!-- Auth prompt -->
 <div class="auth-gate" :class="{ open: $store.app.authRequired }"
      x-data="{ authToken: '', authError: '', checking: false, shake: false }">

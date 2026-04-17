@@ -1,6 +1,10 @@
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
 
+self.addEventListener('message', (e) => {
+  if (e.data && e.data.type === 'SKIP_WAITING') self.skipWaiting();
+});
+
 self.addEventListener('push', (e) => {
   let data = { title: 'Tsugite', body: 'New notification', url: '/' };
   try { data = { ...data, ...e.data.json() }; } catch {}
