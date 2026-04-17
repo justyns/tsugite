@@ -1,5 +1,7 @@
 """Tests for daemon auth token management."""
 
+import os
+import time
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
@@ -168,6 +170,59 @@ class TestTempTokens:
         created = datetime.fromisoformat(t.created_at)
         expires = datetime.fromisoformat(t.expires_at)
         assert (expires - created).total_seconds() == 600
+
+
+class TestHotReload:
+    """Tokens.json written by one process should be picked up by another without restart."""
+
+    def _bump_mtime(self, path):
+        # Ensure mtime changes even on fast filesystems
+        future = time.time() + 2
+        os.utime(path, (future, future))
+
+    def test_new_token_visible_without_restart(self, tmp_path):
+        path = tmp_path / "tokens.json"
+        daemon = TokenStore(path)
+        _t, raw = daemon.create_admin_token(name="existing")
+        assert daemon.validate(raw)[0] is True
+
+        # Simulate `tsugite daemon token create` in another process
+        cli = TokenStore(path)
+        _t2, new_raw = cli.create_admin_token(name="fresh")
+        self._bump_mtime(path)
+
+        # Daemon's running TokenStore picks up the new token on next validate
+        valid, identity = daemon.validate(new_raw)
+        assert valid is True
+        assert identity == "admin:fresh"
+
+    def test_revoked_token_rejected_without_restart(self, tmp_path):
+        path = tmp_path / "tokens.json"
+        daemon = TokenStore(path)
+        _t, raw = daemon.create_admin_token(name="doomed")
+        assert daemon.validate(raw)[0] is True
+
+        cli = TokenStore(path)
+        cli.revoke_admin_token("doomed")
+        self._bump_mtime(path)
+
+        valid, _ = daemon.validate(raw)
+        assert valid is False
+
+    def test_reload_preserves_in_memory_temp_tokens(self, tmp_path):
+        path = tmp_path / "tokens.json"
+        daemon = TokenStore(path)
+        temp_raw = daemon.issue(agent="agent", schedule_id="sched")
+
+        cli = TokenStore(path)
+        cli.create_admin_token(name="new-admin")
+        self._bump_mtime(path)
+
+        # Trigger reload; temp token must survive
+        daemon.validate("trigger-reload")
+        valid, identity = daemon.validate(temp_raw)
+        assert valid is True
+        assert identity == "agent:sched"
 
 
 class TestMixedValidation:

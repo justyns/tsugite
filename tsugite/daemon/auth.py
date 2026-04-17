@@ -37,6 +37,7 @@ class TokenStore:
         self._path = path
         self._default_ttl = default_ttl_seconds
         self._tokens: dict[str, Token] = {}  # hash -> Token
+        self._mtime: float = 0.0
         self._load()
 
     @staticmethod
@@ -45,6 +46,12 @@ class TokenStore:
 
     # --- Persistence ---
 
+    def _current_mtime(self) -> float:
+        try:
+            return self._path.stat().st_mtime
+        except FileNotFoundError:
+            return 0.0
+
     def _load(self) -> None:
         if not self._path.exists():
             return
@@ -52,8 +59,18 @@ class TokenStore:
             for entry in json.loads(self._path.read_text(encoding="utf-8")):
                 t = Token(**entry)
                 self._tokens[t.hash] = t
+            self._mtime = self._current_mtime()
         except (json.JSONDecodeError, TypeError, KeyError) as e:
             logger.warning("Failed to load tokens from %s: %s", self._path, e)
+
+    def _maybe_reload(self) -> None:
+        """Reload persistent tokens from disk if tokens.json has changed since last load."""
+        if self._current_mtime() <= self._mtime:
+            return
+        temp_tokens = [t for t in self._tokens.values() if not t.persistent]
+        self._tokens = {t.hash: t for t in temp_tokens}
+        self._load()
+        logger.info("Reloaded tokens from %s (file changed)", self._path)
 
     def _save(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
@@ -71,6 +88,7 @@ class TokenStore:
             tmp.unlink(missing_ok=True)
             raise
         os.replace(str(tmp), str(self._path))
+        self._mtime = self._current_mtime()
 
     # --- Admin tokens (persistent, no expiry) ---
 
@@ -140,6 +158,7 @@ class TokenStore:
 
     def validate(self, token: str) -> tuple[bool, str]:
         """Validate a token. Returns (valid, identity)."""
+        self._maybe_reload()
         h = self._hash(token)
         t = self._tokens.get(h)
         if not t:
