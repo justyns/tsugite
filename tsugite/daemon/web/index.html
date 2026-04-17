@@ -1255,8 +1255,8 @@
 
 <!-- Settings modal -->
 <div class="modal-backdrop" :class="{ open: $store.app.showSettings }" @click.self="$store.app.showSettings = false"
-     x-data="{ token: '', userId: '', tempTheme: '', tempModel: '', loadedModel: '', pushSubscribed: false, pushLoading: false }"
-     x-effect="if ($store.app.showSettings) { token = localStorage.getItem('tsugite_token') || ''; userId = $store.app.userId; tempTheme = $store.app.theme; let agent = $store.app.selectedAgent; if (agent) { window.tsugiteApi.get('/api/agents/' + agent + '/status').then(d => { tempModel = d.model || ''; loadedModel = d.model || ''; }).catch(() => {}); } if ('serviceWorker' in navigator && 'PushManager' in window) { navigator.serviceWorker.ready.then(r => r.pushManager.getSubscription()).then(s => { pushSubscribed = !!s; }).catch(() => {}); } }">
+     x-data="{ token: '', userId: '', tempTheme: '', tempModel: '', loadedModel: '', resolvedModel: '', pushSubscribed: false, pushLoading: false }"
+     x-effect="if ($store.app.showSettings) { token = localStorage.getItem('tsugite_token') || ''; userId = $store.app.userId; tempTheme = $store.app.theme; let agent = $store.app.selectedAgent; if (agent) { window.tsugiteApi.get('/api/agents/' + agent + '/status').then(d => { tempModel = d.model || ''; loadedModel = d.model || ''; resolvedModel = d.resolved_model || ''; }).catch(() => {}); } if ('serviceWorker' in navigator && 'PushManager' in window) { navigator.serviceWorker.ready.then(r => r.pushManager.getSubscription()).then(s => { pushSubscribed = !!s; }).catch(() => {}); } }">
   <div class="modal-content">
     <h2>Settings</h2>
     <label>API Token</label>
@@ -1278,6 +1278,9 @@
     </select>
     <label>Model Override</label>
     <input type="text" x-model="tempModel" placeholder="e.g. anthropic:claude-sonnet-4-20250514 (blank = use agent default)">
+    <div x-show="resolvedModel" style="margin-top:-12px; margin-bottom:16px; font-size:12px; color:var(--muted)">
+      Resolves to <code x-text="resolvedModel"></code>
+    </div>
     <div style="margin-bottom:16px">
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
         <input type="checkbox" :checked="$store.app.autoFollow" @change="$store.app.autoFollow = $el.checked; localStorage.setItem('tsugite_auto_follow', $el.checked)">

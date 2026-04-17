@@ -12,13 +12,16 @@ from .model_registry import register_models
 logger = logging.getLogger(__name__)
 
 _CLAUDE_CODE_MODELS: dict[str, ModelInfo] = {
+    "claude_code/claude-opus-4-7": ModelInfo(max_input_tokens=1_000_000, supports_vision=True),
     "claude_code/claude-opus-4-6": ModelInfo(max_input_tokens=1_000_000, supports_vision=True),
     "claude_code/claude-sonnet-4-6": ModelInfo(max_input_tokens=1_000_000, supports_vision=True),
     "claude_code/claude-haiku-4-5-20251001": ModelInfo(max_input_tokens=200_000, supports_vision=True),
 }
 
 _ALIASES = {
-    "opus": "claude-opus-4-6",
+    "opus": "claude-opus-4-7",
+    "opus-4-7": "claude-opus-4-7",
+    "opus-4-6": "claude-opus-4-6",
     "sonnet": "claude-sonnet-4-6",
     "haiku": "claude-haiku-4-5-20251001",
 }
@@ -83,6 +86,8 @@ class ClaudeCodeProvider:
         from tsugite.core.claude_code import ClaudeCodeProcess
 
         resolved_model = _ALIASES.get(model, model)
+        if resolved_model != model and self._resolved_model != resolved_model:
+            logger.info("claude_code model alias %r -> %s", model, resolved_model)
         self._resolved_model = resolved_model
 
         if self._process is None:

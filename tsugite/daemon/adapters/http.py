@@ -38,6 +38,22 @@ from tsugite.utils import parse_yaml_frontmatter
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
 
+def _resolve_full_model_id(model: str) -> str:
+    """Return 'provider:full-model-id' so UI can show e.g. claude_code:opus -> claude-opus-4-7.
+
+    Returns the input unchanged on any error or when no alias is involved.
+    """
+    if not model or ":" not in model:
+        return model
+    try:
+        from tsugite.models import get_model_id, parse_model_string
+
+        provider, _, _ = parse_model_string(model)
+        return f"{provider}:{get_model_id(model)}"
+    except Exception:
+        return model
+
+
 def _web_assets_version() -> str:
     """Latest mtime across web assets, as an int string. Changes when any file changes."""
     latest = 0.0
@@ -681,9 +697,13 @@ class HTTPServer:
         backend_key = (adapter.agent_name, user_id)
         backend = self._active_backends.get(backend_key)
 
+        model = adapter.resolve_model()
+        resolved_model = _resolve_full_model_id(model)
+
         return JSONResponse(
             {
-                "model": adapter.resolve_model(),
+                "model": model,
+                "resolved_model": resolved_model if resolved_model != model else None,
                 "tokens": session.cumulative_tokens,
                 "context_limit": adapter.session_store.get_context_limit(adapter.agent_name),
                 "threshold": adapter.session_store.get_compaction_threshold(adapter.agent_name),
