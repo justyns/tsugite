@@ -172,15 +172,18 @@ def save_run_to_history(
         # Fire session_end hooks
         from tsugite.hooks import fire_hooks_background
 
-        fire_hooks_background("session_end", {
-            "session_id": storage.session_id,
-            "agent_name": agent_name,
-            "result": result[:500] if result else "",
-            "model": model,
-            "tokens": token_count,
-            "cost": cost,
-            "status": status,
-        })
+        fire_hooks_background(
+            "session_end",
+            {
+                "session_id": storage.session_id,
+                "agent_name": agent_name,
+                "result": result[:500] if result else "",
+                "model": model,
+                "tokens": token_count,
+                "cost": cost,
+                "status": status,
+            },
+        )
 
         return storage.session_id
 

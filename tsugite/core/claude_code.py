@@ -218,7 +218,9 @@ class ClaudeCodeProcess:
                 # Prefer usage from result event, fall back to last assistant event
                 result_usage = event.get("usage")
                 if not result_usage:
-                    logger.debug("Result event missing usage; falling back to assistant event usage (cache tokens may be lost)")
+                    logger.debug(
+                        "Result event missing usage; falling back to assistant event usage (cache tokens may be lost)"
+                    )
                     result_usage = self._last_usage
 
                 # modelUsage is keyed by model name, e.g. {"claude-sonnet-4-6": {"contextWindow": 200000}}

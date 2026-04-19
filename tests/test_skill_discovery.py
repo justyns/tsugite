@@ -31,7 +31,9 @@ def _write_skill(
     if triggers is not None:
         trigger_lines = "\n".join(f"  - {t}" for t in triggers)
         triggers_block = f"triggers:\n{trigger_lines}\n"
-    frontmatter = f"---\nname: {name}\ndescription: {description}\n{triggers_block}{extra_frontmatter}---\nBody for {name}.\n"
+    frontmatter = (
+        f"---\nname: {name}\ndescription: {description}\n{triggers_block}{extra_frontmatter}---\nBody for {name}.\n"
+    )
     skill_md.write_text(frontmatter)
     return skill_dir
 

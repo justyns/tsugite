@@ -1077,10 +1077,12 @@ class TestHooksConfigNewPhases:
         async def new_hook(ctx):
             pass
 
-        config.merge({
-            "pre_context_build": [HookRule(type="python", hook_callable=new_hook, name="test")],
-            "post_tool": [HookRule(tools=["write_file"], run="echo added")],
-        })
+        config.merge(
+            {
+                "pre_context_build": [HookRule(type="python", hook_callable=new_hook, name="test")],
+                "post_tool": [HookRule(tools=["write_file"], run="echo added")],
+            }
+        )
         assert len(config.pre_context_build) == 1
         assert len(config.post_tool) == 2
 
@@ -1109,18 +1111,14 @@ class TestHookHandlerPreToolCall:
         return HookHandler(config, workspace_dir or Path("/tmp/test"))
 
     def test_fires_pre_tool_call_shell_hooks(self):
-        handler = self._make_handler(
-            pre_tool_call=[HookRule(tools=["write_file"], run="echo before")]
-        )
+        handler = self._make_handler(pre_tool_call=[HookRule(tools=["write_file"], run="echo before")])
         with patch("tsugite.hooks.subprocess.run", return_value=_ok_result()) as mock_run:
             handler.handle_event(ToolCallEvent(tool_name="write_file", arguments={"path": "test.md"}))
             mock_run.assert_called_once()
             assert "before" in mock_run.call_args[0][0]
 
     def test_pre_tool_call_skips_non_matching_tool(self):
-        handler = self._make_handler(
-            pre_tool_call=[HookRule(tools=["write_file"], run="echo before")]
-        )
+        handler = self._make_handler(pre_tool_call=[HookRule(tools=["write_file"], run="echo before")])
         with patch("tsugite.hooks.subprocess.run") as mock_run:
             handler.handle_event(ToolCallEvent(tool_name="read_file", arguments={}))
             mock_run.assert_not_called()

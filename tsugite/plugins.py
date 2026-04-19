@@ -76,7 +76,6 @@ def load_tool_plugins(plugin_config: dict | None = None) -> list[PluginInfo]:
     return results
 
 
-
 def load_hook_plugins(plugin_config: dict | None = None) -> list[PluginInfo]:
     """Discover and register hook plugins.
 

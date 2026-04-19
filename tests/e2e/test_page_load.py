@@ -21,9 +21,7 @@ def test_agent_selector_populated(authenticated_page):
     assert "test-agent" in agents
 
 
-@pytest.mark.parametrize(
-    "tab", ["conversations", "workspace", "schedules", "webhooks", "usage"]
-)
+@pytest.mark.parametrize("tab", ["conversations", "workspace", "schedules", "webhooks", "usage"])
 def test_tab_loads_without_errors(authenticated_page, tab):
     """Each main tab should load without JS errors."""
     page = authenticated_page

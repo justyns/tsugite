@@ -241,13 +241,17 @@ class TestLoadHookPlugins:
         async def hook_b(ctx):
             pass
 
-        register_a = MagicMock(return_value={
-            "pre_context_build": [HookRule(type="python", hook_callable=hook_a, name="a")],
-        })
-        register_b = MagicMock(return_value={
-            "pre_context_build": [HookRule(type="python", hook_callable=hook_b, name="b")],
-            "session_end": [HookRule(type="python", hook_callable=hook_b, name="b-end")],
-        })
+        register_a = MagicMock(
+            return_value={
+                "pre_context_build": [HookRule(type="python", hook_callable=hook_a, name="a")],
+            }
+        )
+        register_b = MagicMock(
+            return_value={
+                "pre_context_build": [HookRule(type="python", hook_callable=hook_b, name="b")],
+                "session_end": [HookRule(type="python", hook_callable=hook_b, name="b-end")],
+            }
+        )
 
         ep_a = _make_entry_point("plugin-a", "a:register", "tsugite.hooks")
         ep_a.load.return_value = register_a

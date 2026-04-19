@@ -225,9 +225,7 @@ class SkillManager:
         """
         self._ensure_registry_initialized()
         already_loaded = set(self._loaded_skills.keys())
-        matched = match_triggered_skills(
-            message, list(self._skill_registry.values()), already_loaded, max_skills
-        )
+        matched = match_triggered_skills(message, list(self._skill_registry.values()), already_loaded, max_skills)
         return [skill.name for skill in matched]
 
     def clear_loaded_skills(self):

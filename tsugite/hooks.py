@@ -470,13 +470,22 @@ class HookHandler:
             try:
                 loop = asyncio.get_running_loop()
                 task = loop.create_task(
-                    _render_and_execute_async(_jinja_env, rules, context, self.workspace_dir, interactive=self.interactive, phase="pre_tool_call")
+                    _render_and_execute_async(
+                        _jinja_env,
+                        rules,
+                        context,
+                        self.workspace_dir,
+                        interactive=self.interactive,
+                        phase="pre_tool_call",
+                    )
                 )
                 task.add_done_callback(_log_task_exception)
             except RuntimeError:
                 logger.debug("No running event loop; pre_tool_call hooks not scheduled")
         else:
-            results = _render_and_execute(_jinja_env, rules, context, self.workspace_dir, interactive=self.interactive, phase="pre_tool_call")
+            results = _render_and_execute(
+                _jinja_env, rules, context, self.workspace_dir, interactive=self.interactive, phase="pre_tool_call"
+            )
             self._executions.extend(results.executions)
 
     def _fire_post_tool(self, tool_name: str, arguments: dict[str, Any]) -> None:
@@ -528,9 +537,16 @@ def drain_all_executions() -> list[HookExecution]:
 
 
 HookPhase = Literal[
-    "post_tool", "pre_compact", "post_compact", "pre_message",
-    "pre_context_build", "post_context_build", "pre_tool_call",
-    "pre_response", "post_response", "session_end",
+    "post_tool",
+    "pre_compact",
+    "post_compact",
+    "pre_message",
+    "pre_context_build",
+    "post_context_build",
+    "pre_tool_call",
+    "pre_response",
+    "post_response",
+    "session_end",
 ]
 
 

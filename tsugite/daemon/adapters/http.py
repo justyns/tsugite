@@ -77,6 +77,7 @@ class _NoCacheStaticFiles(StaticFiles):
             response.headers["Cache-Control"] = "no-cache, must-revalidate"
         return response
 
+
 MAX_TEXT_ATTACH_SIZE = 50 * 1024  # 50KB — ~12K tokens
 MAX_BINARY_ATTACH_SIZE = 10 * 1024 * 1024  # 10MB
 MAX_UPLOAD_TOTAL = 100 * 1024 * 1024  # 100MB per request
@@ -2272,7 +2273,6 @@ class HTTPServer:
         if not deleted:
             return JSONResponse({"error": "secret not found"}, status_code=404)
         return JSONResponse({"status": "ok", "name": name})
-
 
     async def _events(self, request: Request) -> Response:
         if err := self._check_auth(request):

@@ -373,9 +373,7 @@ tools: []
         names = {s.name for s in prepared.skills}
         assert names == {"skill1", "skill2"}
 
-    def test_suppressing_unknown_skill_does_not_affect_others(
-        self, agent_with_skills, skill_files, monkeypatch
-    ):
+    def test_suppressing_unknown_skill_does_not_affect_others(self, agent_with_skills, skill_files, monkeypatch):
         """Suppressing a name that isn't in auto_load_skills is harmless."""
         monkeypatch.chdir(agent_with_skills.parent)
 
@@ -390,9 +388,7 @@ tools: []
         names = {s.name for s in prepared.skills}
         assert names == {"skill1", "skill2"}
 
-    def test_suppression_does_not_emit_skill_loaded_event(
-        self, agent_with_skills, skill_files, monkeypatch
-    ):
+    def test_suppression_does_not_emit_skill_loaded_event(self, agent_with_skills, skill_files, monkeypatch):
         """When a skill is suppressed it should not fire SkillLoadedEvent.
 
         SkillLoadedEvent is emitted via the ui_context event bus (not the
