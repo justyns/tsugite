@@ -1,5 +1,6 @@
 """Agent markdown parser and template renderer."""
 
+import json
 import logging
 import re
 from dataclasses import dataclass, field
@@ -548,79 +549,53 @@ def parse_loop_params_from_args(args: str, step_name: str) -> tuple[Optional[str
     return repeat_while, repeat_until, max_iterations
 
 
+_JSON_DECODER = json.JSONDecoder()
+
+
 def find_json_object_in_string(text: str, start_keyword: str) -> tuple[int, int]:
     """Find a JSON object in a string starting after a keyword.
 
-    Handles nested braces correctly.
-
-    Args:
-        text: Text to search in
-        start_keyword: Keyword before JSON (e.g., "args=")
-
-    Returns:
-        Tuple of (json_start_pos, json_end_pos)
+    Uses the stdlib JSON decoder so braces inside string values (e.g.
+    `{"tmpl": "{{ name }}"}`) are handled correctly.
 
     Raises:
-        ValueError: If JSON object not found or has unmatched braces
+        ValueError: if the keyword is missing, no opening brace follows it, or
+        the JSON is malformed.
     """
     keyword_pos = text.find(start_keyword)
     if keyword_pos == -1:
         raise ValueError(f"Keyword '{start_keyword}' not found in text")
 
-    # Find the opening brace after keyword
     json_start = text.find("{", keyword_pos)
     if json_start == -1:
         raise ValueError(f"No JSON object found after '{start_keyword}'")
 
-    # Find matching closing brace (handle nested braces)
-    brace_count = 0
-    json_end = json_start
-    for i in range(json_start, len(text)):
-        if text[i] == "{":
-            brace_count += 1
-        elif text[i] == "}":
-            brace_count -= 1
-            if brace_count == 0:
-                json_end = i + 1
-                break
+    try:
+        _, rel_end = _JSON_DECODER.raw_decode(text[json_start:])
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON object after '{start_keyword}': {e}") from e
 
-    if brace_count != 0:
-        raise ValueError(f"Unmatched braces in JSON object after '{start_keyword}'")
-
-    return json_start, json_end
+    return json_start, json_start + rel_end
 
 
 def extract_and_parse_json_args(raw_args: str, tool_name: str) -> dict[str, Any]:
     """Extract and parse JSON args from tool directive arguments.
 
-    Args:
-        raw_args: Raw directive arguments string
-        tool_name: Name of tool (for error messages)
-
-    Returns:
-        Parsed args dict
-
     Raises:
-        ValueError: If args missing, invalid JSON, or has syntax errors
+        ValueError: if `args=` is missing, no JSON object follows it, or the
+        JSON is invalid.
     """
-    import json
-
-    # Find args= and extract JSON object
-    args_start = raw_args.find("args=")
-    if args_start == -1:
+    if "args=" not in raw_args:
         raise ValueError(f"Tool directive missing required 'args' attribute: {raw_args}")
 
     try:
         json_start, json_end = find_json_object_in_string(raw_args, "args=")
     except ValueError as e:
-        raise ValueError(f"Tool directive args must be a JSON object: {raw_args}") from e
-
-    # Parse JSON args
-    try:
-        args_json_str = raw_args[json_start:json_end]
-        return json.loads(args_json_str)
-    except json.JSONDecodeError as e:
+        if "No JSON object" in str(e):
+            raise ValueError(f"Tool directive args must be a JSON object: {raw_args}") from e
         raise ValueError(f"Invalid JSON in tool directive args for '{tool_name}': {e}") from e
+
+    return json.loads(raw_args[json_start:json_end])
 
 
 def build_validation_test_context(agent, include_prefetch: bool = True) -> dict[str, Any]:
