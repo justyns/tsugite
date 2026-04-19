@@ -562,6 +562,7 @@ class TsugiteAgent:
                         error=None,
                         tools_called=[],
                         xml_observation=correction_xml,
+                        content_blocks=turn.content_blocks,
                     )
 
                     # Continue to next turn - the correction will be in the observation

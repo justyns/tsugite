@@ -942,27 +942,25 @@ class HTTPServer:
                 result_turns.append(item.model_dump(mode="json", exclude_none=True))
                 continue
             user_msg = ""
-            for msg in item.messages:
-                if msg.get("role") == "user":
-                    content = msg.get("content", "")
-                    user_msg = content if isinstance(content, str) else str(content)
-                    break
-            content_blocks = {}
-            for msg in item.messages:
-                if msg.get("role") == "assistant":
-                    content = msg.get("content", "")
-                    if isinstance(content, str) and "<content" in content:
-                        _, blocks = extract_content_blocks(content)
-                        content_blocks.update(blocks)
-
-            # Count sub-turns (assistant messages) and total tool invocations
+            user_msg_found = False
+            content_blocks: dict[str, str] = {}
+            per_message_blocks: list[dict[str, str]] = []
             sub_turn_count = 0
             tool_call_count = 0
             for msg in item.messages:
-                if msg.get("role") == "assistant":
+                role = msg.get("role")
+                content = msg.get("content", "")
+                blocks: dict[str, str] = {}
+                if role == "user" and not user_msg_found:
+                    user_msg = content if isinstance(content, str) else str(content)
+                    user_msg_found = True
+                elif role == "assistant":
                     sub_turn_count += 1
-                    for tc in msg.get("tool_calls", []):
-                        tool_call_count += 1
+                    tool_call_count += len(msg.get("tool_calls", []))
+                    if isinstance(content, str) and "<content" in content:
+                        _, blocks = extract_content_blocks(content)
+                        content_blocks.update(blocks)
+                per_message_blocks.append(blocks)
             turn_data = {
                 "user": user_msg,
                 "assistant": item.final_answer or "",
@@ -974,7 +972,10 @@ class HTTPServer:
             if content_blocks:
                 turn_data["content_blocks"] = content_blocks
             if detail:
-                turn_data["messages"] = item.messages
+                turn_data["messages"] = [
+                    {**msg, "content_blocks": blocks} if blocks else msg
+                    for msg, blocks in zip(item.messages, per_message_blocks)
+                ]
             turn_reactions = reactions_by_turn.get(real_turn_index)
             if turn_reactions:
                 turn_data["reactions"] = turn_reactions

@@ -408,6 +408,93 @@ class TestHistoryEndpoint:
         assert len(turn_data) == 1
         assert "reactions" not in turn_data[0]
 
+    def test_history_detail_attaches_content_blocks_per_message(self, client, test_token, mock_adapter, tmp_path):
+        """When detail=true, each assistant message carries its own content_blocks dict."""
+        from tsugite.history.storage import SessionStorage
+
+        session = mock_adapter.session_store.get_or_create_interactive("web-anonymous", "test-agent")
+        session_id = session.id
+        history_dir = tmp_path / "history"
+        history_dir.mkdir()
+        session_path = history_dir / f"{session_id}.jsonl"
+
+        storage = SessionStorage.create("test-agent", model="test", session_path=session_path)
+        storage.record_turn(
+            messages=[
+                {"role": "user", "content": "go"},
+                {"role": "assistant", "content": "```python\ninspect()\n```"},
+                {
+                    "role": "user",
+                    "content": '<tsugite_execution_result status="success" duration_ms="3"><output>ok</output></tsugite_execution_result>',
+                },
+                {
+                    "role": "assistant",
+                    "content": (
+                        '```python\nfinal_answer(result="done")\n```\n\n'
+                        '<content name="reply">Stopped before creating anything.</content>'
+                    ),
+                },
+            ],
+            final_answer="done",
+        )
+        session_path.rename(history_dir / f"{session_id}.jsonl")
+
+        with patch("tsugite.daemon.adapters.http.get_history_dir", return_value=history_dir):
+            resp = client.get(
+                "/api/agents/test-agent/history?user_id=web-anonymous&detail=true",
+                headers={"Authorization": f"Bearer {test_token}"},
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        turn = next(t for t in data["turns"] if t.get("user"))
+
+        # Turn-level aggregate still available for backward compat
+        assert turn.get("content_blocks") == {"reply": "Stopped before creating anything."}
+
+        # Per-message attachment is the new source of truth for rendering
+        assistant_msgs = [m for m in turn["messages"] if m.get("role") == "assistant"]
+        assert assistant_msgs[0].get("content_blocks", {}) == {}
+        assert assistant_msgs[1]["content_blocks"] == {"reply": "Stopped before creating anything."}
+
+    def test_history_detail_preserves_execution_result_with_attributes(
+        self, client, test_token, mock_adapter, tmp_path
+    ):
+        """Execution-result tags with attributes must survive the payload unmodified."""
+        from tsugite.history.storage import SessionStorage
+
+        session = mock_adapter.session_store.get_or_create_interactive("web-anonymous", "test-agent")
+        session_id = session.id
+        history_dir = tmp_path / "history"
+        history_dir.mkdir()
+        session_path = history_dir / f"{session_id}.jsonl"
+
+        observation = (
+            '<tsugite_execution_result status="success" duration_ms="12">'
+            "<output>ran</output></tsugite_execution_result>"
+        )
+        storage = SessionStorage.create("test-agent", model="test", session_path=session_path)
+        storage.record_turn(
+            messages=[
+                {"role": "user", "content": "go"},
+                {"role": "assistant", "content": "```python\nprint('hi')\n```"},
+                {"role": "user", "content": observation},
+            ],
+            final_answer="done",
+        )
+        session_path.rename(history_dir / f"{session_id}.jsonl")
+
+        with patch("tsugite.daemon.adapters.http.get_history_dir", return_value=history_dir):
+            resp = client.get(
+                "/api/agents/test-agent/history?user_id=web-anonymous&detail=true",
+                headers={"Authorization": f"Bearer {test_token}"},
+            )
+
+        assert resp.status_code == 200
+        turn = next(t for t in resp.json()["turns"] if t.get("user"))
+        user_msgs = [m for m in turn["messages"] if m.get("role") == "user"]
+        assert any(m.get("content") == observation for m in user_msgs)
+
 
 class TestWebUI:
     def test_serve_ui(self, client):

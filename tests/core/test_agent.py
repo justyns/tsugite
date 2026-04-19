@@ -208,6 +208,35 @@ async def test_agent_format_error_loop_bails_early():
 
 
 @pytest.mark.asyncio
+async def test_agent_format_error_preserves_content_blocks_on_step():
+    """When the LLM emits content blocks but no code fence, the step should still carry them."""
+
+    agent = TsugiteAgent(
+        model_string="openai:gpt-4o-mini",
+        tools=[],
+        instructions="",
+        max_turns=5,
+    )
+
+    format_error = (
+        "Thought: writing without code\n\n" '<content name="reply">Stopped before creating anything.</content>'
+    )
+    _patch_provider(
+        agent,
+        side_effect=[
+            _mock_response(format_error),
+            _mock_response("```python\nfinal_answer('done')\n```"),
+        ],
+    )
+
+    await agent.run("Some task")
+
+    format_error_step = agent.memory.steps[0]
+    assert format_error_step.code == ""
+    assert format_error_step.content_blocks == {"reply": "Stopped before creating anything."}
+
+
+@pytest.mark.asyncio
 async def test_agent_format_error_resets_on_valid_code():
     """Test format error counter resets when model produces valid code."""
 
@@ -675,9 +704,9 @@ def test_tool_execution_no_task_warnings():
     )
 
     assert "Task pending" not in filtered_stderr, f"Unexpected Task pending warning:\n{stderr_output}"
-    assert "Task exception was never retrieved" not in filtered_stderr, (
-        f"Unexpected Task exception warning:\n{stderr_output}"
-    )
+    assert (
+        "Task exception was never retrieved" not in filtered_stderr
+    ), f"Unexpected Task exception warning:\n{stderr_output}"
 
 
 def test_tool_exception_propagation_from_async():
@@ -727,6 +756,6 @@ def test_tool_exception_propagation_from_async():
         line for line in stderr_output.split("\n") if "failing_tool" in line or "never retrieved" in line
     )
 
-    assert "exception was never retrieved" not in filtered_stderr.lower(), (
-        f"Exception handling broken:\n{stderr_output}"
-    )
+    assert (
+        "exception was never retrieved" not in filtered_stderr.lower()
+    ), f"Exception handling broken:\n{stderr_output}"

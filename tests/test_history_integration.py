@@ -465,6 +465,43 @@ class TestBuildTurnMessages:
         code_msg = assistant_msgs[0]["content"]
         assert code_msg == "```python\nx = 1\n```"
 
+    def test_content_blocks_without_code_preserved(self):
+        """A step with only content blocks (no code) should still produce an assistant message."""
+        step = MagicMock()
+        step.code = ""
+        step.xml_observation = '<tsugite_execution_result status="success"></tsugite_execution_result>'
+        step.content_blocks = {"reply": "Stopped before creating anything."}
+
+        messages = _build_turn_messages("hi", "done", execution_steps=[step])
+
+        assistant_msgs = [m for m in messages if m["role"] == "assistant"]
+        # step assistant + final result assistant
+        assert len(assistant_msgs) == 2
+        step_msg = assistant_msgs[0]["content"]
+        assert "```python" not in step_msg
+        assert '<content name="reply">' in step_msg
+        assert "Stopped before creating anything." in step_msg
+
+        user_msgs = [m for m in messages if m["role"] == "user"]
+        # initial prompt + observation
+        assert any("tsugite_execution_result" in m["content"] for m in user_msgs)
+
+    def test_code_and_content_blocks_share_single_message(self):
+        """Code and content blocks from the same step must live in one assistant message so renderers can pair them."""
+        from tsugite.core.content_blocks import extract_content_blocks
+
+        step = MagicMock()
+        step.code = "write_file(path='out.md', content=doc)"
+        step.xml_observation = ""
+        step.content_blocks = {"doc": "hello"}
+
+        messages = _build_turn_messages("hi", "done", execution_steps=[step])
+
+        step_msg = [m for m in messages if m["role"] == "assistant"][0]["content"]
+        assert "```python" in step_msg
+        _, extracted = extract_content_blocks(step_msg)
+        assert extracted == {"doc": "hello"}
+
 
 class TestSessionStatus:
     """Tests for session status recording."""

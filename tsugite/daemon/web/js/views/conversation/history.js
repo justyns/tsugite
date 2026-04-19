@@ -68,15 +68,12 @@ export const historyMixin = {
           if (turn.messages) {
             for (const item of this.extractMessages(turn)) {
               if (item.type === 'tool_call') {
-                steps.push({ hasDetails: true, summary: `<code>${escapeHtml(item.name)}</code>`, content: truncate(item.args), open: false });
+                steps.push({ hasDetails: true, summary: `<code>${escapeHtml(item.name)}</code>`, content: item.args, open: false });
               } else if (item.type === 'tool_result') {
                 steps.push({ hasDetails: true, summary: `<code>${escapeHtml(item.name || 'result')}</code>`, content: item.content, open: false });
+              } else if (item.type === 'content_block') {
+                steps.push({ html: contentBlockHtml(item.name, item.content) });
               }
-            }
-          }
-          if (turn.content_blocks && Object.keys(turn.content_blocks).length) {
-            for (const [name, content] of Object.entries(turn.content_blocks)) {
-              steps.push({ html: contentBlockHtml(name, content) });
             }
           }
           if (steps.length > 0) {
@@ -155,8 +152,13 @@ export const historyMixin = {
             items.push({ type: 'tool_call', name: fn.name || 'unknown', args: fn.arguments || '{}' });
           }
         }
-      } else if (msg.role === 'user' && msg.content?.includes('<tsugite_execution_result>')) {
-        const content = msg.content.replace(/<\/?tsugite_execution_result>/g, '').trim();
+        if (msg.content_blocks) {
+          for (const [name, content] of Object.entries(msg.content_blocks)) {
+            items.push({ type: 'content_block', name, content });
+          }
+        }
+      } else if (msg.role === 'user' && msg.content?.includes('<tsugite_execution_result')) {
+        const content = msg.content.replace(/<tsugite_execution_result[^>]*>|<\/tsugite_execution_result>/g, '').trim();
         items.push({ type: 'tool_result', name: 'result', content: truncate(content) });
       } else if (msg.role === 'tool') {
         const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);

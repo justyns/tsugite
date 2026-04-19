@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 
 from tsugite.attachments.base import Attachment
 from tsugite.config import load_config
+from tsugite.core.content_blocks import serialize_content_blocks
 from tsugite.history import (
     SessionStorage,
     apply_cache_control_to_messages,
@@ -206,15 +207,16 @@ def _build_turn_messages(
         for step in execution_steps:
             code = getattr(step, "code", "")
             xml_observation = getattr(step, "xml_observation", "")
+            content_blocks = getattr(step, "content_blocks", None) or {}
 
+            parts = []
             if code:
-                assistant_msg = f"```python\n{code}\n```"
-                content_blocks = getattr(step, "content_blocks", None) or {}
-                if content_blocks:
-                    from tsugite.core.content_blocks import serialize_content_blocks
+                parts.append(f"```python\n{code}\n```")
+            if content_blocks:
+                parts.append(serialize_content_blocks(content_blocks))
 
-                    assistant_msg += f"\n\n{serialize_content_blocks(content_blocks)}"
-                messages.append({"role": "assistant", "content": assistant_msg})
+            if parts:
+                messages.append({"role": "assistant", "content": "\n\n".join(parts)})
             if xml_observation:
                 messages.append({"role": "user", "content": xml_observation})
 
