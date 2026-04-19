@@ -227,6 +227,17 @@ export default () => ({
     } catch { /* ignore */ }
   },
 
+  async removeLoadedSkill(name) {
+    const agent = this.$store.app.selectedAgent;
+    if (!agent) return;
+    try {
+      await post(`/api/agents/${agent}/unload-skill`, { user_id: this.userId, name });
+      this.loadedSkills = this.loadedSkills.filter(s => s.name !== name);
+    } catch (e) {
+      this.messages.push({ type: 'error', text: `Remove skill failed: ${e.message}` });
+    }
+  },
+
   async compactSession(retryMsg = null) {
     const agent = this.$store.app.selectedAgent;
     if (!agent || this.sending || this.compacting) return;

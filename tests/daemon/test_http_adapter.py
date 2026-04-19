@@ -146,6 +146,120 @@ class TestChatEndpoint:
         assert resp.status_code == 400
 
 
+class TestUnloadSkillEndpoint:
+    """POST /api/agents/{agent}/unload-skill suppresses a skill for the session."""
+
+    def _headers(self, token):
+        return {"Authorization": f"Bearer {token}"}
+
+    def test_unload_skill_happy_path(self, client, test_token, mock_adapter):
+        resp = client.post(
+            "/api/agents/test-agent/unload-skill",
+            json={"user_id": "alice", "name": "skill-a"},
+            headers=self._headers(test_token),
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert data["name"] == "skill-a"
+        # Resolves the interactive session and stores the suppression there.
+        session = mock_adapter.session_store.get_or_create_interactive("alice", "test-agent")
+        assert data["session_id"] == session.id
+        assert mock_adapter.session_store.get_suppressed_skills(session.id) == {"skill-a"}
+
+    def test_unload_skill_is_idempotent(self, client, test_token, mock_adapter):
+        for _ in range(3):
+            resp = client.post(
+                "/api/agents/test-agent/unload-skill",
+                json={"user_id": "alice", "name": "skill-a"},
+                headers=self._headers(test_token),
+            )
+            assert resp.status_code == 200
+        session = mock_adapter.session_store.get_or_create_interactive("alice", "test-agent")
+        assert mock_adapter.session_store.get_suppressed_skills(session.id) == {"skill-a"}
+
+    def test_unload_multiple_skills(self, client, test_token, mock_adapter):
+        for name in ("skill-a", "skill-b", "skill-c"):
+            resp = client.post(
+                "/api/agents/test-agent/unload-skill",
+                json={"user_id": "alice", "name": name},
+                headers=self._headers(test_token),
+            )
+            assert resp.status_code == 200
+        session = mock_adapter.session_store.get_or_create_interactive("alice", "test-agent")
+        assert mock_adapter.session_store.get_suppressed_skills(session.id) == {"skill-a", "skill-b", "skill-c"}
+
+    def test_unload_skill_isolated_per_user(self, client, test_token, mock_adapter):
+        client.post(
+            "/api/agents/test-agent/unload-skill",
+            json={"user_id": "alice", "name": "skill-a"},
+            headers=self._headers(test_token),
+        )
+        alice_session = mock_adapter.session_store.get_or_create_interactive("alice", "test-agent")
+        bob_session = mock_adapter.session_store.get_or_create_interactive("bob", "test-agent")
+        assert alice_session.id != bob_session.id
+        assert mock_adapter.session_store.get_suppressed_skills(bob_session.id) == set()
+
+    def test_unload_skill_missing_name(self, client, test_token):
+        resp = client.post(
+            "/api/agents/test-agent/unload-skill",
+            json={"user_id": "alice"},
+            headers=self._headers(test_token),
+        )
+        assert resp.status_code == 400
+        assert "name" in resp.json()["error"]
+
+    def test_unload_skill_empty_name(self, client, test_token):
+        resp = client.post(
+            "/api/agents/test-agent/unload-skill",
+            json={"user_id": "alice", "name": ""},
+            headers=self._headers(test_token),
+        )
+        assert resp.status_code == 400
+
+    def test_unload_skill_non_string_name(self, client, test_token):
+        resp = client.post(
+            "/api/agents/test-agent/unload-skill",
+            json={"user_id": "alice", "name": 42},
+            headers=self._headers(test_token),
+        )
+        assert resp.status_code == 400
+
+    def test_unload_skill_invalid_json(self, client, test_token):
+        resp = client.post(
+            "/api/agents/test-agent/unload-skill",
+            content=b"not json",
+            headers={**self._headers(test_token), "Content-Type": "application/json"},
+        )
+        assert resp.status_code == 400
+
+    def test_unload_skill_unknown_agent(self, client, test_token):
+        resp = client.post(
+            "/api/agents/nonexistent/unload-skill",
+            json={"user_id": "alice", "name": "skill-a"},
+            headers=self._headers(test_token),
+        )
+        assert resp.status_code == 404
+
+    def test_unload_skill_no_auth(self, client):
+        resp = client.post(
+            "/api/agents/test-agent/unload-skill",
+            json={"user_id": "alice", "name": "skill-a"},
+        )
+        assert resp.status_code == 401
+
+    def test_unload_skill_invokes_manager(self, client, test_token):
+        """The handler also tells the global SkillManager to drop the skill so any
+        in-flight read of its state reflects the removal immediately."""
+        with patch("tsugite.tools.skills.get_skill_manager") as get_mgr:
+            client.post(
+                "/api/agents/test-agent/unload-skill",
+                json={"user_id": "alice", "name": "skill-a"},
+                headers=self._headers(test_token),
+            )
+        get_mgr.return_value.unload_skill.assert_called_once_with("skill-a")
+
+
 class TestWebhookEndpoint:
     def test_webhook_valid_token(self, client, tmp_workspace):
         resp = client.post(

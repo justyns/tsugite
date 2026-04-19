@@ -147,6 +147,115 @@ class TestSessionStoreInteractive:
         assert s1.id != s2.id
 
 
+class TestSessionStoreSkillSuppression:
+    """Per-session skill suppression tracked on SessionStore."""
+
+    def test_default_empty(self, tmp_path):
+        store = SessionStore(tmp_path / "session_store.json")
+        assert store.get_suppressed_skills("any-session") == set()
+
+    def test_suppress_adds_to_set(self, tmp_path):
+        store = SessionStore(tmp_path / "session_store.json")
+        store.suppress_skill("session-1", "skill-a")
+        store.suppress_skill("session-1", "skill-b")
+        assert store.get_suppressed_skills("session-1") == {"skill-a", "skill-b"}
+
+    def test_suppression_isolated_per_session(self, tmp_path):
+        store = SessionStore(tmp_path / "session_store.json")
+        store.suppress_skill("session-1", "skill-a")
+        assert store.get_suppressed_skills("session-2") == set()
+
+    def test_unsuppress_removes(self, tmp_path):
+        store = SessionStore(tmp_path / "session_store.json")
+        store.suppress_skill("session-1", "skill-a")
+        store.unsuppress_skill("session-1", "skill-a")
+        assert store.get_suppressed_skills("session-1") == set()
+
+    def test_get_returns_copy(self, tmp_path):
+        store = SessionStore(tmp_path / "session_store.json")
+        store.suppress_skill("session-1", "skill-a")
+        snapshot = store.get_suppressed_skills("session-1")
+        snapshot.add("skill-b")
+        assert store.get_suppressed_skills("session-1") == {"skill-a"}
+
+    def test_suppress_same_skill_is_idempotent(self, tmp_path):
+        store = SessionStore(tmp_path / "session_store.json")
+        store.suppress_skill("session-1", "skill-a")
+        store.suppress_skill("session-1", "skill-a")
+        assert store.get_suppressed_skills("session-1") == {"skill-a"}
+
+    def test_unsuppress_unknown_is_noop(self, tmp_path):
+        store = SessionStore(tmp_path / "session_store.json")
+        # unsuppress on a session with no entry at all
+        store.unsuppress_skill("ghost-session", "skill-a")
+        assert store.get_suppressed_skills("ghost-session") == set()
+        # unsuppress on a session with a different entry
+        store.suppress_skill("session-1", "skill-a")
+        store.unsuppress_skill("session-1", "skill-b")
+        assert store.get_suppressed_skills("session-1") == {"skill-a"}
+
+    def test_unsuppress_cleans_empty_session_entry(self, tmp_path):
+        """Empty-set entries shouldn't accumulate across many sessions."""
+        store = SessionStore(tmp_path / "session_store.json")
+        store.suppress_skill("session-1", "skill-a")
+        store.unsuppress_skill("session-1", "skill-a")
+        assert "session-1" not in store._suppressed_skills
+
+    def test_suppression_is_not_persisted_across_reload(self, tmp_path):
+        """In-memory only: a fresh SessionStore loses prior suppression."""
+        path = tmp_path / "session_store.json"
+        first = SessionStore(path)
+        first.suppress_skill("session-1", "skill-a")
+        assert first.get_suppressed_skills("session-1") == {"skill-a"}
+
+        second = SessionStore(path)
+        assert second.get_suppressed_skills("session-1") == set()
+
+    def test_suppression_carries_through_compaction(self, tmp_path):
+        """Compacting a session migrates suppressions to the new session_id and
+        drops the old entry so the dict doesn't leak orphaned keys."""
+        store = SessionStore(tmp_path / "session_store.json")
+        session = store.get_or_create_interactive("alice", "test-agent")
+        store.suppress_skill(session.id, "skill-a")
+        store.suppress_skill(session.id, "skill-b")
+
+        new_session = store.compact_session(session.id)
+
+        assert new_session.id != session.id
+        assert store.get_suppressed_skills(new_session.id) == {"skill-a", "skill-b"}
+        assert session.id not in store._suppressed_skills
+
+    def test_compaction_without_suppression_is_noop(self, tmp_path):
+        """Compacting a session that never had suppressions leaves the dict empty."""
+        store = SessionStore(tmp_path / "session_store.json")
+        session = store.get_or_create_interactive("alice", "test-agent")
+        new_session = store.compact_session(session.id)
+
+        assert store.get_suppressed_skills(new_session.id) == set()
+        assert new_session.id not in store._suppressed_skills
+
+    def test_suppress_is_thread_safe(self, tmp_path):
+        """Concurrent suppress calls converge without lost updates."""
+        import threading
+
+        store = SessionStore(tmp_path / "session_store.json")
+        names = [f"skill-{i}" for i in range(40)]
+
+        def worker(subset):
+            for name in subset:
+                store.suppress_skill("session-1", name)
+
+        mid = len(names) // 2
+        t1 = threading.Thread(target=worker, args=(names[:mid],))
+        t2 = threading.Thread(target=worker, args=(names[mid:],))
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+        assert store.get_suppressed_skills("session-1") == set(names)
+
+
 class TestSessionStoreThreadSafety:
     """SessionStore operations are thread-safe."""
 

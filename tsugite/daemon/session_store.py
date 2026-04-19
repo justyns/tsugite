@@ -134,6 +134,10 @@ class SessionStore:
         # Event is unset while compaction is in progress, set when done.
         self._compaction_events: dict[tuple[str, str], threading.Event] = {}
 
+        # Per-session set of skill names that should not be (re)loaded for the
+        # rest of this session's lifetime. In-memory only; resets on daemon restart.
+        self._suppressed_skills: dict[str, set[str]] = {}
+
         self._load()
         self._migrate_legacy()
         self._recover_stale_sessions()
@@ -183,6 +187,32 @@ class SessionStore:
         """Check if a session is currently being compacted."""
         with self._lock:
             return (user_id, agent) in self._compaction_events
+
+    # ── Skill suppression (non-persisted) ──
+
+    def suppress_skill(self, session_id: str, skill_name: str) -> None:
+        """Mark a skill as suppressed for the given session.
+
+        AgentPreparer will skip this skill on subsequent turns so it does not
+        reload from auto_load_skills or trigger matches. Cleared on daemon
+        restart by design.
+        """
+        with self._lock:
+            self._suppressed_skills.setdefault(session_id, set()).add(skill_name)
+
+    def unsuppress_skill(self, session_id: str, skill_name: str) -> None:
+        """Remove a skill from the session's suppression set."""
+        with self._lock:
+            skills = self._suppressed_skills.get(session_id)
+            if skills:
+                skills.discard(skill_name)
+                if not skills:
+                    self._suppressed_skills.pop(session_id, None)
+
+    def get_suppressed_skills(self, session_id: str) -> set[str]:
+        """Return a copy of the session's suppressed skill names."""
+        with self._lock:
+            return set(self._suppressed_skills.get(session_id, ()))
 
     # ── Interactive session management ──
 
@@ -249,6 +279,13 @@ class SessionStore:
             thread_id = new_session.metadata.get("thread_id")
             if thread_id:
                 self._thread_index[thread_id] = new_id
+
+            # Carry skill suppressions forward so a user's "remove this skill" intent
+            # persists across compaction, and drop the old entry so the dict doesn't
+            # accumulate orphans.
+            suppressed = self._suppressed_skills.pop(session_id, None)
+            if suppressed:
+                self._suppressed_skills[new_id] = suppressed
 
             # Mark old session as completed
             old_session.status = SessionStatus.COMPLETED.value

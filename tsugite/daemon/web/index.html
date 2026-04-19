@@ -533,6 +533,7 @@
             <div class="att-header">
               <span class="att-name" x-text="skill.name"></span>
               <span class="att-type" x-text="skill.description"></span>
+              <button class="att-remove" title="Remove from list" @click.stop="removeLoadedSkill(skill.name)">&times;</button>
             </div>
           </div>
         </template>

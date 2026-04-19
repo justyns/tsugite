@@ -282,6 +282,187 @@ tools: []
         skill_names = [s.name for s in prepared.skills]
         assert "nonexistent_skill" not in skill_names
 
+    def test_suppressed_skill_is_not_loaded(self, agent_with_skills, skill_files, monkeypatch):
+        """Skills present in context['suppressed_skills'] are skipped even if
+        listed in auto_load_skills."""
+        monkeypatch.chdir(agent_with_skills.parent)
+
+        agent = parse_agent_file(agent_with_skills)
+        preparer = AgentPreparer()
+
+        prepared = preparer.prepare(
+            agent=agent,
+            prompt="Test task",
+            context={"suppressed_skills": ["skill1"]},
+        )
+
+        skill_names = [s.name for s in prepared.skills]
+        assert "skill1" not in skill_names
+        assert "skill2" in skill_names
+
+    def test_multiple_suppressed_skills(self, agent_with_skills, skill_files, monkeypatch):
+        """Suppressing every auto_load skill leaves prepared.skills empty."""
+        monkeypatch.chdir(agent_with_skills.parent)
+
+        agent = parse_agent_file(agent_with_skills)
+        preparer = AgentPreparer()
+
+        prepared = preparer.prepare(
+            agent=agent,
+            prompt="Test task",
+            context={"suppressed_skills": ["skill1", "skill2"]},
+        )
+
+        assert [s.name for s in prepared.skills] == []
+
+    def test_suppressed_skills_accepts_any_iterable(self, agent_with_skills, skill_files, monkeypatch):
+        """Context may arrive with set/tuple/list; all should filter correctly."""
+        monkeypatch.chdir(agent_with_skills.parent)
+
+        agent = parse_agent_file(agent_with_skills)
+        preparer = AgentPreparer()
+
+        for shape in ({"skill1"}, ("skill1",), ["skill1"]):
+            prepared = preparer.prepare(
+                agent=agent,
+                prompt="Test task",
+                context={"suppressed_skills": shape},
+            )
+            names = [s.name for s in prepared.skills]
+            assert "skill1" not in names, f"failed for shape {type(shape).__name__}"
+            assert "skill2" in names
+
+    def test_missing_suppressed_skills_key(self, agent_with_skills, skill_files, monkeypatch):
+        """Context without the key behaves as if nothing is suppressed."""
+        monkeypatch.chdir(agent_with_skills.parent)
+
+        agent = parse_agent_file(agent_with_skills)
+        preparer = AgentPreparer()
+
+        prepared = preparer.prepare(agent=agent, prompt="Test task", context={})
+        names = {s.name for s in prepared.skills}
+        assert names == {"skill1", "skill2"}
+
+    def test_none_suppressed_skills(self, agent_with_skills, skill_files, monkeypatch):
+        """Explicit None behaves the same as an absent key (no suppression)."""
+        monkeypatch.chdir(agent_with_skills.parent)
+
+        agent = parse_agent_file(agent_with_skills)
+        preparer = AgentPreparer()
+
+        prepared = preparer.prepare(
+            agent=agent,
+            prompt="Test task",
+            context={"suppressed_skills": None},
+        )
+        names = {s.name for s in prepared.skills}
+        assert names == {"skill1", "skill2"}
+
+    def test_empty_suppressed_skills(self, agent_with_skills, skill_files, monkeypatch):
+        """An empty iterable suppresses nothing."""
+        monkeypatch.chdir(agent_with_skills.parent)
+
+        agent = parse_agent_file(agent_with_skills)
+        preparer = AgentPreparer()
+
+        prepared = preparer.prepare(
+            agent=agent,
+            prompt="Test task",
+            context={"suppressed_skills": []},
+        )
+        names = {s.name for s in prepared.skills}
+        assert names == {"skill1", "skill2"}
+
+    def test_suppressing_unknown_skill_does_not_affect_others(
+        self, agent_with_skills, skill_files, monkeypatch
+    ):
+        """Suppressing a name that isn't in auto_load_skills is harmless."""
+        monkeypatch.chdir(agent_with_skills.parent)
+
+        agent = parse_agent_file(agent_with_skills)
+        preparer = AgentPreparer()
+
+        prepared = preparer.prepare(
+            agent=agent,
+            prompt="Test task",
+            context={"suppressed_skills": ["does-not-exist"]},
+        )
+        names = {s.name for s in prepared.skills}
+        assert names == {"skill1", "skill2"}
+
+    def test_suppression_does_not_emit_skill_loaded_event(
+        self, agent_with_skills, skill_files, monkeypatch
+    ):
+        """When a skill is suppressed it should not fire SkillLoadedEvent.
+
+        SkillLoadedEvent is emitted via the ui_context event bus (not the
+        preparer's event_bus arg), so we set it there.
+        """
+        from tsugite import ui_context
+        from tsugite.events import EventBus, SkillLoadedEvent
+
+        monkeypatch.chdir(agent_with_skills.parent)
+
+        agent = parse_agent_file(agent_with_skills)
+        preparer = AgentPreparer()
+        bus = EventBus()
+        events = []
+        bus.subscribe(events.append)
+
+        token = ui_context._event_bus_var.set(bus)
+        try:
+            preparer.prepare(
+                agent=agent,
+                prompt="Test task",
+                context={"suppressed_skills": ["skill1"]},
+            )
+        finally:
+            ui_context._event_bus_var.reset(token)
+
+        loaded_names = {e.skill_name for e in events if isinstance(e, SkillLoadedEvent)}
+        assert "skill1" not in loaded_names
+        assert "skill2" in loaded_names
+
+    def test_suppressed_triggered_skill_is_not_loaded(self, skill_files, tmp_path, monkeypatch):
+        """Suppression also filters out trigger-matched skills, not only
+        auto_load_skills."""
+        monkeypatch.chdir(tmp_path)
+
+        triggered_dir = skill_files["dir"] / "triggered_skill"
+        triggered_dir.mkdir()
+        (triggered_dir / "SKILL.md").write_text("""---
+name: triggered_skill
+description: A skill with trigger words
+triggers:
+  - magicword
+---
+
+Triggered body.
+""")
+
+        agent_file = tmp_path / "agent.md"
+        agent_file.write_text("""---
+name: test_agent
+extends: none
+tools: []
+---
+
+{{ user_prompt }}
+""")
+
+        agent = parse_agent_file(agent_file)
+        preparer = AgentPreparer()
+
+        baseline = preparer.prepare(agent=agent, prompt="please use magicword here", context={})
+        assert "triggered_skill" in [s.name for s in baseline.skills]
+
+        prepared = preparer.prepare(
+            agent=agent,
+            prompt="please use magicword here",
+            context={"suppressed_skills": ["triggered_skill"]},
+        )
+        assert "triggered_skill" not in [s.name for s in prepared.skills]
+
 
 class TestSystemPromptWithSkills:
     """Test that skills are added to system prompt correctly."""

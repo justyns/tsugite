@@ -427,6 +427,7 @@ class HTTPServer:
             Route("/api/agents/{agent}/config", self._update_agent_config, methods=["PATCH"]),
             Route("/api/agents/{agent}/compact", self._compact, methods=["POST"]),
             Route("/api/agents/{agent}/respond", self._respond, methods=["POST"]),
+            Route("/api/agents/{agent}/unload-skill", self._unload_skill, methods=["POST"]),
             Route("/api/schedules", self._list_schedules, methods=["GET"]),
             Route("/api/schedules", self._create_schedule, methods=["POST"]),
             Route("/api/schedules/cleanup", self._cleanup_schedules, methods=["POST"]),
@@ -1088,6 +1089,44 @@ class HTTPServer:
                 "new_conversation_id": new_session.id if new_session else None,
             }
         )
+
+    async def _unload_skill(self, request: Request) -> JSONResponse:
+        """Suppress a skill for the rest of this session's lifetime.
+
+        AgentPreparer will skip the skill on subsequent turns so it does not
+        reload from auto_load_skills or a trigger match. In-memory only; a
+        daemon restart resets suppression by design.
+        """
+        adapter, err = self._get_adapter(request)
+        if err:
+            return err
+
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+
+        skill_name = body.get("name")
+        if not isinstance(skill_name, str) or not skill_name:
+            return JSONResponse({"error": "name is required"}, status_code=400)
+
+        user_id = adapter.resolve_http_user(body.get("user_id", "web-anonymous"))
+        session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
+        adapter.session_store.suppress_skill(session.id, skill_name)
+
+        # Drop it from the currently-loaded manager too so any in-flight code path
+        # that still reads the global manager's state sees the removal. Best-effort:
+        # if the manager hasn't been initialised yet (no prior `prepare()` call)
+        # there's nothing to clear, and the suppression above still takes effect
+        # on the next turn.
+        from tsugite.tools.skills import get_skill_manager
+
+        try:
+            get_skill_manager().unload_skill(skill_name)
+        except (AttributeError, RuntimeError):
+            logger.debug("unload_skill on global manager skipped for %s", skill_name, exc_info=True)
+
+        return JSONResponse({"status": "ok", "session_id": session.id, "name": skill_name})
 
     async def _respond(self, request: Request) -> JSONResponse:
         """Submit a response to an active ask_user prompt."""

@@ -369,7 +369,10 @@ class AgentPreparer:
         # Step 7: Load auto_load_skills and trigger-matched skills
         from tsugite.events.events import SkillLoadFailedEvent
 
-        auto_load_skills = list(agent_config.auto_load_skills or [])
+        # Skills the user explicitly removed this session (populated by the daemon).
+        suppressed_skills = set(full_context.get("suppressed_skills") or [])
+
+        auto_load_skills = [s for s in (agent_config.auto_load_skills or []) if s not in suppressed_skills]
 
         for skill_name in auto_load_skills:
             result = _skill_manager.load_skill(skill_name)
@@ -378,7 +381,9 @@ class AgentPreparer:
                     event_bus.emit(SkillLoadFailedEvent(skill_name=skill_name, error_message=result))
 
         # Step 7b: Auto-load skills whose triggers match the user prompt
-        triggered_skill_names = _skill_manager.get_triggered_skills(prompt)
+        triggered_skill_names = [
+            name for name in _skill_manager.get_triggered_skills(prompt) if name not in suppressed_skills
+        ]
         for skill_name in triggered_skill_names:
             logger.info(f"Trigger-loading skill '{skill_name}' based on user prompt")
             result = _skill_manager.load_skill(skill_name)

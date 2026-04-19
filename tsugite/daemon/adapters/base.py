@@ -444,6 +444,10 @@ class BaseAdapter(ABC):
 
         agent_context = self._build_agent_context(channel_context)
         agent_context["raw_message"] = message
+        # Skip the sort+copy for the common case where nothing was suppressed.
+        suppressed = self.session_store.get_suppressed_skills(conv_id)
+        if suppressed:
+            agent_context["suppressed_skills"] = sorted(suppressed)
 
         from tsugite.cli.helpers import PathContext
 

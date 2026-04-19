@@ -147,6 +147,8 @@ main { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
 .att-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: var(--bg); cursor: pointer; font-size: 13px; }
 .att-header .att-name { font-weight: 600; }
 .att-header .att-type { color: var(--muted); font-size: 12px; }
+.att-header .att-remove { margin-left: 8px; border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 16px; line-height: 1; padding: 0 6px; border-radius: 4px; }
+.att-header .att-remove:hover { color: var(--text); background: var(--border); }
 .att-body { padding: 10px 12px; font-size: 12px; }
 .att-body pre { background: var(--code-bg); padding: 10px; border-radius: 6px; overflow-x: auto; white-space: pre-wrap; word-break: break-word; max-height: 300px; overflow-y: auto; font-size: 11px; }
 
