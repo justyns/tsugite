@@ -120,30 +120,28 @@ list_available_skills()
 
 ## Bundled Resources
 
-When a skill ships with `scripts/`, `references/`, or `assets/`, tsugite appends a resource summary to the loaded content:
+When a skill ships with `scripts/`, `references/`, or `assets/`, tsugite appends a `<skill_resources>` block to the loaded content:
 
 ```
----
-**Skill directory:** /abs/path/to/skill-name
-
-**Bundled resources:**
+<skill_resources dir="/abs/path/to/skill-name">
 - scripts/validate.sh
 - references/api.md
 - assets/template.json
+</skill_resources>
 ```
 
-The agent uses the absolute skill directory to execute scripts (`bash /abs/path/to/skill-name/scripts/validate.sh`) and to read references on demand. Referenced paths in your `SKILL.md` should stay relative to the skill directory - see the [spec guidance on scripts](https://agentskills.io/skill-creation/using-scripts).
+The agent uses the `dir` attribute to execute scripts (`bash /abs/path/to/skill-name/scripts/validate.sh`) and to read references on demand. Referenced paths in your `SKILL.md` should stay relative to the skill directory - see the [spec guidance on scripts](https://agentskills.io/skill-creation/using-scripts).
 
 ## How Skills Are Injected
 
 1. **Preparation:** `auto_load_skills` + trigger-matched skills are loaded; each `SKILL.md` is read, rendered, and its bundled resources are listed.
 2. **Caching:** Rendered content is stored in `SkillManager._loaded_skills`.
-3. **Injection:** Each skill becomes a tagged block in the context turn:
+3. **Injection:** Each skill becomes a tagged block in the cached context turn, using the tag recommended by the agentskills.io client-implementation doc:
 
    ```
-   <skill name="python-math">
+   <skill_content name="python-math">
    ...rendered SKILL.md...
-   </skill>
+   </skill_content>
    ```
 
    The context turn is cached ephemerally so repeated calls reuse the same tokens.

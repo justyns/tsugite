@@ -127,9 +127,8 @@ class TestLoadSkillTool:
 
         call_tool("load_skill", skill_name="resourceful")
         rendered = manager._loaded_skills["resourceful"]
-        assert "**Skill directory:**" in rendered
-        assert str(skill_dir) in rendered
-        assert "**Bundled resources:**" in rendered
+        assert f'<skill_resources dir="{skill_dir}">' in rendered
+        assert "</skill_resources>" in rendered
         assert "scripts/build.sh" in rendered
         assert "references/api.md" in rendered
         assert "assets/template.txt" in rendered
@@ -146,10 +145,9 @@ class TestLoadSkillTool:
 
         call_tool("load_skill", skill_name="plain")
         rendered = manager._loaded_skills["plain"]
-        # Minimal skills stay uncluttered: no divider, no skill-directory line,
-        # no bundled-resources block when there's nothing to bundle.
-        assert "**Skill directory:**" not in rendered
-        assert "**Bundled resources:**" not in rendered
+        # Minimal skills stay uncluttered: no resource wrapper when there's nothing to bundle.
+        assert "<skill_resources" not in rendered
+        assert "</skill_resources>" not in rendered
 
     def test_load_skill_caps_large_resource_listings(self, tmp_path, monkeypatch):
         from tsugite.tools.skills import _MAX_RESOURCES_LISTED

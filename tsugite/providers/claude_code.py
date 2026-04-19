@@ -194,9 +194,9 @@ class ClaudeCodeProvider:
                 content = skill.content
                 if len(content) > 4000:
                     content = content[:4000] + "\n... (truncated)"
-                context_parts.append(f'<skill name="{skill.name}">')
+                context_parts.append(f'<skill_content name="{skill.name}">')
                 context_parts.append(content)
-                context_parts.append("</skill>")
+                context_parts.append("</skill_content>")
             if context_parts:
                 parts.append("<context>\n" + "\n".join(context_parts) + "\n</context>\n")
 

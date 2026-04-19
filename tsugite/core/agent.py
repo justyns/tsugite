@@ -899,11 +899,12 @@ class TsugiteAgent:
                 if block:
                     blocks.append(block)
 
-        # Auto-loaded skills wrapped in XML
+        # Skills wrapped per the agentskills.io client-implementation guidance,
+        # so the block is identifiable for compaction-protection and downstream tools.
         for skill in self.skills:
-            text_parts.append(f'<skill name="{skill.name}">')
+            text_parts.append(f'<skill_content name="{skill.name}">')
             text_parts.append(skill.content)
-            text_parts.append("</skill>")
+            text_parts.append("</skill_content>")
 
         text_parts.append("</context>")
 

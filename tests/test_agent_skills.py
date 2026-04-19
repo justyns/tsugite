@@ -336,8 +336,8 @@ class TestSystemPromptWithSkills:
         assert isinstance(context_content, list)
         context_text = context_content[0]["text"]
         assert "<context>" in context_text
-        assert '<skill name="skill1">' in context_text
-        assert '<skill name="skill2">' in context_text
+        assert '<skill_content name="skill1">' in context_text
+        assert '<skill_content name="skill2">' in context_text
         assert "# Skill 1" in context_text
         assert "# Skill 2" in context_text
 
@@ -364,8 +364,8 @@ class TestSystemPromptWithSkills:
 
         messages = agent._build_messages()
         context_text = messages[1]["content"][0]["text"]
-        assert '<skill name="auto-loaded">' in context_text
-        assert '<skill name="dyn-loaded">' in context_text
+        assert '<skill_content name="auto-loaded">' in context_text
+        assert '<skill_content name="dyn-loaded">' in context_text
         assert "loaded mid-run" in context_text
 
     def test_build_observation_does_not_embed_skill_content(self):
@@ -435,7 +435,7 @@ class TestSystemPromptWithSkills:
         assert "<context>" in context_text
         assert '<attachment name="attach1">' in context_text
         assert "Attachment content" in context_text
-        assert '<skill name="skill1">' in context_text
+        assert '<skill_content name="skill1">' in context_text
         assert "Skill content" in context_text
 
         # Context turn should have cache control

@@ -29,7 +29,7 @@ class TestClaudeCodeFirstMessageAttachments:
         skill = Skill(name="my-skill", content="skill instructions")
         msg = self._build(skills=[skill])
 
-        assert '<skill name="my-skill">' in msg
+        assert '<skill_content name="my-skill">' in msg
         assert "skill instructions" in msg
 
     def test_fresh_session_includes_both(self):
@@ -38,7 +38,7 @@ class TestClaudeCodeFirstMessageAttachments:
         msg = self._build(attachments=[att], skills=[skill])
 
         assert '<attachment name="USER.md">' in msg
-        assert '<skill name="helper">' in msg
+        assert '<skill_content name="helper">' in msg
         assert "<context>" in msg
 
     def test_no_attachments_no_context_block(self):

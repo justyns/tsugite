@@ -35,11 +35,11 @@ def _enumerate_bundled_resources(skill_dir: Path) -> List[str]:
 
 
 def _append_resource_block(body: str, skill_dir: Path, resources: List[str]) -> str:
-    """Append a skill-directory + bundled-resources block when resources exist.
+    """Append a <skill_resources> block when the skill bundles any resources.
 
-    Returns body unchanged when the skill has no scripts/, references/, or assets/ —
-    minimal skills stay uncluttered, matching the spec's "dedicated tool returns
-    instructions + resource list" pattern only when there is a list to return.
+    Wraps the enumerated file list in the tag recommended by the agentskills.io
+    client-implementation doc so the block is identifiable by downstream tooling.
+    Returns body unchanged when the skill has no scripts/, references/, or assets/.
     """
     if not resources:
         return body
@@ -48,15 +48,13 @@ def _append_resource_block(body: str, skill_dir: Path, resources: List[str]) -> 
     lines: List[str] = [
         body.rstrip(),
         "",
-        "---",
-        f"**Skill directory:** {skill_dir}",
-        "",
-        "**Bundled resources:**",
+        f'<skill_resources dir="{skill_dir}">',
     ]
     lines.extend(f"- {path}" for path in shown)
     remaining = len(resources) - len(shown)
     if remaining > 0:
         lines.append(f"- ... (+{remaining} more)")
+    lines.append("</skill_resources>")
     return "\n".join(lines) + "\n"
 
 
