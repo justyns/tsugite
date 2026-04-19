@@ -1,5 +1,5 @@
 ---
-name: codebase_exploration
+name: codebase-exploration
 description: Strategies and patterns for exploring unfamiliar codebases efficiently, with adaptive approaches based on size and scope
 ---
 
@@ -494,7 +494,7 @@ Areas that warrant further investigation:
 2. [Area 2] - [Why interesting]
 
 ---
-*Report generated via codebase_exploration skill on {{ today() }}*
+*Report generated via codebase-exploration skill on {{ today() }}*
 ```
 
 ## Common Exploration Scenarios

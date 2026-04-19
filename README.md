@@ -73,7 +73,7 @@ tsu serve
 - **Scheduling** built-in cron for recurring agent tasks (daily summaries, monitoring, etc.)
 - **Web UI** for conversations, with Discord as an alternative interface
 - **Sub-agents** that can spawn other agents for specific subtasks
-- **Skills** reusable knowledge files agents can load on demand, mostly compatible with [agentskills.io](https://agentskills.io/)
+- **Skills** directory-based knowledge modules (mostly) following the [agentskills.io](https://agentskills.io/) SKILL.md format
 - **Hooks** that fire shell commands on lifecycle events (post-tool, pre-message, pre/post-compact)
 - **Sandbox** (linux only) via bubblewrap with filesystem and network isolation
 - **MCP** integration for connecting to MCP servers

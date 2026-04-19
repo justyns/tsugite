@@ -1,5 +1,5 @@
 ---
-name: tsugite_agent_basics
+name: tsugite-agent-basics
 description: Overview of how Tsugite agents are defined, resolved, and executed; load when inspecting, authoring, or troubleshooting agents
 ---
 

@@ -2,6 +2,7 @@
 
 import logging
 import os
+from pathlib import Path
 from typing import Dict, List, Optional
 
 from tsugite import renderer
@@ -11,6 +12,52 @@ from tsugite.tools import tool
 from tsugite.utils import parse_yaml_frontmatter
 
 logger = logging.getLogger(__name__)
+
+_BUNDLED_SUBDIRS = ("scripts", "references", "assets")
+_MAX_RESOURCES_LISTED = 10
+
+
+def _enumerate_bundled_resources(skill_dir: Path) -> List[str]:
+    """List one-level-deep files under scripts/, references/, assets/.
+
+    Returns skill-relative POSIX paths (e.g., "scripts/build.sh"), sorted
+    first by subdirectory (scripts, references, assets) then by filename.
+    """
+    resources: List[str] = []
+    for sub in _BUNDLED_SUBDIRS:
+        sub_path = skill_dir / sub
+        if not sub_path.is_dir():
+            continue
+        for entry in sorted(sub_path.iterdir(), key=lambda p: p.name):
+            if entry.is_file():
+                resources.append(f"{sub}/{entry.name}")
+    return resources
+
+
+def _append_resource_block(body: str, skill_dir: Path, resources: List[str]) -> str:
+    """Append a skill-directory + bundled-resources block when resources exist.
+
+    Returns body unchanged when the skill has no scripts/, references/, or assets/ —
+    minimal skills stay uncluttered, matching the spec's "dedicated tool returns
+    instructions + resource list" pattern only when there is a list to return.
+    """
+    if not resources:
+        return body
+
+    shown = resources[:_MAX_RESOURCES_LISTED]
+    lines: List[str] = [
+        body.rstrip(),
+        "",
+        "---",
+        f"**Skill directory:** {skill_dir}",
+        "",
+        "**Bundled resources:**",
+    ]
+    lines.extend(f"- {path}" for path in shown)
+    remaining = len(resources) - len(shown)
+    if remaining > 0:
+        lines.append(f"- ... (+{remaining} more)")
+    return "\n".join(lines) + "\n"
 
 
 class SkillManager:
@@ -55,8 +102,9 @@ class SkillManager:
     def load_skill(self, skill_name: str) -> str:
         """Load a skill to gain additional capabilities.
 
-        The skill content is rendered with Jinja2 and added to the agent's context.
-        Once loaded, the skill persists for the session.
+        Reads SKILL.md from the skill directory, renders the body with Jinja2,
+        and appends an absolute-path + bundled-resource summary so the agent
+        can locate scripts/references/assets on demand.
 
         Args:
             skill_name: Name of the skill to load (from available skills list)
@@ -78,10 +126,9 @@ class SkillManager:
                 return f"Skill '{skill_name}' not found. No skills available."
 
         try:
-            skill_text = skill.path.read_text()
+            skill_text = skill.skill_md_path.read_text()
             frontmatter, content = parse_yaml_frontmatter(skill_text)
 
-            # Validate frontmatter fields
             if "name" not in frontmatter:
                 return f"Failed to load skill '{skill_name}': missing 'name' in frontmatter"
 
@@ -90,16 +137,17 @@ class SkillManager:
 
             agent_renderer = AgentRenderer()
             context = {
-                "user_prompt": "",  # Empty for skills
+                "user_prompt": "",
                 "today": renderer.today,
                 "now": renderer.now,
                 "env": os.environ,
             }
-            rendered_content = agent_renderer.render(content, context)
+            rendered_body = agent_renderer.render(content, context)
+            resources = _enumerate_bundled_resources(skill.directory)
+            rendered_content = _append_resource_block(rendered_body, skill.directory, resources)
 
             self._loaded_skills[skill_name] = rendered_content
 
-            # Register with executor for embedding in observation
             if self._executor and hasattr(self._executor, "register_loaded_skill"):
                 self._executor.register_loaded_skill(skill_name, rendered_content)
 

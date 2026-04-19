@@ -1,5 +1,5 @@
 ---
-name: python_math
+name: python-math
 description: Reference for performing common math operations in Python
 ---
 

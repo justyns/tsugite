@@ -1,11 +1,13 @@
 """Tests for skill discovery system."""
 
+import logging
 from pathlib import Path
 
 import pytest
 
 from tsugite.skill_discovery import (
     SkillMeta,
+    _validate_skill_name,
     build_skill_index,
     get_builtin_skills_path,
     match_triggered_skills,
@@ -13,405 +15,307 @@ from tsugite.skill_discovery import (
 )
 
 
+def _write_skill(
+    root: Path,
+    name: str,
+    description: str = "A skill",
+    dir_name: str | None = None,
+    triggers: list[str] | None = None,
+    extra_frontmatter: str = "",
+) -> Path:
+    """Create a directory-based skill at <root>/<dir_name>/SKILL.md."""
+    skill_dir = root / (dir_name or name)
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    skill_md = skill_dir / "SKILL.md"
+    triggers_block = ""
+    if triggers is not None:
+        trigger_lines = "\n".join(f"  - {t}" for t in triggers)
+        triggers_block = f"triggers:\n{trigger_lines}\n"
+    frontmatter = f"---\nname: {name}\ndescription: {description}\n{triggers_block}{extra_frontmatter}---\nBody for {name}.\n"
+    skill_md.write_text(frontmatter)
+    return skill_dir
+
+
 class TestSkillMeta:
-    """Test SkillMeta dataclass."""
-
     def test_skill_meta_creation(self):
-        """Test creating a SkillMeta instance."""
         skill = SkillMeta(
-            name="test_skill",
+            name="test-skill",
             description="A test skill",
-            path=Path("/path/to/skill.md"),
+            directory=Path("/path/to/test-skill"),
+            skill_md_path=Path("/path/to/test-skill/SKILL.md"),
         )
-
-        assert skill.name == "test_skill"
+        assert skill.name == "test-skill"
         assert skill.description == "A test skill"
-        assert skill.path == Path("/path/to/skill.md")
-
-    def test_skill_meta_defaults(self):
-        """Test SkillMeta with minimal required fields."""
-        skill = SkillMeta(
-            name="simple_skill",
-            description="Simple",
-            path=Path("/path/skill.md"),
-        )
-
-        assert skill.name == "simple_skill"
-        assert skill.description == "Simple"
+        assert skill.directory == Path("/path/to/test-skill")
+        assert skill.skill_md_path == Path("/path/to/test-skill/SKILL.md")
+        assert skill.triggers == []
 
 
 class TestGetBuiltinSkillsPath:
-    """Test builtin skills path resolution."""
-
     def test_get_builtin_skills_path(self):
-        """Test that builtin skills path is resolved correctly."""
         path = get_builtin_skills_path()
-
         assert path.is_absolute()
         assert path.name == "builtin_skills"
         assert "tsugite" in str(path)
 
 
-class TestScanSkills:
-    """Test skill scanning functionality."""
+class TestValidateSkillName:
+    def test_valid_name(self):
+        assert _validate_skill_name("python-math", "python-math") == []
 
+    def test_mismatched_directory(self):
+        warnings = _validate_skill_name("python-math", "python_math")
+        assert any("does not match directory" in w for w in warnings)
+
+    def test_uppercase_is_invalid(self):
+        warnings = _validate_skill_name("PythonMath", "PythonMath")
+        assert any("not spec-compliant" in w for w in warnings)
+
+    def test_underscore_is_invalid(self):
+        warnings = _validate_skill_name("python_math", "python_math")
+        assert any("not spec-compliant" in w for w in warnings)
+
+    def test_leading_hyphen_is_invalid(self):
+        warnings = _validate_skill_name("-foo", "-foo")
+        assert any("not spec-compliant" in w for w in warnings)
+
+    def test_consecutive_hyphens_invalid(self):
+        warnings = _validate_skill_name("foo--bar", "foo--bar")
+        assert any("not spec-compliant" in w for w in warnings)
+
+    def test_too_long(self):
+        long_name = "a" + "-a" * 40
+        warnings = _validate_skill_name(long_name, long_name)
+        assert any("exceeds" in w for w in warnings)
+
+
+class TestScanSkills:
     @pytest.fixture
     def skill_dirs(self, tmp_path):
-        """Create temporary skill directories for testing."""
-        # Create directory structure
         project_local = tmp_path / ".tsugite" / "skills"
         project_conv = tmp_path / "skills"
-        user_global = tmp_path / "config" / "tsugite" / "skills"
-
-        project_local.mkdir(parents=True)
-        project_conv.mkdir(parents=True)
-        user_global.mkdir(parents=True)
-
+        project_agents = tmp_path / ".agents" / "skills"
+        user_agents = tmp_path / ".agents" / "skills"
+        user_global = tmp_path / ".config" / "tsugite" / "skills"
+        for p in (project_local, project_conv, project_agents, user_global):
+            p.mkdir(parents=True, exist_ok=True)
         return {
             "project_local": project_local,
             "project_conv": project_conv,
+            "project_agents": project_agents,
+            "user_agents": user_agents,
             "user_global": user_global,
             "base": tmp_path,
         }
 
     def test_scan_empty_directories(self, skill_dirs, monkeypatch):
-        """Test scanning with no skill files."""
         monkeypatch.chdir(skill_dirs["base"])
         monkeypatch.setenv("HOME", str(skill_dirs["base"]))
-
         skills = scan_skills()
-
-        # Should only find builtin skills (if any exist)
-        assert isinstance(skills, list)
+        names = {s.name for s in skills}
+        for d in skill_dirs.values():
+            assert isinstance(d, Path) or d is skill_dirs["base"]
+        # No user-defined skills; may still contain built-ins shipped with the package
+        assert "fake-skill" not in names
 
     def test_scan_single_skill(self, skill_dirs, monkeypatch):
-        """Test scanning a single skill file."""
         monkeypatch.chdir(skill_dirs["base"])
         monkeypatch.setenv("HOME", str(skill_dirs["base"]))
-
-        # Create a skill file
-        skill_file = skill_dirs["project_local"] / "test_skill.md"
-        skill_file.write_text("""---
-name: test_skill
-description: A test skill for testing
----
-
-# Test Skill Content
-This is a test skill.
-""")
+        skill_dir = _write_skill(skill_dirs["project_local"], "my-skill", "Test skill")
 
         skills = scan_skills()
-
-        # Find our test skill
-        test_skills = [s for s in skills if s.name == "test_skill"]
-        assert len(test_skills) == 1
-
-        skill = test_skills[0]
-        assert skill.name == "test_skill"
-        assert skill.description == "A test skill for testing"
-        assert skill.path == skill_file
+        mine = [s for s in skills if s.name == "my-skill"]
+        assert len(mine) == 1
+        assert mine[0].directory == skill_dir
+        assert mine[0].skill_md_path == skill_dir / "SKILL.md"
+        assert mine[0].description == "Test skill"
 
     def test_scan_multiple_skills(self, skill_dirs, monkeypatch):
-        """Test scanning multiple skill files."""
         monkeypatch.chdir(skill_dirs["base"])
         monkeypatch.setenv("HOME", str(skill_dirs["base"]))
-
-        # Create skills in different directories
-        skill1 = skill_dirs["project_local"] / "skill1.md"
-        skill1.write_text("""---
-name: skill1
-description: First skill
----
-Content
-""")
-
-        skill2 = skill_dirs["project_conv"] / "skill2.md"
-        skill2.write_text("""---
-name: skill2
-description: Second skill
----
-Content
-""")
-
-        skills = scan_skills()
-        skill_names = [s.name for s in skills]
-
-        assert "skill1" in skill_names
-        assert "skill2" in skill_names
+        _write_skill(skill_dirs["project_local"], "skill-one", "First skill")
+        _write_skill(skill_dirs["project_conv"], "skill-two", "Second skill")
+        skills = {s.name for s in scan_skills()}
+        assert "skill-one" in skills
+        assert "skill-two" in skills
 
     def test_scan_skill_priority(self, skill_dirs, monkeypatch):
-        """Test that higher priority directories override lower priority."""
+        """project_local beats project_conv for same-named skills."""
         monkeypatch.chdir(skill_dirs["base"])
         monkeypatch.setenv("HOME", str(skill_dirs["base"]))
+        high = _write_skill(skill_dirs["project_local"], "duplicate", "High priority")
+        _write_skill(skill_dirs["project_conv"], "duplicate", "Low priority")
 
-        # Create same-named skill in different directories
-        # Higher priority (project_local)
-        skill_high = skill_dirs["project_local"] / "duplicate.md"
-        skill_high.write_text("""---
-name: duplicate
-description: High priority version
----
-Content
-""")
+        hits = [s for s in scan_skills() if s.name == "duplicate"]
+        assert len(hits) == 1
+        assert hits[0].description == "High priority"
+        assert hits[0].directory == high
 
-        # Lower priority (project_conv)
-        skill_low = skill_dirs["project_conv"] / "duplicate.md"
-        skill_low.write_text("""---
-name: duplicate
-description: Low priority version
----
-Content
-""")
-
-        skills = scan_skills()
-        duplicate_skills = [s for s in skills if s.name == "duplicate"]
-
-        # Should only have one (highest priority)
-        assert len(duplicate_skills) == 1
-        assert duplicate_skills[0].description == "High priority version"
-        assert duplicate_skills[0].path == skill_high
-
-    def test_scan_invalid_yaml_frontmatter(self, skill_dirs, monkeypatch):
-        """Test that skills with invalid YAML are skipped."""
+    def test_directory_without_skill_md_is_ignored(self, skill_dirs, monkeypatch):
         monkeypatch.chdir(skill_dirs["base"])
         monkeypatch.setenv("HOME", str(skill_dirs["base"]))
+        (skill_dirs["project_local"] / "empty").mkdir()
+        (skill_dirs["project_local"] / "empty" / "README.md").write_text("not a skill")
+        _write_skill(skill_dirs["project_local"], "real-skill", "Real")
+        names = {s.name for s in scan_skills()}
+        assert "real-skill" in names
+        assert "empty" not in names
 
-        # Create skill with invalid YAML
-        invalid_skill = skill_dirs["project_local"] / "invalid.md"
-        invalid_skill.write_text("""---
-name: invalid
-invalid: yaml: structure: bad
----
-Content
-""")
-
-        # Should not raise, just skip invalid skills
-        skills = scan_skills()
-        invalid_names = [s.name for s in skills if s.name == "invalid"]
-        assert len(invalid_names) == 0
-
-    def test_scan_missing_name_field(self, skill_dirs, monkeypatch):
-        """Test that skills without name field are skipped."""
+    def test_nested_subdirs_not_discovered(self, skill_dirs, monkeypatch):
         monkeypatch.chdir(skill_dirs["base"])
         monkeypatch.setenv("HOME", str(skill_dirs["base"]))
+        outer = _write_skill(skill_dirs["project_local"], "outer", "Outer")
+        nested = outer / "inner"
+        nested.mkdir()
+        (nested / "SKILL.md").write_text("---\nname: inner\ndescription: Inner\n---\nBody\n")
+        names = {s.name for s in scan_skills()}
+        assert "outer" in names
+        assert "inner" not in names
 
-        # Create skill without name
-        no_name = skill_dirs["project_local"] / "no_name.md"
-        no_name.write_text("""---
-description: No name field
----
-Content
-""")
-
-        skills = scan_skills()
-        # Should be skipped (no name to match)
-        assert all(s.path != no_name for s in skills)
-
-    def test_scan_no_frontmatter(self, skill_dirs, monkeypatch):
-        """Test that files without frontmatter are skipped."""
+    def test_agents_skills_discovered(self, skill_dirs, monkeypatch):
         monkeypatch.chdir(skill_dirs["base"])
         monkeypatch.setenv("HOME", str(skill_dirs["base"]))
+        _write_skill(skill_dirs["project_agents"], "agents-skill", "From .agents/skills")
+        names = {s.name for s in scan_skills()}
+        assert "agents-skill" in names
 
-        # Create markdown without frontmatter
-        no_frontmatter = skill_dirs["project_local"] / "plain.md"
-        no_frontmatter.write_text("# Just markdown\nNo frontmatter here.")
-
-        skills = scan_skills()
-        # Should be skipped
-        assert all(s.path != no_frontmatter for s in skills)
-
-    def test_scan_nested_directories(self, skill_dirs, monkeypatch):
-        """Test scanning nested skill directories."""
+    def test_user_level_agents_skills_discovered(self, skill_dirs, monkeypatch):
         monkeypatch.chdir(skill_dirs["base"])
         monkeypatch.setenv("HOME", str(skill_dirs["base"]))
+        user_agents = skill_dirs["base"] / ".agents" / "skills"
+        user_agents.mkdir(parents=True, exist_ok=True)
+        _write_skill(user_agents, "user-skill", "User-level")
+        names = {s.name for s in scan_skills()}
+        assert "user-skill" in names
 
-        # Create nested directory structure
-        nested = skill_dirs["project_local"] / "category" / "subcategory"
-        nested.mkdir(parents=True)
+    def test_invalid_yaml_frontmatter(self, skill_dirs, monkeypatch):
+        monkeypatch.chdir(skill_dirs["base"])
+        monkeypatch.setenv("HOME", str(skill_dirs["base"]))
+        bad = skill_dirs["project_local"] / "bad"
+        bad.mkdir()
+        (bad / "SKILL.md").write_text("---\nname: bad\ninvalid: yaml: structure: bad\n---\nBody\n")
+        names = {s.name for s in scan_skills()}
+        assert "bad" not in names
 
-        nested_skill = nested / "nested_skill.md"
-        nested_skill.write_text("""---
-name: nested_skill
-description: A nested skill
----
-Content
-""")
+    def test_missing_name_is_skipped(self, skill_dirs, monkeypatch):
+        monkeypatch.chdir(skill_dirs["base"])
+        monkeypatch.setenv("HOME", str(skill_dirs["base"]))
+        target = skill_dirs["project_local"] / "noname"
+        target.mkdir()
+        (target / "SKILL.md").write_text("---\ndescription: no name\n---\nBody\n")
+        for s in scan_skills():
+            assert s.directory != target
 
-        skills = scan_skills()
-        nested_skills = [s for s in skills if s.name == "nested_skill"]
+    def test_name_mismatch_logs_warning_but_loads(self, skill_dirs, monkeypatch, caplog):
+        monkeypatch.chdir(skill_dirs["base"])
+        monkeypatch.setenv("HOME", str(skill_dirs["base"]))
+        _write_skill(
+            skill_dirs["project_local"],
+            name="declared-name",
+            dir_name="other-dir",
+            description="Mismatch",
+        )
+        with caplog.at_level(logging.WARNING):
+            names = {s.name for s in scan_skills()}
+        assert "declared-name" in names
+        assert any("does not match directory" in rec.getMessage() for rec in caplog.records)
 
-        assert len(nested_skills) == 1
-        assert nested_skills[0].path == nested_skill
+    def test_invalid_name_logs_warning_but_loads(self, skill_dirs, monkeypatch, caplog):
+        monkeypatch.chdir(skill_dirs["base"])
+        monkeypatch.setenv("HOME", str(skill_dirs["base"]))
+        _write_skill(
+            skill_dirs["project_local"],
+            name="Invalid_Name",
+            dir_name="Invalid_Name",
+            description="Bad name",
+        )
+        with caplog.at_level(logging.WARNING):
+            names = {s.name for s in scan_skills()}
+        assert "Invalid_Name" in names
+        assert any("not spec-compliant" in rec.getMessage() for rec in caplog.records)
 
 
 class TestBuildSkillIndex:
-    """Test skill index building."""
+    def _meta(self, name, desc):
+        return SkillMeta(
+            name=name,
+            description=desc,
+            directory=Path(f"/skills/{name}"),
+            skill_md_path=Path(f"/skills/{name}/SKILL.md"),
+        )
 
     def test_build_empty_index(self):
-        """Test building index with no skills."""
-        skills = []
-        index = build_skill_index(skills)
-
-        assert index == ""
+        assert build_skill_index([]) == ""
 
     def test_build_single_skill_index(self):
-        """Test building index with single skill."""
-        skills = [
-            SkillMeta(
-                name="test_skill",
-                description="A test skill",
-                path=Path("/path/skill.md"),
-            )
-        ]
-
-        index = build_skill_index(skills)
-
-        assert "test_skill" in index
-        assert "A test skill" in index
+        index = build_skill_index([self._meta("one", "First")])
+        assert "- one: First" in index
 
     def test_build_multiple_skills_index(self):
-        """Test building index with multiple skills."""
-        skills = [
-            SkillMeta(
-                name="skill1",
-                description="First skill",
-                path=Path("/path1.md"),
-            ),
-            SkillMeta(
-                name="skill2",
-                description="Second skill",
-                path=Path("/path2.md"),
-            ),
-            SkillMeta(
-                name="skill3",
-                description="Third skill",
-                path=Path("/path3.md"),
-            ),
-        ]
-
+        skills = [self._meta("a", "A desc"), self._meta("b", "B desc")]
         index = build_skill_index(skills)
-
-        # All skills should be present
-        assert "skill1" in index
-        assert "skill2" in index
-        assert "skill3" in index
-
-        # Descriptions should be present
-        assert "First skill" in index
-        assert "Second skill" in index
-        assert "Third skill" in index
-
-    def test_build_skill_index_format(self):
-        """Test that skill index has correct format."""
-        skills = [
-            SkillMeta(
-                name="example_skill",
-                description="An example skill",
-                path=Path("/path.md"),
-            )
-        ]
-
-        index = build_skill_index(skills)
-
-        # Should be formatted as: - name: description
-        assert "- example_skill:" in index or "example_skill:" in index
-        assert "An example skill" in index
-        # Should not have empty parentheses or brackets
-        assert "()" not in index or "[]" not in index
+        assert "- a: A desc" in index
+        assert "- b: B desc" in index
 
 
 class TestScanSkillsExtraPaths:
-    """Test extra_paths parameter in scan_skills."""
-
     @pytest.fixture
-    def skill_dirs(self, tmp_path):
-        """Create temporary skill directories for testing."""
+    def dirs(self, tmp_path):
         project_local = tmp_path / ".tsugite" / "skills"
         extra = tmp_path / "extra_skills"
-
         project_local.mkdir(parents=True)
         extra.mkdir(parents=True)
+        return {"project_local": project_local, "extra": extra, "base": tmp_path}
 
-        return {
-            "project_local": project_local,
-            "extra": extra,
-            "base": tmp_path,
-        }
+    def test_extra_paths_scanned(self, dirs, monkeypatch):
+        monkeypatch.chdir(dirs["base"])
+        monkeypatch.setenv("HOME", str(dirs["base"]))
+        _write_skill(dirs["extra"], "custom-skill", "Custom")
+        skills = scan_skills(extra_paths=[str(dirs["extra"])])
+        assert "custom-skill" in {s.name for s in skills}
 
-    def _write_skill(self, path, name, description="A skill"):
-        path.write_text(f"---\nname: {name}\ndescription: {description}\n---\nContent\n")
-
-    def test_extra_paths_scanned(self, skill_dirs, monkeypatch):
-        """Skills in extra_paths directories are discovered."""
-        monkeypatch.chdir(skill_dirs["base"])
-        monkeypatch.setenv("HOME", str(skill_dirs["base"]))
-
-        self._write_skill(skill_dirs["extra"] / "custom.md", "custom_skill", "Custom")
-
-        skills = scan_skills(extra_paths=[str(skill_dirs["extra"])])
-        names = [s.name for s in skills]
-        assert "custom_skill" in names
-
-    def test_extra_paths_priority_over_project(self, skill_dirs, monkeypatch):
-        """Extra paths have higher priority than project-local skills."""
-        monkeypatch.chdir(skill_dirs["base"])
-        monkeypatch.setenv("HOME", str(skill_dirs["base"]))
-
-        self._write_skill(skill_dirs["extra"] / "dup.md", "dup", "Extra version")
-        self._write_skill(skill_dirs["project_local"] / "dup.md", "dup", "Project version")
-
-        skills = scan_skills(extra_paths=[str(skill_dirs["extra"])])
+    def test_extra_paths_priority_over_project(self, dirs, monkeypatch):
+        monkeypatch.chdir(dirs["base"])
+        monkeypatch.setenv("HOME", str(dirs["base"]))
+        _write_skill(dirs["extra"], "dup", "Extra version")
+        _write_skill(dirs["project_local"], "dup", "Project version")
+        skills = scan_skills(extra_paths=[str(dirs["extra"])])
         dup = [s for s in skills if s.name == "dup"]
         assert len(dup) == 1
         assert dup[0].description == "Extra version"
 
-    def test_extra_paths_tilde_expansion(self, skill_dirs, monkeypatch):
-        """Tilde in extra_paths is expanded to home directory."""
-        monkeypatch.chdir(skill_dirs["base"])
-        monkeypatch.setenv("HOME", str(skill_dirs["base"]))
-
-        custom_dir = skill_dirs["base"] / "custom_skills"
-        custom_dir.mkdir()
-        self._write_skill(custom_dir / "tilde.md", "tilde_skill", "Tilde test")
-
+    def test_extra_paths_tilde_expansion(self, dirs, monkeypatch):
+        monkeypatch.chdir(dirs["base"])
+        monkeypatch.setenv("HOME", str(dirs["base"]))
+        custom = dirs["base"] / "custom_skills"
+        custom.mkdir()
+        _write_skill(custom, "tilde-skill", "Tilde test")
         skills = scan_skills(extra_paths=["~/custom_skills"])
-        names = [s.name for s in skills]
-        assert "tilde_skill" in names
+        assert "tilde-skill" in {s.name for s in skills}
 
-    def test_extra_paths_nonexistent_ignored(self, skill_dirs, monkeypatch):
-        """Non-existent extra paths are silently ignored."""
-        monkeypatch.chdir(skill_dirs["base"])
-        monkeypatch.setenv("HOME", str(skill_dirs["base"]))
-
-        self._write_skill(skill_dirs["project_local"] / "real.md", "real_skill")
-
+    def test_extra_paths_nonexistent_ignored(self, dirs, monkeypatch):
+        monkeypatch.chdir(dirs["base"])
+        monkeypatch.setenv("HOME", str(dirs["base"]))
+        _write_skill(dirs["project_local"], "real-skill", "Real")
         skills = scan_skills(extra_paths=["/nonexistent/path"])
-        names = [s.name for s in skills]
-        assert "real_skill" in names
+        assert "real-skill" in {s.name for s in skills}
 
-    def test_extra_paths_empty_list(self, skill_dirs, monkeypatch):
-        """Empty extra_paths list behaves same as None."""
-        monkeypatch.chdir(skill_dirs["base"])
-        monkeypatch.setenv("HOME", str(skill_dirs["base"]))
-
-        self._write_skill(skill_dirs["project_local"] / "test.md", "test_skill")
-
-        skills_none = scan_skills(extra_paths=None)
-        skills_empty = scan_skills(extra_paths=[])
-
-        names_none = {s.name for s in skills_none}
-        names_empty = {s.name for s in skills_empty}
+    def test_extra_paths_empty_list(self, dirs, monkeypatch):
+        monkeypatch.chdir(dirs["base"])
+        monkeypatch.setenv("HOME", str(dirs["base"]))
+        _write_skill(dirs["project_local"], "t", "t")
+        names_none = {s.name for s in scan_skills(extra_paths=None)}
+        names_empty = {s.name for s in scan_skills(extra_paths=[])}
         assert names_none == names_empty
 
 
 class TestMatchTriggeredSkills:
-    """Test trigger-based skill matching."""
-
     def _make_skill(self, name, triggers=None):
         return SkillMeta(
             name=name,
             description=f"{name} skill",
-            path=Path(f"/skills/{name}.md"),
+            directory=Path(f"/skills/{name}"),
+            skill_md_path=Path(f"/skills/{name}/SKILL.md"),
             triggers=triggers or [],
         )
 
@@ -423,121 +327,78 @@ class TestMatchTriggeredSkills:
 
     def test_case_insensitive(self):
         skills = [self._make_skill("weather", triggers=["weather"])]
-        result = match_triggered_skills("WEATHER report please", skills)
-        assert len(result) == 1
+        assert len(match_triggered_skills("WEATHER report please", skills)) == 1
 
     def test_word_boundary_no_substring(self):
-        """'weather' trigger should NOT match 'weathering'."""
         skills = [self._make_skill("weather", triggers=["weather"])]
-        result = match_triggered_skills("The weathering of rocks is interesting", skills)
-        assert len(result) == 0
+        assert len(match_triggered_skills("The weathering of rocks", skills)) == 0
 
     def test_word_boundary_matches_punctuation(self):
-        """Trigger should match when adjacent to punctuation."""
         skills = [self._make_skill("weather", triggers=["weather"])]
-        result = match_triggered_skills("How's the weather?", skills)
-        assert len(result) == 1
+        assert len(match_triggered_skills("How's the weather?", skills)) == 1
 
     def test_no_triggers_skipped(self):
         skills = [self._make_skill("basic", triggers=[])]
-        result = match_triggered_skills("anything at all", skills)
-        assert len(result) == 0
+        assert len(match_triggered_skills("anything at all", skills)) == 0
 
     def test_no_match(self):
         skills = [self._make_skill("weather", triggers=["weather", "forecast"])]
-        result = match_triggered_skills("Tell me about Python", skills)
-        assert len(result) == 0
+        assert len(match_triggered_skills("Tell me about Python", skills)) == 0
 
     def test_multiple_skills_matched(self):
         skills = [
             self._make_skill("weather", triggers=["weather"]),
             self._make_skill("travel", triggers=["trip", "travel"]),
         ]
-        result = match_triggered_skills("What's the weather for my trip?", skills)
-        assert len(result) == 2
+        assert len(match_triggered_skills("What's the weather for my trip?", skills)) == 2
 
     def test_max_skills_cap(self):
-        skills = [
-            self._make_skill(f"skill{i}", triggers=[f"word{i}"])
-            for i in range(5)
-        ]
-        message = "word0 word1 word2 word3 word4"
-        result = match_triggered_skills(message, skills, max_skills=3)
-        assert len(result) == 3
+        skills = [self._make_skill(f"skill{i}", triggers=[f"word{i}"]) for i in range(5)]
+        assert len(match_triggered_skills("word0 word1 word2 word3 word4", skills, max_skills=3)) == 3
 
     def test_already_loaded_skipped(self):
         skills = [
             self._make_skill("weather", triggers=["weather"]),
             self._make_skill("news", triggers=["news"]),
         ]
-        result = match_triggered_skills(
-            "weather and news", skills, already_loaded={"weather"}
-        )
+        result = match_triggered_skills("weather and news", skills, already_loaded={"weather"})
         assert len(result) == 1
         assert result[0].name == "news"
 
     def test_ranked_by_match_count(self):
-        """Skills with more trigger matches should rank higher."""
         skills = [
             self._make_skill("general", triggers=["info"]),
             self._make_skill("weather", triggers=["weather", "forecast", "rain"]),
         ]
-        result = match_triggered_skills(
-            "What's the weather forecast for rain today? I need info.", skills
-        )
+        result = match_triggered_skills("What's the weather forecast for rain today? I need info.", skills)
         assert len(result) == 2
-        assert result[0].name == "weather"  # 3 matches vs 1
+        assert result[0].name == "weather"
 
     def test_empty_message(self):
         skills = [self._make_skill("weather", triggers=["weather"])]
-        result = match_triggered_skills("", skills)
-        assert len(result) == 0
+        assert len(match_triggered_skills("", skills)) == 0
 
     def test_empty_skills_list(self):
-        result = match_triggered_skills("weather forecast", [])
-        assert len(result) == 0
+        assert len(match_triggered_skills("weather forecast", [])) == 0
 
     def test_scan_skills_parses_triggers(self, tmp_path, monkeypatch):
-        """Triggers field in YAML frontmatter is parsed by scan_skills."""
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("HOME", str(tmp_path))
-
-        skills_dir = tmp_path / ".tsugite" / "skills"
-        skills_dir.mkdir(parents=True)
-
-        skill_file = skills_dir / "weather.md"
-        skill_file.write_text("""---
-name: weather
-description: Weather skill
-triggers:
-  - weather
-  - forecast
-  - temperature
----
-Weather content here.
-""")
-
+        _write_skill(
+            tmp_path / ".tsugite" / "skills",
+            name="weather",
+            description="Weather skill",
+            triggers=["weather", "forecast", "temperature"],
+        )
         skills = scan_skills()
         weather = [s for s in skills if s.name == "weather"]
         assert len(weather) == 1
         assert weather[0].triggers == ["weather", "forecast", "temperature"]
 
     def test_scan_skills_no_triggers_defaults_empty(self, tmp_path, monkeypatch):
-        """Skills without triggers field default to empty list."""
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("HOME", str(tmp_path))
-
-        skills_dir = tmp_path / ".tsugite" / "skills"
-        skills_dir.mkdir(parents=True)
-
-        skill_file = skills_dir / "basic.md"
-        skill_file.write_text("""---
-name: basic
-description: Basic skill
----
-Content.
-""")
-
+        _write_skill(tmp_path / ".tsugite" / "skills", "basic", "Basic skill")
         skills = scan_skills()
         basic = [s for s in skills if s.name == "basic"]
         assert len(basic) == 1

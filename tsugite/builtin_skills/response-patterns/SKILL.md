@@ -1,5 +1,5 @@
 ---
-name: response_patterns
+name: response-patterns
 description: How to respond effectively - when to use print/send_message/react_to_message/final_answer/ask_user
 ---
 

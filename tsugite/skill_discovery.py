@@ -1,7 +1,18 @@
 """Skill discovery system for Tsugite.
 
-Scans directories for skill files (markdown with YAML frontmatter)
+Scans directories for skills (directory containing a SKILL.md with YAML frontmatter)
 and builds an index for efficient discovery.
+
+Skill layout follows the agentskills.io specification:
+
+    skill-name/
+        SKILL.md            # required; name/description frontmatter + body
+        scripts/            # optional; executable code bundled with the skill
+        references/         # optional; supplementary documentation
+        assets/             # optional; templates, data, static resources
+
+Progressive disclosure: only frontmatter is read at scan time; the body and
+bundled resources are loaded on demand by `SkillManager.load_skill`.
 """
 
 import logging
@@ -14,14 +25,27 @@ from tsugite.utils import parse_yaml_frontmatter
 
 logger = logging.getLogger(__name__)
 
+SKILL_FILENAME = "SKILL.md"
+_VALID_NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+_MAX_NAME_LENGTH = 64
+
 
 @dataclass
 class SkillMeta:
-    """Lightweight skill metadata from frontmatter."""
+    """Lightweight skill metadata from frontmatter.
+
+    Attributes:
+        name: Skill name/identifier.
+        description: One-line description shown in the skill index.
+        directory: Absolute path to the skill directory (contains SKILL.md).
+        skill_md_path: Absolute path to the SKILL.md file.
+        triggers: Optional keywords for auto-loading (tsugite extension).
+    """
 
     name: str
     description: str
-    path: Path
+    directory: Path
+    skill_md_path: Path
     triggers: List[str] = field(default_factory=list)
 
 
@@ -30,9 +54,10 @@ class Skill:
     """A loaded skill with its full content.
 
     Attributes:
-        name: Skill name/identifier
-        content: Full rendered content of the skill
-        source_path: Optional path where the skill was loaded from
+        name: Skill name/identifier.
+        content: Rendered SKILL.md body, optionally with an appended
+            bundled-resources block.
+        source_path: Optional path where the skill was loaded from.
     """
 
     name: str
@@ -41,98 +66,138 @@ class Skill:
 
 
 def get_builtin_skills_path() -> Path:
-    """Get the built-in skills directory path.
-
-    Returns:
-        Path to builtin_skills directory in the package
-    """
+    """Get the built-in skills directory path."""
     return Path(__file__).parent / "builtin_skills"
 
 
-def scan_skills(workspace=None, extra_paths: Optional[List[str]] = None) -> List[SkillMeta]:
-    """Scan all skill directories and extract frontmatter with workspace priority.
+def _validate_skill_name(name: str, directory_name: str) -> List[str]:
+    """Validate a skill name against the agentskills.io spec.
 
-    Only reads YAML frontmatter, not full file content.
-    This is the key to token efficiency.
-
-    Search order (highest to lowest priority):
-    0. workspace/skills/    - Workspace-specific (if workspace provided)
-    1. extra_paths          - User-configured additional paths
-    2. .tsugite/skills/     - Project-local
-    3. skills/              - Project convention
-    4. builtin_skills/      - Built-in (package)
-    5. ~/.config/tsugite/skills/  - Global user
-
-    Args:
-        workspace: Optional workspace to check for workspace-specific skills
-        extra_paths: Optional list of additional directory paths to search
-
-    Returns:
-        List of SkillMeta objects for discovered skills
+    Returns a list of human-readable warning strings. An empty list means
+    the name is fully compliant. Clients should emit the warnings but still
+    load the skill (lenient behavior per the spec's implementation guide).
     """
-    skill_paths = []
+    warnings: List[str] = []
+    if len(name) > _MAX_NAME_LENGTH:
+        warnings.append(f"name '{name}' exceeds {_MAX_NAME_LENGTH} characters")
+    if not _VALID_NAME_RE.match(name):
+        warnings.append(
+            f"name '{name}' is not spec-compliant (must be lowercase alphanumeric + hyphens,"
+            " no leading/trailing/consecutive hyphens)"
+        )
+    if name != directory_name:
+        warnings.append(f"name '{name}' does not match directory '{directory_name}'")
+    return warnings
 
-    # Workspace skills (highest priority)
-    if workspace and hasattr(workspace, "skills_dir"):
-        if workspace.skills_dir.exists():
-            skill_paths.append(workspace.skills_dir)
 
-    # User-configured extra paths
+def _collect_skill_roots(workspace, extra_paths: Optional[List[str]]) -> List[Path]:
+    """Build the ordered list of directories to scan for skills.
+
+    Priority (highest to lowest):
+      1. workspace/.agents/skills, workspace/skills (if a workspace is provided)
+      2. user-configured extra_paths
+      3. <cwd>/.agents/skills, <cwd>/.tsugite/skills, <cwd>/skills
+      4. builtin_skills (ships with the package)
+      5. ~/.agents/skills, ~/.config/tsugite/skills
+    """
+    roots: List[Path] = []
+
+    if workspace is not None:
+        workspace_path = getattr(workspace, "path", None) or getattr(workspace, "root", None)
+        if workspace_path:
+            roots.append(Path(workspace_path) / ".agents" / "skills")
+        skills_dir = getattr(workspace, "skills_dir", None)
+        if skills_dir:
+            roots.append(Path(skills_dir))
+
     if extra_paths:
         for p in extra_paths:
-            skill_paths.append(Path(p).expanduser())
+            roots.append(Path(p).expanduser())
 
-    # Project and system paths
-    skill_paths.extend(
+    roots.extend(
         [
+            Path(".agents/skills"),
             Path(".tsugite/skills"),
             Path("skills"),
             get_builtin_skills_path(),
+            Path.home() / ".agents" / "skills",
             Path.home() / ".config" / "tsugite" / "skills",
         ]
     )
+    return roots
 
-    skills = []
-    seen_names = set()
 
-    for skill_dir in skill_paths:
-        skill_dir = skill_dir.resolve()
+def scan_skills(workspace=None, extra_paths: Optional[List[str]] = None) -> List[SkillMeta]:
+    """Scan all skill roots and return metadata for every discovered skill.
 
-        if not skill_dir.exists():
+    A skill is any immediate subdirectory of a root that contains a SKILL.md
+    file. Only frontmatter is read here; bodies and bundled resources are
+    loaded on demand by SkillManager.
+
+    The first occurrence of a given skill name wins; later duplicates are
+    logged and skipped so project-level skills reliably override built-ins.
+
+    Args:
+        workspace: Optional workspace object; checked first when provided.
+        extra_paths: Optional user-configured directories to scan before the
+            default project/user paths.
+
+    Returns:
+        Ordered list of SkillMeta objects.
+    """
+    skills: List[SkillMeta] = []
+    seen_names: Set[str] = set()
+
+    for root in _collect_skill_roots(workspace, extra_paths):
+        try:
+            resolved = root.resolve()
+        except OSError:
+            continue
+        if not resolved.is_dir():
             continue
 
-        for skill_file in skill_dir.glob("**/*.md"):
-            try:
-                frontmatter, _ = parse_yaml_frontmatter(skill_file.read_text())
-
-                if "name" not in frontmatter:
-                    logger.debug(f"Skipping skill file {skill_file}: missing 'name' in frontmatter")
-                    continue
-
-                skill_name = frontmatter["name"]
-
-                if skill_name in seen_names:
-                    logger.debug(f"Skipping skill '{skill_name}' in {skill_file}: duplicate name")
-                    continue
-
-                # Warn if description is missing (not required, but recommended)
-                if "description" not in frontmatter:
-                    logger.warning(f"Skill '{skill_name}' in {skill_file} missing 'description' field")
-
-                skill = SkillMeta(
-                    name=skill_name,
-                    description=frontmatter.get("description", ""),
-                    path=skill_file,
-                    triggers=frontmatter.get("triggers", []),
-                )
-
-                skills.append(skill)
-                seen_names.add(skill_name)
-
-            except Exception as e:
-                # Log parse failures for debugging
-                logger.warning(f"Failed to parse skill file {skill_file}: {e}")
+        for skill_dir in sorted(p for p in resolved.iterdir() if p.is_dir()):
+            skill_md = skill_dir / SKILL_FILENAME
+            if not skill_md.is_file():
                 continue
+
+            try:
+                frontmatter, _ = parse_yaml_frontmatter(skill_md.read_text())
+            except Exception as exc:
+                logger.warning(f"Failed to parse {skill_md}: {exc}")
+                continue
+
+            name = frontmatter.get("name")
+            if not name:
+                logger.debug(f"Skipping {skill_md}: missing 'name' in frontmatter")
+                continue
+
+            if name in seen_names:
+                logger.debug(f"Skipping '{name}' at {skill_md}: already discovered with higher priority")
+                continue
+
+            for warning in _validate_skill_name(name, skill_dir.name):
+                logger.warning(f"Skill {skill_md}: {warning}")
+
+            description = frontmatter.get("description", "")
+            if not description:
+                logger.warning(f"Skill '{name}' at {skill_md} has no 'description' (recommended)")
+
+            triggers = frontmatter.get("triggers") or []
+            if not isinstance(triggers, list):
+                logger.warning(f"Skill '{name}' at {skill_md}: 'triggers' must be a list; ignoring")
+                triggers = []
+
+            skills.append(
+                SkillMeta(
+                    name=name,
+                    description=description,
+                    directory=skill_dir,
+                    skill_md_path=skill_md,
+                    triggers=triggers,
+                )
+            )
+            seen_names.add(name)
 
     return skills
 
@@ -151,14 +216,16 @@ def match_triggered_skills(
     Uses word-boundary matching (case-insensitive). Skills are ranked by
     number of matching triggers so more specific matches come first.
 
+    Triggers are a tsugite extension and not part of the agentskills.io spec.
+
     Args:
-        message: User message to scan for trigger keywords
-        skills: All available skills to check
-        already_loaded: Skill names to skip (already loaded)
-        max_skills: Maximum number of skills to return
+        message: User message to scan for trigger keywords.
+        skills: All available skills to check.
+        already_loaded: Skill names to skip (already loaded).
+        max_skills: Maximum number of skills to return.
 
     Returns:
-        List of matching SkillMeta objects, up to max_skills
+        List of matching SkillMeta objects, up to max_skills.
     """
     already_loaded = already_loaded or set()
     message_words = set(_WORD_SPLIT.split(message.lower()))
@@ -181,21 +248,10 @@ def build_skill_index(skills: List[SkillMeta]) -> str:
 
     Format: - name: description
 
-    This is what the LLM sees at session start.
-    Total: ~20 tokens per skill.
-
-    Args:
-        skills: List of SkillMeta objects
-
-    Returns:
-        Formatted string index of skills
+    This is what the LLM sees at session start (~20 tokens per skill).
     """
     if not skills:
         return ""
 
-    lines = []
-    for skill in skills:
-        line = f"- {skill.name}: {skill.description}"
-        lines.append(line)
-
+    lines = [f"- {skill.name}: {skill.description}" for skill in skills]
     return "\n".join(lines)

@@ -1,11 +1,11 @@
 ---
-name: skill_authoring
+name: skill-authoring
 description: How to write effective skills, convert agentskills.io/Claude Code skills to tsugite format, and review skills for safety; load when authoring, converting, or auditing skills
 ---
 
 # Skill Authoring Guide
 
-> For skill format, discovery, and loading mechanics, load `tsugite_skill_basics`.
+> For skill format, discovery, and loading mechanics, load `tsugite-skill-basics`.
 
 ## Writing Effective Skills
 
@@ -229,54 +229,40 @@ Even one pass of execute-then-revise noticeably improves quality.
 - Over-qualifying every statement ("you might want to consider perhaps...")
 - Generic advice the agent already knows ("handle errors appropriately", "follow best practices")
 
-## Converting Agentskills / Claude Code Skills
+## Using Agentskills / Claude Code Skills
 
-The [agentskills.io](https://agentskills.io) format (used by Claude Code, Cursor, VS Code Copilot, Gemini CLI, and others) uses a directory-based structure. Tsugite uses single markdown files.
+Tsugite follows the [agentskills.io](https://agentskills.io) directory layout, so skills authored for Claude Code, Cursor, VS Code Copilot, Gemini CLI, and other spec-compliant clients generally drop in as-is. Put them under `.agents/skills/<name>/SKILL.md` (project) or `~/.agents/skills/<name>/SKILL.md` (user).
 
-### Format Comparison
+### Compatibility at a Glance
 
-| Aspect | agentskills.io | Tsugite |
-|--------|---------------|---------|
-| Structure | Directory with `SKILL.md` | Single `.md` file |
-| Resources | `scripts/`, `references/`, `assets/` | Inline or via tool calls |
-| Disclosure | 3-tier: metadata → body → files | All-at-once on load |
-| Triggering | Auto via description matching | Manual: `auto_load_skills` or `load_skill()` |
-| Name format | `lowercase-with-hyphens` | `lowercase_with_underscores` |
-| Frontmatter | name, description, license, compatibility, metadata, allowed-tools | name, description |
-{% raw %}| Templates | None | Jinja2: `{{ today() }}`, `{{ env }}` |{% endraw %}
+| Aspect | agentskills.io spec | Tsugite |
+|--------|---------------------|---------|
+| Structure | Directory with `SKILL.md` | Same |
+| Resources | `scripts/`, `references/`, `assets/` | Same - enumerated on load, read on demand |
+| Disclosure | 3-tier: metadata - body - files | Same |
+| Triggering | Model chooses from descriptions | Same, plus tsugite `triggers` keyword auto-load |
+| Name format | `lowercase-with-hyphens`, must match dir | Same - validated with a warning |
+| Frontmatter | name, description, license, compatibility, metadata, allowed-tools | name + description are used; others are parsed but not yet enforced (`allowed-tools` in particular) |
+{% raw %}| Templates | None | Jinja2: `{{ today() }}`, `{{ env }}`, etc. (tsugite extension - keep optional if portability matters) |{% endraw %}
 
-### What Translates Directly
+### Tsugite-specific Extensions
 
-- Core instructional content (the markdown body of SKILL.md)
-- Code examples, patterns, and anti-patterns
-- Gotchas sections, checklists, decision trees
-- Workflow descriptions and step-by-step procedures
+- `triggers: [word, ...]` in frontmatter - auto-load when a word appears in the user prompt.
+- Jinja2 body rendering - only the basic `today/now/env/user_prompt` helpers are exposed, so templates stay portable with small tweaks.
 
-### What Needs Adaptation
+### What Usually Needs Attention When Porting
 
-| agentskills.io feature | Tsugite equivalent |
-|------------------------|-------------------|
-| `scripts/extract.py` | Inline code example or `read_file("scripts/extract.py")` |
-| `references/API.md` | Inline essential parts, cut the rest |
-| Progressive disclosure ("read X if Y") | Split into separate skills, or inline |
-| `name: pdf-processing` | `name: pdf_processing` (hyphens → underscores) |
-| `allowed-tools: Bash(git:*) Read` | Agent's `tools` list (skills can't declare tools) |
-| `license`, `compatibility`, `metadata` | Not used — omit from frontmatter |
-| Auto-triggering via description | List in `auto_load_skills` or document when to `load_skill()` |
+- **`allowed-tools` is not enforced yet.** If a skill relies on tool restrictions for safety, review the scope manually before loading it.
+- **Jinja2 delimiters.** If the source skill contains literal `{{ }}` sequences in code examples, wrap them in `{% raw %}...{% endraw %}` blocks.
+- **Cross-client assumptions.** Skills that assume a specific file-read tool interface may need small instruction tweaks to match tsugite's toolset - run `tsugite tools list` to confirm names.
 
-### Conversion Steps
+### Quick Conversion Steps
 
-1. Read the `SKILL.md` from the agentskills directory
-2. Convert name: hyphens to underscores (`pdf-processing` → `pdf_processing`)
-3. Keep only `name` and `description` in frontmatter (drop other fields)
-4. Copy the markdown body
-5. Inline essential content from `references/` (or cut if it would make the skill too large)
-6. Convert script references to code examples or `read_file` instructions
-7. Replace tool-specific names with tsugite equivalents (run `tsugite tools list` for the current registry)
-{% raw %}8. Add Jinja2 template variables where useful: `{{ today() }}`, `{{ env.get("VAR") }}`{% endraw %}
-9. Test: `tsugite render test_agent.md "test task" --debug`
+1. Drop the skill directory into `.agents/skills/` (or `~/.agents/skills/` for a user-wide skill).
+2. Confirm the directory name matches `frontmatter.name` - tsugite logs a warning if not.
+3. Run `tsugite render test_agent.md "test"` with `auto_load_skills: [<name>]` to verify it loads and the bundled-resources block is populated.
 
-**Common pitfall:** agentskills recommends <5000 tokens for SKILL.md because resources load separately. Tsugite loads everything at once, so inline judiciously — don't paste entire reference files.
+**Budget note:** the spec recommends keeping SKILL.md under ~5000 tokens because resources load separately. Tsugite follows the same pattern - keep `SKILL.md` lean and push long content into `references/` files that the agent reads on demand.
 
 ## Security Review Checklist
 

@@ -106,12 +106,13 @@ class TestAgentPreparationWithSkills:
 
     @pytest.fixture
     def skill_files(self, tmp_path):
-        """Create test skill files."""
+        """Create directory-based test skills."""
         skills_dir = tmp_path / "skills"
         skills_dir.mkdir()
 
-        skill1 = skills_dir / "skill1.md"
-        skill1.write_text("""---
+        skill1_dir = skills_dir / "skill1"
+        skill1_dir.mkdir()
+        (skill1_dir / "SKILL.md").write_text("""---
 name: skill1
 description: First skill
 ---
@@ -120,8 +121,9 @@ description: First skill
 This is the first skill content.
 """)
 
-        skill2 = skills_dir / "skill2.md"
-        skill2.write_text("""---
+        skill2_dir = skills_dir / "skill2"
+        skill2_dir.mkdir()
+        (skill2_dir / "SKILL.md").write_text("""---
 name: skill2
 description: Second skill
 ---
@@ -130,7 +132,7 @@ description: Second skill
 This is the second skill content.
 """)
 
-        return {"skill1": skill1, "skill2": skill2, "dir": skills_dir}
+        return {"skill1": skill1_dir, "skill2": skill2_dir, "dir": skills_dir}
 
     @pytest.fixture
     def agent_with_skills(self, tmp_path):
@@ -177,8 +179,9 @@ tools: []
         monkeypatch.chdir(agent_with_skills.parent)
 
         # Create skill with template
-        template_skill = skill_files["dir"] / "template_skill.md"
-        template_skill.write_text("""---
+        template_dir = skill_files["dir"] / "template_skill"
+        template_dir.mkdir()
+        (template_dir / "SKILL.md").write_text("""---
 name: template_skill
 description: Template skill
 ---
@@ -490,8 +493,9 @@ tools: []
         skills_dir = tmp_path / "skills"
         skills_dir.mkdir()
 
-        valid_skill = skills_dir / "valid_skill.md"
-        valid_skill.write_text("""---
+        valid_dir = skills_dir / "valid_skill"
+        valid_dir.mkdir()
+        (valid_dir / "SKILL.md").write_text("""---
 name: valid_skill
 description: Valid skill
 ---

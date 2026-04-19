@@ -34,7 +34,7 @@ tools:
   - "@sessions"
   - "@tmux"
 auto_load_skills:
-  - response_patterns
+  - response-patterns
 prefetch:
   - tool: list_agents
     args: {}
