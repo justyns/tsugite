@@ -105,6 +105,7 @@ def test_config_with_empty_values(tmp_path):
         "auto_context_files": [".tsugite/CONTEXT.md", "AGENTS.md", "CLAUDE.md"],
         "auto_context_include_global": True,
         "skill_paths": [],
+        "skill_ttl_default": 10,
     }
 
 

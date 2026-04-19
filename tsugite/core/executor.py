@@ -34,6 +34,7 @@ class ExecutionResult:
     tools_called: List[str] = field(default_factory=list)
     variables_set: Dict[str, str] = field(default_factory=dict)  # name -> "type(size)"
     loaded_skills: Dict[str, str] = field(default_factory=dict)  # name -> content
+    unloaded_skills: List[str] = field(default_factory=list)  # names unloaded this turn
     truncated: bool = False
     truncated_to: Optional[str] = None  # Path to full output if truncated
 
@@ -154,6 +155,7 @@ class LocalExecutor:
         self._final_answer_value = None
         self._tools_called = []
         self._loaded_skills_for_turn: Dict[str, str] = {}
+        self._unloaded_skills_for_turn: List[str] = []
         self.workspace_dir = workspace_dir
         self.event_bus = event_bus
         self.path_context = path_context
@@ -277,6 +279,7 @@ class LocalExecutor:
         self._final_answer_value = None
         self._tools_called = []
         self._loaded_skills_for_turn = {}
+        self._unloaded_skills_for_turn = []
 
         # Set executor on skill manager so load_skill() can track
         from tsugite.tools.skills import get_skill_manager
@@ -326,6 +329,7 @@ class LocalExecutor:
                 tools_called=self._tools_called.copy(),
                 variables_set=variables_set,
                 loaded_skills=self._loaded_skills_for_turn.copy(),
+                unloaded_skills=list(self._unloaded_skills_for_turn),
             )
 
         except Exception as e:
@@ -343,6 +347,7 @@ class LocalExecutor:
                 tools_called=self._tools_called.copy(),
                 variables_set=variables_set,
                 loaded_skills=self._loaded_skills_for_turn.copy(),
+                unloaded_skills=list(self._unloaded_skills_for_turn),
             )
 
         finally:
@@ -396,3 +401,12 @@ class LocalExecutor:
             content: Rendered skill content
         """
         self._loaded_skills_for_turn[name] = content
+
+    def register_unloaded_skill(self, name: str):
+        """Record that a skill was unloaded during this execution turn.
+
+        Called by unload_skill() tool so the daemon can drop the name from
+        session-level sticky state after the turn completes.
+        """
+        if name not in self._unloaded_skills_for_turn:
+            self._unloaded_skills_for_turn.append(name)

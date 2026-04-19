@@ -18,6 +18,7 @@ class StepResult:
     error: Optional[str] = None
     tools_called: List[str] = field(default_factory=list)
     loaded_skills: Dict[str, str] = field(default_factory=dict)
+    unloaded_skills: List[str] = field(default_factory=list)
     xml_observation: Optional[str] = None
     content_blocks: Dict[str, str] = field(default_factory=dict)
 
@@ -50,6 +51,7 @@ class AgentMemory:
         error: Optional[str] = None,
         tools_called: Optional[List[str]] = None,
         loaded_skills: Optional[Dict[str, str]] = None,
+        unloaded_skills: Optional[List[str]] = None,
         xml_observation: Optional[str] = None,
         content_blocks: Optional[Dict[str, str]] = None,
     ) -> None:
@@ -62,6 +64,7 @@ class AgentMemory:
             error=error,
             tools_called=tools_called or [],
             loaded_skills=loaded_skills or {},
+            unloaded_skills=list(unloaded_skills or []),
             xml_observation=xml_observation,
             content_blocks=content_blocks or {},
         )

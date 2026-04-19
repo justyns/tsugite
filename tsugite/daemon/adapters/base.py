@@ -449,6 +449,14 @@ class BaseAdapter(ABC):
         if suppressed:
             agent_context["suppressed_skills"] = sorted(suppressed)
 
+        # Sticky skills carried over from prior turns drive TTL tracking.
+        sticky_counters = self.session_store.get_sticky_skills(conv_id)
+        if sticky_counters:
+            agent_context["sticky_skills"] = sticky_counters
+        from tsugite.config import load_config as _load_ttl_config
+
+        agent_context["skill_ttl_default"] = _load_ttl_config().skill_ttl_default
+
         from tsugite.cli.helpers import PathContext
 
         workspace_dir = self.agent_config.workspace_dir
@@ -522,6 +530,9 @@ class BaseAdapter(ABC):
             attachments=getattr(result, "attachments", None),
             provider_state=getattr(result, "provider_state", None),
         )
+
+        # Sticky-skill TTL bookkeeping: update session-level counters after this turn.
+        self._update_skill_ttl(conv_id, message, result, agent_context)
 
         ps = getattr(result, "provider_state", None) or {}
         if ps.get("context_window"):
@@ -597,6 +608,82 @@ class BaseAdapter(ABC):
         if self.event_bus:
             self.event_bus.emit("session_update", {"action": "compacted", "id": session.id})
         return session.id
+
+    def _update_skill_ttl(self, conv_id: str, user_message: str, result, agent_context: dict) -> None:
+        """Advance per-session TTL counters based on what happened this turn.
+
+        - trigger-matched skills become sticky (counter = 0)
+        - explicit load_skill() calls reset their sticky counter (renewal)
+        - unload_skill() calls drop from sticky entirely
+        - skills referenced by name or trigger in user_message + final answer reset
+        - all other sticky skills increment by 1
+        - skills whose counter now exceeds their effective ttl are dropped and a
+          SkillUnloadedEvent is emitted
+        """
+        try:
+            from tsugite.config import load_config as _load_cfg
+            from tsugite.events.events import SkillUnloadedEvent
+            from tsugite.skill_discovery import find_referenced_skills, scan_skills
+
+            ttl_default = _load_cfg().skill_ttl_default
+
+            # Registry lookup for ttl values and trigger keywords used by the scan.
+            registry = {s.name: s for s in scan_skills()}
+
+            # Prune already-expired entries the preparer identified.
+            for name in agent_context.get("_expired_sticky_skills") or []:
+                self.session_store.drop_sticky(conv_id, name)
+
+            auto_exempt = set(agent_context.get("_auto_loaded_skill_names") or [])
+
+            # New trigger-matched skills become sticky (auto-loaded are exempt).
+            for name in agent_context.get("_triggered_skill_names") or []:
+                if name in auto_exempt:
+                    continue
+                self.session_store.mark_sticky(conv_id, name)
+
+            execution_steps = getattr(result, "execution_steps", None) or []
+
+            # Explicit load_skill() calls become sticky (renewal or fresh),
+            # and count as references so the counter resets to 0.
+            referenced: set[str] = set()
+            for step in execution_steps:
+                for name in (getattr(step, "loaded_skills", {}) or {}).keys():
+                    referenced.add(name)
+                    if name not in auto_exempt:
+                        self.session_store.mark_sticky(conv_id, name)
+
+            # Drop anything the agent called unload_skill() on — this wins over any
+            # other sticky mutation from the same turn.
+            for step in execution_steps:
+                for name in getattr(step, "unloaded_skills", []) or []:
+                    self.session_store.drop_sticky(conv_id, name)
+                    referenced.discard(name)
+
+            # Text-scan for skill names / triggers in user message + final answer.
+            sticky_after_initial_updates = self.session_store.get_sticky_skills(conv_id)
+            if sticky_after_initial_updates:
+                sticky_metas = [registry[n] for n in sticky_after_initial_updates if n in registry]
+                scan_text = f"{user_message}\n{str(result)}"
+                referenced.update(find_referenced_skills(scan_text, sticky_metas))
+
+            self.session_store.bump_unused_counters(conv_id, referenced)
+
+            # Drop anything that exceeded its TTL and notify listeners.
+            for name, counter in list(self.session_store.get_sticky_skills(conv_id).items()):
+                meta = registry.get(name)
+                effective_ttl = (
+                    meta.ttl if (meta is not None and meta.ttl is not None) else ttl_default
+                )
+                if effective_ttl > 0 and counter > effective_ttl:
+                    self.session_store.drop_sticky(conv_id, name)
+                    if self.event_bus:
+                        try:
+                            self.event_bus.emit(SkillUnloadedEvent(skill_name=name))
+                        except Exception:
+                            logger.debug("Failed to emit SkillUnloadedEvent for %s", name, exc_info=True)
+        except Exception:
+            logger.exception("Skill TTL bookkeeping failed for session %s", conv_id)
 
     async def _compact_session(
         self, session_id: str, instructions: str | None = None, reason: str | None = None

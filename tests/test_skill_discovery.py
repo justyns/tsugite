@@ -21,6 +21,7 @@ def _write_skill(
     description: str = "A skill",
     dir_name: str | None = None,
     triggers: list[str] | None = None,
+    ttl: int | None = None,
     extra_frontmatter: str = "",
 ) -> Path:
     """Create a directory-based skill at <root>/<dir_name>/SKILL.md."""
@@ -31,8 +32,10 @@ def _write_skill(
     if triggers is not None:
         trigger_lines = "\n".join(f"  - {t}" for t in triggers)
         triggers_block = f"triggers:\n{trigger_lines}\n"
+    ttl_block = "" if ttl is None else f"ttl: {ttl}\n"
     frontmatter = (
-        f"---\nname: {name}\ndescription: {description}\n{triggers_block}{extra_frontmatter}---\nBody for {name}.\n"
+        f"---\nname: {name}\ndescription: {description}\n{triggers_block}{ttl_block}"
+        f"{extra_frontmatter}---\nBody for {name}.\n"
     )
     skill_md.write_text(frontmatter)
     return skill_dir
@@ -309,6 +312,95 @@ class TestScanSkillsExtraPaths:
         names_none = {s.name for s in scan_skills(extra_paths=None)}
         names_empty = {s.name for s in scan_skills(extra_paths=[])}
         assert names_none == names_empty
+
+
+class TestScanSkillsTTL:
+    """TTL frontmatter parsing on SkillMeta."""
+
+    def test_ttl_parsed_when_set(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("HOME", str(tmp_path))
+        _write_skill(tmp_path / ".tsugite" / "skills", "with-ttl", "x", ttl=5)
+        matched = [s for s in scan_skills() if s.name == "with-ttl"]
+        assert matched[0].ttl == 5
+
+    def test_ttl_defaults_none_when_absent(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("HOME", str(tmp_path))
+        _write_skill(tmp_path / ".tsugite" / "skills", "no-ttl", "x")
+        matched = [s for s in scan_skills() if s.name == "no-ttl"]
+        assert matched[0].ttl is None
+
+    def test_ttl_zero_means_never_expire(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("HOME", str(tmp_path))
+        _write_skill(tmp_path / ".tsugite" / "skills", "sticky-forever", "x", ttl=0)
+        matched = [s for s in scan_skills() if s.name == "sticky-forever"]
+        assert matched[0].ttl == 0
+
+    def test_non_integer_ttl_warns_and_ignored(self, tmp_path, monkeypatch, caplog):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("HOME", str(tmp_path))
+        _write_skill(
+            tmp_path / ".tsugite" / "skills",
+            "bad-ttl",
+            "x",
+            extra_frontmatter='ttl: "oops"\n',
+        )
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            matched = [s for s in scan_skills() if s.name == "bad-ttl"]
+        assert matched[0].ttl is None
+        assert any("ttl" in rec.getMessage() for rec in caplog.records)
+
+
+class TestFindReferencedSkills:
+    """Reference detection for TTL counter resets."""
+
+    def _meta(self, name, triggers=None):
+        return SkillMeta(
+            name=name,
+            description="d",
+            directory=Path(f"/skills/{name}"),
+            skill_md_path=Path(f"/skills/{name}/SKILL.md"),
+            triggers=triggers or [],
+        )
+
+    def test_matches_on_skill_name(self):
+        from tsugite.skill_discovery import find_referenced_skills
+
+        metas = [self._meta("weather", triggers=["forecast"])]
+        assert find_referenced_skills("tell me about weather", metas) == {"weather"}
+
+    def test_matches_on_trigger_word(self):
+        from tsugite.skill_discovery import find_referenced_skills
+
+        metas = [self._meta("weather", triggers=["forecast"])]
+        assert find_referenced_skills("the forecast today", metas) == {"weather"}
+
+    def test_respects_word_boundary(self):
+        from tsugite.skill_discovery import find_referenced_skills
+
+        metas = [self._meta("weather", triggers=["forecast"])]
+        assert find_referenced_skills("weathering of rocks", metas) == set()
+
+    def test_case_insensitive(self):
+        from tsugite.skill_discovery import find_referenced_skills
+
+        metas = [self._meta("weather")]
+        assert find_referenced_skills("WEATHER report", metas) == {"weather"}
+
+    def test_empty_text_returns_empty(self):
+        from tsugite.skill_discovery import find_referenced_skills
+
+        metas = [self._meta("weather")]
+        assert find_referenced_skills("", metas) == set()
+
+    def test_no_skills_returns_empty(self):
+        from tsugite.skill_discovery import find_referenced_skills
+
+        assert find_referenced_skills("anything", []) == set()
 
 
 class TestMatchTriggeredSkills:

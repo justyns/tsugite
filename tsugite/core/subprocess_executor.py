@@ -191,6 +191,7 @@ class SubprocessExecutor:
         self._final_answer_value = None
         self._tools_called: List[str] = []
         self._loaded_skills_for_turn: Dict[str, str] = {}
+        self._unloaded_skills_for_turn: List[str] = []
 
         self._tmpdir = tempfile.mkdtemp(prefix="tsugite_sub_")
         self._proxy = None
@@ -429,6 +430,7 @@ with open(RESULT_PATH, "w") as f:
         self._final_answer_value = None
         self._tools_called = []
         self._loaded_skills_for_turn = {}
+        self._unloaded_skills_for_turn = []
 
         harness_code = self._build_harness(code)
         harness_path = os.path.join(self._tmpdir, "harness.py")
@@ -540,6 +542,7 @@ with open(RESULT_PATH, "w") as f:
                 tools_called=result_data.get("tools_called", []),
                 variables_set=result_data.get("variables_set", {}),
                 loaded_skills=self._loaded_skills_for_turn.copy(),
+                unloaded_skills=list(self._unloaded_skills_for_turn),
             )
         else:
             # Child crashed before writing result
@@ -714,6 +717,11 @@ with open(RESULT_PATH, "w") as f:
     def register_loaded_skill(self, name: str, content: str):
         """Register a skill loaded during this execution turn."""
         self._loaded_skills_for_turn[name] = content
+
+    def register_unloaded_skill(self, name: str):
+        """Record that a skill was unloaded during this execution turn."""
+        if name not in self._unloaded_skills_for_turn:
+            self._unloaded_skills_for_turn.append(name)
 
     def cleanup(self):
         """Stop proxy and remove temp files."""

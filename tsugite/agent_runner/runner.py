@@ -526,6 +526,7 @@ async def _execute_agent_with_prompt(
             model_name=model_string,
             attachments=prepared.attachments,
             skills=prepared.skills,
+            expiring_skills=prepared.expiring_skills,
             previous_messages=previous_messages,
             resume_session=claude_code_resume_session,
             resume_after_compaction=claude_code_resume_after_compaction,

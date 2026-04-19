@@ -256,6 +256,84 @@ class TestSessionStoreSkillSuppression:
         assert store.get_suppressed_skills("session-1") == set(names)
 
 
+class TestSessionStoreStickySkills:
+    """Per-session sticky skills + TTL counter state on SessionStore."""
+
+    def test_default_empty(self, tmp_path):
+        store = SessionStore(tmp_path / "session_store.json")
+        assert store.get_sticky_skills("any") == {}
+
+    def test_mark_sticky_creates_entry_with_zero_counter(self, tmp_path):
+        store = SessionStore(tmp_path / "session_store.json")
+        store.mark_sticky("session-1", "skill-a")
+        assert store.get_sticky_skills("session-1") == {"skill-a": 0}
+
+    def test_mark_sticky_resets_counter(self, tmp_path):
+        store = SessionStore(tmp_path / "session_store.json")
+        store.mark_sticky("session-1", "skill-a")
+        store.bump_unused_counters("session-1", referenced=set())
+        assert store.get_sticky_skills("session-1") == {"skill-a": 1}
+        store.mark_sticky("session-1", "skill-a")
+        assert store.get_sticky_skills("session-1") == {"skill-a": 0}
+
+    def test_bump_increments_unreferenced_resets_referenced(self, tmp_path):
+        store = SessionStore(tmp_path / "session_store.json")
+        store.mark_sticky("session-1", "stale")
+        store.mark_sticky("session-1", "fresh")
+        store.bump_unused_counters("session-1", referenced={"fresh"})
+        assert store.get_sticky_skills("session-1") == {"stale": 1, "fresh": 0}
+
+    def test_bump_with_no_sticky_is_noop(self, tmp_path):
+        store = SessionStore(tmp_path / "session_store.json")
+        store.bump_unused_counters("session-1", referenced={"anything"})
+        assert store.get_sticky_skills("session-1") == {}
+
+    def test_drop_sticky(self, tmp_path):
+        store = SessionStore(tmp_path / "session_store.json")
+        store.mark_sticky("session-1", "skill-a")
+        store.drop_sticky("session-1", "skill-a")
+        assert store.get_sticky_skills("session-1") == {}
+        assert "session-1" not in store._sticky_skills
+
+    def test_drop_sticky_unknown_is_noop(self, tmp_path):
+        store = SessionStore(tmp_path / "session_store.json")
+        store.drop_sticky("ghost", "skill-a")
+        store.mark_sticky("session-1", "skill-a")
+        store.drop_sticky("session-1", "skill-b")
+        assert store.get_sticky_skills("session-1") == {"skill-a": 0}
+
+    def test_isolated_per_session(self, tmp_path):
+        store = SessionStore(tmp_path / "session_store.json")
+        store.mark_sticky("session-1", "skill-a")
+        assert store.get_sticky_skills("session-2") == {}
+
+    def test_get_returns_copy(self, tmp_path):
+        store = SessionStore(tmp_path / "session_store.json")
+        store.mark_sticky("session-1", "skill-a")
+        snapshot = store.get_sticky_skills("session-1")
+        snapshot["skill-b"] = 9
+        assert store.get_sticky_skills("session-1") == {"skill-a": 0}
+
+    def test_sticky_carries_through_compaction(self, tmp_path):
+        store = SessionStore(tmp_path / "session_store.json")
+        session = store.get_or_create_interactive("alice", "test-agent")
+        store.mark_sticky(session.id, "skill-a")
+        store.bump_unused_counters(session.id, referenced=set())
+
+        new_session = store.compact_session(session.id)
+
+        assert new_session.id != session.id
+        assert store.get_sticky_skills(new_session.id) == {"skill-a": 1}
+        assert session.id not in store._sticky_skills
+
+    def test_sticky_not_persisted_across_reload(self, tmp_path):
+        path = tmp_path / "session_store.json"
+        first = SessionStore(path)
+        first.mark_sticky("session-1", "skill-a")
+        second = SessionStore(path)
+        assert second.get_sticky_skills("session-1") == {}
+
+
 class TestSessionStoreThreadSafety:
     """SessionStore operations are thread-safe."""
 

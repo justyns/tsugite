@@ -138,6 +138,13 @@ class SessionStore:
         # rest of this session's lifetime. In-memory only; resets on daemon restart.
         self._suppressed_skills: dict[str, set[str]] = {}
 
+        # Per-session sticky skills with TTL counters: session_id -> name -> turns_unused.
+        # A trigger-matched or load_skill()-loaded skill becomes sticky so it persists
+        # across user messages. The counter increments each turn the skill isn't
+        # referenced; when it exceeds the skill's TTL the skill is dropped from the set.
+        # In-memory only; resets on daemon restart.
+        self._sticky_skills: dict[str, dict[str, int]] = {}
+
         self._load()
         self._migrate_legacy()
         self._recover_stale_sessions()
@@ -214,6 +221,50 @@ class SessionStore:
         with self._lock:
             return set(self._suppressed_skills.get(session_id, ()))
 
+    # ── Sticky skills (non-persisted TTL state) ──
+
+    def mark_sticky(self, session_id: str, skill_name: str) -> None:
+        """Mark a skill as sticky for the session and reset its unused-turn counter.
+
+        Called when the skill is first trigger-matched or dynamically loaded, and
+        again any time it's referenced (so the counter restarts at 0).
+        """
+        with self._lock:
+            self._sticky_skills.setdefault(session_id, {})[skill_name] = 0
+
+    def drop_sticky(self, session_id: str, skill_name: str) -> None:
+        """Remove a skill from the sticky set."""
+        with self._lock:
+            bucket = self._sticky_skills.get(session_id)
+            if bucket:
+                bucket.pop(skill_name, None)
+                if not bucket:
+                    self._sticky_skills.pop(session_id, None)
+
+    def get_sticky_skills(self, session_id: str) -> dict[str, int]:
+        """Return a copy of the session's sticky skill counters."""
+        with self._lock:
+            return dict(self._sticky_skills.get(session_id, ()))
+
+    def bump_unused_counters(self, session_id: str, referenced: set[str]) -> None:
+        """Advance one turn: reset referenced skills, increment the rest.
+
+        A skill is "referenced" this turn if the agent called load_skill() on it
+        or the scanner found its name/trigger in the user message or final answer.
+        Unreferenced skills get their counter incremented. Callers decide whether
+        to drop skills whose counter now exceeds their TTL (we don't know per-skill
+        TTL here — that's a frontmatter/config concern).
+        """
+        with self._lock:
+            bucket = self._sticky_skills.get(session_id)
+            if not bucket:
+                return
+            for name in list(bucket):
+                if name in referenced:
+                    bucket[name] = 0
+                else:
+                    bucket[name] += 1
+
     # ── Interactive session management ──
 
     def get_or_create_interactive(self, user_id: str, agent: str) -> Session:
@@ -286,6 +337,12 @@ class SessionStore:
             suppressed = self._suppressed_skills.pop(session_id, None)
             if suppressed:
                 self._suppressed_skills[new_id] = suppressed
+
+            # Sticky skill counters carry forward too — compaction is "same conversation"
+            # from the user's POV, so an already-loaded sticky skill should keep its TTL.
+            sticky = self._sticky_skills.pop(session_id, None)
+            if sticky:
+                self._sticky_skills[new_id] = sticky
 
             # Mark old session as completed
             old_session.status = SessionStatus.COMPLETED.value

@@ -373,6 +373,164 @@ tools: []
         names = {s.name for s in prepared.skills}
         assert names == {"skill1", "skill2"}
 
+    def test_sticky_skill_reloads_across_turns(self, tmp_path, monkeypatch):
+        """Sticky skills carry over into the next preparer.prepare() call."""
+        monkeypatch.chdir(tmp_path)
+
+        skills_dir = tmp_path / "skills"
+        skill_dir = skills_dir / "my_skill"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: my_skill\ndescription: Sticky test\nttl: 5\n---\nBody.\n"
+        )
+
+        agent_file = tmp_path / "agent.md"
+        agent_file.write_text(
+            "---\nname: test_agent\nextends: none\ntools: []\n---\n\n{{ user_prompt }}\n"
+        )
+        agent = parse_agent_file(agent_file)
+        preparer = AgentPreparer()
+
+        # Counter 2 out of ttl 5 -> loads, not expiring yet.
+        prepared = preparer.prepare(
+            agent=agent,
+            prompt="unrelated",
+            context={"sticky_skills": {"my_skill": 2}, "skill_ttl_default": 10},
+        )
+        assert "my_skill" in [s.name for s in prepared.skills]
+        assert prepared.expiring_skills == {}
+
+    def test_sticky_skill_expires_when_counter_exceeds_ttl(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+
+        skills_dir = tmp_path / "skills"
+        skill_dir = skills_dir / "my_skill"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: my_skill\ndescription: Test\nttl: 3\n---\nBody.\n"
+        )
+
+        agent_file = tmp_path / "agent.md"
+        agent_file.write_text(
+            "---\nname: test_agent\nextends: none\ntools: []\n---\n\n{{ user_prompt }}\n"
+        )
+        agent = parse_agent_file(agent_file)
+        preparer = AgentPreparer()
+
+        prepared = preparer.prepare(
+            agent=agent,
+            prompt="unrelated",
+            context={"sticky_skills": {"my_skill": 4}, "skill_ttl_default": 10},
+        )
+        assert "my_skill" not in [s.name for s in prepared.skills]
+        assert "my_skill" in prepared.context.get("_expired_sticky_skills", [])
+
+    def test_expiring_skills_populated_on_last_turn(self, tmp_path, monkeypatch):
+        """counter == ttl -> 0 turns remaining; still loads, but flagged expiring."""
+        monkeypatch.chdir(tmp_path)
+
+        skills_dir = tmp_path / "skills"
+        skill_dir = skills_dir / "my_skill"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: my_skill\ndescription: Test\nttl: 3\n---\nBody.\n"
+        )
+
+        agent_file = tmp_path / "agent.md"
+        agent_file.write_text(
+            "---\nname: test_agent\nextends: none\ntools: []\n---\n\n{{ user_prompt }}\n"
+        )
+        agent = parse_agent_file(agent_file)
+        preparer = AgentPreparer()
+
+        prepared = preparer.prepare(
+            agent=agent,
+            prompt="unrelated",
+            context={"sticky_skills": {"my_skill": 3}, "skill_ttl_default": 10},
+        )
+        assert "my_skill" in [s.name for s in prepared.skills]
+        assert prepared.expiring_skills == {"my_skill": 0}
+
+    def test_config_default_ttl_used_when_frontmatter_missing(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+
+        skills_dir = tmp_path / "skills"
+        skill_dir = skills_dir / "my_skill"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: my_skill\ndescription: Test\n---\nBody.\n"
+        )
+
+        agent_file = tmp_path / "agent.md"
+        agent_file.write_text(
+            "---\nname: test_agent\nextends: none\ntools: []\n---\n\n{{ user_prompt }}\n"
+        )
+        agent = parse_agent_file(agent_file)
+        preparer = AgentPreparer()
+
+        # Default ttl 2, counter 3 -> expired
+        prepared = preparer.prepare(
+            agent=agent,
+            prompt="unrelated",
+            context={"sticky_skills": {"my_skill": 3}, "skill_ttl_default": 2},
+        )
+        assert "my_skill" not in [s.name for s in prepared.skills]
+        assert "my_skill" in prepared.context.get("_expired_sticky_skills", [])
+
+    def test_ttl_zero_means_never_expire(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+
+        skills_dir = tmp_path / "skills"
+        skill_dir = skills_dir / "my_skill"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: my_skill\ndescription: Test\nttl: 0\n---\nBody.\n"
+        )
+
+        agent_file = tmp_path / "agent.md"
+        agent_file.write_text(
+            "---\nname: test_agent\nextends: none\ntools: []\n---\n\n{{ user_prompt }}\n"
+        )
+        agent = parse_agent_file(agent_file)
+        preparer = AgentPreparer()
+
+        # Counter is huge, but ttl == 0 -> never drops.
+        prepared = preparer.prepare(
+            agent=agent,
+            prompt="unrelated",
+            context={"sticky_skills": {"my_skill": 999}, "skill_ttl_default": 10},
+        )
+        assert "my_skill" in [s.name for s in prepared.skills]
+        assert prepared.expiring_skills == {}
+
+    def test_triggered_skill_names_surfaced_for_daemon(self, agent_with_skills, skill_files, monkeypatch):
+        """Daemon needs to know which skills matched triggers so it can mark them sticky."""
+        monkeypatch.chdir(agent_with_skills.parent)
+
+        skill_dir = skill_files["dir"] / "weather"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: weather\ndescription: Weather\ntriggers:\n  - forecast\n---\nBody.\n"
+        )
+        agent = parse_agent_file(agent_with_skills)
+        preparer = AgentPreparer()
+
+        prepared = preparer.prepare(
+            agent=agent,
+            prompt="what is the forecast",
+            context={},
+        )
+        assert "weather" in prepared.context.get("_triggered_skill_names", [])
+
+    def test_auto_loaded_skill_names_surfaced_for_daemon(self, agent_with_skills, skill_files, monkeypatch):
+        """Daemon uses this list to exempt auto-loaded skills from sticky tracking."""
+        monkeypatch.chdir(agent_with_skills.parent)
+
+        agent = parse_agent_file(agent_with_skills)
+        preparer = AgentPreparer()
+        prepared = preparer.prepare(agent=agent, prompt="Test", context={})
+        assert set(prepared.context.get("_auto_loaded_skill_names", [])) == {"skill1", "skill2"}
+
     def test_suppressing_unknown_skill_does_not_affect_others(self, agent_with_skills, skill_files, monkeypatch):
         """Suppressing a name that isn't in auto_load_skills is harmless."""
         monkeypatch.chdir(agent_with_skills.parent)
@@ -544,6 +702,42 @@ class TestSystemPromptWithSkills:
         assert '<skill_content name="auto-loaded">' in context_text
         assert '<skill_content name="dyn-loaded">' in context_text
         assert "loaded mid-run" in context_text
+
+    def test_expiring_skill_emits_skill_expiring_tag(self):
+        """Skills listed in expiring_skills get a sibling XML block in context."""
+        from tsugite.core.agent import TsugiteAgent
+
+        agent = TsugiteAgent(
+            model_string="openai:gpt-4o-mini",
+            tools=[],
+            instructions="Test",
+            max_turns=3,
+            skills=[Skill(name="weather", content="# Weather\nbody")],
+            expiring_skills={"weather": 1},
+        )
+        agent.memory.task = "hi"
+        messages = agent._build_messages()
+        context_text = messages[1]["content"][0]["text"]
+        assert '<skill_content name="weather">' in context_text
+        assert '<skill_expiring name="weather" turns_remaining="1">' in context_text
+        assert "load_skill" in context_text
+        assert "unload_skill" in context_text
+
+    def test_non_expiring_skill_has_no_expiring_tag(self):
+        from tsugite.core.agent import TsugiteAgent
+
+        agent = TsugiteAgent(
+            model_string="openai:gpt-4o-mini",
+            tools=[],
+            instructions="Test",
+            max_turns=3,
+            skills=[Skill(name="weather", content="# Weather\nbody")],
+            expiring_skills={},
+        )
+        agent.memory.task = "hi"
+        messages = agent._build_messages()
+        context_text = messages[1]["content"][0]["text"]
+        assert "<skill_expiring" not in context_text
 
     def test_build_observation_does_not_embed_skill_content(self):
         """Dynamic skill content must not live in the observation replay:

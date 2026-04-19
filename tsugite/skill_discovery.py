@@ -40,6 +40,9 @@ class SkillMeta:
         directory: Absolute path to the skill directory (contains SKILL.md).
         skill_md_path: Absolute path to the SKILL.md file.
         triggers: Optional keywords for auto-loading (tsugite extension).
+        ttl: Optional time-to-live in turns for sticky persistence (tsugite
+            extension). None means fall back to the global config default.
+            0 or negative means never expire.
     """
 
     name: str
@@ -47,6 +50,7 @@ class SkillMeta:
     directory: Path
     skill_md_path: Path
     triggers: List[str] = field(default_factory=list)
+    ttl: Optional[int] = None
 
 
 @dataclass
@@ -188,6 +192,14 @@ def scan_skills(workspace=None, extra_paths: Optional[List[str]] = None) -> List
                 logger.warning(f"Skill '{name}' at {skill_md}: 'triggers' must be a list; ignoring")
                 triggers = []
 
+            ttl_raw = frontmatter.get("ttl")
+            ttl: Optional[int] = None
+            if ttl_raw is not None:
+                if isinstance(ttl_raw, bool) or not isinstance(ttl_raw, int):
+                    logger.warning(f"Skill '{name}' at {skill_md}: 'ttl' must be an integer; ignoring")
+                else:
+                    ttl = ttl_raw
+
             skills.append(
                 SkillMeta(
                     name=name,
@@ -195,6 +207,7 @@ def scan_skills(workspace=None, extra_paths: Optional[List[str]] = None) -> List
                     directory=skill_dir,
                     skill_md_path=skill_md,
                     triggers=triggers,
+                    ttl=ttl,
                 )
             )
             seen_names.add(name)
@@ -203,6 +216,29 @@ def scan_skills(workspace=None, extra_paths: Optional[List[str]] = None) -> List
 
 
 _WORD_SPLIT = re.compile(r"\W+")
+
+
+def _extract_words(text: str) -> Set[str]:
+    """Split text into a set of lowercase words on non-word boundaries."""
+    return set(_WORD_SPLIT.split(text.lower()))
+
+
+def find_referenced_skills(text: str, skills: List[SkillMeta]) -> Set[str]:
+    """Return names of skills whose name or any trigger appears in text.
+
+    Uses the same word-boundary, case-insensitive matching as trigger dispatch
+    so "keeping the skill alive" stays symmetric with "how it got loaded."
+    """
+    if not text:
+        return set()
+    words = _extract_words(text)
+    referenced: Set[str] = set()
+    for skill in skills:
+        for candidate in (skill.name, *skill.triggers):
+            if candidate and candidate.lower() in words:
+                referenced.add(skill.name)
+                break
+    return referenced
 
 
 def match_triggered_skills(

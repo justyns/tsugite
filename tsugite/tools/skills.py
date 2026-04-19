@@ -104,6 +104,11 @@ class SkillManager:
         and appends an absolute-path + bundled-resource summary so the agent
         can locate scripts/references/assets on demand.
 
+        If the skill is already loaded, this still registers the call with the
+        executor so the daemon's TTL bookkeeping can treat it as a renewal
+        (reference resets the unused-turns counter to 0). Content is not
+        re-read from disk in that case.
+
         Args:
             skill_name: Name of the skill to load (from available skills list)
 
@@ -112,8 +117,12 @@ class SkillManager:
         """
         self._ensure_registry_initialized()
 
-        if skill_name in self._loaded_skills:
-            return f"Skill '{skill_name}' is already loaded in this session"
+        already_loaded = skill_name in self._loaded_skills
+        if already_loaded:
+            rendered_content = self._loaded_skills[skill_name]
+            if self._executor and hasattr(self._executor, "register_loaded_skill"):
+                self._executor.register_loaded_skill(skill_name, rendered_content)
+            return f"Skill '{skill_name}' is already loaded (TTL renewed)"
 
         skill = self._skill_registry.get(skill_name)
         if not skill:
@@ -172,6 +181,9 @@ class SkillManager:
             return f"Skill '{skill_name}' is not currently loaded"
 
         del self._loaded_skills[skill_name]
+
+        if self._executor and hasattr(self._executor, "register_unloaded_skill"):
+            self._executor.register_unloaded_skill(skill_name)
 
         from tsugite.events.helpers import emit_skill_unloaded_event
 
@@ -277,7 +289,8 @@ def load_skill(skill_name: str) -> str:
     """Load a skill to gain additional capabilities.
 
     The skill content is rendered with Jinja2 and added to the agent's context.
-    Once loaded, the skill persists for the session.
+    Once loaded, the skill persists for the session. Calling load_skill on an
+    already-loaded skill renews its TTL (resets the unused-turn counter).
 
     Args:
         skill_name: Name of the skill to load (from available skills list)
@@ -287,6 +300,24 @@ def load_skill(skill_name: str) -> str:
     """
     manager = get_skill_manager()
     return manager.load_skill(skill_name)
+
+
+@tool(parent_only=True)
+def unload_skill(skill_name: str) -> str:
+    """Drop a previously loaded skill from the session to free context tokens.
+
+    Use this when a skill is no longer needed. The skill stays discoverable and
+    can be loaded again later with load_skill. TTL auto-expiry calls this path
+    internally after N turns of no reference.
+
+    Args:
+        skill_name: Name of the skill to unload
+
+    Returns:
+        Success message or error description
+    """
+    manager = get_skill_manager()
+    return manager.unload_skill(skill_name)
 
 
 @tool

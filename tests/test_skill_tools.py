@@ -40,11 +40,12 @@ def _meta(skill_dir: Path) -> SkillMeta:
 
 @pytest.fixture(autouse=True)
 def _register_skill_tools():
-    """Ensure load_skill and list_available_skills tools are registered."""
+    """Ensure load_skill, unload_skill and list_available_skills tools are registered."""
     from tsugite.tools import tool
-    from tsugite.tools.skills import list_available_skills, load_skill
+    from tsugite.tools.skills import list_available_skills, load_skill, unload_skill
 
     tool(load_skill)
+    tool(unload_skill)
     tool(list_available_skills)
 
 
@@ -170,6 +171,89 @@ class TestLoadSkillTool:
         call_tool("load_skill", skill_name="big")
         rendered = manager._loaded_skills["big"]
         assert f"+{extra} more" in rendered
+
+
+class TestUnloadSkillTool:
+    """unload_skill tool drops a skill from the manager + registers with executor."""
+
+    def test_unload_removes_from_manager(self, tmp_path, monkeypatch):
+        skill_dir = _make_skill_dir(tmp_path / "skills", "drop-me")
+        monkeypatch.chdir(tmp_path)
+
+        manager = SkillManager()
+        manager._skill_registry = {"drop-me": _meta(skill_dir)}
+        manager._registry_initialized = True
+        manager._loaded_skills = {"drop-me": "content"}
+        set_skill_manager(manager)
+
+        result = call_tool("unload_skill", skill_name="drop-me")
+        assert "unload" in result.lower() or "success" in result.lower()
+        assert "drop-me" not in manager._loaded_skills
+
+    def test_unload_not_currently_loaded(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        manager = SkillManager()
+        manager._skill_registry = {}
+        manager._registry_initialized = True
+        set_skill_manager(manager)
+
+        result = call_tool("unload_skill", skill_name="missing")
+        assert "not currently loaded" in result.lower()
+
+    def test_unload_registers_with_executor(self, tmp_path, monkeypatch):
+        """Mid-turn unload_skill surfaces in ExecutionResult.unloaded_skills so the
+        daemon can drop the skill from session-level sticky state."""
+        skill_dir = _make_skill_dir(tmp_path / "skills", "drop-me")
+        monkeypatch.chdir(tmp_path)
+
+        class _FakeExecutor:
+            def __init__(self):
+                self.unloaded: list[str] = []
+
+            def register_loaded_skill(self, name, content):
+                pass
+
+            def register_unloaded_skill(self, name):
+                self.unloaded.append(name)
+
+        executor = _FakeExecutor()
+        manager = SkillManager()
+        manager._skill_registry = {"drop-me": _meta(skill_dir)}
+        manager._registry_initialized = True
+        manager._loaded_skills = {"drop-me": "content"}
+        manager.set_executor(executor)
+        set_skill_manager(manager)
+
+        call_tool("unload_skill", skill_name="drop-me")
+        assert executor.unloaded == ["drop-me"]
+
+
+class TestLoadSkillRenewal:
+    """load_skill on an already-loaded skill registers with the executor so the
+    daemon can reset the TTL counter."""
+
+    def test_reload_registers_again(self, tmp_path, monkeypatch):
+        skill_dir = _make_skill_dir(tmp_path / "skills", "already-here")
+        monkeypatch.chdir(tmp_path)
+
+        class _FakeExecutor:
+            def __init__(self):
+                self.loaded: list[str] = []
+
+            def register_loaded_skill(self, name, content):
+                self.loaded.append(name)
+
+        executor = _FakeExecutor()
+        manager = SkillManager()
+        manager._skill_registry = {"already-here": _meta(skill_dir)}
+        manager._registry_initialized = True
+        manager._loaded_skills = {"already-here": "cached content"}
+        manager.set_executor(executor)
+        set_skill_manager(manager)
+
+        result = call_tool("load_skill", skill_name="already-here")
+        assert "renew" in result.lower() or "already" in result.lower()
+        assert executor.loaded == ["already-here"]
 
 
 class TestListAvailableSkillsTool:

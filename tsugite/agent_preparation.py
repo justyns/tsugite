@@ -98,6 +98,10 @@ class PreparedAgent:
     prefetch_results: Dict[str, Any]
     attachments: List[Attachment]
     skills: List[Skill] = field(default_factory=list)
+    # Map of sticky skill name -> turns remaining before auto-unload. Only
+    # populated on the turn a skill is about to expire (turns_remaining <= 0).
+    # The agent surfaces these as <skill_expiring> blocks in the context turn.
+    expiring_skills: Dict[str, int] = field(default_factory=dict)
     skipped: bool = False
     skip_reason: str | None = None
 
@@ -366,12 +370,18 @@ class AgentPreparer:
         except Exception as e:
             raise RuntimeError(f"Failed to create tools: {e}") from e
 
-        # Step 7: Load auto_load_skills and trigger-matched skills
+        # Step 7: Load auto_load_skills, sticky skills, and trigger-matched skills
         from tsugite.events.events import SkillLoadFailedEvent
 
         # Skills the user explicitly removed this session (populated by the daemon).
         suppressed_skills = set(full_context.get("suppressed_skills") or [])
 
+        # Sticky skills carried over from prior turns on this session (daemon-only).
+        # Shape: {skill_name: turns_unused_counter}
+        sticky_counters: Dict[str, int] = dict(full_context.get("sticky_skills") or {})
+        ttl_default = int(full_context.get("skill_ttl_default") or 10)
+
+        # Step 7a: auto_load_skills (exempt from TTL, re-loaded every turn from frontmatter)
         auto_load_skills = [s for s in (agent_config.auto_load_skills or []) if s not in suppressed_skills]
 
         for skill_name in auto_load_skills:
@@ -380,7 +390,39 @@ class AgentPreparer:
                 if event_bus:
                     event_bus.emit(SkillLoadFailedEvent(skill_name=skill_name, error_message=result))
 
-        # Step 7b: Auto-load skills whose triggers match the user prompt
+        # Step 7b: sticky skills — re-load whatever carried over from prior turns,
+        # unless the counter already exceeded the skill's effective TTL (expired).
+        _skill_manager._ensure_registry_initialized()
+        registry = _skill_manager._skill_registry
+        expiring_skills: Dict[str, int] = {}
+        expired_sticky: List[str] = []
+        for name, counter in sticky_counters.items():
+            if name in suppressed_skills:
+                expired_sticky.append(name)
+                continue
+            meta = registry.get(name)
+            if meta is None:
+                # Skill vanished (renamed/removed) between turns — drop it.
+                expired_sticky.append(name)
+                continue
+            effective_ttl = meta.ttl if meta.ttl is not None else ttl_default
+            if effective_ttl > 0 and counter > effective_ttl:
+                expired_sticky.append(name)
+                continue
+            if name in auto_load_skills:
+                # Already loaded above; no need to double-load but it's still sticky.
+                continue
+            result = _skill_manager.load_skill(name)
+            if result.startswith("Failed") or result.startswith("Skill '"):
+                if event_bus:
+                    event_bus.emit(SkillLoadFailedEvent(skill_name=name, error_message=result))
+                continue
+            if effective_ttl > 0:
+                remaining = effective_ttl - counter
+                if remaining <= 1:
+                    expiring_skills[name] = max(remaining, 0)
+
+        # Step 7c: trigger-matched skills (new stickies start here when daemon adds them).
         triggered_skill_names = [
             name for name in _skill_manager.get_triggered_skills(prompt) if name not in suppressed_skills
         ]
@@ -390,6 +432,11 @@ class AgentPreparer:
             if result.startswith("Failed") or result.startswith("Skill '"):
                 if event_bus:
                     event_bus.emit(SkillLoadFailedEvent(skill_name=skill_name, error_message=result))
+
+        # Stash expired/triggered names so the daemon can update its sticky state post-turn.
+        full_context["_expired_sticky_skills"] = expired_sticky
+        full_context["_triggered_skill_names"] = list(triggered_skill_names)
+        full_context["_auto_loaded_skill_names"] = list(auto_load_skills)
 
         # Get all successfully loaded skills as Skill objects
         loaded_skills_dict = _skill_manager.get_loaded_skills()
@@ -426,4 +473,5 @@ they typically mean the invoked location ({invoked_from}).
             prefetch_results=prefetch_context,
             attachments=all_attachments,
             skills=skills,
+            expiring_skills=expiring_skills,
         )

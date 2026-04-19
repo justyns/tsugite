@@ -51,7 +51,9 @@ Available in templates:
 
 **Optional frontmatter the spec defines** (tsugite parses but does not yet enforce): `license`, `compatibility`, `metadata`, `allowed-tools`.
 
-**Tsugite extension:** `triggers: [keywords]` - when any listed keyword appears in the user prompt (word-boundary match, case-insensitive), the skill is auto-loaded. Not part of the spec; safe to omit for cross-client portability.
+**Tsugite extensions** (not part of the agentskills.io spec; safe to omit for cross-client portability):
+- `triggers: [keywords]` - when any listed keyword appears in the user prompt (word-boundary match, case-insensitive), the skill is auto-loaded.
+- `ttl: N` - sticky time-to-live (in user messages). Only applies in the daemon. A sticky skill that goes N turns without being referenced is auto-unloaded. `0` means never expire. Defaults to the global `skill_ttl_default` config value (currently 10).
 
 ## Discovery Order
 
@@ -109,6 +111,22 @@ Agents can load a skill mid-execution:
 ```python
 load_skill("python-math")
 ```
+
+Calling `load_skill()` on an already-loaded skill renews its TTL (resets the unused-turn counter). To drop a skill early:
+
+```python
+unload_skill("python-math")
+```
+
+### TTL and Auto-Unload (daemon only)
+
+In the daemon, any skill loaded via a trigger match or `load_skill()` call becomes **sticky** on the session: it persists across user messages. A turn counter tracks how many user messages go by without the skill being referenced. When the counter exceeds the skill's TTL, the skill auto-unloads.
+
+- A skill is "referenced" this turn if the agent called `load_skill()` on it, or its name / any trigger keyword appears in the user message or final answer.
+- Auto-loaded skills (declared in agent frontmatter) are **exempt** from TTL - they reload every turn from the frontmatter and never auto-unload.
+- On the turn before auto-unload, the context includes a `<skill_expiring name="X" turns_remaining="0">` block so the agent has one last chance to use or renew the skill.
+
+Override TTL per skill with frontmatter `ttl: N`. Global default lives in `config.json` as `skill_ttl_default` (default: 10).
 
 ### List Available Skills
 

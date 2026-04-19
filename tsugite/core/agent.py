@@ -165,6 +165,7 @@ class TsugiteAgent:
         model_name: str = None,
         attachments: List[Attachment] = None,
         skills: List[Skill] = None,
+        expiring_skills: Optional[Dict[str, int]] = None,
         previous_messages: List[Dict] = None,
         resume_session: Optional[str] = None,
         resume_after_compaction: bool = False,
@@ -198,6 +199,10 @@ class TsugiteAgent:
         self.model_name = model_name or model_string
         self.attachments = attachments or []
         self.skills = skills or []
+        # Map of skill name -> turns_remaining. Surfaced as <skill_expiring> blocks
+        # in the context turn so the agent knows the skill will auto-unload if
+        # unreferenced.
+        self.expiring_skills: Dict[str, int] = dict(expiring_skills or {})
         self.previous_messages = previous_messages or []
         self.hook_vars = hook_vars or {}
         self._resume_session = resume_session
@@ -583,6 +588,7 @@ class TsugiteAgent:
                     error=exec_result.error,
                     tools_called=exec_result.tools_called,
                     loaded_skills=exec_result.loaded_skills,
+                    unloaded_skills=exec_result.unloaded_skills,
                     xml_observation=xml_observation,
                     content_blocks=turn.content_blocks,
                 )
@@ -595,6 +601,13 @@ class TsugiteAgent:
                         if name not in existing:
                             self.skills.append(Skill(name=name, content=content))
                             existing.add(name)
+
+                # Drop explicitly-unloaded skills so the next context turn omits them.
+                if exec_result.unloaded_skills:
+                    drop = set(exec_result.unloaded_skills)
+                    self.skills = [s for s in self.skills if s.name not in drop]
+                    for name in drop:
+                        self.expiring_skills.pop(name, None)
 
                 # Check if final_answer was called during execution
                 if exec_result.final_answer is not None:
@@ -905,6 +918,14 @@ class TsugiteAgent:
             text_parts.append(f'<skill_content name="{skill.name}">')
             text_parts.append(skill.content)
             text_parts.append("</skill_content>")
+            remaining = self.expiring_skills.get(skill.name)
+            if remaining is not None:
+                text_parts.append(f'<skill_expiring name="{skill.name}" turns_remaining="{remaining}">')
+                text_parts.append(
+                    f"This skill will auto-unload in {remaining} turn(s) unless referenced. "
+                    f'Call load_skill("{skill.name}") to renew, or unload_skill("{skill.name}") to drop now.'
+                )
+                text_parts.append("</skill_expiring>")
 
         text_parts.append("</context>")
 
