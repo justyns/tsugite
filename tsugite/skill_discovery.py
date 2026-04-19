@@ -187,10 +187,19 @@ def scan_skills(workspace=None, extra_paths: Optional[List[str]] = None) -> List
             if not description:
                 logger.warning(f"Skill '{name}' at {skill_md} has no 'description' (recommended)")
 
-            triggers = frontmatter.get("triggers") or []
-            if not isinstance(triggers, list):
+            triggers_raw = frontmatter.get("triggers") or []
+            if not isinstance(triggers_raw, list):
                 logger.warning(f"Skill '{name}' at {skill_md}: 'triggers' must be a list; ignoring")
                 triggers = []
+            else:
+                triggers = []
+                for item in triggers_raw:
+                    if isinstance(item, str):
+                        triggers.append(item)
+                    else:
+                        logger.warning(
+                            f"Skill '{name}' at {skill_md}: trigger {item!r} is not a string; ignoring"
+                        )
 
             ttl_raw = frontmatter.get("ttl")
             ttl: Optional[int] = None

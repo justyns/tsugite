@@ -497,3 +497,27 @@ class TestMatchTriggeredSkills:
         basic = [s for s in skills if s.name == "basic"]
         assert len(basic) == 1
         assert basic[0].triggers == []
+
+    def test_scan_skills_filters_non_string_triggers(self, tmp_path, monkeypatch, caplog):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("HOME", str(tmp_path))
+        skill_dir = tmp_path / ".tsugite" / "skills" / "mixed"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\n"
+            "name: mixed\n"
+            "description: Mixed trigger types\n"
+            "triggers:\n"
+            "  - forecast\n"
+            "  - 42\n"
+            "  - true\n"
+            "  - rain\n"
+            "---\nBody.\n"
+        )
+        with caplog.at_level("WARNING"):
+            skills = scan_skills()
+        mixed = [s for s in skills if s.name == "mixed"]
+        assert len(mixed) == 1
+        assert mixed[0].triggers == ["forecast", "rain"]
+        # downstream matching must not crash on the original bad input
+        assert match_triggered_skills("forecast today", mixed)[0].name == "mixed"
