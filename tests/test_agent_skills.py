@@ -345,6 +345,60 @@ class TestSystemPromptWithSkills:
         assert messages[2]["role"] == "assistant"
         assert messages[2]["content"] == "Context loaded."
 
+    def test_dynamically_loaded_skill_appears_in_context_turn(self):
+        """Skills added to self.skills after a dynamic load_skill() call must
+        show up in the cached context turn on subsequent _build_messages calls."""
+        from tsugite.core.agent import TsugiteAgent
+
+        agent = TsugiteAgent(
+            model_string="openai:gpt-4o-mini",
+            tools=[],
+            instructions="Test instructions",
+            max_turns=3,
+            attachments=[],
+            skills=[Skill(name="auto-loaded", content="# Auto\nalways on")],
+        )
+        agent.memory.task = "Test task"
+
+        agent.skills.append(Skill(name="dyn-loaded", content="# Dynamic\nloaded mid-run"))
+
+        messages = agent._build_messages()
+        context_text = messages[1]["content"][0]["text"]
+        assert '<skill name="auto-loaded">' in context_text
+        assert '<skill name="dyn-loaded">' in context_text
+        assert "loaded mid-run" in context_text
+
+    def test_build_observation_does_not_embed_skill_content(self):
+        """Dynamic skill content must not live in the observation replay:
+        it flows via self.skills + context turn instead, so compaction and
+        per-turn token cost stay clean."""
+        from tsugite.core.agent import TsugiteAgent
+        from tsugite.core.memory import StepResult
+
+        agent = TsugiteAgent(
+            model_string="openai:gpt-4o-mini",
+            tools=[],
+            instructions="Test instructions",
+            max_turns=3,
+        )
+
+        step = StepResult(
+            step_number=1,
+            thought="thinking",
+            code="load_skill('foo')",
+            output="ok",
+            error=None,
+            tools_called=["load_skill"],
+            loaded_skills={"foo": "# Foo\nsecret skill body"},
+            xml_observation="<observation>ok</observation>",
+            content_blocks=[],
+        )
+
+        rendered = agent._build_observation(step)
+        assert "secret skill body" not in rendered
+        assert "<loaded_skill" not in rendered
+        assert rendered == "<observation>ok</observation>"
+
     def test_skills_formatted_like_attachments(self):
         """Test that skills and attachments are in the same context turn."""
         from tsugite.core.agent import TsugiteAgent

@@ -587,6 +587,15 @@ class TsugiteAgent:
                     content_blocks=turn.content_blocks,
                 )
 
+                # Migrate dynamically-loaded skills into the cached context turn so
+                # they survive compaction alongside auto-loaded skills.
+                if exec_result.loaded_skills:
+                    existing = {s.name for s in self.skills}
+                    for name, content in exec_result.loaded_skills.items():
+                        if name not in existing:
+                            self.skills.append(Skill(name=name, content=content))
+                            existing.add(name)
+
                 # Check if final_answer was called during execution
                 if exec_result.final_answer is not None:
                     # Agent is done!
@@ -901,31 +910,20 @@ class TsugiteAgent:
         return [{"type": "text", "text": "\n".join(text_parts)}] + blocks
 
     def _build_observation(self, step) -> str:
-        """Build observation with dynamically-loaded skills embedded.
+        """Build the observation string that replays as a user message.
 
-        Skills loaded mid-conversation via load_skill() are embedded in the
-        observation of the turn where they were loaded, keeping them visible
-        to the LLM without modifying system messages.
+        Dynamically-loaded skill content does not live here; it is promoted into
+        `self.skills` after each step so the cached context turn carries it
+        forward. That keeps skill content compaction-immune and avoids
+        duplicating large skill bodies in every turn's observation replay.
 
         Args:
-            step: StepResult with execution output and loaded_skills
+            step: StepResult with execution output
 
         Returns:
-            Observation string with embedded skills
+            Observation string (tool results, code output, errors).
         """
-        parts = []
-
-        # Embed skills loaded during this step
-        if step.loaded_skills:
-            for name, content in step.loaded_skills.items():
-                parts.append(f'<loaded_skill name="{name}">')
-                parts.append(content)
-                parts.append("</loaded_skill>")
-
-        # Regular XML observation
-        parts.append(step.xml_observation)
-
-        return "\n".join(parts)
+        return step.xml_observation
 
     def _build_messages(self) -> List[Dict]:
         """Build message list for LLM from memory.
