@@ -1116,26 +1116,20 @@ class TsugiteAgent:
         """Parse text content into thought, code, and content blocks."""
         cleaned, content_blocks = extract_content_blocks(content)
 
-        thought = ""
         code = ""
-
-        # Extract thought (everything before code block)
-        thought_start = cleaned.find("Thought:")
-        if thought_start != -1:
-            thought_start += len("Thought:")
-            code_block_start = cleaned.find("```python", thought_start)
-            if code_block_start != -1:
-                thought = cleaned[thought_start:code_block_start].strip()
-            else:
-                thought = cleaned[thought_start:].strip()
-
-        # Extract code block
         code_block_start = cleaned.find("```python")
         if code_block_start != -1:
             code_start = code_block_start + len("```python")
             code_end = cleaned.find("```", code_start)
             if code_end != -1:
                 code = cleaned[code_start:code_end].strip()
+
+        prose_end = code_block_start if code_block_start != -1 else len(cleaned)
+        thought_start = cleaned.find("Thought:")
+        if thought_start != -1:
+            thought = cleaned[thought_start + len("Thought:"):prose_end].strip()
+        else:
+            thought = cleaned[:prose_end].strip()
 
         return ParsedResponse(thought=thought, code=code, content_blocks=content_blocks)
 

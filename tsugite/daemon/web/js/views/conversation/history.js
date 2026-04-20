@@ -73,6 +73,8 @@ export const historyMixin = {
                 steps.push({ hasDetails: true, summary: `<code>${escapeHtml(item.name || 'result')}</code>`, content: item.content, open: false });
               } else if (item.type === 'content_block') {
                 steps.push({ html: contentBlockHtml(item.name, item.content) });
+              } else if (item.type === 'thought') {
+                steps.push({ hasDetails: true, summary: 'thought', content: item.content, open: false });
               }
             }
           }
@@ -140,9 +142,21 @@ export const historyMixin = {
   extractMessages(turn) {
     if (!turn.messages) return [];
     const items = [];
-    for (const msg of turn.messages) {
+    // _build_turn_messages appends the final_answer a second time as a trailing plain-text
+    // assistant message. It's already rendered as turn.assistant, so skip that duplicate here.
+    const lastIdx = turn.messages.length - 1;
+    const trailingFinal = turn.assistant && turn.messages[lastIdx]?.role === 'assistant'
+      && (turn.messages[lastIdx]?.content || '').trim() === (turn.assistant || '').trim();
+    for (let i = 0; i < turn.messages.length; i++) {
+      const msg = turn.messages[i];
       if (msg.role === 'assistant') {
-        const codeMatch = msg.content?.match(/```(?:python)?\n([\s\S]*?)```/);
+        const content = msg.content || '';
+        const codeMatch = content.match(/```(?:python)?\n([\s\S]*?)```/);
+        const isTrailingFinal = trailingFinal && i === lastIdx;
+        const prose = isTrailingFinal ? '' : content.replace(/```(?:python)?\n[\s\S]*?```/g, '').replace(/^Thought:\s*/i, '').trim();
+        if (prose) {
+          items.push({ type: 'thought', content: prose });
+        }
         if (codeMatch) {
           items.push({ type: 'tool_call', name: 'code', args: codeMatch[1] });
         }
@@ -158,11 +172,11 @@ export const historyMixin = {
           }
         }
       } else if (msg.role === 'user' && msg.content?.includes('<tsugite_execution_result')) {
-        const content = msg.content.replace(/<tsugite_execution_result[^>]*>|<\/tsugite_execution_result>/g, '').trim();
-        items.push({ type: 'tool_result', name: 'result', content: truncate(content) });
+        const body = msg.content.replace(/<tsugite_execution_result[^>]*>|<\/tsugite_execution_result>/g, '').trim();
+        items.push({ type: 'tool_result', name: 'result', content: truncate(body) });
       } else if (msg.role === 'tool') {
-        const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
-        items.push({ type: 'tool_result', name: msg.name || '', content: truncate(content) });
+        const toolContent = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+        items.push({ type: 'tool_result', name: msg.name || '', content: truncate(toolContent) });
       }
     }
     return items;

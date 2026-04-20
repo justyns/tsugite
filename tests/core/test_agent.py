@@ -458,6 +458,54 @@ final_answer(42)
 
 
 @pytest.mark.asyncio
+async def test_agent_parse_response_prose_only():
+    """Prose without a Thought: prefix or code block should be captured as thought."""
+    agent = TsugiteAgent(
+        model_string="openai:gpt-4o-mini",
+        tools=[],
+        instructions="",
+        max_turns=5,
+    )
+
+    parsed = agent._parse_response_from_text("You're welcome!")
+    assert parsed.thought == "You're welcome!"
+    assert parsed.code == ""
+
+
+@pytest.mark.asyncio
+async def test_agent_parse_response_prose_with_code_no_prefix():
+    """Prose preceding a code block (no Thought: prefix) should still be captured."""
+    agent = TsugiteAgent(
+        model_string="openai:gpt-4o-mini",
+        tools=[],
+        instructions="",
+        max_turns=5,
+    )
+
+    parsed = agent._parse_response_from_text(
+        "Sure thing.\n\n```python\nx = 1\nfinal_answer(x)\n```"
+    )
+    assert parsed.thought == "Sure thing."
+    assert "x = 1" in parsed.code
+    assert "final_answer(x)" in parsed.code
+
+
+@pytest.mark.asyncio
+async def test_agent_parse_response_code_only():
+    """A code-only response (no prose) should still yield empty thought."""
+    agent = TsugiteAgent(
+        model_string="openai:gpt-4o-mini",
+        tools=[],
+        instructions="",
+        max_turns=5,
+    )
+
+    parsed = agent._parse_response_from_text("```python\nfoo()\n```")
+    assert parsed.thought == ""
+    assert parsed.code == "foo()"
+
+
+@pytest.mark.asyncio
 async def test_agent_model_kwargs():
     """Test that model_kwargs are correctly filtered for reasoning models."""
     agent = TsugiteAgent(

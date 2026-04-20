@@ -129,9 +129,9 @@ class TestSaveRunToHistory:
             mock_parse.return_value = mock_agent
 
             # Create mock execution steps with tools_called
-            step1 = MagicMock()
+            step1 = MagicMock(spec=["tools_called"])
             step1.tools_called = ["read_file", "write_file"]
-            step2 = MagicMock()
+            step2 = MagicMock(spec=["tools_called"])
             step2.tools_called = ["web_search"]
 
             conv_id = save_run_to_history(
@@ -425,6 +425,7 @@ class TestBuildTurnMessages:
         """Content blocks on execution steps should be appended to assistant messages."""
         step = MagicMock()
         step.code = "print('hi')"
+        step.thought = ""
         step.xml_observation = "<result>ok</result>"
         step.content_blocks = {"summary": "This is a summary", "data": "col1,col2"}
 
@@ -456,6 +457,7 @@ class TestBuildTurnMessages:
         """Steps with empty content_blocks dict should not add anything."""
         step = MagicMock()
         step.code = "x = 1"
+        step.thought = ""
         step.xml_observation = ""
         step.content_blocks = {}
 
@@ -469,6 +471,7 @@ class TestBuildTurnMessages:
         """A step with only content blocks (no code) should still produce an assistant message."""
         step = MagicMock()
         step.code = ""
+        step.thought = ""
         step.xml_observation = '<tsugite_execution_result status="success"></tsugite_execution_result>'
         step.content_blocks = {"reply": "Stopped before creating anything."}
 
@@ -486,12 +489,47 @@ class TestBuildTurnMessages:
         # initial prompt + observation
         assert any("tsugite_execution_result" in m["content"] for m in user_msgs)
 
+    def test_thought_preserved_alongside_code(self):
+        """When a step has both thought and code, both should be recorded in the assistant message."""
+        step = MagicMock()
+        step.code = "x = 1"
+        step.thought = "I'll compute x."
+        step.xml_observation = "<result>1</result>"
+        step.content_blocks = {}
+
+        messages = _build_turn_messages("hi", "done", execution_steps=[step])
+
+        assistant_msgs = [m for m in messages if m["role"] == "assistant"]
+        step_msg = assistant_msgs[0]["content"]
+        assert "I'll compute x." in step_msg
+        assert "```python" in step_msg
+        assert "x = 1" in step_msg
+        assert step_msg.index("I'll compute x.") < step_msg.index("```python")
+
+    def test_prose_only_step_preserves_thought(self):
+        """A step with no code but a thought should still be recorded as an assistant message."""
+        step = MagicMock()
+        step.code = ""
+        step.thought = "You're welcome!"
+        step.xml_observation = (
+            '<tsugite_execution_result status="error"><error>Format Error</error></tsugite_execution_result>'
+        )
+        step.content_blocks = {}
+
+        messages = _build_turn_messages("thanks", "You're welcome!", execution_steps=[step])
+
+        assistant_msgs = [m for m in messages if m["role"] == "assistant"]
+        # step prose + final result
+        assert len(assistant_msgs) == 2
+        assert assistant_msgs[0]["content"] == "You're welcome!"
+
     def test_code_and_content_blocks_share_single_message(self):
         """Code and content blocks from the same step must live in one assistant message so renderers can pair them."""
         from tsugite.core.content_blocks import extract_content_blocks
 
         step = MagicMock()
         step.code = "write_file(path='out.md', content=doc)"
+        step.thought = ""
         step.xml_observation = ""
         step.content_blocks = {"doc": "hello"}
 

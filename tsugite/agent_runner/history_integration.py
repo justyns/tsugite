@@ -205,11 +205,14 @@ def _build_turn_messages(
 
     if execution_steps:
         for step in execution_steps:
-            code = getattr(step, "code", "")
-            xml_observation = getattr(step, "xml_observation", "")
+            code = getattr(step, "code", "") or ""
+            thought = getattr(step, "thought", "") or ""
+            xml_observation = getattr(step, "xml_observation", "") or ""
             content_blocks = getattr(step, "content_blocks", None) or {}
 
             parts = []
+            if thought:
+                parts.append(thought)
             if code:
                 parts.append(f"```python\n{code}\n```")
             if content_blocks:

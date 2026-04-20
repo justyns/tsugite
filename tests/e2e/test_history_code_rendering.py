@@ -172,3 +172,62 @@ def test_history_content_block_survives_no_code_turn(authenticated_page, e2e_ada
         content_blocks.first.click()
         pre_text = page.locator(".msg.progress .tool-steps details.content-block pre code").first.text_content()
         assert "Just a content block, no code." in pre_text
+
+
+def test_history_prose_only_assistant_message_renders(authenticated_page, e2e_adapter, e2e_tmp):
+    """An assistant message that is prose only (no code block) must still render on reload.
+
+    Mirrors the real stored shape from _build_turn_messages: a prose-only step (thought as
+    assistant message), then the format-error observation, then the corrected final_answer
+    code step, its observation, and finally the plain-text result assistant message.
+    """
+    page = authenticated_page
+
+    history_dir, user_id, session_id = _seed_isolated_turn(
+        page,
+        e2e_adapter,
+        e2e_tmp,
+        "prose",
+        messages=[
+            {"role": "user", "content": "thanks"},
+            {"role": "assistant", "content": "You're welcome!"},
+            {
+                "role": "user",
+                "content": (
+                    '<tsugite_execution_result status="error">'
+                    "<error>Format Error: You must respond with a Python code block.</error>"
+                    "</tsugite_execution_result>"
+                ),
+            },
+            {"role": "assistant", "content": '```python\nfinal_answer("You\'re welcome!")\n```'},
+            {
+                "role": "user",
+                "content": (
+                    '<tsugite_execution_result status="success">'
+                    "<output></output></tsugite_execution_result>"
+                ),
+            },
+            {"role": "assistant", "content": "You're welcome!"},
+        ],
+        final_answer="You're welcome!",
+    )
+
+    with patch("tsugite.daemon.adapters.http.get_history_dir", return_value=history_dir):
+        _open_progress_trace(page, user_id, session_id)
+
+        summaries = page.locator(".msg.progress .tool-steps > li details > summary")
+        labels = [summaries.nth(i).text_content() or "" for i in range(summaries.count())]
+        thought_hits = [i for i, s in enumerate(labels) if "thought" in s.lower()]
+        assert len(thought_hits) == 1, f"expected exactly one 'thought' step, got summaries: {labels}"
+
+        thought_idx = thought_hits[0]
+        result_hits = [i for i, s in enumerate(labels) if "result" in s.lower()]
+        assert result_hits, f"expected a result step, got summaries: {labels}"
+        assert thought_idx < result_hits[0], (
+            f"thought must appear before the format-error result, got: {labels}"
+        )
+
+        thought_details = page.locator(".msg.progress .tool-steps > li details").nth(thought_idx)
+        thought_details.click()
+        thought_text = thought_details.locator("pre code").first.text_content()
+        assert "You're welcome!" in thought_text
