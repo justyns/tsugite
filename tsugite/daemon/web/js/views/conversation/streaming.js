@@ -41,7 +41,7 @@ export const streamingMixin = {
       this._resetInputHeight();
       this.showCommandSuggestions = false;
       this.messages.push({ type: 'user', text: msg });
-      this.scrollMessages();
+      this.scrollMessages(true);
       try {
         const result = await this._runCommand(parsed.command, parsed.args);
         this.messages.push({ type: 'agent', text: result });
@@ -49,7 +49,7 @@ export const streamingMixin = {
         this.messages.push({ type: 'error', text: `Command error: ${e.message}` });
       } finally {
         this.sending = false;
-        this.scrollMessages();
+        this.scrollMessages(true);
       }
       return;
     }
@@ -84,7 +84,7 @@ export const streamingMixin = {
     const displayMsg = fileNames.length ? `${msg || ''}\n📎 ${fileNames.join(', ')}`.trim() : msg;
     this.messages.push({ type: 'user', text: displayMsg });
 
-    this.scrollMessages();
+    this.scrollMessages(true);
 
     const progressIdx = this.messages.length;
     this.messages.push({ type: 'progress', steps: [], statusText: 'Working...', turnCount: 0, toolCount: 0 });
@@ -124,7 +124,7 @@ export const streamingMixin = {
               answer: '',
               inputValue: '',
             });
-            this.scrollMessages();
+            this.scrollMessages(true);
           } else if (event.type === 'reaction') {
             for (let i = this.messages.length - 1; i >= 0; i--) {
               if (this.messages[i].type === 'user') {

@@ -327,3 +327,61 @@ main { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
   z-index: 1000;
 }
 .update-toast .btn-dismiss { padding: 3px 8px; font-size: 14px; line-height: 1; }
+
+/* General-purpose toast stack (dispatched via window event 'tsugite:toast') */
+.toast-stack {
+  position: fixed; right: 16px; bottom: 16px;
+  display: flex; flex-direction: column; gap: 6px;
+  z-index: 1000; pointer-events: none;
+}
+.toast {
+  padding: 8px 12px; border-radius: 6px;
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-left: 3px solid var(--border);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+  font-size: 13px; pointer-events: auto;
+}
+.toast-success { border-left-color: var(--ok); }
+.toast-error { border-left-color: var(--error); }
+
+/* Per-message copy button (hover action) */
+.msg { position: relative; }
+.msg-copy {
+  position: absolute; top: 4px; right: 4px;
+  width: 24px; height: 24px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border); background: var(--surface);
+  color: var(--muted); border-radius: 4px;
+  font-size: 13px; line-height: 1; cursor: pointer;
+  opacity: 0; transition: opacity 0.12s, color 0.12s;
+}
+.msg:hover .msg-copy,
+.msg-copy:focus-visible { opacity: 1; }
+.msg-copy:hover { color: var(--accent); }
+
+/* Per-code-block copy button (injected by renderMarkdown) */
+.msg pre { position: relative; }
+.msg pre .copy-code {
+  position: absolute; top: 6px; right: 6px;
+  width: 22px; height: 22px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border); background: var(--surface);
+  color: var(--muted); border-radius: 4px;
+  font-size: 12px; line-height: 1; cursor: pointer;
+  opacity: 0; transition: opacity 0.12s, color 0.12s;
+}
+.msg pre:hover .copy-code,
+.msg pre .copy-code:focus-visible { opacity: 1; }
+.msg pre .copy-code:hover { color: var(--accent); }
+
+/* Scroll-to-bottom FAB */
+.scroll-fab {
+  position: absolute; bottom: 72px; right: 16px;
+  width: 32px; height: 32px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border); background: var(--surface);
+  color: var(--accent); border-radius: 50%;
+  font-size: 16px; line-height: 1; cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15); z-index: 5;
+}
+.scroll-fab:hover { background: var(--bg); }

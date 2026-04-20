@@ -92,7 +92,7 @@ export const historyMixin = {
         this._showRecentHistory();
       }
     } catch { /* ignore */ }
-    this.scrollMessages();
+    this.scrollMessages(true);
   },
 
   _showRecentHistory() {

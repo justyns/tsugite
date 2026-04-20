@@ -235,8 +235,10 @@
 
         <!-- Session chat UI -->
         <template x-if="selectedSessionId">
-          <div style="display:flex;flex-direction:column;flex:1;min-height:0">
-            <div id="messages" x-ref="messages">
+          <div style="display:flex;flex-direction:column;flex:1;min-height:0;position:relative">
+            <div id="messages" x-ref="messages"
+                 @scroll.passive="onMessagesScroll()"
+                 @click="handleMessagesClick($event)">
               <template x-if="compactionSummary">
                 <div class="compaction-banner">
                   <div class="compaction-banner-header">
@@ -278,6 +280,9 @@
                   </template>
                   <template x-if="msg.type === 'user'">
                     <div class="msg user">
+                      <button class="msg-copy" type="button"
+                              @click="copyMessage(msg.text)"
+                              title="Copy markdown" aria-label="Copy markdown">&#10697;</button>
                       <div x-html="renderHtml(msg.text)"></div>
                       <template x-if="msg.reactions && msg.reactions.length">
                         <div class="msg-reactions">
@@ -290,6 +295,9 @@
                   </template>
                   <template x-if="msg.type === 'agent'">
                     <div class="msg agent">
+                      <button class="msg-copy" type="button"
+                              @click="copyMessage(msg.text)"
+                              title="Copy markdown" aria-label="Copy markdown">&#10697;</button>
                       <div x-html="renderHtml(msg.text)"></div>
                     </div>
                   </template>
@@ -381,6 +389,11 @@
                 </div>
               </template>
             </div>
+
+            <button class="scroll-fab" type="button"
+                    x-show="!isAtBottom" x-transition.opacity
+                    @click="scrollMessages(true)"
+                    title="Scroll to latest" aria-label="Scroll to latest">&#8595;</button>
 
             <div id="status-bar" x-show="isActiveSession && statusParts.length > 0">
               <template x-for="(part, i) in statusParts" :key="i">
@@ -1214,6 +1227,20 @@
   <span>New version available</span>
   <button class="btn-sm" @click="window.tsugiteApplyUpdate && window.tsugiteApplyUpdate()">Reload</button>
   <button class="btn-sm btn-dismiss" @click="show = false" aria-label="Dismiss">&times;</button>
+</div>
+
+<!-- Toast stack: dispatched via window event 'tsugite:toast' with detail { text, kind, duration } -->
+<div class="toast-stack"
+     x-data="{ toasts: [] }"
+     @tsugite:toast.window="
+       const id = Date.now() + Math.random();
+       const duration = $event.detail.duration || 2200;
+       toasts.push({ id, text: $event.detail.text, kind: $event.detail.kind || 'success' });
+       setTimeout(() => { toasts = toasts.filter(x => x.id !== id); }, duration);
+     ">
+  <template x-for="t in toasts" :key="t.id">
+    <div class="toast" :class="'toast-' + t.kind" x-transition.opacity x-text="t.text"></div>
+  </template>
 </div>
 
 <!-- Auth prompt -->

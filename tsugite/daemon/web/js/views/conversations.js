@@ -1,5 +1,5 @@
 import { get, post } from '../api.js';
-import { escapeHtml, renderMarkdown, scrollToBottom, formatDate, stateBadgeClass } from '../utils.js';
+import { escapeHtml, renderMarkdown, scrollToBottom, formatDate, stateBadgeClass, copyText } from '../utils.js';
 import { sessionsMixin } from './conversation/sessions.js';
 import { historyMixin } from './conversation/history.js';
 import { attachmentsMixin } from './conversation/attachments.js';
@@ -276,10 +276,34 @@ export default () => ({
   formatDate(iso) { return formatDate(iso) || '—'; },
   stateBadge(state) { return stateBadgeClass(state); },
 
-  scrollMessages() {
+  // User-initiated copy of a message's raw markdown
+  copyMessage(text) { copyText(text); },
+
+  // Delegated click handler on #messages — catches .copy-code buttons
+  // injected by renderMarkdown (Alpine can't bind handlers to x-html content).
+  handleMessagesClick(e) {
+    const btn = e.target.closest('.copy-code');
+    if (!btn) return;
+    const pre = btn.closest('pre');
+    const code = pre && pre.querySelector('code');
+    if (!code) return;
+    // textContent preserves exact whitespace; innerText collapses it.
+    copyText(code.textContent);
+  },
+
+  isAtBottom: true,
+
+  onMessagesScroll() {
+    const el = this.$refs.messages;
+    if (!el) return;
+    this.isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+  },
+
+  scrollMessages(force = false) {
     this.$nextTick(() => {
       const el = this.$refs.messages;
-      if (el) scrollToBottom(el);
+      if (!el) return;
+      if (force || this.isAtBottom) scrollToBottom(el);
     });
   },
 
