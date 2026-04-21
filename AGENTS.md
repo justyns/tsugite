@@ -320,9 +320,26 @@ tsu run -f image1.jpg -f image2.jpg "Compare these images"
 
 ## Testing Strategy
 
-- **TDD preferred**: Write tests first when building new features. Tests don't need to be elaborate — simple tests that verify the expected behavior are enough. This creates a fast feedback loop and catches integration issues early (e.g., contextvar propagation, tool registration) before manual testing.
+### TDD is the default
+
+For any non-trivial bug fix or feature, write a failing test **first**. Exceptions: typo fixes, docs, pure refactors, and changes the user has explicitly scoped as exploratory.
+
+The workflow:
+
+1. **Reproduce before fixing.** Write the smallest test that demonstrates the symptom as reported. Run it. If it passes on master, the hypothesis is wrong — do not write a fix. Investigate further, ask the user for more detail, or add logging.
+2. **Implement the fix.** Keep the change minimal. Do not refactor or add adjacent cleanup in the same diff.
+3. **Verify the test is load-bearing.** Temp-revert the production change and re-run. The test must go red again. If it still passes, the test isn't actually exercising the fix — rework it.
+4. **Cover adjacent cases before declaring done.** When touching a parser, protocol boundary, or state machine, enumerate at least two adjacent input shapes and add tests for them. Narrow tests let bugs sneak in through the cases you didn't think about.
+5. **Run the local regression suite.** At minimum, the test files next to the modules you changed. Faster than running everything, catches silent breakage of existing tests.
+6. **Honest uncertainty.** If a hypothesis doesn't reproduce, say so. Don't ship a "probably-this" fix with no failing test to anchor it — that's how placebo fixes get merged.
+
+Reproducing tests don't need to be elaborate. A 10-line test that flips red→green is worth more than a 100-line one that nobody understands.
+
+### Test layers
+
 - **Unit tests**: Individual functions and classes
 - **Pipeline tests**: Mock only `TsugiteAgent`/`litellm.acompletion` but exercise the full pipeline (parsing → rendering → preparation → tool expansion → execution). Most tests in the suite are this style.
+- **Integration tests**: Live under `tests/integration/` (not collected by default — see `pyproject.toml` `norecursedirs`). Run explicitly with `uv run pytest tests/integration/`. Good for concurrency, cwd, and daemon-wiring tests that need real threading or a real workspace.
 - **Smoke tests**: `tests/smoke_test.sh` hits a real LLM API (requires `OPENAI_API_KEY`, not run in CI)
 - **Fixtures**: `conftest.py` provides shared test data
 - **Mocking**: Use `@pytest.fixture` for LLM responses
