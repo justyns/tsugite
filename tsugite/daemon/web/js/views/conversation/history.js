@@ -1,5 +1,5 @@
 import { get } from '../../api.js';
-import { escapeHtml, contentBlockHtml, truncate, decodeXmlEntities } from '../../utils.js';
+import { escapeHtml, contentBlockHtml, decodeXmlEntities } from '../../utils.js';
 
 export const historyMixin = {
   _allHistoryMessages: [],
@@ -180,10 +180,10 @@ export const historyMixin = {
           .replace(/<tsugite_execution_result[^>]*>|<\/tsugite_execution_result>/g, '')
           .replace(/<\/?(output|error|traceback|variables_set|truncated_to|final_answer)>/g, '')
           .trim();
-        items.push({ type: 'tool_result', name: 'result', content: truncate(decodeXmlEntities(body)) });
+        items.push({ type: 'tool_result', name: 'result', content: decodeXmlEntities(body) });
       } else if (msg.role === 'tool') {
         const toolContent = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
-        items.push({ type: 'tool_result', name: msg.name || '', content: truncate(toolContent) });
+        items.push({ type: 'tool_result', name: msg.name || '', content: toolContent });
       }
     }
     return items;

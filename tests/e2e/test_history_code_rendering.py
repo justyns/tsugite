@@ -189,6 +189,55 @@ def test_history_tool_result_unescapes_xml_entities(authenticated_page, e2e_adap
     )
 
 
+def test_history_tool_result_not_truncated(authenticated_page, e2e_adapter, e2e_tmp):
+    """Large tool_result outputs (e.g. git log, issue listings) must not be
+    chopped off at an arbitrary 500-char limit when viewing history. The
+    live-stream view shows full content; history must too.
+    """
+    page = authenticated_page
+
+    lines = [f"commit-{i:04d}|2026-04-{(i % 28) + 1:02d}|some commit message here" for i in range(40)]
+    full_output = "\n".join(lines)
+    assert len(full_output) > 1500, "fixture must exceed the old 500-char cap"
+    head_line = lines[0]
+    tail_line = lines[-1]
+
+    observation = (
+        '<tsugite_execution_result status="success" duration_ms="3">'
+        f"<output>{full_output}</output>"
+        "</tsugite_execution_result>"
+    )
+    history_dir, user_id, session_id = _seed_isolated_turn(
+        page,
+        e2e_adapter,
+        e2e_tmp,
+        "notrunc",
+        messages=[
+            {"role": "user", "content": "go"},
+            {"role": "assistant", "content": "```python\nprint('hi')\n```"},
+            {"role": "user", "content": observation},
+            {"role": "assistant", "content": "```python\nfinal_answer('done')\n```"},
+        ],
+    )
+
+    with patch("tsugite.daemon.adapters.http.get_history_dir", return_value=history_dir):
+        _open_progress_trace(page, user_id, session_id)
+        result_details = page.locator(".msg.progress .tool-steps > li details").filter(
+            has=page.locator("summary", has_text="result")
+        ).first
+        result_details.click()
+        text = page.locator(
+            ".msg.progress .tool-steps > li details pre code"
+        ).filter(has_text="commit-0000").first.text_content() or ""
+
+    assert head_line in text, f"first line missing. Got first 200: {text[:200]!r}"
+    assert tail_line in text, (
+        f"last line missing — content was truncated before the end. "
+        f"Got last 200: {text[-200:]!r}"
+    )
+    assert "..." not in text[-10:], f"trailing ellipsis suggests truncation. Tail: {text[-50:]!r}"
+
+
 def test_history_content_block_survives_no_code_turn(authenticated_page, e2e_adapter, e2e_tmp):
     """A sub-turn that only emitted content blocks (no code) must still render them after reload."""
     page = authenticated_page
