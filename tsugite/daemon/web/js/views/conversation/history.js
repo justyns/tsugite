@@ -1,5 +1,5 @@
 import { get } from '../../api.js';
-import { escapeHtml, contentBlockHtml, truncate } from '../../utils.js';
+import { escapeHtml, contentBlockHtml, truncate, decodeXmlEntities } from '../../utils.js';
 
 export const historyMixin = {
   _allHistoryMessages: [],
@@ -172,8 +172,15 @@ export const historyMixin = {
           }
         }
       } else if (msg.role === 'user' && msg.content?.includes('<tsugite_execution_result')) {
-        const body = msg.content.replace(/<tsugite_execution_result[^>]*>|<\/tsugite_execution_result>/g, '').trim();
-        items.push({ type: 'tool_result', name: 'result', content: truncate(body) });
+        // The execution result XML wraps stdout/error/etc. in inner tags with
+        // xml.sax.saxutils-escaped payloads (produced by executor.to_xml). Strip
+        // both the outer envelope and the inner tags, then decode the entities
+        // so the user sees the raw output (e.g. ">" not "&gt;").
+        const body = msg.content
+          .replace(/<tsugite_execution_result[^>]*>|<\/tsugite_execution_result>/g, '')
+          .replace(/<\/?(output|error|traceback|variables_set|truncated_to|final_answer)>/g, '')
+          .trim();
+        items.push({ type: 'tool_result', name: 'result', content: truncate(decodeXmlEntities(body)) });
       } else if (msg.role === 'tool') {
         const toolContent = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
         items.push({ type: 'tool_result', name: msg.name || '', content: truncate(toolContent) });

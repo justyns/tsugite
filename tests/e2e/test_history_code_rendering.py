@@ -142,6 +142,53 @@ def test_history_tool_result_visible_between_code_steps(authenticated_page, e2e_
     assert code_hits[0] < result_hits[0] < code_hits[1]
 
 
+def test_history_tool_result_unescapes_xml_entities(authenticated_page, e2e_adapter, e2e_tmp):
+    """The tsugite_execution_result XML envelope escapes <, >, & in <output>.
+
+    When this gets rendered in the history view's tool_result step, the UI
+    must decode those entities back to their literal characters — otherwise
+    the user sees "#179 -&gt; #179" instead of "#179 -> #179".
+    """
+    page = authenticated_page
+
+    # Raw stdout would be:  a -> b  <tag>  x & y
+    # After executor.to_xml escaping:  a -&gt; b  &lt;tag&gt;  x &amp; y
+    observation = (
+        '<tsugite_execution_result status="success" duration_ms="7">'
+        "<output>a -&gt; b  &lt;tag&gt;  x &amp; y</output>"
+        "</tsugite_execution_result>"
+    )
+    history_dir, user_id, session_id = _seed_isolated_turn(
+        page,
+        e2e_adapter,
+        e2e_tmp,
+        "entities",
+        messages=[
+            {"role": "user", "content": "go"},
+            {"role": "assistant", "content": "```python\nprint('hi')\n```"},
+            {"role": "user", "content": observation},
+            {"role": "assistant", "content": "```python\nfinal_answer('done')\n```"},
+        ],
+    )
+
+    with patch("tsugite.daemon.adapters.http.get_history_dir", return_value=history_dir):
+        _open_progress_trace(page, user_id, session_id)
+        result_details = page.locator(".msg.progress .tool-steps > li details").filter(
+            has=page.locator("summary", has_text="result")
+        ).first
+        result_details.click()
+        text = page.locator(
+            ".msg.progress .tool-steps > li details pre code"
+        ).filter(has_text="a ").first.text_content() or ""
+
+    assert "a -> b" in text, f"HTML entity &gt; not decoded. Got: {text!r}"
+    assert "<tag>" in text, f"HTML entities &lt;/&gt; not decoded. Got: {text!r}"
+    assert "x & y" in text, f"HTML entity &amp; not decoded. Got: {text!r}"
+    assert "&gt;" not in text and "&lt;" not in text and "&amp;" not in text, (
+        f"Literal entity text still present. Got: {text!r}"
+    )
+
+
 def test_history_content_block_survives_no_code_turn(authenticated_page, e2e_adapter, e2e_tmp):
     """A sub-turn that only emitted content blocks (no code) must still render them after reload."""
     page = authenticated_page
