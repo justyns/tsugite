@@ -385,6 +385,39 @@ final_answer(42)
 
 
 @pytest.mark.asyncio
+async def test_llm_message_does_not_contain_code_fence(event_bus_with_handler):
+    """When the LLM response is code-only (no prose thought), the emitted
+    LLMMessageEvent must NOT contain the raw markdown code fence.  Otherwise
+    the UI renders the code block twice: once inside the "thought" markdown,
+    and once as a separate code-execution event.
+    """
+    event_bus, mock_ui_handler = event_bus_with_handler
+
+    agent = TsugiteAgent(
+        model_string="openai:gpt-4o-mini",
+        tools=[],
+        instructions="",
+        max_turns=5,
+        event_bus=event_bus,
+    )
+    _patch_provider(
+        agent,
+        return_value=_resp("```python\nfinal_answer(42)\n```"),
+    )
+
+    await agent.run("Test task")
+
+    llm_message_events = [
+        e["event_obj"] for e in mock_ui_handler.events if e["event"] == EventType.LLM_MESSAGE
+    ]
+    for ev in llm_message_events:
+        assert "```python" not in ev.content, (
+            f"LLMMessageEvent carried a code fence as its thought content. "
+            f"This causes the UI to render the code block twice. content={ev.content!r}"
+        )
+
+
+@pytest.mark.asyncio
 async def test_ui_event_error_on_no_code_generation(event_bus_with_handler):
     event_bus, mock_ui_handler = event_bus_with_handler
 

@@ -788,10 +788,15 @@ class TsugiteAgent:
                 self.event_bus.emit(ReasoningTokensEvent(tokens=response.usage.reasoning_tokens, step=turn_num + 1))
 
         if self.event_bus:
-            display_content = parsed.thought if parsed.thought else response.content
-            if display_content and display_content.strip():
+            # Only emit thought prose. Falling back to response.content would
+            # include the raw ```python fence in the event, causing the UI to
+            # render the code block twice (once inside the thought markdown,
+            # once as a separate code-execution event).
+            if parsed.thought and parsed.thought.strip():
                 self.event_bus.emit(
-                    LLMMessageEvent(content=display_content, title=f"Turn {turn_num + 1} Reasoning", step=turn_num + 1)
+                    LLMMessageEvent(
+                        content=parsed.thought, title=f"Turn {turn_num + 1} Reasoning", step=turn_num + 1
+                    )
                 )
 
         return TurnResult(
@@ -1120,7 +1125,11 @@ class TsugiteAgent:
         code_block_start = cleaned.find("```python")
         if code_block_start != -1:
             code_start = code_block_start + len("```python")
-            code_end = cleaned.find("```", code_start)
+            # Use the LAST closing fence on its own line (rfind of "\n```") so
+            # inline triple-backticks inside string literals do not truncate
+            # the code — e.g. when the LLM builds a GitHub comment body that
+            # contains a markdown code block.
+            code_end = cleaned.rfind("\n```", code_start)
             if code_end != -1:
                 code = cleaned[code_start:code_end].strip()
 

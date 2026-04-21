@@ -506,6 +506,58 @@ async def test_agent_parse_response_code_only():
 
 
 @pytest.mark.asyncio
+async def test_agent_parse_response_code_with_inner_backticks():
+    """Code containing a triple-backtick inside a string literal must not be
+    truncated. Seen in practice when the LLM writes a GitHub comment body that
+    includes a markdown code block as part of the string payload.
+    """
+    agent = TsugiteAgent(
+        model_string="openai:gpt-4o-mini",
+        tools=[],
+        instructions="",
+        max_turns=5,
+    )
+
+    llm_response = (
+        "Posting a comment.\n\n"
+        "```python\n"
+        'comment_body = "See example:\\n\\n```python\\nx = 1\\n```\\nthat is all."\n'
+        "post_comment(comment_body)\n"
+        "```"
+    )
+
+    parsed = agent._parse_response_from_text(llm_response)
+
+    assert "post_comment(comment_body)" in parsed.code, (
+        f"Parser truncated code at an inner backtick. Got: {parsed.code!r}"
+    )
+    assert 'x = 1' in parsed.code
+
+
+@pytest.mark.asyncio
+async def test_agent_parse_response_code_only_thought_is_empty_not_full():
+    """For a code-only response, parsed.thought must be empty string — NOT the
+    full response content. Otherwise the UI renders the code block twice: once
+    as markdown-inside-thought, once as a separate code event.
+    """
+    agent = TsugiteAgent(
+        model_string="openai:gpt-4o-mini",
+        tools=[],
+        instructions="",
+        max_turns=5,
+    )
+
+    parsed = agent._parse_response_from_text("```python\nfoo()\n```")
+    # The existing test covers this field.
+    assert parsed.thought == ""
+    # The fallback in agent.py that emits response.content when thought is
+    # empty is what causes the double-render; this guard catches regressions
+    # where thought is accidentally populated with the code fence.
+    assert "```" not in parsed.thought
+    assert "foo()" not in parsed.thought
+
+
+@pytest.mark.asyncio
 async def test_agent_model_kwargs():
     """Test that model_kwargs are correctly filtered for reasoning models."""
     agent = TsugiteAgent(
