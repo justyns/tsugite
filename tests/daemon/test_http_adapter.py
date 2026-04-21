@@ -517,6 +517,55 @@ class TestSSEProgressHandler:
         handler.done = True
         assert handler.done is True
 
+    def test_cross_thread_emit_then_signal_done_preserves_event(self):
+        """H2: `_emit` from a worker thread schedules `queue.put_nowait` via
+        `call_soon_threadsafe`. If `signal_done()` runs on the loop before the
+        scheduled callback fires, the final event may never reach the drain
+        loop.  Reproduce this by emitting from a thread and *immediately*
+        signalling done on the loop, repeated many times.
+        """
+        import asyncio
+        import threading
+
+        async def _run() -> list[dict]:
+            loop = asyncio.get_running_loop()
+            missed: list[int] = []
+
+            for i in range(200):
+                handler = SSEProgressHandler()
+                handler.set_loop(loop)
+
+                emit_scheduled = threading.Event()
+
+                def worker(idx: int = i):
+                    handler._emit("final_result", {"result": f"answer-{idx}"})
+                    emit_scheduled.set()
+
+                thread = threading.Thread(target=worker)
+                thread.start()
+                # Wait for the thread to finish calling _emit — the
+                # call_soon_threadsafe callback may still be pending on the
+                # loop at this point.
+                emit_scheduled.wait()
+                thread.join()
+                handler.signal_done()
+
+                seen: list[dict] = []
+                async for chunk in handler.event_generator():
+                    if chunk.startswith("data: ") and "final_result" in chunk:
+                        seen.append(chunk)
+
+                if not seen:
+                    missed.append(i)
+
+            return missed
+
+        missed = asyncio.run(_run())
+        assert not missed, (
+            f"SSE race dropped {len(missed)}/200 final_result events under "
+            f"cross-thread emit + signal_done contention"
+        )
+
 
 class TestHTTPConfig:
     def test_config_defaults(self):

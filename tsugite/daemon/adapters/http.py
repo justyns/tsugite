@@ -281,7 +281,7 @@ class SSEProgressHandler(JSONLUIHandler):
         else:
             self.queue.put_nowait(payload)
 
-        if event_type in ("prompt_snapshot", "reaction") and self._persist_event:
+        if event_type in ("prompt_snapshot", "reaction", "final_result", "error", "cancelled") and self._persist_event:
             self._persist_event(payload)
 
     def signal_done(self):
@@ -301,7 +301,11 @@ class SSEProgressHandler(JSONLUIHandler):
             if data is None:
                 break
             yield f"data: {json.dumps(data)}\n\n"
-        # Drain remaining
+        # Yield once so any pending call_soon_threadsafe(put_nowait) callbacks
+        # scheduled from worker threads get a chance to land in the queue before
+        # we drain. Without this, events emitted just before signal_done can
+        # race past the drain and be silently dropped.
+        await asyncio.sleep(0)
         while not self.queue.empty():
             data = self.queue.get_nowait()
             if data is not None:

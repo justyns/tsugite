@@ -27,6 +27,19 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Process-wide lock serializing agent runs that os.chdir into a workspace.
+# os.chdir is a global mutation on Linux, so concurrent runs would otherwise
+# clobber each other's cwd and file/git tool calls would see the wrong
+# workspace.
+_cwd_lock: Optional[asyncio.Lock] = None
+
+
+def _get_cwd_lock() -> asyncio.Lock:
+    global _cwd_lock
+    if _cwd_lock is None:
+        _cwd_lock = asyncio.Lock()
+    return _cwd_lock
+
 
 def _is_recent(iso_timestamp: str, minutes: int = 10, now: datetime = None) -> bool:
     """Check if an ISO timestamp is within the last N minutes."""
@@ -495,14 +508,17 @@ class BaseAdapter(ABC):
                 os.chdir(original_cwd)
 
         ctx = contextvars.copy_context()
+        cwd_lock = _get_cwd_lock()
         try:
-            result = await asyncio.to_thread(ctx.run, run_in_workspace)
+            async with cwd_lock:
+                result = await asyncio.to_thread(ctx.run, run_in_workspace)
         except AgentExecutionError as e:
             if "prompt too long" in str(e).lower() and not conv_id_override:
                 logger.warning("[%s] Prompt too long, auto-compacting and retrying", self.agent_name)
                 conv_id = await self._run_compaction(user_id, conv_id, custom_logger, reason="prompt_too_long")
                 ctx = contextvars.copy_context()
-                result = await asyncio.to_thread(ctx.run, run_in_workspace)
+                async with cwd_lock:
+                    result = await asyncio.to_thread(ctx.run, run_in_workspace)
             else:
                 error_result = f"[Error: {e}]\n\n{e.partial_output}" if e.partial_output else f"[Error: {e}]"
                 self._save_history(

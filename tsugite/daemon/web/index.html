@@ -298,7 +298,12 @@
                       <button class="msg-copy" type="button"
                               @click="copyMessage(msg.text)"
                               title="Copy markdown" aria-label="Copy markdown">&#10697;</button>
-                      <div x-html="renderHtml(msg.text)"></div>
+                      <template x-if="msg.text">
+                        <div x-html="renderHtml(msg.text)"></div>
+                      </template>
+                      <template x-if="!msg.text">
+                        <div class="muted"><em>(empty response)</em></div>
+                      </template>
                     </div>
                   </template>
                   <template x-if="msg.type === 'error'">
