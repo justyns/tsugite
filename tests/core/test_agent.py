@@ -535,6 +535,38 @@ async def test_agent_parse_response_code_with_inner_backticks():
 
 
 @pytest.mark.asyncio
+async def test_agent_parse_response_multiple_code_blocks_extracts_first():
+    """If the LLM emits more than one ```python block in a single response,
+    only the FIRST block should be extracted — the parser must not concatenate
+    the blocks together with the intervening close/open fences, which would
+    produce invalid Python ("``` on its own line" as stray tokens).
+    """
+    agent = TsugiteAgent(
+        model_string="openai:gpt-4o-mini",
+        tools=[],
+        instructions="",
+        max_turns=5,
+    )
+
+    parsed = agent._parse_response_from_text(
+        "First thought.\n\n"
+        "```python\n"
+        "x = 1\n"
+        "```\n\n"
+        "More thoughts.\n\n"
+        "```python\n"
+        "y = 2\n"
+        "```"
+    )
+
+    assert parsed.code == "x = 1", (
+        f"Parser concatenated multiple code blocks. Got: {parsed.code!r}"
+    )
+    assert "```" not in parsed.code
+    assert "y = 2" not in parsed.code
+
+
+@pytest.mark.asyncio
 async def test_agent_parse_response_code_only_thought_is_empty_not_full():
     """For a code-only response, parsed.thought must be empty string — NOT the
     full response content. Otherwise the UI renders the code block twice: once

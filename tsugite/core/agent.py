@@ -1125,11 +1125,13 @@ class TsugiteAgent:
         code_block_start = cleaned.find("```python")
         if code_block_start != -1:
             code_start = code_block_start + len("```python")
-            # Use the LAST closing fence on its own line (rfind of "\n```") so
-            # inline triple-backticks inside string literals do not truncate
-            # the code — e.g. when the LLM builds a GitHub comment body that
-            # contains a markdown code block.
-            code_end = cleaned.rfind("\n```", code_start)
+            # Find the FIRST close fence on its own line (a newline immediately
+            # followed by ```). Triple-backticks that appear inside a Python
+            # string literal are written as "\n" escape sequences, not real
+            # newlines, so requiring a real preceding newline correctly skips
+            # them. Using find (not rfind) also ensures we only take the first
+            # code block if the LLM accidentally emits more than one.
+            code_end = cleaned.find("\n```", code_start)
             if code_end != -1:
                 code = cleaned[code_start:code_end].strip()
 
