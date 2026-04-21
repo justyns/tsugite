@@ -84,11 +84,11 @@ class TestContentBlocksIntegration:
     """Integration tests with mock LLM."""
 
     @pytest.mark.asyncio
-    async def test_content_block_write_file(self, mock_provider, mock_litellm_response):
+    async def test_content_block_write_file(self, mock_provider, mock_completion_response):
         with tempfile.TemporaryDirectory() as tmpdir:
             outfile = os.path.join(tmpdir, "output.py")
 
-            mock_provider.acompletion.return_value = mock_litellm_response(
+            mock_provider.acompletion.return_value = mock_completion_response(
                 "Thought: Writing a Python file\n\n"
                 "```python\n"
                 f'write_file("{outfile}", content=py_code)\n'
@@ -124,12 +124,12 @@ class TestContentBlocksIntegration:
             assert 'print("hello")' in written
 
     @pytest.mark.asyncio
-    async def test_content_block_edit_file(self, mock_provider, mock_litellm_response):
+    async def test_content_block_edit_file(self, mock_provider, mock_completion_response):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = os.path.join(tmpdir, "target.py")
             Path(target).write_text('def foo():\n    """old docstring"""\n    pass\n')
 
-            mock_provider.acompletion.return_value = mock_litellm_response(
+            mock_provider.acompletion.return_value = mock_completion_response(
                 "Thought: Editing the file\n\n"
                 "```python\n"
                 f'result = edit_file("{target}", old_string=old, new_string=new)\n'
@@ -169,14 +169,14 @@ class TestContentBlocksIntegration:
             assert "```backticks```" in edited
 
     @pytest.mark.asyncio
-    async def test_content_blocks_in_memory(self, mock_provider, mock_litellm_response):
+    async def test_content_blocks_in_memory(self, mock_provider, mock_completion_response):
         call_count = 0
 
         async def mock_acompletion(*args, **kwargs):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                return mock_litellm_response(
+                return mock_completion_response(
                     "Thought: Setting up\n\n"
                     "```python\n"
                     "print(my_data)\n"
@@ -184,7 +184,7 @@ class TestContentBlocksIntegration:
                     '<content name="my_data">\ntest content\n</content>'
                 )
             else:
-                return mock_litellm_response('```python\nfinal_answer("done")\n```')
+                return mock_completion_response('```python\nfinal_answer("done")\n```')
 
         mock_provider.acompletion.side_effect = mock_acompletion
 
@@ -205,18 +205,18 @@ class TestContentBlocksIntegration:
         assert any('<content name="my_data">' in m["content"] for m in assistant_msgs)
 
     @pytest.mark.asyncio
-    async def test_content_block_variable_persists(self, mock_provider, mock_litellm_response):
+    async def test_content_block_variable_persists(self, mock_provider, mock_completion_response):
         call_count = 0
 
         async def mock_acompletion(*args, **kwargs):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                return mock_litellm_response(
+                return mock_completion_response(
                     '```python\nprint(data)\n```\n\n<content name="data">\npersisted value\n</content>'
                 )
             else:
-                return mock_litellm_response("```python\nfinal_answer(data)\n```")
+                return mock_completion_response("```python\nfinal_answer(data)\n```")
 
         mock_provider.acompletion.side_effect = mock_acompletion
 
@@ -233,12 +233,12 @@ class TestContentBlocksIntegration:
         assert result == "persisted value"
 
     @pytest.mark.asyncio
-    async def test_multiple_content_blocks_same_turn(self, mock_provider, mock_litellm_response):
+    async def test_multiple_content_blocks_same_turn(self, mock_provider, mock_completion_response):
         with tempfile.TemporaryDirectory() as tmpdir:
             file_a = os.path.join(tmpdir, "a.txt")
             file_b = os.path.join(tmpdir, "b.txt")
 
-            mock_provider.acompletion.return_value = mock_litellm_response(
+            mock_provider.acompletion.return_value = mock_completion_response(
                 "```python\n"
                 f'write_file("{file_a}", content=content_a)\n'
                 f'write_file("{file_b}", content=content_b)\n'

@@ -90,7 +90,7 @@ class Turn(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     type: Literal["turn"] = "turn"
-    messages: List[Dict[str, Any]] = Field(..., description="Full LiteLLM messages (may have array content)")
+    messages: List[Dict[str, Any]] = Field(..., description="Full messages (may have array content)")
     final_answer: Optional[str] = Field(default=None, description="Final answer if provided")
     user_summary: Optional[str] = Field(default=None, description="First user message truncated (for display)")
     tokens: Optional[int] = Field(default=None, description="Total tokens used in this turn")

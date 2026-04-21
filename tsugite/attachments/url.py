@@ -56,10 +56,11 @@ class GenericURLHandler(AttachmentHandler):
         return "attachment"
 
     def fetch(self, source: str) -> Attachment:
-        """Fetch URL content or prepare URL reference for LiteLLM.
+        """Fetch URL content, or return a URL reference for the provider to fetch.
 
         For images and documents, returns URL reference without downloading
-        (LiteLLM can fetch them directly).
+        (providers that support URL content blocks fetch them directly;
+        unsupported types fall back to a text placeholder in the provider layer).
         For text/HTML, downloads and converts to text.
 
         Args:
@@ -78,7 +79,7 @@ class GenericURLHandler(AttachmentHandler):
 
             # Determine content type and handle accordingly
             if content_type.startswith("image/"):
-                # Image - let LiteLLM fetch it
+                # Image - return URL reference; providers fetch it
                 mime_type = content_type.split(";")[0].strip()
                 return Attachment(
                     name=name,
@@ -89,7 +90,7 @@ class GenericURLHandler(AttachmentHandler):
                 )
 
             elif content_type.startswith("audio/"):
-                # Audio - let LiteLLM fetch it
+                # Audio - return URL reference; only some providers support this (e.g. OpenAI input_audio)
                 mime_type = content_type.split(";")[0].strip()
                 return Attachment(
                     name=name,
@@ -106,7 +107,7 @@ class GenericURLHandler(AttachmentHandler):
                 "application/msword",
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             ):
-                # Document - let LiteLLM fetch it
+                # Document - return URL reference; only some providers support URL file blocks (e.g. OpenAI)
                 mime_type = content_type.split(";")[0].strip()
                 return Attachment(
                     name=name,

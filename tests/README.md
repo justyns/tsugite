@@ -26,7 +26,7 @@ uv run pytest --cov=tsugite --cov-report=html
 
 ### Smoke Tests
 
-**Smoke tests are NOT run automatically** to avoid API costs. They test real LiteLLM integration with actual API calls.
+**Smoke tests are NOT run automatically** to avoid API costs. They test real provider integration with actual API calls.
 
 #### Prerequisites
 
@@ -42,7 +42,7 @@ bash tests/smoke_test.sh
 
 #### What Smoke Tests Verify
 
-1. **Real LiteLLM integration** - Tests actual API calls, not mocks
+1. **Real provider integration** - Tests actual API calls, not mocks
 2. **Async context detection** - Catches issues like missing asyncio imports
 3. **Tool integration** - Verifies tools work in real execution
 4. **New agents** - Tests recently added agents end-to-end
@@ -50,7 +50,7 @@ bash tests/smoke_test.sh
 #### When to Run Smoke Tests
 
 - Before releases
-- After upgrading LiteLLM
+- After upgrading provider dependencies
 - After major refactors to agent execution
 - When debugging integration issues
 - After adding new agents
@@ -61,7 +61,7 @@ bash tests/smoke_test.sh
 
 - **`core/`** - Tests for core agent implementation (TsugiteAgent, executor, tools)
 - **`test_*.py`** - Feature-specific tests (CLI, rendering, parsing, etc.)
-- All unit tests mock LiteLLM to avoid API calls
+- All unit tests mock the provider to avoid API calls
 
 ### Integration Tests
 
@@ -69,24 +69,20 @@ Currently implemented as smoke tests (see above).
 
 ## Writing Tests
 
-### Mocking LiteLLM
+### Mocking the provider
 
-When writing unit tests that use `TsugiteAgent`:
+When writing unit tests that use `TsugiteAgent`, use the `mock_provider` and
+`mock_completion_response` fixtures from `tests/conftest.py`:
 
 ```python
-from unittest.mock import AsyncMock, patch
-
 @pytest.mark.asyncio
-async def test_agent_example(mock_litellm_response):
-    with patch("tsugite.core.agent.litellm") as mock_litellm:
-        mock_litellm.acompletion = AsyncMock(
-            return_value=mock_litellm_response("test response")
-        )
+async def test_agent_example(mock_provider, mock_completion_response):
+    mock_provider.acompletion.return_value = mock_completion_response("test response")
 
-        agent = TsugiteAgent(...)
-        result = await agent.run("test task")
+    agent = TsugiteAgent(...)
+    result = await agent.run("test task")
 
-        assert result == expected
+    assert result == expected
 ```
 
 ### Testing Agents

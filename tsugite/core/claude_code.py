@@ -1,6 +1,6 @@
 """Claude Code CLI subprocess provider.
 
-Routes LLM calls through `claude --print` instead of litellm.acompletion(),
+Routes LLM calls through `claude --print` instead of a direct HTTP provider,
 enabling Claude Max subscription auth. Text-only, no multimodal support.
 """
 

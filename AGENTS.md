@@ -102,7 +102,7 @@ Tsugite is an agentic CLI that executes AI agents defined as markdown files with
    - Integrates with history system for conversation continuity
 
 7. **LLM Agent Loop** (`tsugite/core/agent.py`)
-   - `TsugiteAgent` - Custom agent using LiteLLM directly
+   - `TsugiteAgent` - Custom agent using tsugite's provider abstraction
    - Think-Code-Observation loop (max_turns iterations)
    - Supports reasoning models (o1, o3, Claude extended thinking)
    - Direct control over model parameters (temperature, reasoning_effort)
@@ -241,7 +241,7 @@ Tsugite supports vision (images), audio, and document understanding through the 
 **How It Works:**
 
 1. **URL Attachments** (Images/Documents):
-   - LiteLLM fetches the URL directly (no download overhead)
+   - The provider fetches the URL directly (no download overhead — support varies by provider and content type; see `tsugite/attachments/url.py`)
    - Example: `tsu run -f https://example.com/chart.png "Describe this chart"`
    - Automatically detected via HTTP HEAD request
 
@@ -338,7 +338,7 @@ Reproducing tests don't need to be elaborate. A 10-line test that flips red→gr
 ### Test layers
 
 - **Unit tests**: Individual functions and classes
-- **Pipeline tests**: Mock only `TsugiteAgent`/`litellm.acompletion` but exercise the full pipeline (parsing → rendering → preparation → tool expansion → execution). Most tests in the suite are this style.
+- **Pipeline tests**: Mock only `TsugiteAgent` / the provider's `acompletion` but exercise the full pipeline (parsing → rendering → preparation → tool expansion → execution). Most tests in the suite are this style.
 - **Integration tests**: Live under `tests/integration/` (not collected by default — see `pyproject.toml` `norecursedirs`). Run explicitly with `uv run pytest tests/integration/`. Good for concurrency, cwd, and daemon-wiring tests that need real threading or a real workspace.
 - **Smoke tests**: `tests/smoke_test.sh` hits a real LLM API (requires `OPENAI_API_KEY`, not run in CI)
 - **Fixtures**: `conftest.py` provides shared test data

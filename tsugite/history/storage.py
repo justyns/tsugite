@@ -465,7 +465,7 @@ class SessionStorage:
         """Record a conversation turn.
 
         Args:
-            messages: Full LiteLLM message array for this turn
+            messages: Full message array for this turn
             final_answer: Optional final answer text
             tokens: Token count for this turn
             cost: Cost for this turn

@@ -648,7 +648,7 @@ async def _execute_agent_with_prompt(
             except Exception:
                 pass  # Best effort cleanup
 
-        # Clean up pending tasks (but not LiteLLM clients - that's handled by run_async_with_cleanup wrapper)
+        # Clean up pending tasks (provider client cleanup is handled by run_async_with_cleanup wrapper)
         # ONLY run cleanup for top-level agents, not spawned agents
         import asyncio
         import threading
@@ -1566,7 +1566,7 @@ async def _run_multistep_agent_impl(
         clear_current_agent()
         clear_allowed_agents()
 
-        # Clean up pending tasks (but not LiteLLM clients - that's handled by run_async_with_cleanup wrapper)
+        # Clean up pending tasks (provider client cleanup is handled by run_async_with_cleanup wrapper)
         # ONLY run cleanup for top-level agents, not spawned agents
         import asyncio
         import threading

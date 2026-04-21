@@ -4,7 +4,7 @@ Tsugite is a micro-agent CLI: agents are Markdown + YAML frontmatter, rendered v
 
 ### Architecture
 
-**Flow:** `Agent.md` (YAML + Jinja2) → `renderer.py` → `TsugiteAgent` → LiteLLM → Tools
+**Flow:** `Agent.md` (YAML + Jinja2) → `renderer.py` → `TsugiteAgent` → Provider → Tools
 
 **Key Modules:**
 - `cli/__init__.py` - Typer CLI (run, chat, render, config, mcp, tools, agents, attachments, cache)
@@ -13,7 +13,7 @@ Tsugite is a micro-agent CLI: agents are Markdown + YAML frontmatter, rendered v
 - `agent_inheritance.py` - Agent resolution pipeline + inheritance chain
 - `chat.py` - Chat session management with history
 - `agent_runner.py` - Execution orchestration, prefetch, tool wiring, multi-step
-- `core/agent.py` - LiteLLM agent loop + streaming
+- `core/agent.py` - agent loop + streaming
 - `renderer.py` - Jinja2 rendering + helpers (now, today, slugify, env, file_exists, read_text, is_file, is_dir)
 - `tools/` - Tool registry + implementations
 - `shell_tool_config.py` + `tools/shell_tools.py` - Custom shell command wrappers

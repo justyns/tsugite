@@ -429,7 +429,7 @@ def mcp_config_factory():
 
 
 @pytest.fixture
-def mock_litellm_response():
+def mock_completion_response():
     """Create a mock provider CompletionResponse for agent tests.
 
     This fixture provides a factory function that creates mock LLM responses

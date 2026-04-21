@@ -1,5 +1,5 @@
 #!/bin/bash
-# Smoke test for Tsugite - tests real LiteLLM integration
+# Smoke test for Tsugite - tests real provider integration
 # This is NOT run automatically with pytest to avoid API costs
 # Run manually: bash tests/smoke_test.sh
 
@@ -12,7 +12,7 @@ echo ""
 # Check for API key
 if [ -z "$OPENAI_API_KEY" ]; then
     echo "❌ OPENAI_API_KEY not set"
-    echo "This smoke test requires a real OpenAI API key to test LiteLLM integration"
+    echo "This smoke test requires a real OpenAI API key to test provider integration"
     echo "Set it with: export OPENAI_API_KEY=your_key_here"
     exit 1
 fi
@@ -81,7 +81,7 @@ echo "✅ All smoke tests passed!"
 echo "================================"
 echo ""
 echo "These tests verify:"
-echo "  • LiteLLM async context works correctly"
+echo "  • Provider async context works correctly"
 echo "  • Real API calls succeed (not just mocks)"
 echo "  • Tools are properly integrated"
 echo "  • New agents work end-to-end"
