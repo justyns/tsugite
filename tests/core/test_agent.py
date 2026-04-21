@@ -535,11 +535,12 @@ async def test_agent_parse_response_code_with_inner_backticks():
 
 
 @pytest.mark.asyncio
-async def test_agent_parse_response_multiple_code_blocks_extracts_first():
+async def test_agent_parse_response_multiple_code_blocks_flagged():
     """If the LLM emits more than one ```python block in a single response,
-    only the FIRST block should be extracted — the parser must not concatenate
-    the blocks together with the intervening close/open fences, which would
-    produce invalid Python ("``` on its own line" as stray tokens).
+    the parser should report the count so the agent can refuse the turn and
+    tell the LLM to use a single block. Silently dropping later blocks makes
+    the LLM believe a side-effect (e.g. final_answer) already fired when it
+    never did, leaving the user without a reply.
     """
     agent = TsugiteAgent(
         model_string="openai:gpt-4o-mini",
@@ -556,14 +557,41 @@ async def test_agent_parse_response_multiple_code_blocks_extracts_first():
         "More thoughts.\n\n"
         "```python\n"
         "y = 2\n"
+        "final_answer(x + y)\n"
         "```"
     )
 
-    assert parsed.code == "x = 1", (
-        f"Parser concatenated multiple code blocks. Got: {parsed.code!r}"
+    assert parsed.num_code_blocks == 2, (
+        f"Parser should report 2 code blocks. Got: {parsed.num_code_blocks!r}"
     )
-    assert "```" not in parsed.code
-    assert "y = 2" not in parsed.code
+
+
+@pytest.mark.asyncio
+async def test_agent_parse_response_single_code_block_counted_as_one():
+    agent = TsugiteAgent(
+        model_string="openai:gpt-4o-mini",
+        tools=[],
+        instructions="",
+        max_turns=5,
+    )
+
+    parsed = agent._parse_response_from_text(
+        "Thought: go.\n\n```python\nfinal_answer(1)\n```"
+    )
+    assert parsed.num_code_blocks == 1
+
+
+@pytest.mark.asyncio
+async def test_agent_parse_response_no_code_block_counted_as_zero():
+    agent = TsugiteAgent(
+        model_string="openai:gpt-4o-mini",
+        tools=[],
+        instructions="",
+        max_turns=5,
+    )
+
+    parsed = agent._parse_response_from_text("Just prose, no code.")
+    assert parsed.num_code_blocks == 0
 
 
 @pytest.mark.asyncio

@@ -418,6 +418,57 @@ async def test_llm_message_does_not_contain_code_fence(event_bus_with_handler):
 
 
 @pytest.mark.asyncio
+async def test_ui_event_error_on_multiple_code_blocks(event_bus_with_handler):
+    """If the LLM emits two ```python blocks in one response, the agent must
+    reject the turn with a Format Error explaining the rule, NOT silently run
+    one and drop the other — otherwise the LLM's final_answer may never fire.
+    On retry with a single block, the agent recovers.
+    """
+    event_bus, mock_ui_handler = event_bus_with_handler
+
+    call_count = 0
+
+    async def mock_acompletion(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return _resp(
+                "Thought: doing work and then replying.\n\n"
+                "```python\n"
+                "x = 1\n"
+                "```\n\n"
+                "```python\n"
+                "final_answer(x)\n"
+                "```"
+            )
+        return _resp(
+            "Thought: single block this time.\n\n"
+            "```python\n"
+            "final_answer(1)\n"
+            "```"
+        )
+
+    agent = TsugiteAgent(
+        model_string="openai:gpt-4o-mini",
+        tools=[],
+        instructions="",
+        max_turns=5,
+        event_bus=event_bus,
+    )
+    _patch_provider(agent, side_effect=mock_acompletion)
+
+    await agent.run("Test task")
+
+    error_events = [e for e in mock_ui_handler.events if e["event"] == EventType.ERROR]
+    assert len(error_events) == 1
+    assert error_events[0]["event_obj"].error_type == "Format Error"
+    assert "one" in error_events[0]["event_obj"].error.lower() and "code block" in error_events[0]["event_obj"].error.lower(), (
+        f"Error message should mention single code block rule. "
+        f"Got: {error_events[0]['event_obj'].error!r}"
+    )
+
+
+@pytest.mark.asyncio
 async def test_ui_event_error_on_no_code_generation(event_bus_with_handler):
     event_bus, mock_ui_handler = event_bus_with_handler
 

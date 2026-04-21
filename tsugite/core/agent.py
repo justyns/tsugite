@@ -106,6 +106,7 @@ class ParsedResponse:
     thought: str
     code: str
     content_blocks: Dict[str, str] = field(default_factory=dict)
+    num_code_blocks: int = 0
 
 
 @dataclass
@@ -117,6 +118,7 @@ class TurnResult:
     step_cost: float
     content_blocks: Dict[str, str] = field(default_factory=dict)
     response: Optional[Any] = None
+    num_code_blocks: int = 0
 
 
 @dataclass
@@ -454,6 +456,46 @@ class TsugiteAgent:
                         for cb_name, cb_content in turn.content_blocks.items():
                             self.event_bus.emit(ContentBlockEvent(name=cb_name, content=cb_content))
                     await self.executor.inject_content_blocks(turn.content_blocks)
+
+                # Reject responses with multiple ```python blocks. Silently
+                # running the first and dropping the rest makes the LLM believe
+                # a side-effect like final_answer() already fired when it never
+                # did, leaving the user with no reply.
+                if turn.num_code_blocks > 1:
+                    multi_block_msg = (
+                        "Format Error: Your response contained "
+                        f"{turn.num_code_blocks} separate ```python code blocks. "
+                        "You must use exactly ONE ```python block per response. "
+                        "Combine all the code you need to run into a single block, "
+                        "including any final_answer() call at the end."
+                    )
+                    if self.event_bus:
+                        self.event_bus.emit(
+                            ErrorEvent(
+                                error=multi_block_msg,
+                                error_type="Format Error",
+                                step=turn_num + 1,
+                            )
+                        )
+
+                    from xml.sax.saxutils import escape
+
+                    multi_block_xml = (
+                        '<tsugite_execution_result status="error">\n'
+                        "<output></output>\n"
+                        f"<error>{escape(multi_block_msg)}</error>\n"
+                        "</tsugite_execution_result>"
+                    )
+                    self.memory.add_step(
+                        thought=thought if thought else "(No thought provided)",
+                        code="",
+                        output=multi_block_msg,
+                        error=None,
+                        tools_called=[],
+                        xml_observation=multi_block_xml,
+                        content_blocks=turn.content_blocks,
+                    )
+                    continue
 
                 # Only execute code if the LLM actually generated some
                 if code and code.strip():
@@ -805,6 +847,7 @@ class TsugiteAgent:
             step_cost=step_cost,
             content_blocks=parsed.content_blocks,
             response=response,
+            num_code_blocks=parsed.num_code_blocks,
         )
 
     def _format_attachment(self, attachment: Attachment) -> Optional[Dict]:
@@ -1121,6 +1164,29 @@ class TsugiteAgent:
         """Parse text content into thought, code, and content blocks."""
         cleaned, content_blocks = extract_content_blocks(content)
 
+        # Count real ```python code blocks so the caller can reject
+        # multi-block responses. A block only counts when its opening fence
+        # appears on its own line (preceded by start-of-string or a newline)
+        # and is followed by a proper close fence on its own line — matching
+        # the same rule used for code extraction below, so counts stay
+        # consistent with what actually gets extracted.
+        num_code_blocks = 0
+        search_pos = 0
+        while True:
+            open_at = cleaned.find("```python", search_pos)
+            if open_at == -1:
+                break
+            on_own_line = open_at == 0 or cleaned[open_at - 1] == "\n"
+            if not on_own_line:
+                search_pos = open_at + len("```python")
+                continue
+            content_start = open_at + len("```python")
+            close_at = cleaned.find("\n```", content_start)
+            if close_at == -1:
+                break
+            num_code_blocks += 1
+            search_pos = close_at + len("\n```")
+
         code = ""
         code_block_start = cleaned.find("```python")
         if code_block_start != -1:
@@ -1142,7 +1208,12 @@ class TsugiteAgent:
         else:
             thought = cleaned[:prose_end].strip()
 
-        return ParsedResponse(thought=thought, code=code, content_blocks=content_blocks)
+        return ParsedResponse(
+            thought=thought,
+            code=code,
+            content_blocks=content_blocks,
+            num_code_blocks=num_code_blocks,
+        )
 
 
 def build_tools_section(tools: List[Tool]) -> str:
@@ -1228,6 +1299,9 @@ Fields:
 ## How to write code:
 
 - Write code in triple-backtick code blocks: ```python
+- **Use exactly ONE ```python code block per response.** Combine all the code
+  you want to run into a single block, including any final_answer() call at
+  the end. Emitting multiple code blocks in one response is a Format Error.
 - Use print() to output important information
 - Variables persist between code blocks
 - When you have the final answer, call: final_answer(your_answer)
