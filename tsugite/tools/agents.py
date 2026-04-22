@@ -3,8 +3,13 @@
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from ..cli.helpers import get_workspace_dir, resolve_workspace_path
 from ..tools import tool
 from ..utils import parse_yaml_frontmatter
+
+
+def _effective_cwd() -> Path:
+    return get_workspace_dir() or Path.cwd()
 
 
 @tool(parent_only=True)
@@ -38,13 +43,11 @@ def spawn_agent(
     from ..agent_inheritance import find_agent_file
     from ..agent_runner import get_allowed_agents, get_current_agent
 
-    agent_file = Path(agent_path)
-    if not agent_file.is_absolute():
-        agent_file = Path.cwd() / agent_file
+    agent_file = resolve_workspace_path(agent_path)
 
     if not agent_file.exists():
         # Try resolving as agent name (e.g., "default" -> builtin default.md)
-        resolved = find_agent_file(agent_path, current_agent_dir=Path.cwd())
+        resolved = find_agent_file(agent_path, current_agent_dir=_effective_cwd())
         if resolved:
             agent_file = resolved
         else:
@@ -141,7 +144,7 @@ def spawn_agent(
             stderr=subprocess.PIPE,
             text=True,
             bufsize=1,  # Line buffered for real-time output
-            cwd=Path.cwd(),  # Subagent inherits parent's working directory
+            cwd=str(_effective_cwd()),
         )
 
         # Write context to stdin then close it
@@ -281,9 +284,10 @@ def list_agents() -> str:
     current_agent_name = get_current_agent()
 
     # Define search paths in priority order
+    effective_cwd = _effective_cwd()
     search_paths = [
-        Path.cwd() / ".tsugite" / "agents",
-        Path.cwd() / "agents",
+        effective_cwd / ".tsugite" / "agents",
+        effective_cwd / "agents",
     ]
 
     # Add built-in agents directory
@@ -321,7 +325,7 @@ def list_agents() -> str:
                     display_path = name
                 else:
                     try:
-                        display_path = str(agent_file.relative_to(Path.cwd()))
+                        display_path = str(agent_file.relative_to(effective_cwd))
                     except ValueError:
                         display_path = str(agent_file)
 

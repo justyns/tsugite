@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from tsugite.cli.helpers import get_workspace_dir
 from tsugite.config import get_xdg_data_path
 from tsugite.tools import tool
 
@@ -149,7 +150,10 @@ def tmux_create(name: str, command: Optional[str] = None) -> dict:
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / f"{name}.log"
 
+    workspace = get_workspace_dir()
     cmd = ["tmux", "new-session", "-d", "-s", prefixed, "-x", "200", "-y", "50"]
+    if workspace is not None:
+        cmd.extend(["-c", str(workspace)])
     if command:
         cmd.append(command)
 

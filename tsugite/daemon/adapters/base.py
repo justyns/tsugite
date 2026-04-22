@@ -27,19 +27,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Process-wide lock serializing agent runs that os.chdir into a workspace.
-# os.chdir is a global mutation on Linux, so concurrent runs would otherwise
-# clobber each other's cwd and file/git tool calls would see the wrong
-# workspace.
-_cwd_lock: Optional[asyncio.Lock] = None
-
-
-def _get_cwd_lock() -> asyncio.Lock:
-    global _cwd_lock
-    if _cwd_lock is None:
-        _cwd_lock = asyncio.Lock()
-    return _cwd_lock
-
 
 def _is_recent(iso_timestamp: str, minutes: int = 10, now: datetime = None) -> bool:
     """Check if an ISO timestamp is within the last N minutes."""
@@ -470,7 +457,7 @@ class BaseAdapter(ABC):
 
         agent_context["skill_ttl_default"] = _load_ttl_config().skill_ttl_default
 
-        from tsugite.cli.helpers import PathContext
+        from tsugite.cli.helpers import PathContext, set_workspace_dir
 
         workspace_dir = self.agent_config.workspace_dir
         path_context = PathContext(
@@ -480,45 +467,38 @@ class BaseAdapter(ABC):
         )
 
         def run_in_workspace():
-            """Run agent in workspace directory (thread-safe via executor isolation)."""
-            original_cwd = os.getcwd()
-            try:
-                os.chdir(str(workspace_dir))
-                attachments = list(self._get_workspace_attachments())
-                if channel_context.metadata and channel_context.metadata.get("uploaded_attachments"):
-                    attachments.extend(channel_context.metadata.pop("uploaded_attachments"))
+            """Run agent with workspace bound via task-local ContextVar."""
+            set_workspace_dir(workspace_dir)
+            attachments = list(self._get_workspace_attachments())
+            if channel_context.metadata and channel_context.metadata.get("uploaded_attachments"):
+                attachments.extend(channel_context.metadata.pop("uploaded_attachments"))
 
-                return run_agent(
-                    agent_path=agent_path,
-                    prompt=enriched_prompt,
-                    continue_conversation_id=conv_id,
-                    attachments=attachments,
-                    exec_options=ExecutionOptions(
-                        return_token_usage=True,
-                        model_override=(channel_context.metadata or {}).get("model_override")
-                        or self.agent_config.model,
-                        max_turns_override=(channel_context.metadata or {}).get("max_turns_override")
-                        or self.agent_config.max_turns,
-                    ),
-                    path_context=path_context,
-                    custom_logger=custom_logger,
-                    context=agent_context,
-                )
-            finally:
-                os.chdir(original_cwd)
+            return run_agent(
+                agent_path=agent_path,
+                prompt=enriched_prompt,
+                continue_conversation_id=conv_id,
+                attachments=attachments,
+                exec_options=ExecutionOptions(
+                    return_token_usage=True,
+                    model_override=(channel_context.metadata or {}).get("model_override")
+                    or self.agent_config.model,
+                    max_turns_override=(channel_context.metadata or {}).get("max_turns_override")
+                    or self.agent_config.max_turns,
+                ),
+                path_context=path_context,
+                custom_logger=custom_logger,
+                context=agent_context,
+            )
 
         ctx = contextvars.copy_context()
-        cwd_lock = _get_cwd_lock()
         try:
-            async with cwd_lock:
-                result = await asyncio.to_thread(ctx.run, run_in_workspace)
+            result = await asyncio.to_thread(ctx.run, run_in_workspace)
         except AgentExecutionError as e:
             if "prompt too long" in str(e).lower() and not conv_id_override:
                 logger.warning("[%s] Prompt too long, auto-compacting and retrying", self.agent_name)
                 conv_id = await self._run_compaction(user_id, conv_id, custom_logger, reason="prompt_too_long")
                 ctx = contextvars.copy_context()
-                async with cwd_lock:
-                    result = await asyncio.to_thread(ctx.run, run_in_workspace)
+                result = await asyncio.to_thread(ctx.run, run_in_workspace)
             else:
                 error_result = f"[Error: {e}]\n\n{e.partial_output}" if e.partial_output else f"[Error: {e}]"
                 self._save_history(

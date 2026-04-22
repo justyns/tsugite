@@ -13,6 +13,8 @@ import tempfile
 import uuid
 from collections.abc import AsyncIterator
 
+from tsugite.cli.helpers import get_workspace_dir
+
 logger = logging.getLogger(__name__)
 
 # Env vars that must be unset to avoid "nested session" detection
@@ -122,12 +124,14 @@ class ClaudeCodeProcess:
         # Copy env but unset keys that trigger nested-session guard or API key usage
         env = {k: v for k, v in os.environ.items() if k not in _CLAUDE_ENV_VARS}
 
+        workspace = get_workspace_dir()
         self._process = await asyncio.create_subprocess_exec(
             *cmd,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=env,
+            cwd=str(workspace) if workspace is not None else None,
         )
 
         # Start draining stderr in background to prevent pipe buffer deadlock

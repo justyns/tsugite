@@ -57,13 +57,20 @@ def parse_yaml_frontmatter(content: str, label: str = "content") -> Tuple[Dict[s
     return metadata, markdown_content
 
 
-def execute_shell_command(command: str, timeout: int = 30, shell: bool = True) -> str:
+def execute_shell_command(
+    command: str,
+    timeout: int = 30,
+    shell: bool = True,
+    cwd: "str | Path | None" = None,
+) -> str:
     """Execute a shell command and return its output.
 
     Args:
         command: Shell command to execute
         timeout: Maximum execution time in seconds
         shell: Whether to use shell execution
+        cwd: Directory to run in. Defaults to the bound workspace ContextVar,
+            else the process cwd.
 
     Returns:
         Command output including stdout, stderr, and exit code
@@ -71,6 +78,13 @@ def execute_shell_command(command: str, timeout: int = 30, shell: bool = True) -
     Raises:
         RuntimeError: If command execution fails or times out
     """
+    if cwd is None:
+        # Deferred import: tsugite.cli.helpers imports from tsugite.utils.
+        from tsugite.cli.helpers import get_workspace_dir
+
+        cwd = get_workspace_dir()
+    resolved_cwd = str(cwd) if cwd is not None else None
+
     try:
         if shell:
             result = subprocess.run(
@@ -80,6 +94,7 @@ def execute_shell_command(command: str, timeout: int = 30, shell: bool = True) -
                 text=True,
                 timeout=timeout,
                 check=False,
+                cwd=resolved_cwd,
             )
         else:
             cmd_parts = shlex.split(command)
@@ -89,6 +104,7 @@ def execute_shell_command(command: str, timeout: int = 30, shell: bool = True) -
                 text=True,
                 timeout=timeout,
                 check=False,
+                cwd=resolved_cwd,
             )
 
         output = ""

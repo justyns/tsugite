@@ -1,27 +1,17 @@
-"""H4: concurrent handle_message calls must not race on process-wide os.chdir.
-
-`tsugite/daemon/adapters/base.py` wraps agent execution in a `run_in_workspace`
-closure that does `os.chdir(workspace)` then restores the original cwd.
-`os.chdir` is process-wide on Linux, not thread-local — so two concurrent
-agent runs with different workspaces will clobber each other's cwd, and
-subsequent tool calls (bash_run, git, etc.) see the wrong directory.
-
-This test monkeypatches `run_agent` with a probe that sleeps briefly while cwd
-is set, then records what cwd and marker files it observed. Under contention
-the recorded values cross between adapters.
-"""
+"""Concurrent handle_message calls must each see their own workspace via
+the task-local workspace ContextVar, not clobber a shared process state."""
 
 import asyncio
-import os
 import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest  # noqa: F401
+import pytest
 
-from tsugite.daemon.adapters.http import HTTPAgentAdapter
+from tsugite.cli.helpers import get_workspace_dir
 from tsugite.daemon.adapters.base import ChannelContext
+from tsugite.daemon.adapters.http import HTTPAgentAdapter
 from tsugite.daemon.config import AgentConfig
 from tsugite.daemon.session_store import SessionStore
 
@@ -32,8 +22,6 @@ def two_workspaces(tmp_path):
     ws_b = tmp_path / "ws_b"
     ws_a.mkdir()
     ws_b.mkdir()
-    (ws_a / "MARKER_A").write_text("a")
-    (ws_b / "MARKER_B").write_text("b")
     return ws_a, ws_b
 
 
@@ -48,7 +36,7 @@ def _make_adapter(name: str, workspace: Path, store: SessionStore) -> HTTPAgentA
 
 
 @pytest.mark.asyncio
-async def test_concurrent_handle_message_does_not_race_on_cwd(
+async def test_concurrent_handle_message_sees_own_workspace_via_contextvar(
     monkeypatch, two_workspaces, session_store
 ):
     ws_a, ws_b = two_workspaces
@@ -60,18 +48,15 @@ async def test_concurrent_handle_message_does_not_race_on_cwd(
     obs_lock = threading.Lock()
 
     def probe_run_agent(**kwargs):
-        """Stand-in for run_agent: sleep briefly while cwd is set, then record
-        what cwd + files the probe observed. If another concurrent run clobbers
-        os.chdir during the sleep, this one sees the wrong workspace."""
+        """Sleep briefly to interleave with the other run, then record the
+        workspace the ContextVar reports for this task."""
         time.sleep(0.1)
-        cwd_after_sleep = os.getcwd()
-        entries_after_sleep = sorted(p.name for p in Path(".").iterdir())
+        observed_ws = get_workspace_dir()
         with obs_lock:
             observations.append(
                 {
-                    "expected_workspace": kwargs["path_context"].workspace_dir.name,
-                    "cwd_after_sleep": cwd_after_sleep,
-                    "entries_after_sleep": entries_after_sleep,
+                    "expected_workspace": kwargs["path_context"].workspace_dir,
+                    "observed_workspace": observed_ws,
                 }
             )
         return SimpleNamespace(
@@ -98,9 +83,8 @@ async def test_concurrent_handle_message_does_not_race_on_cwd(
     assert len(observations) == 2, observations
 
     for obs in observations:
-        marker = "MARKER_A" if obs["expected_workspace"] == "ws_a" else "MARKER_B"
-        assert marker in obs["entries_after_sleep"], (
-            f"Workspace {obs['expected_workspace']} saw {obs['entries_after_sleep']} "
-            f"after the concurrent chdir race — expected {marker}. "
-            f"Cwd observed: {obs['cwd_after_sleep']}"
+        assert obs["observed_workspace"] == obs["expected_workspace"], (
+            f"Concurrent run for {obs['expected_workspace']} saw "
+            f"workspace {obs['observed_workspace']!r} via the CV — expected "
+            f"{obs['expected_workspace']!r}. ContextVar isolation regressed."
         )

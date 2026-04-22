@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 
 import pathspec
 
+from ..cli.helpers import resolve_workspace_path
 from ..tools import tool
 
 
@@ -33,7 +34,7 @@ def read_file(
     Returns:
         File content, optionally with line numbers prefixed.
     """
-    file_path = Path(path)
+    file_path = resolve_workspace_path(path)
 
     if not file_path.exists():
         raise FileNotFoundError(f"File not found: {path}")
@@ -85,7 +86,7 @@ def write_file(path: str, content: str) -> str:
         path: Path to the file to write
         content: Content to write to the file
     """
-    file_path = Path(path)
+    file_path = resolve_workspace_path(path)
     file_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
@@ -154,7 +155,7 @@ def list_files(path: str = ".", pattern: str = "*", respect_gitignore: bool = Tr
         respect_gitignore: If True (default), respects .gitignore files and excludes .git/ directory.
                           Follows the behavior of modern tools like ripgrep and fd.
     """
-    dir_path = Path(path)
+    dir_path = resolve_workspace_path(path)
 
     if not dir_path.exists():
         raise FileNotFoundError(f"Directory not found: {path}")
@@ -191,7 +192,7 @@ def file_exists(path: str) -> bool:
     Args:
         path: Path to check for existence
     """
-    return Path(path).exists()
+    return resolve_workspace_path(path).exists()
 
 
 @tool
@@ -201,7 +202,7 @@ def create_directory(path: str) -> str:
     Args:
         path: Directory path to create
     """
-    dir_path = Path(path)
+    dir_path = resolve_workspace_path(path)
 
     try:
         dir_path.mkdir(parents=True, exist_ok=True)
@@ -227,7 +228,7 @@ def get_file_info(path: str) -> Dict[str, Any]:
     """
     import datetime
 
-    file_path = Path(path)
+    file_path = resolve_workspace_path(path)
 
     info = {
         "exists": file_path.exists(),
@@ -371,7 +372,7 @@ def edit_file(
     if single_mode and new_string is None:
         raise ValueError("new_string is required when using old_string")
 
-    file_path = Path(path)
+    file_path = resolve_workspace_path(path)
 
     if not file_path.exists():
         raise FileNotFoundError(f"File not found: {path}")

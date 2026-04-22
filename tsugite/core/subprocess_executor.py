@@ -480,6 +480,7 @@ with open(RESULT_PATH, "w") as f:
                 env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
+                cwd=str(self.workspace_dir) if self.workspace_dir else None,
             )
         except Exception as e:
             return ExecutionResult(

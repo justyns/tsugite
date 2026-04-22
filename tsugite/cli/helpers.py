@@ -1,12 +1,13 @@
 """CLI helper functions."""
 
+import contextvars
 import hashlib
 import io
 import os
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Generator, List, Optional, Tuple
+from typing import Any, Generator, List, Optional, Tuple, Union
 
 import typer
 from rich.console import Console
@@ -531,6 +532,34 @@ class PathContext:
     invoked_from: Path
     workspace_dir: Optional[Path]
     effective_cwd: Path
+
+
+# Mirrors PathContext.workspace_dir for call sites (fs tools, shell, subprocesses)
+# that don't receive PathContext explicitly. Task-local so concurrent agent runs
+# don't share state.
+_workspace_dir_cv: contextvars.ContextVar[Optional[Path]] = contextvars.ContextVar(
+    "workspace_dir", default=None
+)
+
+
+def get_workspace_dir() -> Optional[Path]:
+    """Return the current task's workspace directory, or None if unset."""
+    return _workspace_dir_cv.get()
+
+
+def set_workspace_dir(path: Optional[Union[str, Path]]) -> contextvars.Token:
+    """Bind a workspace directory to the current task's context. Pass None to clear."""
+    return _workspace_dir_cv.set(Path(path) if path is not None else None)
+
+
+def resolve_workspace_path(path: Union[str, Path]) -> Path:
+    """Resolve a path against the workspace CV. Absolute paths pass through; relative
+    paths are joined against the workspace when one is bound, else process cwd."""
+    p = Path(path)
+    if p.is_absolute():
+        return p
+    ws = _workspace_dir_cv.get()
+    return (ws / p) if ws is not None else (Path.cwd() / p)
 
 
 @contextmanager

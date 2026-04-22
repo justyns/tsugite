@@ -63,6 +63,19 @@ def clear_agent_context():
     clear_allowed_agents()
 
 
+@pytest.fixture(autouse=True)
+def reset_workspace_dir_cv():
+    """Clear the workspace ContextVar between tests so that state from one test
+    doesn't leak into the next (the CV persists across sync tests otherwise)."""
+    from tsugite.cli.helpers import set_workspace_dir, _workspace_dir_cv
+
+    token = set_workspace_dir(None)
+    try:
+        yield
+    finally:
+        _workspace_dir_cv.reset(token)
+
+
 @pytest.fixture
 def temp_dir() -> Generator[Path, None, None]:
     """Create a temporary directory for tests."""

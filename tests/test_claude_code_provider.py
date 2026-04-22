@@ -116,6 +116,35 @@ class TestClaudeCodeProcess:
         await process.stop()
 
     @pytest.mark.asyncio
+    async def test_start_passes_workspace_cv_as_cwd(self, process, tmp_path):
+        """Subprocess runs in the workspace bound to the current task."""
+        from tsugite.cli.helpers import set_workspace_dir
+
+        mock_proc = self._mock_proc()
+        workspace = tmp_path / "agent_ws"
+        workspace.mkdir()
+        set_workspace_dir(workspace)
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc) as mock_exec:
+            await process.start(model="sonnet", system_prompt="test")
+            assert mock_exec.call_args[1].get("cwd") == str(workspace), (
+                f"expected cwd={workspace!s}, got {mock_exec.call_args[1].get('cwd')!r}"
+            )
+
+        await process.stop()
+
+    @pytest.mark.asyncio
+    async def test_start_no_cwd_when_workspace_unset(self, process):
+        """No workspace bound → don't pass cwd=, let subprocess inherit."""
+        mock_proc = self._mock_proc()
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc) as mock_exec:
+            await process.start(model="sonnet", system_prompt="test")
+            assert mock_exec.call_args[1].get("cwd") is None
+
+        await process.stop()
+
+    @pytest.mark.asyncio
     async def test_send_message_captures_init_event(self, process):
         """Init event arrives after first user message -- session_id gets captured."""
         events = [
