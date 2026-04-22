@@ -98,17 +98,17 @@ async def test_agent_multi_step_reasoning():
         nonlocal call_count
         call_count += 1
         if call_count == 1:
-            return _mock_response("""Thought: I'll start by setting x to 5.
+            return _mock_response("""Thought: I'll stash x in state so the next turn can read it.
 
 ```python
-x = 5
-print(f"x = {x}")
+state['x'] = 5
+print(f"x = {state['x']}")
 ```""")
         else:
-            return _mock_response("""Thought: Now I'll multiply x by 2 and return the result.
+            return _mock_response("""Thought: Now I'll multiply state['x'] by 2 and return the result.
 
 ```python
-result = x * 2
+result = state['x'] * 2
 final_answer(result)
 ```""")
 
@@ -117,9 +117,9 @@ final_answer(result)
 
     assert result == 10
     assert len(agent.memory.steps) == 2
-    assert "x = 5" in agent.memory.steps[0].code
+    assert "state['x'] = 5" in agent.memory.steps[0].code
     assert "x = 5" in agent.memory.steps[0].output
-    assert "result = x * 2" in agent.memory.steps[1].code
+    assert "state['x'] * 2" in agent.memory.steps[1].code
 
 
 @pytest.mark.asyncio
@@ -149,7 +149,7 @@ final_answer(result)
 ```"""),
     )
 
-    agent.executor.namespace["multiply"] = tool.function
+    agent.executor.register_tools({"multiply": tool.function})
     result = await agent.run("What is 5 * 3?")
     assert result == 15
 
@@ -788,14 +788,14 @@ async def test_budget_tag_in_observations():
             return _mock_response("""Thought: Step 1.
 
 ```python
-x = 42
-print(x)
+state['x'] = 42
+print(state['x'])
 ```""")
         else:
             return _mock_response("""Thought: Done.
 
 ```python
-final_answer(x)
+final_answer(state['x'])
 ```""")
 
     _patch_provider(agent, side_effect=mock_acompletion)

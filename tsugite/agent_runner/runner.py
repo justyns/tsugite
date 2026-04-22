@@ -9,6 +9,7 @@ from pathlib import Path  # noqa: E402
 from types import SimpleNamespace  # noqa: E402
 from typing import TYPE_CHECKING, Any, Dict, List, Optional  # noqa: E402
 
+from tsugite.config import get_xdg_data_path  # noqa: E402
 from tsugite.core.agent import TsugiteAgent  # noqa: E402
 from tsugite.core.executor import LocalExecutor  # noqa: E402
 from tsugite.exceptions import AgentExecutionError  # noqa: E402
@@ -36,6 +37,13 @@ from .models import AgentExecutionResult  # noqa: E402
 # Display constants for truncating long output
 MAX_VARIABLE_PREVIEW_LENGTH = 100  # Max characters to show in variable documentation
 MAX_CONTENT_PREVIEW_LENGTH = 200  # Max characters to show in debug attachment previews
+
+
+def _resolve_state_path(session_id: Optional[str]) -> Optional[Path]:
+    """Return the per-session JSON state path, or None for an ephemeral run."""
+    if not session_id:
+        return None
+    return get_xdg_data_path("state") / session_id / "state.json"
 
 
 class ExecutionContext:
@@ -367,6 +375,7 @@ async def _execute_agent_with_prompt(
     claude_code_resume_session: Optional[str] = None,
     claude_code_resume_after_compaction: bool = False,
     hook_vars: Optional[Dict[str, str]] = None,
+    continue_conversation_id: Optional[str] = None,
 ) -> str | AgentExecutionResult:
     """Execute agent with a prepared agent.
 
@@ -485,6 +494,8 @@ async def _execute_agent_with_prompt(
     # Create executor with workspace directory and event bus
     workspace_dir = workspace.path if workspace else None
 
+    state_path = _resolve_state_path(continue_conversation_id)
+
     if exec_options.sandbox:
         from tsugite.core.sandbox import BubblewrapSandbox, SandboxConfig
         from tsugite.core.subprocess_executor import SubprocessExecutor
@@ -505,9 +516,17 @@ async def _execute_agent_with_prompt(
             event_bus=event_bus,
             path_context=path_context,
             sandbox_config=sandbox_config,
+            state_path=state_path,
+            session_id=continue_conversation_id,
         )
     else:
-        executor = LocalExecutor(workspace_dir=workspace_dir, event_bus=event_bus, path_context=path_context)
+        executor = LocalExecutor(
+            workspace_dir=workspace_dir,
+            event_bus=event_bus,
+            path_context=path_context,
+            state_path=state_path,
+            session_id=continue_conversation_id,
+        )
 
     # Inject variables into executor (for multi-step agents)
     if injectable_vars:
@@ -905,6 +924,7 @@ async def run_agent_async(
                 claude_code_resume_session=claude_code_resume_session,
                 claude_code_resume_after_compaction=claude_code_resume_after_compaction,
                 hook_vars=hook_vars,
+                continue_conversation_id=continue_conversation_id,
             )
         except (RuntimeError, AgentExecutionError) as e:
             err_str = str(e).lower()
@@ -928,6 +948,7 @@ async def run_agent_async(
                     previous_messages=previous_messages,
                     path_context=path_context,
                     hook_vars=hook_vars,
+                    continue_conversation_id=continue_conversation_id,
                 )
             raise
     finally:

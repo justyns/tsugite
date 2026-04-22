@@ -3,7 +3,8 @@
 Provides local execution using Python's exec().
 WARNING: Not secure! Only use for development.
 
-Maintains state (variables persist between runs).
+Each turn runs in a fresh Python namespace. Only values assigned to the
+injected `state` object persist across turns.
 """
 
 import ast
@@ -12,7 +13,10 @@ import pprint
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
+
+from tsugite.core.state import load_state, save_state
+from tsugite.exceptions import StateSerializationError
 
 PPRINT_WIDTH = 100
 
@@ -33,6 +37,7 @@ class ExecutionResult:
     final_answer: Optional[Any] = None
     tools_called: List[str] = field(default_factory=list)
     variables_set: Dict[str, str] = field(default_factory=dict)  # name -> "type(size)"
+    state_keys: Dict[str, str] = field(default_factory=dict)  # persisted state: name -> "type(size)"
     loaded_skills: Dict[str, str] = field(default_factory=dict)  # name -> content
     unloaded_skills: List[str] = field(default_factory=list)  # names unloaded this turn
     truncated: bool = False
@@ -85,11 +90,26 @@ class ExecutionResult:
             var_list = ", ".join(f"{escape(k)}={escape(_mask(v))}" for k, v in self.variables_set.items())
             parts.append(f"<variables_set>{var_list}</variables_set>")
 
+        if self.state_keys:
+            state_list = ", ".join(f"{escape(k)}={escape(_mask(v))}" for k, v in self.state_keys.items())
+            parts.append(f"<state>{state_list}</state>")
+
         if self.final_answer is not None:
             parts.append(f"<final_answer>{escape(_mask(str(self.final_answer)))}</final_answer>")
 
         parts.append("</tsugite_execution_result>")
         return "\n".join(parts)
+
+
+def _summarize_mapping(items) -> Dict[str, str]:
+    """Summarize a (name, value) iterable as {name: type-and-size} for display."""
+    out: Dict[str, str] = {}
+    for name, value in items:
+        try:
+            out[name] = _summarize_variable(value)
+        except Exception:
+            out[name] = type(value).__name__
+    return out
 
 
 def _summarize_variable(value: Any) -> str:
@@ -125,17 +145,19 @@ class LocalExecutor:
 
     WARNING: This is NOT secure! Only use for development.
 
-    Uses Python's built-in exec() function. State persists between
-    runs by maintaining a shared namespace dict.
+    Each call to ``execute()`` runs in a fresh namespace. Use the injected
+    ``state`` dict to persist values across turns; all other bindings are
+    discarded when the turn ends.
 
     Example:
         executor = LocalExecutor()
 
-        # First run
-        result = await executor.execute("x = 5")
+        await executor.execute("state['x'] = 5")
+        await executor.execute("print(state['x'] + 3)")  # prints 8
 
-        # Second run - x still exists!
-        result = await executor.execute("print(x + 3)")  # Prints: 8
+        # But plain locals do NOT persist:
+        await executor.execute("y = 10")
+        await executor.execute("print(y)")  # NameError
     """
 
     def __init__(
@@ -143,15 +165,19 @@ class LocalExecutor:
         workspace_dir: Optional[Path] = None,
         event_bus: Optional[Any] = None,
         path_context: Optional[Any] = None,
+        state_path: Optional[Path] = None,
+        session_id: Optional[str] = None,
     ):
-        """Initialize executor with empty namespace.
+        """Initialize executor.
 
         Args:
             workspace_dir: Optional workspace directory (for reference, CWD set at CLI level)
             event_bus: Optional event bus for emitting events (used by send_message)
             path_context: Optional PathContext with invoked_from, workspace_dir, effective_cwd
+            state_path: Optional path to a JSON file for persisting `state` across turns.
+                When None, state is ephemeral (in-memory only).
+            session_id: Optional session identifier, used in StateSerializationError messages.
         """
-        self.namespace = {}
         self._final_answer_value = None
         self._tools_called = []
         self._loaded_skills_for_turn: Dict[str, str] = {}
@@ -159,18 +185,27 @@ class LocalExecutor:
         self.workspace_dir = workspace_dir
         self.event_bus = event_bus
         self.path_context = path_context
+        self._state_path = state_path
+        self._session_id = session_id
+        self._state: Dict[str, Any] = load_state(state_path) if state_path else {}
+        self._tool_functions: Dict[str, Callable[..., Any]] = {}
+        self._sticky_injections: Dict[str, Any] = {}
+        self._content_blocks: Dict[str, str] = {}
 
-        # Inject final_answer function into namespace
-        # Accept any arg name (value, result, etc.) since LLMs may vary
+        self.namespace: Dict[str, Any] = self._build_turn_namespace()
+
+    def _build_turn_namespace(self) -> Dict[str, Any]:
+        """Construct a fresh namespace populated with built-ins, tools, state, and sticky injections."""
+        ns: Dict[str, Any] = {}
+
         def final_answer(*args, **kwargs):
             if args:
                 self._final_answer_value = args[0]
             elif kwargs:
                 self._final_answer_value = next(iter(kwargs.values()))
 
-        self.namespace["final_answer"] = final_answer
+        ns["final_answer"] = final_answer
 
-        # Inject send_message function for progress updates
         def send_message(*args, **kwargs):
             if args:
                 msg = args[0]
@@ -185,7 +220,7 @@ class LocalExecutor:
                 self.event_bus.emit(InfoEvent(message=str(msg)))
             return f"Message sent: {msg}"
 
-        self.namespace["send_message"] = send_message
+        ns["send_message"] = send_message
 
         def react_to_message(emoji="", message_id=None):
             if self.event_bus:
@@ -194,9 +229,8 @@ class LocalExecutor:
                 self.event_bus.emit(ReactionEvent(emoji=str(emoji), message_id=message_id))
             return f"Reacted with {emoji}"
 
-        self.namespace["react_to_message"] = react_to_message
+        ns["react_to_message"] = react_to_message
 
-        # Override open() to guide LLMs toward using provided tools
         def _blocked_open(*args, **kwargs):
             raise RuntimeError(
                 "open() is not available. Use the provided tools instead:\n"
@@ -204,15 +238,20 @@ class LocalExecutor:
                 "  - write_file(path, content) to write to files"
             )
 
-        self.namespace["open"] = _blocked_open
+        ns["open"] = _blocked_open
 
-        # Inject path context variables for workspace-aware code
-        if path_context:
-            self.namespace["WORKSPACE_DIR"] = str(path_context.workspace_dir) if path_context.workspace_dir else None
-            self.namespace["INVOKED_FROM"] = str(path_context.invoked_from) if path_context.invoked_from else None
+        if self.path_context:
+            ns["WORKSPACE_DIR"] = str(self.path_context.workspace_dir) if self.path_context.workspace_dir else None
+            ns["INVOKED_FROM"] = str(self.path_context.invoked_from) if self.path_context.invoked_from else None
         else:
-            self.namespace["WORKSPACE_DIR"] = None
-            self.namespace["INVOKED_FROM"] = None
+            ns["WORKSPACE_DIR"] = None
+            ns["INVOKED_FROM"] = None
+
+        ns.update(self._tool_functions)
+        ns.update(self._sticky_injections)
+        ns.update(self._content_blocks)
+        ns["state"] = self._state
+        return ns
 
     def _split_code_for_last_expr(self, code: str) -> tuple[str, Optional[str]]:
         """Split code into setup and last expression if applicable.
@@ -293,9 +332,10 @@ class LocalExecutor:
         old_stdout = sys.stdout
         old_stderr = sys.stderr
 
-        # Track variables before execution
+        self.namespace = self._build_turn_namespace()
         namespace_before = set(self.namespace.keys())
 
+        exec_error: Optional[str] = None
         try:
             sys.stdout = stdout_capture
             sys.stderr = stderr_capture
@@ -314,82 +354,85 @@ class LocalExecutor:
             else:
                 exec(code, self.namespace)
 
-            output = stdout_capture.getvalue()
-            stderr_output = stderr_capture.getvalue()
-
-            # Track new variables (exclude _ prefixed private vars)
-            variables_set = self._get_new_variables(namespace_before)
-
-            return ExecutionResult(
-                output=output,
-                error=None,
-                stdout=output,
-                stderr=stderr_output,
-                final_answer=self._final_answer_value,
-                tools_called=self._tools_called.copy(),
-                variables_set=variables_set,
-                loaded_skills=self._loaded_skills_for_turn.copy(),
-                unloaded_skills=list(self._unloaded_skills_for_turn),
-            )
-
         except Exception as e:
-            error_msg = f"{type(e).__name__}: {str(e)}"
-
-            # Still capture any variables set before error
-            variables_set = self._get_new_variables(namespace_before)
-
-            return ExecutionResult(
-                output=stdout_capture.getvalue(),
-                error=error_msg,
-                stdout=stdout_capture.getvalue(),
-                stderr=stderr_capture.getvalue() + "\n" + error_msg,
-                final_answer=None,
-                tools_called=self._tools_called.copy(),
-                variables_set=variables_set,
-                loaded_skills=self._loaded_skills_for_turn.copy(),
-                unloaded_skills=list(self._unloaded_skills_for_turn),
-            )
+            exec_error = f"{type(e).__name__}: {str(e)}"
 
         finally:
             sys.stdout = old_stdout
             sys.stderr = old_stderr
 
+        variables_set = self._get_new_variables(namespace_before)
+        state_keys = self._summarize_state_keys()
+        save_error = self._save_state()
+
+        error_msg = exec_error
+        if save_error is not None:
+            error_msg = f"{exec_error}\n{save_error}" if exec_error else save_error
+
+        stderr_output = stderr_capture.getvalue()
+        if exec_error:
+            stderr_output = stderr_output + "\n" + exec_error
+        if save_error:
+            stderr_output = stderr_output + "\n" + save_error
+
+        stdout_output = stdout_capture.getvalue()
+        return ExecutionResult(
+            output=stdout_output,
+            error=error_msg,
+            stdout=stdout_output,
+            stderr=stderr_output,
+            final_answer=None if exec_error else self._final_answer_value,
+            tools_called=self._tools_called.copy(),
+            variables_set=variables_set,
+            state_keys=state_keys,
+            loaded_skills=self._loaded_skills_for_turn.copy(),
+            unloaded_skills=list(self._unloaded_skills_for_turn),
+        )
+
     def _get_new_variables(self, namespace_before: set) -> Dict[str, str]:
-        """Get new variables created since namespace_before snapshot.
+        new_vars = set(self.namespace.keys()) - namespace_before
+        return _summarize_mapping(
+            (name, self.namespace[name]) for name in new_vars if not name.startswith("_")
+        )
 
-        Args:
-            namespace_before: Set of variable names before execution
+    def _summarize_state_keys(self) -> Dict[str, str]:
+        return _summarize_mapping(self._state.items())
 
-        Returns:
-            Dict of {variable_name: summary} for new variables
-        """
-        namespace_after = set(self.namespace.keys())
-        new_vars = namespace_after - namespace_before
-
-        variables_set = {}
-        for var_name in new_vars:
-            # Skip private variables (starting with _)
-            if var_name.startswith("_"):
-                continue
-            try:
-                variables_set[var_name] = _summarize_variable(self.namespace[var_name])
-            except Exception:
-                variables_set[var_name] = type(self.namespace[var_name]).__name__
-        return variables_set
+    def _save_state(self) -> Optional[str]:
+        """Persist session state. Returns an error message string on failure, else None."""
+        if self._state_path is None:
+            return None
+        try:
+            save_state(self._state, self._state_path, session_id=self._session_id)
+        except StateSerializationError as e:
+            return f"StateSerializationError: {e}"
+        return None
 
     async def send_variables(self, variables: Dict[str, Any]):
-        """Inject variables into namespace.
+        """Register harness-level variables that are re-injected at the start of every turn.
 
-        Simply updates the shared namespace dict.
-
-        Args:
-            variables: Dict of {name: value} to inject
+        These are intended for caller-supplied inputs (e.g. multi-step agent parameters);
+        they are not serialized with session state.
         """
+        self._sticky_injections.update(variables)
         self.namespace.update(variables)
 
     async def inject_content_blocks(self, blocks: Dict[str, str]):
-        """Inject content block variables into executor namespace."""
+        """Replace the content-block variables available to the next turn.
+
+        Content blocks are scoped to the turn that declared them; earlier
+        turns' block names do not carry forward.
+        """
+        self._content_blocks = dict(blocks)
         self.namespace.update(blocks)
+
+    def register_tools(self, tools: Dict[str, Callable[..., Any]]):
+        """Register tool functions that should be re-injected into the namespace every turn.
+
+        Called by the agent after tool setup; tool wrappers are not serialized into state.
+        """
+        self._tool_functions.update(tools)
+        self.namespace.update(tools)
 
     def register_loaded_skill(self, name: str, content: str):
         """Register a skill loaded during this execution turn.

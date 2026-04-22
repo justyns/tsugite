@@ -375,7 +375,9 @@ class TsugiteAgent:
 
             tool_functions[tool.name] = make_tool_wrapper(tool)
 
-        if hasattr(self.executor, "namespace"):
+        if hasattr(self.executor, "register_tools"):
+            self.executor.register_tools(tool_functions)
+        elif hasattr(self.executor, "namespace"):
             self.executor.namespace.update(tool_functions)
 
     async def run(self, task: str, return_full_result: bool = False, stream: bool = False):
@@ -1285,6 +1287,7 @@ After code runs, you'll see structured XML:
 <tsugite_execution_result status="success" duration_ms="142">
 <output>file contents here...</output>
 <variables_set>config=str(1234 chars)</variables_set>
+<state>issues=list(12 items), run_started=str(24 chars)</state>
 </tsugite_execution_result>
 ```
 
@@ -1293,7 +1296,8 @@ Fields:
 - `<output>`: Your print() output
 - `<error>`: Error message if failed
 - `<traceback>`: Python traceback if failed (last 10 lines)
-- `<variables_set>`: New variables you created
+- `<variables_set>`: Variables you created this turn (discarded at turn end)
+- `<state>`: Values currently persisted in `state` (carry across turns)
 - `<final_answer>`: Confirms completion when you call final_answer()
 
 ## How to write code:
@@ -1303,16 +1307,22 @@ Fields:
   you want to run into a single block, including any final_answer() call at
   the end. Emitting multiple code blocks in one response is a Format Error.
 - Use print() to output important information
-- Variables persist between code blocks
+- **Each turn starts with a fresh Python namespace.** Plain variables
+  (`x = 5`, `data = fetch(...)`) are discarded after the turn ends.
+- To persist a value across turns, assign it to `state`:
+  `state["issues"] = issues`  /  `if "issues" in state: ...`
+  `state` is a dict-like object. Only JSON-serializable values are allowed
+  (plain Python types — no sets, file handles, etc.).
 - When you have the final answer, call: final_answer(your_answer)
 {tools_section}
 ## Rules:
 
-1. Only use variables you've defined
+1. Only use variables you've defined in the current turn, or values from `state`.
 2. Use comments in code for reasoning if needed
 {tool_rule}
 4. If you get an error, try a different approach
-5. State persists - variables remain available across code blocks
+5. Use `state['key'] = value` to carry data across turns. Other names are
+   discarded between turns and will raise `NameError` if referenced later.
 6. **To complete your turn, you MUST call one of:**
    - `final_answer(result)` - when you have the answer
    - `ask_user(question)` - when you need input from the user

@@ -47,23 +47,131 @@ async def test_local_executor_basic():
 
 
 @pytest.mark.asyncio
-async def test_local_executor_state_persistence():
-    """Test that variables persist between executions."""
+async def test_turn_namespace_is_fresh():
+    """Local assignments in one turn must not leak into the next."""
     executor = LocalExecutor()
 
-    # First execution - set variable
     result1 = await executor.execute("x = 42")
     assert result1.error is None
 
-    # Second execution - use the variable
     result2 = await executor.execute("print(x)")
+    assert result2.error is not None
+    assert "NameError" in result2.error
+
+
+@pytest.mark.asyncio
+async def test_state_persists_across_turns():
+    """Values assigned to `state` persist across turns."""
+    executor = LocalExecutor()
+
+    result1 = await executor.execute("state['x'] = 42")
+    assert result1.error is None
+
+    result2 = await executor.execute("print(state['x'])")
     assert result2.error is None
     assert "42" in result2.output
 
-    # Third execution - modify the variable
-    result3 = await executor.execute("x = x * 2; print(x)")
+    result3 = await executor.execute("state['x'] = state['x'] * 2\nprint(state['x'])")
     assert result3.error is None
     assert "84" in result3.output
+
+
+@pytest.mark.asyncio
+async def test_builtins_survive_across_turns():
+    """Built-ins (final_answer, send_message, WORKSPACE_DIR) must be re-injected each turn."""
+    executor = LocalExecutor()
+
+    # Throwaway turn 1
+    await executor.execute("x = 1")
+
+    # Turn 2: built-ins should still be there
+    result = await executor.execute("final_answer('ok')")
+    assert result.error is None
+    assert result.final_answer == "ok"
+
+
+@pytest.mark.asyncio
+async def test_state_round_trip_across_executor_instances(tmp_path):
+    """A fresh LocalExecutor reading the same state file sees prior values."""
+    state_path = tmp_path / "s" / "state.json"
+
+    executor1 = LocalExecutor(state_path=state_path, session_id="abc")
+    result = await executor1.execute("state['greeting'] = 'hi'")
+    assert result.error is None
+
+    executor2 = LocalExecutor(state_path=state_path, session_id="abc")
+    result = await executor2.execute("print(state['greeting'])")
+    assert result.error is None
+    assert "hi" in result.output
+
+
+@pytest.mark.asyncio
+async def test_daemon_replay_no_stale_locals_leak(tmp_path):
+    """Regression for the stale-replay bug behind the turn-isolation change.
+
+    Simulates a daemon resume: run turn 1 on one executor; discard it; spin
+    up a fresh executor with the same session path and run turn 2. Without
+    turn isolation, a local `body` set in turn 1 could appear current in
+    turn 2. With isolation, it must raise NameError; only `state` carries.
+    """
+    state_path = tmp_path / "session_A" / "state.json"
+
+    ex1 = LocalExecutor(state_path=state_path, session_id="A")
+    r1 = await ex1.execute("body = 'stale_response'\nstate['request_id'] = 'req-1'")
+    assert r1.error is None
+
+    # Parent process dies / daemon reloads the session -> fresh executor.
+    ex2 = LocalExecutor(state_path=state_path, session_id="A")
+
+    r2 = await ex2.execute("print(body)")
+    assert r2.error is not None
+    assert "NameError" in r2.error
+
+    r3 = await ex2.execute("print(state['request_id'])")
+    assert r3.error is None
+    assert "req-1" in r3.output
+
+
+@pytest.mark.asyncio
+async def test_cross_session_state_is_isolated(tmp_path):
+    """A second session must not see state from a first session."""
+    path_a = tmp_path / "A" / "state.json"
+    path_b = tmp_path / "B" / "state.json"
+
+    ex_a = LocalExecutor(state_path=path_a, session_id="A")
+    ex_b = LocalExecutor(state_path=path_b, session_id="B")
+
+    await ex_a.execute("state['secret'] = 'from-A'")
+    r = await ex_b.execute("print(list(state.keys()))")
+    assert r.error is None
+    assert "secret" not in r.output
+
+
+@pytest.mark.asyncio
+async def test_state_block_rendered_in_xml():
+    """ExecutionResult.to_xml() must include a <state> block listing persisted keys."""
+    executor = LocalExecutor()
+    await executor.execute("state['foo'] = [1, 2, 3]\nstate['bar'] = 'hello'")
+
+    result = await executor.execute("state['baz'] = 99")
+    xml = result.to_xml()
+
+    assert "<state>" in xml
+    assert "foo=list(3 items)" in xml
+    assert "bar=str(5 chars)" in xml
+    assert "baz=int" in xml
+
+
+@pytest.mark.asyncio
+async def test_state_serialization_error_surfaced_in_result(tmp_path):
+    """Non-JSON assignments surface a clear error naming the offending key."""
+    state_path = tmp_path / "state.json"
+    executor = LocalExecutor(state_path=state_path, session_id="err-sess")
+
+    result = await executor.execute("state['bad'] = {1, 2, 3}")
+    assert result.error is not None
+    assert "bad" in result.error
+    assert "StateSerializationError" in result.error or "not JSON" in result.error
 
 
 @pytest.mark.asyncio
@@ -123,32 +231,32 @@ async def test_local_executor_send_variables():
 
 @pytest.mark.asyncio
 async def test_local_executor_send_variables_persist():
-    """Test that injected variables persist."""
+    """Harness-injected variables are re-applied on every turn."""
     executor = LocalExecutor()
 
-    # Inject variable
+    # Inject variable at harness level
     await executor.send_variables({"base_value": 100})
 
-    # First execution using injected variable
-    result1 = await executor.execute("result = base_value + 50")
+    # First turn: compute and stash in state
+    result1 = await executor.execute("state['result'] = base_value + 50")
     assert result1.error is None
 
-    # Second execution using both injected and computed variables
-    result2 = await executor.execute("print(result)")
+    # Second turn: base_value must still be available (harness injection is sticky)
+    # and state survives too
+    result2 = await executor.execute("print(base_value, state['result'])")
     assert result2.error is None
-    assert "150" in result2.output
+    assert "100 150" in result2.output
 
 
 @pytest.mark.asyncio
 async def test_local_executor_multiple_executions():
-    """Test multiple sequential executions."""
+    """Test multiple sequential executions carrying data via state."""
     executor = LocalExecutor()
 
-    # Execute multiple code blocks
-    await executor.execute("a = 1")
-    await executor.execute("b = 2")
-    await executor.execute("c = a + b")
-    result = await executor.execute("print(c)")
+    await executor.execute("state['a'] = 1")
+    await executor.execute("state['b'] = 2")
+    await executor.execute("state['c'] = state['a'] + state['b']")
+    result = await executor.execute("print(state['c'])")
 
     assert result.error is None
     assert "3" in result.output

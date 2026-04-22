@@ -4,8 +4,11 @@ Runs LLM-generated Python in a child process. Parent-only tools
 (ask_user, spawn_agent, etc.) and final_answer/send_message are
 dispatched via IPC. Non-parent-only tools run directly in the child.
 
-State between turns is serialized as JSON (not pickle — pickle is a
-sandbox escape via __reduce__).
+Each turn runs in a fresh namespace. Values assigned to the injected
+`state` dict persist across turns via a per-session JSON file; all
+other bindings are discarded at turn end. JSON (not pickle) is used
+because unpickling attacker-controlled state would be a sandbox escape
+via __reduce__.
 """
 
 import asyncio
@@ -20,6 +23,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .executor import EXECUTOR_BUILTIN_TOOLS, ExecutionResult
+from .state import load_state, save_state
 
 logger = logging.getLogger(__name__)
 
@@ -177,13 +181,18 @@ class SubprocessExecutor:
         event_bus: Optional[Any] = None,
         path_context: Optional[Any] = None,
         sandbox_config: Optional[Any] = None,
+        state_path: Optional[Path] = None,
+        session_id: Optional[str] = None,
     ):
         self.workspace_dir = workspace_dir
         self.event_bus = event_bus
         self.path_context = path_context
         self.sandbox_config = sandbox_config
 
-        self._state: Dict[str, Any] = {}
+        self._state_path = state_path
+        self._session_id = session_id
+        self._state: Dict[str, Any] = load_state(state_path) if state_path else {}
+        self._sticky_injections: Dict[str, Any] = {}
         self._tools: List[Any] = []
         self._tool_map: Dict[str, Any] = {}
         self._parent_only_tools: set = set()
@@ -197,13 +206,16 @@ class SubprocessExecutor:
         self._proxy = None
         self._proxy_socket: Optional[Path] = None
 
-        # Inject path context
         if path_context:
-            self._state["WORKSPACE_DIR"] = str(path_context.workspace_dir) if path_context.workspace_dir else None
-            self._state["INVOKED_FROM"] = str(path_context.invoked_from) if path_context.invoked_from else None
+            self._sticky_injections["WORKSPACE_DIR"] = (
+                str(path_context.workspace_dir) if path_context.workspace_dir else None
+            )
+            self._sticky_injections["INVOKED_FROM"] = (
+                str(path_context.invoked_from) if path_context.invoked_from else None
+            )
         else:
-            self._state["WORKSPACE_DIR"] = None
-            self._state["INVOKED_FROM"] = None
+            self._sticky_injections["WORKSPACE_DIR"] = None
+            self._sticky_injections["INVOKED_FROM"] = None
 
     def set_tools(self, tools: List[Any], event_bus: Optional[Any] = None):
         """Register tools. Called by TsugiteAgent._inject_tools_into_executor.
@@ -243,6 +255,7 @@ class SubprocessExecutor:
     def _build_harness(self, code: str) -> str:
         """Generate the Python harness script for a single turn."""
         state_path = os.path.join(self._tmpdir, "state.json")
+        injections_path = os.path.join(self._tmpdir, "injections.json")
         result_path = os.path.join(self._tmpdir, "result.json")
 
         # Build tool stubs
@@ -269,18 +282,13 @@ class SubprocessExecutor:
 
 PPRINT_WIDTH = 100
 STATE_PATH = {json.dumps(state_path)}
+INJECTIONS_PATH = {json.dumps(injections_path)}
 RESULT_PATH = {json.dumps(result_path)}
 
 # Tool stubs
 {"".join(tool_stubs)}
 
-# Load state
 namespace = {{}}
-if os.path.exists(STATE_PATH):
-    with open(STATE_PATH, "r") as f:
-        namespace = json.load(f)
-
-# Inject builtins into namespace
 namespace["final_answer"] = final_answer
 namespace["send_message"] = send_message
 namespace["react_to_message"] = react_to_message
@@ -293,6 +301,10 @@ def _blocked_open(*args, **kwargs):
 namespace["open"] = _blocked_open
 {self._inject_tool_names_code()}
 
+if os.path.exists(INJECTIONS_PATH):
+    with open(INJECTIONS_PATH, "r") as f:
+        namespace.update(json.load(f))
+
 # Load content blocks from files (consumed once per turn)
 _cb_manifest = os.path.join(os.path.dirname(STATE_PATH), "content_blocks.json")
 if os.path.exists(_cb_manifest):
@@ -302,14 +314,38 @@ if os.path.exists(_cb_manifest):
                 namespace[_cb_name] = _cb_f.read()
     os.remove(_cb_manifest)
 
+_state_data = {{}}
+if os.path.exists(STATE_PATH):
+    with open(STATE_PATH, "r") as f:
+        _state_data = json.load(f)
+namespace["state"] = _state_data
+
 code = {code_escaped}
 
-# Capture stdout/stderr
 stdout_capture = io.StringIO()
 stderr_capture = io.StringIO()
 old_stdout = sys.stdout
 old_stderr = sys.stderr
 namespace_before = set(namespace.keys())
+
+def _summarize(v):
+    t = type(v).__name__
+    if isinstance(v, dict):
+        return t + "(" + str(len(v)) + " keys)"
+    if isinstance(v, (list, tuple, set, frozenset)):
+        return t + "(" + str(len(v)) + " items)"
+    if isinstance(v, str):
+        return t + "(" + str(len(v)) + " chars)"
+    if isinstance(v, bytes):
+        return t + "(" + str(len(v)) + " bytes)"
+    return t
+
+def _is_json_safe(v):
+    try:
+        json.dumps(v)
+        return True
+    except (TypeError, ValueError, OverflowError):
+        return False
 
 try:
     sys.stdout = stdout_capture
@@ -328,89 +364,63 @@ try:
 
     output = stdout_capture.getvalue()
     stderr_output = stderr_capture.getvalue()
-
-    # Track new variables (mirrors _summarize_variable from executor.py — duplicated
-    # because this runs as a string template in the sandboxed subprocess)
-    namespace_after = set(namespace.keys())
-    new_vars = namespace_after - namespace_before
-    variables_set = {{}}
-    for var_name in new_vars:
-        if var_name.startswith("_"):
-            continue
-        try:
-            v = namespace[var_name]
-            t = type(v).__name__
-            if isinstance(v, dict):
-                variables_set[var_name] = f"{{t}}({{len(v)}} keys)"
-            elif isinstance(v, (list, tuple, set, frozenset)):
-                variables_set[var_name] = f"{{t}}({{len(v)}} items)"
-            elif isinstance(v, str):
-                variables_set[var_name] = f"{{t}}({{len(v)}} chars)"
-            elif isinstance(v, bytes):
-                variables_set[var_name] = f"{{t}}({{len(v)}} bytes)"
-            else:
-                variables_set[var_name] = t
-        except Exception:
-            variables_set[var_name] = type(namespace[var_name]).__name__
-
-    result = {{
-        "output": output,
-        "error": None,
-        "stdout": output,
-        "stderr": stderr_output,
-        "final_answer": _final_answer_value,
-        "tools_called": _tools_called[:],
-        "variables_set": variables_set,
-    }}
+    exec_error = None
 
 except Exception as e:
-    error_msg = f"{{type(e).__name__}}: {{str(e)}}"
-    variables_set = {{}}
-    namespace_after = set(namespace.keys())
-    new_vars = namespace_after - namespace_before
-    for var_name in new_vars:
-        if var_name.startswith("_"):
-            continue
+    output = stdout_capture.getvalue()
+    stderr_output = stderr_capture.getvalue()
+    exec_error = f"{{type(e).__name__}}: {{str(e)}}"
+finally:
+    sys.stdout = old_stdout
+    sys.stderr = old_stderr
+
+namespace_after = set(namespace.keys())
+new_vars = namespace_after - namespace_before
+variables_set = {{}}
+for var_name in new_vars:
+    if var_name.startswith("_"):
+        continue
+    try:
+        variables_set[var_name] = _summarize(namespace[var_name])
+    except Exception:
         try:
             variables_set[var_name] = type(namespace[var_name]).__name__
         except Exception:
             pass
 
-    result = {{
-        "output": stdout_capture.getvalue(),
-        "error": error_msg,
-        "stdout": stdout_capture.getvalue(),
-        "stderr": stderr_capture.getvalue() + "\\n" + error_msg,
-        "final_answer": None,
-        "tools_called": _tools_called[:],
-        "variables_set": variables_set,
-    }}
+state_final = namespace.get("state", {{}})
+if not isinstance(state_final, dict):
+    state_final = dict(state_final) if hasattr(state_final, "keys") else {{}}
 
-finally:
-    sys.stdout = old_stdout
-    sys.stderr = old_stderr
+state_keys = {{k: _summarize(v) for k, v in state_final.items()}}
 
-# Save state (JSON-serializable vars only)
-save_state = {{}}
-skip_keys = {{"final_answer", "send_message", "react_to_message", "__builtins__"}}
-for k, v in namespace.items():
-    if k.startswith("_") or k in skip_keys:
-        continue
-    try:
-        json.dumps(v)
-        save_state[k] = v
-    except (TypeError, ValueError, OverflowError):
-        pass  # skip non-serializable
+save_error = None
+try:
+    serialized = json.dumps(state_final)
+except (TypeError, ValueError, OverflowError) as err:
+    bad_key = next((k for k, v in state_final.items() if not _is_json_safe(v)), "?")
+    save_error = "StateSerializationError: state[" + repr(bad_key) + "] is not JSON-serializable: " + str(err)
 
-# Also skip tool function names
-tool_names = {json.dumps([t.name for t in self._tools])}
-for tn in tool_names:
-    save_state.pop(tn, None)
+if save_error is None:
+    with open(STATE_PATH, "w") as f:
+        f.write(serialized)
 
-with open(STATE_PATH, "w") as f:
-    json.dump(save_state, f)
+final_error = exec_error
+if save_error is not None:
+    final_error = (exec_error + "\\n" + save_error) if exec_error else save_error
+    stderr_output = (stderr_output + "\\n" + save_error) if stderr_output else save_error
 
-# Write result
+result = {{
+    "output": output if exec_error is None else stdout_capture.getvalue(),
+    "error": final_error,
+    "stdout": output,
+    "stderr": stderr_output if exec_error is None else (stderr_output + "\\n" + exec_error),
+    "final_answer": _final_answer_value if exec_error is None else None,
+    "tools_called": _tools_called[:],
+    "variables_set": variables_set,
+    "state_keys": state_keys,
+}}
+
 with open(RESULT_PATH, "w") as f:
     json.dump(result, f)
 """
@@ -435,9 +445,18 @@ with open(RESULT_PATH, "w") as f:
         harness_code = self._build_harness(code)
         harness_path = os.path.join(self._tmpdir, "harness.py")
         result_path = os.path.join(self._tmpdir, "result.json")
+        state_path = os.path.join(self._tmpdir, "state.json")
+        injections_path = os.path.join(self._tmpdir, "injections.json")
 
         with open(harness_path, "w") as f:
             f.write(harness_code)
+
+        # Shuttle persistent state into the tmpdir where the (possibly sandboxed) child can read it.
+        with open(state_path, "w") as f:
+            json.dump(self._state, f)
+
+        with open(injections_path, "w") as f:
+            json.dump(self._sticky_injections, f)
 
         # Remove stale result file
         if os.path.exists(result_path):
@@ -534,6 +553,18 @@ with open(RESULT_PATH, "w") as f:
         if os.path.exists(result_path):
             with open(result_path, "r") as f:
                 result_data = json.load(f)
+
+            # Pull updated state back from the child and persist to the real path.
+            try:
+                with open(state_path, "r") as f:
+                    self._state = json.load(f)
+                if self._state_path is not None:
+                    save_state(self._state, self._state_path, session_id=self._session_id)
+            except FileNotFoundError:
+                pass
+            except Exception as e:
+                logger.warning("Failed to reload state from subprocess: %s", e)
+
             return ExecutionResult(
                 output=result_data.get("output", ""),
                 error=result_data.get("error"),
@@ -542,6 +573,7 @@ with open(RESULT_PATH, "w") as f:
                 final_answer=result_data.get("final_answer"),
                 tools_called=result_data.get("tools_called", []),
                 variables_set=result_data.get("variables_set", {}),
+                state_keys=result_data.get("state_keys", {}),
                 loaded_skills=self._loaded_skills_for_turn.copy(),
                 unloaded_skills=list(self._unloaded_skills_for_turn),
             )
@@ -689,18 +721,13 @@ with open(RESULT_PATH, "w") as f:
             self._proxy_socket = None
 
     async def send_variables(self, variables: Dict[str, Any]):
-        """Inject variables into state for next turn."""
+        """Register harness-level variables that are re-injected at the start of every turn."""
         for k, v in variables.items():
             try:
                 json.dumps(v)
-                self._state[k] = v
+                self._sticky_injections[k] = v
             except (TypeError, ValueError, OverflowError):
                 logger.warning("SubprocessExecutor: skipping non-serializable variable %r", k)
-
-        # Write state file so next turn picks it up
-        state_path = os.path.join(self._tmpdir, "state.json")
-        with open(state_path, "w") as f:
-            json.dump(self._state, f)
 
     async def inject_content_blocks(self, blocks: Dict[str, str]):
         """Inject content block variables for the next turn.

@@ -257,6 +257,28 @@ Instructions are concatenated: parent + "\n\n" + child (via inheritance).
 
 Understanding this flow helps target failures (e.g., prefetch errors, missing template vars, tool expansion issues).
 
+## Turn Execution and `state`
+
+Each LLM turn runs its code in a **fresh Python namespace**. Plain variables
+(`x = 5`, `data = fetch(...)`) are discarded when the turn ends. To carry a
+value into the next turn, assign it to `state`:
+
+```python
+# Turn 1
+issues = fetch_issues()
+state["issues"] = issues          # persisted across turns
+print(f"Found {len(issues)}")
+
+# Turn 2 — `issues` alone would NameError. `state['issues']` is still there.
+for issue in state["issues"]:
+    triage(issue)
+```
+
+`state` is a dict-like object. Values must be JSON-serializable (plain Python
+types - no sets, file handles, custom classes). Use `"key" in state` and
+`state.get("key", default)` for safe access. The current contents show up in
+each turn's `<state>` XML block so you can see what's still carrying over.
+
 ## Skill and Attachment Hooks
 
 - `auto_load_skills` lists skills to load before the first LLM turn.

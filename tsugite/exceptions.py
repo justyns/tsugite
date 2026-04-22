@@ -3,6 +3,28 @@
 from typing import Any, List, Optional
 
 
+class StateSerializationError(RuntimeError):
+    """Raised when per-session state cannot be serialized to JSON.
+
+    Attributes:
+        session_id: Session whose state failed to persist (may be None for ad-hoc executors).
+        key: The offending state key.
+        reason: Short classification, e.g. "not-json-serializable" or "size-cap".
+    """
+
+    def __init__(
+        self,
+        message: str,
+        session_id: Optional[str] = None,
+        key: Optional[str] = None,
+        reason: Optional[str] = None,
+    ):
+        super().__init__(message)
+        self.session_id = session_id
+        self.key = key
+        self.reason = reason
+
+
 class AgentExecutionError(RuntimeError):
     """Exception raised when agent execution fails.
 

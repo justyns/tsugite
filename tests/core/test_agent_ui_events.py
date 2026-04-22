@@ -85,14 +85,14 @@ async def test_ui_event_step_start(event_bus_with_handler):
             return _resp("""Thought: First step.
 
 ```python
-x = 5
-print(x)
+state['x'] = 5
+print(state['x'])
 ```""")
         else:
             return _resp("""Thought: Second step.
 
 ```python
-final_answer(x * 2)
+final_answer(state['x'] * 2)
 ```""")
 
     agent = TsugiteAgent(

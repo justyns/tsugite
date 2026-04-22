@@ -54,14 +54,30 @@ async def test_subprocess_inherits_workspace_cwd(tmp_path):
 
 @pytest.mark.asyncio
 async def test_state_persists_between_turns():
+    """`state` carries values across turns; plain locals do not."""
+    executor = SubprocessExecutor()
+    try:
+        result1 = await executor.execute("state['x'] = 42")
+        assert result1.error is None
+
+        result2 = await executor.execute("print(state['x'])")
+        assert result2.error is None
+        assert "42" in result2.output
+    finally:
+        executor.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_turn_namespace_is_fresh():
+    """Local assignments in one turn must not leak into the next."""
     executor = SubprocessExecutor()
     try:
         result1 = await executor.execute("x = 42")
         assert result1.error is None
 
         result2 = await executor.execute("print(x)")
-        assert result2.error is None
-        assert "42" in result2.output
+        assert result2.error is not None
+        assert "NameError" in result2.error
     finally:
         executor.cleanup()
 
@@ -128,16 +144,13 @@ async def test_last_expr_eval():
 
 
 @pytest.mark.asyncio
-async def test_non_serializable_variable():
-    """Functions can't be JSON-serialized — should be dropped with warning, not crash."""
+async def test_non_serializable_state_value_surfaces_error():
+    """Assigning a non-JSON value to state must surface a clear error at turn end."""
     executor = SubprocessExecutor()
     try:
-        result = await executor.execute("def my_func(): pass\nx = 42")
-        assert result.error is None
-        # x should persist, my_func should be dropped
-        result2 = await executor.execute("print(x)")
-        assert result2.error is None
-        assert "42" in result2.output
+        result = await executor.execute("state['s'] = {1, 2, 3}")
+        assert result.error is not None
+        assert "s" in result.error
     finally:
         executor.cleanup()
 
