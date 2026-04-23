@@ -383,6 +383,197 @@ def history_show(
         raise typer.Exit(1)
 
 
+def _convert_old_records(records: list[dict]) -> list[dict]:
+    """Translate pre-event-log records (session_meta/turn/etc.) into new events.
+
+    Preserves user/assistant text and compaction summaries. Drops context,
+    context_update, and hook_execution records — the new format isn't a
+    superset and the user opted into losing fine-grained tool detail.
+    """
+    events: list[dict] = []
+    first_ts = records[0].get("created_at") if records else None
+    for r in records:
+        rt = r.get("type")
+        if rt == "session_meta":
+            events.append({
+                "type": "session_start",
+                "ts": r.get("created_at") or first_ts,
+                "data": {
+                    k: v
+                    for k, v in {
+                        "agent": r.get("agent") or "unknown",
+                        "model": r.get("model") or "unknown",
+                        "machine": r.get("machine") or "unknown",
+                        "workspace": r.get("workspace"),
+                        "parent_session": r.get("compacted_from"),
+                    }.items()
+                    if v is not None
+                },
+            })
+        elif rt == "turn":
+            ts = r.get("timestamp") or first_ts
+            user_text = ""
+            for msg in r.get("messages") or []:
+                if msg.get("role") == "user":
+                    content = msg.get("content", "")
+                    if isinstance(content, str):
+                        user_text = content
+                    break
+            if not user_text:
+                user_text = r.get("user_summary") or ""
+            assistant_text = r.get("final_answer") or ""
+            if not assistant_text:
+                for msg in reversed(r.get("messages") or []):
+                    if msg.get("role") == "assistant":
+                        content = msg.get("content", "")
+                        if isinstance(content, str):
+                            assistant_text = content
+                        break
+
+            events.append({"type": "user_input", "ts": ts, "data": {"text": user_text}})
+            tokens = r.get("tokens")
+            response_data = {"raw_content": assistant_text}
+            if r.get("model"):
+                response_data["model"] = r["model"]
+            if tokens:
+                response_data["usage"] = {"total_tokens": tokens}
+            if r.get("cost"):
+                response_data["cost"] = r["cost"]
+            events.append({"type": "model_response", "ts": ts, "data": response_data})
+        elif rt == "compaction_summary":
+            events.append({
+                "type": "compaction",
+                "ts": r.get("timestamp") or first_ts,
+                "data": {
+                    k: v
+                    for k, v in {
+                        "summary": r.get("summary", ""),
+                        "replaced_count": r.get("previous_turns", 0),
+                        "retained_count": r.get("retained_turns", 0),
+                        "reason": r.get("compaction_reason"),
+                    }.items()
+                    if v is not None
+                },
+            })
+        elif rt == "session_status":
+            events.append({
+                "type": "session_end",
+                "ts": r.get("timestamp") or first_ts,
+                "data": {
+                    k: v
+                    for k, v in {
+                        "status": r.get("status", "success"),
+                        "error_message": r.get("error_message"),
+                    }.items()
+                    if v is not None
+                },
+            })
+        # context / context_update / hook_execution are dropped intentionally.
+    return events
+
+
+def migrate_session_file(path: Path, *, backup: bool, dry_run: bool) -> str:
+    """Migrate one old-format session file in place.
+
+    Returns a short status string ('migrated ...', 'skipped:...', or 'would-migrate ...').
+    Raises on write errors; the original file is untouched until the rewrite succeeds.
+    """
+    if not path.exists() or path.stat().st_size == 0:
+        return "skipped:empty"
+
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            first_line = f.readline().strip()
+    except OSError:
+        return "skipped:read_error"
+
+    if not first_line:
+        return "skipped:empty"
+
+    try:
+        first = json.loads(first_line)
+    except json.JSONDecodeError:
+        return "skipped:invalid_json"
+
+    ftype = first.get("type")
+    if ftype == "session_start":
+        return "skipped:already_new"
+    if ftype != "session_meta":
+        return f"skipped:unknown_format({ftype})"
+
+    records: list[dict] = []
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                records.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+
+    if not records:
+        return "skipped:no_records"
+
+    events = _convert_old_records(records)
+    if dry_run:
+        return f"would-migrate ({len(records)} records -> {len(events)} events)"
+
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        for e in events:
+            f.write(json.dumps(e, ensure_ascii=False) + "\n")
+
+    if backup:
+        bak = path.with_suffix(path.suffix + ".bak")
+        path.rename(bak)
+    tmp.replace(path)
+
+    return f"migrated ({len(records)} records -> {len(events)} events)"
+
+
+@history_app.command("migrate")
+def history_migrate(
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would change without writing"),
+    backup: bool = typer.Option(True, "--backup/--no-backup", help="Keep .bak copies of the originals"),
+):
+    """Convert pre-event-log session JSONLs to the per-event format.
+
+    Old sessions used {session_meta, context, turn, compaction_summary, ...}
+    record types; the new format uses {session_start, user_input, model_response,
+    code_execution, compaction, session_end}. This command preserves user text,
+    assistant text, and compaction summaries; it drops attachment context and
+    hook_execution records because the new format isn't a superset.
+
+    Runs idempotently — already-new files are skipped.
+    """
+    from tsugite.history import get_history_dir, list_session_files
+
+    session_files = list_session_files()
+    if not session_files:
+        console.print("[yellow]No session files found in[/yellow]", get_history_dir())
+        return
+
+    migrated = skipped = failed = 0
+    for path in session_files:
+        try:
+            status = migrate_session_file(path, backup=backup, dry_run=dry_run)
+        except Exception as e:
+            console.print(f"[red]{path.name}: {e}[/red]")
+            failed += 1
+            continue
+        if status.startswith("migrated") or status.startswith("would-migrate"):
+            console.print(f"[green]{path.name}[/green] {status}")
+            migrated += 1
+        else:
+            skipped += 1
+
+    verb = "Would migrate" if dry_run else "Migrated"
+    console.print(f"\n[bold]{verb}:[/bold] {migrated}  [dim]skipped:[/dim] {skipped}  [dim]failed:[/dim] {failed}")
+    if not dry_run and backup and migrated:
+        console.print("[dim]Originals saved as *.bak — delete when satisfied.[/dim]")
+
+
 @history_app.command("rebuild-index")
 def history_rebuild_index():
     """Rebuild conversation index from JSONL files.
