@@ -832,11 +832,8 @@ class HTTPServer:
 
         events = self._collect_events(conversation_id, limit=limit)
 
-        # Reactions live in the session event log (separate from history).
-        live_events = adapter.session_store.read_events(conversation_id)
-        for live in live_events:
-            if live.get("type") == "reaction" and live.get("emoji"):
-                events.append({"type": "reaction", "ts": live.get("timestamp"), "data": {"emoji": live["emoji"]}})
+        # UI events (reactions, prompt_snapshots) are now part of the same
+        # session JSONL as conversation events, so they're already included.
 
         return JSONResponse(
             {

@@ -532,45 +532,153 @@ def migrate_session_file(path: Path, *, backup: bool, dry_run: bool) -> str:
     return f"migrated ({len(records)} records -> {len(events)} events)"
 
 
-@history_app.command("migrate")
-def history_migrate(
-    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would change without writing"),
-    backup: bool = typer.Option(True, "--backup/--no-backup", help="Keep .bak copies of the originals"),
-):
-    """Convert pre-event-log session JSONLs to the per-event format.
+def migrate_path(root: Path, *, backup: bool, dry_run: bool, recursive: bool) -> tuple[int, int, int]:
+    """Migrate all session JSONL files under ``root``.
 
-    Old sessions used {session_meta, context, turn, compaction_summary, ...}
-    record types; the new format uses {session_start, user_input, model_response,
-    code_execution, compaction, session_end}. This command preserves user text,
-    assistant text, and compaction summaries; it drops attachment context and
-    hook_execution records because the new format isn't a superset.
-
-    Runs idempotently — already-new files are skipped.
+    Returns (migrated, skipped, failed).
     """
-    from tsugite.history import get_history_dir, list_session_files
-
-    session_files = list_session_files()
-    if not session_files:
-        console.print("[yellow]No session files found in[/yellow]", get_history_dir())
-        return
-
+    if not root.exists():
+        return (0, 0, 0)
+    pattern = "**/*.jsonl" if recursive else "*.jsonl"
     migrated = skipped = failed = 0
-    for path in session_files:
+    for path in sorted(root.glob(pattern)):
         try:
             status = migrate_session_file(path, backup=backup, dry_run=dry_run)
         except Exception as e:
-            console.print(f"[red]{path.name}: {e}[/red]")
+            console.print(f"[red]{path}: {e}[/red]")
             failed += 1
             continue
         if status.startswith("migrated") or status.startswith("would-migrate"):
-            console.print(f"[green]{path.name}[/green] {status}")
+            console.print(f"[green]{path}[/green] {status}")
             migrated += 1
         else:
             skipped += 1
+    return (migrated, skipped, failed)
+
+
+def migrate_daemon_sessions(
+    daemon_dir: Path, history_dir: Path, *, backup: bool, dry_run: bool
+) -> tuple[int, int]:
+    """Merge legacy ``daemon/sessions/{id}.jsonl`` UI events into the matching
+    ``history/{id}.jsonl`` file.
+
+    The daemon used to keep a parallel event log with reactions, prompt_snapshots
+    and other UI telemetry. Now those events live in the same per-session JSONL
+    as conversation events, so the daemon log is redundant. This function moves
+    each daemon file's events into the matching history file (sorted by
+    timestamp), then deletes (or backs up) the daemon source file.
+
+    Returns (merged, skipped).
+    """
+    if not daemon_dir.exists():
+        return (0, 0)
+
+    merged = skipped = 0
+    for daemon_file in sorted(daemon_dir.glob("*.jsonl")):
+        sid = daemon_file.stem
+        history_file = history_dir / f"{sid}.jsonl"
+
+        try:
+            daemon_events = []
+            with open(daemon_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        daemon_events.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        continue
+        except OSError:
+            skipped += 1
+            continue
+
+        if not daemon_events:
+            skipped += 1
+            continue
+
+        # Convert to new Event shape, sorted by timestamp
+        new_events = []
+        for e in daemon_events:
+            new_events.append({
+                "type": e.get("type", "unknown"),
+                "ts": e.get("timestamp"),
+                "data": {k: v for k, v in e.items() if k not in ("type", "timestamp")},
+            })
+        new_events.sort(key=lambda e: e.get("ts") or "")
+
+        if dry_run:
+            console.print(f"[green]{daemon_file}[/green] would merge {len(new_events)} events into {history_file.name}")
+            merged += 1
+            continue
+
+        history_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(history_file, "a", encoding="utf-8") as f:
+            for e in new_events:
+                clean_data = {k: v for k, v in e["data"].items() if v is not None}
+                f.write(json.dumps({"type": e["type"], "ts": e["ts"], "data": clean_data}, ensure_ascii=False) + "\n")
+
+        if backup:
+            daemon_file.rename(daemon_file.with_suffix(daemon_file.suffix + ".bak"))
+        else:
+            daemon_file.unlink()
+        console.print(f"[green]{daemon_file}[/green] merged {len(new_events)} events into {history_file.name}")
+        merged += 1
+
+    return (merged, skipped)
+
+
+@history_app.command("migrate")
+def history_migrate(
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would change without writing"),
+    backup: bool = typer.Option(True, "--backup/--no-backup", help="Keep .bak copies of originals"),
+):
+    """Convert pre-event-log session JSONLs to the per-event format.
+
+    Scans:
+      - the main history dir
+      - each workspace's archived sessions
+      - the legacy daemon UI event log (merged into matching history files)
+
+    Runs idempotently — already-new files are skipped.
+    """
+    from tsugite.config import get_xdg_data_path
+    from tsugite.history import get_history_dir
+
+    history_dir = get_history_dir()
+    data_root = get_xdg_data_path("")  # ~/.local/share/tsugite/
+
+    total_migrated = total_skipped = total_failed = 0
+
+    console.print(f"[bold]Scanning history dir:[/bold] {history_dir}")
+    m, s, f = migrate_path(history_dir, backup=backup, dry_run=dry_run, recursive=False)
+    total_migrated += m
+    total_skipped += s
+    total_failed += f
+
+    workspaces_root = data_root / "workspaces"
+    if workspaces_root.exists():
+        console.print(f"\n[bold]Scanning workspace archives:[/bold] {workspaces_root}")
+        for ws in sorted(p for p in workspaces_root.iterdir() if p.is_dir()):
+            sessions_dir = ws / "sessions"
+            if sessions_dir.exists():
+                m, s, f = migrate_path(sessions_dir, backup=backup, dry_run=dry_run, recursive=False)
+                total_migrated += m
+                total_skipped += s
+                total_failed += f
+
+    daemon_dir = data_root / "daemon" / "sessions"
+    if daemon_dir.exists():
+        console.print(f"\n[bold]Merging legacy daemon event log:[/bold] {daemon_dir}")
+        merged, skipped = migrate_daemon_sessions(daemon_dir, history_dir, backup=backup, dry_run=dry_run)
+        total_migrated += merged
+        total_skipped += skipped
 
     verb = "Would migrate" if dry_run else "Migrated"
-    console.print(f"\n[bold]{verb}:[/bold] {migrated}  [dim]skipped:[/dim] {skipped}  [dim]failed:[/dim] {failed}")
-    if not dry_run and backup and migrated:
+    console.print(
+        f"\n[bold]{verb}:[/bold] {total_migrated}  [dim]skipped:[/dim] {total_skipped}  [dim]failed:[/dim] {total_failed}"
+    )
+    if not dry_run and backup and total_migrated:
         console.print("[dim]Originals saved as *.bak — delete when satisfied.[/dim]")
 
 

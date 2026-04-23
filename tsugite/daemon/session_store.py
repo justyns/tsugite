@@ -110,11 +110,19 @@ class SessionStore:
     Persists to {state_dir}/session_store.json.
     """
 
-    def __init__(self, store_path: Path, context_limits: Optional[dict[str, int]] = None):
+    def __init__(
+        self,
+        store_path: Path,
+        context_limits: Optional[dict[str, int]] = None,
+        history_dir: Optional[Path] = None,
+    ):
         self._path = store_path
+        # Where per-session event logs live. Defaults to `<store_path parent>/history`
+        # so tests using tmp_path/session_store.json get isolated tmp_path/history/,
+        # while production callers can pass the XDG history dir explicitly.
+        self._history_dir = history_dir if history_dir is not None else (store_path.parent / "history")
         self._sessions: dict[str, Session] = {}
         self._lock = threading.Lock()
-        self._events_dir_created = False
         self._dirty = False
         self._save_dir_created = False
 
@@ -472,46 +480,54 @@ class SessionStore:
                 and s.status == SessionStatus.ACTIVE.value
             ]
 
-    # ── Event log (per-session JSONL) ──
+    # ── Event log: unified with conversation history ──
+    #
+    # UI events (reactions, prompt_snapshots, etc.) are stored in the same
+    # `history/{session_id}.jsonl` file as the conversation events recorded by
+    # the agent loop. There is no separate daemon/sessions/ log.
 
-    def _events_dir(self) -> Path:
-        return self._path.parent / "sessions"
-
-    def _event_log_path(self, session_id: str) -> Path:
-        return self._events_dir() / f"{session_id}.jsonl"
+    def _history_path(self, session_id: str) -> Path:
+        return self._history_dir / f"{session_id}.jsonl"
 
     def append_event(self, session_id: str, event: dict) -> None:
-        if not self._events_dir_created:
-            self._events_dir().mkdir(parents=True, exist_ok=True)
-            self._events_dir_created = True
-        path = self._event_log_path(session_id)
-        with open(path, "a") as f:
-            f.write(json.dumps(event) + "\n")
+        """Append a UI/telemetry event to the session's history JSONL.
+
+        Accepts the legacy flat-dict shape `{type, timestamp, ...rest}` and
+        translates it into the per-event Event schema. Creates the file if it
+        doesn't exist (without injecting an implicit session_start) so that
+        callers like the SSE handler don't have to coordinate file creation
+        with the agent loop.
+        """
+        path = self._history_path(session_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        storage = SessionStorage(path)  # bare wrapper; doesn't write anything
+        ts = _parse_ts(event.get("timestamp"))
+        data = {k: v for k, v in event.items() if k not in ("type", "timestamp")}
+        storage.record(event.get("type", "unknown"), ts=ts, **data)
 
     def read_events(self, session_id: str) -> list[dict]:
-        path = self._event_log_path(session_id)
+        """Return events as flat dicts for backward compatibility with callers."""
+        path = self._history_path(session_id)
         if not path.exists():
             return []
-        events = []
-        for line in path.read_text().splitlines():
-            line = line.strip()
-            if line:
-                try:
-                    events.append(json.loads(line))
-                except json.JSONDecodeError:
-                    continue
-        return events
+        try:
+            storage = SessionStorage.load(path)
+        except Exception:
+            return []
+        return [
+            {"type": e.type, "timestamp": e.ts.isoformat(), **e.data}
+            for e in storage.iter_events()
+        ]
 
     def event_count(self, session_id: str) -> int:
-        path = self._event_log_path(session_id)
+        path = self._history_path(session_id)
         if not path.exists():
             return 0
-        count = 0
-        with open(path) as f:
-            for line in f:
-                if line.strip():
-                    count += 1
-        return count
+        try:
+            storage = SessionStorage.load(path)
+        except Exception:
+            return 0
+        return sum(1 for _ in storage.iter_events())
 
     def session_detail(self, session_id: str) -> dict:
         session = self.get_session(session_id)

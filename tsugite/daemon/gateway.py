@@ -158,8 +158,15 @@ class Gateway:
             agent_config.context_limit = context_limit
             context_limits[agent_name] = context_limit
 
-        # Single global session store
-        session_store = SessionStore(self.config.state_dir / "session_store.json", context_limits=context_limits)
+        # Single global session store. UI events live in the same per-session
+        # JSONL as conversation history (XDG data dir, not the daemon state dir).
+        from tsugite.history import get_history_dir
+
+        session_store = SessionStore(
+            self.config.state_dir / "session_store.json",
+            context_limits=context_limits,
+            history_dir=get_history_dir(),
+        )
         self._session_store = session_store
 
         tasks = []
