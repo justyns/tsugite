@@ -97,16 +97,18 @@ def test_web_search_error_handling(mock_ddgs):
 # --- http_request tests ---
 
 
-def _mock_response(status_code=200, json_data=None, text="OK", headers=None):
-    """Create a mock httpx.Response."""
+_DEFAULT_TEXT = object()
+
+
+def _mock_response(status_code=200, json_data=None, text=_DEFAULT_TEXT, headers=None):
+    """Create a mock httpx.Response. If json_data is given and text isn't, text is the JSON string."""
     resp = MagicMock(spec=httpx.Response)
     resp.status_code = status_code
     resp.headers = httpx.Headers(headers or {"content-type": "application/json"})
-    resp.text = text
-    if json_data is not None:
-        resp.json.return_value = json_data
+    if text is _DEFAULT_TEXT:
+        resp.text = json.dumps(json_data) if json_data is not None else "OK"
     else:
-        resp.json.side_effect = json.JSONDecodeError("", "", 0)
+        resp.text = text
     resp.raise_for_status.return_value = None
     return resp
 
@@ -129,7 +131,8 @@ def test_http_request_post_dict_body(mock_httpx_client):
 
     assert isinstance(result, HttpResponse)
     assert result.status_code == 200
-    assert result.body == {"id": 1}
+    assert result.text == '{"id": 1}'
+    assert result.json() == {"id": 1}
     call_kwargs = mock_httpx_client.request.call_args
     assert call_kwargs.kwargs["json"] == {"name": "test"}
 
@@ -152,7 +155,7 @@ def test_http_request_patch_dict_body(mock_httpx_client):
 
     result = http_request("https://api.example.com/items/1", method="PATCH", body={"name": "new"})
 
-    assert result.body == {"updated": True}
+    assert result.json() == {"updated": True}
     call_kwargs = mock_httpx_client.request.call_args
     assert call_kwargs.kwargs["method"] == "PATCH"
     assert call_kwargs.kwargs["json"] == {"name": "new"}
@@ -178,7 +181,7 @@ def test_http_request_get_no_body(mock_httpx_client):
     result = http_request("https://api.example.com/items", method="GET")
 
     assert isinstance(result, HttpResponse)
-    assert result.body == {"data": [1, 2, 3]}
+    assert result.json() == {"data": [1, 2, 3]}
 
 
 def test_http_request_timeout_error(mock_httpx_client):
@@ -202,13 +205,35 @@ def test_http_request_http_error(mock_httpx_client):
 
 
 def test_http_request_non_json_response(mock_httpx_client):
-    """Non-JSON response body falls back to text string."""
+    """Non-JSON response exposes raw text; .json() raises a clear ValueError."""
     mock_httpx_client.request.return_value = _mock_response(200, json_data=None, text="plain text response")
 
     result = http_request("https://api.example.com/text", method="GET")
 
-    assert result.body == "plain text response"
+    assert result.text == "plain text response"
     assert result.status_code == 200
+    with pytest.raises(ValueError, match="not valid JSON"):
+        result.json()
+
+
+def test_http_request_json_response_exposes_both_text_and_parsed(mock_httpx_client):
+    """A JSON response keeps .text as the raw string and parses via .json()."""
+    mock_httpx_client.request.return_value = _mock_response(200, {"a": 1, "b": [2, 3]})
+
+    result = http_request("https://api.example.com/items", method="GET")
+
+    assert isinstance(result.text, str)
+    assert json.loads(result.text) == {"a": 1, "b": [2, 3]}
+    assert result.json() == {"a": 1, "b": [2, 3]}
+
+
+def test_http_response_body_aliases_text(mock_httpx_client):
+    """`.body` is a back-compat alias for `.text`."""
+    mock_httpx_client.request.return_value = _mock_response(200, json_data=None, text="hello")
+
+    result = http_request("https://api.example.com/text", method="GET")
+
+    assert result.body == result.text == "hello"
 
 
 # --- fetch_text tests ---

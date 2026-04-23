@@ -1,7 +1,6 @@
 """HTTP client tools for Tsugite agents."""
 
 import json
-from dataclasses import dataclass
 from typing import Any, Dict, Optional, Union
 
 import httpx
@@ -19,13 +18,28 @@ def _default_headers(headers: Optional[Dict[str, str]] = None) -> Dict[str, str]
     return merged
 
 
-@dataclass
 class HttpResponse:
-    """Structured HTTP response."""
+    """Structured HTTP response. Use `.text` for the raw body; call `.json()` to parse as JSON."""
 
-    status_code: int
-    headers: Dict[str, str]
-    body: Union[Dict[str, Any], list, str]
+    def __init__(self, status_code: int, headers: Dict[str, str], text: str):
+        self.status_code = status_code
+        self.headers = headers
+        self.text = text
+
+    @property
+    def body(self) -> str:
+        """Alias for `.text` (raw response body)."""
+        return self.text
+
+    def json(self) -> Union[Dict[str, Any], list]:
+        """Parse the response body as JSON. Raises ValueError if the body is not valid JSON."""
+        try:
+            return json.loads(self.text)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Response body is not valid JSON: {e}") from e
+
+    def __repr__(self) -> str:
+        return f"HttpResponse(status_code={self.status_code}, headers={self.headers!r}, text={self.text!r})"
 
 
 def _simple_request(
@@ -125,12 +139,12 @@ def http_request(
     headers: Optional[Dict[str, str]] = None,
     timeout: int = 30,
 ) -> HttpResponse:
-    """Make an HTTP request with optional body. Use for POST/PUT/PATCH/DELETE or verbose GET.
+    """Make an HTTP request. Returns HttpResponse with .status_code, .headers, .text (raw body); call .json() to parse JSON.
 
     Args:
         url: URL to send the request to
         method: HTTP method (POST, PUT, PATCH, DELETE, GET)
-        body: Request body — dict for JSON (auto-serialized), string for raw body
+        body: Request body - dict for JSON (auto-serialized), string for raw body
         headers: Optional HTTP headers
         timeout: Request timeout in seconds
     """
@@ -138,15 +152,10 @@ def http_request(
         request_headers = dict(headers) if headers else {}
         response = _simple_request(url, method, request_headers, timeout, body)
 
-        try:
-            parsed_body = response.json()
-        except (json.JSONDecodeError, ValueError):
-            parsed_body = response.text
-
         return HttpResponse(
             status_code=response.status_code,
             headers=dict(response.headers),
-            body=parsed_body,
+            text=response.text,
         )
     except httpx.TimeoutException as exc:
         raise RuntimeError(f"Request timed out after {timeout} seconds") from exc
