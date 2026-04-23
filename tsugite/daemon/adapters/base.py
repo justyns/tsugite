@@ -5,12 +5,11 @@ import contextvars
 import json
 import logging
 import os
-import tempfile
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Optional, Protocol
+from typing import Any, Dict, Optional, Protocol
 from zoneinfo import ZoneInfo
 
 from tzlocal import get_localzone
@@ -21,9 +20,6 @@ from tsugite.daemon.config import AgentConfig
 from tsugite.daemon.session_store import READ_ONLY_METADATA_KEYS, SessionStore
 from tsugite.exceptions import AgentExecutionError
 from tsugite.options import ExecutionOptions
-
-if TYPE_CHECKING:
-    from tsugite.history.models import Turn
 
 logger = logging.getLogger(__name__)
 
@@ -41,16 +37,6 @@ def _is_recent(iso_timestamp: str, minutes: int = 10, now: datetime = None) -> b
         return (now - dt) < timedelta(minutes=minutes)
     except (ValueError, TypeError):
         return False
-
-
-def _write_turns_tempfile(turns: "list[Turn]") -> Path:
-    """Write turn messages to a temp JSONL file for hook consumption."""
-    fd, path = tempfile.mkstemp(suffix=".jsonl", prefix="tsugite_compact_")
-    with os.fdopen(fd, "w") as f:
-        for turn in turns:
-            for msg in turn.messages:
-                f.write(json.dumps(msg) + "\n")
-    return Path(path)
 
 
 class HasUIHandler(Protocol):
@@ -488,6 +474,7 @@ class BaseAdapter(ABC):
                 path_context=path_context,
                 custom_logger=custom_logger,
                 context=agent_context,
+                user_input_for_history=message,
             )
 
         ctx = contextvars.copy_context()
@@ -684,24 +671,21 @@ class BaseAdapter(ABC):
     async def _compact_session(
         self, session_id: str, instructions: str | None = None, reason: str | None = None
     ) -> None:
-        """Compact session when approaching context limit.
-
-        Uses a sliding window: recent turns are kept verbatim while older
-        turns are summarized. This preserves the active conversational thread.
-        Fires pre_compact/post_compact hooks if configured.
+        """Compact a session by summarizing older events and rotating to a new
+        session whose first body event is a `compaction` summary, followed by
+        the retained recent events.
         """
         if instructions is None:
             instructions = self._DEFAULT_COMPACT_INSTRUCTIONS
         from tsugite.daemon.memory import (
             RETENTION_BUDGET_RATIO,
-            extract_file_paths_from_turns,
+            extract_file_paths_from_events,
             get_context_limit,
             infer_compaction_model,
-            split_turns_for_compaction,
+            split_events_for_compaction,
             summarize_session,
         )
-        from tsugite.history import SessionStorage, Turn, get_history_dir
-        from tsugite.history.models import CompactionSummary
+        from tsugite.history import SessionStorage, SessionSummary, events_to_messages, get_history_dir
         from tsugite.hooks import fire_compact_hooks
 
         resolved_model = self.resolve_model()
@@ -709,112 +693,123 @@ class BaseAdapter(ABC):
 
         old_conv_id = session_id
         old_session_path = get_history_dir() / f"{old_conv_id}.jsonl"
+        storage = SessionStorage.load(old_session_path)
+        all_events = storage.load_events()
 
-        storage = SessionStorage(old_session_path)
-        records = storage.load_records()
-        all_turns = [r for r in records if isinstance(r, Turn)]
-        prior_summary = next((r for r in records if isinstance(r, CompactionSummary)), None)
+        prior_summary = next(
+            (e.data.get("summary") for e in reversed(all_events) if e.type == "compaction"),
+            None,
+        )
 
         context_limit = get_context_limit(model, fallback=self.agent_config.context_limit)
         retention_budget = int(context_limit * RETENTION_BUDGET_RATIO)
 
-        old_turns, recent_turns = split_turns_for_compaction(all_turns, model, retention_budget)
+        old_events, recent_events = split_events_for_compaction(all_events, model, retention_budget)
 
-        if not old_turns:
-            logger.info("[%s] All turns fit in retention budget, skipping compaction", self.agent_name)
+        if not old_events:
+            logger.info("[%s] All events fit in retention budget, skipping compaction", self.agent_name)
             return
+
+        old_user_inputs = sum(1 for e in old_events if e.type == "user_input")
+        recent_user_inputs = sum(1 for e in recent_events if e.type == "user_input")
 
         logger.info(
             "[%s] Compacting session: %d old turns summarized, %d recent turns retained",
             self.agent_name,
-            len(old_turns),
-            len(recent_turns),
+            old_user_inputs,
+            recent_user_inputs,
         )
 
         old_session = self.session_store.get_session(session_id)
 
-        turns_file = _write_turns_tempfile(old_turns)
-        try:
-            hook_context = {
-                "conversation_id": old_conv_id,
-                "user_id": old_session.user_id or "",
-                "agent_name": self.agent_name,
-                "turns_file": str(turns_file),
-                "turn_count": len(old_turns),
-            }
-            pre_compact_execs = await fire_compact_hooks(
-                self.agent_config.workspace_dir, "pre_compact", hook_context, interactive=False
-            )
-            storage.record_hook_executions(pre_compact_execs)
+        hook_context = {
+            "conversation_id": old_conv_id,
+            "user_id": old_session.user_id or "",
+            "agent_name": self.agent_name,
+            "turn_count": old_user_inputs,
+        }
+        pre_compact_execs = await fire_compact_hooks(
+            self.agent_config.workspace_dir, "pre_compact", hook_context, interactive=False
+        )
+        for ex in pre_compact_execs:
+            storage.record("hook_execution", **ex.model_dump(exclude_none=True))
 
-            old_messages = []
-
-            if prior_summary:
-                old_messages.append(
-                    {
-                        "role": "user",
-                        "content": f"<prior_compaction_summary>\n{prior_summary.summary}\n</prior_compaction_summary>",
-                    }
-                )
-
-            functions_used = sorted({fn for turn in old_turns for fn in turn.functions_called})
-            file_paths = extract_file_paths_from_turns(old_turns)
-            meta_parts = [
-                "<session_metadata>",
-                f"  <turn_count>{len(old_turns)}</turn_count>",
-                f"  <time_range>{old_turns[0].timestamp.isoformat()} to {old_turns[-1].timestamp.isoformat()}</time_range>",
-            ]
-            if functions_used:
-                meta_parts.append(f"  <tools_used>{', '.join(functions_used)}</tools_used>")
-            meta_parts.append(f"  <model>{resolved_model}</model>")
-            if file_paths:
-                meta_parts.append(f"  <files_accessed>{', '.join(file_paths)}</files_accessed>")
-            meta_parts.append("</session_metadata>")
-            old_messages.append({"role": "user", "content": "\n".join(meta_parts)})
-
-            old_messages.extend(msg for turn in old_turns for msg in turn.messages)
-
-            if instructions:
-                old_messages.append(
-                    {"role": "user", "content": f"<compaction_instructions>{instructions}</compaction_instructions>"}
-                )
-
-            try:
-                summary = await summarize_session(
-                    old_messages, model=model, max_context_tokens=self.agent_config.context_limit
-                )
-            except Exception:
-                logger.exception("[%s] Compaction summarization failed", self.agent_name)
-                raise
-
-            new_session = self.session_store.compact_session(session_id)
-            new_session_path = get_history_dir() / f"{new_session.id}.jsonl"
-            new_storage = SessionStorage.create(
-                agent_name=self.agent_name,
-                model=resolved_model,
-                compacted_from=old_conv_id,
-                session_path=new_session_path,
-            )
-
-            new_storage.record_compaction_summary(
-                summary, len(old_turns), retained_turns=len(recent_turns), reason=reason
-            )
-            new_storage.write_turns(recent_turns)
-
-            post_compact_execs = await fire_compact_hooks(
-                self.agent_config.workspace_dir,
-                "post_compact",
+        old_messages: list[dict] = []
+        if prior_summary:
+            old_messages.append(
                 {
-                    **hook_context,
-                    "new_conversation_id": new_session.id,
-                    "turns_compacted": len(old_turns),
-                    "turns_retained": len(recent_turns),
-                },
-                interactive=False,
+                    "role": "user",
+                    "content": f"<prior_compaction_summary>\n{prior_summary}\n</prior_compaction_summary>",
+                }
             )
-            new_storage.record_hook_executions(post_compact_execs)
-        finally:
-            turns_file.unlink(missing_ok=True)
+
+        functions_used = sorted(SessionSummary.from_events(old_events).functions_called)
+        file_paths = extract_file_paths_from_events(old_events)
+        first_user_event = next((e for e in old_events if e.type == "user_input"), None)
+        last_response_event = next((e for e in reversed(old_events) if e.type == "model_response"), None)
+        time_start = first_user_event.ts.isoformat() if first_user_event else ""
+        time_end = (last_response_event or first_user_event).ts.isoformat() if (last_response_event or first_user_event) else ""
+
+        meta_parts = [
+            "<session_metadata>",
+            f"  <turn_count>{old_user_inputs}</turn_count>",
+            f"  <time_range>{time_start} to {time_end}</time_range>",
+        ]
+        if functions_used:
+            meta_parts.append(f"  <tools_used>{', '.join(functions_used)}</tools_used>")
+        meta_parts.append(f"  <model>{resolved_model}</model>")
+        if file_paths:
+            meta_parts.append(f"  <files_accessed>{', '.join(file_paths)}</files_accessed>")
+        meta_parts.append("</session_metadata>")
+        old_messages.append({"role": "user", "content": "\n".join(meta_parts)})
+
+        old_messages.extend(events_to_messages(old_events))
+
+        if instructions:
+            old_messages.append(
+                {"role": "user", "content": f"<compaction_instructions>{instructions}</compaction_instructions>"}
+            )
+
+        try:
+            summary = await summarize_session(
+                old_messages, model=model, max_context_tokens=self.agent_config.context_limit
+            )
+        except Exception:
+            logger.exception("[%s] Compaction summarization failed", self.agent_name)
+            raise
+
+        new_session = self.session_store.compact_session(session_id)
+        new_session_path = get_history_dir() / f"{new_session.id}.jsonl"
+        new_storage = SessionStorage.create(
+            agent_name=self.agent_name,
+            model=resolved_model,
+            parent_session=old_conv_id,
+            session_path=new_session_path,
+        )
+
+        new_storage.record(
+            "compaction",
+            summary=summary,
+            replaced_count=old_user_inputs,
+            retained_count=recent_user_inputs,
+            reason=reason,
+        )
+        for event in recent_events:
+            new_storage.record(event.type, **event.data)
+
+        post_compact_execs = await fire_compact_hooks(
+            self.agent_config.workspace_dir,
+            "post_compact",
+            {
+                **hook_context,
+                "new_conversation_id": new_session.id,
+                "turns_compacted": old_user_inputs,
+                "turns_retained": recent_user_inputs,
+            },
+            interactive=False,
+        )
+        for ex in post_compact_execs:
+            new_storage.record("hook_execution", **ex.model_dump(exclude_none=True))
 
         from tsugite.tools.skills import clear_loaded_skills
 

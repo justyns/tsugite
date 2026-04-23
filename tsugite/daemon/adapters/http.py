@@ -29,8 +29,8 @@ from tsugite.daemon.config import AgentConfig, HTTPConfig
 from tsugite.daemon.scheduler import ScheduleEntry
 from tsugite.daemon.webhook_store import WebhookStore
 from tsugite.events.base import BaseEvent
-from tsugite.history.models import CompactionSummary, HookExecution, Turn
 from tsugite.history.storage import SessionStorage, get_history_dir
+from tsugite.hooks import HookExecution
 from tsugite.skill_discovery import get_builtin_skills_path
 from tsugite.ui.jsonl import JSONLUIHandler
 from tsugite.utils import parse_yaml_frontmatter
@@ -772,112 +772,51 @@ class HTTPServer:
             attachments.append(entry)
         return JSONResponse({"attachments": attachments})
 
-    def _collect_turns(self, session_id: str, limit: int = 0) -> tuple[list, str | None, str | None, str | None]:
-        """Collect turns from a session and its compaction chain.
+    def _collect_events(self, session_id: str, limit: int = 0) -> list[dict]:
+        """Walk the compaction chain newest-first and return a chronological
+        list of event dicts. ``limit`` caps the number of user_input bubbles.
 
-        Args:
-            session_id: The current (newest) session ID.
-            limit: Max number of turns to return (0 = unlimited). Walks
-                   newest-to-oldest and stops early once enough turns are
-                   collected.
-
-        Returns:
-            (turns, compaction_summary, compacted_from, compaction_reason)
-            where the latter three come from the current session's metadata/records.
+        Compaction was historically a chain of separate session files. New
+        sessions record compaction as an in-place event, so for new files the
+        chain has length 1.
         """
         history_dir = get_history_dir()
         visited: set[str] = set()
-
-        # Walk the compaction chain newest-to-oldest, loading lazily.
-        # Each entry: (storage, records_or_None, compacted_from)
-        chain: list[tuple[SessionStorage, list | None, str | None]] = []
+        chain_files: list = []
         current_id = session_id
-        turns_loaded = 0
         while current_id and current_id not in visited:
             visited.add(current_id)
             path = history_dir / f"{current_id}.jsonl"
             if not path.exists():
                 break
+            chain_files.append(path)
+            # Inspect session_start event for parent_session linkage (chain support)
+            meta = SessionStorage.load_meta_fast(path)
+            current_id = meta.data.get("parent_session") if meta else None
+
+        events: list[dict] = []
+        for path in reversed(chain_files):
             try:
                 storage = SessionStorage.load(path)
-                compacted_from_id = storage._meta.compacted_from if storage._meta else None
-                if limit > 0 and turns_loaded >= limit and len(chain) > 0:
-                    # We have enough turns from newer links; only store metadata
-                    chain.append((storage, None, compacted_from_id))
-                    break
-                records = storage.load_records()
-                turn_count = sum(1 for r in records if isinstance(r, Turn))
-                turns_loaded += turn_count
-                chain.append((storage, records, compacted_from_id))
-                current_id = compacted_from_id
+                for event in storage.iter_events():
+                    events.append(event.model_dump(mode="json", exclude_none=True))
             except Exception:
-                break
-
-        # Extract compaction summary/compacted_from/reason from the newest session
-        compaction_summary = None
-        compacted_from = None
-        compaction_reason = None
-        if chain:
-            newest_storage, newest_records, _ = chain[0]
-            if newest_storage._meta:
-                compacted_from = newest_storage._meta.compacted_from
-            if newest_records:
-                cs = next((r for r in newest_records if isinstance(r, CompactionSummary)), None)
-                if cs:
-                    compaction_summary = cs.summary
-                    compaction_reason = cs.compaction_reason
-
-        # Iterate oldest-first (reversed chain) and append for chronological order
-        collected: list = []
-        for idx in reversed(range(len(chain))):
-            _, records, _ = chain[idx]
-            if records is None:
                 continue
-            turns_and_hooks = [r for r in records if isinstance(r, (Turn, HookExecution))]
-
-            # Trim retained turns that overlap with the next (newer) session
-            if idx > 0:
-                _, next_records, _ = chain[idx - 1]
-                comp_summary = None
-                if next_records:
-                    comp_summary = next((r for r in next_records if isinstance(r, CompactionSummary)), None)
-                if comp_summary and comp_summary.retained_turns:
-                    turn_count_total = sum(1 for r in turns_and_hooks if isinstance(r, Turn))
-                    keep_from = turn_count_total - comp_summary.retained_turns
-                    trimmed: list = []
-                    seen_turns = 0
-                    for r in turns_and_hooks:
-                        if isinstance(r, Turn):
-                            if seen_turns < keep_from:
-                                seen_turns += 1
-                                continue
-                            seen_turns += 1
-                        elif isinstance(r, HookExecution):
-                            if seen_turns < keep_from:
-                                continue
-                        trimmed.append(r)
-                    turns_and_hooks = trimmed
-            else:
-                comp_summary = None
-
-            collected.extend(turns_and_hooks)
-
-            if comp_summary:
-                marker = {"marker": "compaction", "summary": comp_summary.summary}
-                if comp_summary.compaction_reason:
-                    marker["reason"] = comp_summary.compaction_reason
-                collected.append(marker)
 
         if limit > 0:
-            turn_count = 0
-            for i in range(len(collected) - 1, -1, -1):
-                if isinstance(collected[i], Turn):
-                    turn_count += 1
-                    if turn_count > limit:
-                        collected = collected[i + 1 :]
-                        break
+            user_inputs = [i for i, e in enumerate(events) if e.get("type") == "user_input"]
+            if len(user_inputs) > limit:
+                events = events[user_inputs[-limit] :]
 
-        return collected, compaction_summary, compacted_from, compaction_reason
+        return events
+
+    @staticmethod
+    def _resolve_session_id(adapter, user_id: str, request: Request) -> str:
+        """Use ?session_id= when given, otherwise the user's interactive session."""
+        session_id = request.query_params.get("session_id")
+        if session_id:
+            return session_id
+        return adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name).id
 
     async def _history(self, request: Request) -> JSONResponse:
         adapter, err = self._get_adapter(request)
@@ -885,119 +824,24 @@ class HTTPServer:
             return err
 
         user_id = adapter.resolve_http_user(request.query_params.get("user_id", "web-anonymous"))
-        detail = request.query_params.get("detail", "false").lower() == "true"
         try:
             limit = max(1, min(int(request.query_params.get("limit", "100")), 1000))
         except (ValueError, TypeError):
             limit = 100
-        session_id = request.query_params.get("session_id")
-        if session_id:
-            conversation_id = session_id
-        else:
-            session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
-            conversation_id = session.id
+        conversation_id = self._resolve_session_id(adapter, user_id, request)
 
-        turns, compaction_summary, compacted_from, compaction_reason = self._collect_turns(conversation_id, limit=limit)
+        events = self._collect_events(conversation_id, limit=limit)
 
-        # Read events from session event log for reactions and prompt snapshots
-        all_events = adapter.session_store.read_events(conversation_id)
-        reaction_events = [e for e in all_events if e.get("type") == "reaction" and e.get("emoji")]
-        snapshot_events = [e for e in all_events if e.get("type") == "prompt_snapshot"] if detail else []
-        # Build list of (turn_timestamp, turn_index) for matching
-        turn_timestamps = []
-        turn_index = 0
-        for item in turns:
-            if isinstance(item, dict) or isinstance(item, HookExecution):
-                continue
-            ts = item.timestamp.isoformat() if item.timestamp else ""
-            turn_timestamps.append((ts, turn_index))
-            turn_index += 1
-
-        def _find_turn_for_event(ev_ts: str) -> int | None:
-            for ts, idx in turn_timestamps:
-                if ts and ts >= ev_ts:
-                    return idx
-            return None
-
-        reactions_by_turn: dict[int, list[str]] = {}
-        for ev in reaction_events:
-            idx = _find_turn_for_event(ev.get("timestamp", ""))
-            if idx is not None:
-                reactions_by_turn.setdefault(idx, []).append(ev["emoji"])
-
-        snapshots_by_turn: dict[int, dict] = {}
-        for ev in snapshot_events:
-            idx = _find_turn_for_event(ev.get("timestamp", ""))
-            if idx is not None:
-                snapshots_by_turn[idx] = ev
-
-        result_turns = []
-        real_turn_index = 0
-        for item in turns:
-            if isinstance(item, dict) and item.get("marker") == "compaction":
-                entry = {"type": "compaction"}
-                if item.get("summary"):
-                    entry["summary"] = item["summary"]
-                if item.get("reason"):
-                    entry["reason"] = item["reason"]
-                result_turns.append(entry)
-                continue
-            if isinstance(item, HookExecution):
-                result_turns.append(item.model_dump(mode="json", exclude_none=True))
-                continue
-            user_msg = ""
-            user_msg_found = False
-            content_blocks: dict[str, str] = {}
-            per_message_blocks: list[dict[str, str]] = []
-            sub_turn_count = 0
-            tool_call_count = 0
-            for msg in item.messages:
-                role = msg.get("role")
-                content = msg.get("content", "")
-                blocks: dict[str, str] = {}
-                if role == "user" and not user_msg_found:
-                    user_msg = content if isinstance(content, str) else str(content)
-                    user_msg_found = True
-                elif role == "assistant":
-                    sub_turn_count += 1
-                    tool_call_count += len(msg.get("tool_calls", []))
-                    if isinstance(content, str) and "<content" in content:
-                        _, blocks = extract_content_blocks(content)
-                        content_blocks.update(blocks)
-                per_message_blocks.append(blocks)
-            turn_data = {
-                "user": user_msg,
-                "assistant": item.final_answer or "",
-                "timestamp": item.timestamp.isoformat() if item.timestamp else None,
-                "tools_used": item.functions_called or [],
-                "turn_count": max(sub_turn_count, 1),
-                "tool_count": tool_call_count,
-            }
-            if content_blocks:
-                turn_data["content_blocks"] = content_blocks
-            if detail:
-                turn_data["messages"] = [
-                    {**msg, "content_blocks": blocks} if blocks else msg
-                    for msg, blocks in zip(item.messages, per_message_blocks)
-                ]
-            turn_reactions = reactions_by_turn.get(real_turn_index)
-            if turn_reactions:
-                turn_data["reactions"] = turn_reactions
-            snapshot = snapshots_by_turn.get(real_turn_index)
-            if snapshot:
-                turn_data["prompt_snapshot"] = {
-                    "token_breakdown": snapshot.get("token_breakdown", {}),
-                }
-            real_turn_index += 1
-            result_turns.append(turn_data)
+        # Reactions live in the session event log (separate from history).
+        live_events = adapter.session_store.read_events(conversation_id)
+        for live in live_events:
+            if live.get("type") == "reaction" and live.get("emoji"):
+                events.append({"type": "reaction", "ts": live.get("timestamp"), "data": {"emoji": live["emoji"]}})
 
         return JSONResponse(
             {
                 "conversation_id": conversation_id,
-                "turns": result_turns,
-                "compaction_summary": compaction_summary,
-                "compacted_from": compacted_from,
-                "compaction_reason": compaction_reason,
+                "events": events,
             }
         )
 
@@ -1014,18 +858,14 @@ class HTTPServer:
         user_id = adapter.resolve_http_user(request.query_params.get("user_id", "web-anonymous"))
         agent_name = request.path_params["agent"]
 
-        # Check live progress handler for full messages
+        session_id = self._resolve_session_id(adapter, user_id, request)
+        events = adapter.session_store.read_events(session_id)
+        snapshots = [e for e in events if e.get("type") == "prompt_snapshot"]
+        breakdown = snapshots[-1].get("token_breakdown", {}) if snapshots else {}
+
         backend_key = (agent_name, user_id)
         live_progress = self._active_progress.get(backend_key)
         if live_progress and live_progress.latest_prompt_messages:
-            # Reconstruct breakdown from persisted event log
-            session_id = request.query_params.get("session_id")
-            if not session_id:
-                session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
-                session_id = session.id
-            events = adapter.session_store.read_events(session_id)
-            snapshots = [e for e in events if e.get("type") == "prompt_snapshot"]
-            breakdown = snapshots[-1].get("token_breakdown", {}) if snapshots else {}
             return JSONResponse(
                 {
                     "prompt_snapshot": {
@@ -1035,19 +875,9 @@ class HTTPServer:
                 }
             )
 
-        # Fallback: breakdown only from event log
-        session_id = request.query_params.get("session_id")
-        if not session_id:
-            session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
-            session_id = session.id
-
-        events = adapter.session_store.read_events(session_id)
-        snapshots = [e for e in events if e.get("type") == "prompt_snapshot"]
         if not snapshots:
             return JSONResponse({"prompt_snapshot": None})
-
-        latest = snapshots[-1]
-        return JSONResponse({"prompt_snapshot": {"token_breakdown": latest.get("token_breakdown", {})}})
+        return JSONResponse({"prompt_snapshot": {"token_breakdown": breakdown}})
 
     async def _compact(self, request: Request) -> JSONResponse:
         adapter, err = self._get_adapter(request)

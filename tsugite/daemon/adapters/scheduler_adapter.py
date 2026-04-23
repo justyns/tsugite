@@ -311,35 +311,39 @@ class SchedulerAdapter:
         from tsugite.history import SessionStorage, get_history_dir
 
         session_path = get_history_dir() / f"{session_id}.jsonl"
-        return SessionStorage.get_or_create(
-            session_id,
-            adapter.agent_name,
-            adapter.resolve_model(),
+        if session_path.exists():
+            return SessionStorage.load(session_path)
+        return SessionStorage.create(
+            agent_name=adapter.agent_name,
+            model=adapter.resolve_model(),
             session_path=session_path,
         )
 
     @staticmethod
+    def _write_synthetic_pair(
+        storage: "SessionStorage",
+        user_text: str,
+        assistant_text: str,
+        metadata: dict,
+    ) -> None:
+        """Append a paired user_input + model_response, both tagged synthetic."""
+        storage.record("user_input", text=user_text, metadata=metadata)
+        storage.record("model_response", raw_content=assistant_text, metadata=metadata)
+
+    @staticmethod
     def _record_synthetic_turn(adapter: BaseAdapter, user_id: str, entry: ScheduleEntry, result: str) -> None:
-        """Write a synthetic turn into the user's session JSONL."""
+        """Write synthetic user_input + model_response events for a scheduled task."""
         session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
         storage = SchedulerAdapter._get_session_storage(session.id, adapter)
-
-        messages = [
-            {
-                "role": "user",
-                "content": (
-                    f'<scheduled_task id="{entry.id}">\n'
-                    "This task ran in the background and the result "
-                    "was sent as a notification to the user.\n"
-                    "</scheduled_task>"
-                ),
-            },
-            {"role": "assistant", "content": result},
-        ]
-
-        storage.record_turn(
-            messages=messages,
-            final_answer=result,
+        SchedulerAdapter._write_synthetic_pair(
+            storage,
+            user_text=(
+                f'<scheduled_task id="{entry.id}">\n'
+                "This task ran in the background and the result "
+                "was sent as a notification to the user.\n"
+                "</scheduled_task>"
+            ),
+            assistant_text=result,
             metadata={"synthetic": True, "schedule_id": entry.id},
         )
 
@@ -408,13 +412,10 @@ class SchedulerAdapter:
             if not adapter:
                 return
             storage = self._get_session_storage(session_id, adapter)
-            messages = [
-                {"role": "user", "content": message},
-                {"role": "assistant", "content": f"Background task {entry.id} completed. Result noted."},
-            ]
-            storage.record_turn(
-                messages=messages,
-                final_answer=message,
+            self._write_synthetic_pair(
+                storage,
+                user_text=message,
+                assistant_text=f"Background task {entry.id} completed. Result noted.",
                 metadata={"synthetic": True, "schedule_id": entry.id, "completion_callback": True},
             )
 

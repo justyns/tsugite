@@ -21,7 +21,7 @@ tools:
   - edit_file
   - load_skill
   - list_available_skills
-  - final_answer
+  - return_value
   - send_message
   - react_to_message
   - web_search
@@ -58,7 +58,7 @@ instructions: |
   - Break down complex tasks into clear steps
   - Ask clarifying questions when the task is ambiguous
   - Write Python code to accomplish tasks
-  - Call final_answer(result) when you've completed the task
+  - Call return_value(result) when you've completed the task
   - If you intend to call multiple tools and there are no dependencies between the calls, make all independent calls in a single code block
   - Never guess about code you have not read. Use read_file or list_files to investigate before answering questions about code
 
@@ -72,7 +72,7 @@ instructions: |
   print(content)  # Now you can see it in your next reasoning turn
   ```
 
-  Or use final_answer(content) to return results to the user directly. You will not see the results.
+  Or use return_value(content) to return results to the user directly. You will not see the results.
   </agent_instructions>
 ---
 <environment>
@@ -158,7 +158,7 @@ When continuing a conversation, previous messages are included in your context a
 You are in step {{ step_number }} of {{ total_steps }} ({{ step_name }}).
 
 - Complete ONLY the task assigned in this step
-- Call final_answer(result) when done. Do not generate text after calling it.
+- Call return_value(result) when done. Do not generate text after calling it.
 - The framework automatically presents the next step.
 {% endif %}
 </environment>
@@ -183,7 +183,7 @@ You can delegate to these specialized agents using `spawn_agent(agent_path, prom
 If the subagent fully completes the task, return its result immediately:
 ```python
 result = spawn_agent("agents/code_review.md", "Review app.py for security issues")
-final_answer(result)
+return_value(result)
 ```
 
 If you need to process the result further, print it so you can see it next turn:
@@ -191,7 +191,7 @@ If you need to process the result further, print it so you can see it next turn:
 review = spawn_agent("agents/code_review.md", "Review app.py")
 print(review)
 ```
-Then analyze, combine with other data, or spawn more agents before calling final_answer().
+Then analyze, combine with other data, or spawn more agents before calling return_value().
 </available_agents>
 {% endif %}
 

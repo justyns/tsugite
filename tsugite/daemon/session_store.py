@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Optional
 from uuid import uuid4
 
-from tsugite.history import SessionStorage, Turn, generate_session_id, get_history_dir
+from tsugite.history import SessionStorage, generate_session_id, get_history_dir
 
 
 def _parse_ts(ts: str | None) -> datetime | None:
@@ -699,9 +699,16 @@ class SessionStore:
             if not session_path.exists():
                 return 0, 0
             storage = SessionStorage.load(session_path)
-            turns = [r for r in storage.load_records() if isinstance(r, Turn)]
-            last_tokens = turns[-1].tokens if turns and turns[-1].tokens else 0
-            return last_tokens, storage.turn_count
+            last_tokens = 0
+            user_input_count = 0
+            for event in storage.iter_events():
+                if event.type == "user_input":
+                    user_input_count += 1
+                elif event.type == "model_response":
+                    usage = event.data.get("usage") or {}
+                    if isinstance(usage, dict):
+                        last_tokens = usage.get("total_tokens") or usage.get("input_tokens") or last_tokens
+            return last_tokens, user_input_count
         except Exception:
             return 0, 0
 

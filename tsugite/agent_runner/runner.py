@@ -376,6 +376,7 @@ async def _execute_agent_with_prompt(
     claude_code_resume_after_compaction: bool = False,
     hook_vars: Optional[Dict[str, str]] = None,
     continue_conversation_id: Optional[str] = None,
+    user_input_for_history: Optional[str] = None,
 ) -> str | AgentExecutionResult:
     """Execute agent with a prepared agent.
 
@@ -532,6 +533,33 @@ async def _execute_agent_with_prompt(
     if injectable_vars:
         await executor.send_variables(injectable_vars)
 
+    # Open or create the session storage so the agent can record events live
+    # (model_request/response, code_execution, tool_invocation). Without this,
+    # the only events stored would be the final aggregate written at end-of-run
+    # by save_run_to_history — losing the per-turn trace the UI shows.
+    from .history_integration import open_or_create_session, record_user_input
+
+    session_storage = None
+    try:
+        session_storage = open_or_create_session(
+            agent_path=prepared.agent.file_path,
+            agent_name=prepared.agent_config.name or (prepared.agent.file_path.stem if prepared.agent.file_path else "agent"),
+            model=model_string,
+            continue_conversation_id=continue_conversation_id,
+            workspace=workspace.name if workspace else None,
+        )
+        if session_storage is not None:
+            # Record only what the user actually typed (or said). The full
+            # rendered template — tools, skills, instructions, daemon context —
+            # is reproducible from the agent file and recorded as a separate
+            # model_request event; replaying the whole thing here would clog the
+            # chat bubble with noise the user never wrote.
+            display_prompt = user_input_for_history or prepared.original_prompt or prepared.rendered_prompt
+            record_user_input(session_storage, display_prompt, attachments=prepared.attachments)
+    except Exception as e:
+        logger.debug("Could not open session storage for live event recording: %s", e)
+        session_storage = None
+
     # Create and run agent
     try:
         agent = TsugiteAgent(
@@ -550,7 +578,12 @@ async def _execute_agent_with_prompt(
             resume_session=claude_code_resume_session,
             resume_after_compaction=claude_code_resume_after_compaction,
             hook_vars=hook_vars,
+            storage=session_storage,
         )
+        # Tell the agent we already wrote the user_input event so it doesn't
+        # duplicate.
+        if session_storage is not None:
+            agent._user_input_recorded = True
 
         # Set event_bus in context so tools can access it during execution
         _setup_event_context(event_bus)
@@ -616,6 +649,7 @@ async def _execute_agent_with_prompt(
                     attachments=prepared.attachments,
                     provider_state=result.provider_state,
                     last_input_tokens=result.last_input_tokens,
+                    session_id=session_storage.session_id if session_storage else None,
                 )
             else:
                 return AgentExecutionResult(
@@ -626,6 +660,7 @@ async def _execute_agent_with_prompt(
                     execution_steps=[],
                     system_message=None,
                     attachments=[],
+                    session_id=session_storage.session_id if session_storage else None,
                 )
         else:
             from tsugite.core.agent import AgentResult
@@ -696,6 +731,7 @@ def run_agent(
     continue_conversation_id: Optional[str] = None,
     attachments: Optional[List[Any]] = None,
     path_context: Optional[Any] = None,
+    user_input_for_history: Optional[str] = None,
 ) -> str | AgentExecutionResult:
     """Run a Tsugite agent (sync wrapper around run_agent_async).
 
@@ -745,6 +781,7 @@ def run_agent(
             continue_conversation_id=continue_conversation_id,
             attachments=attachments,
             path_context=path_context,
+            user_input_for_history=user_input_for_history,
         )
     )
 
@@ -760,6 +797,7 @@ async def run_agent_async(
     attachments: Optional[List[Any]] = None,
     channel_metadata: Optional[Dict[str, Any]] = None,
     path_context: Optional[Any] = None,
+    user_input_for_history: Optional[str] = None,
 ) -> str | AgentExecutionResult:
     """Run a Tsugite agent (async version for tests and async contexts).
 
@@ -925,6 +963,7 @@ async def run_agent_async(
                 claude_code_resume_after_compaction=claude_code_resume_after_compaction,
                 hook_vars=hook_vars,
                 continue_conversation_id=continue_conversation_id,
+                user_input_for_history=user_input_for_history,
             )
         except (RuntimeError, AgentExecutionError) as e:
             err_str = str(e).lower()
@@ -949,6 +988,7 @@ async def run_agent_async(
                     path_context=path_context,
                     hook_vars=hook_vars,
                     continue_conversation_id=continue_conversation_id,
+                    user_input_for_history=user_input_for_history,
                 )
             raise
     finally:

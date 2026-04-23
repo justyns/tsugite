@@ -93,22 +93,20 @@ def _generate_id_from_question(question: str) -> str:
 
 
 @tool
-def final_answer(result: str) -> None:
-    """Return the final result to the user and stop execution.
+def return_value(value) -> None:
+    """Return a value (string, dict, list, anything JSON-serializable) and end the run.
 
-    Call this when you have completed the task and want to return the result.
-    Execution stops after calling this - no further code will run.
+    Use this when you need to return a structured (non-string) result. For plain text
+    answers, just respond with text and no code block — that ends the loop naturally.
 
     Args:
-        result: The final result to return to the user
+        value: The value to return to the caller
 
     Example:
-        final_answer("The answer is 42")
-        # Execution stops here
+        return_value({"status": "ok", "items": [1, 2, 3]})
     """
-    # This tool exists for documentation purposes only.
-    # The executor has a built-in final_answer that actually handles completion.
-    # See agent.py _inject_tools_into_executor() for why this isn't injected.
+    # Documentation stub. The executor injects the real implementation; the
+    # legacy alias `final_answer` still works.
     pass
 
 

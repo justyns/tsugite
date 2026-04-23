@@ -21,6 +21,7 @@ class StepResult:
     unloaded_skills: List[str] = field(default_factory=list)
     xml_observation: Optional[str] = None
     content_blocks: Dict[str, str] = field(default_factory=dict)
+    raw_content: str = ""  # The verbatim assistant text returned by the LLM.
 
 
 @dataclass
@@ -54,6 +55,7 @@ class AgentMemory:
         unloaded_skills: Optional[List[str]] = None,
         xml_observation: Optional[str] = None,
         content_blocks: Optional[Dict[str, str]] = None,
+        raw_content: str = "",
     ) -> None:
         """Add a step to history."""
         step = StepResult(
@@ -67,6 +69,7 @@ class AgentMemory:
             unloaded_skills=list(unloaded_skills or []),
             xml_observation=xml_observation,
             content_blocks=content_blocks or {},
+            raw_content=raw_content,
         )
         self.steps.append(step)
 

@@ -68,16 +68,19 @@ _IPC_HELPER = textwrap.dedent("""\
         _ipc_call("audit", event=event, tool=tool, **kwargs)
 """)
 
-_FINAL_ANSWER_STUB = textwrap.dedent("""\
-    _final_answer_value = None
+_RETURN_VALUE_STUB = textwrap.dedent("""\
+    _return_value = None
 
-    def final_answer(*args, **kwargs):
-        global _final_answer_value
+    def return_value(*args, **kwargs):
+        global _return_value
         if args:
-            _final_answer_value = args[0]
+            _return_value = args[0]
         elif kwargs:
-            _final_answer_value = next(iter(kwargs.values()))
-        _ipc_call("tool_call", name="final_answer", kwargs={"value": _final_answer_value})
+            _return_value = next(iter(kwargs.values()))
+        _ipc_call("tool_call", name="return_value", kwargs={"value": _return_value})
+
+    # Backward-compat alias for older agent markdown files.
+    final_answer = return_value
 """)
 
 _SEND_MESSAGE_STUB = textwrap.dedent("""\
@@ -197,7 +200,7 @@ class SubprocessExecutor:
         self._tool_map: Dict[str, Any] = {}
         self._parent_only_tools: set = set()
         self._local_tools: Dict[str, str] = {}  # name -> module_path
-        self._final_answer_value = None
+        self._return_value = None
         self._tools_called: List[str] = []
         self._loaded_skills_for_turn: Dict[str, str] = {}
         self._unloaded_skills_for_turn: List[str] = []
@@ -275,7 +278,7 @@ class SubprocessExecutor:
 {_HARNESS_IMPORTS}
 {_IPC_HELPER}
 {_TIMED_AUDIT_WRAPPER}
-{_FINAL_ANSWER_STUB}
+{_RETURN_VALUE_STUB}
 {_SEND_MESSAGE_STUB}
 {_REACT_TO_MESSAGE_STUB}
 {_SPLIT_CODE_FN}
@@ -289,7 +292,8 @@ RESULT_PATH = {json.dumps(result_path)}
 {"".join(tool_stubs)}
 
 namespace = {{}}
-namespace["final_answer"] = final_answer
+namespace["return_value"] = return_value
+namespace["final_answer"] = return_value  # backward-compat alias
 namespace["send_message"] = send_message
 namespace["react_to_message"] = react_to_message
 def _blocked_open(*args, **kwargs):
@@ -415,7 +419,7 @@ result = {{
     "error": final_error,
     "stdout": output,
     "stderr": stderr_output if exec_error is None else (stderr_output + "\\n" + exec_error),
-    "final_answer": _final_answer_value if exec_error is None else None,
+    "return_value": _return_value if exec_error is None else None,
     "tools_called": _tools_called[:],
     "variables_set": variables_set,
     "state_keys": state_keys,
@@ -437,7 +441,7 @@ with open(RESULT_PATH, "w") as f:
 
     async def execute(self, code: str) -> ExecutionResult:
         """Execute code in a subprocess."""
-        self._final_answer_value = None
+        self._return_value = None
         self._tools_called = []
         self._loaded_skills_for_turn = {}
         self._unloaded_skills_for_turn = []
@@ -570,7 +574,7 @@ with open(RESULT_PATH, "w") as f:
                 error=result_data.get("error"),
                 stdout=result_data.get("stdout", ""),
                 stderr=result_data.get("stderr", ""),
-                final_answer=result_data.get("final_answer"),
+                return_value=result_data.get("return_value"),
                 tools_called=result_data.get("tools_called", []),
                 variables_set=result_data.get("variables_set", {}),
                 state_keys=result_data.get("state_keys", {}),
@@ -589,7 +593,7 @@ with open(RESULT_PATH, "w") as f:
                 error=f"Subprocess exited with code {proc.returncode}",
                 stdout="",
                 stderr=stderr_output,
-                final_answer=None,
+                return_value=None,
                 tools_called=[],
             )
 
@@ -640,8 +644,8 @@ with open(RESULT_PATH, "w") as f:
             name = msg.get("name")
             kwargs = msg.get("kwargs", {})
 
-            if name == "final_answer":
-                self._final_answer_value = kwargs.get("value")
+            if name == "return_value":
+                self._return_value = kwargs.get("value")
                 resp = {"call_id": call_id, "result": None, "error": None}
             elif name == "send_message":
                 message = kwargs.get("message", "")

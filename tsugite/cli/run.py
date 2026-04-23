@@ -218,9 +218,10 @@ def _unpack_execution_result(result):
             result.execution_steps,
             result.system_message,
             result.attachments,
+            result.session_id,
         )
 
-    return result, None, None, None, None, None
+    return result, None, None, None, None, None, None
 
 
 def _display_result(result_str: str, ui_opts: UIOptions, stderr_console: Console):
@@ -440,9 +441,9 @@ def run(
         latest_conv_id = None
         for session_file in list_session_files():
             try:
-                storage = SessionStorage.load(session_file)
-                if storage.agent == daemon_agent:
-                    latest_conv_id = storage.session_id
+                meta = SessionStorage.load_meta_fast(session_file)
+                if meta and meta.data.get("agent") == daemon_agent:
+                    latest_conv_id = session_file.stem
                     break
             except Exception:
                 continue
@@ -506,8 +507,10 @@ def run(
 
                 session_path = get_history_dir() / f"{history_opts.continue_id}.jsonl"
                 try:
-                    storage = SessionStorage.load(session_path)
-                    agent_name = storage.agent
+                    meta = SessionStorage.load_meta_fast(session_path)
+                    agent_name = meta.data.get("agent") if meta else None
+                    if not agent_name:
+                        raise ValueError("agent name missing from session_start")
                 except Exception:
                     console.print(f"[red]Could not load metadata for conversation: {history_opts.continue_id}[/red]")
                     raise typer.Exit(1)
@@ -653,12 +656,17 @@ def run(
             attachments=None,
             status="success",
             error_message=None,
+            session_id=None,
         ):
             if not history_opts.enabled:
                 return
             try:
                 from tsugite.agent_runner.history_integration import save_run_to_history
 
+                # If the agent loop already created a session and recorded
+                # events live, target that same session. Otherwise honor the
+                # user's --continue or create a fresh one.
+                target_session = session_id or history_opts.continue_id
                 save_run_to_history(
                     agent_path=agent_file,
                     agent_name=agent_info["name"],
@@ -668,7 +676,7 @@ def run(
                     token_count=token_count,
                     cost=cost,
                     execution_steps=execution_steps,
-                    continue_conversation_id=history_opts.continue_id,
+                    continue_conversation_id=target_session,
                     system_prompt=system_prompt,
                     attachments=attachments,
                     channel_metadata=daemon_metadata,
@@ -697,11 +705,25 @@ def run(
                 console,
             )
 
-            result_str, token_count, cost, execution_steps, system_prompt, attachments = _unpack_execution_result(
-                result
-            )
+            (
+                result_str,
+                token_count,
+                cost,
+                execution_steps,
+                system_prompt,
+                attachments,
+                session_id,
+            ) = _unpack_execution_result(result)
 
-            _save_history(result_str, token_count, cost, execution_steps, system_prompt, attachments)
+            _save_history(
+                result_str,
+                token_count,
+                cost,
+                execution_steps,
+                system_prompt,
+                attachments,
+                session_id=session_id,
+            )
             _display_result(result_str, ui_opts, stderr_console)
 
         except ValueError as e:

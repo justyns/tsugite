@@ -74,27 +74,22 @@ class TestRecordSyntheticTurn:
         assert session_path.exists()
         return [json.loads(line) for line in session_path.read_text().strip().split("\n")]
 
-    def test_writes_correct_turn_format(self, tmp_path):
+    def test_writes_synthetic_user_input_and_response(self, tmp_path):
         records = self._record_and_load(tmp_path, "test-session", "Task completed successfully")
-        turn_record = next(r for r in records if r.get("type") == "turn")
+        user_event = next(r for r in records if r.get("type") == "user_input")
+        response_event = next(r for r in records if r.get("type") == "model_response")
 
-        assert turn_record["metadata"]["synthetic"] is True
-        assert turn_record["metadata"]["schedule_id"] == "test-job"
-        assert len(turn_record["messages"]) == 2
-        assert turn_record["messages"][0]["role"] == "user"
-        assert '<scheduled_task id="test-job">' in turn_record["messages"][0]["content"]
-        assert turn_record["messages"][1]["role"] == "assistant"
-        assert turn_record["messages"][1]["content"] == "Task completed successfully"
-        assert turn_record["final_answer"] == "Task completed successfully"
+        assert user_event["data"]["metadata"]["synthetic"] is True
+        assert user_event["data"]["metadata"]["schedule_id"] == "test-job"
+        assert '<scheduled_task id="test-job">' in user_event["data"]["text"]
+        assert response_event["data"]["raw_content"] == "Task completed successfully"
+        assert response_event["data"]["metadata"]["synthetic"] is True
 
     def test_stores_result_as_is(self, tmp_path):
-        """_record_synthetic_turn stores the result verbatim (caller truncates)."""
         result = "pre-truncated result"
         records = self._record_and_load(tmp_path, "trunc-session", result)
-        turn_record = next(r for r in records if r.get("type") == "turn")
-
-        assert turn_record["messages"][1]["content"] == result
-        assert turn_record["final_answer"] == result
+        response_event = next(r for r in records if r.get("type") == "model_response")
+        assert response_event["data"]["raw_content"] == result
 
 
 def _make_scheduler_adapter(identity_map=None, notification_channels=None) -> tuple[SchedulerAdapter, MagicMock]:

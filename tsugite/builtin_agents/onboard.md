@@ -6,7 +6,7 @@ max_turns: 15
 tools:
   - read_file
   - write_file
-  - final_answer
+  - return_value
   - send_message
 instructions: |
   You're setting up a new workspace. Have a brief, conversational exchange to learn:

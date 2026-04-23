@@ -79,6 +79,7 @@ class PreparedAgent:
         system_message: Complete system message sent to LLM
         user_message: Complete user message sent to LLM
         rendered_prompt: Rendered template (before building system message)
+        original_prompt: The user's prompt as typed (pre-template-rendering)
         tools: List of Tool objects ready for agent execution
         context: Full template rendering context
         combined_instructions: Combined default + agent instructions
@@ -97,6 +98,7 @@ class PreparedAgent:
     combined_instructions: str
     prefetch_results: Dict[str, Any]
     attachments: List[Attachment]
+    original_prompt: str = ""
     skills: List[Skill] = field(default_factory=list)
     # Map of sticky skill name -> turns remaining before auto-unload. Only
     # populated on the turn a skill is about to expire (turns_remaining <= 0).
@@ -467,6 +469,7 @@ they typically mean the invoked location ({invoked_from}).
             system_message=system_message,
             user_message=user_message,
             rendered_prompt=rendered_prompt,
+            original_prompt=prompt,
             tools=tools,
             context=full_context,
             combined_instructions=combined_instructions,

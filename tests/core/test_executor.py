@@ -19,7 +19,7 @@ async def test_execution_result_creation():
     assert result.error is None
     assert result.stdout == "Hello, world!"
     assert result.stderr == ""
-    assert result.final_answer is None
+    assert result.return_value is None
 
 
 @pytest.mark.asyncio
@@ -87,7 +87,7 @@ async def test_builtins_survive_across_turns():
     # Turn 2: built-ins should still be there
     result = await executor.execute("final_answer('ok')")
     assert result.error is None
-    assert result.final_answer == "ok"
+    assert result.return_value == "ok"
 
 
 @pytest.mark.asyncio
@@ -195,7 +195,7 @@ async def test_local_executor_final_answer():
     result = await executor.execute("final_answer('The answer is 42')")
 
     assert result.error is None
-    assert result.final_answer == "The answer is 42"
+    assert result.return_value == "The answer is 42"
 
 
 @pytest.mark.asyncio
@@ -211,7 +211,7 @@ final_answer(result)
     result = await executor.execute(code)
 
     assert result.error is None
-    assert result.final_answer == 8
+    assert result.return_value == 8
 
 
 @pytest.mark.asyncio
@@ -535,10 +535,10 @@ class TestExecutionResultToXml:
             error=None,
             stdout="",
             stderr="",
-            final_answer="The answer is 42",
+            return_value="The answer is 42",
         )
         xml = result.to_xml()
-        assert "<final_answer>The answer is 42</final_answer>" in xml
+        assert "<return_value>The answer is 42</return_value>" in xml
 
     def test_truncation(self):
         large_output = "x" * (100 * 1024)  # 100KB
@@ -665,4 +665,4 @@ async def test_local_executor_xml_with_final_answer():
     result = await executor.execute("final_answer('completed!')")
     xml = result.to_xml()
 
-    assert "<final_answer>completed!</final_answer>" in xml
+    assert "<return_value>completed!</return_value>" in xml

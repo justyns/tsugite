@@ -108,28 +108,25 @@ def handle_history(console: Console, limit: int = 10) -> None:
 
         try:
             storage = SessionStorage.load(session_file)
+            summary = storage.summary()
 
-            # Format date
-            if storage.created_at:
+            if summary.created_at:
                 try:
-                    created_at = storage.created_at.strftime("%Y-%m-%d %H:%M")
+                    created_at = summary.created_at.strftime("%Y-%m-%d %H:%M")
                 except (ValueError, AttributeError):
                     created_at = "unknown"
             else:
                 created_at = "unknown"
 
-            # Truncate ID for display
             short_id = storage.session_id[:12]
-
-            # Format tokens with commas
-            tokens_str = f"{storage.total_tokens:,}" if storage.total_tokens else "0"
+            tokens_str = f"{summary.total_tokens:,}" if summary.total_tokens else "0"
 
             table.add_row(
                 short_id,
-                storage.agent or "unknown",
-                storage.model or "unknown",
+                summary.agent or "unknown",
+                summary.model or "unknown",
                 created_at,
-                str(storage.turn_count),
+                str(summary.turn_count),
                 tokens_str,
             )
             count += 1
@@ -240,24 +237,29 @@ def handle_save(console: Console, path: str, manager: "ChatManager") -> None:
         return
 
     try:
-        from tsugite.history import Turn, get_history_dir
+        from tsugite.history import get_history_dir
 
-        # Load conversation turns
         session_path = get_history_dir() / f"{manager.conversation_id}.jsonl"
         storage = SessionStorage.load(session_path)
-        records = storage.load_records()
+        events = storage.load_events()
+        summary = storage.summary()
 
-        # Format as markdown
         output = f"# Conversation: {manager.conversation_id}\n\n"
-        output += f"**Agent:** {storage.agent or 'unknown'}\n"
-        output += f"**Model:** {storage.model or 'unknown'}\n\n"
+        output += f"**Agent:** {summary.agent or 'unknown'}\n"
+        output += f"**Model:** {summary.model or 'unknown'}\n\n"
         output += "---\n\n"
 
-        for record in records:
-            if isinstance(record, Turn):
-                output += f"## User\n\n{record.user_summary or ''}\n\n"
-                output += f"## Assistant\n\n{record.final_answer or ''}\n\n"
-                output += "---\n\n"
+        current_user = None
+        for event in events:
+            if event.type == "user_input":
+                if current_user is not None:
+                    output += "---\n\n"
+                current_user = event.data.get("text", "")
+                output += f"## User\n\n{current_user}\n\n"
+            elif event.type == "model_response":
+                output += f"## Assistant\n\n{event.data.get('raw_content', '')}\n\n"
+        if events:
+            output += "---\n\n"
 
         # Write to file
         expanded_path = os.path.expanduser(path)

@@ -182,7 +182,7 @@ results = run(command="ag 'function_name' src/")
 results = run(command="grep -r --exclude-dir={.git,.venv,__pycache__} --exclude='*.pyc' 'function_name' src/")
 {% endif %}
 print(results)
-final_answer(results)
+return_value(results)
 ```
 
 ## Best Practices

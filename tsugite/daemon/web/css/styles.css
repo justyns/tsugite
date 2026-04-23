@@ -58,6 +58,11 @@ main { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
 .tool-steps details { margin: 2px 0; }
 .tool-steps summary { cursor: pointer; }
 .tool-steps pre { font-size: 11px; max-height: 150px; overflow: auto; margin: 4px 0; }
+.tool-steps .step-dur { color: var(--muted); font-size: 10px; margin-left: 4px; }
+.tool-steps .step-error { color: var(--error); font-size: 11px; }
+.user-context { margin-top: 6px; font-size: 11px; }
+.user-context summary { cursor: pointer; color: var(--muted); }
+.user-context pre { font-size: 11px; max-height: 200px; overflow: auto; margin: 4px 0; }
 .tool-summary { font-size: 12px; color: var(--muted); margin-top: 4px; }
 
 /* Content blocks */

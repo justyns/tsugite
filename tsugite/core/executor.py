@@ -23,7 +23,7 @@ PPRINT_WIDTH = 100
 # Tools with special executor handling (not injected via the normal tool wrapper path).
 # These are implemented directly in the executor because they need event_bus access
 # or special completion signaling.
-EXECUTOR_BUILTIN_TOOLS = frozenset({"final_answer", "send_message", "react_to_message"})
+EXECUTOR_BUILTIN_TOOLS = frozenset({"return_value", "final_answer", "send_message", "react_to_message"})
 
 
 @dataclass
@@ -34,7 +34,7 @@ class ExecutionResult:
     error: Optional[str]
     stdout: str
     stderr: str
-    final_answer: Optional[Any] = None
+    return_value: Optional[Any] = None
     tools_called: List[str] = field(default_factory=list)
     variables_set: Dict[str, str] = field(default_factory=dict)  # name -> "type(size)"
     state_keys: Dict[str, str] = field(default_factory=dict)  # persisted state: name -> "type(size)"
@@ -94,8 +94,8 @@ class ExecutionResult:
             state_list = ", ".join(f"{escape(k)}={escape(_mask(v))}" for k, v in self.state_keys.items())
             parts.append(f"<state>{state_list}</state>")
 
-        if self.final_answer is not None:
-            parts.append(f"<final_answer>{escape(_mask(str(self.final_answer)))}</final_answer>")
+        if self.return_value is not None:
+            parts.append(f"<return_value>{escape(_mask(str(self.return_value)))}</return_value>")
 
         parts.append("</tsugite_execution_result>")
         return "\n".join(parts)
@@ -178,7 +178,7 @@ class LocalExecutor:
                 When None, state is ephemeral (in-memory only).
             session_id: Optional session identifier, used in StateSerializationError messages.
         """
-        self._final_answer_value = None
+        self._return_value = None
         self._tools_called = []
         self._loaded_skills_for_turn: Dict[str, str] = {}
         self._unloaded_skills_for_turn: List[str] = []
@@ -198,13 +198,16 @@ class LocalExecutor:
         """Construct a fresh namespace populated with built-ins, tools, state, and sticky injections."""
         ns: Dict[str, Any] = {}
 
-        def final_answer(*args, **kwargs):
+        def return_value(*args, **kwargs):
             if args:
-                self._final_answer_value = args[0]
+                self._return_value = args[0]
             elif kwargs:
-                self._final_answer_value = next(iter(kwargs.values()))
+                self._return_value = next(iter(kwargs.values()))
 
-        ns["final_answer"] = final_answer
+        ns["return_value"] = return_value
+        # final_answer is kept as a backward-compat alias for older agent
+        # markdown files. New agents should use return_value().
+        ns["final_answer"] = return_value
 
         def send_message(*args, **kwargs):
             if args:
@@ -313,9 +316,9 @@ class LocalExecutor:
             code: Python code to execute
 
         Returns:
-            ExecutionResult with output, error, stdout, stderr, final_answer, tools_called, and variables_set
+            ExecutionResult with output, error, stdout, stderr, return_value, tools_called, and variables_set
         """
-        self._final_answer_value = None
+        self._return_value = None
         self._tools_called = []
         self._loaded_skills_for_turn = {}
         self._unloaded_skills_for_turn = []
@@ -381,7 +384,7 @@ class LocalExecutor:
             error=error_msg,
             stdout=stdout_output,
             stderr=stderr_output,
-            final_answer=None if exec_error else self._final_answer_value,
+            return_value=None if exec_error else self._return_value,
             tools_called=self._tools_called.copy(),
             variables_set=variables_set,
             state_keys=state_keys,

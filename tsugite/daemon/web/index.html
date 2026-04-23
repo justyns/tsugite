@@ -243,12 +243,6 @@
                 <div class="compaction-banner">
                   <div class="compaction-banner-header">
                     <strong>Previous conversation summary</strong>
-                    <span>
-                      <template x-if="compactionReason"><span class="badge badge-muted" x-text="compactionReason"></span></template>
-                      <template x-if="compactedFrom">
-                        <a href="#" @click.prevent="selectSession({conversation_id: compactedFrom})" class="compaction-banner-link">view previous session</a>
-                      </template>
-                    </span>
                   </div>
                   <div class="msg agent compaction-body" x-html="renderHtml(compactionSummary)"></div>
                 </div>
@@ -284,6 +278,14 @@
                               @click="copyMessage(msg.text)"
                               title="Copy markdown" aria-label="Copy markdown">&#10697;</button>
                       <div x-html="renderHtml(msg.text)"></div>
+                      <template x-if="msg.context && msg.context.length">
+                        <details class="user-context">
+                          <summary>show injected context</summary>
+                          <template x-for="(c, ci) in msg.context" :key="ci">
+                            <pre><code x-text="c.content"></code></pre>
+                          </template>
+                        </details>
+                      </template>
                       <template x-if="msg.reactions && msg.reactions.length">
                         <div class="msg-reactions">
                           <template x-for="(emoji, ri) in msg.reactions" :key="ri">

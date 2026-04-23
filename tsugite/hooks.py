@@ -18,10 +18,24 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from tsugite.events.base import BaseEvent
 from tsugite.events.events import ToolCallEvent, ToolResultEvent
-from tsugite.history.models import HookExecution
 
 if TYPE_CHECKING:
     from tsugite.events.bus import EventBus
+
+
+class HookExecution(BaseModel):
+    """Captured output from one hook execution."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    phase: str
+    name: Optional[str] = None
+    command: str
+    exit_code: int
+    stdout: Optional[str] = None
+    stderr: Optional[str] = None
+    duration_ms: Optional[int] = None
+    timestamp: Optional[datetime] = None
 
 logger = logging.getLogger(__name__)
 

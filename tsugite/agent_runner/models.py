@@ -41,6 +41,7 @@ class AgentExecutionResult(BaseModel):
     )  # List of Attachment objects (using Any for Pydantic compatibility)
     provider_state: Optional[dict] = None
     last_input_tokens: Optional[int] = None
+    session_id: Optional[str] = None  # ID of the SessionStorage the agent recorded events to
 
     def __str__(self) -> str:
         """Allow result to be used as string for backward compatibility.

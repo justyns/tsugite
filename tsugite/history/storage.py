@@ -1,85 +1,44 @@
-"""Session storage V2 - JSONL-based conversation history with context tracking.
+"""Append-only event log storage for sessions.
 
-This module provides unified session storage used by CLI, workspace, and daemon modes.
-Key features:
-- Context stored once with delta updates on changes
-- Full messages per turn for exact reconstruction
-- Content-addressable storage for attachments
+One JSONL file per session. Each line is an `Event`. Writes are file-locked so
+multiple processes (e.g., daemon + scheduler) can append safely. Reads stream
+the file once and tolerate a malformed line (skip with stderr warning) so a
+torn write can't poison the whole file.
 """
 
 import hashlib
 import json
 import socket
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Iterable, Iterator, List, Optional
 
 import portalocker
 
-from tsugite.attachments.base import Attachment, AttachmentContentType
-from tsugite.cache import compute_context_hash, store_content
 from tsugite.config import get_xdg_data_path, load_config
 
-from .models import (
-    AttachmentRef,
-    CompactionReason,
-    CompactionSummary,
-    ContextSnapshot,
-    ContextUpdate,
-    HookExecution,
-    SessionMeta,
-    SessionRecord,
-    SessionStatus,
-    Turn,
-)
+from .models import Event
 
 
 def get_history_dir() -> Path:
-    """Get path to conversation history directory.
-
-    Returns:
-        Path to history directory in XDG data location
-        (~/.local/share/tsugite/history/)
-    """
     return get_xdg_data_path("history")
 
 
 def generate_session_id(agent_name: str, timestamp: Optional[datetime] = None) -> str:
-    """Generate unique session ID.
-
-    Format: YYYYMMDD_HHMMSS_{agent}_{hash}
-    Example: 20251024_103000_chat_abc123
-
-    Args:
-        agent_name: Name of the agent
-        timestamp: Optional timestamp (defaults to now)
-
-    Returns:
-        Unique session ID
-    """
     if timestamp is None:
         timestamp = datetime.now(timezone.utc)
-
     date_str = timestamp.strftime("%Y%m%d_%H%M%S")
-    clean_agent = "".join(c if c.isalnum() or c == "-" else "_" for c in agent_name)
-    clean_agent = clean_agent[:20]
-    hash_input = f"{timestamp.isoformat()}_{agent_name}".encode()
-    hash_str = hashlib.sha256(hash_input).hexdigest()[:6]
-
-    return f"{date_str}_{clean_agent}_{hash_str}"
+    clean_agent = "".join(c if c.isalnum() or c == "-" else "_" for c in agent_name)[:20]
+    digest = hashlib.sha256(f"{timestamp.isoformat()}_{agent_name}".encode()).hexdigest()[:6]
+    return f"{date_str}_{clean_agent}_{digest}"
 
 
 def get_machine_name() -> str:
-    """Get machine name for session tracking.
-
-    Checks config for custom machine_name, falls back to hostname.
-
-    Returns:
-        Machine name string
-    """
     config = load_config()
-    if hasattr(config, "machine_name") and config.machine_name:
-        return config.machine_name
+    name = getattr(config, "machine_name", None)
+    if name:
+        return name
     try:
         return socket.gethostname()
     except Exception:
@@ -87,34 +46,11 @@ def get_machine_name() -> str:
 
 
 class SessionStorage:
-    """Unified session storage for CLI, workspace, and daemon modes.
-
-    Tracks context state, records turns, and handles context updates.
-    Uses JSONL format with content-addressable storage for attachments.
-    """
+    """Append-only event log for one session."""
 
     def __init__(self, session_path: Path):
-        """Initialize session storage.
-
-        Args:
-            session_path: Path to the JSONL session file
-        """
         self.session_path = session_path
         self.session_id = session_path.stem
-
-        # Context tracking state
-        self._current_context_hash: Optional[str] = None
-        self._current_attachments: Dict[str, AttachmentRef] = {}
-        self._current_skills: List[str] = []
-        self._turn_count: int = 0
-        self._total_tokens: int = 0
-        self._total_cost: float = 0.0
-        self._total_duration_ms: int = 0
-        self._all_functions: set = set()
-        self._meta: Optional[SessionMeta] = None
-        self._status: Optional[str] = None
-        self._error_message: Optional[str] = None
-        self._cached_records: Optional[List[SessionRecord]] = None
 
     @classmethod
     def create(
@@ -122,495 +58,164 @@ class SessionStorage:
         agent_name: str,
         model: str,
         workspace: Optional[str] = None,
-        compacted_from: Optional[str] = None,
+        parent_session: Optional[str] = None,
         session_path: Optional[Path] = None,
         timestamp: Optional[datetime] = None,
     ) -> "SessionStorage":
-        """Create a new session.
-
-        Args:
-            agent_name: Name of the agent
-            model: Model identifier
-            workspace: Optional workspace name
-            compacted_from: Optional previous session ID if compacted
-            session_path: Optional explicit path (defaults to history dir)
-            timestamp: Optional timestamp for session creation (defaults to now)
-
-        Returns:
-            New SessionStorage instance
-        """
         if timestamp is None:
             timestamp = datetime.now(timezone.utc)
-        session_id = generate_session_id(agent_name, timestamp)
-
         if session_path is None:
-            session_path = get_history_dir() / f"{session_id}.jsonl"
-
+            session_path = get_history_dir() / f"{generate_session_id(agent_name, timestamp)}.jsonl"
         session_path.parent.mkdir(parents=True, exist_ok=True)
 
         storage = cls(session_path)
-        storage._meta = SessionMeta(
-            workspace=workspace,
+        storage.record(
+            "session_start",
+            ts=timestamp,
             agent=agent_name,
             model=model,
             machine=get_machine_name(),
-            created_at=timestamp,
-            compacted_from=compacted_from,
+            workspace=workspace,
+            parent_session=parent_session,
         )
-
-        storage._write_record(storage._meta)
         return storage
 
     @classmethod
     def load(cls, session_path: Path) -> "SessionStorage":
-        """Load existing session and replay to get current state.
-
-        Args:
-            session_path: Path to session JSONL file
-
-        Returns:
-            SessionStorage with replayed state
-
-        Raises:
-            FileNotFoundError: If session doesn't exist
-        """
         if not session_path.exists():
             raise FileNotFoundError(f"Session not found: {session_path}")
+        return cls(session_path)
 
-        storage = cls(session_path)
-        storage._replay_state()
-        return storage
+    def record(self, type: str, *, ts: Optional[datetime] = None, **data: Any) -> None:
+        """Append one event."""
+        event = Event(
+            type=type,
+            ts=ts or datetime.now(timezone.utc),
+            data={k: v for k, v in data.items() if v is not None},
+        )
+        self._write([event])
 
-    @classmethod
-    def get_or_create(
-        cls,
-        session_id: str,
-        agent_name: str,
-        model: str,
-        workspace: Optional[str] = None,
-        session_path: Optional[Path] = None,
-    ) -> "SessionStorage":
-        """Get existing session or create new one.
+    def record_many(self, events: Iterable[Event]) -> None:
+        """Append multiple events under one lock."""
+        events = list(events)
+        if events:
+            self._write(events)
 
-        Args:
-            session_id: Session ID
-            agent_name: Agent name (used if creating)
-            model: Model identifier (used if creating)
-            workspace: Optional workspace name
-            session_path: Optional explicit path
-
-        Returns:
-            SessionStorage instance
-        """
-        if session_path is None:
-            session_path = get_history_dir() / f"{session_id}.jsonl"
-
-        if session_path.exists():
-            return cls.load(session_path)
-        else:
-            return cls.create(agent_name, model, workspace, session_path=session_path)
-
-    def _write_record(self, record: SessionRecord) -> None:
-        """Append a record to the session file with locking."""
-        self._write_records([record])
-
-    def _write_records(self, records: List[SessionRecord]) -> None:
-        """Append multiple records in a single locked write."""
-        if not records:
-            return
-        self._cached_records = None
+    def _write(self, events: List[Event]) -> None:
         self.session_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.session_path, "a", encoding="utf-8") as f:
+            portalocker.lock(f, portalocker.LOCK_EX)
+            try:
+                for e in events:
+                    f.write(e.model_dump_json(exclude_none=True))
+                    f.write("\n")
+                f.flush()
+            finally:
+                portalocker.unlock(f)
 
-        try:
-            with open(self.session_path, "a", encoding="utf-8") as f:
-                portalocker.lock(f, portalocker.LOCK_EX)
-                try:
-                    for record in records:
-                        f.write(record.model_dump_json(exclude_none=True))
-                        f.write("\n")
-                    f.flush()
-                finally:
-                    portalocker.unlock(f)
-        except portalocker.exceptions.LockException:
-            raise RuntimeError(f"Failed to acquire lock on {self.session_path}")
-        except IOError as e:
-            raise RuntimeError(f"Failed to write to {self.session_path}: {e}")
-
-    def write_turns(self, turns: List[Turn]) -> None:
-        """Write pre-existing Turn records (used for compaction retained turns).
-
-        Updates internal counters to match the written turns.
-        """
-        self._write_records(turns)
-        for turn in turns:
-            self._turn_count += 1
-            self._total_tokens += turn.tokens or 0
-            self._total_cost += turn.cost or 0.0
-            self._total_duration_ms += turn.duration_ms or 0
-            if turn.functions_called:
-                self._all_functions.update(turn.functions_called)
-
-    def _replay_state(self) -> None:
-        """Replay records to rebuild current state."""
-        records = self._read_records_from_file()
-        self._cached_records = records
-        for record in records:
-            if isinstance(record, SessionMeta):
-                self._meta = record
-            elif isinstance(record, ContextSnapshot):
-                self._current_context_hash = record.hash
-                self._current_attachments = record.attachments
-                self._current_skills = list(record.skills)
-            elif isinstance(record, ContextUpdate):
-                self._current_context_hash = record.hash
-                for name, ref in record.changed.items():
-                    self._current_attachments[name] = ref
-                for name in record.removed:
-                    self._current_attachments.pop(name, None)
-                for skill in record.added_skills:
-                    if skill not in self._current_skills:
-                        self._current_skills.append(skill)
-                for skill in record.removed_skills:
-                    if skill in self._current_skills:
-                        self._current_skills.remove(skill)
-            elif isinstance(record, Turn):
-                self._turn_count += 1
-                self._total_tokens += record.tokens or 0
-                self._total_cost += record.cost or 0.0
-                self._total_duration_ms += record.duration_ms or 0
-                if record.functions_called:
-                    self._all_functions.update(record.functions_called)
-            elif isinstance(record, SessionStatus):
-                self._status = record.status
-                self._error_message = record.error_message
-
-    def load_records(self) -> List[SessionRecord]:
-        """Load all records, using cache from replay if available."""
-        if self._cached_records is not None:
-            return self._cached_records
-        return self._read_records_from_file()
-
-    def _read_records_from_file(self) -> List[SessionRecord]:
-        """Read and parse all records from the JSONL file."""
+    def iter_events(self, types: Optional[Iterable[str]] = None) -> Iterator[Event]:
+        """Yield events in file order, optionally filtered by type."""
         if not self.session_path.exists():
-            return []
-
-        records = []
+            return
+        wanted = set(types) if types is not None else None
         with open(self.session_path, "r", encoding="utf-8") as f:
             for line_num, line in enumerate(f, 1):
                 line = line.strip()
                 if not line:
                     continue
-
                 try:
-                    data = json.loads(line)
-                    record = self._parse_record(data)
-                    if record:
-                        records.append(record)
-                except json.JSONDecodeError as e:
-                    print(f"Warning: Skipping malformed JSON at line {line_num}: {e}")
+                    event = Event.model_validate(json.loads(line))
+                except (json.JSONDecodeError, ValueError) as e:
+                    print(f"Warning: skipping malformed event at {self.session_path}:{line_num}: {e}", file=sys.stderr)
+                    continue
+                if wanted is None or event.type in wanted:
+                    yield event
 
-        return records
-
-    def _parse_record(self, data: Dict[str, Any]) -> Optional[SessionRecord]:
-        """Parse a record dict into the appropriate model.
-
-        Handles old format records gracefully by skipping them with a warning.
-        Old format Turn records have 'user', 'assistant', 'tools', 'steps' fields
-        instead of 'messages', 'final_answer', 'functions_called'.
-        """
-        from pydantic import ValidationError
-
-        record_type = data.get("type")
-
-        try:
-            if record_type == "session_meta":
-                return SessionMeta.model_validate(data)
-            elif record_type == "context":
-                return ContextSnapshot.model_validate(data)
-            elif record_type == "context_update":
-                return ContextUpdate.model_validate(data)
-            elif record_type == "turn":
-                return Turn.model_validate(data)
-            elif record_type == "compaction_summary":
-                return CompactionSummary.model_validate(data)
-            elif record_type == "hook_execution":
-                return HookExecution.model_validate(data)
-            elif record_type == "session_status":
-                return SessionStatus.model_validate(data)
-            # Handle old format "metadata" type (V1 format)
-            elif record_type == "metadata":
-                print("Warning: Skipping old V1 metadata record (incompatible format)")
-                return None
-            else:
-                return None
-        except ValidationError as e:
-            # Old format records will fail validation - skip them
-            print(f"Warning: Skipping incompatible record (old format?): {e.error_count()} validation errors")
-            return None
-
-    def record_initial_context(
-        self,
-        attachments: Optional[List[Attachment]] = None,
-        skills: Optional[List[str]] = None,
-    ) -> None:
-        """Record initial context snapshot.
-
-        Args:
-            attachments: List of Attachment objects
-            skills: List of skill names
-        """
-        attachments = attachments or []
-        skills = skills or []
-
-        att_refs = self._build_attachment_refs(attachments)
-        context_hash = compute_context_hash(
-            {name: ref.model_dump(exclude_none=True) for name, ref in att_refs.items()}, skills
-        )
-
-        snapshot = ContextSnapshot(attachments=att_refs, skills=skills, hash=context_hash)
-        self._write_record(snapshot)
-
-        self._current_context_hash = context_hash
-        self._current_attachments = att_refs
-        self._current_skills = list(skills)
-
-    def _build_attachment_refs(self, attachments: List[Attachment]) -> Dict[str, AttachmentRef]:
-        """Build AttachmentRef dict from Attachment list."""
-        refs = {}
-        for att in attachments:
-            if att.source_url:
-                refs[att.name] = AttachmentRef(
-                    url=att.source_url,
-                    type=att.content_type.value,
-                    source="url",
-                    mime_type=att.mime_type,
-                )
-            else:
-                is_binary = att.content_type in (
-                    AttachmentContentType.IMAGE,
-                    AttachmentContentType.AUDIO,
-                    AttachmentContentType.DOCUMENT,
-                )
-                content_hash = store_content(att.content, is_binary=is_binary)
-                refs[att.name] = AttachmentRef(
-                    hash=content_hash,
-                    type=att.content_type.value,
-                    source="file",
-                    mime_type=att.mime_type,
-                )
-        return refs
-
-    def check_and_record_context_change(
-        self,
-        attachments: Optional[List[Attachment]] = None,
-        skills: Optional[List[str]] = None,
-    ) -> bool:
-        """Check for context changes and record update if changed.
-
-        Args:
-            attachments: Current attachments
-            skills: Current skills
-
-        Returns:
-            True if context changed, False otherwise
-        """
-        attachments = attachments or []
-        skills = skills or []
-
-        new_refs = self._build_attachment_refs(attachments)
-        new_hash = compute_context_hash(
-            {name: ref.model_dump(exclude_none=True) for name, ref in new_refs.items()}, skills
-        )
-
-        if new_hash == self._current_context_hash:
-            return False
-
-        # Compute delta
-        changed = {}
-        for name, ref in new_refs.items():
-            if name not in self._current_attachments or self._current_attachments[name] != ref:
-                changed[name] = ref
-
-        removed = [name for name in self._current_attachments if name not in new_refs]
-        added_skills = [s for s in skills if s not in self._current_skills]
-        removed_skills = [s for s in self._current_skills if s not in skills]
-
-        update = ContextUpdate(
-            changed=changed,
-            removed=removed,
-            added_skills=added_skills,
-            removed_skills=removed_skills,
-            timestamp=datetime.now(timezone.utc),
-            hash=new_hash,
-        )
-        self._write_record(update)
-
-        self._current_context_hash = new_hash
-        self._current_attachments = new_refs
-        self._current_skills = list(skills)
-        return True
-
-    def record_turn(
-        self,
-        messages: List[Dict[str, Any]],
-        final_answer: Optional[str] = None,
-        tokens: Optional[int] = None,
-        cost: Optional[float] = None,
-        model: Optional[str] = None,
-        duration_ms: Optional[int] = None,
-        functions_called: Optional[List[str]] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> None:
-        """Record a conversation turn.
-
-        Args:
-            messages: Full message array for this turn
-            final_answer: Optional final answer text
-            tokens: Token count for this turn
-            cost: Cost for this turn
-            model: Model used (may differ from session default)
-            duration_ms: Execution duration
-            functions_called: List of function/tool names called
-            metadata: Channel routing metadata
-        """
-        user_summary = None
-        for msg in messages:
-            if msg.get("role") == "user":
-                content = msg.get("content", "")
-                if isinstance(content, str):
-                    user_summary = content[:100] + "..." if len(content) > 100 else content
-                elif isinstance(content, list):
-                    for block in content:
-                        if isinstance(block, dict) and block.get("type") == "text":
-                            text = block.get("text", "")
-                            user_summary = text[:100] + "..." if len(text) > 100 else text
-                            break
-                break
-
-        turn = Turn(
-            messages=messages,
-            final_answer=final_answer,
-            user_summary=user_summary,
-            tokens=tokens,
-            cost=cost,
-            timestamp=datetime.now(timezone.utc),
-            model=model,
-            duration_ms=duration_ms,
-            functions_called=functions_called or [],
-            metadata=metadata,
-        )
-        self._write_record(turn)
-
-        self._turn_count += 1
-        self._total_tokens += tokens or 0
-        self._total_cost += cost or 0.0
-        self._total_duration_ms += duration_ms or 0
-        if functions_called:
-            self._all_functions.update(functions_called)
-
-    def record_hook_executions(self, executions: List[HookExecution]) -> None:
-        """Write hook execution records."""
-        if executions:
-            self._write_records(executions)
-
-    def record_status(self, status: str, error_message: Optional[str] = None) -> None:
-        """Record final run status (success, error, interrupted)."""
-        record = SessionStatus(
-            status=status,
-            error_message=error_message,
-            timestamp=datetime.now(timezone.utc),
-        )
-        self._write_record(record)
-        self._status = status
-        self._error_message = error_message
-
-    def record_compaction_summary(
-        self, summary: str, previous_turns: int, retained_turns: int = 0, reason: CompactionReason | None = None
-    ) -> None:
-        """Record compaction summary.
-
-        Args:
-            summary: LLM-generated summary of previous conversation
-            previous_turns: Number of turns in compacted session
-            retained_turns: Number of recent turns kept verbatim
-            reason: Why compaction was triggered
-        """
-        record = CompactionSummary(
-            summary=summary, previous_turns=previous_turns, retained_turns=retained_turns, compaction_reason=reason
-        )
-        self._write_record(record)
-
-    @property
-    def turn_count(self) -> int:
-        return self._turn_count
-
-    @property
-    def total_tokens(self) -> int:
-        return self._total_tokens
-
-    @property
-    def total_cost(self) -> float:
-        return self._total_cost
-
-    @property
-    def agent(self) -> Optional[str]:
-        return self._meta.agent if self._meta else None
-
-    @property
-    def model(self) -> Optional[str]:
-        return self._meta.model if self._meta else None
-
-    @property
-    def machine(self) -> Optional[str]:
-        return self._meta.machine if self._meta else None
-
-    @property
-    def created_at(self) -> Optional[datetime]:
-        return self._meta.created_at if self._meta else None
-
-    @property
-    def status(self) -> Optional[str]:
-        return self._status
-
-    @property
-    def error_message(self) -> Optional[str]:
-        return self._error_message
-
-    @property
-    def total_duration_ms(self) -> int:
-        return self._total_duration_ms
-
-    @property
-    def all_functions_called(self) -> List[str]:
-        return sorted(self._all_functions)
+    def load_events(self) -> List[Event]:
+        return list(self.iter_events())
 
     @classmethod
-    def load_meta_fast(cls, session_path: Path) -> Optional[SessionMeta]:
-        """Read only the first line of a session file for fast metadata access."""
+    def load_meta_fast(cls, session_path: Path) -> Optional[Event]:
+        """Read just the first event (the session_start) for fast list views."""
         try:
             with open(session_path, "r", encoding="utf-8") as f:
                 line = f.readline().strip()
                 if line:
-                    data = json.loads(line)
-                    if data.get("type") == "session_meta":
-                        return SessionMeta.model_validate(data)
+                    return Event.model_validate(json.loads(line))
         except Exception:
             pass
         return None
 
+    def summary(self) -> "SessionSummary":
+        """Compute one-shot aggregates by walking the event log.
+
+        Scans the file each call — sessions are append-only and small enough
+        that this is fine for CLI/list views. If you need many properties,
+        cache the returned summary; don't repeatedly access individual fields.
+        """
+        return SessionSummary.from_events(self.iter_events())
+
+
+class SessionSummary:
+    """Aggregates derived from an event log: agent, model, totals, status."""
+
+    def __init__(self):
+        self.agent: Optional[str] = None
+        self.model: Optional[str] = None
+        self.machine: Optional[str] = None
+        self.workspace: Optional[str] = None
+        self.created_at: Optional[datetime] = None
+        self.parent_session: Optional[str] = None
+        self.status: Optional[str] = None
+        self.error_message: Optional[str] = None
+        self.turn_count: int = 0  # number of user_input events
+        self.total_tokens: int = 0
+        self.total_cost: float = 0.0
+        self.total_duration_ms: int = 0
+        self.functions_called: set[str] = set()
+        self.last_response_text: str = ""
+
+    @classmethod
+    def from_events(cls, events: Iterable[Event]) -> "SessionSummary":
+        s = cls()
+        for event in events:
+            data = event.data
+            if event.type == "session_start":
+                s.agent = data.get("agent")
+                s.model = data.get("model")
+                s.machine = data.get("machine")
+                s.workspace = data.get("workspace")
+                s.created_at = event.ts
+                s.parent_session = data.get("parent_session")
+            elif event.type == "user_input":
+                s.turn_count += 1
+            elif event.type == "model_response":
+                usage = data.get("usage") or {}
+                if isinstance(usage, dict):
+                    s.total_tokens += int(usage.get("total_tokens") or 0)
+                cost = data.get("cost")
+                if cost:
+                    s.total_cost += float(cost)
+                s.last_response_text = data.get("raw_content", s.last_response_text)
+            elif event.type == "code_execution":
+                s.total_duration_ms += int(data.get("duration_ms") or 0)
+                for fn in data.get("tools_called") or []:
+                    s.functions_called.add(fn)
+            elif event.type == "tool_invocation":
+                name = data.get("name")
+                if name:
+                    s.functions_called.add(name)
+                s.total_duration_ms += int(data.get("duration_ms") or 0)
+            elif event.type == "session_end":
+                s.status = data.get("status")
+                s.error_message = data.get("error_message")
+        return s
+
 
 def list_session_files() -> List[Path]:
-    """List all session JSONL files.
-
-    Returns:
-        List of session file paths (sorted by modification time, newest first)
-    """
     history_dir = get_history_dir()
-
     if not history_dir.exists():
         return []
-
     try:
         files = list(history_dir.glob("*.jsonl"))
         files.sort(key=lambda p: p.stat().st_mtime, reverse=True)

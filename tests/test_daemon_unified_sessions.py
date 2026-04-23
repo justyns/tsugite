@@ -421,7 +421,7 @@ class TestCompactSessionClearsSkills:
     @pytest.mark.asyncio
     async def test_compact_session_clears_loaded_skills(self, workspace_dir, tmp_path):
         from tsugite.history import SessionStorage
-        from tsugite.history.models import Turn
+        from tsugite.history.models import Event
 
         history_dir = tmp_path / "history"
         history_dir.mkdir()
@@ -437,13 +437,8 @@ class TestCompactSessionClearsSkills:
             session_path=session_path,
         )
         for i in range(5):
-            storage.record_turn(
-                messages=[
-                    {"role": "user", "content": f"message {i}"},
-                    {"role": "assistant", "content": f"reply {i}"},
-                ],
-                final_answer=f"reply {i}",
-            )
+            storage.record("user_input", text=f"message {i}")
+            storage.record("model_response", raw_content=f"reply {i}")
 
         adapter = _make_adapter(workspace_dir, store)
 
@@ -452,30 +447,22 @@ class TestCompactSessionClearsSkills:
         manager = get_skill_manager()
         manager._loaded_skills["test-skill"] = "skill content"
 
+        old_events = [Event(type="user_input", ts=datetime.now(timezone.utc), data={"text": "old"})]
+        recent_events = [Event(type="user_input", ts=datetime.now(timezone.utc), data={"text": "recent"})]
+
         with (
             patch("tsugite.daemon.memory.get_context_limit", return_value=128_000),
             patch("tsugite.daemon.memory.infer_compaction_model", return_value="openai:gpt-4o-mini"),
-            patch("tsugite.daemon.memory.split_turns_for_compaction") as mock_split,
+            patch(
+                "tsugite.daemon.memory.split_events_for_compaction",
+                return_value=(old_events, recent_events),
+            ),
             patch("tsugite.daemon.memory.summarize_session", new_callable=AsyncMock, return_value="Summary"),
             patch("tsugite.history.get_history_dir", return_value=history_dir),
             patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
             patch("tsugite.history.storage.get_machine_name", return_value="test"),
-            patch("tsugite.hooks.fire_compact_hooks", new_callable=AsyncMock),
+            patch("tsugite.hooks.fire_compact_hooks", new_callable=AsyncMock, return_value=[]),
         ):
-            old_turns = [
-                Turn(
-                    timestamp=datetime.now(timezone.utc),
-                    messages=[{"role": "user", "content": "old"}],
-                )
-            ]
-            recent_turns = [
-                Turn(
-                    timestamp=datetime.now(timezone.utc),
-                    messages=[{"role": "user", "content": "recent"}],
-                )
-            ]
-            mock_split.return_value = (old_turns, recent_turns)
-
             await adapter._compact_session(conv_id)
 
         assert manager._loaded_skills == {}

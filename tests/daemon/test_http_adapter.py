@@ -318,7 +318,7 @@ class TestHistoryEndpoint:
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert data["turns"] == []
+        assert data["events"] == []
         assert "conversation_id" in data
 
     def test_history_unknown_agent(self, client, test_token):
@@ -332,40 +332,50 @@ class TestHistoryEndpoint:
         resp = client.get("/api/agents/test-agent/history?user_id=someone")
         assert resp.status_code == 401
 
-    def test_history_includes_reactions(self, client, test_token, mock_adapter, tmp_path):
-        """Reactions from session event log should appear in history turns."""
-        from tsugite.history.models import Turn
+    def test_history_returns_event_stream(self, client, test_token, mock_adapter, tmp_path):
+        """The history endpoint returns the raw event log (session_start, user_input, model_response, ...)."""
         from tsugite.history.storage import SessionStorage
 
         session = mock_adapter.session_store.get_or_create_interactive("web-anonymous", "test-agent")
-        session_id = session.id
         history_dir = tmp_path / "history"
         history_dir.mkdir()
-        session_path = history_dir / f"{session_id}.jsonl"
+        session_path = history_dir / f"{session.id}.jsonl"
 
         storage = SessionStorage.create("test-agent", model="test", session_path=session_path)
-        storage.record_turn(
-            messages=[{"role": "user", "content": "hello"}, {"role": "assistant", "content": "hi"}],
-            final_answer="hi",
-        )
+        storage.record("user_input", text="hello")
+        storage.record("model_response", raw_content="hi", usage={"total_tokens": 5})
+        storage.record("session_end", status="success")
 
-        turn = next(r for r in storage.load_records() if isinstance(r, Turn))
-        reaction_dt = turn.timestamp - timedelta(milliseconds=500)
-        reaction_ts = reaction_dt.isoformat()
+        with patch("tsugite.daemon.adapters.http.get_history_dir", return_value=history_dir):
+            resp = client.get(
+                "/api/agents/test-agent/history?user_id=web-anonymous",
+                headers={"Authorization": f"Bearer {test_token}"},
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        types = [e["type"] for e in data["events"]]
+        assert types == ["session_start", "user_input", "model_response", "session_end"]
+        responses = [e for e in data["events"] if e["type"] == "model_response"]
+        assert responses[0]["data"]["raw_content"] == "hi"
+
+    def test_history_includes_reactions(self, client, test_token, mock_adapter, tmp_path):
+        """Reactions from the live session event log appear as their own events in history."""
+        from tsugite.history.storage import SessionStorage
+
+        session = mock_adapter.session_store.get_or_create_interactive("web-anonymous", "test-agent")
+        history_dir = tmp_path / "history"
+        history_dir.mkdir()
+        session_path = history_dir / f"{session.id}.jsonl"
+
+        storage = SessionStorage.create("test-agent", model="test", session_path=session_path)
+        storage.record("user_input", text="hello")
+        storage.record("model_response", raw_content="hi")
 
         mock_adapter.session_store.append_event(
-            session_id,
-            {
-                "type": "reaction",
-                "emoji": "👍",
-                "message_id": None,
-                "timestamp": reaction_ts,
-            },
+            session.id,
+            {"type": "reaction", "emoji": "👍", "timestamp": "2026-01-01T00:00:00+00:00"},
         )
-
-        # The session_id from create() differs from session.id, so we need to
-        # rename the file to match the session_id the adapter expects
-        session_path.rename(history_dir / f"{session_id}.jsonl")
 
         with patch("tsugite.daemon.adapters.http.get_history_dir", return_value=history_dir):
             resp = client.get(
@@ -374,27 +384,25 @@ class TestHistoryEndpoint:
             )
 
         assert resp.status_code == 200
-        data = resp.json()
-        turn_data = [t for t in data["turns"] if t.get("user")]
-        assert len(turn_data) == 1
-        assert turn_data[0].get("reactions") == ["👍"]
+        events = resp.json()["events"]
+        reactions = [e for e in events if e["type"] == "reaction"]
+        assert len(reactions) == 1
+        assert reactions[0]["data"]["emoji"] == "👍"
 
-    def test_history_no_reactions_when_none(self, client, test_token, mock_adapter, tmp_path):
-        """Turns without reactions should not have a reactions field."""
+    def test_history_preserves_execution_result(self, client, test_token, mock_adapter, tmp_path):
+        """Code execution events round-trip through the endpoint with output, error, duration."""
         from tsugite.history.storage import SessionStorage
 
         session = mock_adapter.session_store.get_or_create_interactive("web-anonymous", "test-agent")
-        session_id = session.id
         history_dir = tmp_path / "history"
         history_dir.mkdir()
-        session_path = history_dir / f"{session_id}.jsonl"
+        session_path = history_dir / f"{session.id}.jsonl"
 
         storage = SessionStorage.create("test-agent", model="test", session_path=session_path)
-        storage.record_turn(
-            messages=[{"role": "user", "content": "hello"}, {"role": "assistant", "content": "hi"}],
-            final_answer="hi",
-        )
-        session_path.rename(history_dir / f"{session_id}.jsonl")
+        storage.record("user_input", text="go")
+        storage.record("model_response", raw_content="```python\nprint('hi')\n```")
+        storage.record("code_execution", code="print('hi')", output="hi\n", duration_ms=12)
+        storage.record("model_response", raw_content="Done.")
 
         with patch("tsugite.daemon.adapters.http.get_history_dir", return_value=history_dir):
             resp = client.get(
@@ -403,97 +411,11 @@ class TestHistoryEndpoint:
             )
 
         assert resp.status_code == 200
-        data = resp.json()
-        turn_data = [t for t in data["turns"] if t.get("user")]
-        assert len(turn_data) == 1
-        assert "reactions" not in turn_data[0]
-
-    def test_history_detail_attaches_content_blocks_per_message(self, client, test_token, mock_adapter, tmp_path):
-        """When detail=true, each assistant message carries its own content_blocks dict."""
-        from tsugite.history.storage import SessionStorage
-
-        session = mock_adapter.session_store.get_or_create_interactive("web-anonymous", "test-agent")
-        session_id = session.id
-        history_dir = tmp_path / "history"
-        history_dir.mkdir()
-        session_path = history_dir / f"{session_id}.jsonl"
-
-        storage = SessionStorage.create("test-agent", model="test", session_path=session_path)
-        storage.record_turn(
-            messages=[
-                {"role": "user", "content": "go"},
-                {"role": "assistant", "content": "```python\ninspect()\n```"},
-                {
-                    "role": "user",
-                    "content": '<tsugite_execution_result status="success" duration_ms="3"><output>ok</output></tsugite_execution_result>',
-                },
-                {
-                    "role": "assistant",
-                    "content": (
-                        '```python\nfinal_answer(result="done")\n```\n\n'
-                        '<content name="reply">Stopped before creating anything.</content>'
-                    ),
-                },
-            ],
-            final_answer="done",
-        )
-        session_path.rename(history_dir / f"{session_id}.jsonl")
-
-        with patch("tsugite.daemon.adapters.http.get_history_dir", return_value=history_dir):
-            resp = client.get(
-                "/api/agents/test-agent/history?user_id=web-anonymous&detail=true",
-                headers={"Authorization": f"Bearer {test_token}"},
-            )
-
-        assert resp.status_code == 200
-        data = resp.json()
-        turn = next(t for t in data["turns"] if t.get("user"))
-
-        # Turn-level aggregate still available for backward compat
-        assert turn.get("content_blocks") == {"reply": "Stopped before creating anything."}
-
-        # Per-message attachment is the new source of truth for rendering
-        assistant_msgs = [m for m in turn["messages"] if m.get("role") == "assistant"]
-        assert assistant_msgs[0].get("content_blocks", {}) == {}
-        assert assistant_msgs[1]["content_blocks"] == {"reply": "Stopped before creating anything."}
-
-    def test_history_detail_preserves_execution_result_with_attributes(
-        self, client, test_token, mock_adapter, tmp_path
-    ):
-        """Execution-result tags with attributes must survive the payload unmodified."""
-        from tsugite.history.storage import SessionStorage
-
-        session = mock_adapter.session_store.get_or_create_interactive("web-anonymous", "test-agent")
-        session_id = session.id
-        history_dir = tmp_path / "history"
-        history_dir.mkdir()
-        session_path = history_dir / f"{session_id}.jsonl"
-
-        observation = (
-            '<tsugite_execution_result status="success" duration_ms="12">'
-            "<output>ran</output></tsugite_execution_result>"
-        )
-        storage = SessionStorage.create("test-agent", model="test", session_path=session_path)
-        storage.record_turn(
-            messages=[
-                {"role": "user", "content": "go"},
-                {"role": "assistant", "content": "```python\nprint('hi')\n```"},
-                {"role": "user", "content": observation},
-            ],
-            final_answer="done",
-        )
-        session_path.rename(history_dir / f"{session_id}.jsonl")
-
-        with patch("tsugite.daemon.adapters.http.get_history_dir", return_value=history_dir):
-            resp = client.get(
-                "/api/agents/test-agent/history?user_id=web-anonymous&detail=true",
-                headers={"Authorization": f"Bearer {test_token}"},
-            )
-
-        assert resp.status_code == 200
-        turn = next(t for t in resp.json()["turns"] if t.get("user"))
-        user_msgs = [m for m in turn["messages"] if m.get("role") == "user"]
-        assert any(m.get("content") == observation for m in user_msgs)
+        events = resp.json()["events"]
+        code_events = [e for e in events if e["type"] == "code_execution"]
+        assert len(code_events) == 1
+        assert code_events[0]["data"]["output"] == "hi\n"
+        assert code_events[0]["data"]["duration_ms"] == 12
 
 
 class TestWebUI:

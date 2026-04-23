@@ -88,8 +88,10 @@ def render(
 
         session_path = get_history_dir() / f"{continue_conversation_id}.jsonl"
         try:
-            storage = SessionStorage.load(session_path)
-            agent_name = storage.agent
+            meta = SessionStorage.load_meta_fast(session_path)
+            agent_name = meta.data.get("agent") if meta else None
+            if not agent_name:
+                raise ValueError("agent name missing")
         except Exception:
             console.print(f"[red]Could not load metadata for conversation: {continue_conversation_id}[/red]")
             raise typer.Exit(1)

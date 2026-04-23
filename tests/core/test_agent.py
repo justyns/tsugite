@@ -155,8 +155,8 @@ final_answer(result)
 
 
 @pytest.mark.asyncio
-async def test_agent_max_turns_reached():
-    """Test agent raises error when max_turns is reached."""
+async def test_agent_max_turns_returns_last_text():
+    """When max_turns is hit, the loop ends and the last assistant response is returned."""
 
     agent = TsugiteAgent(
         model_string="openai:gpt-4o-mini",
@@ -164,27 +164,18 @@ async def test_agent_max_turns_reached():
         instructions="",
         max_turns=3,
     )
-
     _patch_provider(
         agent,
-        return_value=_mock_response("""Thought: Still working...
-
-```python
-x = 1
-print(x)
-```"""),
+        return_value=_mock_response("Thought: Still working...\n\n```python\nx = 1\nprint(x)\n```"),
     )
 
-    with pytest.raises(RuntimeError) as exc_info:
-        await agent.run("Some task")
-
-    assert "max_turns" in str(exc_info.value)
-    assert "3" in str(exc_info.value)
+    result = await agent.run("Some task")
+    assert "Still working" in str(result)
 
 
 @pytest.mark.asyncio
-async def test_agent_format_error_loop_bails_early():
-    """Test agent bails out after 3 consecutive format errors instead of burning all turns."""
+async def test_agent_no_code_response_ends_loop():
+    """A plain-text response (no code block) ends the loop and is returned as the answer."""
 
     agent = TsugiteAgent(
         model_string="openai:gpt-4o-mini",
@@ -192,24 +183,20 @@ async def test_agent_format_error_loop_bails_early():
         instructions="",
         max_turns=20,
     )
-
-    # Model responds with plain text (no code block) every turn
     _patch_provider(
         agent,
-        return_value=_mock_response("I'm responding in plain text without a code block."),
+        return_value=_mock_response("Here's my answer in plain text."),
     )
 
-    with pytest.raises(RuntimeError) as exc_info:
-        await agent.run("Some task")
-
-    assert "format_error_loop" in str(exc_info.value)
-    # Should bail after 3 format errors, not burn all 20 turns
-    assert len(agent.memory.steps) <= 3
+    result = await agent.run("Some task")
+    assert result == "Here's my answer in plain text."
+    # Single turn — the no-code response ended the loop immediately.
+    assert len(agent.memory.steps) == 1
 
 
 @pytest.mark.asyncio
-async def test_agent_format_error_preserves_content_blocks_on_step():
-    """When the LLM emits content blocks but no code fence, the step should still carry them."""
+async def test_agent_content_blocks_preserved_on_no_code_step():
+    """Content blocks attached to a no-code answer must survive on the step."""
 
     agent = TsugiteAgent(
         model_string="openai:gpt-4o-mini",
@@ -217,28 +204,19 @@ async def test_agent_format_error_preserves_content_blocks_on_step():
         instructions="",
         max_turns=5,
     )
-
-    format_error = (
-        "Thought: writing without code\n\n" '<content name="reply">Stopped before creating anything.</content>'
-    )
-    _patch_provider(
-        agent,
-        side_effect=[
-            _mock_response(format_error),
-            _mock_response("```python\nfinal_answer('done')\n```"),
-        ],
-    )
+    answer = "Some prose\n\n" '<content name="reply">Done without running code.</content>'
+    _patch_provider(agent, return_value=_mock_response(answer))
 
     await agent.run("Some task")
 
-    format_error_step = agent.memory.steps[0]
-    assert format_error_step.code == ""
-    assert format_error_step.content_blocks == {"reply": "Stopped before creating anything."}
+    step = agent.memory.steps[0]
+    assert step.code == ""
+    assert step.content_blocks == {"reply": "Done without running code."}
 
 
 @pytest.mark.asyncio
-async def test_agent_format_error_resets_on_valid_code():
-    """Test format error counter resets when model produces valid code."""
+async def test_agent_mid_run_no_code_ends_loop_with_text():
+    """If the model runs code on turn 1 then answers in plain text on turn 2, the text is the answer."""
 
     agent = TsugiteAgent(
         model_string="openai:gpt-4o-mini",
@@ -246,24 +224,14 @@ async def test_agent_format_error_resets_on_valid_code():
         instructions="",
         max_turns=10,
     )
-
     responses = [
-        # 2 format errors
-        _mock_response("plain text"),
-        _mock_response("plain text again"),
-        # Valid code — resets counter
-        _mock_response("Thought: ok\n\n```python\nprint('hi')\n```"),
-        # 2 more format errors
-        _mock_response("more plain text"),
-        _mock_response("still plain"),
-        # Valid code again — resets counter
-        _mock_response("Thought: done\n\n```python\nfinal_answer('done')\n```"),
+        _mock_response("Thought: ok\n\n```python\nprint('working')\n```"),
+        _mock_response("All done. The answer is 42."),
     ]
-
     _patch_provider(agent, side_effect=responses)
 
     result = await agent.run("Some task")
-    assert result == "done"
+    assert result == "All done. The answer is 42."
 
 
 @pytest.mark.asyncio
@@ -422,7 +390,7 @@ async def test_agent_build_system_prompt():
     assert "Search for information" in prompt
     assert "You are an expert researcher." in prompt
     assert "tsugite_execution_result" in prompt
-    assert "final_answer" in prompt
+    assert "return_value" in prompt
     assert "```python" in prompt
 
 
@@ -712,7 +680,16 @@ async def test_agent_custom_executor():
     """Test agent can use custom executor."""
 
     mock_executor = MagicMock()
-    mock_executor.execute = AsyncMock(return_value=MagicMock(output="custom output", error=None, final_answer=42))
+    mock_exec_result = MagicMock(
+        output="custom output",
+        error=None,
+        return_value=42,
+        tools_called=[],
+        loaded_skills={},
+        unloaded_skills=[],
+    )
+    mock_exec_result.to_xml.return_value = "<tsugite_execution_result/>"
+    mock_executor.execute = AsyncMock(return_value=mock_exec_result)
     mock_executor.namespace = {}
 
     agent = TsugiteAgent(
@@ -728,7 +705,7 @@ async def test_agent_custom_executor():
         return_value=_mock_response("""Thought: Test.
 
 ```python
-final_answer(42)
+return_value(42)
 ```"""),
     )
 

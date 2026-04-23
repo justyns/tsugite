@@ -111,7 +111,7 @@ async def test_final_answer_ipc():
     try:
         result = await executor.execute("final_answer('done')")
         assert result.error is None
-        assert result.final_answer == "done"
+        assert result.return_value == "done"
     finally:
         executor.cleanup()
 

@@ -5,6 +5,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+from xml.sax.saxutils import escape
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +19,7 @@ from tsugite.events import (  # noqa: E402
     FinalAnswerEvent,
     LLMMessageEvent,
     ObservationEvent,
+    PromptSnapshotEvent,
     ReasoningContentEvent,
     ReasoningTokensEvent,
     StepStartEvent,
@@ -28,6 +30,7 @@ from tsugite.events import (  # noqa: E402
     ToolResultEvent,
     WarningEvent,
 )
+from tsugite.providers.base import CompletionResponse as ProviderResponse  # noqa: E402
 from tsugite.skill_discovery import Skill  # noqa: E402
 
 from .content_blocks import extract_content_blocks  # noqa: E402
@@ -172,6 +175,7 @@ class TsugiteAgent:
         resume_session: Optional[str] = None,
         resume_after_compaction: bool = False,
         hook_vars: Optional[Dict[str, str]] = None,
+        storage: Optional[Any] = None,
     ):
         """Initialize the agent.
 
@@ -216,7 +220,8 @@ class TsugiteAgent:
         self.cache_creation_tokens = 0
         self.cache_read_tokens = 0
         self._previous_turn_had_error = False
-        self._consecutive_format_errors = 0
+        self.storage = storage
+        self._user_input_recorded = False  # caller may pre-record before run()
 
         self.tool_map = {tool.name: tool for tool in tools}
 
@@ -308,9 +313,9 @@ class TsugiteAgent:
         For SubprocessExecutor, tools are registered via set_tools() instead of
         namespace injection — the child process handles tool dispatch via IPC.
 
-        Note: final_answer is registered as a tool for documentation purposes but is NOT
-        injected here - the executor has its own built-in final_answer that properly
-        signals completion. We skip it to avoid overriding the executor's version.
+        Note: return_value (and the final_answer alias) are documentation-only tools.
+        The executor injects the real implementations; we skip injecting the wrappers
+        here to avoid overriding the built-ins.
         """
         from .subprocess_executor import SubprocessExecutor
 
@@ -395,20 +400,20 @@ class TsugiteAgent:
         Raises:
             RuntimeError: If agent reaches max_turns without finishing
         """
-        # Track execution time
         start_time = time.time()
-
-        # Add task to memory
         self.memory.add_task(task)
-
-        # Trigger task start event
         if self.event_bus:
             self.event_bus.emit(TaskStartEvent(task=task, model=self.model_name))
 
-        # Main agent loop
+        self._record_user_input_if_needed(task)
+
+        _UNSET = object()
+        final_value: Any = _UNSET
+        last_response_text: str = ""
+        turn_num = 0
+
         try:
             for turn_num in range(self.max_turns):
-                # Trigger turn start event
                 if self.event_bus:
                     self.event_bus.emit(
                         StepStartEvent(
@@ -418,14 +423,10 @@ class TsugiteAgent:
                         )
                     )
 
-                # Build conversation messages from memory
                 messages = self._build_messages()
-                last_msg = messages[-1]["content"] if messages else ""
-                logger.debug("Turn %d sending %d messages (last: %.200s)", turn_num + 1, len(messages), last_msg)
+                logger.debug("Turn %d sending %d messages", turn_num + 1, len(messages))
 
                 if self.event_bus:
-                    from tsugite.events import PromptSnapshotEvent
-
                     self.event_bus.emit(
                         PromptSnapshotEvent(
                             messages=messages,
@@ -434,348 +435,224 @@ class TsugiteAgent:
                     )
 
                 turn = await self._provider_turn(messages, turn_num, stream)
-
                 thought, code = turn.thought, turn.code
+                last_response_text = turn.response.content if turn.response else (thought or "")
 
-                # Update the inspector snapshot with the LLM response (copy, don't mutate)
                 if self.event_bus and (thought or code):
-                    from tsugite.events import PromptSnapshotEvent
+                    self.event_bus.emit(
+                        PromptSnapshotEvent(messages=messages + [{"role": "assistant", "content": last_response_text}])
+                    )
 
-                    parts = []
-                    if thought:
-                        parts.append(thought)
-                    if code:
-                        parts.append(f"```python\n{code}\n```")
-                    updated = messages + [{"role": "assistant", "content": "\n\n".join(parts)}]
-                    self.event_bus.emit(PromptSnapshotEvent(messages=updated))
-                logger.debug(
-                    "Turn %d response (cost=%.4f): %.200s", turn_num + 1, turn.step_cost, (thought or "")[:200]
-                )
-
-                # Emit and inject content blocks into executor namespace
                 if turn.content_blocks:
                     if self.event_bus:
-                        for cb_name, cb_content in turn.content_blocks.items():
-                            self.event_bus.emit(ContentBlockEvent(name=cb_name, content=cb_content))
+                        for name, content in turn.content_blocks.items():
+                            self.event_bus.emit(ContentBlockEvent(name=name, content=content))
                     await self.executor.inject_content_blocks(turn.content_blocks)
 
-                # Reject responses with multiple ```python blocks. Silently
-                # running the first and dropping the rest makes the LLM believe
-                # a side-effect like final_answer() already fired when it never
-                # did, leaving the user with no reply.
+                # Multiple python blocks: treat as a parser-level format error
+                # and ask the model to retry. Single-block runs and no-code-runs
+                # both proceed past this branch.
                 if turn.num_code_blocks > 1:
-                    multi_block_msg = (
-                        "Format Error: Your response contained "
-                        f"{turn.num_code_blocks} separate ```python code blocks. "
-                        "You must use exactly ONE ```python block per response. "
-                        "Combine all the code you need to run into a single block, "
-                        "including any final_answer() call at the end."
-                    )
-                    if self.event_bus:
-                        self.event_bus.emit(
-                            ErrorEvent(
-                                error=multi_block_msg,
-                                error_type="Format Error",
-                                step=turn_num + 1,
-                            )
-                        )
-
-                    from xml.sax.saxutils import escape
-
-                    multi_block_xml = (
-                        '<tsugite_execution_result status="error">\n'
-                        "<output></output>\n"
-                        f"<error>{escape(multi_block_msg)}</error>\n"
-                        "</tsugite_execution_result>"
-                    )
-                    self.memory.add_step(
-                        thought=thought if thought else "(No thought provided)",
-                        code="",
-                        output=multi_block_msg,
-                        error=None,
-                        tools_called=[],
-                        xml_observation=multi_block_xml,
-                        content_blocks=turn.content_blocks,
-                    )
+                    self._handle_format_error(turn_num, turn, thought, last_response_text)
                     continue
 
-                # Only execute code if the LLM actually generated some
-                if code and code.strip():
-                    self._consecutive_format_errors = 0
-                    # Trigger code execution event
-                    if self.event_bus:
-                        self.event_bus.emit(CodeExecutionEvent(code=code))
-
-                    # Execute the code and track duration
-                    exec_start_time = time.perf_counter()
-                    exec_result = await self.executor.execute(code)
-                    exec_duration_ms = int((time.perf_counter() - exec_start_time) * 1000)
-
-                    # Generate XML observation
-                    xml_observation = exec_result.to_xml(duration_ms=exec_duration_ms)
-
-                    # Trigger observation event
-                    if self.event_bus:
-                        from tsugite.secrets.registry import get_registry
-
-                        observation = get_registry().mask(exec_result.output)
-
-                        if exec_result.error:
-                            # Mark that this turn had an error (for recovery UX)
-                            self._previous_turn_had_error = True
-
-                            # Emit warning instead of error - less alarming and signals retry
-                            error_preview = (
-                                exec_result.error[:100] + "..." if len(exec_result.error) > 100 else exec_result.error
-                            )
-                            self.event_bus.emit(
-                                WarningEvent(
-                                    message=f"Tool failed, will retry: {error_preview}",
-                                    step=turn_num + 1,
-                                )
-                            )
-                        else:
-                            # Success - reset error flag
-                            self._previous_turn_had_error = False
-                            self.event_bus.emit(ObservationEvent(observation=observation))
-                else:
-                    # No code to execute
-
-                    from .executor import ExecutionResult
-
-                    exec_result = ExecutionResult(output="", error=None, stdout="", stderr="")
-                    xml_observation = None  # No XML for non-code responses
-
-                    if self.event_bus:
-                        self.event_bus.emit(
-                            ErrorEvent(
-                                error="LLM did not generate code. Expected format:\n\n```python\n<code>\n```",
-                                error_type="Format Error",
-                                step=turn_num + 1,
-                            )
-                        )
-
-                    self._consecutive_format_errors += 1
-                    if self._consecutive_format_errors >= 3:
-                        error_msg = (
-                            f"Agent stuck in format_error_loop after "
-                            f"{self._consecutive_format_errors} consecutive format errors"
-                        )
-                        logger.warning(error_msg)
-                        if self.event_bus:
-                            self.event_bus.emit(
-                                WarningEvent(
-                                    message=(
-                                        f"Format error loop detected ({self._consecutive_format_errors} "
-                                        "consecutive errors). Will retry with a fresh session."
-                                    ),
-                                )
-                            )
-                        if return_full_result:
-                            return AgentResult(
-                                output=None,
-                                token_usage=None,
-                                cost=self.total_cost,
-                                steps=self.memory.steps,
-                                error=error_msg,
-                                provider_state=self._provider.get_state(),
-                            )
-                        raise RuntimeError(error_msg)
-
-                    correction_msg = (
-                        "Format Error: You must respond with a Python code block.\n\n"
-                        "```python\n"
-                        "# Your code here\n"
-                        'final_answer("your answer")\n'
-                        "```\n\n"
-                        "Even for simple responses, wrap them in a code block with final_answer()."
-                    )
-
-                    from xml.sax.saxutils import escape
-
-                    correction_xml = (
-                        '<tsugite_execution_result status="error">\n'
-                        "<output></output>\n"
-                        f"<error>{escape(correction_msg)}</error>\n"
-                        "</tsugite_execution_result>"
-                    )
+                # No code = the model is done. Its raw text is the answer.
+                if not code or not code.strip():
+                    final_value = last_response_text
                     self.memory.add_step(
-                        thought=thought if thought else "(No thought provided)",
+                        thought=thought,
                         code="",
-                        output=correction_msg,
-                        error=None,
+                        output="",
                         tools_called=[],
-                        xml_observation=correction_xml,
                         content_blocks=turn.content_blocks,
+                        raw_content=last_response_text,
                     )
+                    break
 
-                    # Continue to next turn - the correction will be in the observation
-                    continue
+                if self.event_bus:
+                    self.event_bus.emit(CodeExecutionEvent(code=code))
 
-                # Build observation output, adding reminder if no final_answer
-                step_output = exec_result.output
-                if exec_result.final_answer is None and not exec_result.error:
-                    step_output += (
-                        "\n\n(Reminder: Call final_answer() when you have the result, "
-                        "or ask_user() if you need input from the user.)"
-                    )
+                exec_start = time.perf_counter()
+                exec_result = await self.executor.execute(code)
+                exec_duration_ms = int((time.perf_counter() - exec_start) * 1000)
 
-                # Append turn/token budget tag so the LLM knows its resource limits
+                self._record_code_execution(
+                    code=code,
+                    exec_result=exec_result,
+                    duration_ms=exec_duration_ms,
+                )
+
+                xml_observation = exec_result.to_xml(duration_ms=exec_duration_ms)
+
+                if self.event_bus:
+                    from tsugite.secrets.registry import get_registry
+
+                    masked = get_registry().mask(exec_result.output)
+                    if exec_result.error:
+                        self._previous_turn_had_error = True
+                        preview = (
+                            exec_result.error[:100] + "..." if len(exec_result.error) > 100 else exec_result.error
+                        )
+                        self.event_bus.emit(WarningEvent(message=f"Tool failed, will retry: {preview}", step=turn_num + 1))
+                    else:
+                        self._previous_turn_had_error = False
+                        self.event_bus.emit(ObservationEvent(observation=masked))
+
                 budget_tag = self._build_budget_tag(turn_num)
-                step_output += budget_tag
                 xml_observation += budget_tag
 
-                # Add this step to memory (only for successful executions or text mode)
                 self.memory.add_step(
                     thought=thought,
                     code=code,
-                    output=step_output,
+                    output=exec_result.output + budget_tag,
                     error=exec_result.error,
                     tools_called=exec_result.tools_called,
                     loaded_skills=exec_result.loaded_skills,
                     unloaded_skills=exec_result.unloaded_skills,
                     xml_observation=xml_observation,
                     content_blocks=turn.content_blocks,
+                    raw_content=last_response_text,
                 )
 
-                # Migrate dynamically-loaded skills into the cached context turn so
-                # they survive compaction alongside auto-loaded skills.
-                if exec_result.loaded_skills:
-                    existing = {s.name for s in self.skills}
-                    for name, content in exec_result.loaded_skills.items():
-                        if name not in existing:
-                            self.skills.append(Skill(name=name, content=content))
-                            existing.add(name)
+                self._absorb_skill_changes(exec_result)
 
-                # Drop explicitly-unloaded skills so the next context turn omits them.
-                if exec_result.unloaded_skills:
-                    drop = set(exec_result.unloaded_skills)
-                    self.skills = [s for s in self.skills if s.name not in drop]
-                    for name in drop:
-                        self.expiring_skills.pop(name, None)
+                if exec_result.return_value is not None:
+                    final_value = exec_result.return_value
+                    self.memory.add_final_answer(final_value)
+                    break
 
-                # Check if final_answer was called during execution
-                if exec_result.final_answer is not None:
-                    # Agent is done!
-                    self.memory.add_final_answer(exec_result.final_answer)
+            # If we never broke out, max_turns hit. Use the last response text as
+            # the answer and record the run as interrupted.
+            if final_value is _UNSET:
+                final_value = last_response_text
+                status = "interrupted"
+                error_message = f"max_turns ({self.max_turns}) reached"
+                if self.event_bus:
+                    self.event_bus.emit(
+                        WarningEvent(message=error_message, step=turn_num + 1)
+                    )
+            else:
+                status = "success"
+                error_message = None
 
-                    total_tokens = self.total_tokens if self.total_tokens > 0 else None
-                    response_context = {
-                        "answer": str(exec_result.final_answer)[:500],
-                        "turns": turn_num + 1,
-                        "tokens": total_tokens,
-                        "cost": self.total_cost if self.total_cost > 0 else None,
-                    }
+            total_tokens = self.total_tokens if self.total_tokens > 0 else None
+            response_context = {
+                "answer": str(final_value)[:500] if final_value is not None else "",
+                "turns": turn_num + 1,
+                "tokens": total_tokens,
+                "cost": self.total_cost if self.total_cost > 0 else None,
+            }
 
-                    # Fire pre_response hooks
-                    from tsugite.hooks import fire_hooks_background
+            from tsugite.hooks import fire_hooks_background
 
-                    fire_hooks_background("pre_response", response_context)
+            fire_hooks_background("pre_response", response_context)
 
-                    if self.event_bus:
-                        self.event_bus.emit(
-                            FinalAnswerEvent(
-                                answer=str(exec_result.final_answer),
-                                turns=turn_num + 1,
-                                tokens=total_tokens,
-                                cost=self.total_cost if self.total_cost > 0 else None,
-                            )
-                        )
-
-                        duration = time.time() - start_time
-
-                        self.event_bus.emit(
-                            CostSummaryEvent(
-                                tokens=total_tokens,
-                                cost=self.total_cost if self.total_cost > 0 else None,
-                                model=self.model_name,
-                                duration_seconds=duration,
-                                cache_creation_input_tokens=self.cache_creation_tokens or None,
-                                cache_read_input_tokens=self.cache_read_tokens or None,
-                            )
-                        )
-
-                    # Fire post_response hooks
-                    fire_hooks_background("post_response", response_context)
-
-                    if return_full_result:
-                        return AgentResult(
-                            output=exec_result.final_answer,
-                            token_usage=total_tokens,
-                            cost=self.total_cost if self.total_cost > 0 else None,
-                            steps=self.memory.steps,
-                            provider_state=self._provider.get_state(),
-                            last_input_tokens=self.last_input_tokens if self.last_input_tokens > 0 else None,
-                        )
-                    return exec_result.final_answer
-
-                # Continue loop (LLM will see the observation in next iteration)
-
-            # If we get here, we hit max_turns — give the LLM one last chance to call final_answer()
-            last_chance_msg = (
-                f"TURN LIMIT REACHED. You have used all {self.max_turns} turns.\n"
-                "You MUST call final_answer() NOW with a summary of your progress so far.\n"
-                "If the task is not complete, include what remains to be done so the user can ask to continue.\n"
-                "Do NOT call any other tools — only final_answer() is available."
-            )
-            self.memory.add_step(
-                thought="(system: turn limit reached)",
-                code="",
-                output=last_chance_msg,
-                error=None,
-                tools_called=[],
-            )
-
-            saved_tools = self.tools
-            self.tools = []
-            try:
-                messages = self._build_messages()
-                turn = await self._provider_turn(messages, self.max_turns, stream)
-
-                if turn.code and turn.code.strip():
-                    exec_result = await self.executor.execute(turn.code)
-                    if exec_result.final_answer is not None:
-                        self.memory.add_final_answer(exec_result.final_answer)
-                        if return_full_result:
-                            return AgentResult(
-                                output=exec_result.final_answer,
-                                token_usage=None,
-                                cost=self.total_cost if self.total_cost > 0 else None,
-                                steps=self.memory.steps,
-                                provider_state=self._provider.get_state(),
-                            )
-                        return exec_result.final_answer
-            except Exception:
-                logger.debug("Last-chance turn failed", exc_info=True)
-            finally:
-                self.tools = saved_tools
-
-            error_msg = f"Agent reached max_turns ({self.max_turns}) without completing task"
             if self.event_bus:
-                self.event_bus.emit(ErrorEvent(error=error_msg, error_type="RuntimeError"))
+                self.event_bus.emit(
+                    FinalAnswerEvent(
+                        answer=str(final_value) if final_value is not None else "",
+                        turns=turn_num + 1,
+                        tokens=total_tokens,
+                        cost=self.total_cost if self.total_cost > 0 else None,
+                    )
+                )
+                self.event_bus.emit(
+                    CostSummaryEvent(
+                        tokens=total_tokens,
+                        cost=self.total_cost if self.total_cost > 0 else None,
+                        model=self.model_name,
+                        duration_seconds=time.time() - start_time,
+                        cache_creation_input_tokens=self.cache_creation_tokens or None,
+                        cache_read_input_tokens=self.cache_read_tokens or None,
+                    )
+                )
 
-            partial_output = None
-            if self.memory.steps:
-                last_step = self.memory.steps[-1]
-                partial_output = last_step.thought or last_step.output
+            fire_hooks_background("post_response", response_context)
+
+            if self.storage:
+                from tsugite.agent_runner.history_integration import record_session_end
+
+                record_session_end(self.storage, status=status, error_message=error_message)
 
             if return_full_result:
                 return AgentResult(
-                    output=partial_output,
-                    token_usage=None,
-                    cost=self.total_cost,
+                    output=final_value,
+                    token_usage=total_tokens,
+                    cost=self.total_cost if self.total_cost > 0 else None,
                     steps=self.memory.steps,
-                    error=error_msg,
+                    error=error_message,
                     provider_state=self._provider.get_state(),
+                    last_input_tokens=self.last_input_tokens if self.last_input_tokens > 0 else None,
                 )
-
-            raise RuntimeError(error_msg)
+            return final_value
         finally:
             await self._provider.stop()
 
+    def _record_user_input_if_needed(self, task: str) -> None:
+        if self.storage and not self._user_input_recorded:
+            self.storage.record("user_input", text=task)
+            self._user_input_recorded = True
+
+    def _handle_format_error(self, turn_num: int, turn, thought: str, raw_content: str) -> None:
+        msg = (
+            f"Format Error: Your response contained {turn.num_code_blocks} separate ```python "
+            "code blocks. Use exactly ONE ```python block per response. Combine all code "
+            "into a single block."
+        )
+        if self.storage:
+            self.storage.record("format_error", reason=f"{turn.num_code_blocks} python blocks", rejected_content=raw_content)
+        if self.event_bus:
+            self.event_bus.emit(ErrorEvent(error=msg, error_type="Format Error", step=turn_num + 1))
+
+        observation = (
+            '<tsugite_execution_result status="error">\n'
+            "<output></output>\n"
+            f"<error>{escape(msg)}</error>\n"
+            "</tsugite_execution_result>"
+        )
+        self.memory.add_step(
+            thought=thought or "(No thought provided)",
+            code="",
+            output=msg,
+            error=None,
+            tools_called=[],
+            xml_observation=observation,
+            content_blocks=turn.content_blocks,
+            raw_content=raw_content,
+        )
+
+    def _record_code_execution(self, code: str, exec_result, duration_ms: int) -> None:
+        if not self.storage:
+            return
+        self.storage.record(
+            "code_execution",
+            code=code,
+            output=exec_result.output,
+            error=exec_result.error,
+            duration_ms=duration_ms,
+            tools_called=list(exec_result.tools_called) if exec_result.tools_called else None,
+        )
+
+    def _absorb_skill_changes(self, exec_result) -> None:
+        if exec_result.loaded_skills:
+            existing = {s.name for s in self.skills}
+            for name, content in exec_result.loaded_skills.items():
+                if name not in existing:
+                    self.skills.append(Skill(name=name, content=content))
+                    existing.add(name)
+                    if self.storage:
+                        self.storage.record("skill_added", name=name)
+        if exec_result.unloaded_skills:
+            drop = set(exec_result.unloaded_skills)
+            self.skills = [s for s in self.skills if s.name not in drop]
+            for name in drop:
+                self.expiring_skills.pop(name, None)
+                if self.storage:
+                    self.storage.record("skill_removed", name=name)
+
     async def _provider_turn(self, messages, turn_num, stream) -> TurnResult:
         """Execute one turn via the provider system."""
-        from tsugite.providers.base import CompletionResponse as ProviderResponse
+        self._record_model_request(messages, turn_num)
 
         if stream:
             accumulated_content = ""
@@ -800,13 +677,22 @@ class TsugiteAgent:
                 step_cost = self._accumulate_usage(final_chunk.usage, final_chunk.cost or 0.0)
 
             parsed = self._parse_response_from_text(accumulated_content)
+            self._record_model_response(
+                turn_num,
+                raw_content=accumulated_content,
+                usage=final_chunk.usage if final_chunk else None,
+                cost=final_chunk.cost if final_chunk else None,
+                response=None,
+            )
 
+            synthetic = ProviderResponse(content=accumulated_content)
             return TurnResult(
                 thought=parsed.thought,
                 code=parsed.code,
                 step_cost=step_cost,
                 content_blocks=parsed.content_blocks,
-                response=None,
+                response=synthetic,
+                num_code_blocks=parsed.num_code_blocks,
             )
 
         response: ProviderResponse = await self._provider.acompletion(
@@ -843,6 +729,14 @@ class TsugiteAgent:
                     )
                 )
 
+        self._record_model_response(
+            turn_num,
+            raw_content=response.content,
+            usage=response.usage,
+            cost=response.cost,
+            response=response,
+        )
+
         return TurnResult(
             thought=parsed.thought,
             code=parsed.code,
@@ -850,6 +744,37 @@ class TsugiteAgent:
             content_blocks=parsed.content_blocks,
             response=response,
             num_code_blocks=parsed.num_code_blocks,
+        )
+
+    def _record_model_request(self, messages, turn_num: int) -> None:
+        if not self.storage:
+            return
+        self.storage.record(
+            "model_request",
+            turn=turn_num,
+            provider=self._provider_name,
+            model=self._model_id,
+            messages=messages,
+            tool_names=[t.name for t in self.tools],
+        )
+
+    def _record_model_response(self, turn_num: int, *, raw_content: str, usage, cost, response) -> None:
+        if not self.storage:
+            return
+        usage_dump = usage.model_dump(exclude_none=True) if usage and hasattr(usage, "model_dump") else None
+        state_delta = self._provider.get_state() if self._provider else None
+        raw = getattr(response, "raw", None) if response is not None else None
+        stop_reason = raw.get("stop_reason") if isinstance(raw, dict) else None
+        self.storage.record(
+            "model_response",
+            turn=turn_num,
+            provider=self._provider_name,
+            model=self._model_id,
+            raw_content=raw_content,
+            usage=usage_dump,
+            cost=cost,
+            stop_reason=stop_reason,
+            state_delta=state_delta,
         )
 
     def _format_attachment(self, attachment: Attachment) -> Optional[Dict]:
@@ -1037,23 +962,20 @@ class TsugiteAgent:
         # 4. Task
         messages.append({"role": "user", "content": self.memory.task})
 
-        # 5. Previous steps (Code → Observation with embedded skills)
+        # 5. Previous steps. Use the verbatim raw_content so the model sees its
+        # own past response unchanged. Fall back to a re-rendered code block for
+        # legacy steps that lack raw_content.
         for step in self.memory.steps:
-            # Assistant message is code + any content blocks the LLM defined
-            if step.code and step.code.strip():
+            if step.raw_content:
+                assistant_msg = step.raw_content
+            elif step.code and step.code.strip():
                 assistant_msg = f"```python\n{step.code}\n```"
             else:
-                # No code — show what the LLM actually said so it sees its own response
                 assistant_msg = step.thought if step.thought else "(empty response)"
-            from tsugite.core.content_blocks import serialize_content_blocks
-
-            cb_str = serialize_content_blocks(step.content_blocks)
-            if cb_str:
-                assistant_msg += f"\n\n{cb_str}"
             messages.append({"role": "assistant", "content": assistant_msg})
 
-            # Observation with loaded skills embedded
-            messages.append({"role": "user", "content": self._build_observation(step)})
+            if step.xml_observation:
+                messages.append({"role": "user", "content": self._build_observation(step)})
 
         return messages
 
@@ -1267,12 +1189,17 @@ def build_standard_mode_prompt(tools_section: str, instructions: str, has_tools:
 
 ## How to Respond
 
-Write Python code in a code block. Use comments for reasoning if needed:
+Each turn you can either:
+
+1. **Run Python code** to use tools, read files, compute things — wrap it in a single
+   ```python code block. You'll see the result and can run more code next turn.
+
+2. **Answer directly with text** — when you're done, just respond with your answer
+   in plain text (no code block). That ends the run; the user sees your text.
 
 ```python
-# First, read the config to understand the structure
 config = read_file("config.yaml")
-print(config)  # See the contents
+print(config)
 ```
 
 ## Current Working Directory
@@ -1298,34 +1225,26 @@ Fields:
 - `<traceback>`: Python traceback if failed (last 10 lines)
 - `<variables_set>`: Variables you created this turn (discarded at turn end)
 - `<state>`: Values currently persisted in `state` (carry across turns)
-- `<final_answer>`: Confirms completion when you call final_answer()
+- `<return_value>`: Value you passed to return_value() — ends the run
 
-## How to write code:
+## How to write code
 
-- Write code in triple-backtick code blocks: ```python
-- **Use exactly ONE ```python code block per response.** Combine all the code
-  you want to run into a single block, including any final_answer() call at
-  the end. Emitting multiple code blocks in one response is a Format Error.
-- Use print() to output important information
-- **Each turn starts with a fresh Python namespace.** Plain variables
-  (`x = 5`, `data = fetch(...)`) are discarded after the turn ends.
-- To persist a value across turns, assign it to `state`:
-  `state["issues"] = issues`  /  `if "issues" in state: ...`
-  `state` is a dict-like object. Only JSON-serializable values are allowed
-  (plain Python types — no sets, file handles, etc.).
-- When you have the final answer, call: final_answer(your_answer)
+- One ```python code block per response. Multiple blocks in one response is a Format Error.
+- Use print() to surface anything you'll want to refer to next turn.
+- Each turn starts with a fresh namespace. Plain variables are discarded between turns.
+- To persist across turns: `state["key"] = value` then `state["key"]` next turn.
+  Only JSON-serializable values.
+- For a structured (non-string) return: `return_value({{"status": "ok"}})` — ends the run
+  and returns the value as-is. For a plain text answer, just stop using code blocks.
 {tools_section}
-## Rules:
+## Rules
 
-1. Only use variables you've defined in the current turn, or values from `state`.
-2. Use comments in code for reasoning if needed
+1. Only use variables you defined this turn, or values from `state`.
+2. Use comments in code for reasoning if needed.
 {tool_rule}
-4. If you get an error, try a different approach
-5. Use `state['key'] = value` to carry data across turns. Other names are
-   discarded between turns and will raise `NameError` if referenced later.
-6. **To complete your turn, you MUST call one of:**
-   - `final_answer(result)` - when you have the answer
-   - `ask_user(question)` - when you need input from the user
+4. If you get an error, try a different approach.
+5. To carry data across turns use `state['key'] = value`; bare names don't survive.
+6. To finish, either respond with plain text, or call `return_value(value)` for structured output.
 
 {instructions}
 

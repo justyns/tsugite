@@ -236,7 +236,7 @@ final_answer(1)
 
 
 @pytest.mark.asyncio
-async def test_ui_event_error_on_max_turns(event_bus_with_handler):
+async def test_ui_event_warning_on_max_turns(event_bus_with_handler):
     event_bus, mock_ui_handler = event_bus_with_handler
 
     agent = TsugiteAgent(
@@ -256,13 +256,11 @@ print(x)
 ```"""),
     )
 
-    with pytest.raises(RuntimeError):
-        await agent.run("Test task")
+    # max_turns no longer raises — last response text is returned and a warning is emitted.
+    await agent.run("Test task")
 
-    error_events = [e for e in mock_ui_handler.events if e["event"] == EventType.ERROR]
-    assert len(error_events) == 1
-    assert "max_turns" in error_events[0]["event_obj"].error
-    assert error_events[0]["event_obj"].error_type == "RuntimeError"
+    warning_events = [e for e in mock_ui_handler.events if e["event"] == EventType.WARNING]
+    assert any("max_turns" in w["event_obj"].message for w in warning_events)
 
 
 @pytest.mark.asyncio
@@ -469,24 +467,9 @@ async def test_ui_event_error_on_multiple_code_blocks(event_bus_with_handler):
 
 
 @pytest.mark.asyncio
-async def test_ui_event_error_on_no_code_generation(event_bus_with_handler):
+async def test_no_code_response_ends_loop_cleanly(event_bus_with_handler):
+    """A no-code response is now the answer; no error event is emitted."""
     event_bus, mock_ui_handler = event_bus_with_handler
-
-    call_count = 0
-
-    async def mock_acompletion(*args, **kwargs):
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            return _resp(
-                """Thought: I'm thinking about this problem and how to solve it, but I'm not providing any code."""
-            )
-        else:
-            return _resp("""Thought: Now I'll provide code.
-
-```python
-final_answer(42)
-```""")
 
     agent = TsugiteAgent(
         model_string="openai:gpt-4o-mini",
@@ -495,11 +478,13 @@ final_answer(42)
         max_turns=5,
         event_bus=event_bus,
     )
-    _patch_provider(agent, side_effect=mock_acompletion)
+    _patch_provider(
+        agent,
+        return_value=_resp("Just a plain text answer with no code block."),
+    )
 
-    await agent.run("Test task")
+    result = await agent.run("Test task")
 
+    assert result == "Just a plain text answer with no code block."
     error_events = [e for e in mock_ui_handler.events if e["event"] == EventType.ERROR]
-    assert len(error_events) == 1
-    assert "LLM did not generate code" in error_events[0]["event_obj"].error
-    assert error_events[0]["event_obj"].error_type == "Format Error"
+    assert error_events == []

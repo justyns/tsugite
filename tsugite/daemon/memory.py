@@ -270,64 +270,60 @@ async def compute_session_title(
     return await generate_session_title(messages, model)
 
 
-def extract_file_paths_from_turns(turns: "list[Turn]") -> list[str]:
-    """Extract file paths mentioned in tool calls across turns.
-
-    Scans turn messages for common file path patterns in tool arguments
-    (read_file, write_file, edit_file, etc.).
-
-    Returns:
-        Deduplicated list of file paths found.
-    """
+def extract_file_paths_from_events(events: list) -> list[str]:
+    """Extract file paths from any text payloads in the event stream."""
     paths: set[str] = set()
-    for turn in turns:
-        for msg in turn.messages:
-            text = _message_text(msg)
-            if text:
-                paths.update(_FILE_PATH_PATTERN.findall(text))
+    for event in events:
+        for value in event.data.values():
+            if isinstance(value, str):
+                paths.update(_FILE_PATH_PATTERN.findall(value))
     return sorted(paths)
 
 
-def _estimate_turn_tokens(turn: "Turn", model: str) -> int:
-    """Estimate token cost of a Turn by summing its messages."""
-    return sum(
-        _count_tokens(f"{msg.get('role', 'user').upper()}: {text}", model)
-        for msg in turn.messages
-        if (text := _message_text(msg))
-    )
-
-
-def split_turns_for_compaction(
-    turns: list["Turn"],
+def split_events_for_compaction(
+    events: list,
     model: str,
     retention_budget_tokens: int,
-    min_retained: int = MIN_RETAINED_TURNS,
-) -> tuple[list["Turn"], list["Turn"]]:
-    """Split turns into (old, recent) for compaction.
+    min_retained_turns: int = MIN_RETAINED_TURNS,
+) -> tuple[list, list]:
+    """Split events into (old, recent) groups along user_input boundaries.
 
-    Walks backward keeping recent turns that fit within the retention budget.
-    Always keeps at least min_retained turns. If all turns fit, returns
-    empty old list so the caller can skip compaction.
-
-    Returns:
-        (old_turns, recent_turns) — old_turns may be empty.
+    Walks backward by `user_input` boundary, keeping recent turns whose total
+    estimated tokens fit within the budget. Always keeps at least
+    `min_retained_turns` worth of events. If all turns fit, returns ([], events).
     """
-    if not turns:
+    if not events:
         return [], []
 
-    if len(turns) <= min_retained:
-        return [], list(turns)
+    boundaries = [i for i, e in enumerate(events) if e.type == "user_input"]
+    if len(boundaries) <= min_retained_turns:
+        return [], list(events)
 
-    kept: list["Turn"] = []
-    budget_remaining = retention_budget_tokens
-
-    for turn in reversed(turns):
-        cost = _estimate_turn_tokens(turn, model)
-        if len(kept) >= min_retained and budget_remaining < cost:
+    cutoff = None
+    used = 0
+    kept_turns = 0
+    for i in range(len(boundaries) - 1, -1, -1):
+        start = boundaries[i]
+        end = boundaries[i + 1] if i + 1 < len(boundaries) else len(events)
+        cost = sum(_count_tokens(_event_text(e), model) for e in events[start:end])
+        if kept_turns >= min_retained_turns and used + cost > retention_budget_tokens:
+            cutoff = boundaries[i + 1] if i + 1 < len(boundaries) else None
             break
-        kept.append(turn)
-        budget_remaining -= cost
+        used += cost
+        kept_turns += 1
+        cutoff = start
 
-    kept.reverse()
-    split_idx = len(turns) - len(kept)
-    return turns[:split_idx], turns[split_idx:]
+    if cutoff is None or cutoff == 0:
+        return [], list(events)
+    return events[:cutoff], events[cutoff:]
+
+
+def _event_text(event) -> str:
+    """Cheap text approximation of an event for token counting."""
+    if event.type == "user_input":
+        return event.data.get("text", "")
+    if event.type == "model_response":
+        return event.data.get("raw_content", "")
+    if event.type == "code_execution":
+        return f"{event.data.get('code', '')}\n{event.data.get('output', '') or ''}"
+    return ""

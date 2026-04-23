@@ -66,10 +66,9 @@ class WorkspaceSession:
         """
         if not self.workspace.session_path.exists():
             return False
-
         try:
-            storage = SessionStorage.load(self.workspace.session_path)
-            return storage.total_tokens >= (MAX_CONTEXT_TOKENS * threshold)
+            summary = SessionStorage.load(self.workspace.session_path).summary()
+            return summary.total_tokens >= (MAX_CONTEXT_TOKENS * threshold)
         except Exception:
             return False
 
@@ -102,12 +101,13 @@ class WorkspaceSession:
 
         try:
             storage = SessionStorage.load(self.workspace.session_path)
+            summary = storage.summary()
             return SessionInfo(
                 conversation_id=storage.session_id,
-                message_count=storage.turn_count,
-                token_estimate=storage.total_tokens,
-                last_agent=storage.agent,
-                last_updated=storage.created_at,
+                message_count=summary.turn_count,
+                token_estimate=summary.total_tokens,
+                last_agent=summary.agent,
+                last_updated=summary.created_at,
             )
         except Exception:
             return SessionInfo(
@@ -131,13 +131,13 @@ class WorkspaceSession:
         return sorted(sessions, key=lambda p: p.stat().st_mtime, reverse=True)
 
     def _load_session_id(self) -> Optional[str]:
-        """Load session ID from session file (V2 format only)."""
+        """Load session ID from session file."""
         try:
             with open(self.workspace.session_path) as f:
                 first_line = f.readline().strip()
                 if first_line:
                     entry = json.loads(first_line)
-                    if entry.get("type") == "session_meta":
+                    if entry.get("type") == "session_start":
                         return self.workspace.session_path.stem
         except Exception:
             pass

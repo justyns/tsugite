@@ -37,6 +37,13 @@ def _status_style(status: Optional[str]) -> str:
     return {"success": "green", "error": "red", "interrupted": "yellow"}.get(status or "", "dim")
 
 
+def _format_created(dt: Optional[datetime]) -> str:
+    try:
+        return dt.strftime("%Y-%m-%d %H:%M") if dt else "unknown"
+    except (ValueError, TypeError):
+        return "unknown"
+
+
 def _parse_date(date_str: Optional[str]) -> Optional[datetime]:
     if not date_str:
         return None
@@ -68,21 +75,26 @@ def _filter_by_date(
     return filtered
 
 
-def _search_turns(records, query_lower: str) -> Optional[str]:
-    """Search Turn records for a query match, returning a snippet or None."""
-    from tsugite.history import Turn
-
-    for record in records:
-        if not isinstance(record, Turn):
-            continue
-        if record.user_summary and query_lower in record.user_summary.lower():
-            return _make_snippet(record.user_summary, query_lower, prefix="User: ")
-        if record.final_answer and query_lower in record.final_answer.lower():
-            return _make_snippet(record.final_answer, query_lower, prefix="Output: ")
-        if record.functions_called:
-            for func in record.functions_called:
-                if query_lower in func.lower():
-                    return f"Tool: {func}"
+def _search_events(events, query_lower: str) -> Optional[str]:
+    """Search events for a query match, returning a display snippet or None."""
+    for event in events:
+        data = event.data
+        if event.type == "user_input":
+            text = data.get("text", "")
+            if text and query_lower in text.lower():
+                return _make_snippet(text, query_lower, prefix="User: ")
+        elif event.type == "model_response":
+            text = data.get("raw_content", "")
+            if text and query_lower in text.lower():
+                return _make_snippet(text, query_lower, prefix="Output: ")
+        elif event.type == "code_execution":
+            for fn in data.get("tools_called") or []:
+                if fn and query_lower in fn.lower():
+                    return f"Tool: {fn}"
+        elif event.type == "tool_invocation":
+            fn = data.get("name")
+            if fn and query_lower in fn.lower():
+                return f"Tool: {fn}"
     return None
 
 
@@ -122,7 +134,6 @@ def history_list(
 
     since_dt = _parse_date(since)
     before_dt = _parse_date(before)
-
     try:
         session_files = list_session_files()
 
@@ -153,38 +164,33 @@ def history_list(
                 break
 
             try:
-                # Use fast meta check to skip non-matching sessions before full replay
                 if agent or machine:
                     meta = SessionStorage.load_meta_fast(session_file)
                     if meta:
-                        if agent and meta.agent != agent:
+                        if agent and meta.data.get("agent") != agent:
                             continue
-                        if machine and meta.machine != machine:
+                        if machine and meta.data.get("machine") != machine:
                             continue
 
                 storage = SessionStorage.load(session_file)
+                summary = storage.summary()
 
-                if status and storage.status != status:
+                if status and summary.status != status:
                     continue
-                if tool and tool not in storage._all_functions:
+                if tool and tool not in summary.functions_called:
                     continue
 
-                try:
-                    created_str = storage.created_at.strftime("%Y-%m-%d %H:%M") if storage.created_at else "unknown"
-                except (ValueError, TypeError):
-                    created_str = "unknown"
-
-                status_text = Text(storage.status or "unknown", style=_status_style(storage.status))
+                status_text = Text(summary.status or "unknown", style=_status_style(summary.status))
 
                 table.add_row(
                     storage.session_id,
-                    storage.agent or "unknown",
+                    summary.agent or "unknown",
                     status_text,
-                    str(storage.turn_count),
-                    f"{storage.total_tokens:,}" if storage.total_tokens > 0 else "-",
-                    _format_cost(storage.total_cost),
-                    _format_duration(storage.total_duration_ms),
-                    created_str,
+                    str(summary.turn_count),
+                    f"{summary.total_tokens:,}" if summary.total_tokens > 0 else "-",
+                    _format_cost(summary.total_cost),
+                    _format_duration(summary.total_duration_ms),
+                    _format_created(summary.created_at),
                 )
                 count += 1
 
@@ -218,7 +224,7 @@ def history_search(
         tsugite history search "deploy"
         tsugite history search "error" --status error --since 2026-01-01
     """
-    from tsugite.history import SessionStorage, list_session_files
+    from tsugite.history import SessionStorage, SessionSummary, list_session_files
 
     since_dt = _parse_date(since)
     query_lower = query.lower()
@@ -247,31 +253,28 @@ def history_search(
             try:
                 if agent:
                     meta = SessionStorage.load_meta_fast(session_file)
-                    if meta and meta.agent != agent:
+                    if meta and meta.data.get("agent") != agent:
                         continue
 
                 storage = SessionStorage.load(session_file)
+                events = storage.load_events()
+                summary = SessionSummary.from_events(events)
 
-                if status and storage.status != status:
+                if status and summary.status != status:
                     continue
 
-                match_snippet = _search_turns(storage.load_records(), query_lower)
+                match_snippet = _search_events(events, query_lower)
                 if not match_snippet:
                     continue
 
-                try:
-                    created_str = storage.created_at.strftime("%Y-%m-%d %H:%M") if storage.created_at else "unknown"
-                except (ValueError, TypeError):
-                    created_str = "unknown"
-
-                status_text = Text(storage.status or "unknown", style=_status_style(storage.status))
+                status_text = Text(summary.status or "unknown", style=_status_style(summary.status))
 
                 table.add_row(
                     storage.session_id,
-                    storage.agent or "unknown",
+                    summary.agent or "unknown",
                     match_snippet,
                     status_text,
-                    created_str,
+                    _format_created(summary.created_at),
                 )
                 count += 1
 
@@ -300,83 +303,77 @@ def history_show(
         tsugite history show 20251024_103000_chat_abc123 --format json
         tsugite history show 20251024_103000_chat_abc123 --format markdown
     """
-    from tsugite.history import SessionStorage, Turn, get_history_dir
+    from tsugite.history import SessionStorage, SessionSummary, get_history_dir
 
     try:
         session_path = get_history_dir() / f"{conversation_id}.jsonl"
         storage = SessionStorage.load(session_path)
-        records = storage.load_records()
+        events = storage.load_events()
 
-        if not records:
+        if not events:
             console.print(f"[yellow]Conversation '{conversation_id}' is empty[/yellow]")
             return
 
-        if format == "json":
-            records_as_dicts = [r.model_dump(mode="json") for r in records]
-            output = json.dumps(records_as_dicts, indent=2, ensure_ascii=False)
-            print(output)
+        summary = SessionSummary.from_events(events)
 
-        elif format == "markdown":
+        if format == "json":
+            output = json.dumps([e.model_dump(mode="json") for e in events], indent=2, ensure_ascii=False)
+            print(output)
+            return
+
+        if format == "markdown":
             console.print(f"# Conversation: {conversation_id}\n")
-            if storage.agent:
-                console.print(f"- **Agent**: {storage.agent}")
-            if storage.model:
-                console.print(f"- **Model**: {storage.model}")
-            if storage.machine:
-                console.print(f"- **Machine**: {storage.machine}")
-            if storage.created_at:
-                console.print(f"- **Created**: {storage.created_at}")
-            if storage.status:
-                console.print(f"- **Status**: {storage.status}")
+            for label, value in [
+                ("Agent", summary.agent),
+                ("Model", summary.model),
+                ("Machine", summary.machine),
+                ("Created", summary.created_at),
+                ("Status", summary.status),
+            ]:
+                if value:
+                    console.print(f"- **{label}**: {value}")
             console.print()
             console.print("---\n")
 
-            for record in records:
-                if isinstance(record, Turn):
-                    console.print(f"## Turn ({record.timestamp})\n")
-
-                    if record.user_summary:
-                        console.print(f"**User**: {record.user_summary}\n")
-
-                    if record.final_answer:
-                        console.print(f"**Assistant**: {record.final_answer}\n")
-
-                    if record.functions_called:
-                        console.print(f"*Functions*: {', '.join(record.functions_called)}\n")
-
-                    parts = [f"*Tokens*: {record.tokens or 0}", f"*Cost*: ${record.cost or 0.0:.4f}"]
-                    if record.duration_ms:
-                        parts.append(f"*Duration*: {_format_duration(record.duration_ms)}")
-                    console.print(" | ".join(parts) + "\n")
+            current_user: Optional[str] = None
+            for event in events:
+                if event.type == "user_input":
+                    current_user = event.data.get("text", "")
+                    console.print(f"## Turn ({event.ts})\n")
+                    console.print(f"**User**: {current_user}\n")
+                elif event.type == "model_response":
+                    text = event.data.get("raw_content", "")
+                    console.print(f"**Assistant**: {text}\n")
+                elif event.type == "code_execution":
+                    code = event.data.get("code", "")
+                    console.print(f"```python\n{code}\n```\n")
                     console.print("---\n")
+            return
 
-        else:
-            console.print("=" * 60)
-            console.print(f"Conversation: {conversation_id}")
-            console.print(f"Agent: {storage.agent or 'unknown'}")
-            console.print(f"Model: {storage.model or 'unknown'}")
-            console.print(f"Machine: {storage.machine or 'unknown'}")
-            console.print(f"Created: {storage.created_at}")
-            console.print(f"Status: {storage.status or 'unknown'}")
-            console.print("=" * 60)
-            console.print()
+        # plain
+        console.print("=" * 60)
+        console.print(f"Conversation: {conversation_id}")
+        console.print(f"Agent: {summary.agent or 'unknown'}")
+        console.print(f"Model: {summary.model or 'unknown'}")
+        console.print(f"Machine: {summary.machine or 'unknown'}")
+        console.print(f"Created: {summary.created_at}")
+        console.print(f"Status: {summary.status or 'unknown'}")
+        console.print("=" * 60)
+        console.print()
 
-            for record in records:
-                if isinstance(record, Turn):
-                    console.print(f"[{record.timestamp}]")
-                    if record.user_summary:
-                        console.print(f"User: {record.user_summary}")
-                    if record.final_answer:
-                        console.print(f"Assistant: {record.final_answer}")
-                    if record.functions_called:
-                        console.print(f"  Functions: {', '.join(record.functions_called)}")
-                    parts = [f"Tokens: {record.tokens or 0}", f"Cost: ${record.cost or 0.0:.4f}"]
-                    if record.duration_ms:
-                        parts.append(f"Duration: {_format_duration(record.duration_ms)}")
-                    console.print(f"  {' | '.join(parts)}")
-                    console.print()
-                    console.print("-" * 60)
-                    console.print()
+        for event in events:
+            if event.type == "user_input":
+                console.print(f"[{event.ts}]")
+                console.print(f"User: {event.data.get('text', '')}")
+            elif event.type == "model_response":
+                console.print(f"Assistant: {event.data.get('raw_content', '')}")
+                console.print()
+                console.print("-" * 60)
+                console.print()
+            elif event.type == "code_execution":
+                fn_list = event.data.get("tools_called") or []
+                if fn_list:
+                    console.print(f"  Functions: {', '.join(fn_list)}")
 
     except FileNotFoundError:
         console.print(f"[red]Conversation '{conversation_id}' not found[/red]")

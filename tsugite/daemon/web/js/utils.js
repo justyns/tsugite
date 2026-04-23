@@ -6,20 +6,6 @@ export function escapeHtml(s) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-// Decode the five XML entities that `xml.sax.saxutils.escape` / `quoteattr`
-// produce on the Python side (executor.to_xml wraps <output>, <error>, etc.
-// and escapes their payloads). Decode &amp; last so intentionally-escaped
-// sequences like "&amp;lt;" don't get collapsed to "<".
-export function decodeXmlEntities(s) {
-  if (!s) return s;
-  return s
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&amp;/g, '&');
-}
-
 export function renderMarkdown(text) {
   const html = marked.parse(text ?? '');
   return html.replace(/<pre>/g, '<pre><button class="copy-code" type="button" aria-label="Copy code" title="Copy code">\u29c9</button>');

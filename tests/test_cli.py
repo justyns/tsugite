@@ -685,7 +685,7 @@ class TestRunCommandHistory:
             patch("tsugite.config.load_config") as mock_config,
             patch("tsugite.md_agents.parse_agent_file") as mock_parse,
         ):
-            from tsugite.history import SessionStorage, Turn
+            from tsugite.history import SessionStorage
 
             mock_run_agent.return_value = mock_agent_execution_result(
                 response="Result",
@@ -706,15 +706,15 @@ class TestRunCommandHistory:
 
             assert result.exit_code == 0
 
-            # Verify conversation file was created
             conv_files = list(tmp_path.glob("*.jsonl"))
             assert len(conv_files) > 0
 
-            # Verify it can be loaded using V2 API
             storage = SessionStorage.load(conv_files[0])
-            records = storage.load_records()
-            turns = [r for r in records if isinstance(r, Turn)]
-            assert len(turns) == 1  # One turn
+            types = [e.type for e in storage.iter_events()]
+            assert "session_start" in types
+            assert "user_input" in types
+            assert "model_response" in types
+            assert "session_end" in types
 
     def test_run_command_history_error_handling(self, cli_runner, sample_agent_file, capsys):
         """Test that history errors don't crash the run."""
