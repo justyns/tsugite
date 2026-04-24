@@ -214,6 +214,15 @@ export function eventsToBubbles(events) {
       currentSteps.push({
         html: `<div class="step-error">Format error: ${escapeHtml(data.reason || '')}</div>`,
       });
+      const rejected = data.rejected_content || '';
+      if (rejected) {
+        currentSteps.push({
+          hasDetails: true,
+          summary: '<code>rejected response</code>',
+          content: rejected,
+          open: false,
+        });
+      }
       continue;
     }
   }
