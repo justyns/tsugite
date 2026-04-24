@@ -46,7 +46,6 @@ All fields are optional except `name`.
 | `auto_load_skills` | list | `[]`             | Skills to load automatically at startup                           |
 | `skill_paths`      | list | `[]`             | Extra directories to search for skills                            |
 | `prefetch`         | list | `[]`             | Tools to run before execution, results available in templates     |
-| `mcp_servers`      | dict | `{}`             | MCP server connections                                            |
 | `custom_tools`     | list | `[]`             | Inline tool definitions                                           |
 | `reasoning_effort` | str  | none             | For reasoning models: `low`, `medium`, `high`                     |
 | `disable_history`  | bool | `false`          | Don't save this agent's sessions                                  |

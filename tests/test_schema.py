@@ -29,7 +29,6 @@ def test_generate_schema_has_all_fields():
         "prefetch",
         "attachments",
         "instructions",
-        "mcp_servers",
         "extends",
         "reasoning_effort",
         "custom_tools",

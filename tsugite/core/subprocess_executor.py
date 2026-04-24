@@ -252,7 +252,7 @@ class SubprocessExecutor:
                 else:
                     self._parent_only_tools.add(t.name)
             else:
-                # Not in registry (MCP tool, custom function) — route via IPC
+                # Not in registry (custom function) — route via IPC
                 self._parent_only_tools.add(t.name)
 
     def _build_harness(self, code: str) -> str:

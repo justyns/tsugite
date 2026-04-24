@@ -28,7 +28,6 @@ class ExecutionOptions:
     reasoning_effort_override: Optional[str] = None
     debug: bool = False
     stream: bool = False
-    trust_mcp_code: bool = False
     dry_run: bool = False
     return_token_usage: bool = False
     sandbox: bool = False
@@ -41,7 +40,6 @@ class ExecutionOptions:
         model: Optional[str] = None,
         debug: bool = False,
         stream: bool = False,
-        trust_mcp_code: bool = False,
         dry_run: bool = False,
         sandbox: bool = False,
         no_sandbox: bool = False,
@@ -52,7 +50,6 @@ class ExecutionOptions:
             model_override=model,
             debug=debug,
             stream=stream,
-            trust_mcp_code=trust_mcp_code,
             dry_run=dry_run,
             sandbox=sandbox and not no_sandbox,
             allow_domains=list(allow_domain) if allow_domain else [],

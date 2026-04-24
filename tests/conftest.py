@@ -416,32 +416,6 @@ tools: {tools_str}"""
 
 
 @pytest.fixture
-def mcp_config_factory():
-    """Factory for creating MCP server configurations."""
-
-    def _create_config(server_type="stdio", name="test-server", **kwargs):
-        """Create an MCP server config dict.
-
-        Args:
-            server_type: "stdio" or "http"
-            name: Server name
-            **kwargs: Additional config fields (command, args, env, url, etc)
-        """
-        if server_type == "stdio":
-            return {
-                "command": kwargs.get("command", "npx"),
-                "args": kwargs.get("args", ["-y", "test-server"]),
-                "env": kwargs.get("env", {}),
-            }
-        elif server_type == "http":
-            return {"url": kwargs.get("url", "http://localhost:8000/mcp"), "type": "http"}
-        else:
-            raise ValueError(f"Unknown server type: {server_type}")
-
-    return _create_config
-
-
-@pytest.fixture
 def mock_completion_response():
     """Create a mock provider CompletionResponse for agent tests.
 

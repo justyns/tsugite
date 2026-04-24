@@ -2,7 +2,6 @@
 
 Provides a simple Tool class and converters to wrap:
 - Existing tsugite tools
-- MCP tools
 - Custom functions
 """
 

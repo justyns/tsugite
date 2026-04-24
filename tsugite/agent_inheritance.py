@@ -172,7 +172,6 @@ def merge_agent_configs(parent, child):
     - Lists (tools, attachments): merge and deduplicate
     - Lists (prefetch): concatenate (parent first, no deduplication)
     - Lists of dicts (custom_tools): merge and deduplicate by "name" field
-    - Dicts (mcp_servers): merge, child keys override
     - Strings (instructions): concatenate with newline
     """
     from .md_agents import AgentConfig
@@ -181,7 +180,6 @@ def merge_agent_configs(parent, child):
     merged_data = {}
     merged_data.update(merge_scalar_fields(parent, child))
     merged_data.update(merge_list_fields(parent, child))
-    merged_data.update(merge_dict_fields(parent, child))
     merged_data["instructions"] = merge_instructions(parent, child)
 
     return AgentConfig(**merged_data)
@@ -320,23 +318,6 @@ def merge_list_fields(parent, child) -> Dict[str, List]:
         "prefetch": (parent.prefetch or []) + (child.prefetch or []),
         "custom_tools": list(custom_tool_dict.values()),
         "auto_load_skills": merged_skills,
-    }
-
-
-def merge_dict_fields(parent, child) -> Dict[str, Any]:
-    """Merge dictionary fields from parent and child configs.
-
-    Child keys override parent keys.
-
-    Args:
-        parent: Parent AgentConfig
-        child: Child AgentConfig
-
-    Returns:
-        Dict of merged dict fields
-    """
-    return {
-        "mcp_servers": {**(parent.mcp_servers or {}), **(child.mcp_servers or {})},
     }
 
 

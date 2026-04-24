@@ -7,7 +7,7 @@ Tsugite is a micro-agent CLI: agents are Markdown + YAML frontmatter, rendered v
 **Flow:** `Agent.md` (YAML + Jinja2) → `renderer.py` → `TsugiteAgent` → Provider → Tools
 
 **Key Modules:**
-- `cli/__init__.py` - Typer CLI (run, chat, render, config, mcp, tools, agents, attachments, cache)
+- `cli/__init__.py` - Typer CLI (run, chat, render, config, tools, agents, attachments, cache)
 - `md_agents.py` - Parse frontmatter + agent resolution + directives
 - `builtin_agents/` - File-based built-in agent definitions (default.md, chat-assistant.md)
 - `agent_inheritance.py` - Agent resolution pipeline + inheritance chain
@@ -62,7 +62,6 @@ File-based agents distributed with the package in `tsugite/builtin_agents/` dire
 **Merge rules:**
 - Scalars (model, max_steps): Child overwrites
 - Lists (tools): Merge + deduplicate
-- Dicts (mcp_servers): Merge, child keys override
 - Strings (instructions): Concatenate with `\n\n`
 
 **Opt-out:** `extends: none` skips all inheritance.
@@ -236,7 +235,6 @@ assert tool is not None
 
 **Safety:**
 - Shell tool guard: Never relax dangerous patterns blocklist
-- MCP: Requires `--trust-mcp-code` flag
 - File ops: Use `Path.resolve()` to prevent traversal
 
 **Testing:** Test-first workflow. Add minimal failing test, run target, widen to full suite before merge.

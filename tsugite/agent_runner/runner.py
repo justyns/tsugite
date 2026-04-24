@@ -402,7 +402,7 @@ async def _execute_agent_with_prompt(
     ui_handler = get_ui_handler(custom_logger)
 
     # Create EventBus and subscribe ui_handler
-    from tsugite.events import EventBus, InfoEvent, WarningEvent
+    from tsugite.events import EventBus, WarningEvent
 
     event_bus = EventBus()
     if ui_handler:
@@ -453,34 +453,6 @@ async def _execute_agent_with_prompt(
                 tools.append(create_tool_from_tsugite(tool_def.name))
         except Exception as e:
             event_bus.emit(WarningEvent(message=f"Failed to register custom tools: {e}"))
-
-    # Load MCP tools if configured
-    mcp_clients = []  # Track clients for cleanup
-    if agent_config.mcp_servers:
-        try:
-            from tsugite.mcp_client import load_mcp_tools
-            from tsugite.mcp_config import load_mcp_config
-
-            global_mcp_config = load_mcp_config()
-
-            # Load tools from each configured MCP server
-            for server_name, allowed_tools in agent_config.mcp_servers.items():
-                if server_name not in global_mcp_config:
-                    event_bus.emit(WarningEvent(message=f"MCP server '{server_name}' not found in config. Skipping."))
-                    continue
-
-                server_config = global_mcp_config[server_name]
-                try:
-                    mcp_client, mcp_tools = await load_mcp_tools(server_config, allowed_tools)
-                    mcp_clients.append(mcp_client)  # Keep client alive for tools to work
-                    tools.extend(mcp_tools)
-
-                    event_bus.emit(InfoEvent(message=f"Loaded {len(mcp_tools)} tools from MCP server '{server_name}'"))
-                except Exception as e:
-                    event_bus.emit(WarningEvent(message=f"Failed to load MCP tools from '{server_name}': {e}"))
-        except Exception as e:
-            event_bus.emit(WarningEvent(message=f"Failed to load MCP tools: {e}"))
-            event_bus.emit(WarningEvent(message="Continuing without MCP tools."))
 
     # Get model string
     model_string = _get_model_string(exec_options.model_override, agent_config)
@@ -705,13 +677,6 @@ async def _execute_agent_with_prompt(
                 executor.cleanup()
             except Exception:
                 pass
-
-        # Clean up MCP client connections
-        for client in mcp_clients:
-            try:
-                await client.disconnect()
-            except Exception:
-                pass  # Best effort cleanup
 
         # Clean up pending tasks (provider client cleanup is handled by run_async_with_cleanup wrapper)
         # ONLY run cleanup for top-level agents, not spawned agents
