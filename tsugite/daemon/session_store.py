@@ -32,6 +32,68 @@ def _parse_ts(ts: str | None) -> datetime | None:
 logger = logging.getLogger(__name__)
 
 
+_SESSION_END_EVENT_TYPES = frozenset({"session_complete", "session_error", "session_cancelled", "final_result"})
+
+
+def _progress_status_text(event: dict) -> Optional[str]:
+    """Render a short status label for a mid-session progress event.
+
+    Mirrors the frontend `_handleProgressEvent` mapping in streaming.js so the
+    sidebar and the in-progress bubble show consistent wording. Returns None
+    for events that do not have a meaningful status label.
+    """
+    etype = event.get("type")
+    if etype == "session_start":
+        return "Starting..."
+    if etype == "init":
+        agent = event.get("agent")
+        return f"Agent: {agent}" if agent else "Starting..."
+    if etype == "turn_start":
+        turn = event.get("turn")
+        return f"Turn {turn}..." if turn is not None else "Working..."
+    if etype == "thought":
+        return "Thinking..."
+    if etype == "reasoning_content":
+        return "Reasoning..."
+    if etype == "tool_result":
+        return f"Tool: {event['tool']}" if _is_real_tool_event(event) else None
+    if etype == "hook_status":
+        return event.get("message")
+    return None
+
+
+def _is_real_tool_event(event: dict) -> bool:
+    """True for tool_result events from a named tool (filters 'unknown' raw-code events)."""
+    return event.get("type") == "tool_result" and (event.get("tool") or "unknown") != "unknown"
+
+
+def _progress_from_events(events: list[dict]) -> dict:
+    """Compute a progress summary dict from the raw event list."""
+    turn_count = 0
+    tool_count = 0
+    status_text = "Starting..."
+    last_event_time = None
+    for event in events:
+        etype = event.get("type")
+        if etype == "turn_start":
+            turn = event.get("turn")
+            if isinstance(turn, int) and turn > turn_count:
+                turn_count = turn
+        elif _is_real_tool_event(event):
+            tool_count += 1
+        if etype not in _SESSION_END_EVENT_TYPES:
+            label = _progress_status_text(event)
+            if label:
+                status_text = label
+        last_event_time = event.get("timestamp") or last_event_time
+    return {
+        "turn_count": turn_count,
+        "tool_count": tool_count,
+        "status_text": status_text,
+        "last_event_time": last_event_time,
+    }
+
+
 READ_ONLY_METADATA_KEYS = frozenset(
     {
         "source",
@@ -63,7 +125,7 @@ class SessionStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
-_TERMINAL_STATUSES = (SessionStatus.CANCELLED.value, SessionStatus.COMPLETED.value, SessionStatus.FAILED.value)
+_FINISHED_STATUSES = (SessionStatus.CANCELLED.value, SessionStatus.COMPLETED.value, SessionStatus.FAILED.value)
 
 
 @dataclass
@@ -296,7 +358,7 @@ class SessionStore:
                 session_id = self._interactive_index[key]
                 if session_id in self._sessions:
                     existing = self._sessions[session_id]
-                    if existing.status not in _TERMINAL_STATUSES:
+                    if existing.status not in _FINISHED_STATUSES:
                         return existing
                     is_replacement = True
 
@@ -429,7 +491,7 @@ class SessionStore:
             for s in self._sessions.values()
             if s.agent == agent
             and s.source in (SessionSource.BACKGROUND.value, SessionSource.SPAWNED.value)
-            and s.status in _TERMINAL_STATUSES
+            and s.status in _FINISHED_STATUSES
         ]
         if len(children) <= self.MAX_BACKGROUND_SESSIONS:
             return
@@ -531,10 +593,7 @@ class SessionStore:
             storage = SessionStorage.load(path)
         except Exception:
             return []
-        return [
-            {"type": e.type, "timestamp": e.ts.isoformat(), **e.data}
-            for e in storage.iter_events()
-        ]
+        return [{"type": e.type, "timestamp": e.ts.isoformat(), **e.data} for e in storage.iter_events()]
 
     def event_count(self, session_id: str) -> int:
         path = self._history_path(session_id)
@@ -563,6 +622,15 @@ class SessionStore:
         return [
             e for e in events if (_parse_ts(e.get("timestamp")) or datetime.min.replace(tzinfo=timezone.utc)) > since_dt
         ]
+
+    def session_progress_summary(self, session_id: str) -> dict:
+        """Return a lightweight live-progress summary for a running session.
+
+        Fields are derived entirely from events.jsonl so they stay consistent
+        with what the UI would render if it replayed the event log.
+        """
+        events = self.read_events(session_id)
+        return _progress_from_events(events)
 
     def session_summary(self, session_id: str) -> dict:
         """Return a summary dict for a session including event stats."""
@@ -632,7 +700,7 @@ class SessionStore:
                 session_id = self._channel_index[key]
                 if session_id in self._sessions:
                     existing = self._sessions[session_id]
-                    if existing.status not in _TERMINAL_STATUSES:
+                    if existing.status not in _FINISHED_STATUSES:
                         return existing
                     is_replacement = True
 

@@ -82,7 +82,8 @@
                 <div class="turn-item" :class="{ active: selectedSessionId === (s.conversation_id || s.id) }"
                      @click="selectSession(s)" tabindex="0" role="button" @keydown.enter="selectSession(s)">
                   <div class="item-row">
-                    <span class="status-dot" :style="{ background: statusDotColor(s.state) }"></span>
+                    <span class="status-dot" :class="{ 'status-dot-pulse': isSessionProgressFresh(s) }"
+                          :style="{ background: statusDotColor(s.state) }"></span>
                     <span class="source-icon" x-text="sourceIcon(s.source)" :title="s.source"></span>
                     <template x-if="editingSessionId === s.id && !s.is_default">
                       <input class="session-title-input" type="text" x-model="editingTitle"
@@ -107,6 +108,8 @@
                       <span class="session-chip" :class="chip.cls" x-text="chip.label"></span>
                     </template>
                   </div>
+                  <div class="session-progress" x-show="sessionProgressLabel(s)"
+                       x-text="sessionProgressLabel(s)"></div>
                   <div class="session-preview" x-text="lastMessagePreview(s)" x-show="lastMessagePreview(s)"></div>
                   <div class="turn-meta" x-text="formatDate(s.last_active || s.created_at)"></div>
                 </div>

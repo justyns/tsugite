@@ -628,7 +628,10 @@ class HTTPServer:
             agent=adapter.agent_name, source=source, status=status, parent_id=parent_id, limit=limit
         )
 
+        from tsugite.daemon.session_store import SessionStatus
+
         default_ids = adapter.session_store.default_interactive_ids(adapter.agent_name)
+        live_statuses = {SessionStatus.RUNNING.value, SessionStatus.ACTIVE.value}
         sessions = []
         for s in all_sessions:
             user_id = s.user_id or ""
@@ -638,27 +641,28 @@ class HTTPServer:
                 label = f"Web: {user_id}"
             else:
                 label = user_id or s.source
-            sessions.append(
-                {
-                    "id": s.id,
-                    "user_id": user_id,
-                    "label": label,
-                    "conversation_id": s.id,
-                    "source": s.source,
-                    "status": s.status,
-                    "state": s.status,
-                    "created_at": s.created_at,
-                    "last_active": s.last_active,
-                    "parent_id": s.parent_id,
-                    "prompt": s.prompt or "",
-                    "model": s.model,
-                    "error": s.error,
-                    "result": s.result,
-                    "title": s.title,
-                    "is_default": default_ids.get(user_id) == s.id,
-                    "metadata": s.metadata or {},
-                }
-            )
+            row = {
+                "id": s.id,
+                "user_id": user_id,
+                "label": label,
+                "conversation_id": s.id,
+                "source": s.source,
+                "status": s.status,
+                "state": s.status,
+                "created_at": s.created_at,
+                "last_active": s.last_active,
+                "parent_id": s.parent_id,
+                "prompt": s.prompt or "",
+                "model": s.model,
+                "error": s.error,
+                "result": s.result,
+                "title": s.title,
+                "is_default": default_ids.get(user_id) == s.id,
+                "metadata": s.metadata or {},
+            }
+            if s.status in live_statuses:
+                row["progress"] = adapter.session_store.session_progress_summary(s.id)
+            sessions.append(row)
 
         return JSONResponse({"sessions": sessions})
 
@@ -1185,11 +1189,11 @@ class HTTPServer:
 
         session_id = body.get("session_id")
         if session_id:
-            from tsugite.daemon.session_store import _TERMINAL_STATUSES
+            from tsugite.daemon.session_store import _FINISHED_STATUSES
 
             try:
                 target = adapter.session_store.get_session(session_id)
-                if target.status in _TERMINAL_STATUSES:
+                if target.status in _FINISHED_STATUSES:
                     return JSONResponse(
                         {"error": f"Session is {target.status}. Start a new session to continue."},
                         status_code=409,

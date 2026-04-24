@@ -5,8 +5,7 @@ import { historyMixin } from './conversation/history.js';
 import { attachmentsMixin } from './conversation/attachments.js';
 import { streamingMixin } from './conversation/streaming.js';
 import { inputMixin } from './conversation/input.js';
-
-const SESSION_END_EVENTS = new Set(['session_complete', 'session_error', 'session_cancelled']);
+import { SESSION_END_EVENTS, progressStatusFor } from './conversation/event_types.js';
 
 export default () => ({
   ...sessionsMixin,
@@ -27,6 +26,8 @@ export default () => ({
   inspectingSnapshot: null,
   effortLevels: [],
   sessionEffort: '',
+  // session_id -> { turnCount, toolCount, statusText, lastEventTime }
+  progressCache: {},
   // Getters must stay here — spread loses get descriptors
   get userId() {
     return this.$store.app.userId;
@@ -117,6 +118,7 @@ export default () => ({
         this._debouncedLoadSessions();
       }
       if (ev.type === 'session_event') {
+        this._updateProgressCache(d);
         this._handleSessionEvent(d);
       }
       if (ev.type === 'compaction_started' && d.agent === this.$store.app.selectedAgent) {
@@ -137,13 +139,18 @@ export default () => ({
       }
       this.$store.app.pendingWorkspaceFiles = [];
     });
+    // Ticks the freshness flag off when events stop arriving so the pulse dot doesn't animate forever.
+    this._freshnessTimer = setInterval(() => { this._freshnessTick++; }, 2000);
   },
+
+  _freshnessTick: 0,
 
   destroy() {
     if (this._draftTimer) clearTimeout(this._draftTimer);
     if (this._debounceTimer) clearTimeout(this._debounceTimer);
     if (this._scrollTimer) clearTimeout(this._scrollTimer);
     if (this._historyDebounceTimer) clearTimeout(this._historyDebounceTimer);
+    if (this._freshnessTimer) clearInterval(this._freshnessTimer);
     if (this._activeReader) this._activeReader.cancel().catch(() => {});
     this.pendingFiles.forEach(f => { if (f.previewUrl) URL.revokeObjectURL(f.previewUrl); });
   },
@@ -343,6 +350,34 @@ export default () => ({
   },
 
   _sessionProgress: null,
+
+  _updateProgressCache(d) {
+    const id = d.session_id;
+    if (!id) return;
+    const evType = d.event_type;
+    if (SESSION_END_EVENTS.has(evType)) {
+      delete this.progressCache[id];
+      return;
+    }
+    const now = d.timestamp || new Date().toISOString();
+    let entry = this.progressCache[id];
+    if (!entry) {
+      entry = { turnCount: 0, toolCount: 0, statusText: 'Starting...', lastEventTime: now };
+      this.progressCache[id] = entry;
+    }
+    let { turnCount, toolCount, statusText } = entry;
+    if (evType === 'turn_start' && typeof d.turn === 'number' && d.turn > turnCount) turnCount = d.turn;
+    else if (evType === 'tool_result' && (d.tool || 'unknown') !== 'unknown') toolCount += 1;
+    const label = progressStatusFor(evType, d);
+    if (label) statusText = label;
+    const derivedChanged = turnCount !== entry.turnCount || toolCount !== entry.toolCount || statusText !== entry.statusText;
+    if (derivedChanged) {
+      this.progressCache[id] = { turnCount, toolCount, statusText, lastEventTime: now };
+    } else if (entry.lastEventTime !== now) {
+      // Mutate in place so only the pulse-dot dep re-evaluates; the label doesn't need to re-render.
+      entry.lastEventTime = now;
+    }
+  },
 
   _handleSessionEvent(d) {
     if (!this.selectedSessionId || this.isActiveSession) return;

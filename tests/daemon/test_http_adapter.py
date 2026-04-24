@@ -146,6 +146,60 @@ class TestChatEndpoint:
         assert resp.status_code == 400
 
 
+class TestAgentSessionsEndpoint:
+    """GET /api/agents/{agent}/sessions exposes progress for running sessions."""
+
+    def test_running_session_includes_progress(self, client, mock_adapter, test_token):
+        from tsugite.daemon.session_store import Session, SessionSource, SessionStatus
+
+        store = mock_adapter.session_store
+        session = store.create_session(
+            Session(
+                id="sched_test_1",
+                agent="test-agent",
+                source=SessionSource.SCHEDULE.value,
+                status=SessionStatus.RUNNING.value,
+                prompt="do the thing",
+            )
+        )
+        store.append_event(session.id, {"type": "turn_start", "turn": 2})
+        store.append_event(session.id, {"type": "tool_result", "tool": "bash", "success": True})
+
+        resp = client.get(
+            "/api/agents/test-agent/sessions",
+            headers={"Authorization": f"Bearer {test_token}"},
+        )
+        assert resp.status_code == 200
+        sessions = resp.json()["sessions"]
+        row = next(s for s in sessions if s["id"] == session.id)
+        assert "progress" in row
+        assert row["progress"]["turn_count"] == 2
+        assert row["progress"]["tool_count"] == 1
+        assert row["progress"]["status_text"] == "Tool: bash"
+
+    def test_completed_session_omits_progress(self, client, mock_adapter, test_token):
+        from tsugite.daemon.session_store import Session, SessionSource, SessionStatus
+
+        store = mock_adapter.session_store
+        session = store.create_session(
+            Session(
+                id="sched_done",
+                agent="test-agent",
+                source=SessionSource.SCHEDULE.value,
+                status=SessionStatus.COMPLETED.value,
+                prompt="done already",
+            )
+        )
+
+        resp = client.get(
+            "/api/agents/test-agent/sessions",
+            headers={"Authorization": f"Bearer {test_token}"},
+        )
+        assert resp.status_code == 200
+        row = next(s for s in resp.json()["sessions"] if s["id"] == session.id)
+        assert "progress" not in row
+
+
 class TestEffortLevelsEndpoint:
     """GET /api/agents/{agent}/effort-levels returns the resolved model's effort list."""
 

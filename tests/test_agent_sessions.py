@@ -115,6 +115,95 @@ def test_read_events_missing_session(store):
     assert store.event_count("nope") == 0
 
 
+# ── Store: Progress Summary ──
+
+
+def test_session_progress_summary_no_events(store, sample_session):
+    store.create_session(sample_session)
+    summary = store.session_progress_summary("s1")
+    assert summary == {
+        "turn_count": 0,
+        "tool_count": 0,
+        "status_text": "Starting...",
+        "last_event_time": None,
+    }
+
+
+def test_session_progress_summary_after_session_start(store, sample_session):
+    store.create_session(sample_session)
+    store.append_event("s1", {"type": "session_start", "timestamp": "2026-04-23T10:00:00+00:00", "agent": "default"})
+    summary = store.session_progress_summary("s1")
+    assert summary["turn_count"] == 0
+    assert summary["tool_count"] == 0
+    assert summary["status_text"] == "Starting..."
+    assert summary["last_event_time"] == "2026-04-23T10:00:00+00:00"
+
+
+def test_session_progress_summary_multi_turn_with_tools(store, sample_session):
+    store.create_session(sample_session)
+    store.append_event("s1", {"type": "session_start", "timestamp": "2026-04-23T10:00:00+00:00"})
+    store.append_event("s1", {"type": "turn_start", "turn": 1, "timestamp": "2026-04-23T10:00:01+00:00"})
+    store.append_event(
+        "s1", {"type": "tool_result", "tool": "bash", "success": True, "timestamp": "2026-04-23T10:00:02+00:00"}
+    )
+    store.append_event("s1", {"type": "turn_start", "turn": 2, "timestamp": "2026-04-23T10:00:03+00:00"})
+    store.append_event(
+        "s1", {"type": "tool_result", "tool": "read_file", "success": True, "timestamp": "2026-04-23T10:00:04+00:00"}
+    )
+    store.append_event(
+        "s1", {"type": "tool_result", "tool": "unknown", "success": True, "timestamp": "2026-04-23T10:00:05+00:00"}
+    )
+    store.append_event("s1", {"type": "thought", "content": "thinking", "timestamp": "2026-04-23T10:00:06+00:00"})
+    summary = store.session_progress_summary("s1")
+    assert summary["turn_count"] == 2
+    assert summary["tool_count"] == 2  # 'unknown' excluded (it's raw code output)
+    assert summary["status_text"] == "Thinking..."
+    assert summary["last_event_time"] == "2026-04-23T10:00:06+00:00"
+
+
+def test_session_progress_summary_tool_status(store, sample_session):
+    store.create_session(sample_session)
+    store.append_event("s1", {"type": "turn_start", "turn": 1, "timestamp": "2026-04-23T10:00:00+00:00"})
+    store.append_event(
+        "s1", {"type": "tool_result", "tool": "bash", "success": True, "timestamp": "2026-04-23T10:00:01+00:00"}
+    )
+    summary = store.session_progress_summary("s1")
+    assert summary["status_text"] == "Tool: bash"
+
+
+def test_session_progress_summary_turn_start_status(store, sample_session):
+    store.create_session(sample_session)
+    store.append_event("s1", {"type": "turn_start", "turn": 3, "timestamp": "2026-04-23T10:00:00+00:00"})
+    summary = store.session_progress_summary("s1")
+    assert summary["turn_count"] == 3
+    assert summary["status_text"] == "Turn 3..."
+
+
+def test_session_progress_summary_ignores_session_end_events(store, sample_session):
+    store.create_session(sample_session)
+    store.append_event("s1", {"type": "turn_start", "turn": 1, "timestamp": "2026-04-23T10:00:00+00:00"})
+    store.append_event(
+        "s1", {"type": "tool_result", "tool": "bash", "success": True, "timestamp": "2026-04-23T10:00:01+00:00"}
+    )
+    store.append_event(
+        "s1", {"type": "session_complete", "result_preview": "done", "timestamp": "2026-04-23T10:00:02+00:00"}
+    )
+    summary = store.session_progress_summary("s1")
+    # Last event ended the session; status_text should reflect the last mid-session event.
+    assert summary["turn_count"] == 1
+    assert summary["tool_count"] == 1
+    assert summary["status_text"] == "Tool: bash"
+
+
+def test_session_progress_summary_missing_session(store):
+    assert store.session_progress_summary("nope") == {
+        "turn_count": 0,
+        "tool_count": 0,
+        "status_text": "Starting...",
+        "last_event_time": None,
+    }
+
+
 # ── SessionRunner Tests ──
 
 

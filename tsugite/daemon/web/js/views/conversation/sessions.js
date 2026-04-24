@@ -1,4 +1,5 @@
 import { get, post, patch } from '../../api.js';
+import { REPLAY_SKIP_EVENTS, progressFromPayload } from './event_types.js';
 
 export const sessionsMixin = {
   _debounceTimer: null,
@@ -23,6 +24,17 @@ export const sessionsMixin = {
     try {
       const data = await get(`/api/agents/${agent}/sessions`);
       this.allSessions = (data.sessions || []).map(s => ({ ...s, state: s.state || s.status }));
+      const liveIds = new Set();
+      for (const s of this.allSessions) {
+        if (s.state !== 'running' && s.state !== 'active') continue;
+        liveIds.add(s.id);
+        if (s.progress && !this.progressCache[s.id]) {
+          this.progressCache[s.id] = progressFromPayload(s.progress);
+        }
+      }
+      for (const id of Object.keys(this.progressCache)) {
+        if (!liveIds.has(id)) delete this.progressCache[id];
+      }
     } catch { this.allSessions = []; }
     this.loading = false;
   },
@@ -37,7 +49,7 @@ export const sessionsMixin = {
     if (first) this.selectSession(first);
   },
 
-  selectSession(session) {
+  async selectSession(session) {
     this.sidebarOpen = false;
     this._saveDraftNow();
     const convId = session.conversation_id || session.id;
@@ -54,13 +66,30 @@ export const sessionsMixin = {
 
     this._sessionProgress = null;
     this.loadStatus();
-    this.loadHistory();
+    const historyPromise = this.loadHistory();
     this.loadSessionEffort();
     this._restoreDraft();
     if (!this.isActiveSession && session.state === 'running') {
-      this._sessionProgress = { type: 'progress', steps: [], statusText: 'Running...', turnCount: 0, toolCount: 0 };
-      this.messages.push(this._sessionProgress);
+      await historyPromise;
+      if (this.selectedSessionId !== convId) return;
+      this._rehydrateProgressFromEvents(convId);
     }
+  },
+
+  async _rehydrateProgressFromEvents(sessionId) {
+    const progress = { type: 'progress', steps: [], statusText: 'Starting...', turnCount: 0, toolCount: 0 };
+    this._sessionProgress = progress;
+    const idx = this.messages.push(progress) - 1;
+    try {
+      const data = await get(`/api/sessions/${sessionId}/events`);
+      // Bail if reload/backToSessions/another selectSession swapped our bubble out while the fetch was in flight.
+      if (this.selectedSessionId !== sessionId || this.messages[idx] !== progress) return;
+      for (const ev of data.events || []) {
+        if (REPLAY_SKIP_EVENTS.has(ev.type)) continue;
+        this._handleProgressEvent(idx, ev);
+      }
+      this.scrollMessages();
+    } catch { /* ignore */ }
   },
 
   backToSessions() {
@@ -196,6 +225,27 @@ export const sessionsMixin = {
 
   lastMessagePreview(s) {
     return (s.result || s.prompt || '').slice(0, 60) || '';
+  },
+
+  sessionProgressLabel(s) {
+    if (!s) return '';
+    const running = s.state === 'running' || s.state === 'active';
+    if (!running) return '';
+    const cached = this.progressCache[s.id] || progressFromPayload(s.progress);
+    if (!cached) return 'Starting...';
+    const parts = [];
+    if (cached.turnCount) parts.push(`Turn ${cached.turnCount}`);
+    if (cached.toolCount) parts.push(`${cached.toolCount} tool${cached.toolCount > 1 ? 's' : ''}`);
+    if (cached.statusText) parts.push(cached.statusText);
+    return parts.join(' · ') || 'Starting...';
+  },
+
+  isSessionProgressFresh(s) {
+    void this._freshnessTick;  // establish reactive dep so pulse turns off when events stop
+    const cached = this.progressCache[s?.id];
+    if (!cached || !cached.lastEventTime) return false;
+    const age = Date.now() - Date.parse(cached.lastEventTime);
+    return age >= 0 && age < 10000;
   },
 
   _matchesFilters(s) {
