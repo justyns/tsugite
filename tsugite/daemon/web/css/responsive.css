@@ -176,7 +176,7 @@
     padding: 8px 12px env(safe-area-inset-bottom);
   }
 
-  .input-toolbar { display: flex; gap: 8px; width: 100%; order: -1; }
+  .input-menu { left: auto; right: 0; }
 
 
   /* Context bar: stack meta row items */

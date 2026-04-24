@@ -643,6 +643,44 @@ class TestSSEProgressHandler:
             f"cross-thread emit + signal_done contention"
         )
 
+    def test_emit_broadcasts_session_event_when_wired(self):
+        """Interactive chat must broadcast session_event so the sidebar progress cache updates."""
+        recorded: list[tuple[str, dict]] = []
+
+        class _FakeBroadcaster:
+            def emit(self, event_type, data):
+                recorded.append((event_type, data))
+
+        handler = SSEProgressHandler()
+        handler.set_broadcaster(_FakeBroadcaster())
+        handler.set_session_id("sess-123")
+        handler._emit("turn_start", {"turn": 1})
+        handler._emit("tool_result", {"tool": "bash", "success": True})
+
+        assert recorded == [
+            ("session_event", {"session_id": "sess-123", "event_type": "turn_start", "turn": 1}),
+            ("session_event", {"session_id": "sess-123", "event_type": "tool_result", "tool": "bash", "success": True}),
+        ]
+
+    def test_emit_skips_broadcast_when_not_wired(self):
+        """Without a broadcaster, existing behaviour is unchanged (events still queued locally)."""
+        handler = SSEProgressHandler()
+        handler._emit("turn_start", {"turn": 1})
+        assert handler.queue.qsize() == 1
+
+    def test_emit_skips_broadcast_when_session_id_missing(self):
+        """Guard against broadcasting with an empty session_id that would poison the cache."""
+        recorded: list[tuple[str, dict]] = []
+
+        class _FakeBroadcaster:
+            def emit(self, event_type, data):
+                recorded.append((event_type, data))
+
+        handler = SSEProgressHandler()
+        handler.set_broadcaster(_FakeBroadcaster())
+        handler._emit("turn_start", {"turn": 1})
+        assert recorded == []
+
 
 class TestHTTPConfig:
     def test_config_defaults(self):

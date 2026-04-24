@@ -109,7 +109,7 @@ main { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
 .command-suggestion .cmd-desc { color: var(--text-muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #message-input { flex: 1; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; font-size: 14px; font-family: inherit; resize: none; min-height: 42px; max-height: 150px; transition: max-height 0.15s ease; }
 #message-input:focus { outline: none; border-color: var(--accent); }
-.input-toolbar { display: contents; }
+.input-toolbar { position: relative; align-self: flex-end; }
 .paste-modal .modal-content, .expand-modal .modal-content { max-width: 600px; }
 .expand-modal-text { width: 100%; min-height: 200px; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 10px; font-size: 14px; font-family: inherit; resize: vertical; }
 #send-btn, #stop-btn { border-radius: 8px; padding: 10px 20px; font-size: 14px; font-weight: 600; cursor: pointer; align-self: flex-end; }
@@ -270,10 +270,13 @@ main { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
 .file-name { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-remove { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 16px; padding: 0 2px; line-height: 1; }
 .file-remove:hover { color: var(--error); }
-.attach-btn { background: none; border: none; font-size: 20px; cursor: pointer; padding: 4px 8px; align-self: flex-end; color: var(--muted); }
-.attach-btn:hover { color: var(--text); }
-.effort-select { background: var(--surface0); color: var(--text); border: 1px solid var(--surface2); border-radius: 4px; padding: 2px 6px; font-size: 12px; align-self: flex-end; cursor: pointer; }
-.effort-select:hover { border-color: var(--surface3); }
+.attach-btn { background: none; border: 1px solid var(--border); border-radius: 8px; font-size: 20px; line-height: 1; cursor: pointer; padding: 6px 12px; color: var(--muted); }
+.attach-btn:hover { color: var(--text); border-color: var(--accent); }
+.input-menu { position: absolute; bottom: calc(100% + 4px); left: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 -4px 12px rgba(0,0,0,0.2); padding: 4px; display: flex; flex-direction: column; gap: 2px; z-index: 5; min-width: 200px; }
+.input-menu-item { background: none; border: none; color: var(--text); text-align: left; padding: 8px 12px; font-size: 13px; cursor: pointer; border-radius: 6px; white-space: nowrap; }
+.input-menu-item:hover { background: var(--bg); }
+.effort-chip { background: var(--code-bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 1px 6px; font-size: 11px; cursor: pointer; }
+.effort-chip:hover { border-color: var(--accent); }
 
 /* Paste banner */
 .paste-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 16px; background: var(--surface); border-top: 1px solid var(--border); font-size: 13px; color: var(--text); flex-wrap: wrap; }

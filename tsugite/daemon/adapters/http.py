@@ -244,6 +244,8 @@ class SSEProgressHandler(JSONLUIHandler):
         self.has_final = False
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._persist_event: Optional[Callable] = None
+        self._broadcaster: Optional["SSEBroadcaster"] = None
+        self._session_id: Optional[str] = None
 
     def set_loop(self, loop: asyncio.AbstractEventLoop):
         self._loop = loop
@@ -251,6 +253,12 @@ class SSEProgressHandler(JSONLUIHandler):
     def set_event_persister(self, fn: Callable):
         """Set a callback to persist select events to the session event log."""
         self._persist_event = fn
+
+    def set_broadcaster(self, broadcaster: "SSEBroadcaster") -> None:
+        self._broadcaster = broadcaster
+
+    def set_session_id(self, session_id: str) -> None:
+        self._session_id = session_id
 
     latest_prompt_messages: Optional[list] = None
 
@@ -283,6 +291,12 @@ class SSEProgressHandler(JSONLUIHandler):
 
         if event_type in ("prompt_snapshot", "reaction", "final_result", "error", "cancelled") and self._persist_event:
             self._persist_event(payload)
+
+        if self._broadcaster and self._session_id:
+            self._broadcaster.emit(
+                "session_event",
+                {"session_id": self._session_id, "event_type": event_type, **data},
+            )
 
     def signal_done(self):
         """Set done and wake up the generator."""
@@ -1213,6 +1227,8 @@ class HTTPServer:
         progress = SSEProgressHandler()
         progress.set_loop(asyncio.get_running_loop())
         session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
+        progress.set_session_id(session.id)
+        progress.set_broadcaster(self.event_bus)
         progress.set_event_persister(
             lambda payload: adapter.session_store.append_event(
                 session.id,

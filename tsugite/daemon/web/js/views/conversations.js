@@ -21,6 +21,7 @@ export default () => ({
   statusInfo: {},
   showAttachments: false,
   attachments: [],
+  inputMenuOpen: false,
   showSkills: false,
   loadedSkills: [],
   inspectingSnapshot: null,

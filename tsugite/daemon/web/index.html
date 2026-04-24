@@ -215,6 +215,15 @@
             <template x-if="(selectedSessionMeta?.metadata||{}).working_dir">
               <span class="context-workdir" x-text="selectedSessionMeta.metadata.working_dir" title="Working directory"></span>
             </template>
+            <select class="effort-chip" x-show="effortLevels.length > 0"
+                    :value="sessionEffort"
+                    @change="setSessionEffort($event.target.value)"
+                    title="Reasoning effort (session default)">
+              <option value="">effort: —</option>
+              <template x-for="lvl in effortLevels" :key="lvl">
+                <option :value="lvl" x-text="'effort: ' + lvl" :selected="sessionEffort === lvl"></option>
+              </template>
+            </select>
           </div>
           <div style="display:flex;gap:6px;margin-top:4px" x-show="selectedSessionMeta && !isActiveSession">
             <template x-if="canCancel(selectedSessionMeta)">
@@ -467,20 +476,14 @@
                   </div>
                 </template>
               </div>
-              <div class="input-toolbar">
-                <button class="attach-btn" @click="openFilePicker()" title="Attach files">📎</button>
-                <button class="attach-btn" @click="openPasteModal()" title="Paste text as attachment">📋</button>
+              <div class="input-toolbar" @click.outside="inputMenuOpen = false">
                 <input type="file" multiple x-ref="fileInput" @change="onFileInputChange($event)" style="display:none">
-                <button class="attach-btn" @click="openExpandModal()" title="Expand editor">⤢</button>
-                <select class="effort-select" x-show="effortLevels.length > 0"
-                        :value="sessionEffort"
-                        @change="setSessionEffort($event.target.value)"
-                        title="Reasoning effort (session default)">
-                  <option value="">effort: —</option>
-                  <template x-for="lvl in effortLevels" :key="lvl">
-                    <option :value="lvl" x-text="lvl" :selected="sessionEffort === lvl"></option>
-                  </template>
-                </select>
+                <button class="attach-btn" @click="inputMenuOpen = !inputMenuOpen" title="Attach / paste / expand" aria-label="Input options">+</button>
+                <div class="input-menu" x-show="inputMenuOpen" x-cloak>
+                  <button class="input-menu-item" @click="inputMenuOpen = false; openFilePicker()">📎 Attach files</button>
+                  <button class="input-menu-item" @click="inputMenuOpen = false; openPasteModal()">📋 Paste as attachment</button>
+                  <button class="input-menu-item" @click="inputMenuOpen = false; openExpandModal()">⤢ Expand editor</button>
+                </div>
               </div>
               <textarea id="message-input" x-ref="messageInput" x-model="messageText" rows="1"
                         placeholder="Send a message..." autofocus
