@@ -1,6 +1,7 @@
 """Tests for model registry — verify no duplicate model keys."""
 
 from tsugite.providers.anthropic import _ANTHROPIC_MODELS
+from tsugite.providers.base import ModelInfo
 from tsugite.providers.openai_compat import _OPENAI_MODELS
 
 
@@ -24,3 +25,13 @@ def test_all_keys_have_correct_provider_prefix():
         assert key.startswith("openai/"), f"OpenAI model key missing prefix: {key}"
     for key in _ANTHROPIC_MODELS:
         assert key.startswith("anthropic/"), f"Anthropic model key missing prefix: {key}"
+
+
+def test_model_info_has_supported_effort_levels_default_none():
+    info = ModelInfo()
+    assert info.supported_effort_levels is None
+
+
+def test_model_info_accepts_supported_effort_levels():
+    info = ModelInfo(supported_effort_levels=["low", "medium", "high"])
+    assert info.supported_effort_levels == ["low", "medium", "high"]

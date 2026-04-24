@@ -1,4 +1,4 @@
-import { get, post } from '../api.js';
+import { get, post, patch } from '../api.js';
 import { escapeHtml, renderMarkdown, scrollToBottom, formatDate, stateBadgeClass, copyText } from '../utils.js';
 import { sessionsMixin } from './conversation/sessions.js';
 import { historyMixin } from './conversation/history.js';
@@ -25,6 +25,8 @@ export default () => ({
   showSkills: false,
   loadedSkills: [],
   inspectingSnapshot: null,
+  effortLevels: [],
+  sessionEffort: '',
   // Getters must stay here — spread loses get descriptors
   get userId() {
     return this.$store.app.userId;
@@ -152,7 +154,9 @@ export default () => ({
     this.statusInfo = {};
     this.loadedSkills = [];
     this.selectedSessionMeta = null;
+    this.sessionEffort = '';
     await this.loadSessions();
+    await this.loadEffortLevels();
 
     const targetId = this.$store.app.viewSessionId;
     if (targetId) {
@@ -165,6 +169,37 @@ export default () => ({
       }
     } else {
       this.autoSelectInteractive();
+    }
+  },
+
+  async loadEffortLevels() {
+    const agent = this.$store.app.selectedAgent;
+    if (!agent) { this.effortLevels = []; return; }
+    try {
+      const data = await get(`/api/agents/${agent}/effort-levels`);
+      this.effortLevels = Array.isArray(data.supported_effort_levels) ? data.supported_effort_levels : [];
+    } catch {
+      this.effortLevels = [];
+    }
+  },
+
+  async loadSessionEffort() {
+    if (!this.selectedSessionId) { this.sessionEffort = ''; return; }
+    try {
+      const data = await get(`/api/sessions/${this.selectedSessionId}/settings`);
+      this.sessionEffort = data.reasoning_effort || '';
+    } catch {
+      this.sessionEffort = '';
+    }
+  },
+
+  async setSessionEffort(value) {
+    this.sessionEffort = value || '';
+    if (!this.selectedSessionId) return;
+    try {
+      await patch(`/api/sessions/${this.selectedSessionId}/settings`, { reasoning_effort: value || null });
+    } catch (e) {
+      console.warn('Failed to save reasoning_effort', e);
     }
   },
 

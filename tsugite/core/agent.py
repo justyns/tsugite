@@ -656,6 +656,7 @@ class TsugiteAgent:
 
         if stream:
             accumulated_content = ""
+            accumulated_reasoning = ""
             step_cost = 0.0
             final_chunk = None
             result = await self._provider.acompletion(
@@ -667,6 +668,12 @@ class TsugiteAgent:
                     accumulated_content += chunk.content
                     if self.event_bus:
                         self.event_bus.emit(StreamChunkEvent(chunk=chunk.content))
+                if getattr(chunk, "reasoning_content", ""):
+                    accumulated_reasoning += chunk.reasoning_content
+                    if self.event_bus:
+                        self.event_bus.emit(
+                            ReasoningContentEvent(content=chunk.reasoning_content, step=turn_num + 1)
+                        )
                 if chunk.done:
                     final_chunk = chunk
 
@@ -677,6 +684,8 @@ class TsugiteAgent:
                 step_cost = self._accumulate_usage(final_chunk.usage, final_chunk.cost or 0.0)
 
             parsed = self._parse_response_from_text(accumulated_content)
+            if accumulated_reasoning:
+                self.memory.add_reasoning(accumulated_reasoning)
             self._record_model_response(
                 turn_num,
                 raw_content=accumulated_content,

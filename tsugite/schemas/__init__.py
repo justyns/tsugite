@@ -55,10 +55,13 @@ def generate_agent_schema() -> Dict[str, Any]:
 
     if "reasoning_effort" in properties:
         properties["reasoning_effort"]["description"] = (
-            "Reasoning effort for o1/o3 models. Options: 'low', 'medium', 'high'. "
-            "Only applicable to OpenAI reasoning models."
+            "Reasoning / thinking effort level. Valid values depend on the resolved provider + model. "
+            "OpenAI reasoning models (o1/o3/o4): 'low', 'medium', 'high'. "
+            "Claude Code: 'low', 'medium', 'high', 'xhigh', 'max'. "
+            "Anthropic SDK (extended-thinking-capable models): 'low', 'medium', 'high', 'max'. "
+            "Values are validated at runtime against the resolved model."
         )
-        properties["reasoning_effort"]["enum"] = ["low", "medium", "high"]
+        properties["reasoning_effort"].pop("enum", None)
 
     if "tools" in properties:
         properties["tools"]["description"] = (

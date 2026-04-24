@@ -224,6 +224,13 @@ export const streamingMixin = {
       prog.steps.push({ html: escapeHtml(event.message) });
       this.messages.push({ type: 'info', text: event.message });
       this.scrollMessages();
+    } else if (event.type === 'reasoning_content') {
+      prog.statusText = 'Reasoning...';
+      if (event.content) {
+        this._pushDetailStep(prog, '<code>reasoning</code>', event.content);
+      }
+    } else if (event.type === 'reasoning_tokens') {
+      prog.steps.push({ html: `<code>reasoning</code> ${event.tokens} tokens` });
     }
   },
 

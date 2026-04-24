@@ -32,6 +32,7 @@ class CompletionResponse:
 @dataclass
 class StreamChunk:
     content: str = ""
+    reasoning_content: str = ""
     done: bool = False
     usage: Usage | None = None
     cost: float | None = None
@@ -47,6 +48,7 @@ class ModelInfo:
     supports_audio: bool = False
     supports_reasoning: bool = False
     supports_streaming: bool = True
+    supported_effort_levels: list[str] | None = None
 
 
 @runtime_checkable

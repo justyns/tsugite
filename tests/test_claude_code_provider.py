@@ -310,6 +310,193 @@ class TestClaudeCodeProcess:
                 pass
 
 
+# ── Effort level (reasoning_effort) tests ──
+
+
+class TestClaudeCodeEffort:
+    def test_model_info_declares_effort_levels(self):
+        from tsugite.providers.claude_code import ClaudeCodeProvider
+
+        provider = ClaudeCodeProvider()
+        for alias in ("opus", "sonnet", "haiku"):
+            info = provider.get_model_info(alias)
+            assert info is not None, f"no ModelInfo for {alias}"
+            assert info.supported_effort_levels == ["low", "medium", "high", "xhigh", "max"]
+
+    @pytest.mark.asyncio
+    async def test_start_appends_effort_flag(self):
+        """When start() is given an effort, it's appended as --effort <level>."""
+        from tsugite.core.claude_code import ClaudeCodeProcess
+
+        process = ClaudeCodeProcess()
+        mock_proc = AsyncMock()
+        mock_proc.stdin = AsyncMock()
+        mock_proc.stderr = AsyncMock()
+        mock_proc.stderr.readline = AsyncMock(return_value=b"")
+        mock_proc.stdout = AsyncMock()
+        mock_proc.returncode = None
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc) as mock_exec:
+            await process.start(model="opus", system_prompt="test", effort="xhigh")
+            cmd_args = mock_exec.call_args[0]
+            assert "--effort" in cmd_args
+            assert cmd_args[cmd_args.index("--effort") + 1] == "xhigh"
+
+        await process.stop()
+
+    @pytest.mark.asyncio
+    async def test_start_omits_effort_flag_when_none(self):
+        from tsugite.core.claude_code import ClaudeCodeProcess
+
+        process = ClaudeCodeProcess()
+        mock_proc = AsyncMock()
+        mock_proc.stdin = AsyncMock()
+        mock_proc.stderr = AsyncMock()
+        mock_proc.stderr.readline = AsyncMock(return_value=b"")
+        mock_proc.stdout = AsyncMock()
+        mock_proc.returncode = None
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc) as mock_exec:
+            await process.start(model="opus", system_prompt="test")
+            cmd_args = mock_exec.call_args[0]
+            assert "--effort" not in cmd_args
+
+        await process.stop()
+
+    @pytest.mark.asyncio
+    async def test_provider_forwards_reasoning_effort_to_start(self):
+        """ClaudeCodeProvider pulls reasoning_effort out of kwargs and forwards to process.start()."""
+        from tsugite.providers.claude_code import ClaudeCodeProvider
+
+        provider = ClaudeCodeProvider()
+        mock_process = AsyncMock()
+        mock_process.session_id = "s1"
+        mock_process.compacted = False
+
+        async def mock_send(*_, **__):
+            yield {
+                "type": "result",
+                "text": "hello",
+                "cost_usd": 0.001,
+                "session_id": "s1",
+                "input_tokens": 10,
+                "output_tokens": 5,
+            }
+
+        mock_process.send_message = mock_send
+        mock_process.start = AsyncMock()
+        mock_process.stop = AsyncMock()
+
+        with patch("tsugite.core.claude_code.ClaudeCodeProcess", return_value=mock_process):
+            await provider.acompletion(
+                messages=[{"role": "system", "content": "sys"}, {"role": "user", "content": "q"}],
+                model="opus",
+                stream=False,
+                reasoning_effort="high",
+            )
+            await provider.stop()
+
+        mock_process.start.assert_awaited_once()
+        assert mock_process.start.await_args.kwargs.get("effort") == "high"
+
+    @pytest.mark.asyncio
+    async def test_send_message_emits_thinking_detected(self):
+        """Assistant event with a thinking content block yields a thinking_detected event."""
+        from tsugite.core.claude_code import ClaudeCodeProcess
+
+        process = ClaudeCodeProcess()
+        events = [
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            {"type": "thinking", "thinking": "", "signature": "sig_abc"},
+                            {"type": "text", "text": "Hello world"},
+                        ],
+                        "usage": {"input_tokens": 10, "output_tokens": 5},
+                    },
+                    "session_id": "s1",
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "result",
+                    "subtype": "success",
+                    "result": "Hello world",
+                    "total_cost_usd": 0.001,
+                    "duration_ms": 100,
+                    "session_id": "s1",
+                }
+            ),
+        ]
+        # Reuse the mock helper from TestClaudeCodeProcess
+        mock_proc = AsyncMock()
+        mock_proc.stdin = AsyncMock()
+        mock_proc.stderr = AsyncMock()
+        mock_proc.stderr.readline = AsyncMock(return_value=b"")
+        mock_proc.stdout = AsyncMock()
+        mock_proc.returncode = None
+        event_iter = iter(events)
+
+        async def mock_readline():
+            try:
+                return (next(event_iter) + "\n").encode()
+            except StopIteration:
+                return b""
+
+        mock_proc.stdout.readline = mock_readline
+        process._process = mock_proc
+        process._session_id = "s1"
+
+        collected = []
+        async for event in process.send_message("test"):
+            collected.append(event)
+
+        thinking_events = [e for e in collected if e.get("type") == "thinking_detected"]
+        assert len(thinking_events) == 1
+
+    @pytest.mark.asyncio
+    async def test_thinking_block_sets_reasoning_content_placeholder(self):
+        """When assistant event contains a thinking block, reasoning_content is set to a placeholder."""
+        from tsugite.providers.claude_code import ClaudeCodeProvider
+
+        provider = ClaudeCodeProvider()
+        mock_process = AsyncMock()
+        mock_process.session_id = "s1"
+        mock_process.compacted = False
+
+        async def mock_send(*_, **__):
+            # Simulate the has_thinking signal event from the subprocess
+            yield {"type": "thinking_detected"}
+            yield {"type": "text_delta", "text": "answer"}
+            yield {
+                "type": "result",
+                "text": "answer",
+                "cost_usd": 0.001,
+                "session_id": "s1",
+                "input_tokens": 10,
+                "output_tokens": 5,
+            }
+
+        mock_process.send_message = mock_send
+        mock_process.start = AsyncMock()
+        mock_process.stop = AsyncMock()
+
+        with patch("tsugite.core.claude_code.ClaudeCodeProcess", return_value=mock_process):
+            resp = await provider.acompletion(
+                messages=[{"role": "system", "content": "sys"}, {"role": "user", "content": "q"}],
+                model="opus",
+                stream=False,
+                reasoning_effort="max",
+            )
+            await provider.stop()
+
+        assert resp.reasoning_content is not None
+        assert "redacted" in resp.reasoning_content.lower() or "reasoning" in resp.reasoning_content.lower()
+
+
 # ── Agent integration tests ──
 
 

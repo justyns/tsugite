@@ -82,14 +82,14 @@ _OPENAI_MODELS: dict[str, ModelInfo] = {
     "openai/gpt-5.4-2026-03-05": ModelInfo(max_input_tokens=1_050_000, max_output_tokens=128_000, input_cost_per_million=2.5, output_cost_per_million=15.0, supports_vision=True),
     "openai/gpt-5.4-mini": ModelInfo(max_input_tokens=272_000, max_output_tokens=128_000, input_cost_per_million=0.75, output_cost_per_million=4.5, supports_vision=True),
     "openai/gpt-5.4-nano": ModelInfo(max_input_tokens=272_000, max_output_tokens=128_000, input_cost_per_million=0.2, output_cost_per_million=1.25, supports_vision=True),
-    "openai/o1": ModelInfo(max_input_tokens=200_000, max_output_tokens=100_000, input_cost_per_million=15.0, output_cost_per_million=60.0, supports_vision=True, supports_reasoning=True),
-    "openai/o1-2024-12-17": ModelInfo(max_input_tokens=200_000, max_output_tokens=100_000, input_cost_per_million=15.0, output_cost_per_million=60.0, supports_vision=True, supports_reasoning=True),
-    "openai/o3": ModelInfo(max_input_tokens=200_000, max_output_tokens=100_000, input_cost_per_million=2.0, output_cost_per_million=8.0, supports_vision=True, supports_reasoning=True),
-    "openai/o3-2025-04-16": ModelInfo(max_input_tokens=200_000, max_output_tokens=100_000, input_cost_per_million=2.0, output_cost_per_million=8.0, supports_vision=True, supports_reasoning=True),
-    "openai/o3-mini": ModelInfo(max_input_tokens=200_000, max_output_tokens=100_000, input_cost_per_million=1.1, output_cost_per_million=4.4, supports_reasoning=True),
-    "openai/o3-mini-2025-01-31": ModelInfo(max_input_tokens=200_000, max_output_tokens=100_000, input_cost_per_million=1.1, output_cost_per_million=4.4, supports_reasoning=True),
-    "openai/o4-mini": ModelInfo(max_input_tokens=200_000, max_output_tokens=100_000, input_cost_per_million=1.1, output_cost_per_million=4.4, supports_vision=True, supports_reasoning=True),
-    "openai/o4-mini-2025-04-16": ModelInfo(max_input_tokens=200_000, max_output_tokens=100_000, input_cost_per_million=1.1, output_cost_per_million=4.4, supports_vision=True, supports_reasoning=True),
+    "openai/o1": ModelInfo(max_input_tokens=200_000, max_output_tokens=100_000, input_cost_per_million=15.0, output_cost_per_million=60.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high"]),
+    "openai/o1-2024-12-17": ModelInfo(max_input_tokens=200_000, max_output_tokens=100_000, input_cost_per_million=15.0, output_cost_per_million=60.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high"]),
+    "openai/o3": ModelInfo(max_input_tokens=200_000, max_output_tokens=100_000, input_cost_per_million=2.0, output_cost_per_million=8.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high"]),
+    "openai/o3-2025-04-16": ModelInfo(max_input_tokens=200_000, max_output_tokens=100_000, input_cost_per_million=2.0, output_cost_per_million=8.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high"]),
+    "openai/o3-mini": ModelInfo(max_input_tokens=200_000, max_output_tokens=100_000, input_cost_per_million=1.1, output_cost_per_million=4.4, supports_reasoning=True, supported_effort_levels=["low", "medium", "high"]),
+    "openai/o3-mini-2025-01-31": ModelInfo(max_input_tokens=200_000, max_output_tokens=100_000, input_cost_per_million=1.1, output_cost_per_million=4.4, supports_reasoning=True, supported_effort_levels=["low", "medium", "high"]),
+    "openai/o4-mini": ModelInfo(max_input_tokens=200_000, max_output_tokens=100_000, input_cost_per_million=1.1, output_cost_per_million=4.4, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high"]),
+    "openai/o4-mini-2025-04-16": ModelInfo(max_input_tokens=200_000, max_output_tokens=100_000, input_cost_per_million=1.1, output_cost_per_million=4.4, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high"]),
 }
 # fmt: on
 # --- END GENERATED MODELS (openai) --- #

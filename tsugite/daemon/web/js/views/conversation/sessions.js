@@ -55,6 +55,7 @@ export const sessionsMixin = {
     this._sessionProgress = null;
     this.loadStatus();
     this.loadHistory();
+    this.loadSessionEffort();
     this._restoreDraft();
     if (!this.isActiveSession && session.state === 'running') {
       this._sessionProgress = { type: 'progress', steps: [], statusText: 'Running...', turnCount: 0, toolCount: 0 };

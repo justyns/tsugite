@@ -2,11 +2,27 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from tsugite.providers.base import Provider
+
+logger = logging.getLogger(__name__)
+
+
+class UnsupportedEffortError(ValueError):
+    """Raised when a reasoning_effort value is not supported for the resolved model."""
+
+    def __init__(self, model: str, value: str, supported: list[str]):
+        self.model = model
+        self.value = value
+        self.supported = supported
+        super().__init__(
+            f"reasoning_effort={value!r} is not supported for {model}. "
+            f"Valid values: {', '.join(supported)}"
+        )
 
 
 _CLAUDE_CODE_MODEL_MAP = {
@@ -133,16 +149,54 @@ def is_reasoning_model_without_stop_support(model_string: str) -> bool:
 
 
 def filter_reasoning_model_params(model_name: str, params: dict) -> dict:
-    """Filter out unsupported parameters for reasoning models."""
+    """Filter out unsupported parameters for reasoning models.
+
+    `reasoning_effort` is handled upstream via `ModelInfo.supported_effort_levels`
+    and runner-level validation, so it is not filtered here.
+    """
+    del model_name
     unsupported_params = ["stop", "temperature", "top_p", "presence_penalty", "frequency_penalty"]
-
-    if "o1-mini" in model_name:
-        unsupported_params.append("reasoning_effort")
-
     for param in unsupported_params:
         params.pop(param, None)
-
     return params
+
+
+def resolve_reasoning_effort(model_string: str, value: Optional[str]) -> Optional[str]:
+    """Validate a reasoning_effort value against the resolved model's capability list.
+
+    Returns the value verbatim if the model declares it in ``supported_effort_levels``.
+    Returns ``None`` and logs a warning if the model does not support any effort levels.
+    Raises ``UnsupportedEffortError`` if the value is not in the model's list.
+    """
+    if value is None:
+        return None
+
+    from tsugite.providers import get_provider
+
+    try:
+        resolved = resolve_model_alias(model_string)
+        provider_name, _model_name, _variant = parse_model_string(resolved)
+    except ValueError:
+        logger.warning("Cannot parse model %r; dropping reasoning_effort=%r", model_string, value)
+        return None
+
+    model_id = get_model_id(resolved)
+    try:
+        info = get_provider(provider_name).get_model_info(model_id)
+    except Exception:  # noqa: BLE001
+        info = None
+    if info is None or not info.supported_effort_levels:
+        logger.warning(
+            "Model %s does not support reasoning_effort; dropping value %r",
+            resolved,
+            value,
+        )
+        return None
+
+    if value not in info.supported_effort_levels:
+        raise UnsupportedEffortError(resolved, value, info.supported_effort_levels)
+
+    return value
 
 
 def get_model_kwargs(model_string: str, **kwargs) -> dict:

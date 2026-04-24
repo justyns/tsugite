@@ -51,6 +51,13 @@ SKIP_PREFIXES = (
 # Reasoning model name patterns (for supports_reasoning flag)
 REASONING_PATTERNS = re.compile(r"^(o1|o3|o4)(-mini|-preview|-pro)?")
 
+# Reasoning models that accept the reasoning_effort parameter.
+# Excludes o1-mini (unsupported by OpenAI).
+EFFORT_LEVELS_PATTERNS = re.compile(r"^(o1(-pro)?|o3(-mini|-pro)?|o4(-mini|-pro)?)(-\d{4}-\d{2}-\d{2})?$")
+
+# Anthropic models that support extended thinking (Claude 4+ families).
+ANTHROPIC_THINKING_PATTERNS = re.compile(r"^claude-(opus|sonnet|haiku)-4")
+
 
 def fetch_litellm_data() -> dict:
     print(f"Fetching {LITELLM_URL}...")
@@ -96,6 +103,10 @@ def entry_to_model_info(key: str, entry: dict, provider: str) -> str:
         parts.append("supports_vision=True")
     if reasoning:
         parts.append("supports_reasoning=True")
+    if EFFORT_LEVELS_PATTERNS.match(key):
+        parts.append('supported_effort_levels=["low", "medium", "high"]')
+    elif provider == "anthropic" and ANTHROPIC_THINKING_PATTERNS.match(key):
+        parts.append('supported_effort_levels=["low", "medium", "high", "max"]')
 
     return f"ModelInfo({', '.join(parts)})"
 

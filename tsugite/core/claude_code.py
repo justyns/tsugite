@@ -78,13 +78,21 @@ class ClaudeCodeProcess:
     def _get_stderr(self) -> str:
         return "\n".join(self._stderr_lines[-20:])  # last 20 lines
 
-    async def start(self, model: str, system_prompt: str, resume_session: str | None = None) -> None:
+    async def start(
+        self,
+        model: str,
+        system_prompt: str,
+        resume_session: str | None = None,
+        effort: str | None = None,
+    ) -> None:
         """Launch persistent claude subprocess.
 
         Args:
             model: Model name (sonnet, opus, haiku, or full model ID)
             system_prompt: System prompt text
             resume_session: Optional session ID to resume instead of starting fresh
+            effort: Optional reasoning effort level passed via ``--effort``
+                (low, medium, high, xhigh, max).
 
         Raises:
             RuntimeError: If claude CLI is not found or fails to start
@@ -120,6 +128,9 @@ class ClaudeCodeProcess:
             cmd.extend(["--resume", resume_session])
         else:
             cmd.extend(["--session-id", str(uuid.uuid4())])
+
+        if effort:
+            cmd.extend(["--effort", effort])
 
         # Copy env but unset keys that trigger nested-session guard or API key usage
         env = {k: v for k, v in os.environ.items() if k not in _CLAUDE_ENV_VARS}
@@ -208,6 +219,9 @@ class ClaudeCodeProcess:
                 if usage:
                     self._last_usage = usage
                 content_blocks = message.get("content", [])
+                # Claude CLI redacts thinking text; signal presence without content.
+                if any(block.get("type") == "thinking" for block in content_blocks):
+                    yield {"type": "thinking_detected"}
                 text = "".join(block.get("text", "") for block in content_blocks if block.get("type") == "text")
                 if text:
                     yield {"type": "text_delta", "text": text}

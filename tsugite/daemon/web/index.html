@@ -469,6 +469,15 @@
                 <button class="attach-btn" @click="openPasteModal()" title="Paste text as attachment">📋</button>
                 <input type="file" multiple x-ref="fileInput" @change="onFileInputChange($event)" style="display:none">
                 <button class="attach-btn" @click="openExpandModal()" title="Expand editor">⤢</button>
+                <select class="effort-select" x-show="effortLevels.length > 0"
+                        :value="sessionEffort"
+                        @change="setSessionEffort($event.target.value)"
+                        title="Reasoning effort (session default)">
+                  <option value="">effort: —</option>
+                  <template x-for="lvl in effortLevels" :key="lvl">
+                    <option :value="lvl" x-text="lvl" :selected="sessionEffort === lvl"></option>
+                  </template>
+                </select>
               </div>
               <textarea id="message-input" x-ref="messageInput" x-model="messageText" rows="1"
                         placeholder="Send a message..." autofocus

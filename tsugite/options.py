@@ -25,6 +25,7 @@ class ExecutionOptions:
 
     model_override: Optional[str] = None
     max_turns_override: Optional[int] = None
+    reasoning_effort_override: Optional[str] = None
     debug: bool = False
     stream: bool = False
     trust_mcp_code: bool = False

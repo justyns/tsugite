@@ -153,6 +153,8 @@ class SessionStore:
         # In-memory only; resets on daemon restart.
         self._sticky_skills: dict[str, dict[str, int]] = {}
 
+        self._reasoning_effort: dict[str, str] = {}
+
         self._load()
         self._migrate_legacy()
         self._recover_stale_sessions()
@@ -254,6 +256,17 @@ class SessionStore:
         with self._lock:
             return dict(self._sticky_skills.get(session_id, ()))
 
+    def set_reasoning_effort(self, session_id: str, value: str | None) -> None:
+        with self._lock:
+            if value:
+                self._reasoning_effort[session_id] = value
+            else:
+                self._reasoning_effort.pop(session_id, None)
+
+    def get_reasoning_effort(self, session_id: str) -> str | None:
+        with self._lock:
+            return self._reasoning_effort.get(session_id)
+
     def bump_unused_counters(self, session_id: str, referenced: set[str]) -> None:
         """Advance one turn: reset referenced skills, increment the rest.
 
@@ -351,6 +364,10 @@ class SessionStore:
             sticky = self._sticky_skills.pop(session_id, None)
             if sticky:
                 self._sticky_skills[new_id] = sticky
+
+            effort = self._reasoning_effort.pop(session_id, None)
+            if effort:
+                self._reasoning_effort[new_id] = effort
 
             # Mark old session as completed
             old_session.status = SessionStatus.COMPLETED.value

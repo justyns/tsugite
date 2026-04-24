@@ -459,6 +459,10 @@ class BaseAdapter(ABC):
             if channel_context.metadata and channel_context.metadata.get("uploaded_attachments"):
                 attachments.extend(channel_context.metadata.pop("uploaded_attachments"))
 
+            meta = channel_context.metadata or {}
+            effort_override = meta.get("reasoning_effort_override") or self.session_store.get_reasoning_effort(
+                conv_id
+            )
             return run_agent(
                 agent_path=agent_path,
                 prompt=enriched_prompt,
@@ -466,10 +470,9 @@ class BaseAdapter(ABC):
                 attachments=attachments,
                 exec_options=ExecutionOptions(
                     return_token_usage=True,
-                    model_override=(channel_context.metadata or {}).get("model_override")
-                    or self.agent_config.model,
-                    max_turns_override=(channel_context.metadata or {}).get("max_turns_override")
-                    or self.agent_config.max_turns,
+                    model_override=meta.get("model_override") or self.agent_config.model,
+                    max_turns_override=meta.get("max_turns_override") or self.agent_config.max_turns,
+                    reasoning_effort_override=effort_override,
                 ),
                 path_context=path_context,
                 custom_logger=custom_logger,

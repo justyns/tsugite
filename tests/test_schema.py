@@ -56,9 +56,11 @@ def test_schema_enum_values():
     assert "visibility" in properties
     assert properties["visibility"]["enum"] == ["public", "private", "internal"]
 
-    # reasoning_effort should have enum
+    # reasoning_effort no longer has a fixed enum — valid values depend on the
+    # resolved provider+model and are validated at runtime via ModelInfo.
+    # supported_effort_levels. Keep the field present and string-typed.
     assert "reasoning_effort" in properties
-    assert properties["reasoning_effort"]["enum"] == ["low", "medium", "high"]
+    assert "enum" not in properties["reasoning_effort"]
 
 
 def test_schema_has_examples():

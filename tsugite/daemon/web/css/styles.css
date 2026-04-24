@@ -269,6 +269,8 @@ main { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
 .file-remove:hover { color: var(--error); }
 .attach-btn { background: none; border: none; font-size: 20px; cursor: pointer; padding: 4px 8px; align-self: flex-end; color: var(--muted); }
 .attach-btn:hover { color: var(--text); }
+.effort-select { background: var(--surface0); color: var(--text); border: 1px solid var(--surface2); border-radius: 4px; padding: 2px 6px; font-size: 12px; align-self: flex-end; cursor: pointer; }
+.effort-select:hover { border-color: var(--surface3); }
 
 /* Paste banner */
 .paste-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 16px; background: var(--surface); border-top: 1px solid var(--border); font-size: 13px; color: var(--text); flex-wrap: wrap; }

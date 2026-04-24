@@ -500,8 +500,9 @@ def parse_model_kwargs_from_args(args: str, step_name: str) -> dict[str, Any]:
     if pres_penalty is not None:
         model_kwargs["presence_penalty"] = pres_penalty
 
-    # Parse reasoning_effort (for o1, o3, Claude extended thinking)
-    reasoning_effort = _parse_directive_attribute(args, "reasoning_effort", r"low|medium|high")
+    # Parse reasoning_effort. Values validated at runtime against the resolved
+    # model's supported_effort_levels (see tsugite.models.resolve_reasoning_effort).
+    reasoning_effort = _parse_directive_attribute(args, "reasoning_effort", r"[a-z]+")
     if reasoning_effort:
         model_kwargs["reasoning_effort"] = reasoning_effort
 

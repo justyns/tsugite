@@ -433,6 +433,9 @@ class HTTPServer:
             Route("/api/agents/{agent}/compact", self._compact, methods=["POST"]),
             Route("/api/agents/{agent}/respond", self._respond, methods=["POST"]),
             Route("/api/agents/{agent}/unload-skill", self._unload_skill, methods=["POST"]),
+            Route("/api/agents/{agent}/effort-levels", self._effort_levels, methods=["GET"]),
+            Route("/api/sessions/{session_id}/settings", self._session_settings_get, methods=["GET"]),
+            Route("/api/sessions/{session_id}/settings", self._session_settings_patch, methods=["PATCH"]),
             Route("/api/schedules", self._list_schedules, methods=["GET"]),
             Route("/api/schedules", self._create_schedule, methods=["POST"]),
             Route("/api/schedules/cleanup", self._cleanup_schedules, methods=["POST"]),
@@ -961,6 +964,79 @@ class HTTPServer:
 
         return JSONResponse({"status": "ok", "session_id": session.id, "name": skill_name})
 
+    async def _effort_levels(self, request: Request) -> JSONResponse:
+        """Return the effort levels supported by the agent's resolved model."""
+        adapter, err = self._get_adapter(request)
+        if err:
+            return err
+
+        from tsugite.models import get_model_id, parse_model_string, resolve_model_alias
+        from tsugite.providers import get_provider
+
+        model_string = adapter.resolve_model()
+        levels: list[str] | None = None
+        try:
+            resolved = resolve_model_alias(model_string)
+            provider_name, _, _ = parse_model_string(resolved)
+            provider = get_provider(provider_name)
+            info = provider.get_model_info(get_model_id(resolved))
+            if info and info.supported_effort_levels:
+                levels = list(info.supported_effort_levels)
+        except (ValueError, Exception):  # noqa: BLE001 — treat any resolution failure as "unknown"
+            pass
+
+        return JSONResponse({"model": model_string, "supported_effort_levels": levels})
+
+    def _resolve_session_for_settings(
+        self, request: Request
+    ) -> tuple[Optional[HTTPAgentAdapter], Optional[str], Optional[JSONResponse]]:
+        """Look up (adapter, session_id) for a /api/sessions/{session_id}/settings call."""
+        session_id = request.path_params["session_id"]
+        for adapter in self.adapters.values():
+            try:
+                adapter.session_store.get_session(session_id)
+                return adapter, session_id, None
+            except ValueError:
+                continue
+        return None, None, JSONResponse({"error": f"unknown session: {session_id}"}, status_code=404)
+
+    def _resolve_effort_or_400(
+        self, adapter: "HTTPAgentAdapter", value: Any
+    ) -> tuple[Optional[str], Optional[JSONResponse]]:
+        """Validate a reasoning_effort value against the adapter's resolved model."""
+        if value is None:
+            return None, None
+        from tsugite.models import UnsupportedEffortError, resolve_reasoning_effort
+
+        try:
+            return resolve_reasoning_effort(adapter.resolve_model(), value), None
+        except UnsupportedEffortError as err:
+            return None, JSONResponse({"error": str(err), "supported": err.supported}, status_code=400)
+
+    async def _session_settings_get(self, request: Request) -> JSONResponse:
+        adapter, session_id, err = self._resolve_session_for_settings(request)
+        if err:
+            return err
+        return JSONResponse({"reasoning_effort": adapter.session_store.get_reasoning_effort(session_id)})
+
+    async def _session_settings_patch(self, request: Request) -> JSONResponse:
+        adapter, session_id, err = self._resolve_session_for_settings(request)
+        if err:
+            return err
+
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+
+        if "reasoning_effort" in body:
+            value, err_resp = self._resolve_effort_or_400(adapter, body["reasoning_effort"])
+            if err_resp:
+                return err_resp
+            adapter.session_store.set_reasoning_effort(session_id, value)
+
+        return JSONResponse({"reasoning_effort": adapter.session_store.get_reasoning_effort(session_id)})
+
     async def _respond(self, request: Request) -> JSONResponse:
         """Submit a response to an active ask_user prompt."""
         adapter, err = self._get_adapter(request)
@@ -1066,6 +1142,10 @@ class HTTPServer:
         user_id = adapter.resolve_http_user(raw_user_id)
         logger.info("[%s] <- %s (http): %s", agent_name, user_id, message[:100])
 
+        reasoning_effort, err_resp = self._resolve_effort_or_400(adapter, body.get("reasoning_effort"))
+        if err_resp:
+            return err_resp
+
         # Process uploaded files — only accept filenames, resolve against uploads dir
         uploaded_attachments = []
         workspace_only_files = []
@@ -1100,6 +1180,8 @@ class HTTPServer:
         metadata = {"client_ip": request.client.host if request.client else "unknown"}
         if uploaded_attachments:
             metadata["uploaded_attachments"] = uploaded_attachments
+        if reasoning_effort:
+            metadata["reasoning_effort_override"] = reasoning_effort
 
         session_id = body.get("session_id")
         if session_id:

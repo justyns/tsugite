@@ -11,11 +11,21 @@ from .model_registry import register_models
 
 logger = logging.getLogger(__name__)
 
+_CLAUDE_CODE_EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"]
+
 _CLAUDE_CODE_MODELS: dict[str, ModelInfo] = {
-    "claude_code/claude-opus-4-7": ModelInfo(max_input_tokens=1_000_000, supports_vision=True),
-    "claude_code/claude-opus-4-6": ModelInfo(max_input_tokens=1_000_000, supports_vision=True),
-    "claude_code/claude-sonnet-4-6": ModelInfo(max_input_tokens=1_000_000, supports_vision=True),
-    "claude_code/claude-haiku-4-5-20251001": ModelInfo(max_input_tokens=200_000, supports_vision=True),
+    "claude_code/claude-opus-4-7": ModelInfo(
+        max_input_tokens=1_000_000, supports_vision=True, supported_effort_levels=_CLAUDE_CODE_EFFORT_LEVELS
+    ),
+    "claude_code/claude-opus-4-6": ModelInfo(
+        max_input_tokens=1_000_000, supports_vision=True, supported_effort_levels=_CLAUDE_CODE_EFFORT_LEVELS
+    ),
+    "claude_code/claude-sonnet-4-6": ModelInfo(
+        max_input_tokens=1_000_000, supports_vision=True, supported_effort_levels=_CLAUDE_CODE_EFFORT_LEVELS
+    ),
+    "claude_code/claude-haiku-4-5-20251001": ModelInfo(
+        max_input_tokens=200_000, supports_vision=True, supported_effort_levels=_CLAUDE_CODE_EFFORT_LEVELS
+    ),
 }
 
 _ALIASES = {
@@ -101,6 +111,7 @@ class ClaudeCodeProvider:
                 model=resolved_model,
                 system_prompt=system_prompt,
                 resume_session=self._resume_session,
+                effort=kwargs.get("reasoning_effort"),
             )
             user_content = self._build_first_message(messages)
         else:
@@ -114,15 +125,20 @@ class ClaudeCodeProvider:
 
         return await self._collect(user_content)
 
+    _REASONING_PLACEHOLDER = "[Extended reasoning occurred - content redacted by Claude CLI]"
+
     async def _collect(self, user_content: str) -> CompletionResponse:
         """Send message and collect full response."""
         accumulated = ""
+        reasoning_content: str | None = None
         usage = Usage()
         cost = 0.0
 
         async for event in self._process.send_message(user_content):
             if event["type"] == "text_delta":
                 accumulated += event["text"]
+            elif event["type"] == "thinking_detected":
+                reasoning_content = self._REASONING_PLACEHOLDER
             elif event["type"] == "result":
                 if not accumulated:
                     accumulated = event.get("text", "")
@@ -131,6 +147,7 @@ class ClaudeCodeProvider:
 
         return CompletionResponse(
             content=accumulated,
+            reasoning_content=reasoning_content,
             usage=usage,
             cost=cost,
         )

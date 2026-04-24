@@ -485,12 +485,23 @@ async def _execute_agent_with_prompt(
     # Get model string
     model_string = _get_model_string(exec_options.model_override, agent_config)
 
-    # Merge reasoning_effort from agent config into model_kwargs
+    # Merge reasoning_effort. Resolution order: explicit kwargs > override > agent config.
     final_model_kwargs = dict(model_kwargs or {})
-    if hasattr(agent_config, "reasoning_effort") and agent_config.reasoning_effort:
-        # Only add if not already specified in model_kwargs
-        if "reasoning_effort" not in final_model_kwargs:
+    effort_override = getattr(exec_options, "reasoning_effort_override", None)
+    if "reasoning_effort" not in final_model_kwargs:
+        if effort_override:
+            final_model_kwargs["reasoning_effort"] = effort_override
+        elif hasattr(agent_config, "reasoning_effort") and agent_config.reasoning_effort:
             final_model_kwargs["reasoning_effort"] = agent_config.reasoning_effort
+
+    from tsugite.models import resolve_reasoning_effort
+
+    if "reasoning_effort" in final_model_kwargs:
+        resolved_effort = resolve_reasoning_effort(model_string, final_model_kwargs["reasoning_effort"])
+        if resolved_effort is None:
+            final_model_kwargs.pop("reasoning_effort", None)
+        else:
+            final_model_kwargs["reasoning_effort"] = resolved_effort
 
     # Create executor with workspace directory and event bus
     workspace_dir = workspace.path if workspace else None

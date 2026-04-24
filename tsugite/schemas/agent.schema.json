@@ -141,12 +141,7 @@
       ],
       "default": null,
       "title": "Reasoning Effort",
-      "description": "Reasoning effort for o1/o3 models. Options: 'low', 'medium', 'high'. Only applicable to OpenAI reasoning models.",
-      "enum": [
-        "low",
-        "medium",
-        "high"
-      ]
+      "description": "Reasoning / thinking effort level. Valid values depend on the resolved provider + model. OpenAI reasoning models (o1/o3/o4): 'low', 'medium', 'high'. Claude Code: 'low', 'medium', 'high', 'xhigh', 'max'. Anthropic SDK (extended-thinking-capable models): 'low', 'medium', 'high', 'max'. Values are validated at runtime against the resolved model."
     },
     "custom_tools": {
       "items": {

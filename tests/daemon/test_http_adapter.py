@@ -146,6 +146,107 @@ class TestChatEndpoint:
         assert resp.status_code == 400
 
 
+class TestEffortLevelsEndpoint:
+    """GET /api/agents/{agent}/effort-levels returns the resolved model's effort list."""
+
+    def test_unknown_agent(self, client, test_token):
+        resp = client.get(
+            "/api/agents/nope/effort-levels",
+            headers={"Authorization": f"Bearer {test_token}"},
+        )
+        assert resp.status_code == 404
+
+    def test_returns_levels_for_claude_code_model(self, client, mock_adapter, test_token):
+        mock_adapter.agent_config.model = "claude_code:opus"
+        resp = client.get(
+            "/api/agents/test-agent/effort-levels",
+            headers={"Authorization": f"Bearer {test_token}"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["supported_effort_levels"] == ["low", "medium", "high", "xhigh", "max"]
+
+    def test_returns_null_for_non_reasoning_model(self, client, mock_adapter, test_token):
+        mock_adapter.agent_config.model = "anthropic:claude-3-opus-20240229"
+        resp = client.get(
+            "/api/agents/test-agent/effort-levels",
+            headers={"Authorization": f"Bearer {test_token}"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["supported_effort_levels"] is None
+
+
+class TestSessionSettingsEndpoint:
+    """GET/PATCH /api/sessions/{session_id}/settings round-trips reasoning_effort."""
+
+    def test_get_unknown_session(self, client, test_token):
+        resp = client.get(
+            "/api/sessions/does-not-exist/settings",
+            headers={"Authorization": f"Bearer {test_token}"},
+        )
+        assert resp.status_code == 404
+
+    def test_patch_then_get(self, client, mock_adapter, test_token):
+        mock_adapter.agent_config.model = "claude_code:opus"
+        session = mock_adapter.session_store.get_or_create_interactive("user-a", "test-agent")
+
+        resp = client.patch(
+            f"/api/sessions/{session.id}/settings",
+            json={"reasoning_effort": "high"},
+            headers={"Authorization": f"Bearer {test_token}"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["reasoning_effort"] == "high"
+
+        resp = client.get(
+            f"/api/sessions/{session.id}/settings",
+            headers={"Authorization": f"Bearer {test_token}"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["reasoning_effort"] == "high"
+
+    def test_patch_invalid_value_returns_400(self, client, mock_adapter, test_token):
+        mock_adapter.agent_config.model = "claude_code:opus"
+        session = mock_adapter.session_store.get_or_create_interactive("user-b", "test-agent")
+
+        resp = client.patch(
+            f"/api/sessions/{session.id}/settings",
+            json={"reasoning_effort": "bogus"},
+            headers={"Authorization": f"Bearer {test_token}"},
+        )
+        assert resp.status_code == 400
+        body = resp.json()
+        assert "supported" in body
+        assert "xhigh" in body["supported"]
+
+    def test_patch_null_clears_value(self, client, mock_adapter, test_token):
+        mock_adapter.agent_config.model = "claude_code:opus"
+        session = mock_adapter.session_store.get_or_create_interactive("user-c", "test-agent")
+        mock_adapter.session_store.set_reasoning_effort(session.id, "max")
+
+        resp = client.patch(
+            f"/api/sessions/{session.id}/settings",
+            json={"reasoning_effort": None},
+            headers={"Authorization": f"Bearer {test_token}"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["reasoning_effort"] is None
+
+
+class TestChatReasoningEffortOverride:
+    """POST /api/agents/{agent}/chat accepts and validates reasoning_effort."""
+
+    def test_invalid_value_returns_400(self, client, mock_adapter, test_token):
+        mock_adapter.agent_config.model = "claude_code:opus"
+        resp = client.post(
+            "/api/agents/test-agent/chat",
+            json={"message": "hi", "reasoning_effort": "ultra"},
+            headers={"Authorization": f"Bearer {test_token}"},
+        )
+        assert resp.status_code == 400
+        assert "supported" in resp.json()
+
+
 class TestUnloadSkillEndpoint:
     """POST /api/agents/{agent}/unload-skill suppresses a skill for the session."""
 
