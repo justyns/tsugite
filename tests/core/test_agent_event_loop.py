@@ -4,8 +4,8 @@ Behaviors verified:
 - LLM raw responses are recorded verbatim (no parser-rebuild loss)
 - No-code response ends the loop and returns the text as the answer
 - return_value(x) ends the loop and returns the (possibly non-string) value
-- Multi-code-block response is rejected as a format_error event, loop continues
-- Each turn appends model_request + model_response + (code_execution|format_error) events
+- Multi-code-block response executes the first block and emits a warning about dropped extras
+- Each turn appends model_request + model_response + code_execution events
 """
 
 from pathlib import Path
@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from tsugite.core.agent import TsugiteAgent
+from tsugite.events import EventBus, EventType
 from tsugite.history import SessionStorage
 from tsugite.providers.base import CompletionResponse, Usage
 
@@ -126,13 +127,23 @@ async def test_max_turns_returns_last_response_text(storage):
 
 
 @pytest.mark.asyncio
-async def test_multi_code_block_emits_format_error_and_continues(storage):
+async def test_multi_code_block_executes_first_and_warns(storage):
+    """When the model emits multiple ```python blocks in one response, the agent
+    executes only the first block (the parser already takes just the first),
+    emits a WarningEvent noting the extras were dropped, and proceeds normally.
+    No format_error event is recorded and no retry is forced.
+    """
+    event_bus = EventBus()
+    warnings: list = []
+    event_bus.subscribe(lambda e: warnings.append(e) if e.event_type == EventType.WARNING else None)
+
     agent = TsugiteAgent(
         model_string="openai:gpt-4o-mini",
         tools=[],
         instructions="",
         max_turns=5,
         storage=storage,
+        event_bus=event_bus,
     )
     calls = 0
 
@@ -149,7 +160,15 @@ async def test_multi_code_block_emits_format_error_and_continues(storage):
 
     assert result == "Recovered."
     types = [e.type for e in storage.iter_events()]
-    assert "format_error" in types
+    assert "format_error" not in types, "must not reject multi-block response anymore"
+    # First block executed; the second was dropped. Exactly one code_execution on turn 1.
+    code_execs = [e for e in storage.iter_events(types=["code_execution"])]
+    assert len(code_execs) == 1
+    assert code_execs[0].data["code"] == "a=1"
+    # A WarningEvent was emitted mentioning the dropped extras.
+    assert any("2" in w.message and "block" in w.message.lower() for w in warnings), (
+        f"expected a warning mentioning 2 blocks, got: {[w.message for w in warnings]}"
+    )
 
 
 @pytest.mark.asyncio

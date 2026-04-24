@@ -5,7 +5,6 @@ import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
-from xml.sax.saxutils import escape
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +13,6 @@ from tsugite.events import (  # noqa: E402
     CodeExecutionEvent,
     ContentBlockEvent,
     CostSummaryEvent,
-    ErrorEvent,
     EventBus,
     FinalAnswerEvent,
     LLMMessageEvent,
@@ -449,12 +447,22 @@ class TsugiteAgent:
                             self.event_bus.emit(ContentBlockEvent(name=name, content=content))
                     await self.executor.inject_content_blocks(turn.content_blocks)
 
-                # Multiple python blocks: treat as a parser-level format error
-                # and ask the model to retry. Single-block runs and no-code-runs
-                # both proceed past this branch.
-                if turn.num_code_blocks > 1:
-                    self._handle_format_error(turn_num, turn, thought, last_response_text)
-                    continue
+                # Multiple python blocks: the parser already took just the first
+                # one as `code`. Warn the user about the dropped extras and fall
+                # through to normal execution — rejecting used to burn a retry
+                # per multi-block response with no upside since the extras were
+                # never going to run.
+                if turn.num_code_blocks > 1 and self.event_bus:
+                    self.event_bus.emit(
+                        WarningEvent(
+                            message=(
+                                f"Response contained {turn.num_code_blocks} ```python blocks; "
+                                "only the first was executed, the rest were dropped."
+                            ),
+                            category="multi_code_block",
+                            step=turn_num + 1,
+                        )
+                    )
 
                 # No code = the model is done. Its raw text is the answer.
                 if not code or not code.strip():
@@ -592,34 +600,6 @@ class TsugiteAgent:
         if self.storage and not self._user_input_recorded:
             self.storage.record("user_input", text=task)
             self._user_input_recorded = True
-
-    def _handle_format_error(self, turn_num: int, turn, thought: str, raw_content: str) -> None:
-        msg = (
-            f"Format Error: Your response contained {turn.num_code_blocks} separate ```python "
-            "code blocks. Use exactly ONE ```python block per response. Combine all code "
-            "into a single block."
-        )
-        if self.storage:
-            self.storage.record("format_error", reason=f"{turn.num_code_blocks} python blocks", rejected_content=raw_content)
-        if self.event_bus:
-            self.event_bus.emit(ErrorEvent(error=msg, error_type="Format Error", step=turn_num + 1))
-
-        observation = (
-            '<tsugite_execution_result status="error">\n'
-            "<output></output>\n"
-            f"<error>{escape(msg)}</error>\n"
-            "</tsugite_execution_result>"
-        )
-        self.memory.add_step(
-            thought=thought or "(No thought provided)",
-            code="",
-            output=msg,
-            error=None,
-            tools_called=[],
-            xml_observation=observation,
-            content_blocks=turn.content_blocks,
-            raw_content=raw_content,
-        )
 
     def _record_code_execution(self, code: str, exec_result, duration_ms: int) -> None:
         if not self.storage:
@@ -1238,7 +1218,7 @@ Fields:
 
 ## How to write code
 
-- One ```python code block per response. Multiple blocks in one response is a Format Error.
+- One ```python code block per response. If you emit extras, only the first runs; the rest are dropped.
 - Use print() to surface anything you'll want to refer to next turn.
 - Each turn starts with a fresh namespace. Plain variables are discarded between turns.
 - To persist across turns: `state["key"] = value` then `state["key"]` next turn.
