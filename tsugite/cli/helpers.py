@@ -370,7 +370,6 @@ def _validate_common_option_placement(args: List[str]) -> None:
         "--no-color",
         "--show-reasoning",
         "--no-show-reasoning",
-        "--trust-mcp-code",
         "--attachment",
         "-f",
         "--root",

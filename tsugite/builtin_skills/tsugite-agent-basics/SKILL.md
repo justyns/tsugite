@@ -28,7 +28,6 @@ Agents are Markdown files with YAML frontmatter followed by templated content.
 - `spawnable`: Allow other agents to spawn this one (default: true)
 - `extends`: Parent agent to inherit from (default: auto-detect base)
 - `custom_tools`: Define agent-specific shell command tools
-- `mcp_servers`: MCP server configuration
 - `disable_history`: Opt out of conversation persistence
 - `auto_context`: Auto-load CLAUDE.md, CONTEXT.md files
 
@@ -84,11 +83,6 @@ Agents automatically inherit from a base agent unless you opt out. This enables:
 - `custom_tools`
 - Merged based on "name" field
 - Child entry overrides parent if same name
-
-**Dicts (objects):** Deep merge
-- `mcp_servers`
-- Child keys override parent keys
-- New keys added
 
 **Strings (special):** Concatenate
 - `instructions`

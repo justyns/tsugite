@@ -43,19 +43,15 @@ from .config import config_app  # noqa: E402
 from .daemon import daemon_app  # noqa: E402
 from .history import history_app  # noqa: E402
 from .init import init  # noqa: E402
-from .mcp import mcp_app  # noqa: E402
 from .models import models_app  # noqa: E402
 from .plugins import plugin_app  # noqa: E402
 from .run import _unpack_execution_result  # noqa: E402, F401
 from .secrets import secrets_app  # noqa: E402
-from .serve import serve_app  # noqa: E402
 from .tools import tools_app  # noqa: E402
 from .usage import usage_app  # noqa: E402
 from .validate import validate_command  # noqa: E402
 from .workspace import workspace_app  # noqa: E402
 
-app.add_typer(mcp_app, name="mcp")
-app.add_typer(serve_app, name="serve")
 app.add_typer(agents_app, name="agents")
 app.add_typer(config_app, name="config")
 app.add_typer(daemon_app, name="daemon")

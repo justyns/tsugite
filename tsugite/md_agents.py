@@ -51,7 +51,6 @@ class AgentConfig(BaseModel):
     auto_load_skills: List[str] = Field(default_factory=list)
     skill_paths: List[str] = Field(default_factory=list)
     instructions: str = ""
-    mcp_servers: Dict[str, Optional[List[str]]] = Field(default_factory=dict)
     extends: Optional[str] = None
     reasoning_effort: Optional[str] = None  # For reasoning models (low, medium, high)
     custom_tools: List[Dict[str, Any]] = Field(default_factory=list)  # Per-agent shell tools

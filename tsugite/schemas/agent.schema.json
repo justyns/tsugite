@@ -96,23 +96,6 @@
       "title": "Instructions",
       "type": "string"
     },
-    "mcp_servers": {
-      "additionalProperties": {
-        "anyOf": [
-          {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          {
-            "type": "null"
-          }
-        ]
-      },
-      "title": "Mcp Servers",
-      "type": "object"
-    },
     "extends": {
       "anyOf": [
         {

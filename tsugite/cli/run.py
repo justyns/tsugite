@@ -263,7 +263,6 @@ def run(
     plain: bool = typer.Option(False, "--plain", help="Plain output without panels/boxes (copy-paste friendly)"),
     stream: bool = typer.Option(False, "--stream", help="Stream LLM responses in real-time"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show execution plan without running agent"),
-    trust_mcp_code: bool = typer.Option(False, "--trust-mcp-code", help="Trust remote code from MCP servers"),
     attachment: Optional[List[str]] = typer.Option(
         None, "-f", "--attachment", help="Attachment(s) to include (repeatable)"
     ),
@@ -347,7 +346,6 @@ def run(
         model=model,
         debug=debug,
         stream=stream,
-        trust_mcp_code=trust_mcp_code,
         dry_run=dry_run,
         sandbox=sandbox,
         no_sandbox=no_sandbox,

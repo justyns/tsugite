@@ -54,7 +54,7 @@ Tsugite is an agentic CLI that executes AI agents defined as markdown files with
 1. **CLI Entry** (`tsugite/cli/__init__.py`)
    - Typer-based CLI with subcommands
    - Main commands: `run` (single-shot), `chat` (interactive), `render` (preview)
-   - Additional: `daemon`, `workspace`, `init`, `validate`, `mcp`, `serve`, `agents`, `config`, `attachments`, `cache`, `tools`, `history`
+   - Additional: `daemon`, `workspace`, `init`, `validate`, `agents`, `config`, `attachments`, `cache`, `tools`, `history`
 
 2. **Agent Resolution & Inheritance** (`tsugite/agent_inheritance.py`)
    - Resolves agent names to file paths using search order:
@@ -112,7 +112,6 @@ Tsugite is an agentic CLI that executes AI agents defined as markdown files with
    - Tool registry with built-in tools (fs, http, shell, tasks, agents, memory, skills, history, interactive)
    - Category system: `@fs`, `@http`, `@shell`, `@tasks`, `@agents`, `@memory`, `@skills`, `@history`, `@interactive`
    - Custom shell tools (config-based command wrappers)
-   - MCP integration (`tsugite/mcp_client.py`)
    - Tool expansion supports globs (`*_search`) and exclusions (`-delete_file`)
 
 9. **Event System** (`tsugite/events/`)
@@ -131,7 +130,6 @@ Tsugite is an agentic CLI that executes AI agents defined as markdown files with
     - XDG-compliant paths: `~/.config/tsugite/` or `$XDG_CONFIG_HOME/tsugite/`
     - JSON config with model aliases, default settings
     - Attachment storage (reusable context)
-    - MCP server registration
     - Auto-context discovery (CLAUDE.md, AGENTS.md, CONTEXT.md)
 
 ### Key Data Structures

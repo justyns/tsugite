@@ -73,26 +73,6 @@ def test_merge_agent_configs_lists():
     assert merged.prefetch[1]["tool"] == "get_config"
 
 
-def test_merge_agent_configs_dicts():
-    """Test merging dict fields (mcp_servers)."""
-    parent = AgentConfig(
-        name="parent",
-        mcp_servers={"server1": ["tool1"], "server2": None},
-    )
-
-    child = AgentConfig(
-        name="child",
-        mcp_servers={"server2": ["tool2"], "server3": ["tool3"]},
-    )
-
-    merged = merge_agent_configs(parent, child)
-
-    # Child keys should override parent
-    assert merged.mcp_servers["server1"] == ["tool1"]
-    assert merged.mcp_servers["server2"] == ["tool2"]
-    assert merged.mcp_servers["server3"] == ["tool3"]
-
-
 def test_merge_agent_configs_instructions():
     """Test merging instruction strings (concatenate)."""
     parent = AgentConfig(

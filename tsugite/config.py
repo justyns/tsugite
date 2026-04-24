@@ -20,7 +20,7 @@ def get_xdg_config_path(filename: str) -> Path:
     Returns the first existing file, or the preferred location for new files.
 
     Args:
-        filename: Name of the config file (e.g., "config.json", "mcp.json")
+        filename: Name of the config file (e.g., "config.json", "daemon.yaml")
 
     Returns:
         Path to config file

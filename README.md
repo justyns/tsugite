@@ -63,8 +63,8 @@ tsu run +default "summarize the files in this directory"
 # Run an agent file directly
 tsu run my-agent.md "do the thing"
 
-# Start the web UI
-tsu serve
+# Start the daemon (web UI, Discord/Telegram bots)
+tsu daemon
 ```
 
 ## Features
@@ -76,7 +76,6 @@ tsu serve
 - **Skills** directory-based knowledge modules (mostly) following the [agentskills.io](https://agentskills.io/) SKILL.md format
 - **Hooks** that fire shell commands on lifecycle events (post-tool, pre-message, pre/post-compact)
 - **Sandbox** (linux only) via bubblewrap with filesystem and network isolation
-- **MCP** integration for connecting to MCP servers
 
 ## Agents in more detail
 
@@ -124,7 +123,7 @@ All paths follow [XDG Base Directory](https://specifications.freedesktop.org/bas
 
 | Path                                   | Default                              | Contents                                     |
 |----------------------------------------|--------------------------------------|----------------------------------------------|
-| `$XDG_CONFIG_HOME/tsugite/`            | `~/.config/tsugite/`                 | `config.json`, `mcp.json`, `daemon.yaml`     |
+| `$XDG_CONFIG_HOME/tsugite/`            | `~/.config/tsugite/`                 | `config.json`, `daemon.yaml`                 |
 | `$XDG_DATA_HOME/tsugite/history/`      | `~/.local/share/tsugite/history/`    | Session history (JSONL per session)          |
 | `$XDG_DATA_HOME/tsugite/daemon/`       | `~/.local/share/tsugite/daemon/`     | Daemon state                                 |
 | `$XDG_DATA_HOME/tsugite/secrets/`      | `~/.local/share/tsugite/secrets/`    | Encrypted secrets (`secrets.db`)             |

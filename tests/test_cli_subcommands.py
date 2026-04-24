@@ -10,36 +10,6 @@ from tsugite.cli import app
 runner = CliRunner()
 
 
-class TestMcpSubcommands:
-    """Test MCP CLI subcommands."""
-
-    def test_mcp_help(self):
-        """Test mcp --help works."""
-        result = runner.invoke(app, ["mcp", "--help"])
-        assert result.exit_code == 0
-        assert "mcp" in result.stdout.lower()
-
-    def test_mcp_list_empty(self):
-        """Test mcp list with no servers."""
-        with patch("tsugite.mcp_config.load_mcp_config") as mock_load:
-            mock_load.return_value = {}
-            result = runner.invoke(app, ["mcp", "list"])
-            assert result.exit_code == 0
-            assert "No MCP servers configured" in result.stdout
-
-    def test_mcp_list_with_servers(self):
-        """Test mcp list with servers."""
-        from tsugite.mcp_config import MCPServerConfig
-
-        with patch("tsugite.mcp_config.load_mcp_config") as mock_load:
-            mock_load.return_value = {
-                "test-server": MCPServerConfig(name="test-server", url="http://localhost:8000/mcp")
-            }
-            result = runner.invoke(app, ["mcp", "list"])
-            assert result.exit_code == 0
-            assert "test-server" in result.stdout
-
-
 class TestAgentsSubcommands:
     """Test agents CLI subcommands."""
 

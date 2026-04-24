@@ -189,7 +189,6 @@ def _make_agent_config(tools=None):
         tools=tools or ["write_file"],
         prefetch=[],
         instructions="",
-        mcp_servers={},
         extends=None,
     )
 
