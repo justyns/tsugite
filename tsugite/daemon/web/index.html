@@ -24,8 +24,14 @@
   <div class="tab-bar">
     <template x-for="tab in $store.app.tabs" :key="tab">
       <button @click="$store.app.view = tab; location.hash = tab; $store.app.menuOpen = false"
-              :class="{ active: $store.app.view === tab }"
-              x-text="tab[0].toUpperCase() + tab.slice(1)"></button>
+              :class="{ active: $store.app.view === tab }">
+        <span x-text="tab[0].toUpperCase() + tab.slice(1)"></span>
+        <template x-if="tab === 'skills' && $store.app.skillIssuesCount > 0">
+          <span class="tab-badge"
+                :title="$store.app.skillIssuesCount + ' skill issue' + ($store.app.skillIssuesCount === 1 ? '' : 's')"
+                x-text="$store.app.skillIssuesCount"></span>
+        </template>
+      </button>
     </template>
   </div>
   <span class="spacer"></span>
@@ -816,6 +822,23 @@
 
   <!-- Skill Files -->
   <div class="view" x-show="$store.app.view === 'skills'" x-data="skillFileView" x-cloak>
+    <div x-show="$store.app.skillIssuesCount > 0" class="skill-issues-banner">
+      <div class="skill-issues-header">
+        <strong x-text="$store.app.skillIssuesCount + ' skill' + ($store.app.skillIssuesCount === 1 ? '' : 's') + ' failed to load'"></strong>
+        <span style="color:var(--muted);font-size:12px">These skills are not available until fixed.</span>
+      </div>
+      <ul class="skill-issues-list">
+        <template x-for="issue in $store.app.skillIssues" :key="issue.path + ':' + issue.message">
+          <li>
+            <span class="skill-issue-severity" :class="'severity-' + issue.severity" x-text="issue.severity"></span>
+            <strong x-text="issue.name"></strong>
+            <span style="color:var(--muted);font-size:12px;margin-left:6px" x-text="'(' + issue.source + ')'"></span>
+            <div class="skill-issue-message" x-text="issue.message"></div>
+            <div class="skill-issue-path" x-text="issue.path"></div>
+          </li>
+        </template>
+      </ul>
+    </div>
     <div class="view-scroll two-pane" style="height:100%; overflow:hidden">
       <!-- File list -->
       <div class="pane-sidebar" :class="{ 'sidebar-open': sidebarOpen, 'mobile-hidden': selectedFile }">

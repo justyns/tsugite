@@ -30,6 +30,9 @@ export default function fileEditorView(viewName, apiPrefix) {
       try {
         const data = await get(`/api/${apiPrefix}`);
         this.files = data.files || [];
+        if (viewName === 'skills' && window.tsugiteLoadSkillIssues) {
+          window.tsugiteLoadSkillIssues();
+        }
       } catch (e) {
         this.error = e.message;
       } finally {

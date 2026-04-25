@@ -739,6 +739,53 @@ class TestSSEProgressHandler:
         assert recorded == []
 
 
+class TestSkillIssuesEndpoint:
+    """GET /api/skills/issues surfaces skill validation problems for the web UI."""
+
+    def test_unauthorized_without_token(self, client):
+        resp = client.get("/api/skills/issues")
+        assert resp.status_code == 401
+
+    def test_clean_workspace_returns_no_issues(self, client, test_token, tmp_path, monkeypatch):
+        empty_skills = tmp_path / "empty"
+        empty_skills.mkdir()
+        monkeypatch.chdir(empty_skills)
+        monkeypatch.setenv("HOME", str(empty_skills))
+
+        resp = client.get(
+            "/api/skills/issues",
+            headers={"Authorization": f"Bearer {test_token}"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "issues" in data
+        assert data["total"] == len(data["issues"])
+
+    def test_warning_issue_surfaced(self, client, test_token, tmp_path, monkeypatch):
+        skills_root = tmp_path / ".tsugite" / "skills"
+        skills_root.mkdir(parents=True)
+        bad = skills_root / "bad-trig"
+        bad.mkdir()
+        (bad / "SKILL.md").write_text(
+            "---\nname: bad-trig\ndescription: x\ntriggers:\n  - 403\n---\nBody.\n"
+        )
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("HOME", str(tmp_path))
+
+        resp = client.get(
+            "/api/skills/issues",
+            headers={"Authorization": f"Bearer {test_token}"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        names = [i["name"] for i in data["issues"]]
+        assert "bad-trig" in names
+        bad_trig = next(i for i in data["issues"] if i["name"] == "bad-trig")
+        assert bad_trig["severity"] == "warning"
+        assert bad_trig["source"] == "scan"
+        assert "trigger" in bad_trig["message"].lower()
+
+
 class TestHTTPConfig:
     def test_config_defaults(self):
         config = HTTPConfig()

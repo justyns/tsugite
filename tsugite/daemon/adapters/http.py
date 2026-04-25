@@ -495,6 +495,7 @@ class HTTPServer:
             Route("/api/skill-files", self._list_skill_files, methods=["GET"]),
             Route("/api/skill-files/content", self._read_skill_file, methods=["GET"]),
             Route("/api/skill-files/content", self._save_skill_file, methods=["PUT"]),
+            Route("/api/skills/issues", self._list_skill_issues, methods=["GET"]),
             Route("/api/agents/{agent}/workspace", self._list_workspace_files, methods=["GET"]),
             Route("/api/agents/{agent}/workspace/content", self._read_workspace_file, methods=["GET"]),
             Route("/api/agents/{agent}/workspace/content", self._save_workspace_file, methods=["PUT"]),
@@ -1981,6 +1982,43 @@ class HTTPServer:
 
     async def _save_skill_file(self, request: Request) -> JSONResponse:
         return await self._save_md_file(request, self._get_allowed_skill_dirs())
+
+    async def _list_skill_issues(self, request: Request) -> JSONResponse:
+        if err := self._check_auth(request):
+            return err
+        from tsugite.skill_discovery import scan_skills_with_issues
+
+        _, scan_issues = scan_skills_with_issues()
+        items = [
+            {
+                "name": issue.name or "?",
+                "source": "scan",
+                "path": str(issue.path),
+                "severity": issue.severity,
+                "message": issue.message,
+            }
+            for issue in scan_issues
+        ]
+
+        try:
+            from tsugite.tools.skills import get_skill_manager
+
+            manager = get_skill_manager()
+            for name, message in manager._load_failures.items():
+                meta = manager._skill_registry.get(name)
+                items.append(
+                    {
+                        "name": name,
+                        "source": "load",
+                        "path": str(meta.skill_md_path) if meta else "?",
+                        "severity": "error",
+                        "message": message,
+                    }
+                )
+        except Exception:
+            logger.debug("skill_manager load_failures unavailable", exc_info=True)
+
+        return JSONResponse({"issues": items, "total": len(items)})
 
     # -- Workspace browser endpoints --
 

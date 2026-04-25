@@ -34,6 +34,8 @@ Alpine.store('app', {
   viewSessionId: initialParsed.sessionId || null,
   pendingWorkspaceFiles: [],
   autoFollow: localStorage.getItem('tsugite_auto_follow') !== 'false',
+  skillIssues: [],
+  skillIssuesCount: 0,
 });
 
 Alpine.data('conversationsView', conversationsView);
@@ -80,8 +82,21 @@ async function loadAgents() {
     store.selectedAgent = store.agents[0].name;
   }
   connectSSE();
+  loadSkillIssues().catch(() => {});
 }
 window.tsugiteLoadAgents = loadAgents;
+
+async function loadSkillIssues() {
+  try {
+    const data = await get('/api/skills/issues');
+    const store = Alpine.store('app');
+    store.skillIssues = data.issues || [];
+    store.skillIssuesCount = data.total || 0;
+  } catch {
+    /* leave previous state on transient failure */
+  }
+}
+window.tsugiteLoadSkillIssues = loadSkillIssues;
 
 function connectSSE() {
   if (_es) return;
