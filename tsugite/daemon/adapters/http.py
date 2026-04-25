@@ -1986,39 +1986,9 @@ class HTTPServer:
     async def _list_skill_issues(self, request: Request) -> JSONResponse:
         if err := self._check_auth(request):
             return err
-        from tsugite.skill_discovery import scan_skills_with_issues
+        from tsugite.tools.skills import get_failed_skills_list
 
-        _, scan_issues = scan_skills_with_issues()
-        items = [
-            {
-                "name": issue.name or "?",
-                "source": "scan",
-                "path": str(issue.path),
-                "severity": issue.severity,
-                "message": issue.message,
-            }
-            for issue in scan_issues
-        ]
-
-        try:
-            from tsugite.tools.skills import get_skill_manager
-
-            manager = get_skill_manager()
-            for name, message in manager._load_failures.items():
-                meta = manager._skill_registry.get(name)
-                items.append(
-                    {
-                        "name": name,
-                        "source": "load",
-                        "path": str(meta.skill_md_path) if meta else "?",
-                        "severity": "error",
-                        "message": message,
-                    }
-                )
-        except Exception:
-            logger.debug("skill_manager load_failures unavailable", exc_info=True)
-
-        return JSONResponse({"issues": items, "total": len(items)})
+        return JSONResponse({"issues": get_failed_skills_list()})
 
     # -- Workspace browser endpoints --
 

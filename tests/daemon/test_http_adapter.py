@@ -759,7 +759,6 @@ class TestSkillIssuesEndpoint:
         assert resp.status_code == 200
         data = resp.json()
         assert "issues" in data
-        assert data["total"] == len(data["issues"])
 
     def test_warning_issue_surfaced(self, client, test_token, tmp_path, monkeypatch):
         skills_root = tmp_path / ".tsugite" / "skills"

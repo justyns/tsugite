@@ -31,6 +31,7 @@ _VALID_NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _MAX_NAME_LENGTH = 64
 
 SkillIssueSeverity = Literal["error", "warning"]
+SkillIssueSource = Literal["scan", "load"]
 
 
 @dataclass

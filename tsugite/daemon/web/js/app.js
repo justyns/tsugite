@@ -35,7 +35,6 @@ Alpine.store('app', {
   pendingWorkspaceFiles: [],
   autoFollow: localStorage.getItem('tsugite_auto_follow') !== 'false',
   skillIssues: [],
-  skillIssuesCount: 0,
 });
 
 Alpine.data('conversationsView', conversationsView);
@@ -89,11 +88,9 @@ window.tsugiteLoadAgents = loadAgents;
 async function loadSkillIssues() {
   try {
     const data = await get('/api/skills/issues');
-    const store = Alpine.store('app');
-    store.skillIssues = data.issues || [];
-    store.skillIssuesCount = data.total || 0;
+    Alpine.store('app').skillIssues = data.issues || [];
   } catch {
-    /* leave previous state on transient failure */
+    /* keep prior state on transient failure */
   }
 }
 window.tsugiteLoadSkillIssues = loadSkillIssues;

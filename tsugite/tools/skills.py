@@ -9,6 +9,7 @@ from tsugite import renderer
 from tsugite.renderer import AgentRenderer
 from tsugite.skill_discovery import (
     SkillIssue,
+    SkillIssueSource,
     SkillMeta,
     build_skill_index,
     match_triggered_skills,
@@ -21,6 +22,22 @@ logger = logging.getLogger(__name__)
 
 _BUNDLED_SUBDIRS = ("scripts", "references", "assets")
 _MAX_RESOURCES_LISTED = 10
+
+
+def _failed_skill_dict(
+    name: Optional[str],
+    source: SkillIssueSource,
+    path,
+    severity: str,
+    message: str,
+) -> Dict[str, str]:
+    return {
+        "name": name or "?",
+        "source": source,
+        "path": str(path),
+        "severity": severity,
+        "message": message,
+    }
 
 
 def _enumerate_bundled_resources(skill_dir: Path) -> List[str]:
@@ -239,34 +256,16 @@ class SkillManager:
         return self._loaded_skills.copy()
 
     def get_failed_skills_list(self) -> List[Dict[str, str]]:
-        """Return scan + load failures merged for user-facing surfaces.
-
-        Each item: {name, source: "scan"|"load", path, severity, message}.
-        """
+        """Return scan + load failures merged for user-facing surfaces."""
         self._ensure_registry_initialized()
-        items: List[Dict[str, str]] = []
-        for issue in self._scan_issues:
-            items.append(
-                {
-                    "name": issue.name or "?",
-                    "source": "scan",
-                    "path": str(issue.path),
-                    "severity": issue.severity,
-                    "message": issue.message,
-                }
-            )
+        items: List[Dict[str, str]] = [
+            _failed_skill_dict(issue.name, "scan", issue.path, issue.severity, issue.message)
+            for issue in self._scan_issues
+        ]
         for name, message in self._load_failures.items():
             meta = self._skill_registry.get(name)
-            path = str(meta.skill_md_path) if meta else "?"
-            items.append(
-                {
-                    "name": name,
-                    "source": "load",
-                    "path": path,
-                    "severity": "error",
-                    "message": message,
-                }
-            )
+            path = meta.skill_md_path if meta else "?"
+            items.append(_failed_skill_dict(name, "load", path, "error", message))
         return items
 
     def get_triggered_skills(self, message: str, max_skills: int = 3) -> List[str]:

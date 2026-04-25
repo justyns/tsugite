@@ -216,7 +216,7 @@ Skills may show bash commands. Translate to Python: `shell.run("kubectl get pods
 
 {% if failed_skills %}
 <failed_skills>
-The following skills could not be loaded and are NOT available. If the user asks about one or seems to be relying on it, mention it is broken and point them at the file so they can fix it.
+These skills had errors or warnings during discovery/load. Errors mean the skill is unavailable. Warnings mean it loaded with a bad field stripped (e.g. an invalid trigger). If the user mentions one of these, tell them what's wrong and point them at the file.
 
 {% for f in failed_skills %}
 - **{{ f.name }}** ({{ f.severity }}, {{ f.source }}): {{ f.message }} at `{{ f.path }}`

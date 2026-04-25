@@ -40,7 +40,7 @@ class TestSkillCheck:
         )
         result = runner.invoke(app, ["skill", "check"])
         assert result.exit_code == 0
-        assert "clean-skill" not in result.stdout or "ok" in result.stdout.lower() or "no issues" in result.stdout.lower()
+        assert "no issues" in result.stdout.lower()
 
     def test_warning_issue_exits_zero(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)

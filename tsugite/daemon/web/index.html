@@ -26,10 +26,10 @@
       <button @click="$store.app.view = tab; location.hash = tab; $store.app.menuOpen = false"
               :class="{ active: $store.app.view === tab }">
         <span x-text="tab[0].toUpperCase() + tab.slice(1)"></span>
-        <template x-if="tab === 'skills' && $store.app.skillIssuesCount > 0">
+        <template x-if="tab === 'skills' && $store.app.skillIssues.length > 0">
           <span class="tab-badge"
-                :title="$store.app.skillIssuesCount + ' skill issue' + ($store.app.skillIssuesCount === 1 ? '' : 's')"
-                x-text="$store.app.skillIssuesCount"></span>
+                :title="$store.app.skillIssues.length + ' skill issue' + ($store.app.skillIssues.length === 1 ? '' : 's')"
+                x-text="$store.app.skillIssues.length"></span>
         </template>
       </button>
     </template>
@@ -822,10 +822,10 @@
 
   <!-- Skill Files -->
   <div class="view" x-show="$store.app.view === 'skills'" x-data="skillFileView" x-cloak>
-    <div x-show="$store.app.skillIssuesCount > 0" class="skill-issues-banner">
+    <div x-show="$store.app.skillIssues.length > 0" class="skill-issues-banner">
       <div class="skill-issues-header">
-        <strong x-text="$store.app.skillIssuesCount + ' skill' + ($store.app.skillIssuesCount === 1 ? '' : 's') + ' failed to load'"></strong>
-        <span style="color:var(--muted);font-size:12px">These skills are not available until fixed.</span>
+        <strong x-text="$store.app.skillIssues.length + ' skill issue' + ($store.app.skillIssues.length === 1 ? '' : 's')"></strong>
+        <span style="color:var(--muted);font-size:12px">Errors block the skill; warnings load with the bad field stripped.</span>
       </div>
       <ul class="skill-issues-list">
         <template x-for="issue in $store.app.skillIssues" :key="issue.path + ':' + issue.message">
