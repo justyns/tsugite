@@ -379,11 +379,26 @@ class TestFindReferencedSkills:
         metas = [self._meta("weather", triggers=["forecast"])]
         assert find_referenced_skills("the forecast today", metas) == {"weather"}
 
-    def test_respects_word_boundary(self):
+    def test_plain_trigger_is_substring_case_insensitive(self):
         from tsugite.skill_discovery import find_referenced_skills
 
         metas = [self._meta("weather", triggers=["forecast"])]
-        assert find_referenced_skills("weathering of rocks", metas) == set()
+        assert find_referenced_skills("weathering of rocks", metas) == {"weather"}
+        assert find_referenced_skills("FORECASTING tomorrow", metas) == {"weather"}
+
+    def test_multi_word_trigger_matches_phrase(self):
+        from tsugite.skill_discovery import find_referenced_skills
+
+        metas = [self._meta("uridx", triggers=["semantic search"])]
+        assert find_referenced_skills("please run a semantic search", metas) == {"uridx"}
+        assert find_referenced_skills("semantic only here", metas) == set()
+
+    def test_regex_trigger_with_word_boundaries(self):
+        from tsugite.skill_discovery import find_referenced_skills
+
+        metas = [self._meta("weather", triggers=[r"/\bsearch\b/"])]
+        assert find_referenced_skills("please search now", metas) == {"weather"}
+        assert find_referenced_skills("research project", metas) == set()
 
     def test_case_insensitive(self):
         from tsugite.skill_discovery import find_referenced_skills
@@ -423,13 +438,38 @@ class TestMatchTriggeredSkills:
         skills = [self._make_skill("weather", triggers=["weather"])]
         assert len(match_triggered_skills("WEATHER report please", skills)) == 1
 
-    def test_word_boundary_no_substring(self):
+    def test_plain_trigger_is_substring(self):
+        """Plain trigger strings are case-insensitive substrings (no word boundaries)."""
         skills = [self._make_skill("weather", triggers=["weather"])]
-        assert len(match_triggered_skills("The weathering of rocks", skills)) == 0
+        assert len(match_triggered_skills("The weathering of rocks", skills)) == 1
 
     def test_word_boundary_matches_punctuation(self):
         skills = [self._make_skill("weather", triggers=["weather"])]
         assert len(match_triggered_skills("How's the weather?", skills)) == 1
+
+    def test_multi_word_trigger_matches_phrase(self):
+        skills = [self._make_skill("uridx", triggers=["semantic search"])]
+        assert len(match_triggered_skills("please run a semantic search", skills)) == 1
+        assert len(match_triggered_skills("semantic only here", skills)) == 0
+
+    def test_regex_trigger_with_word_boundaries(self):
+        skills = [self._make_skill("weather", triggers=[r"/\bsearch\b/"])]
+        assert len(match_triggered_skills("please search now", skills)) == 1
+        assert len(match_triggered_skills("research project", skills)) == 0
+
+    def test_regex_trigger_with_alternation(self):
+        skills = [self._make_skill("compose", triggers=["/foo|bar/"])]
+        assert len(match_triggered_skills("contains foo here", skills)) == 1
+        assert len(match_triggered_skills("contains bar here", skills)) == 1
+        assert len(match_triggered_skills("nothing matches", skills)) == 0
+
+    def test_uridx_repro_from_issue(self):
+        """Repro of the exact case from issue #204: single-word trigger inside a longer message."""
+        skills = [self._make_skill("uridx", triggers=["uridx", "semantic search", "search index"])]
+        message = "Can you test if you can use uridx to search for similar topics?"
+        result = match_triggered_skills(message, skills)
+        assert len(result) == 1
+        assert result[0].name == "uridx"
 
     def test_no_triggers_skipped(self):
         skills = [self._make_skill("basic", triggers=[])]
@@ -497,6 +537,27 @@ class TestMatchTriggeredSkills:
         basic = [s for s in skills if s.name == "basic"]
         assert len(basic) == 1
         assert basic[0].triggers == []
+
+    def test_scan_skills_drops_invalid_regex_triggers(self, tmp_path, monkeypatch, caplog):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("HOME", str(tmp_path))
+        skill_dir = tmp_path / ".tsugite" / "skills" / "broken"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\n"
+            "name: broken\n"
+            "description: Has one bad regex trigger\n"
+            "triggers:\n"
+            '  - "/[unclosed/"\n'
+            "  - good\n"
+            "---\nBody.\n"
+        )
+        with caplog.at_level("WARNING"):
+            skills = scan_skills()
+        broken = [s for s in skills if s.name == "broken"]
+        assert len(broken) == 1
+        assert broken[0].triggers == ["good"]
+        assert any("regex" in rec.getMessage().lower() for rec in caplog.records)
 
     def test_scan_skills_filters_non_string_triggers(self, tmp_path, monkeypatch, caplog):
         monkeypatch.chdir(tmp_path)

@@ -18,6 +18,7 @@ bundled resources are loaded on demand by `SkillManager.load_skill`.
 import logging
 import re
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import List, Optional, Set
 
@@ -194,12 +195,17 @@ def scan_skills(workspace=None, extra_paths: Optional[List[str]] = None) -> List
             else:
                 triggers = []
                 for item in triggers_raw:
-                    if isinstance(item, str):
-                        triggers.append(item)
-                    else:
+                    if not isinstance(item, str):
                         logger.warning(
                             f"Skill '{name}' at {skill_md}: trigger {item!r} is not a string; ignoring"
                         )
+                        continue
+                    if _compile_trigger(item) is None:
+                        logger.warning(
+                            f"Skill '{name}' at {skill_md}: trigger {item!r} is not a valid regex; ignoring"
+                        )
+                        continue
+                    triggers.append(item)
 
             ttl_raw = frontmatter.get("ttl")
             ttl: Optional[int] = None
@@ -224,27 +230,41 @@ def scan_skills(workspace=None, extra_paths: Optional[List[str]] = None) -> List
     return skills
 
 
-_WORD_SPLIT = re.compile(r"\W+")
+@lru_cache(maxsize=512)
+def _compile_trigger(trigger: str) -> Optional[re.Pattern]:
+    """Compile a trigger string to a case-insensitive regex.
+
+    A trigger is interpreted as a literal substring unless it is wrapped in
+    forward slashes (e.g. "/\\bword\\b/"), in which case the inside is
+    compiled as a regex. Returns None if the regex form is invalid.
+    """
+    if len(trigger) >= 2 and trigger.startswith("/") and trigger.endswith("/"):
+        pattern = trigger[1:-1]
+    else:
+        pattern = re.escape(trigger)
+    try:
+        return re.compile(pattern, re.IGNORECASE)
+    except re.error:
+        return None
 
 
-def _extract_words(text: str) -> Set[str]:
-    """Split text into a set of lowercase words on non-word boundaries."""
-    return set(_WORD_SPLIT.split(text.lower()))
+def _trigger_matches(message: str, trigger: str) -> bool:
+    pattern = _compile_trigger(trigger)
+    return pattern is not None and pattern.search(message) is not None
 
 
 def find_referenced_skills(text: str, skills: List[SkillMeta]) -> Set[str]:
     """Return names of skills whose name or any trigger appears in text.
 
-    Uses the same word-boundary, case-insensitive matching as trigger dispatch
-    so "keeping the skill alive" stays symmetric with "how it got loaded."
+    Uses the same case-insensitive matching as trigger dispatch so
+    "keeping the skill alive" stays symmetric with "how it got loaded."
     """
     if not text:
         return set()
-    words = _extract_words(text)
     referenced: Set[str] = set()
     for skill in skills:
         for candidate in (skill.name, *skill.triggers):
-            if candidate and candidate.lower() in words:
+            if candidate and _trigger_matches(text, candidate):
                 referenced.add(skill.name)
                 break
     return referenced
@@ -258,8 +278,10 @@ def match_triggered_skills(
 ) -> List[SkillMeta]:
     """Find skills whose trigger keywords appear in the message.
 
-    Uses word-boundary matching (case-insensitive). Skills are ranked by
-    number of matching triggers so more specific matches come first.
+    Plain-string triggers match as case-insensitive substrings. Triggers
+    wrapped in forward slashes (e.g. "/\\bword\\b/") are treated as regex
+    patterns. Skills are ranked by number of matching triggers so more
+    specific matches come first.
 
     Triggers are a tsugite extension and not part of the agentskills.io spec.
 
@@ -273,14 +295,13 @@ def match_triggered_skills(
         List of matching SkillMeta objects, up to max_skills.
     """
     already_loaded = already_loaded or set()
-    message_words = set(_WORD_SPLIT.split(message.lower()))
     matches = []
 
     for skill in skills:
         if not skill.triggers or skill.name in already_loaded:
             continue
 
-        match_count = sum(1 for t in skill.triggers if t.lower() in message_words)
+        match_count = sum(1 for t in skill.triggers if _trigger_matches(message, t))
         if match_count > 0:
             matches.append((match_count, skill))
 

@@ -142,12 +142,9 @@ class BaseAdapter(ABC):
         self._identity_map = identity_map or {}
         self.event_bus = None  # Set by HTTPServer for global SSE broadcast
 
-        from tsugite.workspace import Workspace, WorkspaceNotFoundError
+        from tsugite.workspace import Workspace
 
-        try:
-            self._workspace = Workspace.load(agent_config.workspace_dir)
-        except WorkspaceNotFoundError:
-            self._workspace = None
+        self._workspace = Workspace.try_load(agent_config.workspace_dir)
 
         # Workspace attachments are built per-message via _get_workspace_attachments()
         # so that daily memory files (memory/YYYY-MM-DD.md) are picked up fresh.

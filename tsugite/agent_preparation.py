@@ -232,13 +232,18 @@ class AgentPreparer:
                 deduped.append(att)
         all_attachments = deduped
 
-        # Step 0c: Set up workspace-aware skill manager so tools see workspace skills
+        # Step 0c: Set up workspace-aware skill manager. Fall back to
+        # path_context.workspace_dir when no Workspace was passed so daemon/chat
+        # callers still get workspace skills.
         from tsugite.config import load_config as _load_config
         from tsugite.tools.skills import SkillManager, set_skill_manager
+        from tsugite.workspace.models import Workspace
+
+        effective_workspace = workspace or Workspace.try_load(path_context.workspace_dir if path_context else None)
 
         _config = _load_config()
         extra_skill_paths = (agent_config.skill_paths or []) + (_config.skill_paths or [])
-        _skill_manager = SkillManager(workspace=workspace, extra_paths=extra_skill_paths or None)
+        _skill_manager = SkillManager(workspace=effective_workspace, extra_paths=extra_skill_paths or None)
         set_skill_manager(_skill_manager)
 
         # Step 1: Execute prefetch tools

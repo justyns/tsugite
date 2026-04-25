@@ -150,6 +150,16 @@ class Workspace:
         return cls(name=path.name, path=path)
 
     @classmethod
+    def try_load(cls, path: Optional[Path]) -> Optional["Workspace"]:
+        """Load workspace from path, returning None when path is missing or invalid."""
+        if path is None:
+            return None
+        try:
+            return cls.load(Path(path))
+        except WorkspaceNotFoundError:
+            return None
+
+    @classmethod
     def create(
         cls,
         path: Path,
