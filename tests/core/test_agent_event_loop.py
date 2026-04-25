@@ -172,6 +172,104 @@ async def test_multi_code_block_executes_first_and_warns(storage):
 
 
 @pytest.mark.asyncio
+async def test_multi_code_block_warning_lands_in_next_turn_observation(storage):
+    """Regression test for justyns/tsugite#212.
+
+    When the model emits N>1 ```python blocks in a single response, only the
+    first block runs. The model's prior response (saved as raw_content) still
+    shows all N blocks, so without an explicit signal the model cannot tell
+    that blocks 2..N were dropped — it sees one observation and assumes the
+    rest also ran. The fix appends a model-visible
+    ``<tsugite_multi_block_warning>`` element to the executed block's
+    observation so the next turn's prompt carries the correction.
+    """
+    agent = TsugiteAgent(
+        model_string="openai:gpt-4o-mini",
+        tools=[],
+        instructions="",
+        max_turns=5,
+        storage=storage,
+    )
+    calls = 0
+
+    async def side(*a, **k):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return _resp(
+                "```python\na = 1\nprint(a)\n```\n\n"
+                "```python\nb = 2\n```\n\n"
+                "```python\nc = 3\n```"
+            )
+        return _resp("All done.")
+
+    provider_mock = _patch(agent, side_effect=side)
+
+    await agent.run("multi block obs")
+
+    # Second call to acompletion is turn 2 — the model is seeing turn 1's
+    # raw_content (all 3 blocks) plus turn 1's observation. The observation
+    # should contain the multi-block warning so the model knows blocks 2..3
+    # never ran.
+    assert provider_mock.call_count >= 2, "expected at least two LLM turns"
+    turn2_call = provider_mock.call_args_list[1]
+    turn2_messages = turn2_call.kwargs.get("messages") or turn2_call.args[0]
+
+    # The observation arrives as a user-role message after the assistant turn.
+    user_msgs = [m for m in turn2_messages if m.get("role") == "user"]
+    obs_text = "\n".join(str(m.get("content", "")) for m in user_msgs)
+
+    assert "<tsugite_multi_block_warning" in obs_text, (
+        f"expected multi-block warning element in turn 2's prompt, got user messages: {user_msgs!r}"
+    )
+    assert 'dropped="2"' in obs_text and 'total="3"' in obs_text, (
+        f"warning should report dropped=2 total=3, got: {obs_text!r}"
+    )
+    assert "one ```python block per turn" in obs_text, (
+        f"warning should instruct one-block-per-turn discipline, got: {obs_text!r}"
+    )
+
+    # Sanity: only one code execution (the first block) actually ran.
+    code_execs = list(storage.iter_events(types=["code_execution"]))
+    assert len(code_execs) == 1
+    assert code_execs[0].data["code"].strip() == "a = 1\nprint(a)"
+
+
+@pytest.mark.asyncio
+async def test_single_block_response_has_no_multi_block_warning(storage):
+    """Sanity counterpart to the above: a normal one-block response must not
+    sprout a multi-block warning. Keeps the fix from leaking into the common
+    case.
+    """
+    agent = TsugiteAgent(
+        model_string="openai:gpt-4o-mini",
+        tools=[],
+        instructions="",
+        max_turns=5,
+        storage=storage,
+    )
+    calls = 0
+
+    async def side(*a, **k):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return _resp("```python\nx = 1\nprint(x)\n```")
+        return _resp("done")
+
+    provider_mock = _patch(agent, side_effect=side)
+
+    await agent.run("single block")
+
+    turn2_call = provider_mock.call_args_list[1]
+    turn2_messages = turn2_call.kwargs.get("messages") or turn2_call.args[0]
+    obs_text = "\n".join(str(m.get("content", "")) for m in turn2_messages if m.get("role") == "user")
+    assert "tsugite_multi_block_warning" not in obs_text, (
+        f"single-block response leaked a multi-block warning: {obs_text!r}"
+    )
+
+
+@pytest.mark.asyncio
 async def test_raw_assistant_text_recorded_verbatim(storage):
     agent = TsugiteAgent(
         model_string="openai:gpt-4o-mini",

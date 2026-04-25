@@ -138,6 +138,25 @@ def _find_python_blocks(cleaned: str) -> List[tuple[int, int]]:
         search_pos = close_at + len(_CLOSE_FENCE)
 
 
+def _build_multi_block_warning_xml(count: int) -> str:
+    """Model-visible note appended to a turn's observation when the agent
+    received N>1 ```python blocks in one response.
+
+    The parser only ever runs the first block; without this signal the model
+    sees its full N-block response in raw_content but only one execution
+    result and (reasonably) assumes the rest also ran. See justyns/tsugite#212.
+    """
+    return (
+        f'\n<tsugite_multi_block_warning dropped="{count - 1}" total="{count}">'
+        f"Your response contained {count} ```python blocks. "
+        f"Only block 1 was executed; blocks 2..{count} were dropped silently. "
+        "If those blocks contained work that still needs to happen, re-emit them "
+        "in your next response — exactly one ```python block per turn. "
+        "Do not assume the dropped blocks ran."
+        "</tsugite_multi_block_warning>"
+    )
+
+
 @dataclass
 class ParsedResponse:
     """Result from parsing an LLM response."""
@@ -486,15 +505,17 @@ class TsugiteAgent:
                     await self.executor.inject_content_blocks(turn.content_blocks)
 
                 # Multiple python blocks: the parser already took just the first
-                # one as `code`. Warn the user about the dropped extras and fall
-                # through to normal execution — rejecting used to burn a retry
-                # per multi-block response with no upside since the extras were
-                # never going to run.
-                if turn.num_code_blocks > 1 and self.event_bus:
+                # one as `code`. Surface the drop on two channels — a UI warning
+                # for the human, and an in-conversation observation for the
+                # model. Without the latter the model sees its full N-block
+                # response in raw_content but only one execution result, and
+                # (reasonably) assumes the rest also ran. See #212.
+                multi_block_count = turn.num_code_blocks if turn.num_code_blocks > 1 else 0
+                if multi_block_count and self.event_bus:
                     self.event_bus.emit(
                         WarningEvent(
                             message=(
-                                f"Response contained {turn.num_code_blocks} ```python blocks; "
+                                f"Response contained {multi_block_count} ```python blocks; "
                                 "only the first was executed, the rest were dropped."
                             ),
                             category="multi_code_block",
@@ -512,6 +533,9 @@ class TsugiteAgent:
                         tools_called=[],
                         content_blocks=turn.content_blocks,
                         raw_content=last_response_text,
+                        xml_observation=(
+                            _build_multi_block_warning_xml(multi_block_count) if multi_block_count else None
+                        ),
                     )
                     break
 
@@ -544,6 +568,11 @@ class TsugiteAgent:
                     else:
                         self._previous_turn_had_error = False
                         self.event_bus.emit(ObservationEvent(observation=masked))
+
+                # Multi-block extras were dropped earlier; tell the model so it
+                # knows to re-emit them rather than assume they ran.
+                if multi_block_count:
+                    xml_observation += _build_multi_block_warning_xml(multi_block_count)
 
                 budget_tag = self._build_budget_tag(turn_num)
                 xml_observation += budget_tag
