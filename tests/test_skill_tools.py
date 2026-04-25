@@ -339,3 +339,116 @@ class TestSkillManagerEvents:
 
         result = manager.load_skill("test-skill")
         assert "loaded" in result.lower() or "success" in result.lower()
+
+
+class TestSkillFailureTracking:
+    """SkillManager surfaces scan + load failures for user-facing surfaces."""
+
+    def test_scan_issues_captured_during_init(self, tmp_path, monkeypatch):
+        skills_root = tmp_path / ".tsugite" / "skills"
+        skills_root.mkdir(parents=True)
+        bad = skills_root / "bad-trig"
+        bad.mkdir()
+        (bad / "SKILL.md").write_text(
+            "---\nname: bad-trig\ndescription: x\ntriggers:\n  - 403\n---\nBody.\n"
+        )
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("HOME", str(tmp_path))
+
+        manager = SkillManager()
+        manager._ensure_registry_initialized()
+
+        assert "bad-trig" in manager._skill_registry
+        names_with_issues = [i.name for i in manager._scan_issues]
+        assert "bad-trig" in names_with_issues
+
+    def test_load_failure_recorded_on_render_error(self, tmp_path, monkeypatch):
+        skill_dir = _make_skill_dir(
+            tmp_path / "skills", "broken", body="Hello {{ undefined_var }}\n"
+        )
+        registry = {"broken": _meta(skill_dir)}
+        monkeypatch.chdir(tmp_path)
+
+        manager = SkillManager()
+        manager._skill_registry = registry
+        manager._registry_initialized = True
+        set_skill_manager(manager)
+
+        result = manager.load_skill("broken")
+        assert "Failed" in result
+        assert "broken" in manager._load_failures
+        assert manager._load_failures["broken"]
+
+    def test_load_failure_cleared_on_successful_reload(self, tmp_path, monkeypatch):
+        skill_dir = _make_skill_dir(tmp_path / "skills", "fixme", body="Body.\n")
+        registry = {"fixme": _meta(skill_dir)}
+        monkeypatch.chdir(tmp_path)
+
+        manager = SkillManager()
+        manager._skill_registry = registry
+        manager._registry_initialized = True
+        manager._load_failures["fixme"] = "previous error"
+
+        manager.load_skill("fixme")
+        assert "fixme" not in manager._load_failures
+
+    def test_skill_not_found_does_not_track_as_failure(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        manager = SkillManager()
+        manager._skill_registry = {}
+        manager._registry_initialized = True
+
+        manager.load_skill("typo-skill")
+        assert "typo-skill" not in manager._load_failures
+
+    def test_get_failed_skills_list_merges_scan_and_load_failures(self, tmp_path, monkeypatch):
+        skills_root = tmp_path / ".tsugite" / "skills"
+        skills_root.mkdir(parents=True)
+        # Scan issue: bad ttl
+        bad = skills_root / "bad-ttl"
+        bad.mkdir()
+        (bad / "SKILL.md").write_text(
+            '---\nname: bad-ttl\ndescription: x\nttl: "oops"\n---\nBody.\n'
+        )
+        # Load issue: undefined Jinja var
+        broken = skills_root / "broken"
+        broken.mkdir()
+        (broken / "SKILL.md").write_text(
+            "---\nname: broken\ndescription: x\n---\n{{ undefined_var }}\n"
+        )
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("HOME", str(tmp_path))
+
+        manager = SkillManager()
+        manager._ensure_registry_initialized()
+        set_skill_manager(manager)
+        manager.load_skill("broken")
+
+        failed = manager.get_failed_skills_list()
+        sources_by_name = {item["name"]: item["source"] for item in failed}
+        assert sources_by_name.get("bad-ttl") == "scan"
+        assert sources_by_name.get("broken") == "load"
+        for item in failed:
+            assert set(item.keys()) >= {"name", "source", "path", "severity", "message"}
+
+    def test_get_failed_skills_for_template_tool(self, tmp_path, monkeypatch):
+        skills_root = tmp_path / ".tsugite" / "skills"
+        skills_root.mkdir(parents=True)
+        bad = skills_root / "bad-trig"
+        bad.mkdir()
+        (bad / "SKILL.md").write_text(
+            "---\nname: bad-trig\ndescription: x\ntriggers:\n  - 403\n---\nBody.\n"
+        )
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("HOME", str(tmp_path))
+
+        manager = SkillManager()
+        manager._ensure_registry_initialized()
+        set_skill_manager(manager)
+
+        from tsugite.tools.skills import get_failed_skills_for_template
+
+        result = get_failed_skills_for_template()
+        assert isinstance(result, list)
+        names = [item["name"] for item in result]
+        assert "bad-trig" in names

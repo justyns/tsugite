@@ -7,7 +7,13 @@ from typing import Dict, List, Optional
 
 from tsugite import renderer
 from tsugite.renderer import AgentRenderer
-from tsugite.skill_discovery import SkillMeta, build_skill_index, match_triggered_skills, scan_skills
+from tsugite.skill_discovery import (
+    SkillIssue,
+    SkillMeta,
+    build_skill_index,
+    match_triggered_skills,
+    scan_skills_with_issues,
+)
 from tsugite.tools import tool
 from tsugite.utils import parse_yaml_frontmatter
 
@@ -73,6 +79,8 @@ class SkillManager:
             extra_paths: Optional list of additional directory paths to search for skills
         """
         self._skill_registry: Dict[str, SkillMeta] = {}
+        self._scan_issues: List[SkillIssue] = []
+        self._load_failures: Dict[str, str] = {}
         self._loaded_skills: Dict[str, str] = {}
         self._registry_initialized = False
         self._workspace = workspace
@@ -93,8 +101,11 @@ class SkillManager:
     def _ensure_registry_initialized(self):
         """Initialize skill registry if not already initialized."""
         if not self._registry_initialized:
-            skills = scan_skills(workspace=self._workspace, extra_paths=self._extra_paths)
+            skills, issues = scan_skills_with_issues(
+                workspace=self._workspace, extra_paths=self._extra_paths
+            )
             self._skill_registry = {skill.name: skill for skill in skills}
+            self._scan_issues = issues
             self._registry_initialized = True
 
     def load_skill(self, skill_name: str) -> str:
@@ -154,6 +165,7 @@ class SkillManager:
             rendered_content = _append_resource_block(rendered_body, skill.directory, resources)
 
             self._loaded_skills[skill_name] = rendered_content
+            self._load_failures.pop(skill_name, None)
 
             if self._executor and hasattr(self._executor, "register_loaded_skill"):
                 self._executor.register_loaded_skill(skill_name, rendered_content)
@@ -165,6 +177,7 @@ class SkillManager:
             return f"✓ Successfully loaded skill: {skill_name}"
 
         except Exception as e:
+            self._load_failures[skill_name] = str(e)
             logger.error(f"Failed to load skill '{skill_name}': {e}", exc_info=True)
             return f"Failed to load skill '{skill_name}': {str(e)}"
 
@@ -224,6 +237,37 @@ class SkillManager:
             Dict mapping skill names to rendered content
         """
         return self._loaded_skills.copy()
+
+    def get_failed_skills_list(self) -> List[Dict[str, str]]:
+        """Return scan + load failures merged for user-facing surfaces.
+
+        Each item: {name, source: "scan"|"load", path, severity, message}.
+        """
+        self._ensure_registry_initialized()
+        items: List[Dict[str, str]] = []
+        for issue in self._scan_issues:
+            items.append(
+                {
+                    "name": issue.name or "?",
+                    "source": "scan",
+                    "path": str(issue.path),
+                    "severity": issue.severity,
+                    "message": issue.message,
+                }
+            )
+        for name, message in self._load_failures.items():
+            meta = self._skill_registry.get(name)
+            path = str(meta.skill_md_path) if meta else "?"
+            items.append(
+                {
+                    "name": name,
+                    "source": "load",
+                    "path": path,
+                    "severity": "error",
+                    "message": message,
+                }
+            )
+        return items
 
     def get_triggered_skills(self, message: str, max_skills: int = 3) -> List[str]:
         """Find skills that should auto-load based on trigger keywords in the message.
@@ -341,6 +385,17 @@ def get_skills_for_template() -> List[Dict[str, str]]:
     return get_available_skills_list()
 
 
+@tool
+def get_failed_skills_for_template() -> List[Dict[str, str]]:
+    """Get skill load failures as a list of dicts for template rendering.
+
+    Returns:
+        List of dicts with 'name', 'source', 'path', 'severity', 'message' keys.
+        Empty list when all skills are healthy.
+    """
+    return get_failed_skills_list()
+
+
 def get_available_skills_list() -> List[Dict[str, str]]:
     """Get list of all available skills as dicts (for template rendering).
 
@@ -358,6 +413,16 @@ def get_available_skills_list() -> List[Dict[str, str]]:
 
     # Convert SkillMeta objects to dicts for template use
     return [{"name": skill.name, "description": skill.description} for skill in manager._skill_registry.values()]
+
+
+def get_failed_skills_list() -> List[Dict[str, str]]:
+    """Get list of skill load failures (scan + runtime) as dicts.
+
+    Returns:
+        List of dicts with 'name', 'source', 'path', 'severity', 'message' keys.
+    """
+    manager = get_skill_manager()
+    return manager.get_failed_skills_list()
 
 
 def get_loaded_skills() -> Dict[str, str]:

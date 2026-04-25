@@ -631,6 +631,16 @@ def build_validation_test_context(agent, include_prefetch: bool = True) -> dict[
                 if assign_name == "available_skills":
                     # Skills are rendered as {{ skill.name }} and {{ skill.description }}
                     test_context[assign_name] = [{"name": "mock_skill", "description": "Mock skill for validation"}]
+                elif assign_name == "failed_skills":
+                    test_context[assign_name] = [
+                        {
+                            "name": "mock_failed",
+                            "source": "scan",
+                            "path": "/tmp/SKILL.md",
+                            "severity": "warning",
+                            "message": "Mock failure for validation",
+                        }
+                    ]
                 elif assign_name == "available_agents":
                     # Agents are rendered as a formatted string
                     test_context[assign_name] = "- **mock_agent**: Mock agent for validation"

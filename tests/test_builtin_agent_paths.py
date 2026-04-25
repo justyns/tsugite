@@ -44,7 +44,7 @@ class TestBuiltinAgentPathHandling:
         assert info["description"]
         assert info["valid"] is True
         assert "spawn_agent" in info["tools"]
-        assert info["prefetch_count"] == 2  # list_agents + get_skills_for_template
+        assert info["prefetch_count"] == 3  # list_agents + get_skills_for_template + get_failed_skills_for_template
 
     def test_get_agent_info_returns_model_raw(self, tmp_path):
         """get_agent_info includes model_raw with the unformatted model string."""

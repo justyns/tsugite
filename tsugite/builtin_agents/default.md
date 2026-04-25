@@ -42,6 +42,9 @@ prefetch:
   - tool: get_skills_for_template
     args: {}
     assign: available_skills
+  - tool: get_failed_skills_for_template
+    args: {}
+    assign: failed_skills
 instructions: |
   <agent_instructions>
   You are a helpful AI assistant running in the Tsugite agent framework.
@@ -209,6 +212,16 @@ Do not act in the same turn you load a skill. Skip loading if you already know h
 
 Skills may show bash commands. Translate to Python: `shell.run("kubectl get pods")`
 </available_skills>
+{% endif %}
+
+{% if failed_skills %}
+<failed_skills>
+The following skills could not be loaded and are NOT available. If the user asks about one or seems to be relying on it, mention it is broken and point them at the file so they can fix it.
+
+{% for f in failed_skills %}
+- **{{ f.name }}** ({{ f.severity }}, {{ f.source }}): {{ f.message }} at `{{ f.path }}`
+{% endfor %}
+</failed_skills>
 {% endif %}
 
 <guidelines>

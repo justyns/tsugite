@@ -359,11 +359,11 @@ class TestBuiltinAgentRendering:
         mock_default_agent_prefetch,
     ):
         """Test that builtin agent prefetch tools are executed."""
-        # default has list_agents and get_skills_for_template in prefetch
-        # Use custom side_effect with different agent list
+        # default prefetches list_agents, get_skills_for_template, get_failed_skills_for_template
         mock_call_tool.side_effect = [
             "agents/helper.md\nagents/coder.md",  # list_agents (custom)
             [],  # get_skills_for_template
+            [],  # get_failed_skills_for_template
         ]
 
         result = self.runner.invoke(app, ["render", "+default", "test"])
@@ -371,8 +371,7 @@ class TestBuiltinAgentRendering:
         if result.exit_code != 0:
             print(f"\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}\n")
         assert result.exit_code == 0, f"Command failed with stdout: {result.stdout}"
-        # Verify prefetch was called (both tools)
-        assert mock_call_tool.call_count == 2
+        assert mock_call_tool.call_count == 3
 
     def test_render_unknown_agent(self):
         """Test rendering with unknown agent name."""
