@@ -219,9 +219,8 @@ class ClaudeCodeProcess:
                 if usage:
                     self._last_usage = usage
                 content_blocks = message.get("content", [])
-                # Claude CLI redacts thinking text; signal presence without content.
-                if any(block.get("type") == "thinking" for block in content_blocks):
-                    yield {"type": "thinking_detected"}
+                # Claude CLI redacts thinking text, leaving an empty payload, so drop it
+                # entirely rather than surfacing a content-free placeholder block.
                 text = "".join(block.get("text", "") for block in content_blocks if block.get("type") == "text")
                 if text:
                     yield {"type": "text_delta", "text": text}

@@ -400,8 +400,8 @@ class TestClaudeCodeEffort:
         assert mock_process.start.await_args.kwargs.get("effort") == "high"
 
     @pytest.mark.asyncio
-    async def test_send_message_emits_thinking_detected(self):
-        """Assistant event with a thinking content block yields a thinking_detected event."""
+    async def test_send_message_drops_redacted_thinking_blocks(self):
+        """Redacted thinking blocks from Claude CLI produce no events - they carry no payload."""
         from tsugite.core.claude_code import ClaudeCodeProcess
 
         process = ClaudeCodeProcess()
@@ -431,7 +431,6 @@ class TestClaudeCodeEffort:
                 }
             ),
         ]
-        # Reuse the mock helper from TestClaudeCodeProcess
         mock_proc = AsyncMock()
         mock_proc.stdin = AsyncMock()
         mock_proc.stderr = AsyncMock()
@@ -454,12 +453,13 @@ class TestClaudeCodeEffort:
         async for event in process.send_message("test"):
             collected.append(event)
 
-        thinking_events = [e for e in collected if e.get("type") == "thinking_detected"]
-        assert len(thinking_events) == 1
+        assert not any(e.get("type") == "thinking_detected" for e in collected)
+        text_events = [e for e in collected if e.get("type") == "text_delta"]
+        assert text_events and text_events[0]["text"] == "Hello world"
 
     @pytest.mark.asyncio
-    async def test_thinking_block_sets_reasoning_content_placeholder(self):
-        """When assistant event contains a thinking block, reasoning_content is set to a placeholder."""
+    async def test_redacted_thinking_does_not_produce_reasoning_content(self):
+        """Redacted thinking blocks must not surface as a placeholder reasoning_content (UI noise)."""
         from tsugite.providers.claude_code import ClaudeCodeProvider
 
         provider = ClaudeCodeProvider()
@@ -468,7 +468,8 @@ class TestClaudeCodeEffort:
         mock_process.compacted = False
 
         async def mock_send(*_, **__):
-            # Simulate the has_thinking signal event from the subprocess
+            # Even if the process layer ever emits thinking_detected (legacy),
+            # the provider must not turn it into a placeholder reasoning block.
             yield {"type": "thinking_detected"}
             yield {"type": "text_delta", "text": "answer"}
             yield {
@@ -493,8 +494,7 @@ class TestClaudeCodeEffort:
             )
             await provider.stop()
 
-        assert resp.reasoning_content is not None
-        assert "redacted" in resp.reasoning_content.lower() or "reasoning" in resp.reasoning_content.lower()
+        assert resp.reasoning_content is None
 
 
 # ── Agent integration tests ──

@@ -125,20 +125,15 @@ class ClaudeCodeProvider:
 
         return await self._collect(user_content)
 
-    _REASONING_PLACEHOLDER = "[Extended reasoning occurred - content redacted by Claude CLI]"
-
     async def _collect(self, user_content: str) -> CompletionResponse:
         """Send message and collect full response."""
         accumulated = ""
-        reasoning_content: str | None = None
         usage = Usage()
         cost = 0.0
 
         async for event in self._process.send_message(user_content):
             if event["type"] == "text_delta":
                 accumulated += event["text"]
-            elif event["type"] == "thinking_detected":
-                reasoning_content = self._REASONING_PLACEHOLDER
             elif event["type"] == "result":
                 if not accumulated:
                     accumulated = event.get("text", "")
@@ -147,7 +142,6 @@ class ClaudeCodeProvider:
 
         return CompletionResponse(
             content=accumulated,
-            reasoning_content=reasoning_content,
             usage=usage,
             cost=cost,
         )
