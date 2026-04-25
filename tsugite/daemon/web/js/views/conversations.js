@@ -1,5 +1,5 @@
 import { get, post, patch } from '../api.js';
-import { escapeHtml, renderMarkdown, scrollToBottom, formatDate, stateBadgeClass, copyText } from '../utils.js';
+import { escapeHtml, renderMarkdown, scrollToBottom, formatDate, formatRelativeTime, stateBadgeClass, copyText } from '../utils.js';
 import { sessionsMixin } from './conversation/sessions.js';
 import { historyMixin } from './conversation/history.js';
 import { attachmentsMixin } from './conversation/attachments.js';
@@ -43,11 +43,16 @@ export default () => ({
   },
 
   get groupedSessions() {
+    const pinned = [];
     const active = [];
     const recent = [];
 
     for (const s of this.allSessions) {
       if (!this._matchesFilters(s)) continue;
+      if (s.pinned) {
+        pinned.push(s);
+        continue;
+      }
       const state = s.state;
       if (state === 'active' || state === 'running') {
         active.push(s);
@@ -57,6 +62,7 @@ export default () => ({
     }
 
     const byDate = (a, b) => (b.last_active || b.created_at || '').localeCompare(a.last_active || a.created_at || '');
+    pinned.sort((a, b) => (a.pin_position ?? 0) - (b.pin_position ?? 0));
     active.sort(byDate);
     recent.sort(byDate);
 
@@ -64,6 +70,7 @@ export default () => ({
     const visibleRecent = this.showRecentHidden ? recent : recent.slice(0, maxRecent);
 
     return {
+      pinned,
       active,
       recent: visibleRecent,
       recentTotal: recent.length,
@@ -142,9 +149,19 @@ export default () => ({
     });
     // Ticks the freshness flag off when events stop arriving so the pulse dot doesn't animate forever.
     this._freshnessTimer = setInterval(() => { this._freshnessTick++; }, 2000);
+    // Refresh relative-time labels ("5m ago") in the sidebar.
+    this._relTimeTimer = setInterval(() => { this._relTimeTick++; }, 60000);
+    // Mark the currently-selected session as viewed when the user refocuses the tab.
+    this._onVisibilityChange = () => {
+      if (document.visibilityState !== 'visible' || !this.selectedSessionId) return;
+      const s = this.allSessions.find(x => (x.conversation_id || x.id) === this.selectedSessionId);
+      if (s && s.unread) this._markSessionViewed(s);
+    };
+    document.addEventListener('visibilitychange', this._onVisibilityChange);
   },
 
   _freshnessTick: 0,
+  _relTimeTick: 0,
 
   destroy() {
     if (this._draftTimer) clearTimeout(this._draftTimer);
@@ -152,6 +169,8 @@ export default () => ({
     if (this._scrollTimer) clearTimeout(this._scrollTimer);
     if (this._historyDebounceTimer) clearTimeout(this._historyDebounceTimer);
     if (this._freshnessTimer) clearInterval(this._freshnessTimer);
+    if (this._relTimeTimer) clearInterval(this._relTimeTimer);
+    if (this._onVisibilityChange) document.removeEventListener('visibilitychange', this._onVisibilityChange);
     if (this._activeReader) this._activeReader.cancel().catch(() => {});
     this.pendingFiles.forEach(f => { if (f.previewUrl) URL.revokeObjectURL(f.previewUrl); });
   },
@@ -316,7 +335,11 @@ export default () => ({
   // Rendering helpers
   renderHtml(text) { return renderMarkdown(text); },
   escape(s) { return escapeHtml(s); },
-  formatDate(iso) { return formatDate(iso) || '—'; },
+  formatDate(iso) { return formatDate(iso) || '-'; },
+  formatRelativeTime(iso) {
+    void this._relTimeTick;  // reactive dep so Alpine re-renders when the tick advances
+    return formatRelativeTime(iso) || '';
+  },
   stateBadge(state) { return stateBadgeClass(state); },
 
   // User-initiated copy of a message's raw markdown

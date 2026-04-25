@@ -12,6 +12,8 @@ export const sessionsMixin = {
   sessionFilter: '',
   editingSessionId: null,
   editingTitle: '',
+  draggingPinId: null,
+  dragOverPinId: null,
 
   _debouncedLoadSessions() {
     if (this._debounceTimer) clearTimeout(this._debounceTimer);
@@ -69,11 +71,20 @@ export const sessionsMixin = {
     const historyPromise = this.loadHistory();
     this.loadSessionEffort();
     this._restoreDraft();
+    this._markSessionViewed(session);
     if (!this.isActiveSession && session.state === 'running') {
       await historyPromise;
       if (this.selectedSessionId !== convId) return;
       this._rehydrateProgressFromEvents(convId);
     }
+  },
+
+  async _markSessionViewed(session) {
+    if (!session || !session.id || !session.unread) return;
+    session.unread = false;
+    try {
+      await post(`/api/sessions/${session.id}/mark-viewed`, {});
+    } catch { /* non-fatal */ }
   },
 
   async _rehydrateProgressFromEvents(sessionId) {
@@ -109,7 +120,10 @@ export const sessionsMixin = {
       const data = await post(`/api/agents/${agent}/sessions/new`, { user_id: this.userId });
       await this.loadSessions();
       const session = this.allSessions.find(s => s.id === data.id);
-      if (session) this.selectSession(session);
+      if (session) {
+        this.selectSession(session);
+        this.startEditTitle(session, { stopPropagation() {} }, { blank: true });
+      }
     } catch (e) {
       this.messages.push({ type: 'error', text: `Failed to create session: ${e.message}` });
     }
@@ -179,14 +193,26 @@ export const sessionsMixin = {
     return s.label || s.conversation_id || s.id || 'unknown';
   },
 
-  startEditTitle(s, event) {
+  startEditTitle(s, event, { blank = false } = {}) {
     event.stopPropagation();
     this.editingSessionId = s.id;
-    this.editingTitle = s.title || this.sessionLabel(s);
-    this.$nextTick(() => {
-      const input = this.$el.querySelector('.session-title-input');
-      if (input) { input.focus(); input.select(); }
-    });
+    this.editingTitle = blank ? '' : (s.title || this.sessionLabel(s));
+    // Alpine may render the input async (after newSession()), and selectSession's
+    // later reflows can steal focus right after we set it. Poll up to 30 attempts
+    // (~1.5s) covering both "input not in DOM yet" and "focus stolen post-mount".
+    let tries = 0;
+    const focusInput = () => {
+      if (this.editingSessionId !== s.id) return;  // user navigated away mid-poll
+      const input = document.querySelector('.session-title-input');
+      if (input) {
+        input.focus();
+        input.select();
+      }
+      if ((!input || document.activeElement !== input) && tries++ < 30) {
+        setTimeout(focusInput, 50);
+      }
+    };
+    this.$nextTick(focusInput);
   },
 
   async saveTitle(s) {
@@ -257,5 +283,65 @@ export const sessionsMixin = {
       if (!text.toLowerCase().includes(this.sessionFilter.toLowerCase())) return false;
     }
     return true;
+  },
+
+  async togglePin(s) {
+    if (!s || !s.id) return;
+    const willPin = !s.pinned;
+    s.pinned = willPin;  // optimistic
+    try {
+      await post(`/api/sessions/${s.id}/${willPin ? 'pin' : 'unpin'}`, {});
+      await this.loadSessions();
+    } catch (e) {
+      s.pinned = !willPin;  // revert
+      this.messages.push({ type: 'error', text: `Pin failed: ${e.message}` });
+    }
+  },
+
+  onPinDragStart(s, event) {
+    this.draggingPinId = s.id;
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', s.id);
+    }
+  },
+
+  onPinDragOver(s, event) {
+    if (!this.draggingPinId || this.draggingPinId === s.id) return;
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+    this.dragOverPinId = s.id;
+  },
+
+  onPinDragLeave(s) {
+    if (this.dragOverPinId === s.id) this.dragOverPinId = null;
+  },
+
+  async onPinDrop(target) {
+    const sourceId = this.draggingPinId;
+    this.dragOverPinId = null;
+    this.draggingPinId = null;
+    if (!sourceId || !target || sourceId === target.id) return;
+    const ordered = this.groupedSessions.pinned.map(s => s.id);
+    const from = ordered.indexOf(sourceId);
+    const to = ordered.indexOf(target.id);
+    if (from < 0 || to < 0) return;
+    const [moved] = ordered.splice(from, 1);
+    ordered.splice(to, 0, moved);
+    // Optimistic local reorder
+    for (let i = 0; i < ordered.length; i++) {
+      const s = this.allSessions.find(x => x.id === ordered[i]);
+      if (s) s.pin_position = i;
+    }
+    try {
+      await post('/api/sessions/pinned/reorder', { ids: ordered });
+    } catch (e) {
+      this.messages.push({ type: 'error', text: `Reorder failed: ${e.message}` });
+      await this.loadSessions();
+    }
+  },
+
+  onPinDragEnd() {
+    this.draggingPinId = null;
+    this.dragOverPinId = null;
   },
 };

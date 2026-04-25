@@ -249,6 +249,16 @@ main { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
 .session-edit-btn { opacity: 0; cursor: pointer; font-size: 11px; color: var(--muted); flex-shrink: 0; }
 .turn-item:hover .session-edit-btn { opacity: 0.7; }
 .session-edit-btn:hover { opacity: 1 !important; color: var(--accent); }
+.session-pin-btn { opacity: 0; cursor: pointer; font-size: 12px; color: var(--muted); flex-shrink: 0; }
+.session-pin-btn.pinned { opacity: 0.85; color: var(--accent); }
+.turn-item:hover .session-pin-btn { opacity: 0.7; }
+.session-pin-btn:hover { opacity: 1 !important; color: var(--accent); }
+.session-label-unread { font-weight: 600; }
+.unread-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); margin-left: auto; flex-shrink: 0; }
+.drag-handle { cursor: grab; color: var(--muted); font-size: 14px; line-height: 1; user-select: none; flex-shrink: 0; opacity: 0.6; }
+.drag-handle:active { cursor: grabbing; }
+.turn-item-pinned { border-left: 2px solid var(--accent); }
+.turn-item.drag-over { border-color: var(--accent); border-style: dashed; }
 .session-title-input { background: var(--surface); color: var(--text); border: 1px solid var(--accent); border-radius: 4px; padding: 1px 4px; font-size: 13px; width: 100%; outline: none; }
 
 /* Source icons */

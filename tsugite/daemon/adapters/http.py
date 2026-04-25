@@ -485,6 +485,10 @@ class HTTPServer:
             Route("/api/sessions/{session_id}/cancel", self._api_cancel_session, methods=["POST"]),
             Route("/api/sessions/{session_id}/restart", self._api_restart_session, methods=["POST"]),
             Route("/api/sessions/{session_id}/events", self._api_session_events, methods=["GET"]),
+            Route("/api/sessions/{session_id}/pin", self._api_pin_session, methods=["POST"]),
+            Route("/api/sessions/{session_id}/unpin", self._api_unpin_session, methods=["POST"]),
+            Route("/api/sessions/pinned/reorder", self._api_reorder_pins, methods=["POST"]),
+            Route("/api/sessions/{session_id}/mark-viewed", self._api_mark_viewed, methods=["POST"]),
             Route("/api/webhooks", self._list_webhooks, methods=["GET"]),
             Route("/api/webhooks", self._create_webhook, methods=["POST"]),
             Route("/api/webhooks/{token}", self._delete_webhook, methods=["DELETE"]),
@@ -647,28 +651,38 @@ class HTTPServer:
         source = request.query_params.get("source")
         status = request.query_params.get("status")
         parent_id = request.query_params.get("parent_id")
+        include_superseded = request.query_params.get("include_superseded", "").lower() in ("1", "true", "yes")
         try:
             limit = max(1, min(int(request.query_params.get("limit", "100")), 1000))
         except (ValueError, TypeError):
             limit = 100
 
         all_sessions = adapter.session_store.list_sessions(
-            agent=adapter.agent_name, source=source, status=status, parent_id=parent_id, limit=limit
+            agent=adapter.agent_name,
+            source=source,
+            status=status,
+            parent_id=parent_id,
+            limit=limit,
+            include_superseded=include_superseded,
         )
 
         from tsugite.daemon.session_store import SessionStatus
 
         default_ids = adapter.session_store.default_interactive_ids(adapter.agent_name)
         live_statuses = {SessionStatus.RUNNING.value, SessionStatus.ACTIVE.value}
+
+        def _user_label(user_id: str, source: str) -> str:
+            if user_id.isdigit():
+                return f"Discord: {user_id}"
+            if user_id.startswith("web-"):
+                return f"Web: {user_id}"
+            return user_id or source
+
         sessions = []
         for s in all_sessions:
             user_id = s.user_id or ""
-            if user_id.isdigit():
-                label = f"Discord: {user_id}"
-            elif user_id.startswith("web-"):
-                label = f"Web: {user_id}"
-            else:
-                label = user_id or s.source
+            label = _user_label(user_id, s.source)
+            unread = bool(s.last_active and (not s.last_viewed_at or s.last_active > s.last_viewed_at))
             row = {
                 "id": s.id,
                 "user_id": user_id,
@@ -687,6 +701,11 @@ class HTTPServer:
                 "title": s.title,
                 "is_default": default_ids.get(user_id) == s.id,
                 "metadata": s.metadata or {},
+                "pinned": s.pinned,
+                "pin_position": s.pin_position,
+                "last_viewed_at": s.last_viewed_at,
+                "superseded_by": s.superseded_by,
+                "unread": unread,
             }
             if s.status in live_statuses:
                 row["progress"] = adapter.session_store.session_progress_summary(s.id)
@@ -704,6 +723,9 @@ class HTTPServer:
             return JSONResponse({"error": "invalid JSON body"}, status_code=400)
 
         user_id = adapter.resolve_http_user(body.get("user_id", "web-anonymous"))
+        title = body.get("title")
+        if title is not None and not isinstance(title, str):
+            return JSONResponse({"error": "title must be a string"}, status_code=400)
 
         from tsugite.daemon.session_store import Session, SessionSource
         from tsugite.history.storage import generate_session_id
@@ -714,6 +736,7 @@ class HTTPServer:
             agent=adapter.agent_name,
             source=SessionSource.INTERACTIVE.value,
             user_id=user_id,
+            title=title or None,
         )
         adapter.session_store.create_session(session)
         if self.event_bus:
@@ -1596,22 +1619,91 @@ class HTTPServer:
             return JSONResponse({"error": "Invalid JSON"}, status_code=400)
         title = body.get("title")
         status = body.get("status")
-        if title is None and status is None:
+        pinned = body.get("pinned")
+        has_pin_position = "pin_position" in body
+        pin_position = body.get("pin_position")
+        last_viewed_at = body.get("last_viewed_at")
+        if title is None and status is None and pinned is None and not has_pin_position and last_viewed_at is None:
             return JSONResponse({"error": "No updatable fields provided"}, status_code=400)
+        runner = self.session_runner
         try:
             result = {}
             if title is not None:
-                self.session_runner.rename_session(session_id, title)
+                runner.rename_session(session_id, title)
                 result["title"] = title
+            if pinned is not None or has_pin_position:
+                # When only pin_position is sent, keep the existing pinned state but route
+                # through set_pin so siblings rebalance instead of leaving gaps.
+                target_pinned = bool(pinned) if pinned is not None else runner.store.get_session(session_id).pinned
+                session = runner.set_pin(session_id, target_pinned, position=pin_position if has_pin_position else None)
+                result["pinned"] = session.pinned
+                result["pin_position"] = session.pin_position
+            if last_viewed_at is not None:
+                session = runner.mark_viewed(session_id, ts=last_viewed_at or None)
+                result["last_viewed_at"] = session.last_viewed_at
             if status is not None:
                 if status != "completed":
                     return JSONResponse({"error": "Only 'completed' status is allowed"}, status_code=400)
-                self.session_runner.store.update_session(session_id, status=status)
+                runner.store.update_session(session_id, status=status)
                 self.event_bus.emit("session_update", {"action": "completed", "id": session_id})
                 result["status"] = status
             return JSONResponse({"ok": True, **result})
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=404)
+
+    @staticmethod
+    async def _optional_json_body(request: Request) -> dict:
+        """Best-effort JSON body parse; missing/invalid bodies become {}."""
+        try:
+            body = await request.json()
+        except Exception:
+            return {}
+        return body if isinstance(body, dict) else {}
+
+    async def _api_pin_session(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_sessions(request):
+            return err
+        session_id = request.path_params["session_id"]
+        body = await self._optional_json_body(request)
+        try:
+            session = self.session_runner.set_pin(session_id, True, position=body.get("position"))
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+        return JSONResponse({"ok": True, "pinned": session.pinned, "pin_position": session.pin_position})
+
+    async def _api_unpin_session(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_sessions(request):
+            return err
+        session_id = request.path_params["session_id"]
+        try:
+            self.session_runner.set_pin(session_id, False)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+        return JSONResponse({"ok": True})
+
+    async def _api_reorder_pins(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_sessions(request):
+            return err
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+        ids = body.get("ids") if isinstance(body, dict) else None
+        if not isinstance(ids, list) or not all(isinstance(s, str) for s in ids):
+            return JSONResponse({"error": "ids must be a list of strings"}, status_code=400)
+        ordered = self.session_runner.reorder_pins(ids)
+        return JSONResponse({"ok": True, "ordered": [s.id for s in ordered]})
+
+    async def _api_mark_viewed(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_sessions(request):
+            return err
+        session_id = request.path_params["session_id"]
+        body = await self._optional_json_body(request)
+        try:
+            session = self.session_runner.mark_viewed(session_id, ts=body.get("ts"))
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+        return JSONResponse({"ok": True, "last_viewed_at": session.last_viewed_at})
 
     async def _api_cancel_session(self, request: Request) -> JSONResponse:
         if err := self._require_auth_and_sessions(request):

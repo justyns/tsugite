@@ -73,6 +73,62 @@
           <input type="text" x-model="sessionFilter" placeholder="Filter..." class="session-filter" style="flex:1" aria-label="Filter sessions">
         </div>
         <div class="turn-list">
+          <!-- Pinned sessions -->
+          <template x-if="!loading && groupedSessions.pinned.length > 0">
+            <div>
+              <div class="session-group-header">
+                Pinned
+                <span class="badge badge-muted" style="font-size:10px;margin-left:4px"
+                      x-text="groupedSessions.pinned.length"></span>
+              </div>
+              <template x-for="s in groupedSessions.pinned" :key="s.conversation_id || s.id">
+                <div class="turn-item turn-item-pinned"
+                     :class="{ active: selectedSessionId === (s.conversation_id || s.id), 'drag-over': dragOverPinId === s.id }"
+                     draggable="true"
+                     @dragstart="onPinDragStart(s, $event)"
+                     @dragover.prevent="onPinDragOver(s, $event)"
+                     @dragleave="onPinDragLeave(s)"
+                     @drop.prevent="onPinDrop(s)"
+                     @dragend="onPinDragEnd()"
+                     @click="selectSession(s)" tabindex="0" role="button" @keydown.enter="selectSession(s)">
+                  <div class="item-row">
+                    <span class="drag-handle" title="Drag to reorder">&#x2261;</span>
+                    <span class="status-dot" :class="{ 'status-dot-pulse': isSessionProgressFresh(s) }"
+                          :style="{ background: statusDotColor(s.state) }"></span>
+                    <span class="source-icon" x-text="sourceIcon(s.source)" :title="s.source"></span>
+                    <template x-if="editingSessionId === s.id">
+                      <input class="session-title-input" type="text" x-model="editingTitle"
+                             @blur="saveTitle(s)" @keydown.enter="saveTitle(s)" @keydown.escape="editingSessionId = null"
+                             @click.stop>
+                    </template>
+                    <template x-if="editingSessionId !== s.id">
+                      <span class="session-label-row">
+                        <span x-text="sessionLabel(s)" class="session-label" :class="{ 'session-label-unread': s.unread }"></span>
+                        <span class="session-edit-btn" @click="startEditTitle(s, $event)" title="Rename">&#9998;</span>
+                        <span class="session-pin-btn pinned" @click.stop="togglePin(s)" title="Unpin">&#9733;</span>
+                      </span>
+                    </template>
+                    <span class="unread-dot" x-show="s.unread" title="New activity"></span>
+                  </div>
+                  <div class="session-chips" x-show="metadataChips(s).length > 0">
+                    <template x-for="chip in metadataChips(s).filter(c => c.href)" :key="chip.label">
+                      <a class="session-chip" :class="chip.cls" :href="chip.href" target="_blank"
+                         x-text="chip.label" @click.stop></a>
+                    </template>
+                    <template x-for="chip in metadataChips(s).filter(c => !c.href)" :key="chip.label">
+                      <span class="session-chip" :class="chip.cls" x-text="chip.label"></span>
+                    </template>
+                  </div>
+                  <div class="session-progress" x-show="sessionProgressLabel(s)"
+                       x-text="sessionProgressLabel(s)"></div>
+                  <div class="session-preview" x-text="lastMessagePreview(s)" x-show="lastMessagePreview(s)"></div>
+                  <div class="turn-meta" x-text="formatRelativeTime(s.last_active || s.created_at)"
+                       :title="s.last_active || s.created_at"></div>
+                </div>
+              </template>
+            </div>
+          </template>
+
           <!-- Active sessions -->
           <template x-if="!loading">
             <div>
@@ -91,19 +147,19 @@
                     <span class="status-dot" :class="{ 'status-dot-pulse': isSessionProgressFresh(s) }"
                           :style="{ background: statusDotColor(s.state) }"></span>
                     <span class="source-icon" x-text="sourceIcon(s.source)" :title="s.source"></span>
-                    <template x-if="editingSessionId === s.id && !s.is_default">
+                    <template x-if="editingSessionId === s.id">
                       <input class="session-title-input" type="text" x-model="editingTitle"
                              @blur="saveTitle(s)" @keydown.enter="saveTitle(s)" @keydown.escape="editingSessionId = null"
                              @click.stop>
                     </template>
-                    <template x-if="editingSessionId !== s.id || s.is_default">
+                    <template x-if="editingSessionId !== s.id">
                       <span class="session-label-row">
-                        <span x-text="sessionLabel(s)" class="session-label"></span>
-                        <template x-if="!s.is_default">
-                          <span class="session-edit-btn" @click="startEditTitle(s, $event)" title="Rename">&#9998;</span>
-                        </template>
+                        <span x-text="sessionLabel(s)" class="session-label" :class="{ 'session-label-unread': s.unread }"></span>
+                        <span class="session-edit-btn" @click="startEditTitle(s, $event)" title="Rename">&#9998;</span>
+                        <span class="session-pin-btn" @click.stop="togglePin(s)" title="Pin">&#9734;</span>
                       </span>
                     </template>
+                    <span class="unread-dot" x-show="s.unread" title="New activity"></span>
                   </div>
                   <div class="session-chips" x-show="metadataChips(s).length > 0">
                     <template x-for="chip in metadataChips(s).filter(c => c.href)" :key="chip.label">
@@ -117,7 +173,8 @@
                   <div class="session-progress" x-show="sessionProgressLabel(s)"
                        x-text="sessionProgressLabel(s)"></div>
                   <div class="session-preview" x-text="lastMessagePreview(s)" x-show="lastMessagePreview(s)"></div>
-                  <div class="turn-meta" x-text="formatDate(s.last_active || s.created_at)"></div>
+                  <div class="turn-meta" x-text="formatRelativeTime(s.last_active || s.created_at)"
+                       :title="s.last_active || s.created_at"></div>
                 </div>
               </template>
             </div>
@@ -144,10 +201,12 @@
                     </template>
                     <template x-if="editingSessionId !== s.id">
                       <span class="session-label-row">
-                        <span x-text="sessionLabel(s)" class="session-label"></span>
+                        <span x-text="sessionLabel(s)" class="session-label" :class="{ 'session-label-unread': s.unread }"></span>
                         <span class="session-edit-btn" @click="startEditTitle(s, $event)" title="Rename">&#9998;</span>
+                        <span class="session-pin-btn" @click.stop="togglePin(s)" title="Pin">&#9734;</span>
                       </span>
                     </template>
+                    <span class="unread-dot" x-show="s.unread" title="New activity"></span>
                   </div>
                   <div class="session-chips" x-show="metadataChips(s).length > 0">
                     <template x-for="chip in metadataChips(s).filter(c => c.href)" :key="chip.label">
@@ -158,7 +217,8 @@
                       <span class="session-chip" :class="chip.cls" x-text="chip.label"></span>
                     </template>
                   </div>
-                  <div class="turn-meta" x-text="formatDate(s.last_active || s.created_at)"></div>
+                  <div class="turn-meta" x-text="formatRelativeTime(s.last_active || s.created_at)"
+                       :title="s.last_active || s.created_at"></div>
                 </div>
               </template>
               <template x-if="groupedSessions.recentHidden > 0">

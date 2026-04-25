@@ -225,6 +225,27 @@ class SessionRunner:
             self._event_bus.emit("session_update", {"action": "titled", "id": session_id, "title": title})
         return session
 
+    def set_pin(self, session_id: str, pinned: bool, position: Optional[int] = None) -> Session:
+        session = self._store.set_pin(session_id, pinned, position=position)
+        if self._event_bus:
+            self._event_bus.emit(
+                "session_update",
+                {"action": "pinned" if session.pinned else "unpinned", "id": session_id},
+            )
+        return session
+
+    def reorder_pins(self, ordered_ids: list[str]) -> list[Session]:
+        ordered = self._store.reorder_pins(ordered_ids)
+        if self._event_bus:
+            self._event_bus.emit("session_update", {"action": "reordered", "ids": [s.id for s in ordered]})
+        return ordered
+
+    def mark_viewed(self, session_id: str, ts: Optional[str] = None) -> Session:
+        session = self._store.mark_viewed(session_id, ts=ts)
+        if self._event_bus:
+            self._event_bus.emit("session_update", {"action": "viewed", "id": session_id})
+        return session
+
     def update_session_metadata(self, session_id: str, updates: dict) -> Session:
         session = self._store.set_metadata_bulk(session_id, updates)
         self._emit_metadata_event(session_id, session.metadata)

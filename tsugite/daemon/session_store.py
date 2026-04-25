@@ -168,6 +168,11 @@ class Session:
     title: Optional[str] = None
     scratchpad: str = ""
 
+    pinned: bool = False
+    pin_position: Optional[int] = None
+    last_viewed_at: str = ""
+    superseded_by: Optional[str] = None
+
     def __post_init__(self):
         if not self.id:
             self.id = f"session-{uuid4().hex[:8]}"
@@ -415,6 +420,9 @@ class SessionStore:
                 parent_id=old_session.parent_id,
                 metadata={k: v for k, v in old_session.metadata.items() if k in READ_ONLY_METADATA_KEYS},
                 scratchpad=old_session.scratchpad,
+                title=old_session.title,
+                pinned=old_session.pinned,
+                pin_position=old_session.pin_position,
             )
 
             self._sessions[new_id] = new_session
@@ -444,8 +452,12 @@ class SessionStore:
             if effort:
                 self._reasoning_effort[new_id] = effort
 
-            # Mark old session as completed
+            # Mark old session as completed and superseded so it stops appearing in
+            # the default sidebar list (the new session is the live continuation).
             old_session.status = SessionStatus.COMPLETED.value
+            old_session.superseded_by = new_id
+            old_session.pinned = False
+            old_session.pin_position = None
 
             self._save()
             return new_session
@@ -533,6 +545,65 @@ class SessionStore:
             self._mark_dirty()
             return session
 
+    def _pinned_for_agent(self, agent: str, exclude_id: Optional[str] = None) -> list[Session]:
+        """Return pinned sessions for an agent, sorted by current pin_position (None last)."""
+        return sorted(
+            [s for s in self._sessions.values() if s.agent == agent and s.pinned and s.id != exclude_id],
+            key=lambda s: s.pin_position if s.pin_position is not None else 0,
+        )
+
+    def set_pin(self, session_id: str, pinned: bool, position: Optional[int] = None) -> Session:
+        """Pin or unpin a session. Pinning appends to the end unless position is given;
+        unpinning densifies the remaining pinned sessions for the same agent.
+        """
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                raise ValueError(f"Session '{session_id}' not found")
+
+            if pinned and session.pinned and position is None:
+                return session
+            if not pinned and not session.pinned:
+                return session
+
+            session.pinned = pinned
+            if not pinned:
+                session.pin_position = None
+                for i, s in enumerate(self._pinned_for_agent(session.agent)):
+                    s.pin_position = i
+            else:
+                others = self._pinned_for_agent(session.agent, exclude_id=session_id)
+                insert_at = len(others) if position is None else max(0, min(position, len(others)))
+                session.pin_position = insert_at
+                for i, s in enumerate(others):
+                    s.pin_position = i if i < insert_at else i + 1
+
+            session.last_active = datetime.now(timezone.utc).isoformat()
+            self._mark_dirty()
+            return session
+
+    def reorder_pins(self, ordered_ids: list[str]) -> list[Session]:
+        """Write pin_position 0..N-1 for the given pinned session ids; unknown or
+        unpinned ids are silently skipped.
+        """
+        with self._lock:
+            valid = [self._sessions[sid] for sid in ordered_ids if sid in self._sessions and self._sessions[sid].pinned]
+            for i, s in enumerate(valid):
+                s.pin_position = i
+            if valid:
+                self._mark_dirty()
+            return valid
+
+    def mark_viewed(self, session_id: str, ts: Optional[str] = None) -> Session:
+        """Set last_viewed_at on a session. Defaults to now (UTC ISO)."""
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                raise ValueError(f"Session '{session_id}' not found")
+            session.last_viewed_at = ts or datetime.now(timezone.utc).isoformat()
+            self._mark_dirty()
+            return session
+
     def list_sessions(
         self,
         agent: Optional[str] = None,
@@ -542,6 +613,7 @@ class SessionStore:
         user_id: Optional[str] = None,
         limit: int = 0,
         updated_since: Optional[str] = None,
+        include_superseded: bool = False,
     ) -> list[Session]:
         _updated_since_dt = _parse_ts(updated_since)
         _epoch = datetime.min.replace(tzinfo=timezone.utc)
@@ -555,6 +627,7 @@ class SessionStore:
                 and (not status or s.status == status)
                 and (not user_id or s.user_id == user_id)
                 and (not _updated_since_dt or (_parse_ts(s.last_active) or _epoch) >= _updated_since_dt)
+                and (include_superseded or not s.superseded_by)
             ]
             if limit:
                 results.sort(key=lambda s: s.last_active or s.created_at, reverse=True)
