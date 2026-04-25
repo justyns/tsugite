@@ -1267,28 +1267,29 @@ print(config)
 
 ## Execution Results
 
-After code runs, you'll see structured XML:
+After your code block runs, the runtime injects a `tsugite_execution_result`
+element into your next user-role message. It carries:
 
-```xml
-<tsugite_execution_result status="success" duration_ms="142">
-<output>file contents here...</output>
-<variables_set>config=str(1234 chars)</variables_set>
-<state>issues=list(12 items), run_started=str(24 chars)</state>
-</tsugite_execution_result>
-```
+- `status` attribute: "success" or "error"
+- `output` child: stdout from your `print()` calls
+- `error` + `traceback` children: present only on failure (traceback truncated to last 10 lines)
+- `variables_set` child: variables created this turn (discarded at turn end)
+- `state` child: values persisted in `state` (carry across turns)
+- `return_value` child: the value you passed to `return_value()` — ends the run
 
-Fields:
-- `status`: "success" or "error"
-- `<output>`: Your print() output
-- `<error>`: Error message if failed
-- `<traceback>`: Python traceback if failed (last 10 lines)
-- `<variables_set>`: Variables you created this turn (discarded at turn end)
-- `<state>`: Values currently persisted in `state` (carry across turns)
-- `<return_value>`: Value you passed to return_value() — ends the run
+**Critical — these tags are runtime output, never your input.** Never write
+`tsugite_execution_result`, `tsugite_multi_block_warning`, or `tsugite_budget`
+tags inside your own response — not even to predict, illustrate, or reason about
+what a result will look like. The runtime injects these; if one appears in your
+response, you have hallucinated and any reasoning that follows it is unsound.
+Describe expected output in plain prose instead, then run the code and react to
+the real result next turn.
 
 ## How to write code
 
-- One ```python code block per response. If you emit extras, only the first runs; the rest are dropped.
+- Exactly one ```python code block per response. The parser runs only the first;
+  any additional blocks are silently dropped, and the runtime will warn you next
+  turn. Never assume dropped blocks ran.
 - Use print() to surface anything you'll want to refer to next turn.
 - Each turn starts with a fresh namespace. Plain variables are discarded between turns.
 - To persist across turns: `state["key"] = value` then `state["key"]` next turn.
