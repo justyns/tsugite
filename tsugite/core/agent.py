@@ -101,27 +101,41 @@ def build_system_prompt(tools: List[Tool], instructions: str = "") -> str:
     return build_standard_mode_prompt(tools_section, instructions, has_tools)
 
 
-def _find_parseable_close_fence(cleaned: str, code_start: int) -> Optional[int]:
-    r"""Return the offset of the "\n```" that closes the ```python block.
+_OPEN_FENCE = "```python"
+_CLOSE_FENCE = "\n```"
 
-    Tries each candidate close fence in order and picks the first one whose
-    preceding slice parses as valid Python. That handles the case where a
-    triple backtick appears inside a triple-quoted string literal: the naive
-    first-match would truncate the code to an unterminated string, but
-    ast.parse rejects that and we keep looking. Returns None if no candidate
-    parses.
-    """
+
+def _find_parseable_close_fence(cleaned: str, code_start: int) -> Optional[int]:
+    """Return the offset of the close fence whose preceding slice parses as Python, else None."""
     pos = code_start
     while True:
-        close_at = cleaned.find("\n```", pos)
+        close_at = cleaned.find(_CLOSE_FENCE, pos)
         if close_at == -1:
             return None
-        candidate = cleaned[code_start:close_at].strip()
         try:
-            ast.parse(candidate)
+            ast.parse(cleaned[code_start:close_at].strip())
             return close_at
         except SyntaxError:
-            pos = close_at + len("\n```")
+            pos = close_at + len(_CLOSE_FENCE)
+
+
+def _find_python_blocks(cleaned: str) -> List[tuple[int, int]]:
+    """Return (code_start, close_at) spans for every ``` ```python ``` block on its own line."""
+    blocks: List[tuple[int, int]] = []
+    search_pos = 0
+    while True:
+        open_at = cleaned.find(_OPEN_FENCE, search_pos)
+        if open_at == -1:
+            return blocks
+        if open_at != 0 and cleaned[open_at - 1] != "\n":
+            search_pos = open_at + len(_OPEN_FENCE)
+            continue
+        code_start = open_at + len(_OPEN_FENCE)
+        close_at = _find_parseable_close_fence(cleaned, code_start)
+        if close_at is None:
+            return blocks
+        blocks.append((code_start, close_at))
+        search_pos = close_at + len(_CLOSE_FENCE)
 
 
 @dataclass
@@ -1102,42 +1116,26 @@ class TsugiteAgent:
         """Parse text content into thought, code, and content blocks."""
         cleaned, content_blocks = extract_content_blocks(content)
 
-        num_code_blocks = 0
-        search_pos = 0
-        while True:
-            open_at = cleaned.find("```python", search_pos)
-            if open_at == -1:
-                break
-            on_own_line = open_at == 0 or cleaned[open_at - 1] == "\n"
-            if not on_own_line:
-                search_pos = open_at + len("```python")
-                continue
-            content_start = open_at + len("```python")
-            close_at = _find_parseable_close_fence(cleaned, content_start)
-            if close_at is None:
-                break
-            num_code_blocks += 1
-            search_pos = close_at + len("\n```")
+        blocks = _find_python_blocks(cleaned)
+        num_code_blocks = len(blocks)
 
         code = ""
-        code_block_start = cleaned.find("```python")
-        if code_block_start != -1:
-            code_start = code_block_start + len("```python")
-            # Pick the close fence that makes the extracted block a valid Python
-            # source. A ``` on its own line inside a triple-quoted string is a
-            # real close-fence candidate to the naive scanner but truncates to
-            # an unterminated string literal - letting ast.parse adjudicate
-            # avoids that class of bug without hand-rolling string-literal
-            # tracking.
-            code_end = _find_parseable_close_fence(cleaned, code_start)
-            if code_end is not None:
-                code = cleaned[code_start:code_end].strip()
-            else:
-                fallback_end = cleaned.find("\n```", code_start)
+        if blocks:
+            start, end = blocks[0]
+            code = cleaned[start:end].strip()
+        else:
+            # No block parsed cleanly. If there's still a ```python opener, fall
+            # back to the first naive close fence so the LLM gets a SyntaxError
+            # back instead of empty code (which would look like "model is done").
+            opener = cleaned.find(_OPEN_FENCE)
+            if opener != -1:
+                code_start = opener + len(_OPEN_FENCE)
+                fallback_end = cleaned.find(_CLOSE_FENCE, code_start)
                 if fallback_end != -1:
                     code = cleaned[code_start:fallback_end].strip()
 
-        prose_end = code_block_start if code_block_start != -1 else len(cleaned)
+        first_open = cleaned.find(_OPEN_FENCE)
+        prose_end = first_open if first_open != -1 else len(cleaned)
         thought_start = cleaned.find("Thought:")
         if thought_start != -1:
             thought = cleaned[thought_start + len("Thought:"):prose_end].strip()
