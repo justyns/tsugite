@@ -481,6 +481,7 @@ class TsugiteAgent:
                     self.event_bus.emit(CodeExecutionEvent(code=code))
 
                 exec_start = time.perf_counter()
+                # `code` is the raw LLM string; never substitute an escaped observation (that's model input, not exec input).
                 exec_result = await self.executor.execute(code)
                 exec_duration_ms = int((time.perf_counter() - exec_start) * 1000)
 

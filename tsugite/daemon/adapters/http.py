@@ -235,6 +235,19 @@ async def sse_stream(queue: asyncio.Queue, keepalive_interval: float = 15.0):
         yield f"data: {json.dumps(data)}\n\n"
 
 
+# Events the per-chat SSE already delivers to the active client. Skipping them
+# on the cross-session broadcaster prevents the active tab from rendering the
+# same progress twice, and keeps the broadcast to what other surfaces (sidebar
+# progress cache, non-active session detail view) actually read.
+_BROADCAST_SKIP_EVENTS = frozenset(
+    {
+        "stream_chunk",
+        "stream_complete",
+        "prompt_snapshot",
+    }
+)
+
+
 class SSEProgressHandler(JSONLUIHandler):
     """Converts agent events to SSE messages via an async queue."""
 
@@ -292,7 +305,7 @@ class SSEProgressHandler(JSONLUIHandler):
         if event_type in ("prompt_snapshot", "reaction", "final_result", "error", "cancelled") and self._persist_event:
             self._persist_event(payload)
 
-        if self._broadcaster and self._session_id:
+        if self._broadcaster and self._session_id and event_type not in _BROADCAST_SKIP_EVENTS:
             self._broadcaster.emit(
                 "session_event",
                 {"session_id": self._session_id, "event_type": event_type, **data},
@@ -1216,6 +1229,15 @@ class HTTPServer:
                 pass
             metadata["conv_id_override"] = session_id
 
+        # Without this guard, concurrent POSTs for the same (agent, user_id) both spawn run_agent tasks on the same session and any non-idempotent tool call runs twice.
+        backend_key = (agent_name, user_id)
+        existing_task = self._active_chat_tasks.get(backend_key)
+        if existing_task is not None and not existing_task.done():
+            return JSONResponse(
+                {"error": "a turn is already running for this session"},
+                status_code=409,
+            )
+
         channel_context = ChannelContext(
             source="http",
             channel_id=None,
@@ -1241,7 +1263,6 @@ class HTTPServer:
         custom_logger = SimpleNamespace(ui_handler=progress)
 
         interaction_backend = HTTPInteractionBackend(progress)
-        backend_key = (agent_name, user_id)
         interaction_backend.pending_message = message
         self._active_backends[backend_key] = interaction_backend
         self._active_progress[backend_key] = progress

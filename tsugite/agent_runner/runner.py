@@ -1089,6 +1089,12 @@ def evaluate_loop_condition(expression: str, context: Dict[str, Any]) -> bool:
         raise ValueError(f"Error evaluating loop condition '{expression}': {e}") from e
 
 
+def _attempt_executed_code(exc: BaseException) -> bool:
+    """Did the failed attempt run any code? Retrying would re-issue its side effects."""
+    steps = getattr(exc, "execution_steps", None) or []
+    return any(getattr(s, "code", "") for s in steps)
+
+
 def _prepare_retry_context(step_context: Dict[str, Any], step: Any, attempt: int, errors: List[str]) -> None:
     """Add retry-specific variables to step context.
 
@@ -1307,9 +1313,29 @@ async def _execute_step_with_retries(
         except asyncio.TimeoutError:
             error_msg = f"Step timed out after {step.timeout} seconds"
             errors.append(error_msg)
+            code_executed_this_attempt = False
         except Exception as e:
             error_msg = str(e)
             errors.append(error_msg)
+            code_executed_this_attempt = _attempt_executed_code(e)
+
+        if code_executed_this_attempt and attempt < max_attempts - 1:
+            clear_multistep_ui_context(custom_logger)
+            if event_bus:
+                from tsugite.events import WarningEvent
+
+                event_bus.emit(
+                    WarningEvent(
+                        message=(
+                            f"Step '{step.name}' failed after executing code; skipping retry "
+                            "to avoid re-issuing side effects."
+                        )
+                    )
+                )
+            raise RuntimeError(
+                f"Step '{step.name}' failed after executing code: {error_msg}. "
+                "Retry skipped to avoid duplicate side effects."
+            )
 
         # If not last attempt, handle retry delay and continue
         if attempt < max_attempts - 1:

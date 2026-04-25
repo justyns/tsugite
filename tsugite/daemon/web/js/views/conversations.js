@@ -383,6 +383,10 @@ export default () => ({
   _handleSessionEvent(d) {
     if (!this.selectedSessionId || this.isActiveSession) return;
     if (d.session_id !== this.selectedSessionId) return;
+    // We're streaming to this session ourselves - the per-chat SSE already
+    // delivers these events to our progress bubble. Running this handler too
+    // would render everything twice.
+    if (this.sending) return;
 
     const evType = d.event_type;
 

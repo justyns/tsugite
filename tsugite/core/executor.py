@@ -20,6 +20,17 @@ from tsugite.exceptions import StateSerializationError
 
 PPRINT_WIDTH = 100
 
+
+def _looks_html_escaped(source: str) -> bool:
+    """True if `source` is HTML-entity-escaped XML (observation content leaked into exec)."""
+    i = 0
+    for ch in source:
+        if not ch.isspace():
+            break
+        i += 1
+    return source.startswith("&lt;", i) or source.startswith("&amp;lt;", i)
+
+
 # Tools with special executor handling (not injected via the normal tool wrapper path).
 # These are implemented directly in the executor because they need event_bus access
 # or special completion signaling.
@@ -323,6 +334,19 @@ class LocalExecutor:
         self._loaded_skills_for_turn = {}
         self._unloaded_skills_for_turn = []
 
+        # TODO: This _probably_ isn't needed, but leaving for now as an extra safeguard
+        if _looks_html_escaped(code):
+            return ExecutionResult(
+                output="",
+                error=(
+                    "Refusing to exec HTML-entity-escaped source - the `&lt;` prefix "
+                    "indicates XML observation content was fed into exec(). The "
+                    "xml.sax.saxutils.escape() pass is for LLM-facing XML only."
+                ),
+                stdout="",
+                stderr="",
+            )
+
         # Set executor on skill manager so load_skill() can track
         from tsugite.tools.skills import get_skill_manager
 
@@ -394,9 +418,7 @@ class LocalExecutor:
 
     def _get_new_variables(self, namespace_before: set) -> Dict[str, str]:
         new_vars = set(self.namespace.keys()) - namespace_before
-        return _summarize_mapping(
-            (name, self.namespace[name]) for name in new_vars if not name.startswith("_")
-        )
+        return _summarize_mapping((name, self.namespace[name]) for name in new_vars if not name.startswith("_"))
 
     def _summarize_state_keys(self) -> Dict[str, str]:
         return _summarize_mapping(self._state.items())

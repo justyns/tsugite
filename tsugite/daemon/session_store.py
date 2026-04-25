@@ -605,6 +605,16 @@ class SessionStore:
             return 0
         return sum(1 for _ in storage.iter_events())
 
+    def count_events_by_type(self, session_id: str, event_type: str) -> int:
+        path = self._history_path(session_id)
+        if not path.exists():
+            return 0
+        try:
+            storage = SessionStorage.load(path)
+        except Exception:
+            return 0
+        return sum(1 for _ in storage.iter_events(types=[event_type]))
+
     def session_detail(self, session_id: str) -> dict:
         session = self.get_session(session_id)
         result = asdict(session)

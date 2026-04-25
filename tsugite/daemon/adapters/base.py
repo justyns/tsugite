@@ -480,11 +480,21 @@ class BaseAdapter(ABC):
                 user_input_for_history=message,
             )
 
+        code_events_before = self.session_store.count_events_by_type(conv_id, "code_execution")
         ctx = contextvars.copy_context()
         try:
             result = await asyncio.to_thread(ctx.run, run_in_workspace)
         except AgentExecutionError as e:
             if "prompt too long" in str(e).lower() and not conv_id_override:
+                code_events_after = self.session_store.count_events_by_type(conv_id, "code_execution")
+                if code_events_after > code_events_before:
+                    logger.warning(
+                        "[%s] Prompt too long after %d code executions - not auto-retrying "
+                        "to avoid re-issuing side effects",
+                        self.agent_name,
+                        code_events_after - code_events_before,
+                    )
+                    raise
                 logger.warning("[%s] Prompt too long, auto-compacting and retrying", self.agent_name)
                 conv_id = await self._run_compaction(user_id, conv_id, custom_logger, reason="prompt_too_long")
                 ctx = contextvars.copy_context()
