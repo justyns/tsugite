@@ -38,6 +38,12 @@ def set_current_chain_depth(depth: int) -> None:
     _current_chain_depth.set(depth)
 
 
+# Transient events that should reach live subscribers but not the JSONL event log.
+# Persisting them would bloat history with high-frequency heartbeats whose only
+# value is real-time UI feedback.
+_TRANSIENT_EVENT_TYPES = frozenset({"llm_wait_progress"})
+
+
 class LoggingProgressHandler:
     """Wraps SSE event emission to also append events to the session JSONL log and broadcast via SSE."""
 
@@ -56,7 +62,8 @@ class LoggingProgressHandler:
 
     def _emit(self, event_type: str, data: dict[str, Any]) -> None:
         event = {"type": event_type, "timestamp": datetime.now(timezone.utc).isoformat(), **data}
-        self._store.append_event(self._session_id, event)
+        if event_type not in _TRANSIENT_EVENT_TYPES:
+            self._store.append_event(self._session_id, event)
         if self._broadcaster:
             self._broadcaster.emit(
                 "session_event",

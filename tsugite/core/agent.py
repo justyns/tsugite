@@ -42,8 +42,6 @@ from .tools import Tool  # noqa: E402
 # Agent execution constants
 DEFAULT_MAX_TURNS = 10  # Default maximum reasoning iterations before timeout
 
-# Seconds between LLMWaitProgressEvent heartbeats while awaiting a provider response.
-# Override via monkeypatch in tests; do not change at runtime.
 _LLM_WAIT_HEARTBEAT_INTERVAL = 10.0
 
 
@@ -702,22 +700,20 @@ class TsugiteAgent:
                 if self.storage:
                     self.storage.record("skill_removed", name=name)
 
-    async def _emit_wait_heartbeat(self, started_at: float) -> None:
-        """Emit LLMWaitProgressEvent every _LLM_WAIT_HEARTBEAT_INTERVAL seconds until cancelled."""
-        while True:
-            await asyncio.sleep(_LLM_WAIT_HEARTBEAT_INTERVAL)
-            self.event_bus.emit(LLMWaitProgressEvent(elapsed_seconds=int(time.monotonic() - started_at)))
-
     @contextlib.asynccontextmanager
     async def _llm_wait_heartbeat(self):
-        """Run an LLMWaitProgressEvent heartbeat for the duration of the block.
-
-        No-op when there's no event_bus to emit to.
-        """
+        """No-op when there's no event_bus."""
         if not self.event_bus:
             yield
             return
-        task = asyncio.create_task(self._emit_wait_heartbeat(time.monotonic()))
+        started_at = time.monotonic()
+
+        async def emit_loop():
+            while True:
+                await asyncio.sleep(_LLM_WAIT_HEARTBEAT_INTERVAL)
+                self.event_bus.emit(LLMWaitProgressEvent(elapsed_seconds=int(time.monotonic() - started_at)))
+
+        task = asyncio.create_task(emit_loop())
         try:
             yield
         finally:
