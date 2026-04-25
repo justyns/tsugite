@@ -472,6 +472,109 @@ class TestPartialOutputOnMaxTurns:
         assert "Partial output" not in notification_text
 
 
+class TestSchedulerStatusUpdates:
+    """The scheduled-task session must reach a terminal status on every exit path,
+    so the web UI sidebar doesn't leave the card pinned at "Starting...".
+    """
+
+    def _last_status(self, session_store_mock):
+        """Pull the `status` kwarg from the most recent update_session call, or None."""
+        for call in reversed(session_store_mock.update_session.call_args_list):
+            if "status" in call.kwargs:
+                return call.kwargs["status"]
+        return None
+
+    @pytest.mark.asyncio
+    async def test_success_marks_session_completed(self):
+        from tsugite.daemon.session_store import SessionStatus
+
+        sa, mock_adapter = _make_scheduler_adapter()
+        mock_adapter.handle_message = AsyncMock(return_value="all done")
+
+        entry = ScheduleEntry(
+            id="cron-ok",
+            agent="bot",
+            prompt="do work",
+            schedule_type="cron",
+            cron_expr="0 9 * * *",
+        )
+
+        with patch("tsugite.interaction.set_interaction_backend"):
+            await sa._run_agent(entry)
+
+        assert self._last_status(mock_adapter.session_store) == SessionStatus.COMPLETED.value
+
+    @pytest.mark.asyncio
+    async def test_agent_skipped_marks_session_cancelled(self):
+        """AgentSkippedError currently re-raises without updating status, leaving the session pinned at RUNNING."""
+        from tsugite.agent_runner.models import AgentSkippedError
+        from tsugite.daemon.session_store import SessionStatus
+
+        sa, mock_adapter = _make_scheduler_adapter()
+        mock_adapter.handle_message = AsyncMock(side_effect=AgentSkippedError("conditions not met"))
+
+        entry = ScheduleEntry(
+            id="cron-skipped",
+            agent="bot",
+            prompt="maybe do work",
+            schedule_type="cron",
+            cron_expr="0 9 * * *",
+        )
+
+        with patch("tsugite.interaction.set_interaction_backend"):
+            with pytest.raises(AgentSkippedError):
+                await sa._run_agent(entry)
+
+        assert self._last_status(mock_adapter.session_store) == SessionStatus.CANCELLED.value
+
+    @pytest.mark.asyncio
+    async def test_unexpected_exception_marks_session_failed(self):
+        """Any non-AgentExecutionError that escapes handle_message must still set FAILED."""
+        from tsugite.daemon.session_store import SessionStatus
+
+        sa, mock_adapter = _make_scheduler_adapter()
+        mock_adapter.handle_message = AsyncMock(side_effect=RuntimeError("kaboom"))
+
+        entry = ScheduleEntry(
+            id="cron-boom",
+            agent="bot",
+            prompt="do work",
+            schedule_type="cron",
+            cron_expr="0 9 * * *",
+        )
+
+        with patch("tsugite.interaction.set_interaction_backend"):
+            with pytest.raises(RuntimeError, match="kaboom"):
+                await sa._run_agent(entry)
+
+        assert self._last_status(mock_adapter.session_store) == SessionStatus.FAILED.value
+
+    @pytest.mark.asyncio
+    async def test_update_failure_logs_warning(self, caplog):
+        """A ValueError from session_store.update_session should be logged, not silently swallowed."""
+        import logging
+
+        sa, mock_adapter = _make_scheduler_adapter()
+        mock_adapter.handle_message = AsyncMock(return_value="fine")
+        mock_adapter.session_store.update_session = MagicMock(side_effect=ValueError("session vanished"))
+
+        entry = ScheduleEntry(
+            id="cron-update-fail",
+            agent="bot",
+            prompt="do work",
+            schedule_type="cron",
+            cron_expr="0 9 * * *",
+        )
+
+        with patch("tsugite.interaction.set_interaction_backend"):
+            with caplog.at_level(logging.WARNING, logger="tsugite.daemon.adapters.scheduler_adapter"):
+                await sa._run_agent(entry)
+
+        assert any(
+            "session vanished" in rec.getMessage() and "cron-update-fail" in rec.getMessage() for rec in caplog.records
+        ), f"expected warning mentioning the schedule id and ValueError, got: {[r.getMessage() for r in caplog.records]}"
+
+
 class TestPartialHistoryOnError:
     @pytest.mark.asyncio
     async def test_saves_history_on_agent_execution_error(self, tmp_path):

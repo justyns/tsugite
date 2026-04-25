@@ -1214,20 +1214,22 @@ class HTTPServer:
         if reasoning_effort:
             metadata["reasoning_effort_override"] = reasoning_effort
 
-        session_id = body.get("session_id")
-        if session_id:
-            from tsugite.daemon.session_store import _FINISHED_STATUSES
+        from tsugite.daemon.session_store import FINISHED_STATUSES
 
+        session_id = body.get("session_id")
+        target_session = None
+        if session_id:
             try:
-                target = adapter.session_store.get_session(session_id)
-                if target.status in _FINISHED_STATUSES:
+                target_session = adapter.session_store.get_session(session_id)
+            except ValueError:
+                target_session = None
+            if target_session is not None:
+                if target_session.status in FINISHED_STATUSES:
                     return JSONResponse(
-                        {"error": f"Session is {target.status}. Start a new session to continue."},
+                        {"error": f"Session is {target_session.status}. Start a new session to continue."},
                         status_code=409,
                     )
-            except ValueError:
-                pass
-            metadata["conv_id_override"] = session_id
+                metadata["conv_id_override"] = session_id
 
         # Without this guard, concurrent POSTs for the same (agent, user_id) both spawn run_agent tasks on the same session and any non-idempotent tool call runs twice.
         backend_key = (agent_name, user_id)
@@ -1246,14 +1248,17 @@ class HTTPServer:
             metadata=metadata,
         )
 
+        if target_session is None:
+            target_session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
+        target_session_id = target_session.id
+
         progress = SSEProgressHandler()
         progress.set_loop(asyncio.get_running_loop())
-        session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
-        progress.set_session_id(session.id)
+        progress.set_session_id(target_session_id)
         progress.set_broadcaster(self.event_bus)
         progress.set_event_persister(
             lambda payload: adapter.session_store.append_event(
-                session.id,
+                target_session_id,
                 {
                     **payload,
                     "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -1288,16 +1293,18 @@ class HTTPServer:
                 self.event_bus.emit("agent_status", {"agent": agent_name})
                 self.event_bus.emit("history_update", {"agent": agent_name})
 
-                # Emit session info for the web UI status bar
-                session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
-                if session:
+                try:
+                    refreshed = adapter.session_store.get_session(target_session_id)
+                except ValueError:
+                    refreshed = None
+                if refreshed is not None:
                     progress._emit(
                         "session_info",
                         {
-                            "tokens": session.cumulative_tokens,
+                            "tokens": refreshed.cumulative_tokens,
                             "context_limit": adapter.session_store.get_context_limit(adapter.agent_name),
                             "threshold": adapter.session_store.get_compaction_threshold(adapter.agent_name),
-                            "message_count": session.message_count,
+                            "message_count": refreshed.message_count,
                             "model": adapter.resolve_model(),
                             "attachments": [a.name for a in adapter._get_all_attachments()],
                         },

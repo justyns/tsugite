@@ -237,7 +237,10 @@ export const sessionsMixin = {
     if (cached.turnCount) parts.push(`Turn ${cached.turnCount}`);
     if (cached.toolCount) parts.push(`${cached.toolCount} tool${cached.toolCount > 1 ? 's' : ''}`);
     if (cached.statusText) parts.push(cached.statusText);
-    return parts.join(' · ') || 'Starting...';
+    if (parts.length > 0) return parts.join(' · ');
+    // lastEventTime distinguishes "between turns" (events seen, none active) from
+    // "session never started" so the idle state doesn't fall back to "Starting...".
+    return cached.lastEventTime ? '' : 'Starting...';
   },
 
   isSessionProgressFresh(s) {

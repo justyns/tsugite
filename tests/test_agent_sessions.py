@@ -179,7 +179,7 @@ def test_session_progress_summary_turn_start_status(store, sample_session):
     assert summary["status_text"] == "Turn 3..."
 
 
-def test_session_progress_summary_ignores_session_end_events(store, sample_session):
+def test_session_progress_summary_resets_on_session_complete(store, sample_session):
     store.create_session(sample_session)
     store.append_event("s1", {"type": "turn_start", "turn": 1, "timestamp": "2026-04-23T10:00:00+00:00"})
     store.append_event(
@@ -189,10 +189,58 @@ def test_session_progress_summary_ignores_session_end_events(store, sample_sessi
         "s1", {"type": "session_complete", "result_preview": "done", "timestamp": "2026-04-23T10:00:02+00:00"}
     )
     summary = store.session_progress_summary("s1")
-    # Last event ended the session; status_text should reflect the last mid-session event.
-    assert summary["turn_count"] == 1
-    assert summary["tool_count"] == 1
-    assert summary["status_text"] == "Tool: bash"
+    # Session ended — live progress fields should be cleared so the sidebar shows no stale label.
+    assert summary["turn_count"] == 0
+    assert summary["tool_count"] == 0
+    assert summary["status_text"] == ""
+    assert summary["last_event_time"] == "2026-04-23T10:00:02+00:00"
+
+
+def test_session_progress_summary_resets_on_final_result(store, sample_session):
+    """After an interactive turn ends with final_result, the live progress fields clear."""
+    store.create_session(sample_session)
+    store.append_event("s1", {"type": "turn_start", "turn": 2, "timestamp": "2026-04-23T10:00:00+00:00"})
+    store.append_event(
+        "s1", {"type": "reasoning_content", "content": "thinking...", "timestamp": "2026-04-23T10:00:01+00:00"}
+    )
+    store.append_event("s1", {"type": "final_result", "result": "ok", "timestamp": "2026-04-23T10:00:02+00:00"})
+    summary = store.session_progress_summary("s1")
+    assert summary["turn_count"] == 0
+    assert summary["tool_count"] == 0
+    assert summary["status_text"] == ""
+
+
+def test_session_progress_summary_resets_on_unprefixed_error(store, sample_session):
+    """The HTTP adapter persists `error`/`cancelled` (no `session_` prefix); they must reset progress too."""
+    store.create_session(sample_session)
+    store.append_event("s1", {"type": "turn_start", "turn": 1, "timestamp": "2026-04-23T10:00:00+00:00"})
+    store.append_event("s1", {"type": "reasoning_content", "content": "x", "timestamp": "2026-04-23T10:00:01+00:00"})
+    store.append_event("s1", {"type": "error", "error": "boom", "timestamp": "2026-04-23T10:00:02+00:00"})
+    summary = store.session_progress_summary("s1")
+    assert summary["turn_count"] == 0
+    assert summary["status_text"] == ""
+
+
+def test_session_progress_summary_resets_on_unprefixed_cancelled(store, sample_session):
+    store.create_session(sample_session)
+    store.append_event("s1", {"type": "turn_start", "turn": 1, "timestamp": "2026-04-23T10:00:00+00:00"})
+    store.append_event("s1", {"type": "reasoning_content", "content": "x", "timestamp": "2026-04-23T10:00:01+00:00"})
+    store.append_event("s1", {"type": "cancelled", "reason": "user", "timestamp": "2026-04-23T10:00:02+00:00"})
+    summary = store.session_progress_summary("s1")
+    assert summary["turn_count"] == 0
+    assert summary["status_text"] == ""
+
+
+def test_session_progress_summary_repopulates_on_next_turn(store, sample_session):
+    """After a turn ends, a subsequent turn_start should populate fields again."""
+    store.create_session(sample_session)
+    store.append_event("s1", {"type": "turn_start", "turn": 1, "timestamp": "2026-04-23T10:00:00+00:00"})
+    store.append_event("s1", {"type": "final_result", "result": "ok", "timestamp": "2026-04-23T10:00:01+00:00"})
+    store.append_event("s1", {"type": "turn_start", "turn": 2, "timestamp": "2026-04-23T10:01:00+00:00"})
+    store.append_event("s1", {"type": "reasoning_content", "content": "y", "timestamp": "2026-04-23T10:01:01+00:00"})
+    summary = store.session_progress_summary("s1")
+    assert summary["turn_count"] == 2
+    assert summary["status_text"] == "Reasoning..."
 
 
 def test_session_progress_summary_missing_session(store):

@@ -101,8 +101,8 @@ class SchedulerAdapter:
         if adapter:
             try:
                 adapter.session_store.update_session(conv_id, **fields)
-            except ValueError:
-                pass
+            except ValueError as e:
+                logger.warning("Schedule '%s' session update failed for %s: %s", entry.id, conv_id, e)
 
     async def _run_script(self, entry: ScheduleEntry) -> RunResult:
         """Run a shell command directly (no LLM)."""
@@ -201,6 +201,7 @@ class SchedulerAdapter:
                     channel_context=channel_context,
                 )
         except AgentSkippedError:
+            self._update_run_session(conv_id, entry, status=SessionStatus.CANCELLED.value)
             raise
         except AgentExecutionError as e:
             self._update_run_session(conv_id, entry, status=SessionStatus.FAILED.value, error=str(e))
@@ -212,6 +213,11 @@ class SchedulerAdapter:
                     await asyncio.to_thread(send_notification, notification, resolved_channels)
                 except Exception as notify_err:
                     logger.error("Failure notification for schedule '%s' failed: %s", entry.id, notify_err)
+            raise
+        except Exception as e:
+            # Anything else escaping handle_message must still leave the session in a terminal
+            # state, otherwise the sidebar pins the card at "Starting..." indefinitely.
+            self._update_run_session(conv_id, entry, status=SessionStatus.FAILED.value, error=str(e))
             raise
         finally:
             if temp_token and self._token_store:

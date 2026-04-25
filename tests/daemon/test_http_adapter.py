@@ -2,7 +2,7 @@
 
 import json
 from datetime import timedelta
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from starlette.testclient import TestClient
@@ -144,6 +144,63 @@ class TestChatEndpoint:
             headers={"Authorization": f"Bearer {test_token}", "Content-Type": "application/json"},
         )
         assert resp.status_code == 400
+
+    def test_chat_with_explicit_session_id_routes_progress_to_that_session(
+        self, client, server, mock_adapter, test_token
+    ):
+        """When body has session_id, broadcasts must carry that id even if a newer interactive session has since become the user's default."""
+        from tsugite.daemon.session_store import Session, SessionSource, SessionStatus
+
+        store = mock_adapter.session_store
+        # User's older interactive session, still visible in sidebar.
+        target = store.get_or_create_interactive("web-anonymous", "test-agent")
+        target_id = target.id
+        # User clicked "New Session" — a fresh interactive becomes the default in the
+        # store's interactive index, displacing `target` as the default for chats with
+        # no explicit session_id.
+        newer = store.create_session(
+            Session(
+                id="newer-default-session",
+                agent="test-agent",
+                source=SessionSource.INTERACTIVE.value,
+                status=SessionStatus.ACTIVE.value,
+                user_id="web-anonymous",
+                title="Newer session",
+            )
+        )
+        assert store.get_or_create_interactive("web-anonymous", "test-agent").id == newer.id
+        assert target_id != newer.id
+
+        recorded: list[dict] = []
+        original_emit = server.event_bus.emit
+
+        def capture(event_type, data=None):
+            if event_type == "session_event":
+                recorded.append(dict(data or {}))
+            return original_emit(event_type, data)
+
+        with (
+            patch.object(
+                type(mock_adapter),
+                "handle_message",
+                new=AsyncMock(return_value="ok"),
+            ),
+            patch.object(server.event_bus, "emit", side_effect=capture),
+        ):
+            resp = client.post(
+                "/api/agents/test-agent/chat",
+                json={"message": "hello", "session_id": target_id},
+                headers={"Authorization": f"Bearer {test_token}"},
+            )
+            # Drain the SSE stream so the run_agent task has a chance to finish.
+            list(resp.iter_lines())
+
+        assert resp.status_code == 200
+        assert recorded, "expected at least one session_event broadcast"
+        for payload in recorded:
+            assert (
+                payload.get("session_id") == target_id
+            ), f"broadcast routed to {payload.get('session_id')!r}, expected {target_id!r}"
 
 
 class TestAgentSessionsEndpoint:

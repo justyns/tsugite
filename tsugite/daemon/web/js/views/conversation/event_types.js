@@ -1,6 +1,8 @@
-// Session lifecycle events that end a live progress trace. Kept in sync with
-// the Python _SESSION_END_EVENT_TYPES set in tsugite/daemon/session_store.py.
 export const SESSION_END_EVENTS = new Set(['session_complete', 'session_error', 'session_cancelled']);
+
+// Turn-end events on a session that itself stays active. `error`/`cancelled`
+// are the unprefixed names the HTTP adapter persists for interactive turns.
+export const TURN_END_EVENTS = new Set(['final_result', 'error', 'cancelled']);
 
 // Events skipped during replay-on-select so we don't re-announce the session
 // or surface the final result twice (loadHistory already provides it).
@@ -22,13 +24,14 @@ export function progressStatusFor(evType, data) {
   return null;
 }
 
-// Normalize a server-side `progress` payload (snake_case) into the local cache shape (camelCase).
+// Empty `status_text` from the backend means "live progress cleared" (turn ended);
+// preserve it as '' so sessionProgressLabel can render nothing instead of "Starting...".
 export function progressFromPayload(p) {
   if (!p) return null;
   return {
     turnCount: p.turn_count || 0,
     toolCount: p.tool_count || 0,
-    statusText: p.status_text || 'Starting...',
+    statusText: typeof p.status_text === 'string' ? p.status_text : 'Starting...',
     lastEventTime: p.last_event_time || null,
   };
 }

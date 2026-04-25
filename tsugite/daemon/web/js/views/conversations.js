@@ -5,7 +5,7 @@ import { historyMixin } from './conversation/history.js';
 import { attachmentsMixin } from './conversation/attachments.js';
 import { streamingMixin } from './conversation/streaming.js';
 import { inputMixin } from './conversation/input.js';
-import { SESSION_END_EVENTS, progressStatusFor } from './conversation/event_types.js';
+import { SESSION_END_EVENTS, TURN_END_EVENTS, progressStatusFor } from './conversation/event_types.js';
 
 export default () => ({
   ...sessionsMixin,
@@ -361,6 +361,17 @@ export default () => ({
       return;
     }
     const now = d.timestamp || new Date().toISOString();
+    if (TURN_END_EVENTS.has(evType)) {
+      // Keep lastEventTime so sessionProgressLabel knows we're between turns
+      // (otherwise it falls back to "Starting...").
+      const entry = this.progressCache[id];
+      if (entry && !entry.turnCount && !entry.toolCount && !entry.statusText) {
+        entry.lastEventTime = now;
+      } else {
+        this.progressCache[id] = { turnCount: 0, toolCount: 0, statusText: '', lastEventTime: now };
+      }
+      return;
+    }
     let entry = this.progressCache[id];
     if (!entry) {
       entry = { turnCount: 0, toolCount: 0, statusText: 'Starting...', lastEventTime: now };

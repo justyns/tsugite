@@ -32,7 +32,9 @@ def _parse_ts(ts: str | None) -> datetime | None:
 logger = logging.getLogger(__name__)
 
 
-_SESSION_END_EVENT_TYPES = frozenset({"session_complete", "session_error", "session_cancelled", "final_result"})
+_SESSION_END_EVENT_TYPES = frozenset(
+    {"session_complete", "session_error", "session_cancelled", "final_result", "error", "cancelled"}
+)
 
 
 def _progress_status_text(event: dict) -> Optional[str]:
@@ -68,24 +70,32 @@ def _is_real_tool_event(event: dict) -> bool:
 
 
 def _progress_from_events(events: list[dict]) -> dict:
-    """Compute a progress summary dict from the raw event list."""
+    """Compute a progress summary dict from the raw event list.
+
+    A session/turn-end event clears live progress fields so the sidebar doesn't
+    re-render a stale label between turns of an active session.
+    """
     turn_count = 0
     tool_count = 0
     status_text = "Starting..."
     last_event_time = None
     for event in events:
         etype = event.get("type")
+        last_event_time = event.get("timestamp") or last_event_time
+        if etype in _SESSION_END_EVENT_TYPES:
+            turn_count = 0
+            tool_count = 0
+            status_text = ""
+            continue
         if etype == "turn_start":
             turn = event.get("turn")
             if isinstance(turn, int) and turn > turn_count:
                 turn_count = turn
         elif _is_real_tool_event(event):
             tool_count += 1
-        if etype not in _SESSION_END_EVENT_TYPES:
-            label = _progress_status_text(event)
-            if label:
-                status_text = label
-        last_event_time = event.get("timestamp") or last_event_time
+        label = _progress_status_text(event)
+        if label:
+            status_text = label
     return {
         "turn_count": turn_count,
         "tool_count": tool_count,
@@ -125,7 +135,7 @@ class SessionStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
-_FINISHED_STATUSES = (SessionStatus.CANCELLED.value, SessionStatus.COMPLETED.value, SessionStatus.FAILED.value)
+FINISHED_STATUSES = (SessionStatus.CANCELLED.value, SessionStatus.COMPLETED.value, SessionStatus.FAILED.value)
 
 
 @dataclass
@@ -358,7 +368,7 @@ class SessionStore:
                 session_id = self._interactive_index[key]
                 if session_id in self._sessions:
                     existing = self._sessions[session_id]
-                    if existing.status not in _FINISHED_STATUSES:
+                    if existing.status not in FINISHED_STATUSES:
                         return existing
                     is_replacement = True
 
@@ -491,7 +501,7 @@ class SessionStore:
             for s in self._sessions.values()
             if s.agent == agent
             and s.source in (SessionSource.BACKGROUND.value, SessionSource.SPAWNED.value)
-            and s.status in _FINISHED_STATUSES
+            and s.status in FINISHED_STATUSES
         ]
         if len(children) <= self.MAX_BACKGROUND_SESSIONS:
             return
@@ -710,7 +720,7 @@ class SessionStore:
                 session_id = self._channel_index[key]
                 if session_id in self._sessions:
                     existing = self._sessions[session_id]
-                    if existing.status not in _FINISHED_STATUSES:
+                    if existing.status not in FINISHED_STATUSES:
                         return existing
                     is_replacement = True
 
