@@ -13,6 +13,7 @@ from tsugite.events import (
     FinalAnswerEvent,
     InfoEvent,
     LLMMessageEvent,
+    LLMWaitProgressEvent,
     ObservationEvent,
     PromptSnapshotEvent,
     ReactionEvent,
@@ -84,6 +85,7 @@ class JSONLUIHandler:
         ReasoningTokensEvent: "_handle_reasoning_tokens",
         SecretAccessEvent: "_handle_secret_access",
         PromptSnapshotEvent: "_handle_prompt_snapshot",
+        LLMWaitProgressEvent: "_handle_llm_wait_progress",
     }
 
     def handle_event(self, event: BaseEvent) -> None:
@@ -179,6 +181,9 @@ class JSONLUIHandler:
 
     def _handle_reasoning_tokens(self, event: ReasoningTokensEvent) -> None:
         self._emit("reasoning_tokens", {"tokens": event.tokens, "step": event.step})
+
+    def _handle_llm_wait_progress(self, event: LLMWaitProgressEvent) -> None:
+        self._emit("llm_wait_progress", {"elapsed_seconds": event.elapsed_seconds})
 
     def _emit(self, event_type: str, data: Dict[str, Any]) -> None:
         """Print JSONL event to stdout.

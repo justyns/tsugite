@@ -226,6 +226,13 @@ class StreamCompleteEvent(BaseEvent):
     complete: bool = True
 
 
+class LLMWaitProgressEvent(BaseEvent):
+    """Periodic heartbeat fired while awaiting an LLM provider response."""
+
+    event_type: EventType = Field(default=EventType.LLM_WAIT_PROGRESS, frozen=True)
+    elapsed_seconds: int = Field(ge=0)
+
+
 # ============================================================================
 # Progress Events
 # ============================================================================

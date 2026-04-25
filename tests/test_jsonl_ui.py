@@ -7,6 +7,7 @@ from tsugite.events import (
     ErrorEvent,
     FinalAnswerEvent,
     LLMMessageEvent,
+    LLMWaitProgressEvent,
     ObservationEvent,
     StepStartEvent,
     TaskStartEvent,
@@ -141,6 +142,20 @@ def test_jsonl_error(capsys):
     assert event["type"] == "error"
     assert event["error"] == "Something went wrong"
     assert event["step"] == 2
+
+
+def test_jsonl_llm_wait_progress(capsys):
+    """LLM_WAIT_PROGRESS heartbeat surfaces as llm_wait_progress JSONL with elapsed_seconds."""
+    handler = JSONLUIHandler()
+    handler.handle_event(LLMWaitProgressEvent(elapsed_seconds=42))
+
+    output = capsys.readouterr().out
+    lines = output.strip().split("\n")
+
+    assert len(lines) == 1
+    event = json.loads(lines[0])
+    assert event["type"] == "llm_wait_progress"
+    assert event["elapsed_seconds"] == 42
 
 
 def test_jsonl_multiple_events(capsys):

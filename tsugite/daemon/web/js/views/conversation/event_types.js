@@ -21,6 +21,9 @@ export function progressStatusFor(evType, data) {
     return tool === 'unknown' ? null : `Tool: ${tool}`;
   }
   if (evType === 'hook_status') return data.message || null;
+  if (evType === 'llm_wait_progress') {
+    return data.elapsed_seconds ? `Waiting on LLM (${data.elapsed_seconds}s)` : 'Waiting on LLM...';
+  }
   return null;
 }
 

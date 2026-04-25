@@ -2,6 +2,7 @@
 
 import ast
 import asyncio
+import contextlib
 import logging
 import time
 from dataclasses import dataclass, field
@@ -17,6 +18,7 @@ from tsugite.events import (  # noqa: E402
     EventBus,
     FinalAnswerEvent,
     LLMMessageEvent,
+    LLMWaitProgressEvent,
     ObservationEvent,
     PromptSnapshotEvent,
     ReasoningContentEvent,
@@ -39,6 +41,10 @@ from .tools import Tool  # noqa: E402
 
 # Agent execution constants
 DEFAULT_MAX_TURNS = 10  # Default maximum reasoning iterations before timeout
+
+# Seconds between LLMWaitProgressEvent heartbeats while awaiting a provider response.
+# Override via monkeypatch in tests; do not change at runtime.
+_LLM_WAIT_HEARTBEAT_INTERVAL = 10.0
 
 
 def _attachment_char_limit(name: str) -> int | None:
@@ -561,10 +567,10 @@ class TsugiteAgent:
                     masked = get_registry().mask(exec_result.output)
                     if exec_result.error:
                         self._previous_turn_had_error = True
-                        preview = (
-                            exec_result.error[:100] + "..." if len(exec_result.error) > 100 else exec_result.error
+                        preview = exec_result.error[:100] + "..." if len(exec_result.error) > 100 else exec_result.error
+                        self.event_bus.emit(
+                            WarningEvent(message=f"Tool failed, will retry: {preview}", step=turn_num + 1)
                         )
-                        self.event_bus.emit(WarningEvent(message=f"Tool failed, will retry: {preview}", step=turn_num + 1))
                     else:
                         self._previous_turn_had_error = False
                         self.event_bus.emit(ObservationEvent(observation=masked))
@@ -604,9 +610,7 @@ class TsugiteAgent:
                 status = "interrupted"
                 error_message = f"max_turns ({self.max_turns}) reached"
                 if self.event_bus:
-                    self.event_bus.emit(
-                        WarningEvent(message=error_message, step=turn_num + 1)
-                    )
+                    self.event_bus.emit(WarningEvent(message=error_message, step=turn_num + 1))
             else:
                 status = "success"
                 error_message = None
@@ -698,93 +702,113 @@ class TsugiteAgent:
                 if self.storage:
                     self.storage.record("skill_removed", name=name)
 
+    async def _emit_wait_heartbeat(self, started_at: float) -> None:
+        """Emit LLMWaitProgressEvent every _LLM_WAIT_HEARTBEAT_INTERVAL seconds until cancelled."""
+        while True:
+            await asyncio.sleep(_LLM_WAIT_HEARTBEAT_INTERVAL)
+            self.event_bus.emit(LLMWaitProgressEvent(elapsed_seconds=int(time.monotonic() - started_at)))
+
+    @contextlib.asynccontextmanager
+    async def _llm_wait_heartbeat(self):
+        """Run an LLMWaitProgressEvent heartbeat for the duration of the block.
+
+        No-op when there's no event_bus to emit to.
+        """
+        if not self.event_bus:
+            yield
+            return
+        task = asyncio.create_task(self._emit_wait_heartbeat(time.monotonic()))
+        try:
+            yield
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
     async def _provider_turn(self, messages, turn_num, stream) -> TurnResult:
         """Execute one turn via the provider system."""
         self._record_model_request(messages, turn_num)
 
-        if stream:
-            accumulated_content = ""
-            accumulated_reasoning = ""
-            step_cost = 0.0
-            final_chunk = None
-            result = await self._provider.acompletion(
-                messages=messages, model=self._model_id, stream=True, **self._model_kwargs
-            )
+        async with self._llm_wait_heartbeat():
+            if stream:
+                return await self._provider_turn_streaming(messages, turn_num)
+            return await self._provider_turn_blocking(messages, turn_num)
 
-            async for chunk in result:
-                if chunk.content:
-                    accumulated_content += chunk.content
-                    if self.event_bus:
-                        self.event_bus.emit(StreamChunkEvent(chunk=chunk.content))
-                if getattr(chunk, "reasoning_content", ""):
-                    accumulated_reasoning += chunk.reasoning_content
-                    if self.event_bus:
-                        self.event_bus.emit(
-                            ReasoningContentEvent(content=chunk.reasoning_content, step=turn_num + 1)
-                        )
-                if chunk.done:
-                    final_chunk = chunk
+    async def _provider_turn_streaming(self, messages, turn_num) -> TurnResult:
+        accumulated_content = ""
+        accumulated_reasoning = ""
+        step_cost = 0.0
+        final_chunk = None
+        result = await self._provider.acompletion(
+            messages=messages, model=self._model_id, stream=True, **self._model_kwargs
+        )
 
-            if self.event_bus:
-                self.event_bus.emit(StreamCompleteEvent())
+        async for chunk in result:
+            if chunk.content:
+                accumulated_content += chunk.content
+                if self.event_bus:
+                    self.event_bus.emit(StreamChunkEvent(chunk=chunk.content))
+            if getattr(chunk, "reasoning_content", ""):
+                accumulated_reasoning += chunk.reasoning_content
+                if self.event_bus:
+                    self.event_bus.emit(ReasoningContentEvent(content=chunk.reasoning_content, step=turn_num + 1))
+            if chunk.done:
+                final_chunk = chunk
 
-            if final_chunk and final_chunk.usage:
-                step_cost = self._accumulate_usage(final_chunk.usage, final_chunk.cost or 0.0)
+        if self.event_bus:
+            self.event_bus.emit(StreamCompleteEvent())
 
-            parsed = self._parse_response_from_text(accumulated_content)
-            if accumulated_reasoning:
-                self.memory.add_reasoning(accumulated_reasoning)
-            self._record_model_response(
-                turn_num,
-                raw_content=accumulated_content,
-                usage=final_chunk.usage if final_chunk else None,
-                cost=final_chunk.cost if final_chunk else None,
-                response=None,
-            )
+        if final_chunk and final_chunk.usage:
+            step_cost = self._accumulate_usage(final_chunk.usage, final_chunk.cost or 0.0)
 
-            synthetic = ProviderResponse(content=accumulated_content)
-            return TurnResult(
-                thought=parsed.thought,
-                code=parsed.code,
-                step_cost=step_cost,
-                content_blocks=parsed.content_blocks,
-                response=synthetic,
-                num_code_blocks=parsed.num_code_blocks,
-            )
+        parsed = self._parse_response_from_text(accumulated_content)
+        if accumulated_reasoning:
+            self.memory.add_reasoning(accumulated_reasoning)
+        self._record_model_response(
+            turn_num,
+            raw_content=accumulated_content,
+            usage=final_chunk.usage if final_chunk else None,
+            cost=final_chunk.cost if final_chunk else None,
+            response=None,
+        )
 
+        synthetic = ProviderResponse(content=accumulated_content)
+        return TurnResult(
+            thought=parsed.thought,
+            code=parsed.code,
+            step_cost=step_cost,
+            content_blocks=parsed.content_blocks,
+            response=synthetic,
+            num_code_blocks=parsed.num_code_blocks,
+        )
+
+    async def _provider_turn_blocking(self, messages, turn_num) -> TurnResult:
         response: ProviderResponse = await self._provider.acompletion(
             messages=messages, model=self._model_id, stream=False, **self._model_kwargs
         )
         parsed = self._parse_response_from_text(response.content)
 
-        # Track cost and cumulative tokens
         step_cost = response.cost or 0.0
         if response.usage:
             self._accumulate_usage(response.usage, step_cost)
         else:
             self.total_cost += step_cost
 
-        # Extract reasoning content
         if response.reasoning_content:
             self.memory.add_reasoning(response.reasoning_content)
             if self.event_bus:
                 self.event_bus.emit(ReasoningContentEvent(content=response.reasoning_content, step=turn_num + 1))
 
-        if response.usage and response.usage.reasoning_tokens:
-            if self.event_bus:
-                self.event_bus.emit(ReasoningTokensEvent(tokens=response.usage.reasoning_tokens, step=turn_num + 1))
+        if self.event_bus and response.usage and response.usage.reasoning_tokens:
+            self.event_bus.emit(ReasoningTokensEvent(tokens=response.usage.reasoning_tokens, step=turn_num + 1))
 
-        if self.event_bus:
-            # Only emit thought prose. Falling back to response.content would
-            # include the raw ```python fence in the event, causing the UI to
-            # render the code block twice (once inside the thought markdown,
-            # once as a separate code-execution event).
-            if parsed.thought and parsed.thought.strip():
-                self.event_bus.emit(
-                    LLMMessageEvent(
-                        content=parsed.thought, title=f"Turn {turn_num + 1} Reasoning", step=turn_num + 1
-                    )
-                )
+        # Only emit thought prose. Falling back to response.content would include the
+        # raw ```python fence, causing the UI to render the code block twice (once
+        # inside the thought markdown, once as a separate code-execution event).
+        if self.event_bus and parsed.thought and parsed.thought.strip():
+            self.event_bus.emit(
+                LLMMessageEvent(content=parsed.thought, title=f"Turn {turn_num + 1} Reasoning", step=turn_num + 1)
+            )
 
         self._record_model_response(
             turn_num,
@@ -1167,7 +1191,7 @@ class TsugiteAgent:
         prose_end = first_open if first_open != -1 else len(cleaned)
         thought_start = cleaned.find("Thought:")
         if thought_start != -1:
-            thought = cleaned[thought_start + len("Thought:"):prose_end].strip()
+            thought = cleaned[thought_start + len("Thought:") : prose_end].strip()
         else:
             thought = cleaned[:prose_end].strip()
 

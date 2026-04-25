@@ -13,6 +13,7 @@ from .events import (
     FinalAnswerEvent,
     InfoEvent,
     LLMMessageEvent,
+    LLMWaitProgressEvent,
     ObservationEvent,
     PromptSnapshotEvent,
     ReactionEvent,
@@ -46,6 +47,7 @@ __all__ = [
     "FinalAnswerEvent",
     # LLM
     "LLMMessageEvent",
+    "LLMWaitProgressEvent",
     "ReasoningContentEvent",
     "ReasoningTokensEvent",
     # Reaction

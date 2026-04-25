@@ -231,6 +231,27 @@ def test_session_progress_summary_resets_on_unprefixed_cancelled(store, sample_s
     assert summary["status_text"] == ""
 
 
+def test_session_progress_summary_llm_wait_progress(store, sample_session):
+    """Heartbeat events surface as 'Waiting on LLM (Ns)' in the sidebar."""
+    store.create_session(sample_session)
+    store.append_event("s1", {"type": "turn_start", "turn": 1, "timestamp": "2026-04-23T10:00:00+00:00"})
+    store.append_event(
+        "s1", {"type": "llm_wait_progress", "elapsed_seconds": 15, "timestamp": "2026-04-23T10:00:15+00:00"}
+    )
+    summary = store.session_progress_summary("s1")
+    assert summary["status_text"] == "Waiting on LLM (15s)"
+
+
+def test_session_progress_summary_llm_wait_progress_zero(store, sample_session):
+    """Zero-elapsed heartbeat falls back to a no-elapsed label."""
+    store.create_session(sample_session)
+    store.append_event(
+        "s1", {"type": "llm_wait_progress", "elapsed_seconds": 0, "timestamp": "2026-04-23T10:00:00+00:00"}
+    )
+    summary = store.session_progress_summary("s1")
+    assert summary["status_text"] == "Waiting on LLM..."
+
+
 def test_session_progress_summary_repopulates_on_next_turn(store, sample_session):
     """After a turn ends, a subsequent turn_start should populate fields again."""
     store.create_session(sample_session)

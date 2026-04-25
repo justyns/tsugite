@@ -54,6 +54,9 @@ class EventType(IntEnum):
     # Debug/inspection events
     PROMPT_SNAPSHOT = 31
 
+    # Heartbeat while waiting on the LLM provider
+    LLM_WAIT_PROGRESS = 32
+
 
 class BaseEvent(BaseModel):
     """Base class for all UI events."""

@@ -61,6 +61,9 @@ def _progress_status_text(event: dict) -> Optional[str]:
         return f"Tool: {event['tool']}" if _is_real_tool_event(event) else None
     if etype == "hook_status":
         return event.get("message")
+    if etype == "llm_wait_progress":
+        secs = event.get("elapsed_seconds")
+        return f"Waiting on LLM ({secs}s)" if secs else "Waiting on LLM..."
     return None
 
 
