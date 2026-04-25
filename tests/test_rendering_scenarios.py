@@ -277,6 +277,109 @@ class TestPrefetchExecution:
         assert result == {}
 
 
+class TestPrefetchArgRendering:
+    """Tests for Jinja rendering inside prefetch args."""
+
+    @patch("tsugite.tools.call_tool")
+    def test_prefetch_renders_get_secret_in_string_arg(self, mock_call_tool, secret_backend):
+        secret_backend.set("forgejo-token", "abc123")
+        mock_call_tool.return_value = "ok"
+
+        prefetch_config = [
+            {
+                "tool": "run",
+                "args": {"command": "FOO={{ get_secret('forgejo-token') }} bash"},
+                "assign": "out",
+            }
+        ]
+        execute_prefetch(prefetch_config)
+        mock_call_tool.assert_called_once_with("run", command="FOO=abc123 bash")
+
+    @patch("tsugite.tools.call_tool")
+    def test_prefetch_renders_nested_dict_args(self, mock_call_tool, secret_backend):
+        secret_backend.set("k", "v")
+        mock_call_tool.return_value = "ok"
+
+        prefetch_config = [
+            {
+                "tool": "run",
+                "args": {
+                    "command": "echo go",
+                    "env": {"TOKEN": "{{ get_secret('k') }}"},
+                },
+                "assign": "out",
+            }
+        ]
+        execute_prefetch(prefetch_config)
+        mock_call_tool.assert_called_once_with(
+            "run",
+            command="echo go",
+            env={"TOKEN": "v"},
+        )
+
+    @patch("tsugite.tools.call_tool")
+    def test_prefetch_renders_list_args_preserves_types(self, mock_call_tool, secret_backend):
+        secret_backend.set("k", "v")
+        mock_call_tool.return_value = "ok"
+
+        prefetch_config = [
+            {
+                "tool": "run",
+                "args": {
+                    "items": ["literal", "{{ get_secret('k') }}", 42, True],
+                    "timeout": 30,
+                },
+                "assign": "out",
+            }
+        ]
+        execute_prefetch(prefetch_config)
+        mock_call_tool.assert_called_once_with(
+            "run",
+            items=["literal", "v", 42, True],
+            timeout=30,
+        )
+
+    def test_prefetch_render_failure_raises(self):
+        prefetch_config = [
+            {
+                "tool": "run",
+                "args": {"command": "{{ undefined_var }}"},
+                "assign": "out",
+            }
+        ]
+        with pytest.raises(Exception, match="undefined_var|Prefetch render"):
+            execute_prefetch(prefetch_config)
+
+    @patch("tsugite.tools.call_tool")
+    def test_prefetch_string_without_jinja_passes_through(self, mock_call_tool):
+        # Fast-path: no braces means render_string is never invoked.
+        mock_call_tool.return_value = "ok"
+        prefetch_config = [
+            {
+                "tool": "run",
+                "args": {"command": "echo plain"},
+                "assign": "out",
+            }
+        ]
+        execute_prefetch(prefetch_config)
+        mock_call_tool.assert_called_once_with("run", command="echo plain")
+
+    @patch("tsugite.tools.call_tool")
+    def test_prefetch_tool_failure_still_silent_after_render(self, mock_call_tool, secret_backend):
+        secret_backend.set("k", "v")
+        mock_call_tool.side_effect = RuntimeError("tool boom")
+
+        prefetch_config = [
+            {
+                "tool": "run",
+                "args": {"command": "echo {{ get_secret('k') }}"},
+                "assign": "out",
+            }
+        ]
+        result = execute_prefetch(prefetch_config)
+        assert result == {"out": None}
+
+
 class TestComplexRenderingScenarios:
     """Test complex rendering scenarios."""
 

@@ -62,6 +62,7 @@ def execute_shell_command(
     timeout: int = 30,
     shell: bool = True,
     cwd: "str | Path | None" = None,
+    env: "dict[str, str] | None" = None,
 ) -> str:
     """Execute a shell command and return its output.
 
@@ -71,6 +72,8 @@ def execute_shell_command(
         shell: Whether to use shell execution
         cwd: Directory to run in. Defaults to the bound workspace ContextVar,
             else the process cwd.
+        env: Extra environment variables for the child process. When provided,
+            merged on top of os.environ so the child still inherits PATH/HOME.
 
     Returns:
         Command output including stdout, stderr, and exit code
@@ -85,6 +88,8 @@ def execute_shell_command(
         cwd = get_workspace_dir()
     resolved_cwd = str(cwd) if cwd is not None else None
 
+    subprocess_env = {**os.environ, **env} if env else None
+
     try:
         if shell:
             result = subprocess.run(
@@ -95,6 +100,7 @@ def execute_shell_command(
                 timeout=timeout,
                 check=False,
                 cwd=resolved_cwd,
+                env=subprocess_env,
             )
         else:
             cmd_parts = shlex.split(command)
@@ -105,6 +111,7 @@ def execute_shell_command(
                 timeout=timeout,
                 check=False,
                 cwd=resolved_cwd,
+                env=subprocess_env,
             )
 
         output = ""

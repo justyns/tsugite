@@ -741,6 +741,24 @@ class TestRenderAndExecuteEnv:
             assert env["GOOD"] == "ok"
 
 
+class TestHookSecretsGlobal:
+    """get_secret must be available in hook-rendered run/env strings."""
+
+    def test_run_command_renders_get_secret(self, secret_backend, tmp_path):
+        secret_backend.set("hook-token", "hookval")
+        rules = [HookRule(run="echo {{ get_secret('hook-token') }}")]
+        with patch("tsugite.hooks.subprocess.run", return_value=_ok_result()) as mock_run:
+            _render_and_execute(_jinja_env, rules, {}, tmp_path)
+            assert mock_run.call_args[0][0] == "echo hookval"
+
+    def test_env_renders_get_secret(self, secret_backend, tmp_path):
+        secret_backend.set("hook-token", "hookval")
+        rules = [HookRule(run="echo hi", env={"TOKEN": "{{ get_secret('hook-token') }}"})]
+        with patch("tsugite.hooks.subprocess.run", return_value=_ok_result()) as mock_run:
+            _render_and_execute(_jinja_env, rules, {}, tmp_path)
+            assert mock_run.call_args[1]["env"]["TOKEN"] == "hookval"
+
+
 class TestHookRuleEnv:
     def test_env_defaults_to_empty_dict(self):
         rule = HookRule(run="echo hi")

@@ -51,3 +51,13 @@ def list_secrets() -> str:
     if not names:
         return "No secrets found (or backend does not support listing)"
     return "\n".join(sorted(names))
+
+
+def register_jinja_globals(env) -> None:
+    """Register get_secret/list_secrets on a Jinja environment.
+
+    The functions enforce the per-agent allowlist and route values through the
+    masking registry, so exposing them as Jinja globals is safe.
+    """
+    env.globals["get_secret"] = get_secret
+    env.globals["list_secrets"] = list_secrets

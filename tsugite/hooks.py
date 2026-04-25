@@ -44,6 +44,10 @@ HOOK_TIMEOUT = 300
 _jinja_env = jinja2.Environment()
 _jinja_env.filters["shell_quote"] = shlex.quote
 
+from tsugite.tools.secrets import register_jinja_globals as _register_secret_globals  # noqa: E402
+
+_register_secret_globals(_jinja_env)
+
 
 class HookRule(BaseModel):
     """A hook rule - used for all hook phases (post_tool, pre_message, pre_context_build, etc.)."""

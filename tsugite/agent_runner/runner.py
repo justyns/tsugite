@@ -235,12 +235,35 @@ def get_default_instructions() -> str:
     return base + output + rules
 
 
+def _render_args(value: Any, renderer: AgentRenderer) -> Any:
+    """Recursively render Jinja in string leaves of a tool args structure.
+
+    Non-string values pass through unchanged. Strings without Jinja markers
+    skip the render call.
+    """
+    if isinstance(value, str):
+        if "{{" not in value and "{%" not in value:
+            return value
+        return renderer.render_string(value, {})
+    if isinstance(value, dict):
+        return {k: _render_args(v, renderer) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_render_args(v, renderer) for v in value]
+    if isinstance(value, tuple):
+        return tuple(_render_args(v, renderer) for v in value)
+    return value
+
+
 def execute_prefetch(prefetch_config: List[Dict[str, Any]], event_bus: Optional["EventBus"] = None) -> Dict[str, Any]:
+    if not prefetch_config:
+        return {}
+
     from tsugite.tools import call_tool
 
     # Set event_bus in context so tools can access it
     _setup_event_context(event_bus)
 
+    renderer = AgentRenderer()
     context = {}
     for config in prefetch_config:
         tool_name = config.get("tool")
@@ -251,7 +274,12 @@ def execute_prefetch(prefetch_config: List[Dict[str, Any]], event_bus: Optional[
             continue
 
         try:
-            context[assign_name] = call_tool(tool_name, **args)
+            rendered_args = _render_args(args, renderer)
+        except Exception as e:
+            raise RuntimeError(f"Prefetch render failed for tool '{tool_name}': {e}") from e
+
+        try:
+            context[assign_name] = call_tool(tool_name, **rendered_args)
         except Exception as e:
             if event_bus:
                 from tsugite.events import WarningEvent
@@ -313,11 +341,17 @@ def execute_tool_directives(
     # Execute directives in order
     new_context = {}
     modified_content = content
+    renderer = AgentRenderer()
 
     for directive in directives:
         try:
+            rendered_args = _render_args(directive.args, renderer)
+        except Exception as e:
+            raise RuntimeError(f"Tool directive render failed for '{directive.name}': {e}") from e
+
+        try:
             # Execute the tool
-            result = call_tool(directive.name, **directive.args)
+            result = call_tool(directive.name, **rendered_args)
             new_context[directive.assign_var] = result
 
             # Replace directive with execution note

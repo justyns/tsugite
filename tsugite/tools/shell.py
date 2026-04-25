@@ -7,15 +7,24 @@ from tsugite.utils import execute_shell_command
 
 
 @tool
-def run(command: str, timeout: int = 30, shell: bool = True) -> str:
+def run(
+    command: str,
+    timeout: int = 30,
+    shell: bool = True,
+    env: dict[str, str] | None = None,
+) -> str:
     """Execute a shell command and return its output.
 
     Args:
         command: Shell command to execute
         timeout: Maximum execution time in seconds (default: 30)
         shell: Whether to use shell execution (default: True)
+        env: Extra environment variables to inject into the subprocess. Merged on top
+            of the parent process environment, so callers do not lose PATH/HOME. Use
+            this for secret injection ({{ get_secret('x') }}) instead of putting the
+            value on the command line, where it would be visible via `ps`.
     """
-    return execute_shell_command(command, timeout=timeout, shell=shell)
+    return execute_shell_command(command, timeout=timeout, shell=shell, env=env)
 
 
 @tool

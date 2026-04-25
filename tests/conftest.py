@@ -50,17 +50,33 @@ def clear_agent_context():
     This prevents test pollution where one test sets current_agent
     and affects another test running in the same worker.
     """
-    from tsugite.agent_runner.helpers import clear_allowed_agents, clear_current_agent
+    from tsugite.agent_runner.helpers import clear_allowed_agents, clear_current_agent, set_allowed_secrets
 
-    # Clear before test
-    clear_current_agent()
-    clear_allowed_agents()
+    def _reset():
+        clear_current_agent()
+        clear_allowed_agents()
+        set_allowed_secrets(None)
 
+    _reset()
     yield
+    _reset()
 
-    # Clear after test
-    clear_current_agent()
-    clear_allowed_agents()
+
+@pytest.fixture
+def secret_backend(tmp_path):
+    """File-backed secrets rooted under tmp_path. Wires the backend, registers a
+    test agent, clears the masking registry, and yields the backend so callers
+    can populate via backend.set(name, value)."""
+    from tsugite.agent_runner.helpers import set_current_agent
+    from tsugite.secrets import set_backend
+    from tsugite.secrets.file import FileSecretBackend
+    from tsugite.secrets.registry import get_registry
+
+    backend = FileSecretBackend({"path": str(tmp_path / "secrets")})
+    set_backend(backend)
+    set_current_agent("test-agent")
+    get_registry().clear()
+    return backend
 
 
 @pytest.fixture(autouse=True)

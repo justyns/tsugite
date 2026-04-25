@@ -183,8 +183,24 @@ class AgentRenderer:
             }
         )
 
+        # Deferred to avoid an import cycle: tsugite.tools.secrets depends on
+        # tsugite.tools, which is loaded before this module in some import orders.
+        from tsugite.tools.secrets import register_jinja_globals
+
+        register_jinja_globals(self.env)
+
         # Add filters
         self.env.filters["slugify"] = slugify
+
+    def render_string(self, content: str, context: Dict[str, Any] | None = None) -> str:
+        """Render a template string without preprocessing (no ignore-block stripping).
+
+        Use this for short values like prefetch tool args, where <!-- tsu:ignore --> is not
+        a meaningful marker. Globals (get_secret, env, today, etc.) remain available.
+        """
+        if context is None:
+            context = {}
+        return self.env.from_string(content).render(**context)
 
     def render(self, content: str, context: Dict[str, Any] = None) -> str:
         """Render agent content with Jinja2.

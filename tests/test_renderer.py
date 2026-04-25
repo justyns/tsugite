@@ -671,3 +671,62 @@ Task: {{ user_prompt }}
         assert "**Output:** Formatted for user" in result_top
         assert "**Verbosity:** High" in result_top
         assert "Task: analyze data" in result_top
+
+
+class TestSecretsInJinja:
+    """Tests for get_secret/list_secrets exposed as Jinja globals."""
+
+    def test_get_secret_global_in_jinja(self, secret_backend):
+        secret_backend.set("forgejo-token", "abc123")
+
+        renderer = AgentRenderer()
+        result = renderer.render("{{ get_secret('forgejo-token') }}")
+        assert result == "abc123"
+
+    def test_get_secret_respects_allowlist(self, secret_backend):
+        from tsugite.agent_runner.helpers import set_allowed_secrets
+
+        secret_backend.set("allowed-key", "ok")
+        secret_backend.set("blocked-key", "nope")
+        set_allowed_secrets(["allowed-key"])
+
+        renderer = AgentRenderer()
+        assert renderer.render("{{ get_secret('allowed-key') }}") == "ok"
+
+        with pytest.raises(ValueError, match="Template rendering failed"):
+            renderer.render("{{ get_secret('blocked-key') }}")
+
+    def test_list_secrets_global_in_jinja(self, secret_backend):
+        secret_backend.set("alpha", "1")
+        secret_backend.set("beta", "2")
+
+        renderer = AgentRenderer()
+        result = renderer.render("{{ list_secrets() }}")
+        assert "alpha" in result
+        assert "beta" in result
+
+
+class TestRenderString:
+    """Tests for AgentRenderer.render_string (no preprocessing)."""
+
+    def test_render_string_basic(self):
+        renderer = AgentRenderer()
+        assert renderer.render_string("Hello {{ name }}", {"name": "world"}) == "Hello world"
+
+    def test_render_string_keeps_ignore_blocks_literal(self):
+        renderer = AgentRenderer()
+        content = "before <!-- tsu:ignore -->kept<!-- /tsu:ignore --> after"
+        result = renderer.render_string(content, {})
+        assert "kept" in result
+        assert "tsu:ignore" in result
+
+    def test_render_string_uses_globals(self, secret_backend):
+        secret_backend.set("token", "xyz")
+
+        renderer = AgentRenderer()
+        assert renderer.render_string("{{ get_secret('token') }}", {}) == "xyz"
+
+    def test_render_string_propagates_undefined(self):
+        renderer = AgentRenderer()
+        with pytest.raises(Exception):
+            renderer.render_string("{{ missing_var }}", {})
