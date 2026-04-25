@@ -1,5 +1,6 @@
 """Core agent implementation"""
 
+import ast
 import asyncio
 import logging
 import time
@@ -98,6 +99,29 @@ def build_system_prompt(tools: List[Tool], instructions: str = "") -> str:
     tools_section = build_tools_section(tools)
     has_tools = bool(tools)
     return build_standard_mode_prompt(tools_section, instructions, has_tools)
+
+
+def _find_parseable_close_fence(cleaned: str, code_start: int) -> Optional[int]:
+    r"""Return the offset of the "\n```" that closes the ```python block.
+
+    Tries each candidate close fence in order and picks the first one whose
+    preceding slice parses as valid Python. That handles the case where a
+    triple backtick appears inside a triple-quoted string literal: the naive
+    first-match would truncate the code to an unterminated string, but
+    ast.parse rejects that and we keep looking. Returns None if no candidate
+    parses.
+    """
+    pos = code_start
+    while True:
+        close_at = cleaned.find("\n```", pos)
+        if close_at == -1:
+            return None
+        candidate = cleaned[code_start:close_at].strip()
+        try:
+            ast.parse(candidate)
+            return close_at
+        except SyntaxError:
+            pos = close_at + len("\n```")
 
 
 @dataclass
@@ -1078,12 +1102,6 @@ class TsugiteAgent:
         """Parse text content into thought, code, and content blocks."""
         cleaned, content_blocks = extract_content_blocks(content)
 
-        # Count real ```python code blocks so the caller can reject
-        # multi-block responses. A block only counts when its opening fence
-        # appears on its own line (preceded by start-of-string or a newline)
-        # and is followed by a proper close fence on its own line — matching
-        # the same rule used for code extraction below, so counts stay
-        # consistent with what actually gets extracted.
         num_code_blocks = 0
         search_pos = 0
         while True:
@@ -1095,8 +1113,8 @@ class TsugiteAgent:
                 search_pos = open_at + len("```python")
                 continue
             content_start = open_at + len("```python")
-            close_at = cleaned.find("\n```", content_start)
-            if close_at == -1:
+            close_at = _find_parseable_close_fence(cleaned, content_start)
+            if close_at is None:
                 break
             num_code_blocks += 1
             search_pos = close_at + len("\n```")
@@ -1105,15 +1123,19 @@ class TsugiteAgent:
         code_block_start = cleaned.find("```python")
         if code_block_start != -1:
             code_start = code_block_start + len("```python")
-            # Find the FIRST close fence on its own line (a newline immediately
-            # followed by ```). Triple-backticks that appear inside a Python
-            # string literal are written as "\n" escape sequences, not real
-            # newlines, so requiring a real preceding newline correctly skips
-            # them. Using find (not rfind) also ensures we only take the first
-            # code block if the LLM accidentally emits more than one.
-            code_end = cleaned.find("\n```", code_start)
-            if code_end != -1:
+            # Pick the close fence that makes the extracted block a valid Python
+            # source. A ``` on its own line inside a triple-quoted string is a
+            # real close-fence candidate to the naive scanner but truncates to
+            # an unterminated string literal - letting ast.parse adjudicate
+            # avoids that class of bug without hand-rolling string-literal
+            # tracking.
+            code_end = _find_parseable_close_fence(cleaned, code_start)
+            if code_end is not None:
                 code = cleaned[code_start:code_end].strip()
+            else:
+                fallback_end = cleaned.find("\n```", code_start)
+                if fallback_end != -1:
+                    code = cleaned[code_start:fallback_end].strip()
 
         prose_end = code_block_start if code_block_start != -1 else len(cleaned)
         thought_start = cleaned.find("Thought:")
