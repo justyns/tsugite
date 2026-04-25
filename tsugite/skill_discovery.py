@@ -20,7 +20,7 @@ import re
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
-from typing import List, Optional, Set
+from typing import List, Literal, Optional, Set, Tuple
 
 from tsugite.utils import parse_yaml_frontmatter
 
@@ -29,6 +29,25 @@ logger = logging.getLogger(__name__)
 SKILL_FILENAME = "SKILL.md"
 _VALID_NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _MAX_NAME_LENGTH = 64
+
+SkillIssueSeverity = Literal["error", "warning"]
+
+
+@dataclass
+class SkillIssue:
+    """A validation problem found during skill discovery.
+
+    Attributes:
+        path: SKILL.md path (or directory) where the issue was found.
+        name: Declared skill name, or None if it could not be parsed.
+        severity: "error" if the skill was dropped, "warning" if it loaded with the bad field stripped.
+        message: Human-readable description.
+    """
+
+    path: Path
+    name: Optional[str]
+    severity: SkillIssueSeverity
+    message: str
 
 
 @dataclass
@@ -142,6 +161,9 @@ def scan_skills(workspace=None, extra_paths: Optional[List[str]] = None) -> List
     The first occurrence of a given skill name wins; later duplicates are
     logged and skipped so project-level skills reliably override built-ins.
 
+    Use scan_skills_with_issues() to also receive structured validation
+    issues for surfacing to the user.
+
     Args:
         workspace: Optional workspace object; checked first when provided.
         extra_paths: Optional user-configured directories to scan before the
@@ -150,7 +172,20 @@ def scan_skills(workspace=None, extra_paths: Optional[List[str]] = None) -> List
     Returns:
         Ordered list of SkillMeta objects.
     """
+    return scan_skills_with_issues(workspace, extra_paths)[0]
+
+
+def scan_skills_with_issues(
+    workspace=None, extra_paths: Optional[List[str]] = None
+) -> Tuple[List[SkillMeta], List[SkillIssue]]:
+    """Like scan_skills, but also returns structured validation issues.
+
+    Returns:
+        (skills, issues) tuple. Issues are surfaced to user-facing channels
+        (CLI, web UI, agent context) so silent-failure modes are visible.
+    """
     skills: List[SkillMeta] = []
+    issues: List[SkillIssue] = []
     seen_names: Set[str] = set()
 
     for root in _collect_skill_roots(workspace, extra_paths):
@@ -169,12 +204,16 @@ def scan_skills(workspace=None, extra_paths: Optional[List[str]] = None) -> List
             try:
                 frontmatter, _ = parse_yaml_frontmatter(skill_md.read_text())
             except Exception as exc:
-                logger.warning(f"Failed to parse {skill_md}: {exc}")
+                msg = f"Failed to parse frontmatter: {exc}"
+                logger.warning(f"{skill_md}: {msg}")
+                issues.append(SkillIssue(path=skill_md, name=None, severity="error", message=msg))
                 continue
 
             name = frontmatter.get("name")
             if not name:
-                logger.debug(f"Skipping {skill_md}: missing 'name' in frontmatter")
+                msg = "missing 'name' in frontmatter"
+                logger.debug(f"Skipping {skill_md}: {msg}")
+                issues.append(SkillIssue(path=skill_md, name=None, severity="error", message=msg))
                 continue
 
             if name in seen_names:
@@ -183,27 +222,32 @@ def scan_skills(workspace=None, extra_paths: Optional[List[str]] = None) -> List
 
             for warning in _validate_skill_name(name, skill_dir.name):
                 logger.warning(f"Skill {skill_md}: {warning}")
+                issues.append(SkillIssue(path=skill_md, name=name, severity="warning", message=warning))
 
             description = frontmatter.get("description", "")
             if not description:
+                msg = "missing 'description' field (recommended)"
                 logger.warning(f"Skill '{name}' at {skill_md} has no 'description' (recommended)")
+                issues.append(SkillIssue(path=skill_md, name=name, severity="warning", message=msg))
 
             triggers_raw = frontmatter.get("triggers") or []
             if not isinstance(triggers_raw, list):
-                logger.warning(f"Skill '{name}' at {skill_md}: 'triggers' must be a list; ignoring")
+                msg = "'triggers' must be a list; ignoring"
+                logger.warning(f"Skill '{name}' at {skill_md}: {msg}")
+                issues.append(SkillIssue(path=skill_md, name=name, severity="warning", message=msg))
                 triggers = []
             else:
                 triggers = []
                 for item in triggers_raw:
                     if not isinstance(item, str):
-                        logger.warning(
-                            f"Skill '{name}' at {skill_md}: trigger {item!r} is not a string; ignoring"
-                        )
+                        msg = f"trigger {item!r} is not a string; ignoring"
+                        logger.warning(f"Skill '{name}' at {skill_md}: {msg}")
+                        issues.append(SkillIssue(path=skill_md, name=name, severity="warning", message=msg))
                         continue
                     if _compile_trigger(item) is None:
-                        logger.warning(
-                            f"Skill '{name}' at {skill_md}: trigger {item!r} is not a valid regex; ignoring"
-                        )
+                        msg = f"trigger {item!r} is not a valid regex; ignoring"
+                        logger.warning(f"Skill '{name}' at {skill_md}: {msg}")
+                        issues.append(SkillIssue(path=skill_md, name=name, severity="warning", message=msg))
                         continue
                     triggers.append(item)
 
@@ -211,7 +255,9 @@ def scan_skills(workspace=None, extra_paths: Optional[List[str]] = None) -> List
             ttl: Optional[int] = None
             if ttl_raw is not None:
                 if isinstance(ttl_raw, bool) or not isinstance(ttl_raw, int):
-                    logger.warning(f"Skill '{name}' at {skill_md}: 'ttl' must be an integer; ignoring")
+                    msg = "'ttl' must be an integer; ignoring"
+                    logger.warning(f"Skill '{name}' at {skill_md}: {msg}")
+                    issues.append(SkillIssue(path=skill_md, name=name, severity="warning", message=msg))
                 else:
                     ttl = ttl_raw
 
@@ -227,7 +273,7 @@ def scan_skills(workspace=None, extra_paths: Optional[List[str]] = None) -> List
             )
             seen_names.add(name)
 
-    return skills
+    return skills, issues
 
 
 @lru_cache(maxsize=512)

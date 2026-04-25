@@ -6,12 +6,14 @@ from pathlib import Path
 import pytest
 
 from tsugite.skill_discovery import (
+    SkillIssue,
     SkillMeta,
     _validate_skill_name,
     build_skill_index,
     get_builtin_skills_path,
     match_triggered_skills,
     scan_skills,
+    scan_skills_with_issues,
 )
 
 
@@ -582,3 +584,110 @@ class TestMatchTriggeredSkills:
         assert mixed[0].triggers == ["forecast", "rain"]
         # downstream matching must not crash on the original bad input
         assert match_triggered_skills("forecast today", mixed)[0].name == "mixed"
+
+
+class TestScanSkillsWithIssues:
+    """scan_skills_with_issues() captures validation problems for user-facing surfaces."""
+
+    @pytest.fixture
+    def root(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("HOME", str(tmp_path))
+        skills_root = tmp_path / ".tsugite" / "skills"
+        skills_root.mkdir(parents=True)
+        return skills_root
+
+    def test_returns_tuple_of_skills_and_issues(self, root):
+        _write_skill(root, "clean", "A clean skill")
+        skills, issues = scan_skills_with_issues()
+        clean = [s for s in skills if s.name == "clean"]
+        assert len(clean) == 1
+        clean_issues = [i for i in issues if i.name == "clean"]
+        assert clean_issues == []
+
+    def test_invalid_yaml_is_error_and_drops_skill(self, root):
+        bad = root / "bad-yaml"
+        bad.mkdir()
+        (bad / "SKILL.md").write_text("---\nname: bad\ninvalid: yaml: structure: bad\n---\nBody\n")
+        skills, issues = scan_skills_with_issues()
+        assert "bad" not in {s.name for s in skills}
+        matched = [i for i in issues if i.path == bad / "SKILL.md"]
+        assert len(matched) == 1
+        assert matched[0].severity == "error"
+        assert "parse" in matched[0].message.lower()
+
+    def test_missing_name_is_error_and_drops_skill(self, root):
+        target = root / "noname"
+        target.mkdir()
+        (target / "SKILL.md").write_text("---\ndescription: no name\n---\nBody\n")
+        skills, issues = scan_skills_with_issues()
+        assert all(s.directory != target for s in skills)
+        matched = [i for i in issues if i.path == target / "SKILL.md"]
+        assert len(matched) == 1
+        assert matched[0].severity == "error"
+        assert matched[0].name is None
+
+    def test_invalid_name_is_warning_and_loads(self, root):
+        _write_skill(root, name="Invalid_Name", dir_name="Invalid_Name", description="Bad name")
+        skills, issues = scan_skills_with_issues()
+        assert "Invalid_Name" in {s.name for s in skills}
+        matched = [i for i in issues if i.name == "Invalid_Name"]
+        assert any(i.severity == "warning" and "spec-compliant" in i.message for i in matched)
+
+    def test_missing_description_is_warning(self, root):
+        target = root / "no-desc"
+        target.mkdir()
+        (target / "SKILL.md").write_text("---\nname: no-desc\ndescription:\n---\nBody\n")
+        skills, issues = scan_skills_with_issues()
+        assert "no-desc" in {s.name for s in skills}
+        matched = [i for i in issues if i.name == "no-desc"]
+        assert any(i.severity == "warning" and "description" in i.message.lower() for i in matched)
+
+    def test_invalid_trigger_is_warning_and_skill_loads(self, root):
+        skill_dir = root / "bad-trig"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: bad-trig\ndescription: x\ntriggers:\n  - 403\n---\nBody.\n"
+        )
+        skills, issues = scan_skills_with_issues()
+        assert "bad-trig" in {s.name for s in skills}
+        matched = [i for i in issues if i.name == "bad-trig"]
+        assert any(i.severity == "warning" and "trigger" in i.message.lower() for i in matched)
+
+    def test_invalid_regex_trigger_is_warning(self, root):
+        skill_dir = root / "bad-regex"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: bad-regex\ndescription: x\ntriggers:\n  - \"/[unclosed/\"\n---\nBody.\n"
+        )
+        skills, issues = scan_skills_with_issues()
+        assert "bad-regex" in {s.name for s in skills}
+        matched = [i for i in issues if i.name == "bad-regex"]
+        assert any(i.severity == "warning" and "regex" in i.message.lower() for i in matched)
+
+    def test_invalid_ttl_is_warning(self, root):
+        _write_skill(root, "bad-ttl", "x", extra_frontmatter='ttl: "oops"\n')
+        skills, issues = scan_skills_with_issues()
+        assert "bad-ttl" in {s.name for s in skills}
+        matched = [i for i in issues if i.name == "bad-ttl"]
+        assert any(i.severity == "warning" and "ttl" in i.message.lower() for i in matched)
+
+    def test_clean_workspace_has_no_issues_for_user_skills(self, root):
+        _write_skill(root, "alpha", "A")
+        _write_skill(root, "beta", "B")
+        _, issues = scan_skills_with_issues()
+        for issue in issues:
+            assert issue.name not in {"alpha", "beta"}
+
+    def test_scan_skills_returns_only_skills(self, root):
+        _write_skill(root, "plain", "p")
+        result = scan_skills()
+        assert isinstance(result, list)
+        assert all(isinstance(s, SkillMeta) for s in result)
+
+    def test_skill_issue_dataclass_shape(self):
+        issue = SkillIssue(path=Path("/tmp/SKILL.md"), name="x", severity="warning", message="y")
+        assert issue.path == Path("/tmp/SKILL.md")
+        assert issue.name == "x"
+        assert issue.severity == "warning"
+        assert issue.message == "y"
