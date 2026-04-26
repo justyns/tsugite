@@ -1129,7 +1129,16 @@ class HTTPServer:
         return JSONResponse(self._session_settings_payload(adapter, session_id))
 
     async def _list_models(self, request: Request) -> JSONResponse:
+        from tsugite.providers import get_provider, list_all_providers
         from tsugite.providers.model_registry import list_models
+
+        if not getattr(self, "_models_primed", False):
+            for name in list_all_providers():
+                try:
+                    get_provider(name)
+                except Exception:  # noqa: BLE001 — provider init may fail without env keys; skip those
+                    continue
+            self._models_primed = True
 
         models: list[dict] = []
         for key, info in list_models().items():

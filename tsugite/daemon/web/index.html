@@ -347,46 +347,60 @@
                   </button>
                   <div class="setting-pop" x-show="open" x-cloak x-transition.opacity>
                     <div class="setting-pop-head">agent</div>
-                    <template x-for="a in $store.app.agents" :key="a.name">
-                      <button type="button" class="setting-pop-row"
-                              :class="{ current: (selectedSessionMeta?.agent || $store.app.selectedAgent) === a.name }"
-                              @click="setSessionAgent(a.name); open = false">
-                        <span class="pop-mark agent"
-                              x-text="(selectedSessionMeta?.agent || $store.app.selectedAgent) === a.name ? '●' : '○'"></span>
-                        <span class="pop-val" x-text="a.name"></span>
-                        <span class="pop-meta" x-text="a.is_default ? 'default' : ''"></span>
-                      </button>
-                    </template>
+                    <div class="setting-pop-list">
+                      <template x-for="a in $store.app.agents" :key="a.name">
+                        <button type="button" class="setting-pop-row"
+                                :class="{ current: (selectedSessionMeta?.agent || $store.app.selectedAgent) === a.name }"
+                                @click="setSessionAgent(a.name); open = false">
+                          <span class="pop-mark agent"
+                                x-text="(selectedSessionMeta?.agent || $store.app.selectedAgent) === a.name ? '●' : '○'"></span>
+                          <span class="pop-val" x-text="a.name"></span>
+                          <span class="pop-meta" x-text="a.is_default ? 'default' : ''"></span>
+                        </button>
+                      </template>
+                    </div>
                   </div>
                 </span>
                 <!-- model popover -->
-                <span class="kv kv-pop" x-data="{ open: false }"
-                      x-init="$watch('open', v => { if (v) loadModels() })"
+                <span class="kv kv-pop" x-data="{ open: false, q: '' }"
+                      x-init="$watch('open', v => { if (v) { loadModels(); q = ''; $nextTick(() => $refs.modelFilter && $refs.modelFilter.focus()); } })"
                       @click.outside="open = false">
                   <span class="k">model</span>
                   <button type="button" class="v-btn model" :class="{ open: open }" @click="open = !open">
                     <span x-text="sessionModel || statusInfo?.model || 'default'"></span>
                     <span class="caret">▾</span>
                   </button>
-                  <div class="setting-pop" x-show="open" x-cloak x-transition.opacity>
+                  <div class="setting-pop" x-show="open" x-cloak x-transition.opacity
+                       @keydown.escape.stop="open = false">
                     <div class="setting-pop-head">model</div>
-                    <button type="button" class="setting-pop-row"
-                            :class="{ current: !sessionModel }"
-                            @click="setSessionModel(null); open = false">
-                      <span class="pop-mark model" x-text="!sessionModel ? '●' : '○'"></span>
-                      <span class="pop-val">— default</span>
-                      <span class="pop-desc">use the agent's configured model</span>
-                    </button>
-                    <template x-for="m in (availableModels || [])" :key="m.id">
+                    <div class="setting-pop-filter">
+                      <span class="prompt">›</span>
+                      <input type="text" x-ref="modelFilter" x-model="q" placeholder="filter models…">
+                    </div>
+                    <div class="setting-pop-list">
                       <button type="button" class="setting-pop-row"
-                              :class="{ current: sessionModel === m.id }"
-                              @click="setSessionModel(m.id); open = false">
-                        <span class="pop-mark model" x-text="sessionModel === m.id ? '●' : '○'"></span>
-                        <span class="pop-val" x-text="m.id"></span>
-                        <span class="pop-desc" x-text="m.description || ''"></span>
-                        <span class="pop-meta" x-text="m.context ? (m.context/1000).toFixed(0) + 'k ctx' : ''"></span>
+                              x-show="!q"
+                              :class="{ current: !sessionModel }"
+                              @click="setSessionModel(null); open = false">
+                        <span class="pop-mark model" x-text="!sessionModel ? '●' : '○'"></span>
+                        <span class="pop-val">— default</span>
+                        <span class="pop-desc">use the agent's configured model</span>
                       </button>
-                    </template>
+                      <template x-for="m in (availableModels || []).filter(m => !q || m.id.toLowerCase().includes(q.toLowerCase()))" :key="m.id">
+                        <button type="button" class="setting-pop-row"
+                                :class="{ current: sessionModel === m.id }"
+                                @click="setSessionModel(m.id); open = false">
+                          <span class="pop-mark model" x-text="sessionModel === m.id ? '●' : '○'"></span>
+                          <span class="pop-val" x-text="m.id"></span>
+                          <span class="pop-desc" x-text="m.description || ''"></span>
+                          <span class="pop-meta" x-text="m.context ? (m.context/1000).toFixed(0) + 'k ctx' : ''"></span>
+                        </button>
+                      </template>
+                      <div class="setting-pop-empty"
+                           x-show="q && (availableModels || []).filter(m => m.id.toLowerCase().includes(q.toLowerCase())).length === 0">
+                        no matches
+                      </div>
+                    </div>
                   </div>
                 </span>
                 <!-- effort popover (wrapped <select> to keep a11y) -->
@@ -1549,8 +1563,8 @@
 
 <!-- Settings modal -->
 <div class="console-modal-overlay" x-show="$store.app.showSettings" @click.self="$store.app.showSettings = false"
-     x-data="{ token: '', userId: '', tempTheme: '', tempModel: '', loadedModel: '', resolvedModel: '', pushSubscribed: false, pushLoading: false }"
-     x-effect="if ($store.app.showSettings) { token = localStorage.getItem('tsugite_token') || ''; userId = $store.app.userId; tempTheme = $store.app.theme; let agent = $store.app.selectedAgent; if (agent) { window.tsugiteApi.get('/api/agents/' + agent + '/status').then(d => { tempModel = d.model || ''; loadedModel = d.model || ''; resolvedModel = d.resolved_model || ''; }).catch(() => {}); } if ('serviceWorker' in navigator && 'PushManager' in window) { navigator.serviceWorker.ready.then(r => r.pushManager.getSubscription()).then(s => { pushSubscribed = !!s; }).catch(() => {}); } }">
+     x-data="{ token: '', userId: '', tempTheme: '', tempModel: '', loadedModel: '', resolvedModel: '', models: [], pushSubscribed: false, pushLoading: false }"
+     x-effect="if ($store.app.showSettings) { token = localStorage.getItem('tsugite_token') || ''; userId = $store.app.userId; tempTheme = $store.app.theme; let agent = $store.app.selectedAgent; if (agent) { window.tsugiteApi.get('/api/agents/' + agent + '/status').then(d => { tempModel = d.model || ''; loadedModel = d.model || ''; resolvedModel = d.resolved_model || ''; }).catch(() => {}); } if (!models.length) { window.tsugiteApi.get('/api/models').then(d => { models = d.models || []; }).catch(() => {}); } if ('serviceWorker' in navigator && 'PushManager' in window) { navigator.serviceWorker.ready.then(r => r.pushManager.getSubscription()).then(s => { pushSubscribed = !!s; }).catch(() => {}); } }">
   <div class="console-modal">
     <h2>settings</h2>
     <div class="body">
@@ -1576,7 +1590,15 @@
         </select>
       </div>
       <div class="row"><label>model override</label>
-        <input type="text" x-model="tempModel" placeholder="anthropic:claude-sonnet-4-20250514">
+        <select x-model="tempModel">
+          <option value="">— agent default</option>
+          <template x-if="tempModel && !models.find(m => m.id === tempModel)">
+            <option :value="tempModel" x-text="tempModel + '  (custom)'"></option>
+          </template>
+          <template x-for="m in models" :key="m.id">
+            <option :value="m.id" x-text="m.context_window ? m.id + '  · ' + (m.context_window/1000).toFixed(0) + 'k ctx' : m.id"></option>
+          </template>
+        </select>
       </div>
       <div x-show="resolvedModel" style="font-size:10.5px;color:var(--overlay1);padding-left:96px;margin-top:-4px">
         resolves to <code x-text="resolvedModel"></code>

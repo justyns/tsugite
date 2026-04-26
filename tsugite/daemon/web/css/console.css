@@ -518,12 +518,16 @@ body.console-shell { display: flex; flex-direction: column; height: 100dvh; }
   top: calc(100% + 6px); left: 0;
   z-index: 50;
   min-width: 240px;
+  max-width: min(420px, calc(100vw - 32px));
+  max-height: min(420px, calc(100vh - 120px));
   background: var(--mantle);
   border: 1px solid var(--surface1);
   border-radius: 5px;
   box-shadow: 0 12px 32px rgba(0,0,0,0.45);
   padding: 4px;
   animation: pop-in 0.12s ease-out;
+  display: flex; flex-direction: column;
+  overflow: hidden;
 }
 @keyframes pop-in {
   from { opacity: 0; transform: translateY(-4px); }
@@ -534,7 +538,33 @@ body.console-shell { display: flex; flex-direction: column; height: 100dvh; }
   font-size: 9.5px; letter-spacing: 0.16em; text-transform: uppercase;
   color: var(--overlay0);
   padding: 6px 10px 4px;
+  flex: 0 0 auto;
 }
+.setting-pop-filter {
+  display: flex; align-items: center; gap: 6px;
+  margin: 2px 6px 4px;
+  padding: 4px 8px;
+  background: var(--crust);
+  border: 1px solid var(--surface0);
+  border-radius: 3px;
+  flex: 0 0 auto;
+}
+.setting-pop-filter:focus-within { border-color: var(--lavender); }
+.setting-pop-filter .prompt { color: var(--lavender); font-family: var(--font-mono); font-weight: 600; }
+.setting-pop-filter input {
+  flex: 1;
+  background: none; border: none; outline: none;
+  color: var(--text); font: inherit;
+  font-family: var(--font-mono); font-size: 11.5px;
+}
+.setting-pop-filter input::placeholder { color: var(--overlay0); }
+.setting-pop-list { overflow-y: auto; min-height: 0; }
+.setting-pop-empty {
+  padding: 10px 10px 8px;
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--overlay1); font-style: italic;
+}
+.setting-pop-foot { flex: 0 0 auto; }
 .setting-pop-row {
   display: grid;
   grid-template-columns: 14px 1fr auto;
@@ -1523,14 +1553,26 @@ textarea.editor-body {
   text-transform: uppercase; letter-spacing: 0.16em;
   color: var(--lavender);
 }
-.console-modal .body { padding: 12px 16px; display: grid; gap: 10px; font-size: 12px; }
-.console-modal .row { display: flex; align-items: center; gap: 10px; }
-.console-modal label { color: var(--overlay1); font-size: 11px; min-width: 84px; text-transform: uppercase; letter-spacing: 0.1em; }
+.console-modal .body {
+  padding: 12px 16px;
+  display: grid;
+  gap: 10px;
+  font-size: 12px;
+  min-width: 0;
+}
+.console-modal .row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.console-modal .row > label:first-child {
+  color: var(--overlay1); font-size: 11px;
+  min-width: 84px; flex: 0 0 84px;
+  text-transform: uppercase; letter-spacing: 0.1em;
+}
 .console-modal select, .console-modal input {
   background: var(--crust); border: 1px solid var(--surface1);
   color: var(--text); font: inherit; font-family: var(--font-mono); font-size: 12px;
   padding: 4px 8px; border-radius: 3px; outline: none;
-  flex: 1;
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 100%;
 }
 .console-modal select:focus, .console-modal input:focus { border-color: var(--lavender); }
 .console-modal .foot {
