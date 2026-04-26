@@ -36,7 +36,11 @@ Alpine.store('app', {
   autoFollow: localStorage.getItem('tsugite_auto_follow') !== 'false',
   skillIssues: [],
   tokensTotal: null,  // updated by usageView.load() so the keystrip shows daily token count
+  version: '',
 });
+
+// Fetch version once at boot (public endpoint, doesn't require a token).
+get('/api/health').then(d => { Alpine.store('app').version = d.version || ''; }).catch(() => {});
 
 Alpine.data('conversationsView', conversationsView);
 Alpine.data('scheduleView', scheduleView);

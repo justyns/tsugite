@@ -22,7 +22,7 @@
   <div class="console-tab-brand">
     <span class="dot"></span>
     <span>tsu</span>
-    <span class="ver">0.7</span>
+    <span class="ver" x-show="$store.app.version" x-text="$store.app.version"></span>
   </div>
   <template x-for="tab in $store.app.tabs" :key="tab">
     <button class="console-tab"
@@ -1497,26 +1497,16 @@
 </div>
 
 <!-- Bottom keystrip -->
-<div class="console-keystrip" x-data="{
-       daemonOk: true,
-       init() {
-         this.$watch('$store.app.lastEvent', (e) => {
-           if (!e) return;
-           this.daemonOk = e.type !== 'reconnect_lost';
-         });
-       }
-     }">
+<div class="console-keystrip">
   <span><kbd>⌘K</kbd> palette</span>
   <span><kbd>/</kbd> commands</span>
   <span><kbd>@</kbd> agent</span>
   <span><kbd>#</kbd> file</span>
   <span><kbd>⌘↩</kbd> send</span>
   <span class="grow"></span>
-  <span :class="daemonOk ? 'ok' : 'err'" x-text="daemonOk ? '● daemon' : '● disconnected'"></span>
   <template x-if="$store.app.tokensTotal != null">
     <span x-text="'tok ' + (($store.app.tokensTotal / 1000).toFixed(1)) + 'k'"></span>
   </template>
-  <span x-text="$store.app.theme"></span>
 </div>
 
 <!-- Auth gate -->

@@ -525,7 +525,12 @@ class HTTPServer:
         return Starlette(routes=routes)
 
     async def _health(self, request: Request) -> JSONResponse:
-        return JSONResponse({"status": "ok", "agents": list(self.adapters.keys())})
+        try:
+            from importlib.metadata import version
+            v = version("tsugite-cli")
+        except Exception:  # noqa: BLE001 — fall back to in-tree constant
+            from tsugite import __version__ as v
+        return JSONResponse({"status": "ok", "version": v, "agents": list(self.adapters.keys())})
 
     async def _list_commands(self, request: Request) -> JSONResponse:
         if err := self._check_auth(request):

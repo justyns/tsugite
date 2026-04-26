@@ -8,7 +8,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-04-14T06:57:17.697860328Z"
+exclude-newer = "2026-04-16T20:03:59.223308948Z"
 exclude-newer-span = "P10D"
 
 [[package]]
@@ -2288,7 +2288,7 @@ wheels = [
 
 [[package]]
 name = "tsugite-cli"
-version = "0.12.3"
+version = "0.13.0"
 source = { editable = "." }
 dependencies = [
     { name = "cryptography" },
