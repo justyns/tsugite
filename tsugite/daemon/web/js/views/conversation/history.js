@@ -13,12 +13,15 @@ function _extractContentBlocks(raw) {
   return { prose, blocks };
 }
 
+// Only python fences are tsugite tool-execution blocks (they're surfaced as
+// separate code_execution steps). Plain ``` fences are part of the agent's
+// prose answer and must stay visible.
 function _stripCodeFences(text) {
-  return text.replace(/```(?:python)?\n[\s\S]*?```/g, '').trim();
+  return text.replace(/```python\n[\s\S]*?```/g, '').trim();
 }
 
 function _firstCodeBlock(text) {
-  const m = text.match(/```(?:python)?\n([\s\S]*?)\n```/);
+  const m = text.match(/```python\n([\s\S]*?)\n```/);
   return m ? m[1] : null;
 }
 
