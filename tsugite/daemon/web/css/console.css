@@ -241,7 +241,8 @@ body.console-shell { display: flex; flex-direction: column; height: 100dvh; }
   flex-shrink: 0;
   background: var(--overlay0);
 }
-.console-session .row1 .dot.running { background: var(--green); animation: pulse 1.6s ease-out infinite; }
+.console-session .row1 .dot.running { background: var(--green); }
+.console-session .row1 .dot.pulse { animation: pulse 1.6s ease-out infinite; }
 .console-session .row1 .dot.thinking { background: var(--yellow); box-shadow: 0 0 8px var(--yellow); }
 .console-session .row1 .dot.starting { background: var(--sky); }
 .console-session .row1 .dot.idle { background: var(--overlay0); }

@@ -263,11 +263,16 @@ export const sessionsMixin = {
   },
 
   isSessionProgressFresh(s) {
-    void this._freshnessTick;  // establish reactive dep so pulse turns off when events stop
-    const cached = this.progressCache[s?.id];
-    if (!cached || !cached.lastEventTime) return false;
-    const age = Date.now() - Date.parse(cached.lastEventTime);
-    return age >= 0 && age < 10000;
+    if (!s) return false;
+    if (s.state !== 'running' && s.state !== 'active') return false;
+    const cached = this.progressCache[s.id];
+    // Mid-turn entries carry a non-empty statusText ('Starting...', 'Turn N...',
+    // 'Tool: bash', 'Waiting on LLM (12s)', etc); turn_end resets it to ''. So
+    // statusText is the truthy "in flight" signal even during long silent tools
+    // like a 20s sleep. No cache yet → optimistically pulse (running but no
+    // events seen by us yet — usually a freshly-spawned interactive session).
+    if (!cached) return true;
+    return !!cached.statusText;
   },
 
   _matchesFilters(s) {

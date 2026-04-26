@@ -100,7 +100,7 @@
                      @click="selectSession(s)" tabindex="0" role="button" @keydown.enter="selectSession(s)">
                   <div class="row1">
                     <span class="drag-handle" title="Drag to reorder">≡</span>
-                    <span class="dot" :class="statusDotClass(s.state)"></span>
+                    <span class="dot" :class="[statusDotClass(s.state), { pulse: isSessionProgressFresh(s) }]"></span>
                     <span class="source-icon" x-text="sourceIcon(s.source)" :title="s.source"></span>
                     <template x-if="editingSessionId === s.id">
                       <input class="title-input" type="text" x-model="editingTitle"
@@ -154,7 +154,7 @@
                      :class="{ focused: selectedSessionId === (s.conversation_id || s.id), live: isLive(s) }"
                      @click="selectSession(s)" tabindex="0" role="button" @keydown.enter="selectSession(s)">
                   <div class="row1">
-                    <span class="dot" :class="statusDotClass(s.state)"></span>
+                    <span class="dot" :class="[statusDotClass(s.state), { pulse: isSessionProgressFresh(s) }]"></span>
                     <span class="source-icon" x-text="sourceIcon(s.source)" :title="s.source"></span>
                     <template x-if="editingSessionId === s.id">
                       <input class="title-input" type="text" x-model="editingTitle"
@@ -211,7 +211,7 @@
                          :class="{ focused: selectedSessionId === (s.conversation_id || s.id) }"
                          @click="selectSession(s)" tabindex="0" role="button" @keydown.enter="selectSession(s)">
                       <div class="row1">
-                        <span class="dot" :class="statusDotClass(s.state)"></span>
+                        <span class="dot" :class="[statusDotClass(s.state), { pulse: isSessionProgressFresh(s) }]"></span>
                         <span class="source-icon" x-text="sourceIcon(s.source)" :title="s.source"></span>
                         <template x-if="editingSessionId === s.id">
                           <input class="title-input" type="text" x-model="editingTitle"

@@ -164,8 +164,6 @@ export default () => ({
       }
       this.$store.app.pendingWorkspaceFiles = [];
     });
-    // Ticks the freshness flag off when events stop arriving so the pulse dot doesn't animate forever.
-    this._freshnessTimer = setInterval(() => { this._freshnessTick++; }, 2000);
     // Refresh relative-time labels ("5m ago") in the sidebar.
     this._relTimeTimer = setInterval(() => { this._relTimeTick++; }, 60000);
     // Mark the currently-selected session as viewed when the user refocuses the tab.
@@ -177,7 +175,6 @@ export default () => ({
     document.addEventListener('visibilitychange', this._onVisibilityChange);
   },
 
-  _freshnessTick: 0,
   _relTimeTick: 0,
 
   destroy() {
@@ -185,7 +182,6 @@ export default () => ({
     if (this._debounceTimer) clearTimeout(this._debounceTimer);
     if (this._scrollTimer) clearTimeout(this._scrollTimer);
     if (this._historyDebounceTimer) clearTimeout(this._historyDebounceTimer);
-    if (this._freshnessTimer) clearInterval(this._freshnessTimer);
     if (this._relTimeTimer) clearInterval(this._relTimeTimer);
     if (this._onVisibilityChange) document.removeEventListener('visibilitychange', this._onVisibilityChange);
     if (this._activeReader) this._activeReader.cancel().catch(() => {});
@@ -469,7 +465,6 @@ export default () => ({
     if (derivedChanged) {
       this.progressCache[id] = { turnCount, toolCount, statusText, lastEventTime: now };
     } else if (entry.lastEventTime !== now) {
-      // Mutate in place so only the pulse-dot dep re-evaluates; the label doesn't need to re-render.
       entry.lastEventTime = now;
     }
   },
