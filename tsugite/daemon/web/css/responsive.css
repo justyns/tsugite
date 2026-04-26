@@ -1,115 +1,56 @@
 /* Touch targets for coarse pointers (mobile, tablets) */
 @media (pointer: coarse) {
-  .btn-sm { min-height: 44px; min-width: 44px; padding: 8px 14px; }
-  .session-chip { font-size: 12px; padding: 4px 8px; min-height: 28px; display: inline-flex; align-items: center; }
-  #status-bar .btn-sm { min-height: 36px; min-width: 36px; padding: 4px 10px; }
-  .tab-bar button { min-height: 44px; padding: 8px 12px; }
-  .settings-btn { min-height: 44px; }
-  nav select { min-height: 44px; }
-  .turn-item { min-height: 44px; }
+  .console-tab { min-height: 36px; padding: 0 12px; }
+  .console-tab-action { min-height: 36px; padding: 0 12px; }
+  .console-session { min-height: 44px; padding: 8px 12px; }
+  .console-thread-header .hbtn { min-height: 32px; padding: 4px 8px; }
+  .console-icon-btn { min-width: 32px; min-height: 32px; }
+  .console-send-btn, .console-stop-btn { min-height: 32px; padding: 8px 14px; }
   .form-group input, .form-group select, .form-group textarea { min-height: 44px; }
-  .ask-buttons button { min-height: 44px; padding: 10px 18px; }
-  .paste-banner-actions button { min-height: 44px; padding: 10px 18px; }
-  .paste-modal .modal-actions button, .expand-modal .modal-actions button { min-height: 44px; padding: 10px 18px; }
 }
 
-/* Tablet breakpoint — stack two-pane layouts, scroll nav */
+/* Tablet: at this width the dense desktop tool-row collapses extra columns
+   so long args/results don't push the bubble past the bezel. */
 @media (max-width: 860px) {
-  /* Nav wraps: title row on top, tab bar scrolls underneath */
-  nav {
-    flex-wrap: wrap;
+  .console-app {
+    grid-template-columns: 240px 1fr;
   }
+  .console-tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .console-tabs::-webkit-scrollbar { display: none; }
+  .console-tab { white-space: nowrap; flex-shrink: 0; }
 
-  .tab-bar {
-    order: 10;
-    width: 100%;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
+  .console-codeblock .cb-tools .tool-row {
+    grid-template-columns: 22px auto auto 1fr;
   }
+  .console-codeblock .cb-tools .t-arrow,
+  .console-codeblock .cb-tools .t-result,
+  .console-codeblock .cb-tools .t-ms { display: none; }
 
-  .tab-bar button {
-    white-space: nowrap;
-    flex-shrink: 0;
-  }
-
-  .two-pane {
-    flex-direction: column;
-  }
-
-  /* Sidebar uses mobile-style drill-down (one pane at a time) */
-  .pane-sidebar {
-    max-height: none; overflow-y: auto; width: 100%; flex: 1;
-  }
-
-  .sidebar-toggle { display: none; }
-
-  .mobile-back-btn {
-    display: flex; align-items: center; gap: 4px;
-    background: none; border: none; color: var(--accent);
-    font-size: 14px; padding: 8px 12px; cursor: pointer;
-    flex-shrink: 0;
-  }
-  .mobile-back-btn:hover { text-decoration: underline; }
-
-  .mobile-hidden { display: none !important; }
-
-  /* Tables: horizontal scroll */
-  .data-table {
-    display: block;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-  }
-
-  /* Forms: stack rows */
-  .form-row {
-    flex-direction: column;
-  }
-
-  /* Status bar: wrap so Compact button stays visible */
-  #status-bar {
-    flex-wrap: wrap;
-    gap: 4px 12px;
-    padding: 4px 12px;
-  }
+  .form-row { flex-direction: column; }
 }
 
-/* Paste modal full-screen on small viewports */
-@media (max-width: 600px) {
-  .paste-modal .modal-content, .expand-modal .modal-content { width: 100%; max-width: none; height: 100%; max-height: none; border-radius: 0; display: flex; flex-direction: column; }
-  .paste-modal textarea, .expand-modal textarea { flex: 1; min-height: 0; }
-  .paste-modal .modal-actions, .expand-modal .modal-actions { flex-direction: column; }
-  .paste-modal .modal-actions button, .expand-modal .modal-actions button { width: 100%; }
-  .paste-banner { flex-direction: column; align-items: stretch; gap: 8px; }
-  .paste-banner-actions { flex-direction: column; }
-  .paste-banner-actions button { width: 100%; }
-}
-
-/* Mobile breakpoint */
+/* Mobile: drill-down — sidebar OR thread, not both. Tab bar + nav drawer. */
 @media (max-width: 640px) {
-  /* Safe area for notch devices */
-  body {
-    padding-top: env(safe-area-inset-top);
-  }
+  body { padding-top: env(safe-area-inset-top); }
 
-  nav {
-    flex-wrap: wrap;
-    padding: 8px 12px;
-  }
+  /* Tab bar shrinks; settings + palette stay visible at the right. */
+  .console-tabs { height: 36px; flex: 0 0 36px; }
+  .console-tab { padding: 0 10px; font-size: 11.5px; }
+  .console-tab-brand { padding: 0 10px; font-size: 12px; }
+  .console-tab-brand .ver { display: none; }
+  .console-tab-action { padding: 0 10px; font-size: 11px; }
 
-  .spacer { display: none; }
-
-  /* Hamburger button */
-  .menu-toggle {
-    display: flex; flex-direction: column; gap: 4px;
-    background: none; border: none; cursor: pointer; padding: 8px;
+  /* Sidebar+main collapse to one pane controlled by mobile-hidden. */
+  .console-app {
+    grid-template-columns: 1fr;
+    grid-template-areas: "main";
   }
-  .menu-toggle span {
-    display: block; width: 20px; height: 2px;
-    background: var(--text); border-radius: 1px;
-    transition: transform 0.2s, opacity 0.2s;
-  }
+  .console-app .console-sidebar { grid-area: main; }
+  .console-app .console-main { grid-area: main; }
+  .console-sidebar.mobile-hidden,
+  .console-main.mobile-hidden { display: none; }
 
-  /* Slide-out nav menu overlay */
+  /* Slide-out nav drawer (preserved from previous design) */
   .nav-menu {
     display: block;
     position: fixed; inset: 0; z-index: 30;
@@ -120,72 +61,50 @@
     background: rgba(0,0,0,0.5); pointer-events: auto;
   }
   .nav-menu-panel {
-    width: 260px; height: 100%; background: var(--surface);
-    border-right: 1px solid var(--border); padding: 16px;
+    width: 260px; height: 100%;
+    background: var(--mantle);
+    border-right: 1px solid var(--surface1);
+    padding: 16px;
     display: flex; flex-direction: column; gap: 4px;
     transform: translateX(-100%); transition: transform 0.2s ease;
   }
   .nav-menu.open .nav-menu-panel { transform: translateX(0); }
-  .nav-menu .tab-bar { flex-direction: column; width: 100%; }
-  .nav-menu .tab-bar button { text-align: left; width: 100%; }
+  .nav-menu .console-tab { width: 100%; text-align: left; }
 
-  /* Hide tab bar + settings from top nav (they live in the slide-out menu) */
-  nav > .tab-bar,
-  nav > .settings-btn { display: none; }
+  /* Tighter turn gutter; bubble takes more room */
+  .console-turn { grid-template-columns: 56px 1fr; padding: 6px 10px; gap: 8px; }
+  .console-turn-gutter .role { font-size: 9px; padding: 1px 4px; }
+  .console-turn-gutter .turn-num { display: none; }
+  .console-turn-bubble { font-size: 13px; padding: 8px 12px; }
 
-  main {
-    padding-bottom: 0;
+  /* Thread header rows wrap cleanly */
+  .console-thread-header { padding: 6px 12px; }
+  .console-thread-header .row { gap: 6px; }
+  .console-thread-header .meta-row { gap: 8px; font-size: 10.5px; }
+
+  /* Composer: prevent iOS zoom on textarea focus */
+  .console-composer-input-wrap textarea { font-size: 16px; min-height: 56px; max-height: 200px; }
+  .console-composer { padding: 8px 12px env(safe-area-inset-bottom); }
+
+  /* Prompt inspector popover: full width minus padding */
+  .pi-pop { width: calc(100vw - 24px); right: 12px !important; }
+
+  /* Setting popovers anchor close to viewport edge */
+  .setting-pop { min-width: 200px; max-width: calc(100vw - 32px); }
+
+  /* Keystrip dense on mobile */
+  .console-keystrip { padding: 4px 10px; gap: 10px; font-size: 9.5px; }
+  .console-keystrip kbd { font-size: 9px; }
+}
+
+/* Paste / expand legacy modals shrink on small viewports (kept lifted from prior responsive.css) */
+@media (max-width: 600px) {
+  .paste-modal .modal-content,
+  .expand-modal .modal-content {
+    width: 100%; max-width: none; height: 100%; max-height: none;
+    border-radius: 0; display: flex; flex-direction: column;
   }
-
-  /* Hide hint on mobile — Enter naturally adds newlines */
-  .input-hint { display: none; }
-
-  /* Chat messages wider on mobile */
-  .msg {
-    max-width: 90%;
-  }
-
-  /* Taller textarea on mobile + prevent iOS zoom */
-  #message-input {
-    font-size: 16px;
-    min-height: 60px;
-    max-height: 200px;
-  }
-
-  /* Modals full-width */
-  .modal-content {
-    width: 95%;
-    max-width: none;
-  }
-
-  /* Cards single column */
-  .card-grid {
-    grid-template-columns: 1fr;
-  }
-
-  /* Tighter padding */
-  .view-scroll {
-    padding: 12px;
-  }
-
-  #messages {
-    padding: 12px;
-  }
-
-  #input-area {
-    padding: 8px 12px env(safe-area-inset-bottom);
-  }
-
-  .input-menu { left: auto; right: 0; }
-
-
-  /* Context bar: stack meta row items */
-  .context-meta-row {
-    flex-wrap: wrap;
-  }
-  .context-workdir {
-    max-width: 100%;
-    flex-basis: 100%;
-  }
-
+  .paste-modal textarea, .expand-modal textarea { flex: 1; min-height: 0; }
+  .paste-modal .modal-actions, .expand-modal .modal-actions { flex-direction: column; }
+  .paste-modal .modal-actions button, .expand-modal .modal-actions button { width: 100%; }
 }

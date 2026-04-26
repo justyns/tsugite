@@ -3,87 +3,94 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Tsugite</title>
+<title>tsugite — console</title>
 <link rel="stylesheet" href="/static/css/theme.css">
+<link rel="stylesheet" href="/static/css/console.css">
 <link rel="stylesheet" href="/static/css/styles.css">
 <link rel="stylesheet" href="/static/css/responsive.css">
 <link rel="manifest" href="/static/manifest.json">
-<meta name="theme-color" content="#303446">
+<meta name="theme-color" content="#232634">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
 <script type="module" src="/static/js/app.js"></script>
 </head>
-<body x-data :data-theme="$store.app.theme">
+<body class="console-shell" x-data :data-theme="$store.app.theme">
 
-<nav>
-  <button class="menu-toggle" @click="$store.app.menuOpen = !$store.app.menuOpen" aria-label="Menu">
-    <span></span><span></span><span></span>
-  </button>
-  <h1>Tsugite</h1>
-  <div class="tab-bar">
-    <template x-for="tab in $store.app.tabs" :key="tab">
-      <button @click="$store.app.view = tab; location.hash = tab; $store.app.menuOpen = false"
-              :class="{ active: $store.app.view === tab }">
-        <span x-text="tab[0].toUpperCase() + tab.slice(1)"></span>
-        <template x-if="tab === 'skills' && $store.app.skillIssues.length > 0">
-          <span class="tab-badge"
-                :title="$store.app.skillIssues.length + ' skill issue' + ($store.app.skillIssues.length === 1 ? '' : 's')"
-                x-text="$store.app.skillIssues.length"></span>
-        </template>
-      </button>
-    </template>
+<!-- IDE-style top tab bar -->
+<div class="console-tabs">
+  <div class="console-tab-brand">
+    <span class="dot"></span>
+    <span>tsu</span>
+    <span class="ver">0.7</span>
   </div>
-  <span class="spacer"></span>
-  <button class="settings-btn" @click="$store.app.showSettings = true">Settings</button>
-</nav>
-
-<div class="nav-menu" :class="{ open: $store.app.menuOpen }"
-     @click.self="$store.app.menuOpen = false">
-  <div class="nav-menu-panel">
-    <div class="tab-bar">
-      <template x-for="tab in $store.app.tabs" :key="tab">
-        <button @click="$store.app.view = tab; location.hash = tab; $store.app.menuOpen = false"
-                :class="{ active: $store.app.view === tab }"
-                x-text="tab[0].toUpperCase() + tab.slice(1)"></button>
+  <template x-for="tab in $store.app.tabs" :key="tab">
+    <button class="console-tab"
+            :class="{ active: $store.app.view === tab }"
+            @click="$store.app.view = tab; location.hash = tab; $store.app.menuOpen = false">
+      <span x-text="tab"></span>
+      <template x-if="tab === 'skills' && $store.app.skillIssues.length > 0">
+        <span class="badge"
+              :title="$store.app.skillIssues.length + ' skill issue' + ($store.app.skillIssues.length === 1 ? '' : 's')"
+              x-text="$store.app.skillIssues.length"></span>
       </template>
-    </div>
-    <button class="settings-btn" @click="$store.app.showSettings = true; $store.app.menuOpen = false">Settings</button>
+    </button>
+  </template>
+  <div class="console-tabs-spacer"></div>
+  <button class="console-tab-action"
+          @click="window.dispatchEvent(new CustomEvent('tsugite:toast', { detail: { text: 'command palette — coming soon', kind: 'info' } }))"
+          title="Command palette">
+    <kbd>⌘K</kbd>
+  </button>
+  <button class="console-tab-action" @click="$store.app.showSettings = true" title="Settings">settings</button>
+</div>
+
+<!-- Mobile menu drawer (collapses tab bar at narrow widths) -->
+<div class="nav-menu" :class="{ open: $store.app.menuOpen }" @click.self="$store.app.menuOpen = false">
+  <div class="nav-menu-panel">
+    <template x-for="tab in $store.app.tabs" :key="tab">
+      <button class="console-tab"
+              :class="{ active: $store.app.view === tab }"
+              @click="$store.app.view = tab; location.hash = tab; $store.app.menuOpen = false"
+              x-text="tab"></button>
+    </template>
+    <button class="console-tab-action" @click="$store.app.showSettings = true; $store.app.menuOpen = false">settings</button>
   </div>
 </div>
 
-<main>
-  <!-- Conversations -->
+<div class="console-views">
+
+  <!-- ============================================================
+       CONVERSATIONS
+       ============================================================ -->
   <div class="view" x-show="$store.app.view === 'conversations'" x-data="conversationsView" x-cloak
        @dragover.prevent @dragenter.prevent="onDragEnter($event)"
        @dragleave="onDragLeave($event)" @drop.prevent="onDrop($event)"
        style="position:relative">
-    <div class="view-scroll two-pane" style="height:100%; overflow:hidden">
-      <!-- Session sidebar -->
-      <div class="pane-sidebar" :class="{ 'sidebar-open': sidebarOpen, 'mobile-hidden': selectedSessionId }">
-        <div class="section-header" style="display:flex;align-items:center;justify-content:space-between">
-          <h2>Sessions</h2>
-          <button class="btn-sm" @click="newSession()" title="New conversation" style="padding:2px 8px;font-size:12px">+</button>
+    <div class="console-app" :class="{ 'mobile-thread-active': selectedSessionId }">
+
+      <!-- Sidebar: pinned + active + recent -->
+      <aside class="console-sidebar" :class="{ 'mobile-hidden': selectedSessionId }">
+        <div class="console-filter">
+          <span class="prompt">›</span>
+          <input type="text" x-model="sessionFilter" placeholder="filter agent:odyn status:running" aria-label="Filter sessions">
+          <kbd>/</kbd>
         </div>
-        <template x-if="loading">
-          <div class="empty-state"><span class="spinner"></span></div>
-        </template>
-        <!-- Filter bar -->
-        <div class="session-filter-bar" x-show="!loading && allSessions.length > 0">
-          <input type="text" x-model="sessionFilter" placeholder="Filter..." class="session-filter" style="flex:1" aria-label="Filter sessions">
-        </div>
-        <div class="turn-list">
-          <!-- Pinned sessions -->
+        <div class="console-sidebar-scroll">
+          <template x-if="loading">
+            <div class="console-empty"><span class="spinner"></span></div>
+          </template>
+
+          <!-- Pinned -->
           <template x-if="!loading && groupedSessions.pinned.length > 0">
             <div>
-              <div class="session-group-header">
-                Pinned
-                <span class="badge badge-muted" style="font-size:10px;margin-left:4px"
-                      x-text="groupedSessions.pinned.length"></span>
+              <div class="console-section-head pinned">
+                <span class="label">★ pinned</span>
+                <span class="count" x-text="groupedSessions.pinned.length"></span>
               </div>
               <template x-for="s in groupedSessions.pinned" :key="s.conversation_id || s.id">
-                <div class="turn-item turn-item-pinned"
-                     :class="{ active: selectedSessionId === (s.conversation_id || s.id), 'drag-over': dragOverPinId === s.id }"
+                <div class="console-session"
+                     :class="{ focused: selectedSessionId === (s.conversation_id || s.id), 'drag-over': dragOverPinId === s.id, live: isLive(s) }"
                      draggable="true"
                      @dragstart="onPinDragStart(s, $event)"
                      @dragover.prevent="onPinDragOver(s, $event)"
@@ -91,259 +98,446 @@
                      @drop.prevent="onPinDrop(s)"
                      @dragend="onPinDragEnd()"
                      @click="selectSession(s)" tabindex="0" role="button" @keydown.enter="selectSession(s)">
-                  <div class="item-row">
-                    <span class="drag-handle" title="Drag to reorder">&#x2261;</span>
-                    <span class="status-dot" :class="{ 'status-dot-pulse': isSessionProgressFresh(s) }"
-                          :style="{ background: statusDotColor(s.state) }"></span>
+                  <div class="row1">
+                    <span class="drag-handle" title="Drag to reorder">≡</span>
+                    <span class="dot" :class="statusDotClass(s.state)"></span>
                     <span class="source-icon" x-text="sourceIcon(s.source)" :title="s.source"></span>
                     <template x-if="editingSessionId === s.id">
-                      <input class="session-title-input" type="text" x-model="editingTitle"
+                      <input class="title-input" type="text" x-model="editingTitle"
                              @blur="saveTitle(s)" @keydown.enter="saveTitle(s)" @keydown.escape="editingSessionId = null"
                              @click.stop>
                     </template>
                     <template x-if="editingSessionId !== s.id">
-                      <span class="session-label-row">
-                        <span x-text="sessionLabel(s)" class="session-label" :class="{ 'session-label-unread': s.unread }"></span>
-                        <span class="session-edit-btn" @click="startEditTitle(s, $event)" title="Rename">&#9998;</span>
-                        <span class="session-pin-btn pinned" @click.stop="togglePin(s)" title="Unpin">&#9733;</span>
-                      </span>
+                      <span class="title" :class="{ unread: s.unread }" x-text="sessionLabel(s)"></span>
                     </template>
-                    <span class="unread-dot" x-show="s.unread" title="New activity"></span>
+                    <button class="icon-btn" @click.stop="startEditTitle(s, $event)" title="Rename">✎</button>
+                    <button class="icon-btn pin-on" @click.stop="togglePin(s)" title="Unpin">★</button>
+                    <span class="time" x-text="formatRelativeTime(s.last_active || s.created_at)"
+                          :title="s.last_active || s.created_at"></span>
                   </div>
-                  <div class="session-chips" x-show="metadataChips(s).length > 0">
+                  <div class="row2">
+                    <span class="agent" x-text="s.agent || $store.app.selectedAgent"></span>
+                    <span class="sep">·</span>
+                    <template x-if="sessionProgressLabel(s)">
+                      <span class="live-label" :class="s.state" x-text="sessionProgressLabel(s)"></span>
+                    </template>
+                    <template x-if="!sessionProgressLabel(s)">
+                      <span class="preview" x-text="lastMessagePreview(s)"></span>
+                    </template>
+                  </div>
+                  <div class="row3" x-show="metadataChips(s).length > 0">
                     <template x-for="chip in metadataChips(s).filter(c => c.href)" :key="chip.label">
-                      <a class="session-chip" :class="chip.cls" :href="chip.href" target="_blank"
-                         x-text="chip.label" @click.stop></a>
+                      <a class="chip" :class="chip.cls" :href="chip.href" target="_blank" x-text="chip.label" @click.stop></a>
                     </template>
                     <template x-for="chip in metadataChips(s).filter(c => !c.href)" :key="chip.label">
-                      <span class="session-chip" :class="chip.cls" x-text="chip.label"></span>
+                      <span class="chip" :class="chip.cls" x-text="chip.label"></span>
                     </template>
                   </div>
-                  <div class="session-progress" x-show="sessionProgressLabel(s)"
-                       x-text="sessionProgressLabel(s)"></div>
-                  <div class="session-preview" x-text="lastMessagePreview(s)" x-show="lastMessagePreview(s)"></div>
-                  <div class="turn-meta" x-text="formatRelativeTime(s.last_active || s.created_at)"
-                       :title="s.last_active || s.created_at"></div>
                 </div>
               </template>
             </div>
           </template>
 
-          <!-- Active sessions -->
+          <!-- Active -->
           <template x-if="!loading">
             <div>
-              <div class="session-group-header">
-                Active
-                <span class="badge badge-muted" style="font-size:10px;margin-left:4px"
-                      x-text="groupedSessions.active.length" x-show="groupedSessions.active.length > 0"></span>
+              <div class="console-section-head active">
+                <span class="label">● active</span>
+                <span class="count" x-text="groupedSessions.active.length"></span>
+                <button class="head-btn" @click="newSession()" title="New conversation">＋</button>
               </div>
               <template x-if="groupedSessions.active.length === 0">
-                <div class="turn-item" style="opacity:0.5;font-style:italic">No active sessions</div>
+                <div class="console-empty">No active sessions</div>
               </template>
               <template x-for="s in groupedSessions.active" :key="s.conversation_id || s.id">
-                <div class="turn-item" :class="{ active: selectedSessionId === (s.conversation_id || s.id) }"
+                <div class="console-session"
+                     :class="{ focused: selectedSessionId === (s.conversation_id || s.id), live: isLive(s) }"
                      @click="selectSession(s)" tabindex="0" role="button" @keydown.enter="selectSession(s)">
-                  <div class="item-row">
-                    <span class="status-dot" :class="{ 'status-dot-pulse': isSessionProgressFresh(s) }"
-                          :style="{ background: statusDotColor(s.state) }"></span>
+                  <div class="row1">
+                    <span class="dot" :class="statusDotClass(s.state)"></span>
                     <span class="source-icon" x-text="sourceIcon(s.source)" :title="s.source"></span>
                     <template x-if="editingSessionId === s.id">
-                      <input class="session-title-input" type="text" x-model="editingTitle"
+                      <input class="title-input" type="text" x-model="editingTitle"
                              @blur="saveTitle(s)" @keydown.enter="saveTitle(s)" @keydown.escape="editingSessionId = null"
                              @click.stop>
                     </template>
                     <template x-if="editingSessionId !== s.id">
-                      <span class="session-label-row">
-                        <span x-text="sessionLabel(s)" class="session-label" :class="{ 'session-label-unread': s.unread }"></span>
-                        <span class="session-edit-btn" @click="startEditTitle(s, $event)" title="Rename">&#9998;</span>
-                        <span class="session-pin-btn" @click.stop="togglePin(s)" title="Pin">&#9734;</span>
-                      </span>
+                      <span class="title" :class="{ unread: s.unread }" x-text="sessionLabel(s)"></span>
                     </template>
-                    <span class="unread-dot" x-show="s.unread" title="New activity"></span>
+                    <button class="icon-btn" @click.stop="startEditTitle(s, $event)" title="Rename">✎</button>
+                    <button class="icon-btn" @click.stop="togglePin(s)" title="Pin">☆</button>
+                    <span class="time" x-text="formatRelativeTime(s.last_active || s.created_at)"
+                          :title="s.last_active || s.created_at"></span>
                   </div>
-                  <div class="session-chips" x-show="metadataChips(s).length > 0">
+                  <div class="row2">
+                    <span class="agent" x-text="s.agent || $store.app.selectedAgent"></span>
+                    <span class="sep">·</span>
+                    <template x-if="sessionProgressLabel(s)">
+                      <span class="live-label" :class="s.state" x-text="sessionProgressLabel(s)"></span>
+                    </template>
+                    <template x-if="!sessionProgressLabel(s)">
+                      <span class="preview" x-text="lastMessagePreview(s)"></span>
+                    </template>
+                  </div>
+                  <div class="row3" x-show="metadataChips(s).length > 0">
                     <template x-for="chip in metadataChips(s).filter(c => c.href)" :key="chip.label">
-                      <a class="session-chip" :class="chip.cls" :href="chip.href" target="_blank"
-                         x-text="chip.label" @click.stop></a>
+                      <a class="chip" :class="chip.cls" :href="chip.href" target="_blank" x-text="chip.label" @click.stop></a>
                     </template>
                     <template x-for="chip in metadataChips(s).filter(c => !c.href)" :key="chip.label">
-                      <span class="session-chip" :class="chip.cls" x-text="chip.label"></span>
+                      <span class="chip" :class="chip.cls" x-text="chip.label"></span>
                     </template>
                   </div>
-                  <div class="session-progress" x-show="sessionProgressLabel(s)"
-                       x-text="sessionProgressLabel(s)"></div>
-                  <div class="session-preview" x-text="lastMessagePreview(s)" x-show="lastMessagePreview(s)"></div>
-                  <div class="turn-meta" x-text="formatRelativeTime(s.last_active || s.created_at)"
-                       :title="s.last_active || s.created_at"></div>
                 </div>
               </template>
             </div>
           </template>
 
-          <!-- Recent sessions -->
+          <!-- Recent (grouped by Today / Yesterday / This week / Older) -->
           <template x-if="groupedSessions.recent.length > 0 || groupedSessions.recentHidden > 0">
-            <details>
-              <summary class="session-group-header">
-                Recent
-                <span class="badge badge-muted" style="font-size:10px;margin-left:4px"
-                      x-text="groupedSessions.recentTotal"></span>
+            <details open>
+              <summary class="console-section-head">
+                <span class="label">▾ recent</span>
+                <span class="count" x-text="groupedSessions.recentTotal"></span>
               </summary>
-              <template x-for="s in groupedSessions.recent" :key="s.conversation_id || s.id">
-                <div class="turn-item" :class="{ active: selectedSessionId === (s.conversation_id || s.id) }"
-                     @click="selectSession(s)" tabindex="0" role="button" @keydown.enter="selectSession(s)">
-                  <div class="item-row">
-                    <span class="status-dot" :style="{ background: statusDotColor(s.state) }"></span>
-                    <span class="source-icon" x-text="sourceIcon(s.source)" :title="s.source"></span>
-                    <template x-if="editingSessionId === s.id">
-                      <input class="session-title-input" type="text" x-model="editingTitle"
-                             @blur="saveTitle(s)" @keydown.enter="saveTitle(s)" @keydown.escape="editingSessionId = null"
-                             @click.stop>
-                    </template>
-                    <template x-if="editingSessionId !== s.id">
-                      <span class="session-label-row">
-                        <span x-text="sessionLabel(s)" class="session-label" :class="{ 'session-label-unread': s.unread }"></span>
-                        <span class="session-edit-btn" @click="startEditTitle(s, $event)" title="Rename">&#9998;</span>
-                        <span class="session-pin-btn" @click.stop="togglePin(s)" title="Pin">&#9734;</span>
-                      </span>
-                    </template>
-                    <span class="unread-dot" x-show="s.unread" title="New activity"></span>
+              <template x-for="bucket in recentBuckets()" :key="bucket.label">
+                <div x-show="bucket.items.length > 0">
+                  <div class="console-subsection-head">
+                    <span class="dash">—</span>
+                    <span class="sublabel" x-text="bucket.label"></span>
+                    <span class="subcount" x-text="bucket.items.length"></span>
                   </div>
-                  <div class="session-chips" x-show="metadataChips(s).length > 0">
-                    <template x-for="chip in metadataChips(s).filter(c => c.href)" :key="chip.label">
-                      <a class="session-chip" :class="chip.cls" :href="chip.href" target="_blank"
-                         x-text="chip.label" @click.stop></a>
-                    </template>
-                    <template x-for="chip in metadataChips(s).filter(c => !c.href)" :key="chip.label">
-                      <span class="session-chip" :class="chip.cls" x-text="chip.label"></span>
-                    </template>
-                  </div>
-                  <div class="turn-meta" x-text="formatRelativeTime(s.last_active || s.created_at)"
-                       :title="s.last_active || s.created_at"></div>
+                  <template x-for="s in bucket.items" :key="s.conversation_id || s.id">
+                    <div class="console-session"
+                         :class="{ focused: selectedSessionId === (s.conversation_id || s.id) }"
+                         @click="selectSession(s)" tabindex="0" role="button" @keydown.enter="selectSession(s)">
+                      <div class="row1">
+                        <span class="dot" :class="statusDotClass(s.state)"></span>
+                        <span class="source-icon" x-text="sourceIcon(s.source)" :title="s.source"></span>
+                        <template x-if="editingSessionId === s.id">
+                          <input class="title-input" type="text" x-model="editingTitle"
+                                 @blur="saveTitle(s)" @keydown.enter="saveTitle(s)" @keydown.escape="editingSessionId = null"
+                                 @click.stop>
+                        </template>
+                        <template x-if="editingSessionId !== s.id">
+                          <span class="title" :class="{ unread: s.unread }" x-text="sessionLabel(s)"></span>
+                        </template>
+                        <button class="icon-btn" @click.stop="startEditTitle(s, $event)" title="Rename">✎</button>
+                        <button class="icon-btn" @click.stop="togglePin(s)" title="Pin">☆</button>
+                        <span class="time" x-text="formatRelativeTime(s.last_active || s.created_at)"
+                              :title="s.last_active || s.created_at"></span>
+                      </div>
+                      <div class="row2 dim">
+                        <span class="agent" x-text="s.agent || $store.app.selectedAgent"></span>
+                        <span class="sep">·</span>
+                        <span class="preview" x-text="lastMessagePreview(s)"></span>
+                      </div>
+                      <div class="row3" x-show="metadataChips(s).length > 0">
+                        <template x-for="chip in metadataChips(s).filter(c => c.href)" :key="chip.label">
+                          <a class="chip" :class="chip.cls" :href="chip.href" target="_blank" x-text="chip.label" @click.stop></a>
+                        </template>
+                        <template x-for="chip in metadataChips(s).filter(c => !c.href)" :key="chip.label">
+                          <span class="chip" :class="chip.cls" x-text="chip.label"></span>
+                        </template>
+                      </div>
+                    </div>
+                  </template>
                 </div>
               </template>
               <template x-if="groupedSessions.recentHidden > 0">
-                <div class="turn-item" style="opacity:0.6;font-style:italic;cursor:pointer"
-                     @click="showRecentHidden = !showRecentHidden">
-                  <span x-text="showRecentHidden ? 'Show less' : groupedSessions.recentHidden + ' more (click to show)'"></span>
+                <div class="console-empty" style="cursor:pointer" @click="showRecentHidden = !showRecentHidden">
+                  <span x-text="showRecentHidden ? 'show less' : groupedSessions.recentHidden + ' more (click to show)'"></span>
                 </div>
               </template>
             </details>
           </template>
         </div>
-      </div>
+      </aside>
 
-      <!-- Main panel -->
-      <div class="pane-detail" :class="{ 'mobile-hidden': !selectedSessionId }" style="display:flex;flex-direction:column;min-height:0">
-        <button class="sidebar-toggle" @click="sidebarOpen = !sidebarOpen">
-          <span class="sidebar-toggle-arrow" :class="{ open: sidebarOpen }">▾</span>
-          <span x-text="sidebarOpen ? 'Hide Sessions' : 'Sessions'"></span>
-        </button>
-        <button class="mobile-back-btn" @click="backToSessions()">&#8592; Sessions</button>
-
-        <!-- Context bar -->
-        <div class="context-bar" x-show="selectedSessionId && selectedSessionMeta" x-cloak>
-          <div class="context-bar-top">
-            <h3 class="context-title" @click="startEditTitle(selectedSessionMeta, $event)"
-                @keydown.enter="startEditTitle(selectedSessionMeta, $event)"
-                tabindex="0" role="button"
-                x-text="selectedSessionMeta?.title || sessionLabel(selectedSessionMeta)" title="Click to rename"></h3>
-          </div>
-          <div class="context-chips" x-show="(selectedSessionMeta?.metadata||{}).type || (selectedSessionMeta?.metadata||{}).status_text || (selectedSessionMeta?.metadata||{}).task || (selectedSessionMeta?.metadata||{}).pr">
-            <template x-if="(selectedSessionMeta?.metadata||{}).type">
-              <span class="session-chip chip-type" x-text="selectedSessionMeta.metadata.type"></span>
-            </template>
-            <template x-if="(selectedSessionMeta?.metadata||{}).status_text">
-              <span class="session-chip chip-status" x-text="selectedSessionMeta.metadata.status_text"></span>
-            </template>
-            <template x-if="(selectedSessionMeta?.metadata||{}).task">
-              <a class="session-chip chip-link" :href="selectedSessionMeta.metadata.task" target="_blank">Task</a>
-            </template>
-            <template x-if="(selectedSessionMeta?.metadata||{}).pr">
-              <a class="session-chip chip-link" :href="selectedSessionMeta.metadata.pr" target="_blank">PR</a>
-            </template>
-          </div>
-          <div class="context-meta-row">
-            <span x-text="selectedSessionMeta?.agent || $store.app.selectedAgent"></span>
-            <template x-if="statusInfo?.model">
-              <span class="badge badge-muted" x-text="statusInfo.model"></span>
-            </template>
-            <template x-if="statusInfo?.tokens != null && statusInfo?.context_limit">
-              <div class="context-meter" @click="openPromptInspector()" title="Current context window usage (click for breakdown)" style="cursor:pointer">
-                <div class="context-meter-bar">
-                  <div class="context-meter-fill"
-                       :style="'width:' + Math.min(100, (statusInfo.tokens / statusInfo.context_limit) * 100) + '%'"
-                       :class="{ 'meter-warn': statusInfo.tokens / statusInfo.context_limit > 0.8 }"></div>
-                </div>
-                <span class="context-meter-label"
-                      x-text="(statusInfo.tokens/1000).toFixed(1) + 'k / ' + (statusInfo.context_limit/1000).toFixed(0) + 'k'"></span>
-              </div>
-            </template>
-            <template x-if="(selectedSessionMeta?.metadata||{}).working_dir">
-              <span class="context-workdir" x-text="selectedSessionMeta.metadata.working_dir" title="Working directory"></span>
-            </template>
-            <select class="effort-chip" x-show="effortLevels.length > 0"
-                    :value="sessionEffort"
-                    @change="setSessionEffort($event.target.value)"
-                    title="Reasoning effort (session default)">
-              <option value="">effort: —</option>
-              <template x-for="lvl in effortLevels" :key="lvl">
-                <option :value="lvl" x-text="'effort: ' + lvl" :selected="sessionEffort === lvl"></option>
-              </template>
-            </select>
-          </div>
-          <div style="display:flex;gap:6px;margin-top:4px" x-show="selectedSessionMeta && !isActiveSession">
-            <template x-if="canCancel(selectedSessionMeta)">
-              <button class="btn-sm" style="color:var(--error)" @click="cancelSession(selectedSessionMeta)">Cancel</button>
-            </template>
-            <template x-if="canComplete(selectedSessionMeta)">
-              <button class="btn-sm" @click="completeSession(selectedSessionMeta)">Complete</button>
-            </template>
-            <template x-if="canRestart(selectedSessionMeta)">
-              <button class="btn-sm" @click="restartSession(selectedSessionMeta)">Restart</button>
-            </template>
-          </div>
-        </div>
-
+      <!-- Main pane -->
+      <main class="console-main" :class="{ 'mobile-hidden': !selectedSessionId }">
         <template x-if="!selectedSessionId">
-          <div class="empty-state">
-            <div>Select a session or</div>
-            <button class="btn-sm" @click="newSession()" style="margin-top:8px">Start new conversation</button>
+          <div class="console-empty" style="display:flex;align-items:center;justify-content:center;flex:1;font-family:var(--font-mono);font-size:13px">
+            <div style="text-align:center">
+              <div>›_ Select a session, or</div>
+              <button class="hbtn archive" style="margin-top:10px" @click="newSession()">＋ start new conversation</button>
+            </div>
           </div>
         </template>
 
-        <!-- Session chat UI -->
         <template x-if="selectedSessionId">
-          <div style="display:flex;flex-direction:column;flex:1;min-height:0;position:relative">
-            <div id="messages" x-ref="messages"
+          <div class="console-pane-col" style="position:relative">
+            <!-- Thread header -->
+            <div class="console-thread-header" x-show="selectedSessionMeta" x-cloak>
+              <div class="row top">
+                <button class="hbtn mobile-back" @click="backToSessions()" title="Back to sessions">‹</button>
+                <span class="path">
+                  <span class="seg" x-text="$store.app.view"></span>
+                  <span class="slash">/</span>
+                  <span class="seg" x-text="(selectedSessionMeta?.state) || 'session'"></span>
+                  <span class="slash">/</span>
+                  <span class="seg cur" x-text="(selectedSessionId || '').slice(0, 8)"></span>
+                </span>
+                <span class="grow"></span>
+                <button class="hbtn pin"
+                        :class="{ on: selectedSessionMeta?.pinned }"
+                        @click="togglePin(selectedSessionMeta)"
+                        :title="selectedSessionMeta?.pinned ? 'Unpin' : 'Pin'"
+                        x-text="selectedSessionMeta?.pinned ? '★' : '☆'"></button>
+                <template x-if="canComplete(selectedSessionMeta)">
+                  <button class="hbtn archive" @click="completeSession(selectedSessionMeta)"
+                          title="Mark complete &amp; archive"><span class="glyph">⊠</span> mark complete</button>
+                </template>
+                <button class="hbtn" @click="startEditTitle(selectedSessionMeta, $event)">✎ rename</button>
+                <template x-if="compacting">
+                  <span style="color:var(--mauve);font-size:11px"><span class="spinner"></span> compacting…</span>
+                </template>
+                <span class="kv-pop" x-data="{ open: false }" @click.outside="open = false">
+                  <button class="hbtn" @click="open = !open" title="More actions">⋯</button>
+                  <div class="setting-pop" x-show="open" x-cloak x-transition.opacity style="right:0;left:auto">
+                    <div class="setting-pop-head">actions</div>
+                    <button type="button" class="setting-pop-row" @click="open = false; compactSession()" :disabled="compacting || sending">
+                      <span class="pop-mark">⚙</span><span class="pop-val">compact session</span>
+                    </button>
+                    <template x-if="canCancel(selectedSessionMeta)">
+                      <button type="button" class="setting-pop-row" @click="open = false; cancelSession(selectedSessionMeta)">
+                        <span class="pop-mark" style="color:var(--red)">✗</span><span class="pop-val">cancel run</span>
+                      </button>
+                    </template>
+                    <template x-if="canRestart(selectedSessionMeta)">
+                      <button type="button" class="setting-pop-row" @click="open = false; restartSession(selectedSessionMeta)">
+                        <span class="pop-mark">↻</span><span class="pop-val">restart</span>
+                      </button>
+                    </template>
+                  </div>
+                </span>
+              </div>
+              <div class="row title-row">
+                <template x-if="editingSessionId === selectedSessionMeta?.id">
+                  <input class="title-input" type="text" x-model="editingTitle"
+                         @blur="saveTitle(selectedSessionMeta)" @keydown.enter="saveTitle(selectedSessionMeta)" @keydown.escape="editingSessionId = null">
+                </template>
+                <template x-if="editingSessionId !== selectedSessionMeta?.id">
+                  <h1 @click="startEditTitle(selectedSessionMeta, $event)"
+                      style="cursor:pointer" title="Click to rename"
+                      x-text="selectedSessionMeta?.title || sessionLabel(selectedSessionMeta)"></h1>
+                </template>
+                <span class="grow"></span>
+                <span class="ctx-mini ctx-pop-wrap">
+                  <button type="button" class="ctx-trigger" :class="{ open: !!inspectingSnapshot }"
+                          @click="inspectingSnapshot ? (inspectingSnapshot = null) : openPromptInspector()"
+                          title="Open Prompt Inspector"
+                          x-show="statusInfo?.tokens != null && statusInfo?.context_limit">
+                    <span class="ctx-num"
+                          x-text="(statusInfo.tokens / 1000).toFixed(1) + 'k'"></span>
+                    <span class="ctx-bar">
+                      <span :style="'width:' + Math.min(100, (statusInfo.tokens / statusInfo.context_limit) * 100) + '%'"></span>
+                    </span>
+                    <span class="ctx-pct"
+                          x-text="Math.round((statusInfo.tokens / statusInfo.context_limit) * 100) + '%'"></span>
+                  </button>
+                </span>
+              </div>
+              <div class="row meta-row">
+                <!-- agent popover -->
+                <span class="kv kv-pop" x-data="{ open: false }" @click.outside="open = false">
+                  <span class="k">agent</span>
+                  <button type="button" class="v-btn agent" :class="{ open: open }" @click="open = !open">
+                    <span x-text="selectedSessionMeta?.agent || $store.app.selectedAgent"></span>
+                    <span class="caret">▾</span>
+                  </button>
+                  <div class="setting-pop" x-show="open" x-cloak x-transition.opacity>
+                    <div class="setting-pop-head">agent</div>
+                    <template x-for="a in $store.app.agents" :key="a.name">
+                      <button type="button" class="setting-pop-row"
+                              :class="{ current: (selectedSessionMeta?.agent || $store.app.selectedAgent) === a.name }"
+                              @click="setSessionAgent(a.name); open = false">
+                        <span class="pop-mark agent"
+                              x-text="(selectedSessionMeta?.agent || $store.app.selectedAgent) === a.name ? '●' : '○'"></span>
+                        <span class="pop-val" x-text="a.name"></span>
+                        <span class="pop-meta" x-text="a.is_default ? 'default' : ''"></span>
+                      </button>
+                    </template>
+                  </div>
+                </span>
+                <!-- model popover -->
+                <span class="kv kv-pop" x-data="{ open: false }"
+                      x-init="$watch('open', v => { if (v) loadModels() })"
+                      @click.outside="open = false">
+                  <span class="k">model</span>
+                  <button type="button" class="v-btn model" :class="{ open: open }" @click="open = !open">
+                    <span x-text="sessionModel || statusInfo?.model || 'default'"></span>
+                    <span class="caret">▾</span>
+                  </button>
+                  <div class="setting-pop" x-show="open" x-cloak x-transition.opacity>
+                    <div class="setting-pop-head">model</div>
+                    <button type="button" class="setting-pop-row"
+                            :class="{ current: !sessionModel }"
+                            @click="setSessionModel(null); open = false">
+                      <span class="pop-mark model" x-text="!sessionModel ? '●' : '○'"></span>
+                      <span class="pop-val">— default</span>
+                      <span class="pop-desc">use the agent's configured model</span>
+                    </button>
+                    <template x-for="m in (availableModels || [])" :key="m.id">
+                      <button type="button" class="setting-pop-row"
+                              :class="{ current: sessionModel === m.id }"
+                              @click="setSessionModel(m.id); open = false">
+                        <span class="pop-mark model" x-text="sessionModel === m.id ? '●' : '○'"></span>
+                        <span class="pop-val" x-text="m.id"></span>
+                        <span class="pop-desc" x-text="m.description || ''"></span>
+                        <span class="pop-meta" x-text="m.context ? (m.context/1000).toFixed(0) + 'k ctx' : ''"></span>
+                      </button>
+                    </template>
+                  </div>
+                </span>
+                <!-- effort popover (wrapped <select> to keep a11y) -->
+                <span class="kv" x-show="effortLevels.length > 0">
+                  <span class="k">effort</span>
+                  <select class="v-select" :value="sessionEffort" @change="setSessionEffort($event.target.value)" title="Reasoning effort">
+                    <option value="">—</option>
+                    <template x-for="lvl in effortLevels" :key="lvl">
+                      <option :value="lvl" x-text="lvl" :selected="sessionEffort === lvl"></option>
+                    </template>
+                  </select>
+                </span>
+                <!-- attachments / skills counts -->
+                <template x-if="statusInfo?.attachments?.length">
+                  <span class="kv" style="cursor:pointer" @click="openAttachments()">
+                    <span class="k">attach</span>
+                    <span class="v" x-text="statusInfo.attachments.length"></span>
+                  </span>
+                </template>
+                <template x-if="loadedSkills.length">
+                  <span class="kv" style="cursor:pointer" @click="showSkills = true">
+                    <span class="k">skills</span>
+                    <span class="v" x-text="loadedSkills.length"></span>
+                  </span>
+                </template>
+                <template x-if="statusInfo?.message_count != null">
+                  <span class="kv">
+                    <span class="k">msgs</span>
+                    <span class="v" x-text="statusInfo.message_count"></span>
+                  </span>
+                </template>
+                <span class="grow"></span>
+                <template x-if="(selectedSessionMeta?.metadata||{}).working_dir">
+                  <span class="meta-tag" x-text="selectedSessionMeta.metadata.working_dir"
+                        :title="selectedSessionMeta.metadata.working_dir"></span>
+                </template>
+                <template x-for="chip in metadataChips(selectedSessionMeta || {})" :key="chip.label">
+                  <template x-if="chip.href">
+                    <a class="meta-tag" :href="chip.href" target="_blank" x-text="chip.label"></a>
+                  </template>
+                  <template x-if="!chip.href">
+                    <span class="meta-tag" x-text="chip.label"></span>
+                  </template>
+                </template>
+              </div>
+
+              <!-- Prompt inspector popover (anchored to ctx-mini, visible while inspectingSnapshot truthy) -->
+              <template x-if="inspectingSnapshot">
+                <div class="pi-pop" role="dialog" aria-label="Prompt Inspector"
+                     @click.outside="inspectingSnapshot = null"
+                     @keydown.escape.window="inspectingSnapshot = null">
+                  <header class="pi-head">
+                    <div class="pi-title">Prompt Inspector</div>
+                    <button class="pi-close-x" @click="inspectingSnapshot = null" aria-label="Close">×</button>
+                  </header>
+                  <template x-if="inspectingSnapshot.token_breakdown">
+                    <div style="display:flex;flex-direction:column;min-height:0">
+                      <div class="pi-stack-bar">
+                        <template x-for="cat in (inspectingSnapshot.token_breakdown.categories || []).filter(c => c.tokens > 0)" :key="cat.name">
+                          <span class="seg"
+                                :style="'flex-basis:' + (cat.tokens / inspectingSnapshot.token_breakdown.total * 100) + '%; background:' + categoryColor(cat.name)"
+                                :title="cat.name + ': ~' + fmtTok(cat.tokens)"></span>
+                        </template>
+                      </div>
+                      <ul class="pi-list">
+                        <template x-for="cat in (inspectingSnapshot.token_breakdown.categories || []).filter(c => c.tokens > 0)" :key="cat.name">
+                          <li class="pi-row">
+                            <span class="dot" :style="'background:' + categoryColor(cat.name)"></span>
+                            <span class="lbl">
+                              <span x-text="cat.name"></span>
+                              <template x-if="cat.items && cat.items.length">
+                                <span class="cnt" x-text="' (' + cat.items.length + ')'"></span>
+                              </template>
+                            </span>
+                            <span class="spacer"></span>
+                            <span class="tok" x-text="'~' + fmtTok(cat.tokens)"></span>
+                          </li>
+                        </template>
+                      </ul>
+                      <div class="pi-divider"></div>
+                      <div class="pi-total">
+                        <span class="lbl">Total</span>
+                        <span class="tok" x-text="'~' + fmtTok(inspectingSnapshot.token_breakdown.total) + ' tokens'"></span>
+                      </div>
+                      <template x-if="inspectingSnapshot.messages && inspectingSnapshot.messages.length">
+                        <section class="pi-raw">
+                          <div class="pi-raw-head">Raw Messages</div>
+                          <ul class="pi-raw-list">
+                            <template x-for="(m, mi) in inspectingSnapshot.messages" :key="mi">
+                              <li class="pi-msg" :class="{ open: piExpanded === mi }"
+                                  x-data="{ get text() { const c = m.content; if (typeof c === 'string') return c; if (Array.isArray(c)) return c.map(b => b.text || JSON.stringify(b)).join('\\n'); return JSON.stringify(c, null, 2); } }">
+                                <button class="pi-msg-row" @click="piExpanded = (piExpanded === mi ? null : mi)">
+                                  <span class="role" :class="'role-' + m.role" x-text="m.role"></span>
+                                  <span class="tok" x-text="'~' + fmtTok(Math.round(text.length / 4)) + ' tok'"></span>
+                                  <span class="prev" x-text="text.substring(0, 90) + (text.length > 90 ? '…' : '')"></span>
+                                </button>
+                                <template x-if="piExpanded === mi">
+                                  <pre class="pi-msg-full" x-text="text"></pre>
+                                </template>
+                              </li>
+                            </template>
+                          </ul>
+                        </section>
+                      </template>
+                      <template x-if="!inspectingSnapshot.messages || !inspectingSnapshot.messages.length">
+                        <div style="padding:8px 14px;color:var(--overlay1);font-size:11px;font-style:italic">
+                          Raw messages only available during a live session.
+                        </div>
+                      </template>
+                      <footer class="pi-foot">
+                        <button class="pi-close" @click="inspectingSnapshot = null">Close</button>
+                      </footer>
+                    </div>
+                  </template>
+                </div>
+              </template>
+            </div>
+
+            <!-- Thread -->
+            <div id="messages" class="console-thread" x-ref="messages"
                  @scroll.passive="onMessagesScroll()"
                  @click="handleMessagesClick($event)">
               <template x-if="compactionSummary">
-                <div class="compaction-banner">
-                  <div class="compaction-banner-header">
-                    <strong>Previous conversation summary</strong>
-                  </div>
-                  <div class="msg agent compaction-body" x-html="renderHtml(compactionSummary)"></div>
+                <div class="console-compaction-banner">
+                  <h4>Previous conversation summary</h4>
+                  <div x-html="renderHtml(compactionSummary)"></div>
                 </div>
               </template>
               <template x-for="(msg, i) in messages" :key="i">
                 <div>
                   <template x-if="msg.type === 'compaction'">
-                    <div class="history-sep">
+                    <div class="console-history-sep">
                       <template x-if="msg.summary">
                         <details>
-                          <summary>session compacted <template x-if="msg.reason"><span class="badge badge-muted" x-text="msg.reason"></span></template></summary>
-                          <div class="msg agent compaction-body" x-html="renderHtml(msg.summary)"></div>
+                          <summary>session compacted
+                            <template x-if="msg.reason"><span class="badge" x-text="msg.reason"></span></template>
+                          </summary>
+                          <div class="console-compaction-banner" x-html="renderHtml(msg.summary)"></div>
                         </details>
                       </template>
                       <template x-if="!msg.summary">
-                        <span>session compacted <template x-if="msg.reason"><span class="badge badge-muted" x-text="msg.reason"></span></template></span>
+                        <span>session compacted
+                          <template x-if="msg.reason"><span class="badge" x-text="msg.reason"></span></template>
+                        </span>
                       </template>
                     </div>
                   </template>
                   <template x-if="msg.type === 'separator'">
-                    <div class="history-sep">
+                    <div class="console-history-sep">
                       <template x-if="hasMoreHistory && i === 0">
-                        <button class="btn-sm" @click="loadMoreHistory()" x-text="msg.text"></button>
+                        <button @click="loadMoreHistory()" x-text="msg.text"></button>
                       </template>
                       <template x-if="!(hasMoreHistory && i === 0)">
                         <span x-text="msg.text"></span>
@@ -351,222 +545,263 @@
                     </div>
                   </template>
                   <template x-if="msg.type === 'user'">
-                    <div class="msg user">
-                      <button class="msg-copy" type="button"
-                              @click="copyMessage(msg.text)"
-                              title="Copy markdown" aria-label="Copy markdown">&#10697;</button>
-                      <div x-html="renderHtml(msg.text)"></div>
-                      <template x-if="msg.context && msg.context.length">
-                        <details class="user-context">
-                          <summary>show injected context</summary>
-                          <template x-for="(c, ci) in msg.context" :key="ci">
-                            <pre><code x-text="c.content"></code></pre>
-                          </template>
-                        </details>
-                      </template>
-                      <template x-if="msg.reactions && msg.reactions.length">
-                        <div class="msg-reactions">
-                          <template x-for="(emoji, ri) in msg.reactions" :key="ri">
-                            <span class="reaction-badge" x-text="emoji"></span>
-                          </template>
-                        </div>
-                      </template>
+                    <div class="console-turn user">
+                      <div class="console-turn-gutter">
+                        <span class="role user">you</span>
+                        <span class="time" x-text="turnTimeShort(msg)"></span>
+                        <span class="turn-num" x-text="turnIndex(i)"></span>
+                      </div>
+                      <div class="console-turn-bubble">
+                        <button class="copy-btn" type="button"
+                                @click="copyMessage(msg.text)"
+                                title="Copy markdown">⎘</button>
+                        <div x-html="renderHtml(msg.text)"></div>
+                        <template x-if="msg.context && msg.context.length">
+                          <details>
+                            <summary style="font-family:var(--font-mono);font-size:10.5px;color:var(--overlay1);cursor:pointer">▸ injected context</summary>
+                            <template x-for="(c, ci) in msg.context" :key="ci">
+                              <pre><code x-text="c.content"></code></pre>
+                            </template>
+                          </details>
+                        </template>
+                        <template x-if="msg.reactions && msg.reactions.length">
+                          <div style="display:flex;gap:4px;margin-top:4px">
+                            <template x-for="(emoji, ri) in msg.reactions" :key="ri">
+                              <span style="font-size:13px" x-text="emoji"></span>
+                            </template>
+                          </div>
+                        </template>
+                      </div>
                     </div>
                   </template>
                   <template x-if="msg.type === 'agent'">
-                    <div class="msg agent">
-                      <button class="msg-copy" type="button"
-                              @click="copyMessage(msg.text)"
-                              title="Copy markdown" aria-label="Copy markdown">&#10697;</button>
-                      <template x-if="msg.text">
-                        <div x-html="renderHtml(msg.text)"></div>
-                      </template>
-                      <template x-if="!msg.text">
-                        <div class="muted"><em>(empty response)</em></div>
-                      </template>
+                    <div class="console-turn agent">
+                      <div class="console-turn-gutter">
+                        <span class="role agent" x-text="(selectedSessionMeta?.agent || $store.app.selectedAgent || 'agent').slice(0, 8)"></span>
+                        <span class="time" x-text="turnTimeShort(msg)"></span>
+                        <span class="turn-num" x-text="turnIndex(i)"></span>
+                      </div>
+                      <div class="console-turn-bubble">
+                        <button class="copy-btn" type="button"
+                                @click="copyMessage(msg.text)"
+                                title="Copy markdown">⎘</button>
+                        <template x-if="msg.text">
+                          <div x-html="renderHtml(msg.text)"></div>
+                        </template>
+                        <template x-if="!msg.text">
+                          <div style="color:var(--overlay1);font-style:italic">(empty response)</div>
+                        </template>
+                      </div>
                     </div>
                   </template>
                   <template x-if="msg.type === 'error'">
-                    <div class="msg error" x-text="msg.text"></div>
-                  </template>
-                  <template x-if="msg.type === 'info'">
-                    <div class="msg info"><span class="info-label">Progress: </span><span x-text="msg.text"></span></div>
-                  </template>
-                  <template x-if="msg.type === 'progress'">
-                    <div class="msg progress">
-                      <span class="spinner"></span>
-                      <span x-text="msg.statusText"></span>
-                      <ul class="tool-steps">
-                        <template x-for="(step, j) in msg.steps" :key="j">
-                          <li>
-                            <template x-if="step.hasDetails">
-                              <details :open="step.open" @toggle="if(step.open !== $el.open) step.open = $el.open">
-                                <summary x-html="step.summary"></summary>
-                                <pre><code x-text="step.content"></code></pre>
-                              </details>
-                            </template>
-                            <template x-if="!step.hasDetails">
-                              <span x-html="step.html"></span>
-                            </template>
-                          </li>
-                        </template>
-                      </ul>
+                    <div class="console-turn error">
+                      <div class="console-turn-gutter">
+                        <span class="role error">err</span>
+                        <span class="time" x-text="turnTimeShort(msg)"></span>
+                      </div>
+                      <div class="console-turn-bubble" x-text="msg.text"></div>
                     </div>
                   </template>
-                  <template x-if="msg.type === 'progress-done'">
-                    <div class="msg progress">
-                      <details>
-                        <summary class="tool-summary" x-text="progressSummaryText(msg)"></summary>
-                        <ul class="tool-steps">
-                          <template x-for="(step, j) in msg.steps" :key="j">
-                            <li>
-                              <template x-if="step.hasDetails">
-                                <details :open="step.open" @toggle="if(step.open !== $el.open) step.open = $el.open">
-                                  <summary x-html="step.summary"></summary>
-                                  <pre><code x-text="step.content"></code></pre>
-                                </details>
+                  <template x-if="msg.type === 'info'">
+                    <div class="console-turn info">
+                      <div class="console-turn-gutter">
+                        <span class="role info">info</span>
+                      </div>
+                      <div class="console-turn-bubble">
+                        <strong style="font-family:var(--font-mono);font-size:10px;letter-spacing:0.14em;text-transform:uppercase;color:var(--sky)">progress: </strong>
+                        <span x-text="msg.text"></span>
+                      </div>
+                    </div>
+                  </template>
+                  <template x-if="msg.type === 'progress' || msg.type === 'progress-done'">
+                    <div class="console-turn agent">
+                      <div class="console-turn-gutter">
+                        <span class="role tool">tool</span>
+                      </div>
+                      <div class="console-turn-bubble" style="padding:0;background:transparent;border:none">
+                        <div class="console-codeblock">
+                          <button class="cb-head" @click="msg._codeOpen = !(msg._codeOpen ?? true)">
+                            <span class="caret" x-text="(msg._codeOpen ?? true) ? '▾' : '▸'"></span>
+                            <span class="lang" x-text="msg.type === 'progress' ? 'running' : 'code'"></span>
+                            <template x-if="msg.statusText">
+                              <span class="dot-sep">·</span>
+                            </template>
+                            <span class="dur" x-show="msg.statusText" x-text="msg.statusText"></span>
+                            <template x-if="msg.toolCount">
+                              <span class="dot-sep">·</span>
+                            </template>
+                            <span class="tools" x-show="msg.toolCount" x-text="msg.toolCount + ' tool' + (msg.toolCount > 1 ? 's' : '')"></span>
+                            <template x-if="msg.type === 'progress'">
+                              <span class="ok"><span class="spinner"></span></span>
+                            </template>
+                            <template x-if="msg.type === 'progress-done' && !msg.failed">
+                              <span class="ok">✓</span>
+                            </template>
+                            <template x-if="msg.failed">
+                              <span class="err">✗</span>
+                            </template>
+                          </button>
+                          <template x-if="msg._codeOpen ?? true">
+                            <div class="cb-tools">
+                              <template x-for="(step, j) in msg.steps" :key="j">
+                                <div class="tool-step">
+                                  <template x-if="step.hasDetails">
+                                    <details :open="step.open" @toggle="if(step.open !== $el.open) step.open = $el.open">
+                                      <summary class="tool-row" x-html="step.summary"></summary>
+                                      <pre class="tool-detail"><code x-text="step.content"></code></pre>
+                                    </details>
+                                  </template>
+                                  <template x-if="!step.hasDetails">
+                                    <div class="tool-row" x-html="step.html"></div>
+                                  </template>
+                                </div>
                               </template>
-                              <template x-if="!step.hasDetails">
-                                <span x-html="step.html"></span>
-                              </template>
-                            </li>
-                          </template>
-                        </ul>
-                      </details>
-                      <template x-if="msg.failed">
-                        <div class="retry-actions" style="margin-top:8px;display:flex;gap:8px">
-                          <button class="btn-sm" @click="retryMessage(msg.lastMessage)">Retry</button>
-                          <button class="btn-sm" @click="continueAfterError(msg.lastMessage, msg.errorText)">Continue</button>
-                          <template x-if="msg.errorText && msg.errorText.toLowerCase().includes('prompt too long')">
-                            <button class="btn-sm" @click="compactSession(msg.lastMessage)">Compact & Retry</button>
+                            </div>
                           </template>
                         </div>
-                      </template>
+                        <template x-if="msg.failed">
+                          <div style="display:flex;gap:8px;margin:8px 0 0;flex-wrap:wrap">
+                            <button class="hbtn archive" @click="retryMessage(msg.lastMessage)">retry</button>
+                            <button class="hbtn" @click="continueAfterError(msg.lastMessage, msg.errorText)">continue</button>
+                            <template x-if="msg.errorText && msg.errorText.toLowerCase().includes('prompt too long')">
+                              <button class="hbtn" @click="compactSession(msg.lastMessage)">compact &amp; retry</button>
+                            </template>
+                          </div>
+                        </template>
+                      </div>
                     </div>
                   </template>
                   <template x-if="msg.type === 'ask_user'">
-                    <div class="msg agent ask-user-form">
-                      <p><strong x-text="msg.question"></strong></p>
-                      <template x-if="msg.answered">
-                        <p class="ask-answered">Answered: <em x-text="msg.answer"></em></p>
-                      </template>
-                      <template x-if="!msg.answered && msg.questionType === 'yes_no'">
-                        <div class="ask-buttons">
-                          <button @click="submitAskUser(i, 'yes')">Yes</button>
-                          <button @click="submitAskUser(i, 'no')">No</button>
-                        </div>
-                      </template>
-                      <template x-if="!msg.answered && msg.questionType === 'choice'">
-                        <div class="ask-buttons">
-                          <template x-for="opt in msg.options" :key="opt">
-                            <button @click="submitAskUser(i, opt)" x-text="opt"></button>
+                    <div class="console-turn agent">
+                      <div class="console-turn-gutter">
+                        <span class="role agent" x-text="(selectedSessionMeta?.agent || 'agent').slice(0, 8)"></span>
+                        <span class="time" x-text="turnTimeShort(msg)"></span>
+                      </div>
+                      <div class="console-turn-bubble">
+                        <div class="console-ask-user">
+                          <div class="question" x-text="msg.question"></div>
+                          <template x-if="msg.answered">
+                            <div style="font-style:italic;color:var(--overlay1);font-size:12px">
+                              Answered: <em x-text="msg.answer"></em>
+                            </div>
+                          </template>
+                          <template x-if="!msg.answered && msg.questionType === 'yes_no'">
+                            <div class="actions">
+                              <button class="hbtn archive" @click="submitAskUser(i, 'yes')">yes</button>
+                              <button class="hbtn" @click="submitAskUser(i, 'no')">no</button>
+                            </div>
+                          </template>
+                          <template x-if="!msg.answered && msg.questionType === 'choice'">
+                            <div class="actions">
+                              <template x-for="opt in msg.options" :key="opt">
+                                <button class="hbtn" @click="submitAskUser(i, opt)" x-text="opt"></button>
+                              </template>
+                            </div>
+                          </template>
+                          <template x-if="!msg.answered && msg.questionType === 'text'">
+                            <form class="actions" @submit.prevent="submitAskUser(i, msg.inputValue || '')" style="display:grid;gap:6px;width:100%">
+                              <textarea x-model="msg.inputValue" placeholder="type your answer…" autofocus></textarea>
+                              <button type="submit" class="hbtn archive" style="justify-self:end">send</button>
+                            </form>
                           </template>
                         </div>
-                      </template>
-                      <template x-if="!msg.answered && msg.questionType === 'text'">
-                        <form class="ask-text" @submit.prevent="submitAskUser(i, msg.inputValue || '')">
-                          <input type="text" x-model="msg.inputValue" placeholder="Type your answer..." autofocus>
-                          <button type="submit">Send</button>
-                        </form>
-                      </template>
+                      </div>
                     </div>
                   </template>
                 </div>
               </template>
+              <button class="scroll-fab" type="button"
+                      x-show="!isAtBottom" x-transition.opacity
+                      @click="scrollMessages(true)"
+                      title="Scroll to latest" aria-label="Scroll to latest">↓</button>
             </div>
 
-            <button class="scroll-fab" type="button"
-                    x-show="!isAtBottom" x-transition.opacity
-                    @click="scrollMessages(true)"
-                    title="Scroll to latest" aria-label="Scroll to latest">&#8595;</button>
-
-            <div id="status-bar" x-show="isActiveSession && statusParts.length > 0">
-              <template x-for="(part, i) in statusParts" :key="i">
-                <span>
-                  <span class="status-label" x-text="part.label + ':'"></span>
-                  <template x-if="part.isLink === 'attachments'">
-                    <span class="att-link" @click="openAttachments()" x-text="part.value"></span>
-                  </template>
-                  <template x-if="part.isLink === 'skills'">
-                    <span class="att-link" @click="showSkills = true" x-text="part.value"></span>
-                  </template>
-                  <template x-if="part.isLink === 'context'">
-                    <span class="att-link" @click="openPromptInspector()" x-text="part.value"></span>
-                  </template>
-                  <template x-if="!part.isLink">
-                    <span x-text="part.value"></span>
-                  </template>
-                  <span style="opacity:0.3;margin:0 4px">|</span>
-                </span>
+            <!-- Composer -->
+            <div class="console-composer" x-show="isSessionInputVisible()" :class="{ dragover: isDragging }">
+              <template x-if="isDragging">
+                <div class="console-drag-overlay" x-cloak>drop files to attach</div>
               </template>
-              <template x-if="compacting">
-                <span><span class="spinner"></span> Compacting...</span>
-              </template>
-              <button class="btn-sm" x-show="!compacting" @click="compactSession()" :disabled="sending">Compact</button>
-              <button class="btn-sm" x-show="!compacting && !sending && !selectedSessionMeta?.is_default" @click="completeSession(selectedSessionMeta)">Mark Complete</button>
-            </div>
-
-            <div x-show="isSessionInputVisible()">
-            <div class="drag-overlay" x-show="isDragging" x-cloak>Drop files to attach</div>
-
-            <div class="paste-banner" x-show="showPasteBanner" x-cloak>
-              <span>Large paste detected (<span x-text="pendingPasteText.length"></span> chars)</span>
-              <div class="paste-banner-actions">
-                <button class="btn-sm" @click="acceptPasteAsFile()">Attach as file</button>
-                <button class="btn-sm btn-cancel" @click="dismissPasteBanner()">Paste normally</button>
-              </div>
-            </div>
-
-            <div class="pending-files" x-show="pendingFiles.length > 0">
-              <template x-for="(pf, fi) in pendingFiles" :key="fi">
-                <div class="pending-file">
-                  <template x-if="pf.previewUrl">
-                    <img class="file-thumb" :src="pf.previewUrl" :alt="pf.name">
-                  </template>
-                  <template x-if="!pf.previewUrl">
-                    <span class="file-icon">📄</span>
-                  </template>
-                  <span class="file-name" x-text="pf.name"></span>
-                  <button class="file-remove" @click="removeFile(fi)">&times;</button>
+              <template x-if="showPasteBanner">
+                <div class="console-paste-banner" x-cloak>
+                  <span>large paste detected (<span x-text="pendingPasteText.length"></span> chars)</span>
+                  <button class="hbtn archive" @click="acceptPasteAsFile()">attach as file</button>
+                  <button @click="dismissPasteBanner()" aria-label="Dismiss">×</button>
                 </div>
               </template>
-            </div>
-
-            <div id="input-area">
-              <div class="command-suggestions" x-show="showCommandSuggestions" x-cloak>
-                <template x-for="(cmd, ci) in filteredCommands" :key="cmd.name">
-                  <div class="command-suggestion" :class="{ 'selected': ci === commandSelectedIndex }"
-                       @click="selectCommand(cmd)" @mouseenter="commandSelectedIndex = ci">
-                    <span class="cmd-name" x-text="'/' + cmd.name"></span>
-                    <span class="cmd-desc" x-text="cmd.description"></span>
+              <template x-if="pendingFiles.length > 0">
+                <div class="console-pending-files">
+                  <template x-for="(pf, fi) in pendingFiles" :key="fi">
+                    <span class="file-pill">
+                      <template x-if="pf.previewUrl">
+                        <img :src="pf.previewUrl" :alt="pf.name" style="width:14px;height:14px;object-fit:cover;border-radius:2px">
+                      </template>
+                      <template x-if="!pf.previewUrl">📄</template>
+                      <span x-text="pf.name"></span>
+                      <button @click="removeFile(fi)">×</button>
+                    </span>
+                  </template>
+                </div>
+              </template>
+              <div class="console-composer-input-wrap">
+                <span class="leader">›</span>
+                <textarea id="message-input" x-ref="messageInput" x-model="messageText" rows="2"
+                          placeholder="message · / commands · @ agent · # file"
+                          @keydown="onInputKeydown($event)" @input="autoResize($event); onInputChange()"
+                          @paste="onPaste($event)"></textarea>
+                <div class="console-composer-actions">
+                  <span class="meta" x-text="composerMetaLabel()"></span>
+                  <input type="file" multiple x-ref="fileInput" @change="onFileInputChange($event)" style="display:none">
+                  <button class="console-icon-btn" @click="inputMenuOpen = !inputMenuOpen" title="Attach / paste / expand">＋</button>
+                  <div class="setting-pop" x-show="inputMenuOpen" x-cloak @click.outside="inputMenuOpen = false"
+                       style="bottom:32px;top:auto;right:60px;left:auto">
+                    <button type="button" class="setting-pop-row" @click="inputMenuOpen = false; openFilePicker()">
+                      <span class="pop-mark">○</span><span class="pop-val">📎 attach files</span>
+                    </button>
+                    <button type="button" class="setting-pop-row" @click="inputMenuOpen = false; openPasteModal()">
+                      <span class="pop-mark">○</span><span class="pop-val">📋 paste as file</span>
+                    </button>
+                    <button type="button" class="setting-pop-row" @click="inputMenuOpen = false; openExpandModal()">
+                      <span class="pop-mark">○</span><span class="pop-val">⤢ expand editor</span>
+                    </button>
                   </div>
-                </template>
-              </div>
-              <div class="input-toolbar" @click.outside="inputMenuOpen = false">
-                <input type="file" multiple x-ref="fileInput" @change="onFileInputChange($event)" style="display:none">
-                <button class="attach-btn" @click="inputMenuOpen = !inputMenuOpen" title="Attach / paste / expand" aria-label="Input options">+</button>
-                <div class="input-menu" x-show="inputMenuOpen" x-cloak>
-                  <button class="input-menu-item" @click="inputMenuOpen = false; openFilePicker()">📎 Attach files</button>
-                  <button class="input-menu-item" @click="inputMenuOpen = false; openPasteModal()">📋 Paste as attachment</button>
-                  <button class="input-menu-item" @click="inputMenuOpen = false; openExpandModal()">⤢ Expand editor</button>
+                  <template x-if="!sending">
+                    <button class="console-send-btn" @click="sendMessage()">send <kbd>⌘↩</kbd></button>
+                  </template>
+                  <template x-if="sending">
+                    <button class="console-stop-btn" @click="cancelChat()">stop</button>
+                  </template>
                 </div>
               </div>
-              <textarea id="message-input" x-ref="messageInput" x-model="messageText" rows="1"
-                        placeholder="Send a message..." autofocus
-                        @keydown="onInputKeydown($event)" @input="autoResize($event); onInputChange()"
-                        @paste="onPaste($event)"></textarea>
-              <span class="input-hint">Shift+Enter for newline</span>
-              <button id="send-btn" x-show="!sending" @click="sendMessage()">Send</button>
-              <button id="stop-btn" x-show="sending" @click="cancelChat()">Stop</button>
-            </div>
+
+              <!-- Slash menu -->
+              <div class="console-slash" x-show="showCommandSuggestions" x-cloak>
+                <div class="console-slash-head">
+                  <span class="lbl" x-text="'slash · ' + filteredCommands.length + ' match'"></span>
+                  <span class="grow" style="flex:1"></span>
+                  <span><kbd>↑</kbd><kbd>↓</kbd> nav · <kbd>↵</kbd> insert · <kbd>esc</kbd> close</span>
+                </div>
+                <div class="console-slash-list">
+                  <template x-for="(cmd, ci) in filteredCommands" :key="cmd.name">
+                    <button type="button" class="console-slash-row"
+                            :class="{ active: ci === commandSelectedIndex }"
+                            @click="selectCommand(cmd)" @mouseenter="commandSelectedIndex = ci">
+                      <span class="cmd" x-text="'/' + cmd.name"></span>
+                      <span class="desc" x-text="cmd.description"></span>
+                      <span class="src" :class="cmd.plugin ? 'plugin' : 'builtin'"
+                            x-text="cmd.plugin || 'built-in'"></span>
+                    </button>
+                  </template>
+                </div>
+              </div>
             </div>
           </div>
         </template>
 
-      </div>
+      </main>
     </div>
 
-    <!-- Paste text modal -->
+    <!-- Hidden / modal surfaces preserved from previous UI -->
     <div class="modal-backdrop paste-modal" :class="{ open: showPasteModal }" @click.self="closePasteModal()" @keydown.escape.window="if(showPasteModal) closePasteModal()">
       <div class="modal-content">
         <h2>Paste text as attachment</h2>
@@ -580,8 +815,6 @@
         </div>
       </div>
     </div>
-
-    <!-- Expand editor modal -->
     <div class="modal-backdrop expand-modal" :class="{ open: showExpandModal }" @click.self="closeExpandModal()" @keydown.escape.window="if(showExpandModal) closeExpandModal()">
       <div class="modal-content">
         <h2>Edit message</h2>
@@ -592,8 +825,6 @@
         </div>
       </div>
     </div>
-
-    <!-- Attachments modal -->
     <div class="modal-backdrop att-modal" :class="{ open: showAttachments }" @click.self="showAttachments = false">
       <div class="modal-content">
         <h2>Attachments</h2>
@@ -607,22 +838,16 @@
               <span class="att-type" x-text="att.content_type + ' · ' + att.mime_type"></span>
             </div>
             <div class="att-body" x-show="open">
-              <template x-if="att.content != null">
-                <pre x-text="att.content"></pre>
-              </template>
+              <template x-if="att.content != null"><pre x-text="att.content"></pre></template>
               <template x-if="att.content == null">
                 <span style="color:var(--muted)" x-text="att.size_bytes != null ? att.size_bytes + ' bytes (binary)' : 'No content preview'"></span>
               </template>
             </div>
           </div>
         </template>
-        <div class="modal-actions">
-          <button class="btn-cancel" @click="showAttachments = false">Close</button>
-        </div>
+        <div class="modal-actions"><button class="btn-cancel" @click="showAttachments = false">Close</button></div>
       </div>
     </div>
-
-    <!-- Skills modal -->
     <div class="modal-backdrop att-modal" :class="{ open: showSkills }" @click.self="showSkills = false">
       <div class="modal-content">
         <h2>Loaded Skills</h2>
@@ -638,717 +863,663 @@
             </div>
           </div>
         </template>
-        <div class="modal-actions">
-          <button class="btn-cancel" @click="showSkills = false">Close</button>
-        </div>
+        <div class="modal-actions"><button class="btn-cancel" @click="showSkills = false">Close</button></div>
       </div>
     </div>
+  </div>
 
-    <!-- Prompt inspector modal -->
-    <div class="modal-backdrop" :class="{ open: inspectingSnapshot }" @click.self="inspectingSnapshot = null" @keydown.escape.window="if(inspectingSnapshot) inspectingSnapshot = null"
-         x-data="{ ftok(n) { return n < 1000 ? n : (n / 1000).toFixed(1) + 'k'; } }">
-      <div class="modal-content prompt-inspector">
-        <h2>Prompt Inspector</h2>
-        <template x-if="inspectingSnapshot && inspectingSnapshot.token_breakdown">
-          <div>
-            <!-- Token bar -->
-            <div class="token-bar">
-              <template x-for="cat in (inspectingSnapshot.token_breakdown.categories || [])" :key="cat.name">
-                <template x-if="cat.tokens > 0">
-                  <div class="token-segment" :class="'token-' + cat.name"
-                       :style="'width:' + (cat.tokens / inspectingSnapshot.token_breakdown.total * 100) + '%'"
-                       :title="cat.name + ': ~' + cat.tokens + ' tokens'">
-                  </div>
+  <!-- ============================================================
+       WORKSPACE
+       ============================================================ -->
+  <div class="view" x-show="$store.app.view === 'workspace'" x-data="workspaceView" x-cloak>
+    <div class="console-app">
+      <aside class="console-sidebar" :class="{ 'mobile-hidden': selectedFile }">
+        <div class="console-sidebar-head">
+          <span>workspace</span>
+        </div>
+        <div class="console-repo-head">
+          <div class="path">
+            <span class="seg" @click="goToRoot()">/</span>
+            <template x-for="crumb in breadcrumbs" :key="crumb.path">
+              <span>
+                <span class="slash">/</span>
+                <span class="seg" @click="goToBreadcrumb(crumb)" x-text="crumb.name"></span>
+              </span>
+            </template>
+          </div>
+        </div>
+        <div class="console-sidebar-scroll">
+          <template x-if="loading"><div class="console-empty"><span class="spinner"></span></div></template>
+          <template x-if="!loading && entries.length === 0"><div class="console-empty">empty directory</div></template>
+          <div class="console-tree">
+            <template x-for="entry in entries" :key="entry.path">
+              <div class="row" :class="{ active: !entry.is_dir && selectedFile?.path === entry.path }"
+                   @click="entry.is_dir ? openDir(entry) : selectFile(entry)">
+                <span class="caret" x-text="entry.is_dir ? '▸' : ' '"></span>
+                <span class="name" :class="{ dir: entry.is_dir }" x-text="entry.name"></span>
+                <template x-if="!entry.is_dir">
+                  <span class="meta" x-text="formatSize(entry.size)"></span>
                 </template>
-              </template>
+                <template x-if="!entry.is_dir">
+                  <span class="mod" x-text="formatDate(entry.modified)"></span>
+                </template>
+              </div>
+            </template>
+          </div>
+        </div>
+      </aside>
+      <main class="console-main" :class="{ 'mobile-hidden': !selectedFile }">
+        <template x-if="!selectedFile">
+          <div class="console-empty fill">›_ select a file</div>
+        </template>
+        <template x-if="selectedFile">
+          <div class="console-pane-col">
+            <div class="console-thread-header">
+              <div class="row top">
+                <span class="path">
+                  <span class="seg">workspace</span>
+                  <span class="slash">/</span>
+                  <span class="seg cur" x-text="selectedFile.path"></span>
+                </span>
+                <span class="grow"></span>
+                <button class="hbtn" @click="attachToChat(selectedFile)" title="Attach to conversation">↗ attach</button>
+                <button class="hbtn archive" @click="save()" :disabled="saving || !isDirty"
+                        x-text="saving ? 'saving…' : (isDirty ? '⌘ save' : 'saved')"></button>
+              </div>
+              <div class="row title-row">
+                <h1 x-text="selectedFile.name"></h1>
+                <template x-if="isDirty">
+                  <span class="unsaved-tag">unsaved</span>
+                </template>
+              </div>
             </div>
+            <template x-if="error">
+              <div class="console-turn error standalone">
+                <div class="console-turn-gutter"><span class="role error">err</span></div>
+                <div class="console-turn-bubble" x-text="error"></div>
+              </div>
+            </template>
+            <textarea x-model="content" class="editor-body"></textarea>
+          </div>
+        </template>
+      </main>
+    </div>
+  </div>
 
-            <!-- Category breakdown -->
-            <div class="pi-categories">
-              <template x-for="cat in (inspectingSnapshot.token_breakdown.categories || [])" :key="cat.name">
-                <template x-if="cat.tokens > 0">
-                  <div class="pi-cat">
-                    <template x-if="cat.items && cat.items.length">
-                      <details>
-                        <summary class="pi-cat-row">
-                          <span class="token-dot" :class="'token-' + cat.name"></span>
-                          <span class="pi-cat-name" x-text="cat.name + ' (' + cat.items.length + ')'"></span>
-                          <span class="pi-cat-tokens" x-text="'~' + ftok(cat.tokens)"></span>
-                        </summary>
-                        <div class="pi-items">
-                          <template x-for="item in cat.items" :key="item.name">
-                            <div class="pi-item">
-                              <span x-text="item.name"></span>
-                              <span class="token-count" x-text="ftok(item.tokens)"></span>
-                            </div>
-                          </template>
-                        </div>
-                      </details>
+  <!-- ============================================================
+       AGENTS
+       ============================================================ -->
+  <div class="view" x-show="$store.app.view === 'agents'" x-data="agentFileView" x-cloak>
+    <div class="console-app">
+      <aside class="console-sidebar" :class="{ 'mobile-hidden': selectedFile }">
+        <div class="console-sidebar-head">
+          <span>agents</span>
+          <select x-model="filter" class="head-btn" style="background:none">
+            <option value="all">all</option>
+            <option value="project">project</option>
+            <option value="builtin">builtin</option>
+            <option value="global">global</option>
+          </select>
+        </div>
+        <div class="console-sidebar-scroll">
+          <template x-if="loading"><div class="console-empty"><span class="spinner"></span></div></template>
+          <template x-if="!loading && filteredFiles.length === 0"><div class="console-empty">no agent files</div></template>
+          <template x-for="file in filteredFiles" :key="file.path">
+            <div class="console-session" :class="{ focused: selectedFile?.path === file.path }"
+                 @click="selectFile(file)">
+              <div class="row1">
+                <span class="dot idle"></span>
+                <span class="title" x-text="file.name"></span>
+                <template x-if="file.readonly">
+                  <span class="time readonly-tag">RO</span>
+                </template>
+              </div>
+              <div class="row2 dim">
+                <span class="agent" x-text="file.source"></span>
+                <template x-if="file.description">
+                  <span class="sep">·</span>
+                </template>
+                <span class="preview" x-text="file.description || ''"></span>
+              </div>
+            </div>
+          </template>
+        </div>
+      </aside>
+      <main class="console-main" :class="{ 'mobile-hidden': !selectedFile }">
+        <template x-if="!selectedFile">
+          <div class="console-empty fill">›_ select an agent</div>
+        </template>
+        <template x-if="selectedFile">
+          <div class="console-pane-col">
+            <div class="console-thread-header">
+              <div class="row top">
+                <span class="path">
+                  <span class="seg">agents</span>
+                  <span class="slash">/</span>
+                  <span class="seg cur" x-text="selectedFile.path"></span>
+                </span>
+                <span class="grow"></span>
+                <template x-if="!selectedFile.readonly">
+                  <button class="hbtn archive" @click="save()" :disabled="saving || !isDirty"
+                          x-text="saving ? 'saving…' : (isDirty ? '⌘ save' : 'saved')"></button>
+                </template>
+              </div>
+              <div class="row title-row">
+                <h1 x-text="selectedFile.name"></h1>
+                <template x-if="isDirty"><span class="unsaved-tag">unsaved</span></template>
+                <template x-if="selectedFile.readonly"><span class="meta-tag readonly-tag">readonly</span></template>
+              </div>
+            </div>
+            <template x-if="error">
+              <div class="console-turn error standalone">
+                <div class="console-turn-gutter"><span class="role error">err</span></div>
+                <div class="console-turn-bubble" x-text="error"></div>
+              </div>
+            </template>
+            <textarea x-model="content" :readonly="selectedFile.readonly" class="editor-body"></textarea>
+          </div>
+        </template>
+      </main>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       SKILLS
+       ============================================================ -->
+  <div class="view" x-show="$store.app.view === 'skills'" x-data="skillFileView" x-cloak>
+    <div class="console-app">
+      <aside class="console-sidebar" :class="{ 'mobile-hidden': selectedFile }">
+        <div class="console-sidebar-head">
+          <span>skills</span>
+          <select x-model="filter" class="head-btn" style="background:none">
+            <option value="all">all</option>
+            <option value="project">project</option>
+            <option value="builtin">builtin</option>
+            <option value="global">global</option>
+          </select>
+        </div>
+        <div x-show="$store.app.skillIssues.length > 0" style="padding:0 12px 8px">
+          <template x-for="issue in $store.app.skillIssues" :key="issue.path + ':' + issue.message">
+            <div class="console-issue-card" style="margin:4px 0;font-size:11px">
+              <span class="badge" :style="issue.severity === 'error' ? 'background:var(--red)' : 'background:var(--yellow)'" x-text="issue.severity"></span>
+              <div style="flex:1;min-width:0">
+                <strong x-text="issue.name"></strong>
+                <div style="color:var(--overlay1);font-size:10.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" x-text="issue.message"></div>
+                <div style="color:var(--overlay0);font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" x-text="issue.path"></div>
+              </div>
+            </div>
+          </template>
+        </div>
+        <div class="console-sidebar-scroll">
+          <template x-if="loading"><div class="console-empty"><span class="spinner"></span></div></template>
+          <template x-if="!loading && filteredFiles.length === 0"><div class="console-empty">no skill files</div></template>
+          <template x-for="file in filteredFiles" :key="file.path">
+            <div class="console-session" :class="{ focused: selectedFile?.path === file.path }"
+                 @click="selectFile(file)">
+              <div class="row1">
+                <span class="dot idle"></span>
+                <span class="title" x-text="file.name"></span>
+                <template x-if="file.readonly">
+                  <span class="time readonly-tag">RO</span>
+                </template>
+              </div>
+              <div class="row2 dim">
+                <span class="agent" x-text="file.source"></span>
+                <template x-if="file.description">
+                  <span class="sep">·</span>
+                </template>
+                <span class="preview" x-text="file.description || ''"></span>
+              </div>
+            </div>
+          </template>
+        </div>
+      </aside>
+      <main class="console-main" :class="{ 'mobile-hidden': !selectedFile }">
+        <template x-if="!selectedFile">
+          <div class="console-empty fill">›_ select a skill</div>
+        </template>
+        <template x-if="selectedFile">
+          <div class="console-pane-col">
+            <div class="console-thread-header">
+              <div class="row top">
+                <span class="path">
+                  <span class="seg">skills</span>
+                  <span class="slash">/</span>
+                  <span class="seg cur" x-text="selectedFile.path"></span>
+                </span>
+                <span class="grow"></span>
+                <template x-if="!selectedFile.readonly">
+                  <button class="hbtn archive" @click="save()" :disabled="saving || !isDirty"
+                          x-text="saving ? 'saving…' : (isDirty ? '⌘ save' : 'saved')"></button>
+                </template>
+              </div>
+              <div class="row title-row">
+                <h1 x-text="selectedFile.name"></h1>
+                <template x-if="isDirty"><span class="unsaved-tag">unsaved</span></template>
+                <template x-if="selectedFile.readonly"><span class="meta-tag readonly-tag">readonly</span></template>
+              </div>
+            </div>
+            <template x-if="error">
+              <div class="console-turn error standalone">
+                <div class="console-turn-gutter"><span class="role error">err</span></div>
+                <div class="console-turn-bubble" x-text="error"></div>
+              </div>
+            </template>
+            <textarea x-model="content" :readonly="selectedFile.readonly" class="editor-body"></textarea>
+          </div>
+        </template>
+      </main>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       SCHEDULES
+       ============================================================ -->
+  <div class="view" x-show="$store.app.view === 'schedules'" x-data="scheduleView" x-cloak>
+    <div class="console-app no-sidebar">
+      <main class="console-main">
+        <div class="console-thread-header">
+          <div class="row top">
+            <span class="path">
+              <span class="seg cur">schedules</span>
+            </span>
+            <span class="grow"></span>
+            <button class="hbtn archive" @click="showForm ? cancelForm() : (showForm = true)"
+                    x-text="showForm ? '✗ cancel' : '＋ new schedule'"></button>
+          </div>
+          <div class="row title-row">
+            <h1>schedules</h1>
+            <span class="grow"></span>
+            <span class="kv"><span class="k">total</span> <span class="v" x-text="schedules.length"></span></span>
+          </div>
+        </div>
+
+        <template x-if="error">
+          <div class="console-turn error standalone">
+            <div class="console-turn-gutter"><span class="role error">err</span></div>
+            <div class="console-turn-bubble" x-text="error"></div>
+          </div>
+        </template>
+
+        <template x-if="showForm">
+          <div class="console-card">
+            <div class="console-card-head" x-text="formTitle"></div>
+            <div class="console-card-body">
+              <div class="form-row">
+                <div class="form-group"><label>id</label>
+                  <input x-model="form.id" placeholder="my-schedule" :disabled="!!editingId">
+                </div>
+                <div class="form-group"><label>execution type</label>
+                  <select x-model="form.execution_type">
+                    <option value="agent">agent</option>
+                    <option value="script">script</option>
+                  </select>
+                </div>
+                <div class="form-group" x-show="form.execution_type !== 'script'"><label>agent</label>
+                  <select x-model="form.agent">
+                    <option value="">select agent…</option>
+                    <template x-for="a in $store.app.agents" :key="a.name">
+                      <option :value="a.name" x-text="a.name"></option>
                     </template>
-                    <template x-if="!cat.items || !cat.items.length">
-                      <div class="pi-cat-row">
-                        <span class="token-dot" :class="'token-' + cat.name"></span>
-                        <span class="pi-cat-name" x-text="cat.name"></span>
-                        <span class="pi-cat-tokens" x-text="'~' + ftok(cat.tokens)"></span>
+                  </select>
+                </div>
+              </div>
+              <div class="form-group" x-show="form.execution_type === 'script'"><label>command</label>
+                <textarea x-model="form.command" rows="2" placeholder="shell command…" style="resize:vertical;font-family:var(--font-mono)"></textarea>
+              </div>
+              <div class="form-group" x-show="form.execution_type !== 'script'"><label>prompt</label>
+                <textarea x-model="form.prompt" rows="2" placeholder="task for the agent…"></textarea>
+              </div>
+              <div class="form-row" x-show="form.execution_type === 'script'">
+                <div class="form-group"><label>script timeout (s)</label>
+                  <input x-model="form.script_timeout" type="number" min="1" placeholder="60">
+                </div>
+              </div>
+              <div class="form-row" x-show="form.execution_type !== 'script'">
+                <div class="form-group"><label>model</label>
+                  <input x-model="form.model" placeholder="openai:gpt-4o-mini">
+                </div>
+                <div class="form-group"><label>agent file</label>
+                  <input x-model="form.agent_file" placeholder="my-agent.md">
+                </div>
+                <div class="form-group"><label>max turns</label>
+                  <input x-model="form.max_turns" type="number" min="1" placeholder="default">
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-group"><label>type</label>
+                  <select x-model="form.schedule_type">
+                    <option value="cron">cron</option>
+                    <option value="once">once</option>
+                  </select>
+                </div>
+                <div class="form-group" x-show="form.schedule_type === 'cron'"><label>cron expression</label>
+                  <input x-model="form.cron_expr" placeholder="0 9 * * *">
+                </div>
+                <div class="form-group" x-show="form.schedule_type === 'once'"><label>run at (ISO)</label>
+                  <input x-model="form.run_at" type="datetime-local">
+                </div>
+                <div class="form-group"><label>timezone</label>
+                  <input x-model="form.timezone" placeholder="UTC">
+                </div>
+              </div>
+              <div class="modal-actions">
+                <button class="btn-cancel" @click="cancelForm()">cancel</button>
+                <button class="btn-primary" @click="save()" x-text="editingId ? 'update' : 'create'"></button>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <template x-if="loading">
+          <div class="console-empty"><span class="spinner"></span> loading…</div>
+        </template>
+        <template x-if="!loading && schedules.length === 0">
+          <div class="console-empty">no schedules configured</div>
+        </template>
+
+        <template x-if="!loading && schedules.length > 0">
+          <div class="console-table-wrap">
+            <table class="console-table">
+              <thead><tr><th>id</th><th>agent / cmd</th><th>type</th><th>status</th><th>next run</th><th>last run</th><th></th></tr></thead>
+              <tbody>
+                <template x-for="row in tableRows" :key="row.key">
+                  <tr :class="{ active: row.type === 'run' }">
+                    <template x-if="row.type === 'schedule'">
+                      <td>
+                        <span style="cursor:pointer" @click="toggleRuns(row.data)"
+                              x-text="(expandedId === row.data.id ? '▾ ' : '▸ ') + row.data.id"></span>
+                      </td>
+                    </template>
+                    <template x-if="row.type === 'schedule'">
+                      <td>
+                        <span class="agent" x-show="row.data.execution_type !== 'script'" x-text="row.data.agent"></span>
+                        <code x-show="row.data.execution_type === 'script'" x-text="(row.data.command || '').substring(0, 40)"></code>
+                      </td>
+                    </template>
+                    <template x-if="row.type === 'schedule'">
+                      <td x-text="row.data.execution_type === 'script' ? 'script / ' + row.data.schedule_type : row.data.schedule_type"></td>
+                    </template>
+                    <template x-if="row.type === 'schedule'">
+                      <td><span class="last-status" :class="row.data.enabled ? 'ok' : 'err'" x-text="statusLabel(row.data)"></span></td>
+                    </template>
+                    <template x-if="row.type === 'schedule'">
+                      <td x-text="formatDate(row.data.next_run)"></td>
+                    </template>
+                    <template x-if="row.type === 'schedule'">
+                      <td x-text="formatDate(row.data.last_run)"></td>
+                    </template>
+                    <template x-if="row.type === 'schedule'">
+                      <td class="actions">
+                        <button @click="edit(row.data)">edit</button>
+                        <button @click="toggle(row.data)" x-text="row.data.enabled ? 'disable' : 'enable'"></button>
+                        <button @click="runNow(row.data)">run</button>
+                        <button @click="remove(row.data)">del</button>
+                      </td>
+                    </template>
+                    <template x-if="row.type === 'run'">
+                      <td colspan="2" style="padding-left:28px;color:var(--overlay1)" x-text="row.data.id"></td>
+                    </template>
+                    <template x-if="row.type === 'run'"><td></td></template>
+                    <template x-if="row.type === 'run'">
+                      <td><span class="last-status" :class="row.data.status" x-text="row.data.status"></span></td>
+                    </template>
+                    <template x-if="row.type === 'run'">
+                      <td x-text="formatDate(row.data.created_at)"></td>
+                    </template>
+                    <template x-if="row.type === 'run'">
+                      <td x-text="(row.data.result || row.data.error || '—').substring(0, 80)" style="color:var(--overlay1)"></td>
+                    </template>
+                    <template x-if="row.type === 'run'">
+                      <td class="actions"><button @click="viewRunHistory(row.data)">view</button></td>
+                    </template>
+                    <template x-if="row.type === 'empty'">
+                      <td colspan="7" style="padding-left:28px;color:var(--overlay1)">no recorded runs</td>
+                    </template>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+        </template>
+      </main>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       WEBHOOKS
+       ============================================================ -->
+  <div class="view" x-show="$store.app.view === 'webhooks'" x-data="webhookView" x-cloak>
+    <div class="console-app no-sidebar">
+      <main class="console-main">
+        <div class="console-thread-header">
+          <div class="row top">
+            <span class="path"><span class="seg cur">webhooks</span></span>
+            <span class="grow"></span>
+            <button class="hbtn archive" @click="showForm = !showForm"
+                    x-text="showForm ? '✗ cancel' : '＋ new webhook'"></button>
+          </div>
+          <div class="row title-row">
+            <h1>webhooks</h1>
+            <span class="grow"></span>
+            <span class="kv"><span class="k">total</span> <span class="v" x-text="webhooks.length"></span></span>
+          </div>
+        </div>
+
+        <template x-if="error">
+          <div class="console-turn error standalone">
+            <div class="console-turn-gutter"><span class="role error">err</span></div>
+            <div class="console-turn-bubble" x-text="error"></div>
+          </div>
+        </template>
+        <template x-if="showForm">
+          <div class="console-card">
+            <div class="console-card-head">new webhook</div>
+            <div class="console-card-body">
+              <div class="form-row">
+                <div class="form-group"><label>agent</label>
+                  <select x-model="form.agent">
+                    <option value="">select agent…</option>
+                    <template x-for="a in $store.app.agents" :key="a.name">
+                      <option :value="a.name" x-text="a.name"></option>
+                    </template>
+                  </select>
+                </div>
+                <div class="form-group"><label>source</label>
+                  <input x-model="form.source" placeholder="github, stripe, etc.">
+                </div>
+              </div>
+              <div class="modal-actions">
+                <button class="btn-cancel" @click="showForm = false">cancel</button>
+                <button class="btn-primary" @click="create()">create</button>
+              </div>
+            </div>
+          </div>
+        </template>
+        <template x-if="loading">
+          <div class="console-empty"><span class="spinner"></span> loading…</div>
+        </template>
+        <template x-if="!loading && webhooks.length === 0 && !showForm">
+          <div class="console-empty">no webhooks configured</div>
+        </template>
+        <template x-if="!loading && webhooks.length > 0">
+          <div class="console-table-wrap">
+            <table class="console-table">
+              <thead><tr><th>source</th><th>agent</th><th>url</th><th>token</th><th></th></tr></thead>
+              <tbody>
+                <template x-for="w in webhooks" :key="w.token">
+                  <tr>
+                    <td><span class="agent" x-text="w.source"></span></td>
+                    <td x-text="w.agent"></td>
+                    <td><code x-text="webhookUrl(w.token)"></code></td>
+                    <td>
+                      <span x-text="isRevealed(w.token) ? w.token : maskedToken(w.token)"></span>
+                      <button class="actions" @click="toggleReveal(w.token)" x-text="isRevealed(w.token) ? 'hide' : 'show'" style="background:none;border:none;color:var(--lavender);font-family:var(--font-mono);font-size:10.5px;cursor:pointer"></button>
+                    </td>
+                    <td class="actions"><button @click="remove(w)">del</button></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+        </template>
+      </main>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       USAGE
+       ============================================================ -->
+  <div class="view" x-show="$store.app.view === 'usage'" x-data="usageView" x-cloak>
+    <div class="console-app no-sidebar">
+      <main class="console-main">
+        <div class="console-thread-header">
+          <div class="row top">
+            <span class="path"><span class="seg cur">usage</span></span>
+            <span class="grow"></span>
+            <select x-model="sinceDays" @change="load()" class="v-select" style="color:var(--lavender)">
+              <option value="7">7 days</option>
+              <option value="30">30 days</option>
+              <option value="90">90 days</option>
+              <option value="365">1 year</option>
+            </select>
+            <select x-model="period" @change="load()" class="v-select" style="color:var(--blue)">
+              <option value="day">daily</option>
+              <option value="week">weekly</option>
+              <option value="month">monthly</option>
+            </select>
+          </div>
+          <div class="row title-row">
+            <h1>usage &amp; cost</h1>
+            <span class="grow"></span>
+            <template x-if="totals">
+              <span class="kv"><span class="k">runs</span> <span class="v" x-text="totals.runs"></span></span>
+            </template>
+            <template x-if="totals">
+              <span class="kv"><span class="k">tokens</span> <span class="v" x-text="fmtTokens(totals.total_tokens)"></span></span>
+            </template>
+            <template x-if="totals">
+              <span class="kv"><span class="k">cost</span> <span class="v effort" x-text="fmtCost(totals.total_cost)"></span></span>
+            </template>
+          </div>
+        </div>
+
+        <div class="console-table-wrap">
+          <template x-if="loading">
+            <div class="console-empty"><span class="spinner"></span> loading usage…</div>
+          </template>
+          <template x-if="error">
+            <div class="console-turn error standalone">
+              <div class="console-turn-gutter"><span class="role error">err</span></div>
+              <div class="console-turn-bubble" x-text="error"></div>
+            </div>
+          </template>
+          <template x-if="!loading && !error && totals">
+            <div>
+              <template x-if="dailySummary.length > 0">
+                <div class="console-card">
+                  <div class="console-card-head">cost trend</div>
+                  <div class="console-card-body" style="display:flex;align-items:flex-end;gap:2px;height:120px;padding:12px 14px">
+                    <template x-for="row in dailySummary" :key="row.period">
+                      <div style="flex:1;display:flex;flex-direction:column;align-items:stretch;justify-content:flex-end;height:100%;min-width:0"
+                           :title="barLabel(row) + ': ' + fmtCost(row.total_cost) + ' (' + row.runs + ' runs)'">
+                        <div :style="'height:' + barPct(row.total_cost) + ';background:var(--lavender);min-height:2px;border-radius:2px 2px 0 0'"></div>
                       </div>
                     </template>
                   </div>
-                </template>
+                </div>
               </template>
-              <div class="pi-cat-row" style="font-weight:600;border-top:1px solid var(--border);padding-top:8px;margin-top:4px">
-                <span>Total</span>
-                <span x-text="'~' + ftok(inspectingSnapshot.token_breakdown.total) + ' tokens'"></span>
-              </div>
-            </div>
-
-            <!-- Raw messages (live session only) -->
-            <template x-if="inspectingSnapshot.messages && inspectingSnapshot.messages.length">
-              <div class="prompt-messages">
-                <h3 style="font-size:13px;color:var(--muted);margin:12px 0 4px">Raw Messages</h3>
-                <template x-for="(m, mi) in inspectingSnapshot.messages" :key="mi">
-                  <details class="prompt-msg" x-data="{ get text() { const c = m.content; if (typeof c === 'string') return c; if (Array.isArray(c)) return c.map(b => b.text || JSON.stringify(b)).join('\\n'); return JSON.stringify(c, null, 2); } }">
-                    <summary>
-                      <span class="badge" :class="{'badge-accent': m.role === 'assistant', 'badge-muted': m.role === 'system'}" x-text="m.role"></span>
-                      <span class="token-count" x-text="'~' + ftok(Math.round(text.length / 4)) + ' tokens'"></span>
-                      <span style="color:var(--muted);font-size:11px;margin-left:4px" x-text="text.substring(0, 80) + (text.length > 80 ? '...' : '')"></span>
-                    </summary>
-                    <pre class="prompt-msg-content"><code x-text="text"></code></pre>
-                  </details>
-                </template>
-              </div>
-            </template>
-            <template x-if="!inspectingSnapshot.messages || !inspectingSnapshot.messages.length">
-              <p style="color:var(--muted);font-size:13px;margin-top:12px">Raw messages only available during a live session.</p>
-            </template>
-            <div class="modal-actions">
-              <button class="btn-cancel" @click="inspectingSnapshot = null">Close</button>
-            </div>
-          </div>
-        </template>
-      </div>
-
-    </div>
-  </div>
-
-  <!-- Workspace Browser -->
-  <div class="view" x-show="$store.app.view === 'workspace'" x-data="workspaceView" x-cloak>
-    <div class="view-scroll two-pane" style="height:100%; overflow:hidden">
-      <!-- File list -->
-      <div class="pane-sidebar" :class="{ 'sidebar-open': sidebarOpen }">
-        <div class="section-header">
-          <h2>Workspace</h2>
-        </div>
-        <div style="font-size:12px;padding:4px 12px 8px;display:flex;flex-wrap:wrap;align-items:center;gap:2px">
-          <span style="cursor:pointer;color:var(--accent)" @click="goToRoot()">workspace</span>
-          <template x-for="crumb in breadcrumbs" :key="crumb.path">
-            <span>
-              <span style="color:var(--muted);margin:0 2px">/</span>
-              <span style="cursor:pointer;color:var(--accent)" @click="goToBreadcrumb(crumb)" x-text="crumb.name"></span>
-            </span>
-          </template>
-        </div>
-        <template x-if="loading">
-          <div class="empty-state"><span class="spinner"></span></div>
-        </template>
-        <template x-if="!loading && entries.length === 0">
-          <div class="empty-state">Empty directory</div>
-        </template>
-        <div class="turn-list">
-          <template x-for="entry in entries" :key="entry.path">
-            <div class="turn-item" :class="{ active: !entry.is_dir && selectedFile?.path === entry.path }"
-                 @click="entry.is_dir ? openDir(entry) : selectFile(entry)">
-              <div class="item-row">
-                <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
-                  <span x-text="entry.is_dir ? '\u{1F4C1} ' : ''" style="font-size:13px"></span>
-                  <span x-text="entry.name"></span>
-                </span>
-              </div>
-              <template x-if="!entry.is_dir">
-                <div class="turn-meta" x-text="formatSize(entry.size) + ' \u00b7 ' + formatDate(entry.modified)"></div>
-              </template>
-            </div>
-          </template>
-        </div>
-      </div>
-
-      <!-- Editor / Viewer -->
-      <div class="pane-detail" style="display:flex;flex-direction:column">
-        <button class="sidebar-toggle" @click="sidebarOpen = !sidebarOpen">
-          <span class="sidebar-toggle-arrow" :class="{ open: sidebarOpen }">▾</span>
-          <span x-text="sidebarOpen ? 'Hide Files' : 'Files'"></span>
-        </button>
-        <template x-if="!selectedFile">
-          <div class="empty-state">Select a file to view</div>
-        </template>
-        <template x-if="selectedFile">
-          <div style="display:flex;flex-direction:column;flex:1;min-height:0">
-            <div class="section-header">
-              <h2>
-                <span x-text="selectedFile.name"></span>
-                <template x-if="isDirty">
-                  <span style="color:var(--accent);font-size:12px;margin-left:8px">unsaved</span>
-                </template>
-              </h2>
-              <div style="display:flex;gap:6px">
-                <button class="btn-sm" @click="attachToChat(selectedFile)" title="Attach to conversation">Attach</button>
-                <button class="btn-sm" @click="save()" :disabled="saving || !isDirty"
-                        x-text="saving ? 'Saving...' : 'Save'"></button>
-              </div>
-            </div>
-            <div style="font-size:11px;color:var(--muted);margin-bottom:8px" x-text="selectedFile.path"></div>
-            <template x-if="error">
-              <div class="msg error" x-text="error" style="margin-bottom:8px"></div>
-            </template>
-            <textarea x-model="content"
-                      style="flex:1;min-height:300px;font-family:monospace;font-size:13px;resize:vertical;background:var(--surface0);color:var(--text);border:1px solid var(--surface2);border-radius:6px;padding:12px;tab-size:2"></textarea>
-          </div>
-        </template>
-      </div>
-    </div>
-  </div>
-
-  <!-- Agent Files -->
-  <div class="view" x-show="$store.app.view === 'agents'" x-data="agentFileView" x-cloak>
-    <div class="view-scroll two-pane" style="height:100%; overflow:hidden">
-      <!-- File list -->
-      <div class="pane-sidebar" :class="{ 'sidebar-open': sidebarOpen, 'mobile-hidden': selectedFile }">
-        <div class="section-header">
-          <h2>Agent Files</h2>
-          <select x-model="filter" style="font-size:12px;padding:2px 4px">
-            <option value="all">All</option>
-            <option value="project">Project</option>
-            <option value="builtin">Builtin</option>
-            <option value="global">Global</option>
-          </select>
-        </div>
-        <template x-if="loading">
-          <div class="empty-state"><span class="spinner"></span></div>
-        </template>
-        <template x-if="!loading && filteredFiles.length === 0">
-          <div class="empty-state">No agent files found</div>
-        </template>
-        <div class="turn-list">
-          <template x-for="file in filteredFiles" :key="file.path">
-            <div class="turn-item" :class="{ active: selectedFile?.path === file.path }"
-                 @click="selectFile(file)">
-              <div>
-                <span x-text="file.name"></span>
-                <template x-if="file.readonly">
-                  <span class="badge" style="font-size:10px;margin-left:4px">readonly</span>
-                </template>
-              </div>
-              <div class="turn-meta" x-text="file.source + (file.description ? ' · ' + file.description : '')"></div>
-            </div>
-          </template>
-        </div>
-      </div>
-
-      <!-- Editor -->
-      <div class="pane-detail" :class="{ 'mobile-hidden': !selectedFile }" style="display:flex;flex-direction:column">
-        <button class="sidebar-toggle" @click="sidebarOpen = !sidebarOpen">
-          <span class="sidebar-toggle-arrow" :class="{ open: sidebarOpen }">▾</span>
-          <span x-text="sidebarOpen ? 'Hide Agents' : 'Agents'"></span>
-        </button>
-        <button class="mobile-back-btn" @click="backToFiles()">&#8592; Agents</button>
-        <template x-if="!selectedFile">
-          <div class="empty-state">Select an agent file to view</div>
-        </template>
-        <template x-if="selectedFile">
-          <div style="display:flex;flex-direction:column;flex:1;min-height:0">
-            <div class="section-header">
-              <h2>
-                <span x-text="selectedFile.name"></span>
-                <template x-if="isDirty">
-                  <span style="color:var(--accent);font-size:12px;margin-left:8px">unsaved</span>
-                </template>
-              </h2>
-              <template x-if="!selectedFile.readonly">
-                <button class="btn-sm" @click="save()" :disabled="saving || !isDirty"
-                        x-text="saving ? 'Saving...' : 'Save'"></button>
-              </template>
-            </div>
-            <div style="font-size:11px;color:var(--muted);margin-bottom:8px" x-text="selectedFile.path"></div>
-            <template x-if="error">
-              <div class="msg error" x-text="error" style="margin-bottom:8px"></div>
-            </template>
-            <textarea x-model="content"
-                      :readonly="selectedFile.readonly"
-                      style="flex:1;min-height:300px;font-family:monospace;font-size:13px;resize:vertical;background:var(--surface0);color:var(--text);border:1px solid var(--surface2);border-radius:6px;padding:12px;tab-size:2"></textarea>
-          </div>
-        </template>
-      </div>
-    </div>
-  </div>
-
-  <!-- Skill Files -->
-  <div class="view" x-show="$store.app.view === 'skills'" x-data="skillFileView" x-cloak>
-    <div x-show="$store.app.skillIssues.length > 0" class="skill-issues-banner">
-      <div class="skill-issues-header">
-        <strong x-text="$store.app.skillIssues.length + ' skill issue' + ($store.app.skillIssues.length === 1 ? '' : 's')"></strong>
-        <span style="color:var(--muted);font-size:12px">Errors block the skill; warnings load with the bad field stripped.</span>
-      </div>
-      <ul class="skill-issues-list">
-        <template x-for="issue in $store.app.skillIssues" :key="issue.path + ':' + issue.message">
-          <li>
-            <span class="skill-issue-severity" :class="'severity-' + issue.severity" x-text="issue.severity"></span>
-            <strong x-text="issue.name"></strong>
-            <span style="color:var(--muted);font-size:12px;margin-left:6px" x-text="'(' + issue.source + ')'"></span>
-            <div class="skill-issue-message" x-text="issue.message"></div>
-            <div class="skill-issue-path" x-text="issue.path"></div>
-          </li>
-        </template>
-      </ul>
-    </div>
-    <div class="view-scroll two-pane" style="height:100%; overflow:hidden">
-      <!-- File list -->
-      <div class="pane-sidebar" :class="{ 'sidebar-open': sidebarOpen, 'mobile-hidden': selectedFile }">
-        <div class="section-header">
-          <h2>Skill Files</h2>
-          <select x-model="filter" style="font-size:12px;padding:2px 4px">
-            <option value="all">All</option>
-            <option value="project">Project</option>
-            <option value="builtin">Builtin</option>
-            <option value="global">Global</option>
-          </select>
-        </div>
-        <template x-if="loading">
-          <div class="empty-state"><span class="spinner"></span></div>
-        </template>
-        <template x-if="!loading && filteredFiles.length === 0">
-          <div class="empty-state">No skill files found</div>
-        </template>
-        <div class="turn-list">
-          <template x-for="file in filteredFiles" :key="file.path">
-            <div class="turn-item" :class="{ active: selectedFile?.path === file.path }"
-                 @click="selectFile(file)">
-              <div>
-                <span x-text="file.name"></span>
-                <template x-if="file.readonly">
-                  <span class="badge" style="font-size:10px;margin-left:4px">readonly</span>
-                </template>
-              </div>
-              <div class="turn-meta" x-text="file.source + (file.description ? ' · ' + file.description : '')"></div>
-            </div>
-          </template>
-        </div>
-      </div>
-
-      <!-- Editor -->
-      <div class="pane-detail" :class="{ 'mobile-hidden': !selectedFile }" style="display:flex;flex-direction:column">
-        <button class="sidebar-toggle" @click="sidebarOpen = !sidebarOpen">
-          <span class="sidebar-toggle-arrow" :class="{ open: sidebarOpen }">▾</span>
-          <span x-text="sidebarOpen ? 'Hide Skills' : 'Skills'"></span>
-        </button>
-        <button class="mobile-back-btn" @click="backToFiles()">&#8592; Skills</button>
-        <template x-if="!selectedFile">
-          <div class="empty-state">Select a skill file to view</div>
-        </template>
-        <template x-if="selectedFile">
-          <div style="display:flex;flex-direction:column;flex:1;min-height:0">
-            <div class="section-header">
-              <h2>
-                <span x-text="selectedFile.name"></span>
-                <template x-if="isDirty">
-                  <span style="color:var(--accent);font-size:12px;margin-left:8px">unsaved</span>
-                </template>
-              </h2>
-              <template x-if="!selectedFile.readonly">
-                <button class="btn-sm" @click="save()" :disabled="saving || !isDirty"
-                        x-text="saving ? 'Saving...' : 'Save'"></button>
-              </template>
-            </div>
-            <div style="font-size:11px;color:var(--muted);margin-bottom:8px" x-text="selectedFile.path"></div>
-            <template x-if="error">
-              <div class="msg error" x-text="error" style="margin-bottom:8px"></div>
-            </template>
-            <textarea x-model="content"
-                      :readonly="selectedFile.readonly"
-                      style="flex:1;min-height:300px;font-family:monospace;font-size:13px;resize:vertical;background:var(--surface0);color:var(--text);border:1px solid var(--surface2);border-radius:6px;padding:12px;tab-size:2"></textarea>
-          </div>
-        </template>
-      </div>
-    </div>
-  </div>
-
-  <!-- Schedules -->
-  <div class="view" x-show="$store.app.view === 'schedules'" x-data="scheduleView" x-cloak>
-    <div class="view-scroll">
-      <div class="section-header">
-        <h2>Schedules</h2>
-        <button class="btn-sm" @click="showForm ? cancelForm() : (showForm = true)" x-text="showForm ? 'Cancel' : '+ New'"></button>
-      </div>
-
-      <template x-if="error">
-        <div class="msg error" x-text="error" style="margin-bottom:16px"></div>
-      </template>
-
-      <!-- Create/Edit form -->
-      <template x-if="showForm">
-        <div class="card" style="margin-bottom:16px">
-          <h3 x-text="formTitle" style="margin-bottom:12px"></h3>
-          <div class="form-row">
-            <div class="form-group">
-              <label>ID</label>
-              <input x-model="form.id" placeholder="my-schedule" :disabled="!!editingId">
-            </div>
-            <div class="form-group">
-              <label>Execution Type</label>
-              <select x-model="form.execution_type">
-                <option value="agent">Agent</option>
-                <option value="script">Script</option>
-              </select>
-            </div>
-            <div class="form-group" x-show="form.execution_type !== 'script'">
-              <label>Agent</label>
-              <select x-model="form.agent">
-                <option value="">Select agent...</option>
-                <template x-for="a in $store.app.agents" :key="a.name">
-                  <option :value="a.name" x-text="a.name"></option>
-                </template>
-              </select>
-            </div>
-          </div>
-          <div class="form-group" x-show="form.execution_type === 'script'">
-            <label>Command</label>
-            <textarea x-model="form.command" rows="2" placeholder="Shell command to execute..." style="resize:vertical;font-family:monospace"></textarea>
-          </div>
-          <div class="form-group" x-show="form.execution_type !== 'script'">
-            <label>Prompt</label>
-            <textarea x-model="form.prompt" rows="2" placeholder="Task for the agent..." style="resize:vertical"></textarea>
-          </div>
-          <div class="form-row" x-show="form.execution_type === 'script'">
-            <div class="form-group">
-              <label>Script Timeout (seconds)</label>
-              <input x-model="form.script_timeout" type="number" min="1" placeholder="60">
-            </div>
-          </div>
-          <div class="form-row" x-show="form.execution_type !== 'script'">
-            <div class="form-group">
-              <label>Model</label>
-              <input x-model="form.model" placeholder="e.g. openai:gpt-4o-mini">
-            </div>
-            <div class="form-group">
-              <label>Agent File</label>
-              <input x-model="form.agent_file" placeholder="e.g. my-agent.md">
-            </div>
-            <div class="form-group">
-              <label>Max Turns</label>
-              <input x-model="form.max_turns" type="number" min="1" placeholder="default">
-            </div>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>Type</label>
-              <select x-model="form.schedule_type">
-                <option value="cron">Cron</option>
-                <option value="once">Once</option>
-              </select>
-            </div>
-            <div class="form-group" x-show="form.schedule_type === 'cron'">
-              <label>Cron Expression</label>
-              <input x-model="form.cron_expr" placeholder="0 9 * * *">
-            </div>
-            <div class="form-group" x-show="form.schedule_type === 'once'">
-              <label>Run At (ISO)</label>
-              <input x-model="form.run_at" type="datetime-local">
-            </div>
-            <div class="form-group">
-              <label>Timezone</label>
-              <input x-model="form.timezone" placeholder="UTC">
-            </div>
-          </div>
-          <div class="modal-actions">
-            <button class="btn-cancel" @click="cancelForm()">Cancel</button>
-            <button class="btn-primary" @click="save()" x-text="editingId ? 'Update' : 'Create'"></button>
-          </div>
-        </div>
-      </template>
-
-      <template x-if="loading">
-        <div class="empty-state"><span class="spinner"></span> Loading...</div>
-      </template>
-
-      <template x-if="!loading && schedules.length === 0">
-        <div class="empty-state">No schedules configured</div>
-      </template>
-
-      <template x-if="!loading && schedules.length > 0">
-        <table class="data-table">
-          <thead><tr><th>ID</th><th>Agent</th><th>Type</th><th>Status</th><th>Next Run</th><th>Last Run</th><th>Actions</th></tr></thead>
-          <tbody>
-            <template x-for="row in tableRows" :key="row.key">
-              <tr :class="row.type === 'run' ? 'schedule-run-row' : ''">
-                <template x-if="row.type === 'schedule'">
-                  <td>
-                    <span style="cursor:pointer" @click="toggleRuns(row.data)" x-text="(expandedId === row.data.id ? '▾ ' : '▸ ') + row.data.id"></span>
-                  </td>
-                </template>
-                <template x-if="row.type === 'schedule'">
-                  <td>
-                    <span x-show="row.data.execution_type !== 'script'" x-text="row.data.agent"></span>
-                    <code x-show="row.data.execution_type === 'script'" x-text="(row.data.command || '').substring(0, 40)" style="font-size:12px"></code>
-                  </td>
-                </template>
-                <template x-if="row.type === 'schedule'">
-                  <td x-text="row.data.execution_type === 'script' ? 'script / ' + row.data.schedule_type : row.data.schedule_type"></td>
-                </template>
-                <template x-if="row.type === 'schedule'">
-                  <td><span class="badge" :class="statusBadge(row.data)" x-text="statusLabel(row.data)"></span></td>
-                </template>
-                <template x-if="row.type === 'schedule'">
-                  <td x-text="formatDate(row.data.next_run)"></td>
-                </template>
-                <template x-if="row.type === 'schedule'">
-                  <td x-text="formatDate(row.data.last_run)"></td>
-                </template>
-                <template x-if="row.type === 'schedule'">
-                  <td style="white-space:nowrap">
-                    <button class="btn-sm" @click="edit(row.data)">Edit</button>
-                    <button class="btn-sm" @click="toggle(row.data)" x-text="row.data.enabled ? 'Disable' : 'Enable'"></button>
-                    <button class="btn-sm" @click="runNow(row.data)">Run</button>
-                    <button class="btn-sm danger" @click="remove(row.data)">Delete</button>
-                  </td>
-                </template>
-                <template x-if="row.type === 'run'">
-                  <td colspan="2" style="padding-left:28px;font-size:12px;color:var(--muted)" x-text="row.data.id"></td>
-                </template>
-                <template x-if="row.type === 'run'">
-                  <td></td>
-                </template>
-                <template x-if="row.type === 'run'">
-                  <td><span class="badge" :class="runBadge(row.data.status)" x-text="row.data.status"></span></td>
-                </template>
-                <template x-if="row.type === 'run'">
-                  <td x-text="formatDate(row.data.created_at)" style="font-size:12px"></td>
-                </template>
-                <template x-if="row.type === 'run'">
-                  <td x-text="(row.data.result || row.data.error || '—').substring(0, 80)" style="font-size:12px;color:var(--muted)"></td>
-                </template>
-                <template x-if="row.type === 'run'">
-                  <td><button class="btn-sm" @click="viewRunHistory(row.data)">View</button></td>
-                </template>
-                <template x-if="row.type === 'empty'">
-                  <td colspan="7" style="padding-left:28px;font-size:12px;color:var(--muted)">No recorded runs</td>
-                </template>
-              </tr>
-            </template>
-          </tbody>
-        </table>
-      </template>
-    </div>
-  </div>
-
-
-  <!-- Webhooks -->
-  <div class="view" x-show="$store.app.view === 'webhooks'" x-data="webhookView" x-cloak>
-    <div class="view-scroll">
-      <div class="section-header">
-        <h2>Webhooks</h2>
-        <button class="btn-sm" @click="showForm = !showForm" x-text="showForm ? 'Cancel' : '+ New'"></button>
-      </div>
-
-      <template x-if="error">
-        <div class="msg error" x-text="error" style="margin-bottom:16px"></div>
-      </template>
-
-      <template x-if="showForm">
-        <div class="card" style="margin-bottom:16px">
-          <div class="form-row">
-            <div class="form-group">
-              <label>Agent</label>
-              <select x-model="form.agent">
-                <option value="">Select agent...</option>
-                <template x-for="a in $store.app.agents" :key="a.name">
-                  <option :value="a.name" x-text="a.name"></option>
-                </template>
-              </select>
-            </div>
-            <div class="form-group">
-              <label>Source</label>
-              <input x-model="form.source" placeholder="github, stripe, etc.">
-            </div>
-          </div>
-          <div class="modal-actions">
-            <button class="btn-cancel" @click="showForm = false">Cancel</button>
-            <button class="btn-primary" @click="create()">Create</button>
-          </div>
-        </div>
-      </template>
-
-      <template x-if="loading">
-        <div class="empty-state"><span class="spinner"></span> Loading...</div>
-      </template>
-
-      <template x-if="!loading && webhooks.length === 0 && !showForm">
-        <div class="empty-state">No webhooks configured</div>
-      </template>
-
-      <template x-if="!loading && webhooks.length > 0">
-        <table class="data-table">
-          <thead><tr><th>Source</th><th>Agent</th><th>URL</th><th>Token</th><th>Actions</th></tr></thead>
-          <tbody>
-            <template x-for="w in webhooks" :key="w.token">
-              <tr>
-                <td><span class="badge badge-accent" x-text="w.source"></span></td>
-                <td x-text="w.agent"></td>
-                <td><code style="font-size:12px" x-text="webhookUrl(w.token)"></code></td>
-                <td>
-                  <span class="token-masked" x-text="isRevealed(w.token) ? w.token : maskedToken(w.token)"></span>
-                  <span class="token-reveal" @click="toggleReveal(w.token)" x-text="isRevealed(w.token) ? 'hide' : 'show'"></span>
-                </td>
-                <td><button class="btn-sm danger" @click="remove(w)">Delete</button></td>
-              </tr>
-            </template>
-          </tbody>
-        </table>
-      </template>
-    </div>
-  </div>
-
-  <div class="view" x-show="$store.app.view === 'usage'" x-data="usageView" x-cloak>
-    <div class="view-scroll">
-      <div class="section-header">
-        <h2>Usage & Cost</h2>
-        <div style="display:flex;gap:6px;align-items:center">
-          <select x-model="sinceDays" @change="load()">
-            <option value="7">7 days</option>
-            <option value="30">30 days</option>
-            <option value="90">90 days</option>
-            <option value="365">1 year</option>
-          </select>
-          <select x-model="period" @change="load()">
-            <option value="day">Daily</option>
-            <option value="week">Weekly</option>
-            <option value="month">Monthly</option>
-          </select>
-        </div>
-      </div>
-
-      <template x-if="loading">
-        <div class="empty-state"><span class="spinner"></span> Loading usage data...</div>
-      </template>
-      <template x-if="error">
-        <div class="msg error" x-text="error" style="margin:16px auto"></div>
-      </template>
-
-      <template x-if="!loading && !error && totals">
-        <div>
-          <div class="card-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px">
-            <div class="card" style="text-align:center">
-              <div style="font-size:28px;font-weight:700;color:var(--accent)" x-text="totals.runs"></div>
-              <div class="card-meta">Runs</div>
-            </div>
-            <div class="card" style="text-align:center">
-              <div style="font-size:28px;font-weight:700;color:var(--ctp-green)" x-text="fmtTokens(totals.total_tokens)"></div>
-              <div class="card-meta">Tokens</div>
-            </div>
-            <div class="card" style="text-align:center">
-              <div style="font-size:28px;font-weight:700;color:var(--ctp-peach)" x-text="fmtCost(totals.total_cost)"></div>
-              <div class="card-meta">Cost</div>
-            </div>
-          </div>
-
-          <template x-if="dailySummary.length > 0">
-            <div class="card" style="margin-bottom:20px;overflow:hidden">
-              <h3>Cost Trend</h3>
-              <div style="display:flex;align-items:flex-end;gap:2px;height:120px;padding-top:12px">
-                <template x-for="row in dailySummary" :key="row.period">
-                  <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;min-width:0" :title="barLabel(row) + ': ' + fmtCost(row.total_cost) + ' (' + row.runs + ' runs)'">
-                    <div style="width:100%;border-radius:3px 3px 0 0;background:var(--accent);min-height:2px;transition:height 0.3s ease" :style="'height:' + barPct(row.total_cost)"></div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;margin-top:0">
+                <div class="console-card">
+                  <div class="console-card-head">top agents</div>
+                  <div class="console-card-body mono">
+                    <template x-if="topAgents.length === 0"><div style="color:var(--overlay1)">no data</div></template>
+                    <table class="console-table" x-show="topAgents.length > 0" style="margin:0">
+                      <thead><tr><th>agent</th><th style="text-align:right">runs</th><th style="text-align:right">cost</th></tr></thead>
+                      <tbody>
+                        <template x-for="row in topAgents" :key="row.agent">
+                          <tr>
+                            <td class="agent" x-text="row.agent || '(unknown)'"></td>
+                            <td style="text-align:right" x-text="row.runs"></td>
+                            <td style="text-align:right" x-text="fmtCost(row.total_cost)"></td>
+                          </tr>
+                        </template>
+                      </tbody>
+                    </table>
                   </div>
-                </template>
+                </div>
+                <div class="console-card">
+                  <div class="console-card-head">top models</div>
+                  <div class="console-card-body mono">
+                    <template x-if="topModels.length === 0"><div style="color:var(--overlay1)">no data</div></template>
+                    <table class="console-table" x-show="topModels.length > 0" style="margin:0">
+                      <thead><tr><th>model</th><th style="text-align:right">tokens</th><th style="text-align:right">cost</th></tr></thead>
+                      <tbody>
+                        <template x-for="row in topModels" :key="row.model">
+                          <tr>
+                            <td class="cron" x-text="row.model || '(unknown)'"></td>
+                            <td style="text-align:right" x-text="fmtTokens(row.total_tokens)"></td>
+                            <td style="text-align:right" x-text="fmtCost(row.total_cost)"></td>
+                          </tr>
+                        </template>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               </div>
-              <div style="display:flex;gap:2px;margin-top:4px">
-                <template x-for="(row, i) in dailySummary" :key="'l'+row.period">
-                  <div style="flex:1;text-align:center;font-size:9px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" x-text="i % Math.max(1, Math.floor(dailySummary.length / 8)) === 0 ? barLabel(row) : ''"></div>
-                </template>
-              </div>
-            </div>
-          </template>
-
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
-            <div class="card">
-              <h3>Top Agents</h3>
-              <template x-if="topAgents.length === 0"><div class="card-meta">No data</div></template>
-              <table class="data-table" x-show="topAgents.length > 0">
-                <thead><tr><th>Agent</th><th style="text-align:right">Runs</th><th style="text-align:right">Cost</th></tr></thead>
-                <tbody>
-                  <template x-for="row in topAgents" :key="row.agent">
-                    <tr>
-                      <td x-text="row.agent || '(unknown)'"></td>
-                      <td style="text-align:right" x-text="row.runs"></td>
-                      <td style="text-align:right" x-text="fmtCost(row.total_cost)"></td>
-                    </tr>
-                  </template>
-                </tbody>
-              </table>
-            </div>
-            <div class="card">
-              <h3>Top Models</h3>
-              <template x-if="topModels.length === 0"><div class="card-meta">No data</div></template>
-              <table class="data-table" x-show="topModels.length > 0">
-                <thead><tr><th>Model</th><th style="text-align:right">Tokens</th><th style="text-align:right">Cost</th></tr></thead>
-                <tbody>
-                  <template x-for="row in topModels" :key="row.model">
-                    <tr>
-                      <td x-text="row.model || '(unknown)'"></td>
-                      <td style="text-align:right" x-text="fmtTokens(row.total_tokens)"></td>
-                      <td style="text-align:right" x-text="fmtCost(row.total_cost)"></td>
-                    </tr>
-                  </template>
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <template x-if="dailySummary.length > 0">
-            <div class="card">
-              <h3>Detail</h3>
-              <table class="data-table">
-                <thead><tr><th>Period</th><th style="text-align:right">Runs</th><th style="text-align:right">Tokens</th><th style="text-align:right">Cost</th></tr></thead>
-                <tbody>
-                  <template x-for="row in [...dailySummary].reverse()" :key="'d'+row.period">
-                    <tr>
-                      <td x-text="barLabel(row)"></td>
-                      <td style="text-align:right" x-text="row.runs"></td>
-                      <td style="text-align:right" x-text="fmtTokens(row.total_tokens)"></td>
-                      <td style="text-align:right" x-text="fmtCost(row.total_cost)"></td>
-                    </tr>
-                  </template>
-                </tbody>
-              </table>
+              <template x-if="dailySummary.length > 0">
+                <div class="console-card">
+                  <div class="console-card-head">detail</div>
+                  <div class="console-card-body mono" style="padding:0">
+                    <table class="console-table" style="margin:0">
+                      <thead><tr><th>period</th><th style="text-align:right">runs</th><th style="text-align:right">tokens</th><th style="text-align:right">cost</th></tr></thead>
+                      <tbody>
+                        <template x-for="row in [...dailySummary].reverse()" :key="'d'+row.period">
+                          <tr>
+                            <td x-text="barLabel(row)"></td>
+                            <td style="text-align:right" x-text="row.runs"></td>
+                            <td style="text-align:right" x-text="fmtTokens(row.total_tokens)"></td>
+                            <td style="text-align:right" x-text="fmtCost(row.total_cost)"></td>
+                          </tr>
+                        </template>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </template>
             </div>
           </template>
         </div>
-      </template>
+      </main>
     </div>
   </div>
-</main>
 
-<!-- App-update toast: shown when a new service worker has installed -->
-<div class="update-toast" x-data="{ show: false }"
-     @tsugite:update-available.window="show = true"
-     x-show="show" x-transition.opacity style="display:none">
-  <span>New version available</span>
-  <button class="btn-sm" @click="window.tsugiteApplyUpdate && window.tsugiteApplyUpdate()">Reload</button>
-  <button class="btn-sm btn-dismiss" @click="show = false" aria-label="Dismiss">&times;</button>
 </div>
 
-<!-- Toast stack: dispatched via window event 'tsugite:toast' with detail { text, kind, duration } -->
-<div class="toast-stack"
-     x-data="{ toasts: [] }"
-     @tsugite:toast.window="
-       const id = Date.now() + Math.random();
-       const duration = $event.detail.duration || 2200;
-       toasts.push({ id, text: $event.detail.text, kind: $event.detail.kind || 'success' });
-       setTimeout(() => { toasts = toasts.filter(x => x.id !== id); }, duration);
-     ">
-  <template x-for="t in toasts" :key="t.id">
-    <div class="toast" :class="'toast-' + t.kind" x-transition.opacity x-text="t.text"></div>
+<!-- Bottom keystrip -->
+<div class="console-keystrip" x-data="{
+       daemonOk: true,
+       init() {
+         this.$watch('$store.app.lastEvent', (e) => {
+           if (!e) return;
+           this.daemonOk = e.type !== 'reconnect_lost';
+         });
+       }
+     }">
+  <span><kbd>⌘K</kbd> palette</span>
+  <span><kbd>/</kbd> commands</span>
+  <span><kbd>@</kbd> agent</span>
+  <span><kbd>#</kbd> file</span>
+  <span><kbd>⌘↩</kbd> send</span>
+  <span class="grow"></span>
+  <span :class="daemonOk ? 'ok' : 'err'" x-text="daemonOk ? '● daemon' : '● disconnected'"></span>
+  <template x-if="$store.app.tokensTotal != null">
+    <span x-text="'tok ' + (($store.app.tokensTotal / 1000).toFixed(1)) + 'k'"></span>
   </template>
+  <span x-text="$store.app.theme"></span>
 </div>
 
-<!-- Auth prompt -->
+<!-- Auth gate -->
 <div class="auth-gate" :class="{ open: $store.app.authRequired }"
      x-data="{ authToken: '', authError: '', checking: false, shake: false }">
   <div class="auth-card">
@@ -1357,8 +1528,8 @@
         <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
       </svg>
     </div>
-    <h2>Tsugite</h2>
-    <p class="auth-hint">Paste your API token to connect</p>
+    <h2>tsugite</h2>
+    <p class="auth-hint">paste your API token to connect</p>
     <div class="auth-input-wrap" :class="{ shake: shake }">
       <input type="password" x-model="authToken" placeholder="tsu_..."
              @input="authToken = authToken.trim()"
@@ -1379,58 +1550,65 @@
         checking = false;
       });
     ">
-      <span x-show="!checking">Connect</span>
+      <span x-show="!checking">connect</span>
       <span x-show="checking" class="auth-spinner"></span>
     </button>
-    <p class="auth-footer">Generate a token with <code>tsugite daemon token create</code></p>
+    <p class="auth-footer">generate a token with <code>tsugite daemon token create</code></p>
   </div>
 </div>
 
 <!-- Settings modal -->
-<div class="modal-backdrop" :class="{ open: $store.app.showSettings }" @click.self="$store.app.showSettings = false"
+<div class="console-modal-overlay" x-show="$store.app.showSettings" @click.self="$store.app.showSettings = false"
      x-data="{ token: '', userId: '', tempTheme: '', tempModel: '', loadedModel: '', resolvedModel: '', pushSubscribed: false, pushLoading: false }"
      x-effect="if ($store.app.showSettings) { token = localStorage.getItem('tsugite_token') || ''; userId = $store.app.userId; tempTheme = $store.app.theme; let agent = $store.app.selectedAgent; if (agent) { window.tsugiteApi.get('/api/agents/' + agent + '/status').then(d => { tempModel = d.model || ''; loadedModel = d.model || ''; resolvedModel = d.resolved_model || ''; }).catch(() => {}); } if ('serviceWorker' in navigator && 'PushManager' in window) { navigator.serviceWorker.ready.then(r => r.pushManager.getSubscription()).then(s => { pushSubscribed = !!s; }).catch(() => {}); } }">
-  <div class="modal-content">
-    <h2>Settings</h2>
-    <label>API Token</label>
-    <input type="password" x-model="token" @input="token = token.trim()" placeholder="tsu_...">
-    <label>User ID</label>
-    <input type="text" x-model="userId" placeholder="web-user-1">
-    <label>Theme</label>
-    <select x-model="tempTheme" @change="$store.app.theme = tempTheme">
-      <option value="latte">Latte</option>
-      <option value="frappe">Frappé</option>
-      <option value="macchiato">Macchiato</option>
-      <option value="mocha">Mocha</option>
-    </select>
-    <label>Agent</label>
-    <select x-model="$store.app.selectedAgent">
-      <template x-for="a in $store.app.agents" :key="a.name">
-        <option :value="a.name" x-text="a.name"></option>
-      </template>
-    </select>
-    <label>Model Override</label>
-    <input type="text" x-model="tempModel" placeholder="e.g. anthropic:claude-sonnet-4-20250514 (blank = use agent default)">
-    <div x-show="resolvedModel" style="margin-top:-12px; margin-bottom:16px; font-size:12px; color:var(--muted)">
-      Resolves to <code x-text="resolvedModel"></code>
-    </div>
-    <div style="margin-bottom:16px">
-      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-        <input type="checkbox" :checked="$store.app.autoFollow" @change="$store.app.autoFollow = $el.checked; localStorage.setItem('tsugite_auto_follow', $el.checked)">
-        Auto-follow turn details during streaming
-      </label>
-    </div>
-    <template x-if="'serviceWorker' in navigator && 'PushManager' in window">
-      <div style="margin-bottom:16px">
-        <label>Push Notifications</label>
-        <button class="btn-sm" :disabled="pushLoading"
-                @click="pushLoading = true; (pushSubscribed ? window.tsugiteUnsubscribePush() : window.tsugiteSubscribePush()).then(() => { pushSubscribed = !pushSubscribed; }).catch(e => console.error('Push toggle failed:', e)).finally(() => { pushLoading = false; })"
-                x-text="pushLoading ? 'Working...' : (pushSubscribed ? 'Disable Notifications' : 'Enable Notifications')"></button>
+  <div class="console-modal">
+    <h2>settings</h2>
+    <div class="body">
+      <div class="row"><label>api token</label>
+        <input type="password" x-model="token" @input="token = token.trim()" placeholder="tsu_…">
       </div>
-    </template>
-    <div class="modal-actions">
-      <button class="btn-cancel" @click="$store.app.theme = localStorage.getItem('tsugite_theme') || 'frappe'; $store.app.showSettings = false">Cancel</button>
-      <button class="btn-primary" @click="
+      <div class="row"><label>user id</label>
+        <input type="text" x-model="userId" placeholder="web-user-1">
+      </div>
+      <div class="row"><label>theme</label>
+        <select x-model="tempTheme" @change="$store.app.theme = tempTheme">
+          <option value="latte">latte</option>
+          <option value="frappe">frappé</option>
+          <option value="macchiato">macchiato</option>
+          <option value="mocha">mocha</option>
+        </select>
+      </div>
+      <div class="row"><label>agent</label>
+        <select x-model="$store.app.selectedAgent">
+          <template x-for="a in $store.app.agents" :key="a.name">
+            <option :value="a.name" x-text="a.name"></option>
+          </template>
+        </select>
+      </div>
+      <div class="row"><label>model override</label>
+        <input type="text" x-model="tempModel" placeholder="anthropic:claude-sonnet-4-20250514">
+      </div>
+      <div x-show="resolvedModel" style="font-size:10.5px;color:var(--overlay1);padding-left:96px;margin-top:-4px">
+        resolves to <code x-text="resolvedModel"></code>
+      </div>
+      <div class="row" style="align-items:flex-start"><label>options</label>
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-family:var(--font-mono);font-size:11.5px;color:var(--text);text-transform:none;letter-spacing:normal">
+          <input type="checkbox" :checked="$store.app.autoFollow" @change="$store.app.autoFollow = $el.checked; localStorage.setItem('tsugite_auto_follow', $el.checked)">
+          auto-follow turn details
+        </label>
+      </div>
+      <template x-if="'serviceWorker' in navigator && 'PushManager' in window">
+        <div class="row"><label>push</label>
+          <button class="head-btn" :disabled="pushLoading"
+                  @click="pushLoading = true; (pushSubscribed ? window.tsugiteUnsubscribePush() : window.tsugiteSubscribePush()).then(() => { pushSubscribed = !pushSubscribed; }).catch(e => console.error('Push toggle failed:', e)).finally(() => { pushLoading = false; })"
+                  x-text="pushLoading ? 'working…' : (pushSubscribed ? 'disable notifications' : 'enable notifications')"
+                  style="background:var(--surface0);border:1px solid var(--surface1);color:var(--text);padding:4px 10px;border-radius:3px;font-family:var(--font-mono);font-size:11px;cursor:pointer"></button>
+        </div>
+      </template>
+    </div>
+    <div class="foot">
+      <button @click="$store.app.theme = localStorage.getItem('tsugite_theme') || 'frappe'; $store.app.showSettings = false">cancel</button>
+      <button class="primary" @click="
         if (token.trim()) localStorage.setItem('tsugite_token', token.trim()); else localStorage.removeItem('tsugite_token');
         $store.app.userId = userId.trim() || 'web-user-1';
         localStorage.setItem('tsugite_user_id', $store.app.userId);
@@ -1440,9 +1618,32 @@
           window.tsugiteApi.patch('/api/agents/' + $store.app.selectedAgent + '/config', { model: tempModel || null }).catch(() => {});
         }
         $store.app.showSettings = false;
-      ">Save</button>
+      ">save</button>
     </div>
   </div>
+</div>
+
+<!-- App-update toast -->
+<div class="update-toast" x-data="{ show: false }"
+     @tsugite:update-available.window="show = true"
+     x-show="show" x-transition.opacity style="display:none">
+  <span>new version available</span>
+  <button class="hbtn" @click="window.tsugiteApplyUpdate && window.tsugiteApplyUpdate()">reload</button>
+  <button class="hbtn" @click="show = false" aria-label="Dismiss">×</button>
+</div>
+
+<!-- Toast stack -->
+<div class="toast-stack"
+     x-data="{ toasts: [] }"
+     @tsugite:toast.window="
+       const id = Date.now() + Math.random();
+       const duration = $event.detail.duration || 2200;
+       toasts.push({ id, text: $event.detail.text, kind: $event.detail.kind || 'success' });
+       setTimeout(() => { toasts = toasts.filter(x => x.id !== id); }, duration);
+     ">
+  <template x-for="t in toasts" :key="t.id">
+    <div class="console-toast" :class="'toast-' + t.kind" x-transition.opacity x-text="t.text"></div>
+  </template>
 </div>
 
 </body>

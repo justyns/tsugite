@@ -35,6 +35,11 @@ def register_models(models: dict[str, ModelInfo]) -> None:
     _REGISTRY.update(models)
 
 
+def list_models() -> dict[str, ModelInfo]:
+    """Return a snapshot of all registered models, keyed by 'provider/model'."""
+    return dict(_REGISTRY)
+
+
 def calculate_cost(provider: str, model: str, usage: Usage) -> float | None:
     """Calculate cost from usage stats. Returns None for unknown models."""
     info = get_model_info(provider, model)

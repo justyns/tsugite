@@ -1,11 +1,25 @@
 import { get, post, patch } from '../api.js';
-import { escapeHtml, renderMarkdown, scrollToBottom, formatDate, formatRelativeTime, stateBadgeClass, copyText } from '../utils.js';
+import { escapeHtml, renderMarkdown, scrollToBottom, formatDate, formatRelativeTime, stateBadgeClass, copyText, toast } from '../utils.js';
 import { sessionsMixin } from './conversation/sessions.js';
 import { historyMixin } from './conversation/history.js';
 import { attachmentsMixin } from './conversation/attachments.js';
 import { streamingMixin } from './conversation/streaming.js';
 import { inputMixin } from './conversation/input.js';
 import { SESSION_END_EVENTS, TURN_END_EVENTS, progressStatusFor } from './conversation/event_types.js';
+
+// Maps prompt-inspector category names to Catppuccin CSS variables. Using vars
+// (not raw hex) means the stacked bar re-colors when the user switches themes.
+const PI_COLORS = {
+  instructions: 'var(--pink)',
+  tools: 'var(--lavender)',
+  attachments: 'var(--teal)',
+  skills: 'var(--green)',
+  task: 'var(--yellow)',
+  system: 'var(--mauve)',
+  user_messages: 'var(--blue)',
+  system_prompt: 'var(--pink)',
+  metadata: 'var(--sapphire)',
+};
 
 export default () => ({
   ...sessionsMixin,
@@ -25,8 +39,11 @@ export default () => ({
   showSkills: false,
   loadedSkills: [],
   inspectingSnapshot: null,
+  piExpanded: null,
   effortLevels: [],
   sessionEffort: '',
+  sessionModel: '',
+  availableModels: null,
   // session_id -> { turnCount, toolCount, statusText, lastEventTime }
   progressCache: {},
   // Getters must stay here — spread loses get descriptors
@@ -211,12 +228,14 @@ export default () => ({
   },
 
   async loadSessionEffort() {
-    if (!this.selectedSessionId) { this.sessionEffort = ''; return; }
+    if (!this.selectedSessionId) { this.sessionEffort = ''; this.sessionModel = ''; return; }
     try {
       const data = await get(`/api/sessions/${this.selectedSessionId}/settings`);
       this.sessionEffort = data.reasoning_effort || '';
+      this.sessionModel = data.model || '';
     } catch {
       this.sessionEffort = '';
+      this.sessionModel = '';
     }
   },
 
@@ -228,6 +247,47 @@ export default () => ({
     } catch (e) {
       console.warn('Failed to save reasoning_effort', e);
     }
+  },
+
+  async setSessionAgent(name) {
+    if (!name || name === this.$store.app.selectedAgent) return;
+    this.$store.app.selectedAgent = name;
+    if (this.selectedSessionMeta) this.selectedSessionMeta.agent = name;
+    if (!this.selectedSessionId) return;
+    try {
+      await patch(`/api/sessions/${this.selectedSessionId}/settings`, { agent: name });
+    } catch (e) {
+      console.warn('Failed to save agent override', e);
+      toast(`agent change failed: ${e.message || 'unknown'}`, 'error');
+    }
+  },
+
+  async setSessionModel(value) {
+    const next = value || '';
+    if (next === this.sessionModel) return;
+    this.sessionModel = next;
+    if (!this.selectedSessionId) return;
+    try {
+      await patch(`/api/sessions/${this.selectedSessionId}/settings`, { model: value || null });
+    } catch (e) {
+      console.warn('Failed to save model override', e);
+      toast(`model change failed: ${e.message || 'unknown'}`, 'error');
+    }
+  },
+
+  async loadModels() {
+    if (this.availableModels !== null) return this.availableModels;
+    try {
+      const data = await get('/api/models');
+      this.availableModels = (data.models || []).map(m => ({
+        id: m.id || m.name,
+        description: m.description || m.provider || '',
+        context: m.context_window || m.context || null,
+      }));
+    } catch {
+      this.availableModels = [];
+    }
+    return this.availableModels;
   },
 
   // Shared helper used by both history and streaming mixins
@@ -450,5 +510,91 @@ export default () => ({
       this._handleProgressEvent(progressIdx, { type: evType, ...rest });
       this._scrollThrottled();
     }
+  },
+
+  // ---------- Console helpers ----------
+
+  isLive(s) {
+    if (!s) return false;
+    return s.state === 'running' || s.state === 'active' || s.state === 'thinking' || s.state === 'starting';
+  },
+
+  statusDotClass(state) {
+    switch (state) {
+      case 'running':
+      case 'active': return 'running';
+      case 'thinking': return 'thinking';
+      case 'starting': return 'starting';
+      case 'scheduled': return 'scheduled';
+      case 'completed':
+      case 'done': return 'done';
+      case 'failed':
+      case 'error':
+      case 'cancelled': return 'failed';
+      default: return 'idle';
+    }
+  },
+
+  recentBuckets() {
+    void this._relTimeTick;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const yest = new Date(today);
+    yest.setDate(yest.getDate() - 1);
+    const weekStart = new Date(today);
+    weekStart.setDate(weekStart.getDate() - 7);
+
+    const buckets = [
+      { label: 'today', items: [] },
+      { label: 'yesterday', items: [] },
+      { label: 'this week', items: [] },
+      { label: 'older', items: [] },
+    ];
+    for (const s of (this.groupedSessions.recent || [])) {
+      const ts = Date.parse(s.last_active || s.created_at || '');
+      if (!ts) { buckets[3].items.push(s); continue; }
+      if (ts >= today.getTime()) buckets[0].items.push(s);
+      else if (ts >= yest.getTime()) buckets[1].items.push(s);
+      else if (ts >= weekStart.getTime()) buckets[2].items.push(s);
+      else buckets[3].items.push(s);
+    }
+    return buckets;
+  },
+
+  turnTimeShort(msg) {
+    const ts = msg && (msg.timestamp || msg.ts || msg.created_at);
+    if (!ts) return '';
+    const d = new Date(ts);
+    if (isNaN(d.getTime())) return '';
+    const h = String(d.getHours()).padStart(2, '0');
+    const m = String(d.getMinutes()).padStart(2, '0');
+    return `${h}:${m}`;
+  },
+
+  turnIndex(i) {
+    return '#' + String(i + 1).padStart(2, '0');
+  },
+
+  // Compact tokens — "12.3k" / "1.2M" / "850".
+  fmtTok(n) {
+    if (n == null) return '0';
+    if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
+    if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
+    return String(n);
+  },
+
+  categoryColor(name) { return PI_COLORS[name] || 'var(--lavender)'; },
+
+  composerMetaLabel() {
+    const turn = this.statusInfo?.message_count ?? this.messages.length;
+    const attached = this.pendingFiles?.length || 0;
+    const tokens = this.statusInfo?.tokens;
+    const limit = this.statusInfo?.context_limit;
+    const ctxPct = (tokens && limit) ? Math.round((tokens / limit) * 100) : null;
+    const parts = [];
+    if (turn) parts.push(`turn ${turn}`);
+    if (attached) parts.push(`${attached} attached`);
+    if (ctxPct != null) parts.push(`${ctxPct}% ctx`);
+    return parts.length ? parts.join(' · ') : 'shift+enter for newline';
   },
 });

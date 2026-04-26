@@ -460,6 +460,11 @@ class BaseAdapter(ABC):
             effort_override = meta.get("reasoning_effort_override") or self.session_store.get_reasoning_effort(
                 conv_id
             )
+            model_override = (
+                meta.get("model_override")
+                or self.session_store.get_model_override(conv_id)
+                or self.agent_config.model
+            )
             return run_agent(
                 agent_path=agent_path,
                 prompt=enriched_prompt,
@@ -467,7 +472,7 @@ class BaseAdapter(ABC):
                 attachments=attachments,
                 exec_options=ExecutionOptions(
                     return_token_usage=True,
-                    model_override=meta.get("model_override") or self.agent_config.model,
+                    model_override=model_override,
                     max_turns_override=meta.get("max_turns_override") or self.agent_config.max_turns,
                     reasoning_effort_override=effort_override,
                 ),

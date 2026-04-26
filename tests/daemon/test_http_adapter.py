@@ -634,7 +634,7 @@ class TestWebUI:
     def test_serve_ui(self, client):
         resp = client.get("/")
         assert resp.status_code == 200
-        assert "Tsugite" in resp.text
+        assert "tsugite" in resp.text.lower()
 
 
 class TestSSEProgressHandler:

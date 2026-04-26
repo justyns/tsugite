@@ -227,13 +227,6 @@ export const sessionsMixin = {
     }
   },
 
-  statusDotColor(state) {
-    if (state === 'running') return 'var(--ok)';
-    if (state === 'active') return 'var(--ctp-yellow, var(--ok))';
-    if (state === 'error' || state === 'failed') return 'var(--error)';
-    return 'var(--muted)';
-  },
-
   sourceIcon(source) {
     return { interactive: 'I', web: 'W', discord: 'D', cli: '>', schedule: 'S',
              background: 'B', spawned: 'P' }[source] || '?';

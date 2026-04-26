@@ -234,6 +234,7 @@ class SessionStore:
         self._sticky_skills: dict[str, dict[str, int]] = {}
 
         self._reasoning_effort: dict[str, str] = {}
+        self._model_overrides: dict[str, str] = {}
 
         self._load()
         self._migrate_legacy()
@@ -347,6 +348,36 @@ class SessionStore:
         with self._lock:
             return self._reasoning_effort.get(session_id)
 
+    def set_model_override(self, session_id: str, value: str | None) -> None:
+        with self._lock:
+            if value:
+                self._model_overrides[session_id] = value
+            else:
+                self._model_overrides.pop(session_id, None)
+
+    def get_model_override(self, session_id: str) -> str | None:
+        with self._lock:
+            return self._model_overrides.get(session_id)
+
+    def set_agent_override(self, session_id: str, value: str | None) -> None:
+        """Update the agent associated with a session.
+
+        Unlike model/effort, the agent is stored on the Session itself (it
+        determines which adapter handles future turns), so we mutate the
+        session record directly. Returns silently if the session is unknown.
+
+        TODO: We're allowing changing the agent, but I'm not sure if that's going to just
+              confuse the llm in the middle of a session?  Will need to test.
+        """
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if not session or not value:
+                return
+            if session.agent == value:
+                return
+            session.agent = value
+            self._save()
+
     def bump_unused_counters(self, session_id: str, referenced: set[str]) -> None:
         """Advance one turn: reset referenced skills, increment the rest.
 
@@ -451,6 +482,10 @@ class SessionStore:
             effort = self._reasoning_effort.pop(session_id, None)
             if effort:
                 self._reasoning_effort[new_id] = effort
+
+            model = self._model_overrides.pop(session_id, None)
+            if model:
+                self._model_overrides[new_id] = model
 
             # Mark old session as completed and superseded so it stops appearing in
             # the default sidebar list (the new session is the live continuation).

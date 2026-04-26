@@ -461,6 +461,7 @@ class HTTPServer:
             Route("/api/agents/{agent}/respond", self._respond, methods=["POST"]),
             Route("/api/agents/{agent}/unload-skill", self._unload_skill, methods=["POST"]),
             Route("/api/agents/{agent}/effort-levels", self._effort_levels, methods=["GET"]),
+            Route("/api/models", self._list_models, methods=["GET"]),
             Route("/api/sessions/{session_id}/settings", self._session_settings_get, methods=["GET"]),
             Route("/api/sessions/{session_id}/settings", self._session_settings_patch, methods=["PATCH"]),
             Route("/api/schedules", self._list_schedules, methods=["GET"]),
@@ -1068,11 +1069,19 @@ class HTTPServer:
         except UnsupportedEffortError as err:
             return None, JSONResponse({"error": str(err), "supported": err.supported}, status_code=400)
 
+    def _session_settings_payload(self, adapter: "HTTPAgentAdapter", session_id: str) -> dict:
+        session = adapter.session_store.get_session(session_id)
+        return {
+            "reasoning_effort": adapter.session_store.get_reasoning_effort(session_id),
+            "model": adapter.session_store.get_model_override(session_id),
+            "agent": session.agent if session else None,
+        }
+
     async def _session_settings_get(self, request: Request) -> JSONResponse:
         adapter, session_id, err = self._resolve_session_for_settings(request)
         if err:
             return err
-        return JSONResponse({"reasoning_effort": adapter.session_store.get_reasoning_effort(session_id)})
+        return JSONResponse(self._session_settings_payload(adapter, session_id))
 
     async def _session_settings_patch(self, request: Request) -> JSONResponse:
         adapter, session_id, err = self._resolve_session_for_settings(request)
@@ -1090,7 +1099,46 @@ class HTTPServer:
                 return err_resp
             adapter.session_store.set_reasoning_effort(session_id, value)
 
-        return JSONResponse({"reasoning_effort": adapter.session_store.get_reasoning_effort(session_id)})
+        if "model" in body:
+            raw = body["model"]
+            if raw is None or raw == "":
+                adapter.session_store.set_model_override(session_id, None)
+            elif not isinstance(raw, str):
+                return JSONResponse({"error": "model must be a string"}, status_code=400)
+            else:
+                from tsugite.models import get_provider_and_model
+                try:
+                    get_provider_and_model(raw)
+                except Exception as exc:  # noqa: BLE001
+                    return JSONResponse({"error": f"unknown model: {raw} ({exc})"}, status_code=400)
+                adapter.session_store.set_model_override(session_id, raw)
+
+        if "agent" in body:
+            name = body["agent"]
+            if not isinstance(name, str) or not name:
+                return JSONResponse({"error": "agent must be a non-empty string"}, status_code=400)
+            if name not in self.adapters:
+                return JSONResponse({"error": f"unknown agent: {name}"}, status_code=400)
+            adapter.session_store.set_agent_override(session_id, name)
+
+        return JSONResponse(self._session_settings_payload(adapter, session_id))
+
+    async def _list_models(self, request: Request) -> JSONResponse:
+        from tsugite.providers.model_registry import list_models
+
+        models: list[dict] = []
+        for key, info in list_models().items():
+            provider, _, model_id = key.partition("/")
+            full_id = f"{provider}:{model_id}" if provider and model_id else key
+            models.append({
+                "id": full_id,
+                "provider": provider or None,
+                "context_window": info.max_input_tokens,
+                "supports_vision": info.supports_vision,
+                "supports_reasoning": info.supports_reasoning,
+            })
+        models.sort(key=lambda m: m["id"])
+        return JSONResponse({"models": models})
 
     async def _respond(self, request: Request) -> JSONResponse:
         """Submit a response to an active ask_user prompt."""

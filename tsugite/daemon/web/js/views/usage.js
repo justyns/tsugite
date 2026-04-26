@@ -37,6 +37,8 @@ export default () => ({
       this.dailySummary = summary;
       this.topAgents = agents;
       this.topModels = models;
+      const next = totals?.total_tokens ?? null;
+      if (this.$store.app.tokensTotal !== next) this.$store.app.tokensTotal = next;
     } catch (e) {
       this.error = e.message || 'Failed to load usage data';
     }

@@ -35,6 +35,7 @@ Alpine.store('app', {
   pendingWorkspaceFiles: [],
   autoFollow: localStorage.getItem('tsugite_auto_follow') !== 'false',
   skillIssues: [],
+  tokensTotal: null,  // updated by usageView.load() so the keystrip shows daily token count
 });
 
 Alpine.data('conversationsView', conversationsView);
@@ -61,6 +62,21 @@ Alpine.effect(() => {
   const currentView = parseHash(location.hash.slice(1)).view;
   if (currentView !== store.view) location.hash = store.view;
   if (store.selectedAgent) localStorage.setItem('tsugite-agent', store.selectedAgent);
+});
+
+// Keep <meta name="theme-color"> in sync with the active theme's --crust so
+// the OS/browser chrome (PWA status bar, mobile address bar) matches the IDE
+// tab strip instead of flashing the previous theme on switch.
+Alpine.effect(() => {
+  const theme = Alpine.store('app').theme;
+  void theme;  // reactive dep
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (!meta) return;
+  // Defer one frame so the new --crust is resolved against the new data-theme.
+  requestAnimationFrame(() => {
+    const crust = getComputedStyle(document.body).getPropertyValue('--crust').trim();
+    if (crust) meta.setAttribute('content', crust);
+  });
 });
 
 let _es = null;
