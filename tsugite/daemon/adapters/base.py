@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional, Protocol
+from typing import Any, Callable, Dict, Optional, Protocol
 from zoneinfo import ZoneInfo
 
 from tzlocal import get_localzone
@@ -276,14 +276,14 @@ class BaseAdapter(ABC):
         if custom_logger and hasattr(custom_logger, "ui_handler"):
             custom_logger.ui_handler._emit(event_type, {})
 
-    def _broadcast_compaction(self, agent: str, *, started: bool) -> None:
-        """Broadcast compaction state change to all SSE subscribers."""
-        if self.event_bus:
-            event_type = "compaction_started" if started else "compaction_finished"
-            try:
-                self.event_bus.emit(event_type, {"agent": agent})
-            except Exception:
-                logger.debug("Failed to broadcast %s", event_type)
+    def _broadcast_compaction(self, event_type: str, agent: str, **payload: Any) -> None:
+        """Broadcast a compaction lifecycle/progress event to SSE subscribers."""
+        if not self.event_bus:
+            return
+        try:
+            self.event_bus.emit(event_type, {"agent": agent, **payload})
+        except Exception:
+            logger.debug("Failed to broadcast %s", event_type)
 
     def _build_agent_context(self, channel_context: ChannelContext) -> Dict[str, Any]:
         """Build context dict for agent template rendering."""
@@ -587,12 +587,16 @@ class BaseAdapter(ABC):
         """Run session compaction and return the new conv_id."""
         self._emit_ui(custom_logger, "compacting")
         if self.session_store.begin_compaction(user_id, self.agent_name):
-            self._broadcast_compaction(self.agent_name, started=True)
+            self._broadcast_compaction("compaction_started", self.agent_name)
+
+            def progress_cb(payload: Dict[str, Any]) -> None:
+                self._broadcast_compaction("compaction_progress", self.agent_name, **payload)
+
             try:
-                await self._compact_session(conv_id, reason=reason)
+                await self._compact_session(conv_id, reason=reason, progress_callback=progress_cb)
             finally:
                 self.session_store.end_compaction(user_id, self.agent_name)
-                self._broadcast_compaction(self.agent_name, started=False)
+                self._broadcast_compaction("compaction_finished", self.agent_name)
         else:
             done = await asyncio.to_thread(self.session_store.wait_for_compaction, user_id, self.agent_name)
             if not done:
@@ -678,7 +682,11 @@ class BaseAdapter(ABC):
             logger.exception("Skill TTL bookkeeping failed for session %s", conv_id)
 
     async def _compact_session(
-        self, session_id: str, instructions: str | None = None, reason: str | None = None
+        self,
+        session_id: str,
+        instructions: str | None = None,
+        reason: str | None = None,
+        progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> None:
         """Compact a session by summarizing older events and rotating to a new
         session whose first body event is a `compaction` summary, followed by
@@ -691,6 +699,7 @@ class BaseAdapter(ABC):
             extract_file_paths_from_events,
             get_context_limit,
             infer_compaction_model,
+            sanitize_for_summary,
             split_events_for_compaction,
             summarize_session,
         )
@@ -729,6 +738,14 @@ class BaseAdapter(ABC):
             recent_user_inputs,
         )
 
+        if progress_callback:
+            try:
+                progress_callback(
+                    {"phase": "starting", "replaced_count": old_user_inputs, "retained_count": recent_user_inputs}
+                )
+            except Exception:
+                logger.debug("compaction progress_callback raised", exc_info=True)
+
         old_session = self.session_store.get_session(session_id)
 
         hook_context = {
@@ -752,8 +769,15 @@ class BaseAdapter(ABC):
                 }
             )
 
+        from tsugite.workspace.models import WORKSPACE_FILES
+
         functions_used = sorted(SessionSummary.from_events(old_events).functions_called)
-        file_paths = extract_file_paths_from_events(old_events)
+        scaffolding_basenames = {f.lower() for f in WORKSPACE_FILES}
+        file_paths = [
+            p
+            for p in extract_file_paths_from_events(old_events)
+            if p.rsplit("/", 1)[-1].lower() not in scaffolding_basenames
+        ]
         first_user_event = next((e for e in old_events if e.type == "user_input"), None)
         last_response_event = next((e for e in reversed(old_events) if e.type == "model_response"), None)
         time_start = first_user_event.ts.isoformat() if first_user_event else ""
@@ -783,9 +807,14 @@ class BaseAdapter(ABC):
                 {"role": "user", "content": f"<compaction_instructions>{instructions}</compaction_instructions>"}
             )
 
+        old_messages = sanitize_for_summary(old_messages, model=model)
+
         try:
             summary = await summarize_session(
-                old_messages, model=model, max_context_tokens=self.agent_config.context_limit
+                old_messages,
+                model=model,
+                max_context_tokens=self.agent_config.context_limit,
+                progress_callback=progress_callback,
             )
         except Exception:
             logger.exception("[%s] Compaction summarization failed", self.agent_name)

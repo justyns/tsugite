@@ -32,6 +32,8 @@ export default () => ({
   messages: [],
   loading: true,
   compacting: false,
+  compactingCounts: null,
+  compactingPhase: null,
   statusInfo: {},
   showAttachments: false,
   attachments: [],
@@ -151,9 +153,20 @@ export default () => ({
       }
       if (ev.type === 'compaction_started' && d.agent === this.$store.app.selectedAgent) {
         this.compacting = true;
+        this.compactingCounts = null;
+        this.compactingPhase = null;
+      }
+      if (ev.type === 'compaction_progress' && d.agent === this.$store.app.selectedAgent) {
+        if (d.phase === 'starting') {
+          this.compactingCounts = { replaced_count: d.replaced_count || 0, retained_count: d.retained_count || 0 };
+        } else {
+          this.compactingPhase = d;
+        }
       }
       if (ev.type === 'compaction_finished' && d.agent === this.$store.app.selectedAgent) {
         this.compacting = false;
+        this.compactingCounts = null;
+        this.compactingPhase = null;
         if (this.isActiveSession) this.reload();
       }
       if (ev.type === 'reconnect' && this.$store.app.selectedAgent) {
@@ -357,6 +370,28 @@ export default () => ({
     } catch (e) {
       this.messages.push({ type: 'error', text: `Remove skill failed: ${e.message}` });
     }
+  },
+
+  get compactingLabel() {
+    if (!this.compacting) return '';
+    const c = this.compactingCounts;
+    const phase = this.compactingPhase;
+    let base;
+    if (c && c.replaced_count) {
+      const n = c.replaced_count;
+      base = `summarizing ${n} turn${n === 1 ? '' : 's'}`;
+      if (c.retained_count) base += `, keeping ${c.retained_count}`;
+    } else {
+      base = 'compacting';
+    }
+    if (phase && phase.phase === 'summarizing' && phase.chunk_total > 1) {
+      base += ` (chunk ${phase.chunk_index}/${phase.chunk_total})`;
+    } else if (phase && phase.phase === 'combining') {
+      base = 'combining summary';
+    } else if (phase && phase.phase === 'chunking') {
+      base += ' (preparing chunks)';
+    }
+    return base + '…';
   },
 
   async compactSession(retryMsg = null) {

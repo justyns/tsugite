@@ -289,7 +289,7 @@
                 </template>
                 <button class="hbtn" @click="startEditTitle(selectedSessionMeta, $event)">✎ rename</button>
                 <template x-if="compacting">
-                  <span style="color:var(--mauve);font-size:11px"><span class="spinner"></span> compacting…</span>
+                  <span style="color:var(--mauve);font-size:11px"><span class="spinner"></span> <span x-text="compactingLabel || 'compacting…'"></span></span>
                 </template>
                 <span class="kv-pop" x-data="{ open: false }" @click.outside="open = false">
                   <button class="hbtn" @click="open = !open" title="More actions">⋯</button>

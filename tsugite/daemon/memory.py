@@ -199,6 +199,7 @@ async def summarize_session(
     conversation_history: list[dict],
     model: str | None = None,
     max_context_tokens: int | None = None,
+    progress_callback=None,
 ) -> str:
     """Summarize conversation history using LLM with chunked map-reduce.
 
@@ -206,7 +207,19 @@ async def summarize_session(
         conversation_history: List of {role, content} dicts
         model: Model to use for summarization (Tsugite format: provider:model).
         max_context_tokens: Override context limit (for Ollama/custom models).
+        progress_callback: Optional fire-and-forget sync fn called with phase
+            payloads ({"phase": "chunking"}, {"phase": "summarizing",
+            "chunk_index": i, "chunk_total": n}, {"phase": "combining"}).
     """
+
+    def _emit(payload: dict) -> None:
+        if progress_callback is None:
+            return
+        try:
+            progress_callback(payload)
+        except Exception:
+            logger.debug("compaction progress_callback raised", exc_info=True)
+
     if not conversation_history:
         return "No conversation to summarize."
 
@@ -216,15 +229,27 @@ async def summarize_session(
     context_limit = get_context_limit(model, fallback=max_context_tokens)
     usable_tokens = int(context_limit * (1 - CONTEXT_RESERVE_RATIO))
 
+    _emit({"phase": "chunking"})
     chunks = _chunk_messages(conversation_history, usable_tokens, model)
     if not chunks:
         return "No conversation to summarize."
 
     if len(chunks) == 1:
+        _emit({"phase": "summarizing", "chunk_index": 1, "chunk_total": 1})
         return await _summarize_chunk(chunks[0], model)
 
     logger.info("Summarizing %d chunks (context limit: %d, usable: %d)", len(chunks), context_limit, usable_tokens)
-    chunk_summaries = await asyncio.gather(*[_summarize_chunk(chunk, model) for chunk in chunks])
+    completed = 0
+
+    async def _summarize_with_progress(chunk: list[dict]) -> str:
+        nonlocal completed
+        result = await _summarize_chunk(chunk, model)
+        completed += 1
+        _emit({"phase": "summarizing", "chunk_index": completed, "chunk_total": len(chunks)})
+        return result
+
+    chunk_summaries = await asyncio.gather(*[_summarize_with_progress(chunk) for chunk in chunks])
+    _emit({"phase": "combining"})
     return await _combine_summaries(chunk_summaries, model)
 
 
@@ -327,3 +352,91 @@ def _event_text(event) -> str:
     if event.type == "code_execution":
         return f"{event.data.get('code', '')}\n{event.data.get('output', '') or ''}"
     return ""
+
+
+_ATTACHMENT_BLOCK = re.compile(
+    r"<attachment\b([^>]*)>.*?</attachment>",
+    re.DOTALL,
+)
+_CONTEXT_BLOCK = re.compile(r"<context>.*?</context>", re.DOTALL)
+_SKILL_BLOCK = re.compile(
+    r"<skill_content\b([^>]*)>.*?</skill_content>",
+    re.DOTALL,
+)
+_EXECUTION_RESULT = re.compile(
+    r"(<tsugite_execution_result\b[^>]*>)(.*?)(</tsugite_execution_result>)",
+    re.DOTALL,
+)
+_OUTPUT_BODY = re.compile(r"(<output>)(.*?)(</output>)", re.DOTALL)
+_TRUNCATION_MARKER = "...[truncated]..."
+
+
+def _elide_block(match: "re.Match[str]", tag: str) -> str:
+    attrs = match.group(1).strip()
+    if attrs:
+        return f'<{tag} {attrs} elided="true"/>'
+    return f'<{tag} elided="true"/>'
+
+
+def _truncate_output_body(body: str, head_chars: int, tail_chars: int) -> str:
+    if _TRUNCATION_MARKER in body:
+        return body
+    if len(body) <= head_chars + tail_chars + len(_TRUNCATION_MARKER):
+        return body
+    return f"{body[:head_chars]}\n{_TRUNCATION_MARKER}\n{body[-tail_chars:]}"
+
+
+def sanitize_for_summary(
+    messages: list[dict],
+    per_message_token_budget: int = 1500,
+    model: str = DEFAULT_COMPACT_MODEL,
+) -> list[dict]:
+    """Strip workspace-scaffolding blocks and truncate oversized tool outputs.
+
+    Applied just before `summarize_session` so the summary describes the
+    conversation, not file dumps or context-turn scaffolding that may have
+    been replayed via `code_execution` outputs (e.g. read_note('AGENTS.md')).
+
+    - Inline `<attachment>...</attachment>`, `<context>...</context>`, and
+      `<skill_content ...>...</skill_content>` blocks are replaced with one-line
+      elision tags that preserve their identifying attributes.
+    - For oversized `<tsugite_execution_result>` blocks (token count exceeding
+      `per_message_token_budget`), the `<output>...</output>` body is truncated
+      to head + marker + tail, preserving the wrapping tags so structure is
+      kept intact.
+    - String content only; non-string content (e.g. multimodal blocks) passes
+      through unchanged.
+    """
+    head_chars = max(per_message_token_budget * 4 // 4, 400)
+    tail_chars = max(per_message_token_budget * 4 // 8, 200)
+
+    out: list[dict] = []
+    for msg in messages:
+        content = msg.get("content")
+        if not isinstance(content, str):
+            out.append(msg)
+            continue
+
+        new_content = _ATTACHMENT_BLOCK.sub(lambda m: _elide_block(m, "attachment"), content)
+        new_content = _CONTEXT_BLOCK.sub('<context elided="true"/>', new_content)
+        new_content = _SKILL_BLOCK.sub(lambda m: _elide_block(m, "skill_content"), new_content)
+
+        if _count_tokens(new_content, model) > per_message_token_budget:
+
+            def _shrink(match: "re.Match[str]") -> str:
+                opening, inner, closing = match.group(1), match.group(2), match.group(3)
+                shrunk_inner = _OUTPUT_BODY.sub(
+                    lambda om: (
+                        f"{om.group(1)}{_truncate_output_body(om.group(2), head_chars, tail_chars)}{om.group(3)}"
+                    ),
+                    inner,
+                )
+                return f"{opening}{shrunk_inner}{closing}"
+
+            new_content = _EXECUTION_RESULT.sub(_shrink, new_content)
+
+        if new_content == content:
+            out.append(msg)
+        else:
+            out.append({**msg, "content": new_content})
+    return out
