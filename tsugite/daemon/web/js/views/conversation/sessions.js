@@ -62,8 +62,12 @@ export const sessionsMixin = {
   },
 
   autoSelectInteractive() {
+    // Pinned-and-mine wins over a recently-fired schedule run; if no pinned
+    // interactive session exists, fall back to any of mine, then to whatever's
+    // active, then recent.
     const g = this.groupedSessions;
-    const first = g.active[0] || g.recent[0];
+    const mine = (s) => this._isMyInteractive(s);
+    const first = g.pinned.find(mine) || g.active.find(mine) || g.active[0] || g.recent[0];
     if (first) this.selectSession(first);
   },
 
