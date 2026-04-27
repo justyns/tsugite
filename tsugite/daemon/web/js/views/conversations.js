@@ -66,6 +66,9 @@ export default () => ({
 
     for (const s of this.allSessions) {
       if (!this._matchesFilters(s)) continue;
+      // Superseded sessions stay in allSessions for chase lookups but should
+      // never appear in the sidebar.
+      if (s.superseded_by) continue;
       if (s.pinned) {
         pinned.push(s);
         continue;

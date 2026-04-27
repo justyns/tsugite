@@ -36,7 +36,10 @@ export const sessionsMixin = {
       } catch { /* corrupt cache — ignore and fetch fresh */ }
     }
     try {
-      const data = await get(`/api/agents/${agent}/sessions`);
+      // include_superseded=true so allSessions has the chain info; we filter
+      // them out of groupedSessions for the sidebar but keep them indexable
+      // here so selectSession can chase superseded_by to the live successor.
+      const data = await get(`/api/agents/${agent}/sessions?include_superseded=true`);
       this.allSessions = (data.sessions || []).map(s => ({ ...s, state: s.state || s.status }));
       const liveIds = new Set();
       for (const s of this.allSessions) {
@@ -72,6 +75,16 @@ export const sessionsMixin = {
   },
 
   async selectSession(session) {
+    // Compaction marks the old session completed and stamps superseded_by on it.
+    // The localStorage sidebar cache may still show the old one as pinned on
+    // cold load, so chase the chain to land on the live continuation.
+    const visited = new Set();
+    while (session?.superseded_by && !visited.has(session.id)) {
+      visited.add(session.id);
+      const next = this.allSessions.find(s => s.id === session.superseded_by);
+      if (!next) break;
+      session = next;
+    }
     this.sidebarOpen = false;
     this._saveDraftNow();
     const convId = session.conversation_id || session.id;
