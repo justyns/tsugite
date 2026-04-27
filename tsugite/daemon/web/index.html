@@ -311,6 +311,17 @@
                   </div>
                 </span>
               </div>
+              <template x-if="selectedSessionMeta?.superseded_by">
+                <div class="row" style="font-size:11px;color:var(--mauve)">
+                  <span>this session was compacted</span>
+                  <button class="hbtn" @click="
+                    (() => {
+                      const next = allSessions.find(s => s.id === selectedSessionMeta.superseded_by);
+                      if (next) selectSession(next);
+                    })()
+                  ">continue in live session ›</button>
+                </div>
+              </template>
               <div class="row title-row">
                 <template x-if="editingSessionId === selectedSessionMeta?.id">
                   <input class="title-input" type="text" x-model="editingTitle"
