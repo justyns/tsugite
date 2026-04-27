@@ -536,9 +536,7 @@ class PathContext:
 # Mirrors PathContext.workspace_dir for call sites (fs tools, shell, subprocesses)
 # that don't receive PathContext explicitly. Task-local so concurrent agent runs
 # don't share state.
-_workspace_dir_cv: contextvars.ContextVar[Optional[Path]] = contextvars.ContextVar(
-    "workspace_dir", default=None
-)
+_workspace_dir_cv: contextvars.ContextVar[Optional[Path]] = contextvars.ContextVar("workspace_dir", default=None)
 
 
 def get_workspace_dir() -> Optional[Path]:

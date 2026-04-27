@@ -395,21 +395,23 @@ def _convert_old_records(records: list[dict]) -> list[dict]:
     for r in records:
         rt = r.get("type")
         if rt == "session_meta":
-            events.append({
-                "type": "session_start",
-                "ts": r.get("created_at") or first_ts,
-                "data": {
-                    k: v
-                    for k, v in {
-                        "agent": r.get("agent") or "unknown",
-                        "model": r.get("model") or "unknown",
-                        "machine": r.get("machine") or "unknown",
-                        "workspace": r.get("workspace"),
-                        "parent_session": r.get("compacted_from"),
-                    }.items()
-                    if v is not None
-                },
-            })
+            events.append(
+                {
+                    "type": "session_start",
+                    "ts": r.get("created_at") or first_ts,
+                    "data": {
+                        k: v
+                        for k, v in {
+                            "agent": r.get("agent") or "unknown",
+                            "model": r.get("model") or "unknown",
+                            "machine": r.get("machine") or "unknown",
+                            "workspace": r.get("workspace"),
+                            "parent_session": r.get("compacted_from"),
+                        }.items()
+                        if v is not None
+                    },
+                }
+            )
         elif rt == "turn":
             ts = r.get("timestamp") or first_ts
             user_text = ""
@@ -441,33 +443,37 @@ def _convert_old_records(records: list[dict]) -> list[dict]:
                 response_data["cost"] = r["cost"]
             events.append({"type": "model_response", "ts": ts, "data": response_data})
         elif rt == "compaction_summary":
-            events.append({
-                "type": "compaction",
-                "ts": r.get("timestamp") or first_ts,
-                "data": {
-                    k: v
-                    for k, v in {
-                        "summary": r.get("summary", ""),
-                        "replaced_count": r.get("previous_turns", 0),
-                        "retained_count": r.get("retained_turns", 0),
-                        "reason": r.get("compaction_reason"),
-                    }.items()
-                    if v is not None
-                },
-            })
+            events.append(
+                {
+                    "type": "compaction",
+                    "ts": r.get("timestamp") or first_ts,
+                    "data": {
+                        k: v
+                        for k, v in {
+                            "summary": r.get("summary", ""),
+                            "replaced_count": r.get("previous_turns", 0),
+                            "retained_count": r.get("retained_turns", 0),
+                            "reason": r.get("compaction_reason"),
+                        }.items()
+                        if v is not None
+                    },
+                }
+            )
         elif rt == "session_status":
-            events.append({
-                "type": "session_end",
-                "ts": r.get("timestamp") or first_ts,
-                "data": {
-                    k: v
-                    for k, v in {
-                        "status": r.get("status", "success"),
-                        "error_message": r.get("error_message"),
-                    }.items()
-                    if v is not None
-                },
-            })
+            events.append(
+                {
+                    "type": "session_end",
+                    "ts": r.get("timestamp") or first_ts,
+                    "data": {
+                        k: v
+                        for k, v in {
+                            "status": r.get("status", "success"),
+                            "error_message": r.get("error_message"),
+                        }.items()
+                        if v is not None
+                    },
+                }
+            )
         # context / context_update / hook_execution are dropped intentionally.
     return events
 
@@ -556,9 +562,7 @@ def migrate_path(root: Path, *, backup: bool, dry_run: bool, recursive: bool) ->
     return (migrated, skipped, failed)
 
 
-def migrate_daemon_sessions(
-    daemon_dir: Path, history_dir: Path, *, backup: bool, dry_run: bool
-) -> tuple[int, int]:
+def migrate_daemon_sessions(daemon_dir: Path, history_dir: Path, *, backup: bool, dry_run: bool) -> tuple[int, int]:
     """Merge legacy ``daemon/sessions/{id}.jsonl`` UI events into the matching
     ``history/{id}.jsonl`` file.
 
@@ -600,11 +604,13 @@ def migrate_daemon_sessions(
         # Convert to new Event shape, sorted by timestamp
         new_events = []
         for e in daemon_events:
-            new_events.append({
-                "type": e.get("type", "unknown"),
-                "ts": e.get("timestamp"),
-                "data": {k: v for k, v in e.items() if k not in ("type", "timestamp")},
-            })
+            new_events.append(
+                {
+                    "type": e.get("type", "unknown"),
+                    "ts": e.get("timestamp"),
+                    "data": {k: v for k, v in e.items() if k not in ("type", "timestamp")},
+                }
+            )
         new_events.sort(key=lambda e: e.get("ts") or "")
 
         if dry_run:

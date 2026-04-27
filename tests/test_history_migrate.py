@@ -27,11 +27,24 @@ def test_migrates_basic_session(session_path):
     _write_old_session(
         session_path,
         [
-            {"type": "session_meta", "agent": "chat", "model": "openai:gpt-4o", "machine": "mac", "created_at": "2026-01-01T12:00:00+00:00"},
-            {"type": "turn", "timestamp": "2026-01-01T12:00:05+00:00", "messages": [
-                {"role": "user", "content": "hello"},
-                {"role": "assistant", "content": "hi there"},
-            ], "final_answer": "hi there", "tokens": 100, "cost": 0.001},
+            {
+                "type": "session_meta",
+                "agent": "chat",
+                "model": "openai:gpt-4o",
+                "machine": "mac",
+                "created_at": "2026-01-01T12:00:00+00:00",
+            },
+            {
+                "type": "turn",
+                "timestamp": "2026-01-01T12:00:05+00:00",
+                "messages": [
+                    {"role": "user", "content": "hello"},
+                    {"role": "assistant", "content": "hi there"},
+                ],
+                "final_answer": "hi there",
+                "tokens": 100,
+                "cost": 0.001,
+            },
             {"type": "session_status", "status": "success", "timestamp": "2026-01-01T12:00:10+00:00"},
         ],
     )
@@ -69,7 +82,9 @@ def test_skips_empty_file(tmp_path):
 
 
 def test_dry_run_does_not_modify(session_path):
-    original_content = json.dumps({"type": "session_meta", "agent": "x", "model": "y", "machine": "m", "created_at": "2026-01-01T00:00:00+00:00"})
+    original_content = json.dumps(
+        {"type": "session_meta", "agent": "x", "model": "y", "machine": "m", "created_at": "2026-01-01T00:00:00+00:00"}
+    )
     session_path.write_text(original_content + "\n")
     migrate_session_file(session_path, backup=False, dry_run=True)
     assert session_path.read_text().strip() == original_content
@@ -79,7 +94,13 @@ def test_creates_backup_when_requested(session_path):
     _write_old_session(
         session_path,
         [
-            {"type": "session_meta", "agent": "x", "model": "y", "machine": "m", "created_at": "2026-01-01T00:00:00+00:00"},
+            {
+                "type": "session_meta",
+                "agent": "x",
+                "model": "y",
+                "machine": "m",
+                "created_at": "2026-01-01T00:00:00+00:00",
+            },
         ],
     )
     original = session_path.read_text()
@@ -93,12 +114,30 @@ def test_preserves_compaction_summary(session_path):
     _write_old_session(
         session_path,
         [
-            {"type": "session_meta", "agent": "x", "model": "y", "machine": "m", "created_at": "2026-01-01T00:00:00+00:00", "compacted_from": "older-id"},
-            {"type": "compaction_summary", "summary": "we discussed cats", "previous_turns": 10, "retained_turns": 2, "compaction_reason": "token_threshold"},
-            {"type": "turn", "timestamp": "2026-01-01T00:00:01+00:00", "messages": [
-                {"role": "user", "content": "next message"},
-                {"role": "assistant", "content": "ok"},
-            ], "final_answer": "ok"},
+            {
+                "type": "session_meta",
+                "agent": "x",
+                "model": "y",
+                "machine": "m",
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "compacted_from": "older-id",
+            },
+            {
+                "type": "compaction_summary",
+                "summary": "we discussed cats",
+                "previous_turns": 10,
+                "retained_turns": 2,
+                "compaction_reason": "token_threshold",
+            },
+            {
+                "type": "turn",
+                "timestamp": "2026-01-01T00:00:01+00:00",
+                "messages": [
+                    {"role": "user", "content": "next message"},
+                    {"role": "assistant", "content": "ok"},
+                ],
+                "final_answer": "ok",
+            },
         ],
     )
     migrate_session_file(session_path, backup=False, dry_run=False)
@@ -119,14 +158,39 @@ def test_drops_tool_calls_and_context(session_path):
     _write_old_session(
         session_path,
         [
-            {"type": "session_meta", "agent": "x", "model": "y", "machine": "m", "created_at": "2026-01-01T00:00:00+00:00"},
+            {
+                "type": "session_meta",
+                "agent": "x",
+                "model": "y",
+                "machine": "m",
+                "created_at": "2026-01-01T00:00:00+00:00",
+            },
             {"type": "context", "attachments": {"foo": {"hash": "abc"}}, "skills": ["sk1"], "hash": "x"},
-            {"type": "context_update", "changed": {}, "removed": [], "added_skills": ["sk2"], "removed_skills": [], "timestamp": "2026-01-01T00:00:01+00:00", "hash": "y"},
-            {"type": "hook_execution", "phase": "pre", "command": "echo hi", "exit_code": 0, "timestamp": "2026-01-01T00:00:02+00:00"},
-            {"type": "turn", "timestamp": "2026-01-01T00:00:03+00:00", "messages": [
-                {"role": "user", "content": "hey"},
-                {"role": "assistant", "content": "yo"},
-            ], "final_answer": "yo"},
+            {
+                "type": "context_update",
+                "changed": {},
+                "removed": [],
+                "added_skills": ["sk2"],
+                "removed_skills": [],
+                "timestamp": "2026-01-01T00:00:01+00:00",
+                "hash": "y",
+            },
+            {
+                "type": "hook_execution",
+                "phase": "pre",
+                "command": "echo hi",
+                "exit_code": 0,
+                "timestamp": "2026-01-01T00:00:02+00:00",
+            },
+            {
+                "type": "turn",
+                "timestamp": "2026-01-01T00:00:03+00:00",
+                "messages": [
+                    {"role": "user", "content": "hey"},
+                    {"role": "assistant", "content": "yo"},
+                ],
+                "final_answer": "yo",
+            },
         ],
     )
     migrate_session_file(session_path, backup=False, dry_run=False)
@@ -145,8 +209,20 @@ def test_handles_user_summary_when_messages_missing(session_path):
     _write_old_session(
         session_path,
         [
-            {"type": "session_meta", "agent": "x", "model": "y", "machine": "m", "created_at": "2026-01-01T00:00:00+00:00"},
-            {"type": "turn", "timestamp": "2026-01-01T00:00:01+00:00", "user_summary": "what time?", "final_answer": "noon", "messages": []},
+            {
+                "type": "session_meta",
+                "agent": "x",
+                "model": "y",
+                "machine": "m",
+                "created_at": "2026-01-01T00:00:00+00:00",
+            },
+            {
+                "type": "turn",
+                "timestamp": "2026-01-01T00:00:01+00:00",
+                "user_summary": "what time?",
+                "final_answer": "noon",
+                "messages": [],
+            },
         ],
     )
     migrate_session_file(session_path, backup=False, dry_run=False)
@@ -160,10 +236,21 @@ def test_atomic_rewrite_on_failure(session_path, monkeypatch):
     _write_old_session(
         session_path,
         [
-            {"type": "session_meta", "agent": "x", "model": "y", "machine": "m", "created_at": "2026-01-01T00:00:00+00:00"},
-            {"type": "turn", "timestamp": "2026-01-01T00:00:01+00:00", "messages": [
-                {"role": "user", "content": "hi"},
-            ], "final_answer": "ok"},
+            {
+                "type": "session_meta",
+                "agent": "x",
+                "model": "y",
+                "machine": "m",
+                "created_at": "2026-01-01T00:00:00+00:00",
+            },
+            {
+                "type": "turn",
+                "timestamp": "2026-01-01T00:00:01+00:00",
+                "messages": [
+                    {"role": "user", "content": "hi"},
+                ],
+                "final_answer": "ok",
+            },
         ],
     )
     original = session_path.read_text()

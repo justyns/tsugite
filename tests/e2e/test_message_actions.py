@@ -34,7 +34,9 @@ def _open_session(page, user_id, session_id):
 def test_copy_markdown_button_present_on_every_rendered_message(authenticated_page, e2e_adapter, e2e_tmp):
     page = authenticated_page
     history_dir, user_id, session_id = _seed_turn(
-        e2e_adapter, e2e_tmp, "present",
+        e2e_adapter,
+        e2e_tmp,
+        "present",
         messages=[{"role": "user", "content": "hi"}],
         final_answer="# Answer\n\nSome **bold** text.",
     )
@@ -64,14 +66,11 @@ def test_copy_markdown_button_writes_raw_markdown_to_clipboard(authenticated_pag
     page = authenticated_page
     page.context.grant_permissions(["clipboard-read", "clipboard-write"])
 
-    md = (
-        "# Heading\n\n"
-        "A table:\n\n"
-        "| col |\n| --- |\n| x |\n\n"
-        "```python\nprint('hi')\n```\n"
-    )
+    md = "# Heading\n\nA table:\n\n| col |\n| --- |\n| x |\n\n```python\nprint('hi')\n```\n"
     history_dir, user_id, session_id = _seed_turn(
-        e2e_adapter, e2e_tmp, "copy-md",
+        e2e_adapter,
+        e2e_tmp,
+        "copy-md",
         messages=[{"role": "user", "content": "render this"}],
         final_answer=md,
     )
@@ -115,7 +114,9 @@ def test_copy_user_message_writes_raw_user_text(authenticated_page, e2e_adapter,
 
     user_text = "please **render** this and keep _formatting_"
     history_dir, user_id, session_id = _seed_turn(
-        e2e_adapter, e2e_tmp, "copy-user",
+        e2e_adapter,
+        e2e_tmp,
+        "copy-user",
         messages=[{"role": "user", "content": user_text}],
         final_answer="ok",
     )
@@ -137,7 +138,9 @@ def test_copy_code_block_button_injected_per_pre(authenticated_page, e2e_adapter
 
     md = "```python\nprint('one')\n```\n\ntext\n\n```js\nconsole.log('two');\n```\n"
     history_dir, user_id, session_id = _seed_turn(
-        e2e_adapter, e2e_tmp, "pre-count",
+        e2e_adapter,
+        e2e_tmp,
+        "pre-count",
         messages=[{"role": "user", "content": "two blocks"}],
         final_answer=md,
     )
@@ -160,7 +163,9 @@ def test_copy_code_block_copies_full_code_preserving_whitespace(authenticated_pa
     long_code = "\n".join(f"    line_{i} = {i}" for i in range(40))
     md = f"Here you go:\n\n```python\n{long_code}\n```\n"
     history_dir, user_id, session_id = _seed_turn(
-        e2e_adapter, e2e_tmp, "copy-code",
+        e2e_adapter,
+        e2e_tmp,
+        "copy-code",
         messages=[{"role": "user", "content": "show code"}],
         final_answer=md,
     )
@@ -219,12 +224,8 @@ def test_toast_success_and_error_variants_have_correct_border(authenticated_page
     err_color = page.locator(".toast-error").evaluate("el => getComputedStyle(el).borderLeftColor")
 
     # `--ok` / `--error` are defined on `[data-theme]`, which is the <body>.
-    expected_ok = page.evaluate(
-        "getComputedStyle(document.body).getPropertyValue('--ok').trim()"
-    )
-    expected_err = page.evaluate(
-        "getComputedStyle(document.body).getPropertyValue('--error').trim()"
-    )
+    expected_ok = page.evaluate("getComputedStyle(document.body).getPropertyValue('--ok').trim()")
+    expected_err = page.evaluate("getComputedStyle(document.body).getPropertyValue('--error').trim()")
 
     def _normalize(css_color):
         # Both computed `border-left-color` and the raw token are color strings;

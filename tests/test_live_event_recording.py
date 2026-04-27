@@ -2,7 +2,7 @@
 and that `save_run_to_history` doesn't double-write when the agent already did."""
 
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -14,8 +14,10 @@ from tsugite.history import SessionStorage
 def history_dir(tmp_path: Path):
     history = tmp_path / "history"
     history.mkdir()
-    with patch("tsugite.history.storage.get_history_dir", return_value=history), \
-         patch("tsugite.agent_runner.history_integration.get_history_dir", return_value=history):
+    with (
+        patch("tsugite.history.storage.get_history_dir", return_value=history),
+        patch("tsugite.agent_runner.history_integration.get_history_dir", return_value=history),
+    ):
         yield history
 
 

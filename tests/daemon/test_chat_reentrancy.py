@@ -122,9 +122,7 @@ def test_second_chat_for_same_user_is_rejected_while_first_runs(client, mock_ada
             json={"message": "second", "user_id": "alice"},
             headers={"Authorization": f"Bearer {test_token}"},
         )
-        assert resp2.status_code == 409, (
-            f"expected 409 Conflict, got {resp2.status_code}: {resp2.text}"
-        )
+        assert resp2.status_code == 409, f"expected 409 Conflict, got {resp2.status_code}: {resp2.text}"
 
         first_done.wait(timeout=5)
 

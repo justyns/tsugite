@@ -133,7 +133,6 @@ class TestAnthropicThinkingStreaming:
 
     @pytest.mark.asyncio
     async def test_thinking_delta_yields_reasoning_chunk(self, monkeypatch):
-        from tsugite.providers import anthropic as anth_mod
         from tsugite.providers.anthropic import AnthropicProvider
         from tsugite.providers.base import StreamChunk
 

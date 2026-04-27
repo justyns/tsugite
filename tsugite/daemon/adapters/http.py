@@ -23,14 +23,12 @@ from starlette.staticfiles import StaticFiles
 from tsugite.agent_inheritance import get_builtin_agents_path, get_global_agents_paths
 from tsugite.attachments.base import AttachmentContentType
 from tsugite.attachments.file import FileHandler
-from tsugite.core.content_blocks import extract_content_blocks
 from tsugite.daemon.adapters.base import BaseAdapter, ChannelContext
 from tsugite.daemon.config import AgentConfig, HTTPConfig
 from tsugite.daemon.scheduler import ScheduleEntry
 from tsugite.daemon.webhook_store import WebhookStore
 from tsugite.events.base import BaseEvent
 from tsugite.history.storage import SessionStorage, get_history_dir
-from tsugite.hooks import HookExecution
 from tsugite.skill_discovery import get_builtin_skills_path
 from tsugite.ui.jsonl import JSONLUIHandler
 from tsugite.utils import parse_yaml_frontmatter
@@ -527,6 +525,7 @@ class HTTPServer:
     async def _health(self, request: Request) -> JSONResponse:
         try:
             from importlib.metadata import version
+
             v = version("tsugite-cli")
         except Exception:  # noqa: BLE001 — fall back to in-tree constant
             from tsugite import __version__ as v
@@ -1112,6 +1111,7 @@ class HTTPServer:
                 return JSONResponse({"error": "model must be a string"}, status_code=400)
             else:
                 from tsugite.models import get_provider_and_model
+
                 try:
                     get_provider_and_model(raw)
                 except Exception as exc:  # noqa: BLE001
@@ -1144,13 +1144,15 @@ class HTTPServer:
         for key, info in list_models().items():
             provider, _, model_id = key.partition("/")
             full_id = f"{provider}:{model_id}" if provider and model_id else key
-            models.append({
-                "id": full_id,
-                "provider": provider or None,
-                "context_window": info.max_input_tokens,
-                "supports_vision": info.supports_vision,
-                "supports_reasoning": info.supports_reasoning,
-            })
+            models.append(
+                {
+                    "id": full_id,
+                    "provider": provider or None,
+                    "context_window": info.max_input_tokens,
+                    "supports_vision": info.supports_vision,
+                    "supports_reasoning": info.supports_reasoning,
+                }
+            )
         models.sort(key=lambda m: m["id"])
         return JSONResponse({"models": models})
 

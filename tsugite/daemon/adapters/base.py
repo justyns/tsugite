@@ -2,9 +2,7 @@
 
 import asyncio
 import contextvars
-import json
 import logging
-import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -457,13 +455,9 @@ class BaseAdapter(ABC):
                 attachments.extend(channel_context.metadata.pop("uploaded_attachments"))
 
             meta = channel_context.metadata or {}
-            effort_override = meta.get("reasoning_effort_override") or self.session_store.get_reasoning_effort(
-                conv_id
-            )
+            effort_override = meta.get("reasoning_effort_override") or self.session_store.get_reasoning_effort(conv_id)
             model_override = (
-                meta.get("model_override")
-                or self.session_store.get_model_override(conv_id)
-                or self.agent_config.model
+                meta.get("model_override") or self.session_store.get_model_override(conv_id) or self.agent_config.model
             )
             return run_agent(
                 agent_path=agent_path,
@@ -670,9 +664,7 @@ class BaseAdapter(ABC):
             # Drop anything that exceeded its TTL and notify listeners.
             for name, counter in list(self.session_store.get_sticky_skills(conv_id).items()):
                 meta = registry.get(name)
-                effective_ttl = (
-                    meta.ttl if (meta is not None and meta.ttl is not None) else ttl_default
-                )
+                effective_ttl = meta.ttl if (meta is not None and meta.ttl is not None) else ttl_default
                 if effective_ttl > 0 and counter > effective_ttl:
                     self.session_store.drop_sticky(conv_id, name)
                     if self.event_bus:
@@ -763,7 +755,11 @@ class BaseAdapter(ABC):
         first_user_event = next((e for e in old_events if e.type == "user_input"), None)
         last_response_event = next((e for e in reversed(old_events) if e.type == "model_response"), None)
         time_start = first_user_event.ts.isoformat() if first_user_event else ""
-        time_end = (last_response_event or first_user_event).ts.isoformat() if (last_response_event or first_user_event) else ""
+        time_end = (
+            (last_response_event or first_user_event).ts.isoformat()
+            if (last_response_event or first_user_event)
+            else ""
+        )
 
         meta_parts = [
             "<session_metadata>",

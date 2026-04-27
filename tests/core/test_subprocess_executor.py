@@ -45,9 +45,7 @@ async def test_subprocess_inherits_workspace_cwd(tmp_path):
     try:
         result = await executor.execute("import os; print(os.getcwd())")
         assert result.error is None, result.error
-        assert str(workspace) in result.output, (
-            f"Subprocess cwd is {result.output!r}, expected {workspace!s}"
-        )
+        assert str(workspace) in result.output, f"Subprocess cwd is {result.output!r}, expected {workspace!s}"
     finally:
         executor.cleanup()
 

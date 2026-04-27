@@ -118,9 +118,7 @@ class SkillManager:
     def _ensure_registry_initialized(self):
         """Initialize skill registry if not already initialized."""
         if not self._registry_initialized:
-            skills, issues = scan_skills_with_issues(
-                workspace=self._workspace, extra_paths=self._extra_paths
-            )
+            skills, issues = scan_skills_with_issues(workspace=self._workspace, extra_paths=self._extra_paths)
             self._skill_registry = {skill.name: skill for skill in skills}
             self._scan_issues = issues
             self._registry_initialized = True

@@ -36,9 +36,7 @@ def _make_adapter(name: str, workspace: Path, store: SessionStore) -> HTTPAgentA
 
 
 @pytest.mark.asyncio
-async def test_concurrent_handle_message_sees_own_workspace_via_contextvar(
-    monkeypatch, two_workspaces, session_store
-):
+async def test_concurrent_handle_message_sees_own_workspace_via_contextvar(monkeypatch, two_workspaces, session_store):
     ws_a, ws_b = two_workspaces
 
     adapter_a = _make_adapter("agent-a", ws_a, session_store)

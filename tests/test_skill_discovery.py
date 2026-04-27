@@ -646,9 +646,7 @@ class TestScanSkillsWithIssues:
     def test_invalid_trigger_is_warning_and_skill_loads(self, root):
         skill_dir = root / "bad-trig"
         skill_dir.mkdir()
-        (skill_dir / "SKILL.md").write_text(
-            "---\nname: bad-trig\ndescription: x\ntriggers:\n  - 403\n---\nBody.\n"
-        )
+        (skill_dir / "SKILL.md").write_text("---\nname: bad-trig\ndescription: x\ntriggers:\n  - 403\n---\nBody.\n")
         skills, issues = scan_skills_with_issues()
         assert "bad-trig" in {s.name for s in skills}
         matched = [i for i in issues if i.name == "bad-trig"]
@@ -658,7 +656,7 @@ class TestScanSkillsWithIssues:
         skill_dir = root / "bad-regex"
         skill_dir.mkdir()
         (skill_dir / "SKILL.md").write_text(
-            "---\nname: bad-regex\ndescription: x\ntriggers:\n  - \"/[unclosed/\"\n---\nBody.\n"
+            '---\nname: bad-regex\ndescription: x\ntriggers:\n  - "/[unclosed/"\n---\nBody.\n'
         )
         skills, issues = scan_skills_with_issues()
         assert "bad-regex" in {s.name for s in skills}

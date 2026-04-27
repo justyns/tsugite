@@ -67,9 +67,7 @@ class TestFindJsonObjectInString:
 
 class TestExtractAndParseJsonArgs:
     def test_simple(self):
-        assert extract_and_parse_json_args('args={"path": "test.txt"}', "read_file") == {
-            "path": "test.txt"
-        }
+        assert extract_and_parse_json_args('args={"path": "test.txt"}', "read_file") == {"path": "test.txt"}
 
     def test_with_surrounding_attributes(self):
         raw = 'name="read_file" args={"path": "x"} assign="data"'

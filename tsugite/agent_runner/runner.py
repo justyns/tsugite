@@ -560,7 +560,8 @@ async def _execute_agent_with_prompt(
     try:
         session_storage = open_or_create_session(
             agent_path=prepared.agent.file_path,
-            agent_name=prepared.agent_config.name or (prepared.agent.file_path.stem if prepared.agent.file_path else "agent"),
+            agent_name=prepared.agent_config.name
+            or (prepared.agent.file_path.stem if prepared.agent.file_path else "agent"),
             model=model_string,
             continue_conversation_id=continue_conversation_id,
             workspace=workspace.name if workspace else None,

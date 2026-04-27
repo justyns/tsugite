@@ -37,6 +37,7 @@ class HookExecution(BaseModel):
     duration_ms: Optional[int] = None
     timestamp: Optional[datetime] = None
 
+
 logger = logging.getLogger(__name__)
 
 FALSY_STRINGS = {"false", "none", "0", ""}

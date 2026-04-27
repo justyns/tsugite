@@ -109,14 +109,13 @@ Tsugite is an agentic CLI that executes AI agents defined as markdown files with
    - Code execution via `LocalExecutor`
 
 8. **Tool System** (`tsugite/tools/`)
-   - Tool registry with built-in tools (fs, http, shell, tasks, agents, memory, skills, history, interactive)
-   - Category system: `@fs`, `@http`, `@shell`, `@tasks`, `@agents`, `@memory`, `@skills`, `@history`, `@interactive`
-   - Custom shell tools (config-based command wrappers)
-   - Tool expansion supports globs (`*_search`) and exclusions (`-delete_file`)
+   - Tool registry with built-in tools (fs, http, shell, agents, skills, history, interactive) plus optional categories (notify, schedule, scratchpad, sessions, secrets, tmux — gated by `_OPTIONAL_CATEGORIES` in `tools/__init__.py`)
+   - Custom shell tools (config-based command wrappers in `tools/shell_tools.py`)
+   - Tool expansion supports globs (`*_search`), categories (`@fs`), and exclusions (`-delete_file`)
 
 9. **Event System** (`tsugite/events/`)
    - Event-driven architecture for UI decoupling
-   - 20 event types: execution, LLM, meta, progress, skills
+   - 28 event types: execution, LLM, meta, progress, skills
    - `EventBus` dispatches to multiple handlers
    - Handlers: Rich console, plain text, JSONL, chat, REPL
 
@@ -134,12 +133,12 @@ Tsugite is an agentic CLI that executes AI agents defined as markdown files with
 
 ### Key Data Structures
 
-**AgentConfig** (`md_agents.py:43`)
+**AgentConfig** (`md_agents.py:36`)
 - Pydantic model for agent frontmatter
 - Validates all fields (name, model, tools, max_turns, etc.)
 - Schema exported to `tsugite/schemas/agent.schema.json`
 
-**PreparedAgent** (`agent_preparation.py:17`)
+**PreparedAgent** (`agent_preparation.py:69`)
 - Dataclass containing everything for execution/display
 - Ensures `render` shows exactly what `run` executes
 - Contains: agent, config, system_message, user_message, tools, context
@@ -313,7 +312,7 @@ tsu run -f image1.jpg -f image2.jpg "Compare these images"
 
 1. Update `AgentConfig` Pydantic model (`md_agents.py`)
 2. Regenerate schema: `uv run python scripts/regenerate_schema.py`
-3. Update documentation in CLAUDE.md (user guide section)
+3. Update relevant documentation in `AGENTS.md` and any user-facing doc under `docs/`
 4. Add validation tests in `tests/test_agent_parser.py`
 
 ## Testing Strategy
@@ -362,6 +361,28 @@ Reproducing tests don't need to be elaborate. A 10-line test that flips red→gr
 5. **Don't use blocking IO in async**: Use `asyncio.to_thread()` for sync tools
 6. **Test both sync and async paths**: Many tools support both execution modes
 7. **Don't embed prompts in adapters/code**: Use context variables + conditional blocks in `default.md` instead. Add new context vars in `_build_agent_context()` (base adapter) and default them in `agent_preparation.py`, then use `{% if var %}` in the agent template. This keeps all prompt content in one place and leverages the existing rendering pipeline.
+
+## Web UI
+
+The daemon's web UI lives at `tsugite/daemon/web/`.
+
+### Stack
+
+- **Alpine.js 3** loaded from CDN. No build step. No React. Don't port this to a framework - the design handoff explicitly said match visuals, not internal structure.
+- **Starlette** serves `index.html` plus `/static/{css,js,icons}` and the `/api/*` routes (`tsugite/daemon/adapters/http.py`).
+- CSS lives in three files. Read all three before adding rules: `theme.css` (Catppuccin tokens), `console.css` (Console redesign - the real stylesheet), `styles.css` (legacy modals/auth/forms; ~120 lines, pruned aggressively after the redesign).
+- View modules under `js/views/`: `conversations.js` (orchestrator) + `conversation/{sessions,history,streaming,input,attachments,event_types}.js` mixins, plus `workspace.js`, `schedules.js`, `webhooks.js`, `usage.js`, `file-editor.js`. Shared helpers: `js/api.js` (REST + SSE), `js/utils.js` (markdown, formatters, toast).
+
+### Theme tokens
+
+- Use **bare token names** - `var(--base)`, `var(--mantle)`, `var(--crust)`, `var(--surface0/1/2)`, `var(--text)`, `var(--lavender)`, `var(--blue)`, `var(--peach)`, etc. The legacy `--ctp-*` aliases were removed.
+- **Visual depth is `crust < mantle < base`** (darker → lighter on Frappé/Mocha/Macchiato). For dark-on-dark panels, panels go `var(--mantle)` and inner cards `var(--surface0)` or `var(--crust)`. Don't put a brighter (`--bg`/`--base`) header over a `--mantle` panel - it inverts the depth on dark themes.
+- Never hardcode hex colors. They won't theme-switch. Even in JS palette objects (e.g. `PI_COLORS` in `conversations.js`), use `var(--pink)` strings - they get embedded into `:style="background: ..."` and resolve through the CSS cascade.
+- `<meta name="theme-color">` is synced to the active theme's `--crust` via an `Alpine.effect` in `app.js` so the PWA status bar / mobile chrome track the theme.
+
+### Verification
+
+Browser verification on UI changes is mandatory. The smoketest recipe - daemon spinup, Playwright wiring, and the post-redesign DOM selectors - is captured in the agent's project memory file `project_daemon_ui_smoketest.md`. There's also a `project_webui_console_hotzones.md` memory listing the load-bearing assumptions in the new UI (pulse signal, mid-turn reload guards, theme depth, PWA resume, mobile back-buttons) that bit during the redesign and should be re-read before touching session lifecycle, theme tokens, or PWA behaviour.
 
 ## Code Review Policy
 

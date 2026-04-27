@@ -26,42 +26,18 @@ def _agent():
 @pytest.mark.asyncio
 async def test_parse_triple_quoted_body_with_real_newlines_and_inner_fences():
     llm_response = (
-        "Posting a comment.\n\n"
-        "```python\n"
-        'body = """example:\n'
-        "\n"
-        "```\n"
-        "inner\n"
-        "```\n"
-        "\n"
-        'end.\n'
-        '"""\n'
-        "post_comment(body)\n"
-        "```"
+        'Posting a comment.\n\n```python\nbody = """example:\n\n```\ninner\n```\n\nend.\n"""\npost_comment(body)\n```'
     )
 
     parsed = _agent()._parse_response_from_text(llm_response)
 
-    assert "post_comment(body)" in parsed.code, (
-        f"Parser truncated at an inner backtick. Got: {parsed.code!r}"
-    )
+    assert "post_comment(body)" in parsed.code, f"Parser truncated at an inner backtick. Got: {parsed.code!r}"
     ast.parse(parsed.code)
 
 
 @pytest.mark.asyncio
 async def test_parse_triple_single_quoted_body_with_inner_fences():
-    llm_response = (
-        "```python\n"
-        "body = '''\n"
-        "example:\n"
-        "```\n"
-        "inner\n"
-        "```\n"
-        "end\n"
-        "'''\n"
-        "print(body)\n"
-        "```"
-    )
+    llm_response = "```python\nbody = '''\nexample:\n```\ninner\n```\nend\n'''\nprint(body)\n```"
 
     parsed = _agent()._parse_response_from_text(llm_response)
     assert "print(body)" in parsed.code, f"Got: {parsed.code!r}"
@@ -89,14 +65,6 @@ async def test_multiple_top_level_blocks_still_counted():
     """Picking the right close fence must not change the multi-block count
     the agent relies on for its warning.
     """
-    llm_response = (
-        "```python\n"
-        'x = """\n```\ny\n```\n"""\n'
-        "```\n\n"
-        "some prose\n\n"
-        "```python\n"
-        "final_answer(x)\n"
-        "```"
-    )
+    llm_response = '```python\nx = """\n```\ny\n```\n"""\n```\n\nsome prose\n\n```python\nfinal_answer(x)\n```'
     parsed = _agent()._parse_response_from_text(llm_response)
     assert parsed.num_code_blocks == 2, f"got {parsed.num_code_blocks}"

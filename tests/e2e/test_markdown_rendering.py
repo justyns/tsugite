@@ -88,12 +88,7 @@ def test_markdown_gfm_table_renders(authenticated_page, e2e_adapter, e2e_tmp):
     """Simple GFM table produces <table><thead><th>...<tbody><tr><td>."""
     page = authenticated_page
 
-    md = (
-        "| Name | Score |\n"
-        "| ---- | ----- |\n"
-        "| Alice | 10 |\n"
-        "| Bob | 20 |\n"
-    )
+    md = "| Name | Score |\n| ---- | ----- |\n| Alice | 10 |\n| Bob | 20 |\n"
 
     history_dir, user_id, session_id = _seed_agent_turn(e2e_adapter, e2e_tmp, "table", md)
 
@@ -113,11 +108,7 @@ def test_markdown_gfm_table_alignment(authenticated_page, e2e_adapter, e2e_tmp):
     """GFM alignment syntax yields text-align on th/td via inline style."""
     page = authenticated_page
 
-    md = (
-        "| L | C | R |\n"
-        "| :--- | :---: | ---: |\n"
-        "| a | b | c |\n"
-    )
+    md = "| L | C | R |\n| :--- | :---: | ---: |\n| a | b | c |\n"
 
     history_dir, user_id, session_id = _seed_agent_turn(e2e_adapter, e2e_tmp, "align", md)
 
@@ -143,12 +134,7 @@ def test_markdown_table_styling(authenticated_page, e2e_adapter, e2e_tmp):
     """Computed CSS matches the design: no uppercase header, last row no border."""
     page = authenticated_page
 
-    md = (
-        "| h1 | h2 |\n"
-        "| --- | --- |\n"
-        "| a | b |\n"
-        "| c | d |\n"
-    )
+    md = "| h1 | h2 |\n| --- | --- |\n| a | b |\n| c | d |\n"
 
     history_dir, user_id, session_id = _seed_agent_turn(e2e_adapter, e2e_tmp, "style", md)
 
@@ -163,8 +149,7 @@ def test_markdown_table_styling(authenticated_page, e2e_adapter, e2e_tmp):
 
         last_td = agent.locator("table tbody tr").last.locator("td").first
         border = last_td.evaluate(
-            "el => ({ style: getComputedStyle(el).borderBottomStyle, "
-            "width: getComputedStyle(el).borderBottomWidth })"
+            "el => ({ style: getComputedStyle(el).borderBottomStyle, width: getComputedStyle(el).borderBottomWidth })"
         )
         assert border["style"] == "none" or border["width"] == "0px", (
             f"last row should have no bottom border; got {border}"
@@ -189,12 +174,8 @@ def test_markdown_wide_table_scrolls_inside_bubble(authenticated_page, e2e_adapt
         _open_session(page, user_id, session_id)
         table = page.locator(".msg.agent table").last
 
-        dims = table.evaluate(
-            "el => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth })"
-        )
-        assert dims["scrollWidth"] > dims["clientWidth"], (
-            f"expected table to be horizontally scrollable; got {dims}"
-        )
+        dims = table.evaluate("el => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth })")
+        assert dims["scrollWidth"] > dims["clientWidth"], f"expected table to be horizontally scrollable; got {dims}"
 
         page_dims = page.evaluate(
             "() => ({ scrollWidth: document.documentElement.scrollWidth, "

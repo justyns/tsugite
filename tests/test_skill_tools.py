@@ -349,9 +349,7 @@ class TestSkillFailureTracking:
         skills_root.mkdir(parents=True)
         bad = skills_root / "bad-trig"
         bad.mkdir()
-        (bad / "SKILL.md").write_text(
-            "---\nname: bad-trig\ndescription: x\ntriggers:\n  - 403\n---\nBody.\n"
-        )
+        (bad / "SKILL.md").write_text("---\nname: bad-trig\ndescription: x\ntriggers:\n  - 403\n---\nBody.\n")
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("HOME", str(tmp_path))
 
@@ -363,9 +361,7 @@ class TestSkillFailureTracking:
         assert "bad-trig" in names_with_issues
 
     def test_load_failure_recorded_on_render_error(self, tmp_path, monkeypatch):
-        skill_dir = _make_skill_dir(
-            tmp_path / "skills", "broken", body="Hello {{ undefined_var }}\n"
-        )
+        skill_dir = _make_skill_dir(tmp_path / "skills", "broken", body="Hello {{ undefined_var }}\n")
         registry = {"broken": _meta(skill_dir)}
         monkeypatch.chdir(tmp_path)
 
@@ -407,15 +403,11 @@ class TestSkillFailureTracking:
         # Scan issue: bad ttl
         bad = skills_root / "bad-ttl"
         bad.mkdir()
-        (bad / "SKILL.md").write_text(
-            '---\nname: bad-ttl\ndescription: x\nttl: "oops"\n---\nBody.\n'
-        )
+        (bad / "SKILL.md").write_text('---\nname: bad-ttl\ndescription: x\nttl: "oops"\n---\nBody.\n')
         # Load issue: undefined Jinja var
         broken = skills_root / "broken"
         broken.mkdir()
-        (broken / "SKILL.md").write_text(
-            "---\nname: broken\ndescription: x\n---\n{{ undefined_var }}\n"
-        )
+        (broken / "SKILL.md").write_text("---\nname: broken\ndescription: x\n---\n{{ undefined_var }}\n")
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("HOME", str(tmp_path))
 
@@ -436,9 +428,7 @@ class TestSkillFailureTracking:
         skills_root.mkdir(parents=True)
         bad = skills_root / "bad-trig"
         bad.mkdir()
-        (bad / "SKILL.md").write_text(
-            "---\nname: bad-trig\ndescription: x\ntriggers:\n  - 403\n---\nBody.\n"
-        )
+        (bad / "SKILL.md").write_text("---\nname: bad-trig\ndescription: x\ntriggers:\n  - 403\n---\nBody.\n")
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("HOME", str(tmp_path))
 

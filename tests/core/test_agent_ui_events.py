@@ -405,9 +405,7 @@ async def test_llm_message_does_not_contain_code_fence(event_bus_with_handler):
 
     await agent.run("Test task")
 
-    llm_message_events = [
-        e["event_obj"] for e in mock_ui_handler.events if e["event"] == EventType.LLM_MESSAGE
-    ]
+    llm_message_events = [e["event_obj"] for e in mock_ui_handler.events if e["event"] == EventType.LLM_MESSAGE]
     for ev in llm_message_events:
         assert "```python" not in ev.content, (
             f"LLMMessageEvent carried a code fence as its thought content. "

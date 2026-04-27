@@ -380,14 +380,10 @@ tools: []
         skills_dir = tmp_path / "skills"
         skill_dir = skills_dir / "my_skill"
         skill_dir.mkdir(parents=True)
-        (skill_dir / "SKILL.md").write_text(
-            "---\nname: my_skill\ndescription: Sticky test\nttl: 5\n---\nBody.\n"
-        )
+        (skill_dir / "SKILL.md").write_text("---\nname: my_skill\ndescription: Sticky test\nttl: 5\n---\nBody.\n")
 
         agent_file = tmp_path / "agent.md"
-        agent_file.write_text(
-            "---\nname: test_agent\nextends: none\ntools: []\n---\n\n{{ user_prompt }}\n"
-        )
+        agent_file.write_text("---\nname: test_agent\nextends: none\ntools: []\n---\n\n{{ user_prompt }}\n")
         agent = parse_agent_file(agent_file)
         preparer = AgentPreparer()
 
@@ -406,14 +402,10 @@ tools: []
         skills_dir = tmp_path / "skills"
         skill_dir = skills_dir / "my_skill"
         skill_dir.mkdir(parents=True)
-        (skill_dir / "SKILL.md").write_text(
-            "---\nname: my_skill\ndescription: Test\nttl: 3\n---\nBody.\n"
-        )
+        (skill_dir / "SKILL.md").write_text("---\nname: my_skill\ndescription: Test\nttl: 3\n---\nBody.\n")
 
         agent_file = tmp_path / "agent.md"
-        agent_file.write_text(
-            "---\nname: test_agent\nextends: none\ntools: []\n---\n\n{{ user_prompt }}\n"
-        )
+        agent_file.write_text("---\nname: test_agent\nextends: none\ntools: []\n---\n\n{{ user_prompt }}\n")
         agent = parse_agent_file(agent_file)
         preparer = AgentPreparer()
 
@@ -432,14 +424,10 @@ tools: []
         skills_dir = tmp_path / "skills"
         skill_dir = skills_dir / "my_skill"
         skill_dir.mkdir(parents=True)
-        (skill_dir / "SKILL.md").write_text(
-            "---\nname: my_skill\ndescription: Test\nttl: 3\n---\nBody.\n"
-        )
+        (skill_dir / "SKILL.md").write_text("---\nname: my_skill\ndescription: Test\nttl: 3\n---\nBody.\n")
 
         agent_file = tmp_path / "agent.md"
-        agent_file.write_text(
-            "---\nname: test_agent\nextends: none\ntools: []\n---\n\n{{ user_prompt }}\n"
-        )
+        agent_file.write_text("---\nname: test_agent\nextends: none\ntools: []\n---\n\n{{ user_prompt }}\n")
         agent = parse_agent_file(agent_file)
         preparer = AgentPreparer()
 
@@ -457,14 +445,10 @@ tools: []
         skills_dir = tmp_path / "skills"
         skill_dir = skills_dir / "my_skill"
         skill_dir.mkdir(parents=True)
-        (skill_dir / "SKILL.md").write_text(
-            "---\nname: my_skill\ndescription: Test\n---\nBody.\n"
-        )
+        (skill_dir / "SKILL.md").write_text("---\nname: my_skill\ndescription: Test\n---\nBody.\n")
 
         agent_file = tmp_path / "agent.md"
-        agent_file.write_text(
-            "---\nname: test_agent\nextends: none\ntools: []\n---\n\n{{ user_prompt }}\n"
-        )
+        agent_file.write_text("---\nname: test_agent\nextends: none\ntools: []\n---\n\n{{ user_prompt }}\n")
         agent = parse_agent_file(agent_file)
         preparer = AgentPreparer()
 
@@ -483,14 +467,10 @@ tools: []
         skills_dir = tmp_path / "skills"
         skill_dir = skills_dir / "my_skill"
         skill_dir.mkdir(parents=True)
-        (skill_dir / "SKILL.md").write_text(
-            "---\nname: my_skill\ndescription: Test\nttl: 0\n---\nBody.\n"
-        )
+        (skill_dir / "SKILL.md").write_text("---\nname: my_skill\ndescription: Test\nttl: 0\n---\nBody.\n")
 
         agent_file = tmp_path / "agent.md"
-        agent_file.write_text(
-            "---\nname: test_agent\nextends: none\ntools: []\n---\n\n{{ user_prompt }}\n"
-        )
+        agent_file.write_text("---\nname: test_agent\nextends: none\ntools: []\n---\n\n{{ user_prompt }}\n")
         agent = parse_agent_file(agent_file)
         preparer = AgentPreparer()
 

@@ -36,7 +36,9 @@ def events_to_messages(events: Iterable[Event], provider: Optional[str] = None) 
     if cutoff is not None:
         summary = events[cutoff].data.get("summary", "")
         messages.append({"role": "user", "content": _compaction_user_block(summary)})
-        messages.append({"role": "assistant", "content": "I've reviewed our previous conversation and I'm ready to continue."})
+        messages.append(
+            {"role": "assistant", "content": "I've reviewed our previous conversation and I'm ready to continue."}
+        )
 
     for event in post_compaction:
         rendered = _event_to_message(event)

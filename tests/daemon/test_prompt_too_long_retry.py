@@ -6,7 +6,7 @@ whether any code_execution event was recorded during the first pass.
 """
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -96,8 +96,7 @@ async def test_retry_skipped_after_side_effecting_code_ran(adapter, tmp_path, mo
         )
 
     assert call_count["n"] == 1, (
-        f"run_agent fired {call_count['n']} times; should stop after first "
-        "attempt recorded a code_execution event"
+        f"run_agent fired {call_count['n']} times; should stop after first attempt recorded a code_execution event"
     )
 
 

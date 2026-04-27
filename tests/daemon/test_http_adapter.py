@@ -1,7 +1,6 @@
 """Tests for the HTTP API adapter."""
 
 import json
-from datetime import timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -198,9 +197,9 @@ class TestChatEndpoint:
         assert resp.status_code == 200
         assert recorded, "expected at least one session_event broadcast"
         for payload in recorded:
-            assert (
-                payload.get("session_id") == target_id
-            ), f"broadcast routed to {payload.get('session_id')!r}, expected {target_id!r}"
+            assert payload.get("session_id") == target_id, (
+                f"broadcast routed to {payload.get('session_id')!r}, expected {target_id!r}"
+            )
 
 
 class TestAgentSessionsEndpoint:
@@ -696,8 +695,7 @@ class TestSSEProgressHandler:
 
         missed = asyncio.run(_run())
         assert not missed, (
-            f"SSE race dropped {len(missed)}/200 final_result events under "
-            f"cross-thread emit + signal_done contention"
+            f"SSE race dropped {len(missed)}/200 final_result events under cross-thread emit + signal_done contention"
         )
 
     def test_emit_broadcasts_session_event_when_wired(self):
@@ -765,9 +763,7 @@ class TestSkillIssuesEndpoint:
         skills_root.mkdir(parents=True)
         bad = skills_root / "bad-trig"
         bad.mkdir()
-        (bad / "SKILL.md").write_text(
-            "---\nname: bad-trig\ndescription: x\ntriggers:\n  - 403\n---\nBody.\n"
-        )
+        (bad / "SKILL.md").write_text("---\nname: bad-trig\ndescription: x\ntriggers:\n  - 403\n---\nBody.\n")
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("HOME", str(tmp_path))
 

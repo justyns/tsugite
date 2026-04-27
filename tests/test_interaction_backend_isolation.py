@@ -48,9 +48,7 @@ def _stub_run_agent_result() -> SimpleNamespace:
 
 
 @pytest.mark.asyncio
-async def test_parent_interactive_backend_survives_nested_session_spawn(
-    monkeypatch, workspaces, session_store
-):
+async def test_parent_interactive_backend_survives_nested_session_spawn(monkeypatch, workspaces, session_store):
     """A parent handle_message with an interactive backend must still see that
     backend after a child session runs concurrently and installs its own
     NonInteractiveBackend."""
@@ -118,8 +116,7 @@ async def test_parent_interactive_backend_survives_nested_session_spawn(
     )
 
     assert isinstance(observations["child_backend"], NonInteractiveBackend), (
-        f"Child session should see its own NonInteractiveBackend, got "
-        f"{observations['child_backend']!r}"
+        f"Child session should see its own NonInteractiveBackend, got {observations['child_backend']!r}"
     )
     assert observations["parent_backend_after"] is parent_backend, (
         "Parent's interactive backend was clobbered by the child session's "
@@ -136,9 +133,7 @@ async def _run_child(runner: SessionRunner, session: Session) -> None:
 
 
 @pytest.mark.asyncio
-async def test_concurrent_sessions_each_see_their_own_backend(
-    monkeypatch, workspaces, session_store
-):
+async def test_concurrent_sessions_each_see_their_own_backend(monkeypatch, workspaces, session_store):
     """Two sessions running concurrently must each see their own interaction
     backend inside handle_message — one session's set_interaction_backend must
     not leak into the other's context."""
@@ -193,6 +188,4 @@ async def test_concurrent_sessions_each_see_their_own_backend(
         f"Session A saw {sessions_observed['a']!r}, expected backend_a. "
         "Concurrent session B's set_interaction_backend leaked into A's context."
     )
-    assert sessions_observed["b"] is backend_b, (
-        f"Session B saw {sessions_observed['b']!r}, expected backend_b."
-    )
+    assert sessions_observed["b"] is backend_b, f"Session B saw {sessions_observed['b']!r}, expected backend_b."

@@ -204,7 +204,7 @@ async def test_agent_content_blocks_preserved_on_no_code_step():
         instructions="",
         max_turns=5,
     )
-    answer = "Some prose\n\n" '<content name="reply">Done without running code.</content>'
+    answer = 'Some prose\n\n<content name="reply">Done without running code.</content>'
     _patch_provider(agent, return_value=_mock_response(answer))
 
     await agent.run("Some task")
@@ -450,9 +450,7 @@ async def test_agent_parse_response_prose_with_code_no_prefix():
         max_turns=5,
     )
 
-    parsed = agent._parse_response_from_text(
-        "Sure thing.\n\n```python\nx = 1\nfinal_answer(x)\n```"
-    )
+    parsed = agent._parse_response_from_text("Sure thing.\n\n```python\nx = 1\nfinal_answer(x)\n```")
     assert parsed.thought == "Sure thing."
     assert "x = 1" in parsed.code
     assert "final_answer(x)" in parsed.code
@@ -499,7 +497,7 @@ async def test_agent_parse_response_code_with_inner_backticks():
     assert "post_comment(comment_body)" in parsed.code, (
         f"Parser truncated code at an inner backtick. Got: {parsed.code!r}"
     )
-    assert 'x = 1' in parsed.code
+    assert "x = 1" in parsed.code
 
 
 @pytest.mark.asyncio
@@ -518,20 +516,10 @@ async def test_agent_parse_response_multiple_code_blocks_flagged():
     )
 
     parsed = agent._parse_response_from_text(
-        "First thought.\n\n"
-        "```python\n"
-        "x = 1\n"
-        "```\n\n"
-        "More thoughts.\n\n"
-        "```python\n"
-        "y = 2\n"
-        "final_answer(x + y)\n"
-        "```"
+        "First thought.\n\n```python\nx = 1\n```\n\nMore thoughts.\n\n```python\ny = 2\nfinal_answer(x + y)\n```"
     )
 
-    assert parsed.num_code_blocks == 2, (
-        f"Parser should report 2 code blocks. Got: {parsed.num_code_blocks!r}"
-    )
+    assert parsed.num_code_blocks == 2, f"Parser should report 2 code blocks. Got: {parsed.num_code_blocks!r}"
 
 
 @pytest.mark.asyncio
@@ -543,9 +531,7 @@ async def test_agent_parse_response_single_code_block_counted_as_one():
         max_turns=5,
     )
 
-    parsed = agent._parse_response_from_text(
-        "Thought: go.\n\n```python\nfinal_answer(1)\n```"
-    )
+    parsed = agent._parse_response_from_text("Thought: go.\n\n```python\nfinal_answer(1)\n```")
     assert parsed.num_code_blocks == 1
 
 
@@ -841,9 +827,9 @@ def test_tool_execution_no_task_warnings():
     )
 
     assert "Task pending" not in filtered_stderr, f"Unexpected Task pending warning:\n{stderr_output}"
-    assert (
-        "Task exception was never retrieved" not in filtered_stderr
-    ), f"Unexpected Task exception warning:\n{stderr_output}"
+    assert "Task exception was never retrieved" not in filtered_stderr, (
+        f"Unexpected Task exception warning:\n{stderr_output}"
+    )
 
 
 def test_tool_exception_propagation_from_async():
@@ -893,6 +879,6 @@ def test_tool_exception_propagation_from_async():
         line for line in stderr_output.split("\n") if "failing_tool" in line or "never retrieved" in line
     )
 
-    assert (
-        "exception was never retrieved" not in filtered_stderr.lower()
-    ), f"Exception handling broken:\n{stderr_output}"
+    assert "exception was never retrieved" not in filtered_stderr.lower(), (
+        f"Exception handling broken:\n{stderr_output}"
+    )

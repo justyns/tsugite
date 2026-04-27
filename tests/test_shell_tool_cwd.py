@@ -52,7 +52,7 @@ def test_run_passes_env_to_subprocess(workspace):
 def test_run_env_merges_with_os_environ(workspace, monkeypatch):
     monkeypatch.setenv("BASELINE", "yes")
     set_workspace_dir(workspace)
-    output = shell_run("printf '%s/%s' \"$BASELINE\" \"$FOO\"", env={"FOO": "bar"})
+    output = shell_run('printf \'%s/%s\' "$BASELINE" "$FOO"', env={"FOO": "bar"})
     assert "yes/bar" in output
 
 

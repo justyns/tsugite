@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from tsugite.daemon.session_store import SessionStore
-from tsugite.history import SessionStorage, get_history_dir
+from tsugite.history import SessionStorage
 
 
 @pytest.fixture
@@ -91,9 +91,24 @@ class TestExtendedMigration:
         ws.mkdir(parents=True)
         old_file = ws / "20260101-120000.jsonl"
         old_file.write_text(
-            json.dumps({"type": "session_meta", "agent": "demo", "model": "m", "machine": "h", "created_at": "2026-01-01T12:00:00+00:00"})
+            json.dumps(
+                {
+                    "type": "session_meta",
+                    "agent": "demo",
+                    "model": "m",
+                    "machine": "h",
+                    "created_at": "2026-01-01T12:00:00+00:00",
+                }
+            )
             + "\n"
-            + json.dumps({"type": "turn", "timestamp": "2026-01-01T12:00:01+00:00", "messages": [{"role": "user", "content": "hi"}], "final_answer": "hello"})
+            + json.dumps(
+                {
+                    "type": "turn",
+                    "timestamp": "2026-01-01T12:00:01+00:00",
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "final_answer": "hello",
+                }
+            )
             + "\n"
         )
 
@@ -118,14 +133,20 @@ class TestExtendedMigration:
         # Pre-existing history file (already migrated to new format)
         history_file = history_dir / f"{sid}.jsonl"
         history_file.write_text(
-            json.dumps({"type": "session_start", "ts": "2026-01-01T12:00:00+00:00", "data": {"agent": "x"}}) + "\n"
-            + json.dumps({"type": "user_input", "ts": "2026-01-01T12:00:01+00:00", "data": {"text": "hi"}}) + "\n"
+            json.dumps({"type": "session_start", "ts": "2026-01-01T12:00:00+00:00", "data": {"agent": "x"}})
+            + "\n"
+            + json.dumps({"type": "user_input", "ts": "2026-01-01T12:00:01+00:00", "data": {"text": "hi"}})
+            + "\n"
         )
         # Daemon-only events from the old separate log
         daemon_file = daemon_dir / f"{sid}.jsonl"
         daemon_file.write_text(
-            json.dumps({"type": "reaction", "emoji": "👍", "timestamp": "2026-01-01T12:00:02+00:00"}) + "\n"
-            + json.dumps({"type": "prompt_snapshot", "token_breakdown": {"total": 100}, "timestamp": "2026-01-01T12:00:03+00:00"}) + "\n"
+            json.dumps({"type": "reaction", "emoji": "👍", "timestamp": "2026-01-01T12:00:02+00:00"})
+            + "\n"
+            + json.dumps(
+                {"type": "prompt_snapshot", "token_breakdown": {"total": 100}, "timestamp": "2026-01-01T12:00:03+00:00"}
+            )
+            + "\n"
         )
 
         merged, skipped = migrate_daemon_sessions(daemon_dir, history_dir, backup=False, dry_run=False)
@@ -146,13 +167,19 @@ class TestExtendedMigration:
         history_dir.mkdir()
         daemon_dir = tmp_path / "daemon" / "sessions"
         daemon_dir.mkdir(parents=True)
-        (history_dir / "s.jsonl").write_text(json.dumps({"type": "session_start", "ts": "2026-01-01T00:00:00+00:00", "data": {}}) + "\n")
-        (daemon_dir / "s.jsonl").write_text(json.dumps({"type": "reaction", "emoji": "x", "timestamp": "2026-01-01T00:00:01+00:00"}) + "\n")
+        (history_dir / "s.jsonl").write_text(
+            json.dumps({"type": "session_start", "ts": "2026-01-01T00:00:00+00:00", "data": {}}) + "\n"
+        )
+        (daemon_dir / "s.jsonl").write_text(
+            json.dumps({"type": "reaction", "emoji": "x", "timestamp": "2026-01-01T00:00:01+00:00"}) + "\n"
+        )
 
         merged, skipped = migrate_daemon_sessions(daemon_dir, history_dir, backup=False, dry_run=True)
         assert merged == 1
         # Source still exists in dry-run
         assert (daemon_dir / "s.jsonl").exists()
         # History wasn't modified
-        types = [json.loads(line)["type"] for line in (history_dir / "s.jsonl").read_text().splitlines() if line.strip()]
+        types = [
+            json.loads(line)["type"] for line in (history_dir / "s.jsonl").read_text().splitlines() if line.strip()
+        ]
         assert types == ["session_start"]

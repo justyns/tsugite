@@ -3,7 +3,6 @@ progress — the parent must not serialize against the child."""
 
 import asyncio
 import threading
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest

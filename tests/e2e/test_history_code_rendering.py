@@ -173,13 +173,16 @@ def test_history_tool_result_unescapes_xml_entities(authenticated_page, e2e_adap
 
     with patch("tsugite.daemon.adapters.http.get_history_dir", return_value=history_dir):
         _open_progress_trace(page, user_id, session_id)
-        result_details = page.locator(".msg.progress .tool-steps > li details").filter(
-            has=page.locator("summary", has_text="result")
-        ).first
+        result_details = (
+            page.locator(".msg.progress .tool-steps > li details")
+            .filter(has=page.locator("summary", has_text="result"))
+            .first
+        )
         result_details.click()
-        text = page.locator(
-            ".msg.progress .tool-steps > li details pre code"
-        ).filter(has_text="a ").first.text_content() or ""
+        text = (
+            page.locator(".msg.progress .tool-steps > li details pre code").filter(has_text="a ").first.text_content()
+            or ""
+        )
 
     assert "a -> b" in text, f"HTML entity &gt; not decoded. Got: {text!r}"
     assert "<tag>" in text, f"HTML entities &lt;/&gt; not decoded. Got: {text!r}"
@@ -222,19 +225,21 @@ def test_history_tool_result_not_truncated(authenticated_page, e2e_adapter, e2e_
 
     with patch("tsugite.daemon.adapters.http.get_history_dir", return_value=history_dir):
         _open_progress_trace(page, user_id, session_id)
-        result_details = page.locator(".msg.progress .tool-steps > li details").filter(
-            has=page.locator("summary", has_text="result")
-        ).first
+        result_details = (
+            page.locator(".msg.progress .tool-steps > li details")
+            .filter(has=page.locator("summary", has_text="result"))
+            .first
+        )
         result_details.click()
-        text = page.locator(
-            ".msg.progress .tool-steps > li details pre code"
-        ).filter(has_text="commit-0000").first.text_content() or ""
+        text = (
+            page.locator(".msg.progress .tool-steps > li details pre code")
+            .filter(has_text="commit-0000")
+            .first.text_content()
+            or ""
+        )
 
     assert head_line in text, f"first line missing. Got first 200: {text[:200]!r}"
-    assert tail_line in text, (
-        f"last line missing — content was truncated before the end. "
-        f"Got last 200: {text[-200:]!r}"
-    )
+    assert tail_line in text, f"last line missing — content was truncated before the end. Got last 200: {text[-200:]!r}"
     assert "..." not in text[-10:], f"trailing ellipsis suggests truncation. Tail: {text[-50:]!r}"
 
 
@@ -298,10 +303,7 @@ def test_history_prose_only_assistant_message_renders(authenticated_page, e2e_ad
             {"role": "assistant", "content": '```python\nfinal_answer("You\'re welcome!")\n```'},
             {
                 "role": "user",
-                "content": (
-                    '<tsugite_execution_result status="success">'
-                    "<output></output></tsugite_execution_result>"
-                ),
+                "content": ('<tsugite_execution_result status="success"><output></output></tsugite_execution_result>'),
             },
             {"role": "assistant", "content": "You're welcome!"},
         ],
@@ -319,9 +321,7 @@ def test_history_prose_only_assistant_message_renders(authenticated_page, e2e_ad
         thought_idx = thought_hits[0]
         result_hits = [i for i, s in enumerate(labels) if "result" in s.lower()]
         assert result_hits, f"expected a result step, got summaries: {labels}"
-        assert thought_idx < result_hits[0], (
-            f"thought must appear before the format-error result, got: {labels}"
-        )
+        assert thought_idx < result_hits[0], f"thought must appear before the format-error result, got: {labels}"
 
         thought_details = page.locator(".msg.progress .tool-steps > li details").nth(thought_idx)
         thought_details.click()

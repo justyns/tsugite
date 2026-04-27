@@ -20,9 +20,7 @@ from tsugite.workspace.models import Workspace
 
 def _write_agent(path: Path) -> Path:
     agent_file = path / "agent.md"
-    agent_file.write_text(
-        "---\nname: test_agent\nextends: none\ntools: []\n---\n\n{{ user_prompt }}\n"
-    )
+    agent_file.write_text("---\nname: test_agent\nextends: none\ntools: []\n---\n\n{{ user_prompt }}\n")
     return agent_file
 
 

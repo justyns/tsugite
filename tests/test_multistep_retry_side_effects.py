@@ -62,9 +62,7 @@ async def test_retry_skipped_when_prior_attempt_executed_code(monkeypatch):
             custom_logger=None,
         )
 
-    assert call_count["n"] == 1, (
-        f"step retried after side-effecting code ran; fired {call_count['n']} times"
-    )
+    assert call_count["n"] == 1, f"step retried after side-effecting code ran; fired {call_count['n']} times"
 
 
 @pytest.mark.asyncio

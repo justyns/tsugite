@@ -20,8 +20,7 @@ class UnsupportedEffortError(ValueError):
         self.value = value
         self.supported = supported
         super().__init__(
-            f"reasoning_effort={value!r} is not supported for {model}. "
-            f"Valid values: {', '.join(supported)}"
+            f"reasoning_effort={value!r} is not supported for {model}. Valid values: {', '.join(supported)}"
         )
 
 

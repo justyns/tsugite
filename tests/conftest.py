@@ -83,7 +83,7 @@ def secret_backend(tmp_path):
 def reset_workspace_dir_cv():
     """Clear the workspace ContextVar between tests so that state from one test
     doesn't leak into the next (the CV persists across sync tests otherwise)."""
-    from tsugite.cli.helpers import set_workspace_dir, _workspace_dir_cv
+    from tsugite.cli.helpers import _workspace_dir_cv, set_workspace_dir
 
     token = set_workspace_dir(None)
     try:
