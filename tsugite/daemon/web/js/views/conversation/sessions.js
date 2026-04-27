@@ -23,6 +23,18 @@ export const sessionsMixin = {
   async loadSessions() {
     const agent = this.$store.app.selectedAgent;
     if (!agent) { this.loading = false; return; }
+    const cacheKey = `tsugite_sessions_${agent}`;
+    // Stale-while-revalidate: paint the cached list immediately on cold load /
+    // PWA resume so the sidebar isn't blank while we wait for the network.
+    if (this.allSessions.length === 0) {
+      try {
+        const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null');
+        if (Array.isArray(cached) && cached.length) {
+          this.allSessions = cached;
+          this.loading = false;
+        }
+      } catch { /* corrupt cache — ignore and fetch fresh */ }
+    }
     try {
       const data = await get(`/api/agents/${agent}/sessions`);
       this.allSessions = (data.sessions || []).map(s => ({ ...s, state: s.state || s.status }));
@@ -37,7 +49,11 @@ export const sessionsMixin = {
       for (const id of Object.keys(this.progressCache)) {
         if (!liveIds.has(id)) delete this.progressCache[id];
       }
-    } catch { this.allSessions = []; }
+      try { localStorage.setItem(cacheKey, JSON.stringify(this.allSessions)); } catch { /* quota or disabled */ }
+    } catch {
+      // Network failed — keep whatever is currently displayed (cache or last successful fetch)
+      // instead of dropping back to []; that's the empty-flash bug on PWA resume.
+    }
     this.loading = false;
   },
 
@@ -72,7 +88,10 @@ export const sessionsMixin = {
     this.loadSessionEffort();
     this._restoreDraft();
     this._markSessionViewed(session);
-    if (!this.isActiveSession && session.state === 'running') {
+    // Rehydrate the in-flight progress bubble whenever a turn is mid-execution
+    // and we're not the one currently streaming (sending=true means sendMessage
+    // is driving the stream and will populate its own bubble).
+    if (!this.sending && (session.state === 'running' || session.state === 'active')) {
       await historyPromise;
       if (this.selectedSessionId !== convId) return;
       this._rehydrateProgressFromEvents(convId);
@@ -88,9 +107,18 @@ export const sessionsMixin = {
   },
 
   async _rehydrateProgressFromEvents(sessionId) {
-    const progress = { type: 'progress', steps: [], statusText: 'Starting...', turnCount: 0, toolCount: 0 };
-    this._sessionProgress = progress;
-    const idx = this.messages.push(progress) - 1;
+    let progress = this._sessionProgress;
+    let idx;
+    if (progress) {
+      idx = this.messages.indexOf(progress);
+      if (idx < 0) {
+        idx = this.messages.push(progress) - 1;
+      }
+    } else {
+      progress = { type: 'progress', steps: [], statusText: 'Starting...', turnCount: 0, toolCount: 0 };
+      this._sessionProgress = progress;
+      idx = this.messages.push(progress) - 1;
+    }
     try {
       const data = await get(`/api/sessions/${sessionId}/events`);
       // Bail if reload/backToSessions/another selectSession swapped our bubble out while the fetch was in flight.

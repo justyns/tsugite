@@ -470,11 +470,12 @@ export default () => ({
   },
 
   _handleSessionEvent(d) {
-    if (!this.selectedSessionId || this.isActiveSession) return;
+    if (!this.selectedSessionId) return;
     if (d.session_id !== this.selectedSessionId) return;
-    // We're streaming to this session ourselves - the per-chat SSE already
-    // delivers these events to our progress bubble. Running this handler too
-    // would render everything twice.
+    // sendMessage's per-chat streaming response already populates the live
+    // progress bubble while it's running; bail to avoid double-rendering.
+    // Once it finishes (or after a reload), sending=false and the global SSE
+    // feed becomes the source of in-flight progress for this session.
     if (this.sending) return;
 
     const evType = d.event_type;

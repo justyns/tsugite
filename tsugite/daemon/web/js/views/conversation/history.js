@@ -63,7 +63,7 @@ function _splitUserInput(raw) {
  * trailing agent bubble). Hooks before any user_input buffer and attach to the
  * next bubble. Reactions wire onto the preceding user bubble.
  */
-export function eventsToBubbles(events) {
+export function eventsToBubbles(events, { dropTrailing = false } = {}) {
   const bubbles = [];
   let pendingHooks = [];
   let currentSteps = null;
@@ -230,7 +230,10 @@ export function eventsToBubbles(events) {
     }
   }
 
-  flushBubble();
+  // When a session is mid-flight, the trailing bubble's steps belong to a turn
+  // that hasn't ended yet. We drop it here so rehydration owns the live bubble
+  // (otherwise we'd render the same events twice — once as ✓ done, once live).
+  if (!dropTrailing) flushBubble();
 
   // Drop steps that only existed to mark a turn (no visible content).
   for (const b of bubbles) {
@@ -321,9 +324,10 @@ export const historyMixin = {
       if (lastCompact) {
         this.compactionSummary = lastCompact.data?.summary || null;
       }
-      this._allHistoryMessages = eventsToBubbles(events);
-      if (this._allHistoryMessages.length === 0 && this.selectedSessionMeta) {
-        const meta = this.selectedSessionMeta;
+      const meta = this.selectedSessionMeta;
+      const inFlight = !!meta && (meta.state === 'running' || meta.state === 'active');
+      this._allHistoryMessages = eventsToBubbles(events, { dropTrailing: inFlight });
+      if (this._allHistoryMessages.length === 0 && meta) {
         if (meta.prompt) this._allHistoryMessages.push({ type: 'user', text: meta.prompt });
         if (meta.error) this._allHistoryMessages.push({ type: 'error', text: meta.error });
         if (meta.result) this._allHistoryMessages.push({ type: 'agent', text: meta.result });

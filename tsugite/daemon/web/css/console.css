@@ -6,7 +6,7 @@
    ============================================================================ */
 
 html, body { height: 100%; }
-body { overflow: hidden; }
+body { overflow-x: hidden; }  /* allow vertical overscroll (pull-to-refresh) but never sideways */
 details > summary { list-style: none; cursor: pointer; }
 details > summary::-webkit-details-marker { display: none; }
 
