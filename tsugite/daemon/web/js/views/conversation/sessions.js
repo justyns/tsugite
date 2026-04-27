@@ -83,15 +83,17 @@ export const sessionsMixin = {
     this.isActiveSession = this._isMyInteractive(session);
 
     this._sessionProgress = null;
+    // Interactive sessions stay state='active' between turns, so state alone
+    // isn't a "turn in flight" signal. status_text is non-empty only mid-turn,
+    // so use that to gate both dropTrailing and rehydrate.
+    const cached = this.progressCache[session.id] || progressFromPayload(session.progress);
+    const liveTurn = !!cached?.statusText;
     this.loadStatus();
-    const historyPromise = this.loadHistory();
+    const historyPromise = this.loadHistory({ dropTrailing: liveTurn });
     this.loadSessionEffort();
     this._restoreDraft();
     this._markSessionViewed(session);
-    // Rehydrate the in-flight progress bubble whenever a turn is mid-execution
-    // and we're not the one currently streaming (sending=true means sendMessage
-    // is driving the stream and will populate its own bubble).
-    if (!this.sending && (session.state === 'running' || session.state === 'active')) {
+    if (!this.sending && liveTurn) {
       await historyPromise;
       if (this.selectedSessionId !== convId) return;
       this._rehydrateProgressFromEvents(convId);

@@ -310,7 +310,10 @@ export const historyMixin = {
     this.compactionSummary = null;
   },
 
-  async loadHistory() {
+  // dropTrailing only when the caller will spawn a live bubble for the
+  // trailing turn (selectSession rehydrate). Default false, otherwise
+  // the latest turn vanishes from rendered history.
+  async loadHistory({ dropTrailing = false } = {}) {
     const agent = this.$store.app.selectedAgent;
     if (!agent) return;
     this.resetHistory();
@@ -325,8 +328,7 @@ export const historyMixin = {
         this.compactionSummary = lastCompact.data?.summary || null;
       }
       const meta = this.selectedSessionMeta;
-      const inFlight = !!meta && (meta.state === 'running' || meta.state === 'active');
-      this._allHistoryMessages = eventsToBubbles(events, { dropTrailing: inFlight });
+      this._allHistoryMessages = eventsToBubbles(events, { dropTrailing });
       if (this._allHistoryMessages.length === 0 && meta) {
         if (meta.prompt) this._allHistoryMessages.push({ type: 'user', text: meta.prompt });
         if (meta.error) this._allHistoryMessages.push({ type: 'error', text: meta.error });
