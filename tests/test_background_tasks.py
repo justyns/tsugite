@@ -572,9 +572,7 @@ class TestSchedulerStatusUpdates:
 
         assert any(
             "session vanished" in rec.getMessage() and "cron-update-fail" in rec.getMessage() for rec in caplog.records
-        ), (
-            f"expected warning mentioning the schedule id and ValueError, got: {[r.getMessage() for r in caplog.records]}"
-        )
+        ), f"expected warning mentioning the schedule id and ValueError, got: {[r.getMessage() for r in caplog.records]}"
 
 
 class TestPartialHistoryOnError:

@@ -83,29 +83,25 @@ def test_streaming_does_not_yank_user_when_scrolled_up(authenticated_page, e2e_a
     with patch("tsugite.daemon.adapters.http.get_history_dir", return_value=history_dir):
         _open_session(page, user_id, session_id)
 
-        page.evaluate(
-            """
+        page.evaluate("""
             const el = document.getElementById('messages');
             el.scrollTop = 0;
             // Fire the scroll listener explicitly so isAtBottom updates synchronously
             // (passive scroll events can otherwise be coalesced in headless).
             el.dispatchEvent(new Event('scroll'));
-            """
-        )
+            """)
 
         # isAtBottom is false now; pushing a message via the conversations view
         # should hit the guarded path in scrollMessages() and leave scrollTop alone.
         before = page.evaluate("document.getElementById('messages').scrollTop")
         assert before == 0
 
-        page.evaluate(
-            """
+        page.evaluate("""
             const root = document.querySelector('[x-data*=conversations]') || document.querySelector('#app');
             const view = Alpine.$data(document.getElementById('messages'));
             view.messages.push({ type: 'agent', text: 'late arrival from stream' });
             view.scrollMessages();
-            """
-        )
+            """)
 
         # Give $nextTick + microtasks a moment.
         page.wait_for_timeout(100)
@@ -127,14 +123,12 @@ def test_streaming_follows_when_user_is_at_bottom(authenticated_page, e2e_adapte
             timeout=2000,
         )
 
-        page.evaluate(
-            """
+        page.evaluate("""
             const view = Alpine.$data(document.getElementById('messages'));
             view.messages.push({ type: 'agent', text: 'tail one' });
             view.messages.push({ type: 'agent', text: 'tail two' });
             view.scrollMessages();
-            """
-        )
+            """)
 
         page.wait_for_function(
             "(() => { const el = document.getElementById('messages'); "

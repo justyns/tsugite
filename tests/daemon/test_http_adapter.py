@@ -197,9 +197,9 @@ class TestChatEndpoint:
         assert resp.status_code == 200
         assert recorded, "expected at least one session_event broadcast"
         for payload in recorded:
-            assert payload.get("session_id") == target_id, (
-                f"broadcast routed to {payload.get('session_id')!r}, expected {target_id!r}"
-            )
+            assert (
+                payload.get("session_id") == target_id
+            ), f"broadcast routed to {payload.get('session_id')!r}, expected {target_id!r}"
 
 
 class TestAgentSessionsEndpoint:
@@ -694,9 +694,9 @@ class TestSSEProgressHandler:
             return missed
 
         missed = asyncio.run(_run())
-        assert not missed, (
-            f"SSE race dropped {len(missed)}/200 final_result events under cross-thread emit + signal_done contention"
-        )
+        assert (
+            not missed
+        ), f"SSE race dropped {len(missed)}/200 final_result events under cross-thread emit + signal_done contention"
 
     def test_emit_broadcasts_session_event_when_wired(self):
         """Interactive chat must broadcast session_event so the sidebar progress cache updates."""

@@ -115,9 +115,9 @@ async def test_parent_interactive_backend_survives_nested_session_spawn(monkeypa
         timeout=10.0,
     )
 
-    assert isinstance(observations["child_backend"], NonInteractiveBackend), (
-        f"Child session should see its own NonInteractiveBackend, got {observations['child_backend']!r}"
-    )
+    assert isinstance(
+        observations["child_backend"], NonInteractiveBackend
+    ), f"Child session should see its own NonInteractiveBackend, got {observations['child_backend']!r}"
     assert observations["parent_backend_after"] is parent_backend, (
         "Parent's interactive backend was clobbered by the child session's "
         f"set_interaction_backend. Parent now sees: "

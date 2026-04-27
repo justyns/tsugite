@@ -187,9 +187,9 @@ def test_history_tool_result_unescapes_xml_entities(authenticated_page, e2e_adap
     assert "a -> b" in text, f"HTML entity &gt; not decoded. Got: {text!r}"
     assert "<tag>" in text, f"HTML entities &lt;/&gt; not decoded. Got: {text!r}"
     assert "x & y" in text, f"HTML entity &amp; not decoded. Got: {text!r}"
-    assert "&gt;" not in text and "&lt;" not in text and "&amp;" not in text, (
-        f"Literal entity text still present. Got: {text!r}"
-    )
+    assert (
+        "&gt;" not in text and "&lt;" not in text and "&amp;" not in text
+    ), f"Literal entity text still present. Got: {text!r}"
 
 
 def test_history_tool_result_not_truncated(authenticated_page, e2e_adapter, e2e_tmp):

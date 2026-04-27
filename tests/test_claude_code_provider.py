@@ -127,9 +127,9 @@ class TestClaudeCodeProcess:
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_proc) as mock_exec:
             await process.start(model="sonnet", system_prompt="test")
-            assert mock_exec.call_args[1].get("cwd") == str(workspace), (
-                f"expected cwd={workspace!s}, got {mock_exec.call_args[1].get('cwd')!r}"
-            )
+            assert mock_exec.call_args[1].get("cwd") == str(
+                workspace
+            ), f"expected cwd={workspace!s}, got {mock_exec.call_args[1].get('cwd')!r}"
 
         await process.stop()
 

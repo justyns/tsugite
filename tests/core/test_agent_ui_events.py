@@ -456,9 +456,9 @@ async def test_ui_event_warning_on_multiple_code_blocks(event_bus_with_handler):
         f"expected a warning mentioning dropped blocks. got warnings: "
         f"{[e['event_obj'].message for e in warning_events]}"
     )
-    assert "2" in multi_block_warnings[0]["event_obj"].message, (
-        f"warning should mention the count. got: {multi_block_warnings[0]['event_obj'].message!r}"
-    )
+    assert (
+        "2" in multi_block_warnings[0]["event_obj"].message
+    ), f"warning should mention the count. got: {multi_block_warnings[0]['event_obj'].message!r}"
 
 
 @pytest.mark.asyncio

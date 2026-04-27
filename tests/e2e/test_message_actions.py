@@ -91,15 +91,13 @@ def test_copy_markdown_button_writes_raw_markdown_to_clipboard(authenticated_pag
         # in the clipboard, byte-for-byte — no HTML escaping, no rendering, no
         # truncation. History storage may normalize trailing whitespace, so we
         # compare against the in-memory value rather than the raw seed.
-        expected = page.evaluate(
-            """
+        expected = page.evaluate("""
             () => {
               const view = Alpine.$data(document.getElementById('messages'));
               const agents = view.messages.filter(m => m.type === 'agent');
               return agents[agents.length - 1].text;
             }
-            """
-        )
+            """)
         assert clipboard == expected
         assert "# Heading" in clipboard
         assert "| col |" in clipboard
@@ -193,13 +191,11 @@ def test_copy_code_block_copies_full_code_preserving_whitespace(authenticated_pa
 def test_toast_stack_handles_rapid_fire(authenticated_page):
     page = authenticated_page
 
-    page.evaluate(
-        """
+    page.evaluate("""
         window.dispatchEvent(new CustomEvent('tsugite:toast', { detail: { text: 'a', duration: 5000 } }));
         window.dispatchEvent(new CustomEvent('tsugite:toast', { detail: { text: 'b', duration: 5000 } }));
         window.dispatchEvent(new CustomEvent('tsugite:toast', { detail: { text: 'c', duration: 5000 } }));
-        """
-    )
+        """)
 
     page.wait_for_function("document.querySelectorAll('.toast-stack .toast').length === 3", timeout=2000)
     texts = page.locator(".toast-stack .toast").evaluate_all("els => els.map(e => e.textContent)")
@@ -209,12 +205,10 @@ def test_toast_stack_handles_rapid_fire(authenticated_page):
 def test_toast_success_and_error_variants_have_correct_border(authenticated_page):
     page = authenticated_page
 
-    page.evaluate(
-        """
+    page.evaluate("""
         window.dispatchEvent(new CustomEvent('tsugite:toast', { detail: { text: 'ok', kind: 'success', duration: 5000 } }));
         window.dispatchEvent(new CustomEvent('tsugite:toast', { detail: { text: 'bad', kind: 'error', duration: 5000 } }));
-        """
-    )
+        """)
     page.wait_for_function("document.querySelectorAll('.toast-stack .toast').length === 2", timeout=2000)
 
     assert page.locator(".toast-stack .toast-success").count() == 1
@@ -250,12 +244,10 @@ def test_toast_auto_dismisses_by_id_not_shift(authenticated_page):
     """
     page = authenticated_page
 
-    page.evaluate(
-        """
+    page.evaluate("""
         const ev = () => new CustomEvent('tsugite:toast', { detail: { text: 't', duration: 250 } });
         window.dispatchEvent(ev());
         window.dispatchEvent(ev());
-        """
-    )
+        """)
     page.wait_for_function("document.querySelectorAll('.toast-stack .toast').length === 2", timeout=2000)
     page.wait_for_function("document.querySelectorAll('.toast-stack .toast').length === 0", timeout=2000)

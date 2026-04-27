@@ -151,9 +151,9 @@ def test_markdown_table_styling(authenticated_page, e2e_adapter, e2e_tmp):
         border = last_td.evaluate(
             "el => ({ style: getComputedStyle(el).borderBottomStyle, width: getComputedStyle(el).borderBottomWidth })"
         )
-        assert border["style"] == "none" or border["width"] == "0px", (
-            f"last row should have no bottom border; got {border}"
-        )
+        assert (
+            border["style"] == "none" or border["width"] == "0px"
+        ), f"last row should have no bottom border; got {border}"
 
 
 def test_markdown_wide_table_scrolls_inside_bubble(authenticated_page, e2e_adapter, e2e_tmp):
@@ -181,6 +181,6 @@ def test_markdown_wide_table_scrolls_inside_bubble(authenticated_page, e2e_adapt
             "() => ({ scrollWidth: document.documentElement.scrollWidth, "
             "clientWidth: document.documentElement.clientWidth })"
         )
-        assert page_dims["scrollWidth"] <= page_dims["clientWidth"] + 1, (
-            f"page itself should not horizontally scroll; got {page_dims}"
-        )
+        assert (
+            page_dims["scrollWidth"] <= page_dims["clientWidth"] + 1
+        ), f"page itself should not horizontally scroll; got {page_dims}"

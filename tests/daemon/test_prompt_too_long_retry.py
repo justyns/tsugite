@@ -95,9 +95,9 @@ async def test_retry_skipped_after_side_effecting_code_ran(adapter, tmp_path, mo
             channel_context=channel_context,
         )
 
-    assert call_count["n"] == 1, (
-        f"run_agent fired {call_count['n']} times; should stop after first attempt recorded a code_execution event"
-    )
+    assert (
+        call_count["n"] == 1
+    ), f"run_agent fired {call_count['n']} times; should stop after first attempt recorded a code_execution event"
 
 
 @pytest.mark.asyncio

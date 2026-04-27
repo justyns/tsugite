@@ -166,9 +166,9 @@ async def test_multi_code_block_executes_first_and_warns(storage):
     assert len(code_execs) == 1
     assert code_execs[0].data["code"] == "a=1"
     # A WarningEvent was emitted mentioning the dropped extras.
-    assert any("2" in w.message and "block" in w.message.lower() for w in warnings), (
-        f"expected a warning mentioning 2 blocks, got: {[w.message for w in warnings]}"
-    )
+    assert any(
+        "2" in w.message and "block" in w.message.lower() for w in warnings
+    ), f"expected a warning mentioning 2 blocks, got: {[w.message for w in warnings]}"
 
 
 @pytest.mark.asyncio
@@ -215,15 +215,15 @@ async def test_multi_code_block_warning_lands_in_next_turn_observation(storage):
     user_msgs = [m for m in turn2_messages if m.get("role") == "user"]
     obs_text = "\n".join(str(m.get("content", "")) for m in user_msgs)
 
-    assert "<tsugite_multi_block_warning" in obs_text, (
-        f"expected multi-block warning element in turn 2's prompt, got user messages: {user_msgs!r}"
-    )
-    assert 'dropped="2"' in obs_text and 'total="3"' in obs_text, (
-        f"warning should report dropped=2 total=3, got: {obs_text!r}"
-    )
-    assert "one ```python block per turn" in obs_text, (
-        f"warning should instruct one-block-per-turn discipline, got: {obs_text!r}"
-    )
+    assert (
+        "<tsugite_multi_block_warning" in obs_text
+    ), f"expected multi-block warning element in turn 2's prompt, got user messages: {user_msgs!r}"
+    assert (
+        'dropped="2"' in obs_text and 'total="3"' in obs_text
+    ), f"warning should report dropped=2 total=3, got: {obs_text!r}"
+    assert (
+        "one ```python block per turn" in obs_text
+    ), f"warning should instruct one-block-per-turn discipline, got: {obs_text!r}"
 
     # Sanity: only one code execution (the first block) actually ran.
     code_execs = list(storage.iter_events(types=["code_execution"]))
@@ -260,9 +260,9 @@ async def test_single_block_response_has_no_multi_block_warning(storage):
     turn2_call = provider_mock.call_args_list[1]
     turn2_messages = turn2_call.kwargs.get("messages") or turn2_call.args[0]
     obs_text = "\n".join(str(m.get("content", "")) for m in turn2_messages if m.get("role") == "user")
-    assert "tsugite_multi_block_warning" not in obs_text, (
-        f"single-block response leaked a multi-block warning: {obs_text!r}"
-    )
+    assert (
+        "tsugite_multi_block_warning" not in obs_text
+    ), f"single-block response leaked a multi-block warning: {obs_text!r}"
 
 
 @pytest.mark.asyncio

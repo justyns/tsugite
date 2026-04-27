@@ -846,6 +846,7 @@ async def run_agent_async(
 
         def on_hook_result(ex):
             return ui_handler._emit("hook_execution", ex.model_dump(exclude={"type", "timestamp"}))
+
     else:
         on_status = None
         on_hook_result = None

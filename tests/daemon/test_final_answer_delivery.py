@@ -41,9 +41,9 @@ class TestFinalResultPersistence:
 
         handler.handle_event(ErrorEvent(error="boom", step=1))
 
-        assert persister.called, (
-            "error was emitted but _persist_event was not called — UI has no way to show the failure after a reconnect"
-        )
+        assert (
+            persister.called
+        ), "error was emitted but _persist_event was not called — UI has no way to show the failure after a reconnect"
         payload = persister.call_args[0][0]
         assert payload["type"] == "error"
         assert payload["error"] == "boom"
@@ -70,6 +70,6 @@ class TestFinalResultPersistence:
 
         handler.handle_event(InfoEvent(message="working on it"))
 
-        assert not persister.called, (
-            "transient info events must not be persisted — they would bloat the event log with progress chatter"
-        )
+        assert (
+            not persister.called
+        ), "transient info events must not be persisted — they would bloat the event log with progress chatter"

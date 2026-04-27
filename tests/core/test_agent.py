@@ -494,9 +494,9 @@ async def test_agent_parse_response_code_with_inner_backticks():
 
     parsed = agent._parse_response_from_text(llm_response)
 
-    assert "post_comment(comment_body)" in parsed.code, (
-        f"Parser truncated code at an inner backtick. Got: {parsed.code!r}"
-    )
+    assert (
+        "post_comment(comment_body)" in parsed.code
+    ), f"Parser truncated code at an inner backtick. Got: {parsed.code!r}"
     assert "x = 1" in parsed.code
 
 
@@ -827,9 +827,9 @@ def test_tool_execution_no_task_warnings():
     )
 
     assert "Task pending" not in filtered_stderr, f"Unexpected Task pending warning:\n{stderr_output}"
-    assert "Task exception was never retrieved" not in filtered_stderr, (
-        f"Unexpected Task exception warning:\n{stderr_output}"
-    )
+    assert (
+        "Task exception was never retrieved" not in filtered_stderr
+    ), f"Unexpected Task exception warning:\n{stderr_output}"
 
 
 def test_tool_exception_propagation_from_async():
@@ -879,6 +879,6 @@ def test_tool_exception_propagation_from_async():
         line for line in stderr_output.split("\n") if "failing_tool" in line or "never retrieved" in line
     )
 
-    assert "exception was never retrieved" not in filtered_stderr.lower(), (
-        f"Exception handling broken:\n{stderr_output}"
-    )
+    assert (
+        "exception was never retrieved" not in filtered_stderr.lower()
+    ), f"Exception handling broken:\n{stderr_output}"
