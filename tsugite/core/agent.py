@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-from tsugite.attachments.base import Attachment, AttachmentContentType  # noqa: E402
+from tsugite.attachments.base import Attachment, AttachmentContentType, format_attachment_open_tag  # noqa: E402
 from tsugite.events import (  # noqa: E402
     CodeExecutionEvent,
     ContentBlockEvent,
@@ -954,12 +954,13 @@ class TsugiteAgent:
         model_supports_vision = model_info.supports_vision if model_info else True
 
         for att in self.attachments:
+            open_tag = format_attachment_open_tag(att)
             if att.content_type == AttachmentContentType.TEXT:
-                text_parts.append(f'<attachment name="{att.name}">')
+                text_parts.append(open_tag)
                 text_parts.append(att.content)
                 text_parts.append("</attachment>")
             elif att.content_type == AttachmentContentType.IMAGE and not model_supports_vision:
-                text_parts.append(f'<attachment name="{att.name}">[Image: {att.name}]</attachment>')
+                text_parts.append(f"{open_tag}[Image: {att.name}]</attachment>")
             else:
                 block = self._format_attachment(att)
                 if block:

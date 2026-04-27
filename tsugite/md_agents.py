@@ -5,13 +5,13 @@ import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Literal, Optional, Union
 
 logger = logging.getLogger(__name__)
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator  # noqa: E402
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator  # noqa: E402
 
-from .utils import parse_yaml_frontmatter  # noqa: E402
+from .utils import has_glob_chars, parse_yaml_frontmatter  # noqa: E402
 
 
 def _parse_directive_attribute(
@@ -33,6 +33,45 @@ def _parse_directive_attribute(
     return value
 
 
+class AttachmentSpec(BaseModel):
+    """Dict-form attachment specification.
+
+    Used in agent frontmatter as an alternative to plain string paths. Supports
+    binding attachment content to a Jinja variable (`assign:`) and rendering as
+    an on-demand index instead of full content (`mode: index`).
+    """
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    path: str
+    mode: Literal["full", "index"] = "full"
+    name: Optional[str] = None
+    assign: Optional[str] = None
+    attach: bool = True
+    index_format: Literal["path_only", "first_line", "first_heading", "frontmatter"] = "first_heading"
+    max_entries: int = 50
+
+    @field_validator("assign", mode="after")
+    @classmethod
+    def _valid_identifier(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and not v.isidentifier():
+            raise ValueError(f"assign must be a valid Python identifier, got: {v!r}")
+        return v
+
+    @field_validator("path", mode="after")
+    @classmethod
+    def _no_leading_dash(cls, v: str) -> str:
+        if v.startswith("-"):
+            raise ValueError("AttachmentSpec.path cannot start with '-' (use string form for removals)")
+        return v
+
+    @model_validator(mode="after")
+    def _attach_or_assign(self) -> "AttachmentSpec":
+        if not self.attach and not self.assign:
+            raise ValueError("attach: false requires assign: to be useful")
+        return self
+
+
 class AgentConfig(BaseModel):
     """Agent configuration from YAML frontmatter."""
 
@@ -47,7 +86,7 @@ class AgentConfig(BaseModel):
     max_turns: int = 5
     tools: List[str] = Field(default_factory=list)
     prefetch: List[Dict[str, Any]] = Field(default_factory=list)
-    attachments: List[str] = Field(default_factory=list)
+    attachments: List[Union[str, AttachmentSpec]] = Field(default_factory=list)
     auto_load_skills: List[str] = Field(default_factory=list)
     skill_paths: List[str] = Field(default_factory=list)
     instructions: str = ""
@@ -79,6 +118,17 @@ class AgentConfig(BaseModel):
         allowed = ["public", "private", "internal"]
         if v not in allowed:
             raise ValueError(f"visibility must be one of {allowed}, got: {v}")
+        return v
+
+    @field_validator("attachments", mode="after")
+    @classmethod
+    def _no_duplicate_assigns(cls, v: List[Union[str, "AttachmentSpec"]]) -> List[Union[str, "AttachmentSpec"]]:
+        seen: set[str] = set()
+        for item in v:
+            if isinstance(item, AttachmentSpec) and item.assign:
+                if item.assign in seen:
+                    raise ValueError(f"duplicate attachment assign: {item.assign!r}")
+                seen.add(item.assign)
         return v
 
 
@@ -647,6 +697,18 @@ def build_validation_test_context(agent, include_prefetch: bool = True) -> dict[
                 else:
                     # Default: use string placeholder
                     test_context[assign_name] = "mock_prefetch_data"
+
+    # Mock attachment `assign:` bindings so templates that reference them validate.
+    # Shape mirrors what resolve_agent_config_attachments would produce at runtime.
+    for item in agent.config.attachments or []:
+        if not isinstance(item, AttachmentSpec) or not item.assign:
+            continue
+        if item.mode == "index":
+            test_context[item.assign] = [{"path": "mock/path.md", "heading": "Mock", "size_bytes": 0, "mtime": 0}]
+        elif has_glob_chars(item.path):
+            test_context[item.assign] = [{"path": "mock/path.md", "content": "mock content"}]
+        else:
+            test_context[item.assign] = "mock attachment content"
 
     return test_context
 

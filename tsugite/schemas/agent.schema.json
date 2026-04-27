@@ -1,4 +1,75 @@
 {
+  "$defs": {
+    "AttachmentSpec": {
+      "additionalProperties": false,
+      "description": "Dict-form attachment specification.\n\nUsed in agent frontmatter as an alternative to plain string paths. Supports\nbinding attachment content to a Jinja variable (`assign:`) and rendering as\nan on-demand index instead of full content (`mode: index`).",
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "mode": {
+          "default": "full",
+          "enum": [
+            "full",
+            "index"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "assign": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Assign"
+        },
+        "attach": {
+          "default": true,
+          "title": "Attach",
+          "type": "boolean"
+        },
+        "index_format": {
+          "default": "first_heading",
+          "enum": [
+            "path_only",
+            "first_line",
+            "first_heading",
+            "frontmatter"
+          ],
+          "title": "Index Format",
+          "type": "string"
+        },
+        "max_entries": {
+          "default": 50,
+          "title": "Max Entries",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "AttachmentSpec",
+      "type": "object"
+    }
+  },
   "additionalProperties": false,
   "description": "YAML frontmatter configuration for Tsugite markdown agents. See https://github.com/anthropics/tsugite for full documentation.",
   "properties": {
@@ -72,7 +143,14 @@
     },
     "attachments": {
       "items": {
-        "type": "string"
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "$ref": "#/$defs/AttachmentSpec"
+          }
+        ]
       },
       "title": "Attachments",
       "type": "array"

@@ -162,18 +162,20 @@ class BaseAdapter(ABC):
         agent_path = self._resolve_agent_path()
         if agent_path:
             try:
-                from tsugite.agent_preparation import resolve_agent_config_attachments
+                from tsugite.agent_preparation import (
+                    resolve_agent_config_attachments,
+                    split_attachment_removals,
+                )
                 from tsugite.md_agents import parse_agent_file
 
                 agent = parse_agent_file(agent_path)
                 workspace_path = self._workspace.path if self._workspace else None
 
-                # Support "-filename" removal syntax
-                removals = {t.lstrip("-") for t in (agent.config.attachments or []) if t.startswith("-")}
-                keep_templates = [t for t in (agent.config.attachments or []) if not t.startswith("-")]
+                removals, keep_items = split_attachment_removals(agent.config.attachments or [])
                 if removals:
                     attachments = [a for a in attachments if a.name not in removals]
-                attachments.extend(resolve_agent_config_attachments(keep_templates, workspace_path))
+                loaded, _ = resolve_agent_config_attachments(keep_items, workspace_path)
+                attachments.extend(loaded)
             except Exception as e:
                 logger.debug("Failed to load agent config attachments: %s", e)
 

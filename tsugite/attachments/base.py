@@ -3,7 +3,8 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional, Union
+from typing import Literal, Optional, Union
+from xml.sax.saxutils import quoteattr
 
 
 class AttachmentContentType(Enum):
@@ -25,6 +26,8 @@ class Attachment:
         content_type: Type of content (TEXT, IMAGE, AUDIO, DOCUMENT)
         mime_type: MIME type of the content (e.g., 'image/jpeg', 'application/pdf')
         source_url: Optional URL source (for remote attachments that don't need downloading)
+        mode: Optional rendering hint surfaced as a `mode="..."` attribute on the
+            <attachment> XML tag. None means default (full content) rendering.
     """
 
     name: str
@@ -32,6 +35,18 @@ class Attachment:
     content_type: AttachmentContentType
     mime_type: str
     source_url: Optional[str] = None
+    mode: Optional[Literal["index"]] = None
+
+
+def format_attachment_open_tag(att: "Attachment") -> str:
+    """Format the opening `<attachment ...>` XML tag for an attachment.
+
+    Includes a `mode="..."` attribute when `att.mode` is set. Attribute values are
+    XML-escaped so quotes/angle-brackets in attachment names don't break parsing.
+    """
+    name_attr = quoteattr(att.name)
+    mode_attr = f" mode={quoteattr(att.mode)}" if att.mode else ""
+    return f"<attachment name={name_attr}{mode_attr}>"
 
 
 class AttachmentHandler(ABC):

@@ -66,6 +66,26 @@ class TestClaudeCodeFirstMessageAttachments:
         assert "short content" in msg
         assert "truncated" not in msg
 
+    def test_index_mode_emits_mode_attribute(self):
+        att = Attachment(
+            name="topic_index",
+            content="File index for topics",
+            content_type=AttachmentContentType.TEXT,
+            mime_type="text/plain",
+            mode="index",
+        )
+        msg = self._build(attachments=[att])
+
+        assert '<attachment name="topic_index" mode="index">' in msg
+        assert "File index for topics" in msg
+
+    def test_no_mode_attribute_when_unset(self):
+        att = self._att(name="plain.md", content="ordinary")
+        msg = self._build(attachments=[att])
+
+        assert '<attachment name="plain.md">' in msg
+        assert "mode=" not in msg.split("</attachment>")[0]
+
 
 class TestClaudeCodeSessionId:
     @pytest.mark.asyncio

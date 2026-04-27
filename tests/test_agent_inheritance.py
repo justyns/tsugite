@@ -126,6 +126,60 @@ def test_merge_agent_configs_attachments():
     assert merged.attachments == ["standards", "api-docs", "examples"]
 
 
+def test_merge_agent_configs_attachments_dict_form_child_wins():
+    """Child AttachmentSpec with same path as parent overrides parent."""
+    from tsugite.md_agents import AttachmentSpec
+
+    parent = AgentConfig(
+        name="parent",
+        attachments=[AttachmentSpec(path="memory.md", assign="mem_parent")],
+    )
+
+    child = AgentConfig(
+        name="child",
+        attachments=[AttachmentSpec(path="memory.md", assign="mem_child")],
+    )
+
+    merged = merge_agent_configs(parent, child)
+
+    assert len(merged.attachments) == 1
+    spec = merged.attachments[0]
+    assert isinstance(spec, AttachmentSpec)
+    assert spec.path == "memory.md"
+    assert spec.assign == "mem_child"
+
+
+def test_merge_agent_configs_attachments_mixed_strings_and_specs():
+    """Mixed list of legacy strings and AttachmentSpecs merges without crashing."""
+    from tsugite.md_agents import AttachmentSpec
+
+    parent = AgentConfig(
+        name="parent",
+        attachments=["legacy.md", AttachmentSpec(path="spec.md", assign="x")],
+    )
+
+    child = AgentConfig(
+        name="child",
+        attachments=[AttachmentSpec(path="spec.md", assign="y"), "extra.md"],
+    )
+
+    merged = merge_agent_configs(parent, child)
+
+    paths = []
+    for item in merged.attachments:
+        if isinstance(item, str):
+            paths.append(item)
+        else:
+            paths.append(item.path)
+    assert "legacy.md" in paths
+    assert "spec.md" in paths
+    assert "extra.md" in paths
+
+    spec_entries = [a for a in merged.attachments if isinstance(a, AttachmentSpec) and a.path == "spec.md"]
+    assert len(spec_entries) == 1
+    assert spec_entries[0].assign == "y"
+
+
 def test_merge_agent_configs_reasoning_effort():
     """Test merging reasoning_effort scalar (child overwrites parent)."""
     parent = AgentConfig(

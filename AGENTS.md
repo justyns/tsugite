@@ -283,6 +283,63 @@ tsu run -f image1.jpg -f image2.jpg "Compare these images"
 - YouTube handler: `tsugite/attachments/youtube.py` (fetches transcripts)
 - LLM formatting: `tsugite/core/agent.py:_format_attachment()`
 
+#### Frontmatter Attachment Specs
+
+The `attachments:` field accepts either plain string paths (legacy) or dict-form `AttachmentSpec` entries. Both forms can be mixed in the same list.
+
+**String form** (existing): rendered through Jinja, then loaded as a single file. Prefix with `-` to remove a workspace default (e.g., `-MEMORY.md`).
+
+```yaml
+attachments:
+  - MEMORY.md
+  - "{{ today() }}.md"
+  - -SKIP.md  # remove a workspace default named SKIP.md
+```
+
+**Dict form** (`AttachmentSpec`): adds `assign:`, `mode: index`, glob expansion, and other knobs.
+
+```yaml
+attachments:
+  - path: MEMORY.md
+    assign: memory_content        # bind file content as Jinja variable
+
+  - path: USER.md
+    assign: user_prefs
+    attach: false                 # bind variable but don't inject into prompt
+
+  - path: "memory/topics/*.md"    # glob - one Attachment per matched file
+    assign: topic_files           # bound as list[dict] of {path, content}
+
+  - path: "memory/topics/*.md"
+    mode: index                   # render path+heading list, not full content
+    name: topic_index             # explicit attachment name (default derives from glob)
+    assign: topics                # bound as list[dict] of {path, heading, size_bytes, mtime}
+    index_format: first_heading   # path_only | first_line | first_heading | frontmatter
+    max_entries: 50               # cap, warns if exceeded
+```
+
+**Variable shapes** (when `assign:` is set):
+
+| Spec | Shape |
+|---|---|
+| `mode: full`, single concrete file | `str` (file content) |
+| `mode: full`, glob | `list[dict]` of `{path, content}` (binaries skipped) |
+| `mode: index` | `list[dict]` of `{path, heading, size_bytes, mtime}` |
+| Single file, missing | `None` |
+| Empty glob | `[]` |
+
+**Constraints (validated at parse time):**
+- `assign:` must be a valid Python identifier.
+- Two specs can't share the same `assign` value.
+- `attach: false` requires `assign:` (otherwise the attachment loads for nothing).
+- `path:` cannot start with `-` (use string form for removal).
+
+**Index mode rendering** wraps the formatted index in an existing `<attachment>` tag with a `mode="index"` attribute, e.g. `<attachment name="topic_index" mode="index">...</attachment>`. Agents are expected to call `read_file(path=...)` to fetch individual entries on demand.
+
+**Collisions:** if an `assign:` name shadows a built-in or prefetch variable, the assignment wins and a warning is logged.
+
+See `examples/attachment_assign_demo.md` and `examples/attachment_index_demo.md` for runnable references.
+
 ## Development Patterns
 
 ### Adding a New Built-in Agent

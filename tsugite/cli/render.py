@@ -176,7 +176,8 @@ def render(
                         style="dim",
                         align="left",
                     )
-                    console.print(f"[yellow]<Attachment: {att.name}>[/yellow]")
+                    mode_suffix = f" mode={att.mode}" if att.mode else ""
+                    console.print(f"[yellow]<Attachment: {att.name}{mode_suffix}>[/yellow]")
 
                     if att.content_type == AttachmentContentType.TEXT and att.content:
                         console.print(att.content if verbose else _truncate_content(att.content))

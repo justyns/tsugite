@@ -193,12 +193,12 @@ class ClaudeCodeProvider:
 
         include_context = not self._resume_session or self._resume_after_compaction
         if include_context and (self._attachments or self._skills):
+            from tsugite.attachments.base import AttachmentContentType, format_attachment_open_tag
+
             context_parts = []
             for att in self._attachments:
-                from tsugite.attachments.base import AttachmentContentType
-
                 if att.content_type == AttachmentContentType.TEXT:
-                    context_parts.append(f'<attachment name="{att.name}">')
+                    context_parts.append(format_attachment_open_tag(att))
                     context_parts.append(att.content)
                     context_parts.append("</attachment>")
             for skill in self._skills:

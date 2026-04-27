@@ -185,7 +185,57 @@ attachments:
   - "{{ WORKSPACE_DIR }}/notes.md"
 ```
 
-Supports text files, PDFs, images, and URLs.  Jinja2 works in attachment paths.  All attachments are injected as context.
+Supports text files, PDFs, images, and URLs.  Jinja2 works in attachment paths.  All attachments are injected as context. Prefix with `-` to remove a workspace default (e.g. `-MEMORY.md`).
+
+### Attachment specs (dict form)
+
+Use the dict form to bind attachment content to a Jinja variable, render an on-demand index instead of full content, or expand globs:
+
+```yaml
+attachments:
+  # Bind file content as a variable usable in body/instructions templates
+  - path: MEMORY.md
+    assign: memory_content
+
+  # Bind without injecting (the LLM doesn't see it; the template does)
+  - path: USER.md
+    assign: user_prefs
+    attach: false
+
+  # Glob - one attachment per matched file; assign binds list[dict] of {path, content}
+  - path: "notes/*.md"
+    assign: notes
+
+  # Index mode - emits a single <attachment mode="index"> with path+heading bullets,
+  # no full file content. Agents read individual entries via read_file().
+  - path: "memory/topics/*.md"
+    mode: index
+    name: topic_index             # optional override; default derives from glob
+    assign: topics                # list[dict] of {path, heading, size_bytes, mtime}
+    index_format: first_heading   # path_only | first_line | first_heading | frontmatter
+    max_entries: 50
+```
+
+Variable shapes when `assign:` is set:
+
+| Spec | Variable shape |
+|---|---|
+| `mode: full`, single concrete file | `str` (file content) |
+| `mode: full`, glob | `list[dict]` of `{path, content}` (binaries skipped) |
+| `mode: index` | `list[dict]` of `{path, heading, size_bytes, mtime}` |
+| Single file, missing | `None` |
+| Empty glob | `[]` |
+
+Validation rules (enforced at parse time):
+
+- `assign:` must be a valid Python identifier.
+- Two specs cannot share the same `assign:` value.
+- `attach: false` requires `assign:`.
+- `path:` cannot start with `-` (use string form for removal).
+
+Collisions between an `assign:` name and a built-in/prefetch variable resolve in favor of the attachment binding, with a warning logged.
+
+See `examples/attachment_assign_demo.md` and `examples/attachment_index_demo.md` for full working examples.
 
 ## Multi-step agents
 

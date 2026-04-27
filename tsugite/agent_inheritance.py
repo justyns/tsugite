@@ -303,8 +303,23 @@ def merge_list_fields(parent, child) -> Dict[str, List]:
     def _merge_dedup(parent_list, child_list):
         return list(dict.fromkeys((parent_list or []) + (child_list or [])))
 
+    def _merge_attachments(parent_list, child_list):
+        """Merge attachments preserving parent order; child entries override by key.
+
+        Strings are keyed by their full text (so `-foo.md` and `foo.md` stay distinct).
+        AttachmentSpec entries are keyed by `path`, so a child spec with the same path
+        replaces the parent spec in place.
+        """
+        from tsugite.md_agents import AttachmentSpec
+
+        merged: Dict[Any, Any] = {}
+        for item in (parent_list or []) + (child_list or []):
+            key = ("spec", item.path) if isinstance(item, AttachmentSpec) else ("str", item)
+            merged[key] = item
+        return list(merged.values())
+
     merged_tools = _merge_dedup(parent.tools, child.tools)
-    merged_attachments = _merge_dedup(parent.attachments, child.attachments)
+    merged_attachments = _merge_attachments(parent.attachments, child.attachments)
     merged_skills = _merge_dedup(parent.auto_load_skills, child.auto_load_skills)
 
     # Custom tools - deduplicate by "name" field (child overrides parent)

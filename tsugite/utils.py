@@ -28,6 +28,14 @@ def convert_html_to_markdown(html: str) -> str:
     return h.handle(html)
 
 
+_GLOB_CHARS = frozenset("*?[")
+
+
+def has_glob_chars(s: str) -> bool:
+    """Return True if s contains any shell glob metacharacter (`*`, `?`, `[`)."""
+    return any(c in _GLOB_CHARS for c in s)
+
+
 def parse_yaml_frontmatter(content: str, label: str = "content") -> Tuple[Dict[str, Any], str]:
     """Parse YAML frontmatter from markdown content.
 
