@@ -807,8 +807,32 @@ class BaseAdapter(ABC):
                 {"role": "user", "content": f"<compaction_instructions>{instructions}</compaction_instructions>"}
             )
 
-        old_messages = sanitize_for_summary(old_messages, model=model)
+        attachment_basenames: set[str] = set(WORKSPACE_FILES)
+        try:
+            agent_path = self._resolve_agent_path()
+            if agent_path:
+                from tsugite.agent_preparation import split_attachment_removals
+                from tsugite.md_agents import parse_agent_file
 
+                attachments_spec = parse_agent_file(agent_path).config.attachments or []
+                _, keep_items = split_attachment_removals(attachments_spec)
+                for item in keep_items:
+                    path = item if isinstance(item, str) else item.path
+                    if path:
+                        attachment_basenames.add(Path(path).name)
+        except Exception:
+            logger.debug("[%s] Failed to enumerate attachment basenames", self.agent_name, exc_info=True)
+
+        old_messages = sanitize_for_summary(
+            old_messages, model=model, attachment_basenames=attachment_basenames
+        )
+
+        # Snapshot the agent's tracked context limit before summarization so
+        # that any mutation during the call (e.g. provider state leakage from
+        # a smaller compact model) doesn't corrupt the displayed value or
+        # the next compaction-threshold computation.
+        saved_session_store_limit = self.session_store.get_context_limit(self.agent_name)
+        saved_agent_config_limit = self.agent_config.context_limit
         try:
             summary = await summarize_session(
                 old_messages,
@@ -819,6 +843,9 @@ class BaseAdapter(ABC):
         except Exception:
             logger.exception("[%s] Compaction summarization failed", self.agent_name)
             raise
+        finally:
+            self.session_store.update_context_limit(self.agent_name, saved_session_store_limit)
+            self.agent_config.context_limit = saved_agent_config_limit
 
         new_session = self.session_store.compact_session(session_id)
         new_session_path = get_history_dir() / f"{new_session.id}.jsonl"

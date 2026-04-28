@@ -45,8 +45,16 @@ Unresolved questions or ambiguities that still need answers.
 ## Action Items
 Concrete next steps or pending tasks."""
 
+_ATTACHMENT_DIRECTIVE = (
+    "Do not include or repeat content from auto-attached workspace files "
+    "(e.g., AGENTS.md, MEMORY.md, IDENTITY.md, USER.md, CLAUDE.md). "
+    "The agent re-loads those automatically; summarizing them wastes tokens "
+    "and produces a stale snapshot if those files change."
+)
+
 SUMMARIZE_SYSTEM_PROMPT = (
     "Summarize this conversation using the structured format below.\n"
+    f"{_ATTACHMENT_DIRECTIVE}\n"
     "Keep the total summary under 800 words. Omit any section that has no content.\n\n"
     f"{_SUMMARY_FORMAT}"
 )
@@ -54,6 +62,7 @@ SUMMARIZE_SYSTEM_PROMPT = (
 COMBINE_SYSTEM_PROMPT = (
     "You are given multiple summaries of consecutive conversation chunks.\n"
     "Combine them into a single coherent summary using the structured format below.\n"
+    f"{_ATTACHMENT_DIRECTIVE}\n"
     "Keep the total summary under 800 words. Omit any section that has no content.\n\n"
     f"{_SUMMARY_FORMAT}"
 )
@@ -163,6 +172,9 @@ def _chunk_messages(messages: list[dict], max_chunk_tokens: int, model: str) -> 
     return chunks
 
 
+_MISSING = object()
+
+
 async def _llm_complete(system_prompt: str, user_content: str, model: str) -> str:
     """Send a system+user message pair to the LLM and return the response text."""
     from tsugite.models import get_provider_and_model
@@ -173,7 +185,17 @@ async def _llm_complete(system_prompt: str, user_content: str, model: str) -> st
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content},
         ]
-        response = await provider.acompletion(messages=messages, model=model_id)
+        # Shield the provider's per-instance _context_window from this internal
+        # call. Summarization (and title generation) typically use a smaller
+        # model than the agent; without this guard, the smaller model's
+        # context_window leaks into shared provider state and corrupts the next
+        # agent turn's reported context limit.
+        saved_context_window = getattr(provider, "_context_window", _MISSING)
+        try:
+            response = await provider.acompletion(messages=messages, model=model_id)
+        finally:
+            if saved_context_window is not _MISSING:
+                provider._context_window = saved_context_window
         content = response.content
     except Exception as e:
         raise RuntimeError(f"LLM call failed ({model}): {e}") from e
@@ -358,6 +380,10 @@ _ATTACHMENT_BLOCK = re.compile(
     r"<attachment\b([^>]*)>.*?</attachment>",
     re.DOTALL,
 )
+_NAMED_ATTACHMENT_BLOCK = re.compile(
+    r"<Attachment:\s*([^>]+?)>(.*?)</Attachment:\s*\1\s*>",
+    re.DOTALL,
+)
 _CONTEXT_BLOCK = re.compile(r"<context>.*?</context>", re.DOTALL)
 _SKILL_BLOCK = re.compile(
     r"<skill_content\b([^>]*)>.*?</skill_content>",
@@ -386,10 +412,40 @@ def _truncate_output_body(body: str, head_chars: int, tail_chars: int) -> str:
     return f"{body[:head_chars]}\n{_TRUNCATION_MARKER}\n{body[-tail_chars:]}"
 
 
+def _elide_attachment_aware_outputs(content: str, basenames: set[str]) -> str:
+    """Elide `<output>...</output>` bodies inside `<tsugite_execution_result>`
+    blocks whose code or output references a known attachment file basename.
+
+    These blocks are typically `read_note('MEMORY.md')` style tool calls that
+    inline auto-attached file contents into the event stream, where the
+    size-based truncation may not catch them (small files, big budget). The
+    agent re-loads attachments every turn anyway.
+    """
+    valid = [n for n in basenames if n]
+    if not valid:
+        return content
+
+    name_pattern = re.compile("|".join(re.escape(n) for n in valid))
+
+    def _maybe_elide(match: "re.Match[str]") -> str:
+        opening, inner, closing = match.group(1), match.group(2), match.group(3)
+        hit = name_pattern.search(match.group(0))
+        if not hit:
+            return match.group(0)
+        shrunk_inner = _OUTPUT_BODY.sub(
+            f'<output elided="attachment_file: {hit.group(0)}"/>',
+            inner,
+        )
+        return f"{opening}{shrunk_inner}{closing}"
+
+    return _EXECUTION_RESULT.sub(_maybe_elide, content)
+
+
 def sanitize_for_summary(
     messages: list[dict],
     per_message_token_budget: int = 1500,
     model: str = DEFAULT_COMPACT_MODEL,
+    attachment_basenames: set[str] = frozenset(),
 ) -> list[dict]:
     """Strip workspace-scaffolding blocks and truncate oversized tool outputs.
 
@@ -397,9 +453,14 @@ def sanitize_for_summary(
     conversation, not file dumps or context-turn scaffolding that may have
     been replayed via `code_execution` outputs (e.g. read_note('AGENTS.md')).
 
-    - Inline `<attachment>...</attachment>`, `<context>...</context>`, and
-      `<skill_content ...>...</skill_content>` blocks are replaced with one-line
-      elision tags that preserve their identifying attributes.
+    - Inline `<attachment>...</attachment>`, `<Attachment: name>...</Attachment: name>`,
+      `<context>...</context>`, and `<skill_content ...>...</skill_content>`
+      blocks are replaced with one-line elision tags that preserve their
+      identifying attributes.
+    - When `attachment_basenames` is provided, `<tsugite_execution_result>`
+      blocks whose code or output references a known basename have their
+      `<output>` body elided regardless of size (small reads of MEMORY.md
+      otherwise slip past the size budget).
     - For oversized `<tsugite_execution_result>` blocks (token count exceeding
       `per_message_token_budget`), the `<output>...</output>` body is truncated
       to head + marker + tail, preserving the wrapping tags so structure is
@@ -418,8 +479,12 @@ def sanitize_for_summary(
             continue
 
         new_content = _ATTACHMENT_BLOCK.sub(lambda m: _elide_block(m, "attachment"), content)
+        new_content = _NAMED_ATTACHMENT_BLOCK.sub(
+            lambda m: f'<attachment name="{m.group(1).strip()}" elided="true"/>', new_content
+        )
         new_content = _CONTEXT_BLOCK.sub('<context elided="true"/>', new_content)
         new_content = _SKILL_BLOCK.sub(lambda m: _elide_block(m, "skill_content"), new_content)
+        new_content = _elide_attachment_aware_outputs(new_content, attachment_basenames)
 
         if _count_tokens(new_content, model) > per_message_token_budget:
 

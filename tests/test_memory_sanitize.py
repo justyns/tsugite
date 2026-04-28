@@ -12,7 +12,7 @@ bloat the summary input:
 The sanitizer elides scaffolding and truncates oversized tool outputs.
 """
 
-from tsugite.daemon.memory import sanitize_for_summary
+from tsugite.daemon.memory import COMBINE_SYSTEM_PROMPT, SUMMARIZE_SYSTEM_PROMPT, sanitize_for_summary
 
 MODEL = "openai:gpt-4o-mini"
 
@@ -163,3 +163,128 @@ class TestSanitizeIdempotence:
         once = sanitize_for_summary([msg], model=MODEL, per_message_token_budget=200)
         twice = sanitize_for_summary(once, model=MODEL, per_message_token_budget=200)
         assert once == twice
+
+
+class TestSanitizeCapitalAttachmentForm:
+    """The `<Attachment: name>...</Attachment: name>` format used by
+    `_format_attachment` (capital A, colon, name) must also be elided.
+    """
+
+    def test_strips_capital_attachment_block(self):
+        msg = {
+            "role": "user",
+            "content": (
+                "Here is the file:\n"
+                "<Attachment: AGENTS.md>\n"
+                "Big workspace doc with hundreds of lines of text...\n"
+                "</Attachment: AGENTS.md>\n"
+                "Please review."
+            ),
+        }
+        out = sanitize_for_summary([msg], model=MODEL)
+        c = out[0]["content"]
+        assert "Big workspace doc" not in c
+        assert "Please review." in c
+        assert "Here is the file:" in c
+
+    def test_strips_capital_attachment_with_simple_name(self):
+        msg = {
+            "role": "user",
+            "content": "<Attachment: README>\ncontent here\n</Attachment: README>\nrest",
+        }
+        out = sanitize_for_summary([msg], model=MODEL)
+        assert "content here" not in out[0]["content"]
+        assert "rest" in out[0]["content"]
+
+
+class TestSanitizeAttachmentBasenameElision:
+    """Tool outputs that read known attachment files (e.g. read_note('MEMORY.md'))
+    leak the file's verbatim contents into `code_execution` events. These bypass
+    the size-based truncation when small.
+
+    When `attachment_basenames` is provided, sanitize elides any
+    <tsugite_execution_result> block referencing those basenames regardless of
+    size.
+    """
+
+    def _wrap(self, body: str, code_hint: str = "") -> str:
+        return (
+            '<tsugite_execution_result status="success" duration_ms="42">\n'
+            f"{code_hint}"
+            f"<output>{body}</output>\n"
+            "</tsugite_execution_result>"
+        )
+
+    def test_small_tool_output_referencing_attachment_is_elided(self):
+        # Small enough to slip past the size budget
+        body = "# AGENTS.md\nshort file content here"
+        msg = {
+            "role": "user",
+            "content": self._wrap(
+                body, code_hint="<code>read_note('AGENTS.md')</code>\n"
+            ),
+        }
+        out = sanitize_for_summary(
+            [msg],
+            model=MODEL,
+            per_message_token_budget=10000,
+            attachment_basenames={"AGENTS.md", "MEMORY.md"},
+        )
+        c = out[0]["content"]
+        assert "short file content here" not in c
+        assert "<tsugite_execution_result" in c
+        assert "</tsugite_execution_result>" in c
+
+    def test_tool_output_unrelated_to_attachments_unchanged(self):
+        body = "search results for kittens"
+        msg = {
+            "role": "user",
+            "content": self._wrap(body, code_hint="<code>web_search('kittens')</code>\n"),
+        }
+        out = sanitize_for_summary(
+            [msg],
+            model=MODEL,
+            per_message_token_budget=10000,
+            attachment_basenames={"AGENTS.md", "MEMORY.md"},
+        )
+        assert "search results for kittens" in out[0]["content"]
+
+    def test_attachment_basenames_match_in_output_body(self):
+        # Attachment basename in the output body itself, not just the code arg
+        body = "# AGENTS.md\nthis is the agents config\n## section"
+        msg = {"role": "user", "content": self._wrap(body)}
+        out = sanitize_for_summary(
+            [msg],
+            model=MODEL,
+            per_message_token_budget=10000,
+            attachment_basenames={"AGENTS.md"},
+        )
+        c = out[0]["content"]
+        assert "this is the agents config" not in c
+
+    def test_no_attachment_basenames_keeps_existing_behavior(self):
+        body = "# AGENTS.md\nshort file content here"
+        msg = {
+            "role": "user",
+            "content": self._wrap(body, code_hint="<code>read_note('AGENTS.md')</code>\n"),
+        }
+        out_no_basenames = sanitize_for_summary([msg], model=MODEL, per_message_token_budget=10000)
+        out_empty_basenames = sanitize_for_summary(
+            [msg], model=MODEL, per_message_token_budget=10000, attachment_basenames=set()
+        )
+        assert out_no_basenames[0]["content"] == msg["content"]
+        assert out_empty_basenames[0]["content"] == msg["content"]
+
+
+class TestSummarizerPromptDirective:
+    """Both summarizer prompts must instruct the LLM to skip auto-attached
+    workspace files.
+    """
+
+    def test_summarize_prompt_mentions_attachments(self):
+        assert "auto-attached" in SUMMARIZE_SYSTEM_PROMPT.lower() or "attached" in SUMMARIZE_SYSTEM_PROMPT.lower()
+        assert "MEMORY.md" in SUMMARIZE_SYSTEM_PROMPT or "AGENTS.md" in SUMMARIZE_SYSTEM_PROMPT
+
+    def test_combine_prompt_mentions_attachments(self):
+        assert "auto-attached" in COMBINE_SYSTEM_PROMPT.lower() or "attached" in COMBINE_SYSTEM_PROMPT.lower()
+        assert "MEMORY.md" in COMBINE_SYSTEM_PROMPT or "AGENTS.md" in COMBINE_SYSTEM_PROMPT
