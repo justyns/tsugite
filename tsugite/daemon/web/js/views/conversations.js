@@ -30,6 +30,8 @@ export default () => ({
 
   // Data owned by orchestrator
   messages: [],
+  // session_id -> bubbles. Stream pushes target the original session even after the user switches.
+  messagesBySession: {},
   loading: true,
   compacting: false,
   compactingCounts: null,

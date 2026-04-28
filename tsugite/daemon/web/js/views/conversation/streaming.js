@@ -59,6 +59,10 @@ export const streamingMixin = {
     this._clearDraft();
     this._resetInputHeight();
 
+    // Re-resolve each call: loadHistory() may swap the array reference mid-stream.
+    const sendSessionId = this.selectedSessionId;
+    const sessMessages = () => (this.messagesBySession[sendSessionId] ||= []);
+
     let uploadedFiles = [];
     const fileNames = this.pendingFiles.map(f => f.name);
     const workspaceFiles = this.pendingFiles.filter(f => f.fromWorkspace);
@@ -82,12 +86,12 @@ export const streamingMixin = {
     }
 
     const displayMsg = fileNames.length ? `${msg || ''}\n📎 ${fileNames.join(', ')}`.trim() : msg;
-    this.messages.push({ type: 'user', text: displayMsg });
+    sessMessages().push({ type: 'user', text: displayMsg });
 
     this.scrollMessages(true);
 
-    const progressIdx = this.messages.length;
-    this.messages.push({ type: 'progress', steps: [], statusText: 'Working...', turnCount: 0, toolCount: 0 });
+    const progressIdx = sessMessages().length;
+    sessMessages().push({ type: 'progress', steps: [], statusText: 'Working...', turnCount: 0, toolCount: 0 });
 
     try {
       const chatBody = { message: msg, user_id: this.userId };
@@ -102,7 +106,7 @@ export const streamingMixin = {
           if (event.type === 'done') {
             break;
           } else if (event.type === 'cancelled') {
-            this.messages.push({ type: 'info', text: 'Generation stopped.' });
+            sessMessages().push({ type: 'info', text: 'Generation stopped.' });
             break;
           } else if (event.type === 'compacting') {
             this.compacting = true;
@@ -115,7 +119,7 @@ export const streamingMixin = {
           } else if (event.type === 'skill_unloaded') {
             this.loadedSkills = this.loadedSkills.filter(s => s.name !== event.name);
           } else if (event.type === 'ask_user') {
-            this.messages.push({
+            sessMessages().push({
               type: 'ask_user',
               question: event.question,
               questionType: event.question_type || 'text',
@@ -126,26 +130,28 @@ export const streamingMixin = {
             });
             this.scrollMessages(true);
           } else if (event.type === 'reaction') {
-            for (let i = this.messages.length - 1; i >= 0; i--) {
-              if (this.messages[i].type === 'user') {
-                if (!this.messages[i].reactions) this.messages[i].reactions = [];
-                this.messages[i].reactions.push(event.emoji);
+            const arr = sessMessages();
+            for (let i = arr.length - 1; i >= 0; i--) {
+              if (arr[i].type === 'user') {
+                if (!arr[i].reactions) arr[i].reactions = [];
+                arr[i].reactions.push(event.emoji);
                 break;
               }
             }
           } else if (event.type === 'final_result') {
             gotResult = true;
-            this.messages.push({ type: 'agent', text: event.result });
+            sessMessages().push({ type: 'agent', text: event.result });
           } else if (event.type === 'session_info') {
             this.updateStatusFromEvent(event);
           } else {
-            this._handleProgressEvent(progressIdx, event);
+            this._handleProgressEvent(progressIdx, event, sendSessionId);
           }
       }
 
       reader.cancel().catch(() => {});
 
-      const prog = this.messages[progressIdx];
+      const arr = sessMessages();
+      const prog = arr[progressIdx];
       if (prog && prog.type === 'progress') {
         if (prog.steps.length > 0) {
           prog.type = 'progress-done';
@@ -154,14 +160,15 @@ export const streamingMixin = {
             prog.lastMessage = msg;
           }
         } else {
-          this.messages.splice(progressIdx, 1);
+          arr.splice(progressIdx, 1);
         }
       }
     } catch (e) {
-      if (this.messages[progressIdx]?.type === 'progress') {
-        this.messages.splice(progressIdx, 1);
+      const arr = sessMessages();
+      if (arr[progressIdx]?.type === 'progress') {
+        arr.splice(progressIdx, 1);
       }
-      this.messages.push({ type: 'error', text: `Connection error: ${e.message}` });
+      arr.push({ type: 'error', text: `Connection error: ${e.message}` });
     } finally {
       this._activeReader = null;
       this.sending = false;
@@ -169,8 +176,9 @@ export const streamingMixin = {
     }
   },
 
-  _handleProgressEvent(idx, event) {
-    const prog = this.messages[idx];
+  _handleProgressEvent(idx, event, sessionId = this.selectedSessionId) {
+    const arr = (this.messagesBySession[sessionId] ||= []);
+    const prog = arr[idx];
     if (!prog || prog.type !== 'progress') return;
 
     if (event.type === 'turn_start') {
@@ -222,7 +230,7 @@ export const streamingMixin = {
       prog.steps.push({ html: `<span class="err">${escapeHtml(event.message)}</span>` });
     } else if (event.type === 'info') {
       prog.steps.push({ html: escapeHtml(event.message) });
-      this.messages.push({ type: 'info', text: event.message });
+      arr.push({ type: 'info', text: event.message });
       this.scrollMessages();
     } else if (event.type === 'reasoning_content') {
       prog.statusText = 'Reasoning...';

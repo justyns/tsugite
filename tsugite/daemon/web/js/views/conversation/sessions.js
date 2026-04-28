@@ -90,7 +90,8 @@ export const sessionsMixin = {
     const convId = session.conversation_id || session.id;
     this.selectedSessionId = convId;
     this.selectedSessionMeta = session;
-    this.messages = [];
+    if (!this.messagesBySession[convId]) this.messagesBySession[convId] = [];
+    this.messages = this.messagesBySession[convId];
     this.statusInfo = {};
     this.resetHistory();
 

@@ -354,6 +354,10 @@ export const historyMixin = {
     if (slice.length > 0) {
       this.messages.push({ type: 'separator', text: `${this._historyLoaded} of ${all.length} messages loaded` });
     }
+    // Re-point the per-session entry so in-flight stream pushes target the rebuilt array.
+    if (this.selectedSessionId) {
+      this.messagesBySession[this.selectedSessionId] = this.messages;
+    }
   },
 
   loadMoreHistory() {
