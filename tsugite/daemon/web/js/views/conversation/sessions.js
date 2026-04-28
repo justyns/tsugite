@@ -90,9 +90,10 @@ export const sessionsMixin = {
     const convId = session.conversation_id || session.id;
     this.selectedSessionId = convId;
     this.selectedSessionMeta = session;
+    const isFirstVisit = !this.messagesBySession[convId] || this.messagesBySession[convId].length === 0;
     if (!this.messagesBySession[convId]) this.messagesBySession[convId] = [];
     this.messages = this.messagesBySession[convId];
-    this.statusInfo = {};
+    if (isFirstVisit) this.statusInfo = {};
     this.resetHistory();
 
     const hash = `conversations?session=${encodeURIComponent(convId)}`;
@@ -100,18 +101,22 @@ export const sessionsMixin = {
 
     this.isActiveSession = this._isMyInteractive(session);
 
-    this._sessionProgress = null;
+    if (isFirstVisit) this._sessionProgress = null;
     // Interactive sessions stay state='active' between turns, so state alone
-    // isn't a "turn in flight" signal. status_text is non-empty only mid-turn,
-    // so use that to gate both dropTrailing and rehydrate.
+    // isn't a "turn in flight" signal. status_text is non-empty only mid-turn.
+    // lastEventTime gates against the never-started case where the server
+    // returns its default "Starting..." for sessions with zero events.
     const cached = this.progressCache[session.id] || progressFromPayload(session.progress);
-    const liveTurn = !!cached?.statusText;
+    const liveTurn = !!cached?.statusText && !!cached?.lastEventTime;
     this.loadStatus();
-    const historyPromise = this.loadHistory({ dropTrailing: liveTurn });
+    // On revisit, the in-memory bubbles (including a streaming progress trace)
+    // are already authoritative; loadHistory would clobber them. The history_update
+    // SSE event (conversations.js:133) refreshes from the server when needed.
+    const historyPromise = isFirstVisit ? this.loadHistory({ dropTrailing: liveTurn }) : Promise.resolve();
     this.loadSessionEffort();
     this._restoreDraft();
     this._markSessionViewed(session);
-    if (!this.sendingBySession[convId] && liveTurn) {
+    if (isFirstVisit && !this.sendingBySession[convId] && liveTurn) {
       await historyPromise;
       if (this.selectedSessionId !== convId) return;
       this._rehydrateProgressFromEvents(convId);
@@ -320,7 +325,9 @@ export const sessionsMixin = {
     // like a 20s sleep. No cache yet → optimistically pulse (running but no
     // events seen by us yet — usually a freshly-spawned interactive session).
     if (!cached) return true;
-    return !!cached.statusText;
+    // The server defaults status_text to 'Starting...' for sessions with zero
+    // events; gate on lastEventTime so never-started sessions don't pulse.
+    return !!cached.statusText && !!cached.lastEventTime;
   },
 
   _matchesFilters(s) {
