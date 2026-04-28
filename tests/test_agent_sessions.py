@@ -210,6 +210,48 @@ def test_session_progress_summary_resets_on_final_result(store, sample_session):
     assert summary["status_text"] == ""
 
 
+def test_session_progress_summary_persisted_model_request(store, sample_session):
+    """Persisted (non-broadcast) events drive the post-refresh sidebar status.
+    `model_request` means the LLM call is in flight; show 'Waiting on LLM...'.
+    Without this, after page refresh the status is stuck at 'Starting...'.
+    """
+    store.create_session(sample_session)
+    store.append_event("s1", {"type": "session_start", "timestamp": "2026-04-23T10:00:00+00:00"})
+    store.append_event("s1", {"type": "user_input", "text": "hi", "timestamp": "2026-04-23T10:00:01+00:00"})
+    store.append_event("s1", {"type": "model_request", "timestamp": "2026-04-23T10:00:02+00:00"})
+    summary = store.session_progress_summary("s1")
+    assert summary["status_text"] == "Waiting on LLM..."
+
+
+def test_session_progress_summary_persisted_code_execution(store, sample_session):
+    """`code_execution` is persisted when the agent runs raw code (e.g. final_answer).
+    Status should reflect that, not stay at 'Starting...'.
+    """
+    store.create_session(sample_session)
+    store.append_event("s1", {"type": "session_start", "timestamp": "2026-04-23T10:00:00+00:00"})
+    store.append_event("s1", {"type": "model_response", "timestamp": "2026-04-23T10:00:01+00:00"})
+    store.append_event(
+        "s1", {"type": "code_execution", "code": "ls", "timestamp": "2026-04-23T10:00:02+00:00"}
+    )
+    summary = store.session_progress_summary("s1")
+    assert summary["status_text"] == "Running code..."
+
+
+def test_session_progress_summary_persisted_tool_invocation(store, sample_session):
+    """`tool_invocation` is the persisted form of a named tool call. Mirror the
+    'Tool: <name>' wording the broadcast `tool_result` already uses.
+    """
+    store.create_session(sample_session)
+    store.append_event("s1", {"type": "turn_start", "turn": 1, "timestamp": "2026-04-23T10:00:00+00:00"})
+    store.append_event(
+        "s1",
+        {"type": "tool_invocation", "name": "read_file", "timestamp": "2026-04-23T10:00:01+00:00"},
+    )
+    summary = store.session_progress_summary("s1")
+    assert summary["tool_count"] == 1
+    assert summary["status_text"] == "Tool: read_file"
+
+
 def test_session_progress_summary_resets_on_unprefixed_error(store, sample_session):
     """The HTTP adapter persists `error`/`cancelled` (no `session_` prefix); they must reset progress too."""
     store.create_session(sample_session)

@@ -40,9 +40,10 @@ _SESSION_END_EVENT_TYPES = frozenset(
 def _progress_status_text(event: dict) -> Optional[str]:
     """Render a short status label for a mid-session progress event.
 
-    Mirrors the frontend `_handleProgressEvent` mapping in streaming.js so the
-    sidebar and the in-progress bubble show consistent wording. Returns None
-    for events that do not have a meaningful status label.
+    Handles both the broadcast event names (turn_start, tool_result,
+    llm_wait_progress, ...) seen via SSE and the persisted event names
+    (model_request, code_execution, tool_invocation, ...) replayed when
+    rebuilding the sidebar status after a page refresh.
     """
     etype = event.get("type")
     if etype == "session_start":
@@ -59,6 +60,13 @@ def _progress_status_text(event: dict) -> Optional[str]:
         return "Reasoning..."
     if etype == "tool_result":
         return f"Tool: {event['tool']}" if _is_real_tool_event(event) else None
+    if etype == "tool_invocation":
+        name = event.get("name")
+        return f"Tool: {name}" if name else None
+    if etype == "code_execution":
+        return "Running code..."
+    if etype == "model_request":
+        return "Waiting on LLM..."
     if etype == "hook_status":
         return event.get("message")
     if etype == "llm_wait_progress":
@@ -68,8 +76,14 @@ def _progress_status_text(event: dict) -> Optional[str]:
 
 
 def _is_real_tool_event(event: dict) -> bool:
-    """True for tool_result events from a named tool (filters 'unknown' raw-code events)."""
-    return event.get("type") == "tool_result" and (event.get("tool") or "unknown") != "unknown"
+    """True for events that count toward the tool counter — broadcast tool_result
+    with a named tool, or persisted tool_invocation."""
+    etype = event.get("type")
+    if etype == "tool_result":
+        return (event.get("tool") or "unknown") != "unknown"
+    if etype == "tool_invocation":
+        return bool(event.get("name"))
+    return False
 
 
 def _progress_from_events(events: list[dict]) -> dict:
