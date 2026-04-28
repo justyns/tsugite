@@ -571,6 +571,14 @@ export default () => ({
     }
   },
 
+  // Alpine 3's :class array form does not unpack nested objects — it stringifies
+  // them to `[object Object]`. Build a flat string so the `pulse` class actually
+  // lands on the dot.
+  dotClassNames(s) {
+    const base = this.statusDotClass(s.state);
+    return this.isSessionProgressFresh(s) ? `${base} pulse` : base;
+  },
+
   recentBuckets() {
     void this._relTimeTick;
     const today = new Date();

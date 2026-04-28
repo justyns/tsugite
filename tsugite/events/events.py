@@ -113,6 +113,9 @@ class FinalAnswerEvent(BaseEvent):
 
     event_type: EventType = Field(default=EventType.FINAL_ANSWER, frozen=True)
     answer: str
+    # Structured payload when the agent returned a non-string return_value (dict/list/etc).
+    # None when the agent returned a string or didn't call return_value (the str form lives in answer).
+    answer_data: Optional[Any] = None
     turns: Optional[int] = Field(default=None, ge=1)
     tokens: Optional[int] = Field(default=None, ge=0)
     cost: Optional[float] = Field(default=None, ge=0)

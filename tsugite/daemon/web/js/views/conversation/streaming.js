@@ -1,5 +1,6 @@
 import { post, streamPost, uploadFiles, parseSSE } from '../../api.js';
 import { escapeHtml, formatFileSize, contentBlockHtml } from '../../utils.js';
+import { finalResultBubble } from './event_types.js';
 
 export const streamingMixin = {
   sending: false,
@@ -140,7 +141,8 @@ export const streamingMixin = {
             }
           } else if (event.type === 'final_result') {
             gotResult = true;
-            sessMessages().push({ type: 'agent', text: event.result });
+            const bubble = finalResultBubble(event);
+            if (bubble) sessMessages().push(bubble);
           } else if (event.type === 'session_info') {
             this.updateStatusFromEvent(event);
           } else {
@@ -239,6 +241,12 @@ export const streamingMixin = {
       }
     } else if (event.type === 'reasoning_tokens') {
       prog.steps.push({ html: `<code>reasoning</code> ${event.tokens} tokens` });
+    } else if (event.type === 'final_result') {
+      const bubble = finalResultBubble(event);
+      if (bubble) {
+        arr.push(bubble);
+        this.scrollMessages();
+      }
     }
   },
 

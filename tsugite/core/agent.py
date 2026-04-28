@@ -3,6 +3,7 @@
 import ast
 import asyncio
 import contextlib
+import json
 import logging
 import time
 from dataclasses import dataclass, field
@@ -43,6 +44,16 @@ from .tools import Tool  # noqa: E402
 DEFAULT_MAX_TURNS = 10  # Default maximum reasoning iterations before timeout
 
 _LLM_WAIT_HEARTBEAT_INTERVAL = 10.0
+
+
+def _safe_json(value: Any) -> Any:
+    if value is None or isinstance(value, str):
+        return None
+    try:
+        json.dumps(value)
+        return value
+    except (TypeError, ValueError):
+        return None
 
 
 def _attachment_char_limit(name: str) -> int | None:
@@ -629,6 +640,7 @@ class TsugiteAgent:
                 self.event_bus.emit(
                     FinalAnswerEvent(
                         answer=str(final_value) if final_value is not None else "",
+                        answer_data=_safe_json(final_value),
                         turns=turn_num + 1,
                         tokens=total_tokens,
                         cost=self.total_cost if self.total_cost > 0 else None,

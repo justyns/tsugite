@@ -27,6 +27,18 @@ export function progressStatusFor(evType, data) {
   return null;
 }
 
+// Build the bubble for a `final_result` event. Returns null when there's
+// nothing to render (no structured payload AND no string answer).
+// Pre-stringifies `result_data` so the template doesn't re-run JSON.stringify
+// on every Alpine re-render.
+export function finalResultBubble({ result, result_data }) {
+  if (result_data != null) {
+    return { type: 'return_value', data: result_data, dataText: JSON.stringify(result_data, null, 2) };
+  }
+  if (result) return { type: 'agent', text: result };
+  return null;
+}
+
 // Empty `status_text` from the backend means "live progress cleared" (turn ended);
 // preserve it as '' so sessionProgressLabel can render nothing instead of "Starting...".
 export function progressFromPayload(p) {

@@ -126,6 +126,32 @@ def test_jsonl_final_answer(capsys):
     assert event["turns"] == 3
     assert event["tokens"] == 150
     assert event["cost"] == 0.002
+    assert event["result_data"] is None
+
+
+def test_jsonl_final_answer_with_structured_data(capsys):
+    handler = JSONLUIHandler()
+    handler.handle_event(
+        FinalAnswerEvent(
+            answer="{'status': 'ok'}",
+            answer_data={"status": "ok", "items": [1, 2]},
+            turns=1,
+            tokens=10,
+            cost=0.001,
+        )
+    )
+    ev = json.loads(capsys.readouterr().out.strip().split("\n")[0])
+    assert ev["type"] == "final_result"
+    assert ev["result_data"] == {"status": "ok", "items": [1, 2]}
+    assert ev["result"] == "{'status': 'ok'}"
+
+
+def test_jsonl_final_answer_string_no_data(capsys):
+    handler = JSONLUIHandler()
+    handler.handle_event(FinalAnswerEvent(answer="plain string"))
+    ev = json.loads(capsys.readouterr().out.strip().split("\n")[0])
+    assert ev["result_data"] is None
+    assert ev["result"] == "plain string"
 
 
 def test_jsonl_error(capsys):

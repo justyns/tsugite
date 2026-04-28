@@ -100,7 +100,7 @@
                      @click="selectSession(s)" tabindex="0" role="button" @keydown.enter="selectSession(s)">
                   <div class="row1">
                     <span class="drag-handle" title="Drag to reorder">≡</span>
-                    <span class="dot" :class="[statusDotClass(s.state), { pulse: isSessionProgressFresh(s) }]"></span>
+                    <span class="dot" :class="dotClassNames(s)"></span>
                     <span class="source-icon" x-text="sourceIcon(s.source)" :title="s.source"></span>
                     <template x-if="editingSessionId === s.id">
                       <input class="title-input" type="text" x-model="editingTitle"
@@ -154,7 +154,7 @@
                      :class="{ focused: selectedSessionId === (s.conversation_id || s.id), live: isLive(s) }"
                      @click="selectSession(s)" tabindex="0" role="button" @keydown.enter="selectSession(s)">
                   <div class="row1">
-                    <span class="dot" :class="[statusDotClass(s.state), { pulse: isSessionProgressFresh(s) }]"></span>
+                    <span class="dot" :class="dotClassNames(s)"></span>
                     <span class="source-icon" x-text="sourceIcon(s.source)" :title="s.source"></span>
                     <template x-if="editingSessionId === s.id">
                       <input class="title-input" type="text" x-model="editingTitle"
@@ -211,7 +211,7 @@
                          :class="{ focused: selectedSessionId === (s.conversation_id || s.id) }"
                          @click="selectSession(s)" tabindex="0" role="button" @keydown.enter="selectSession(s)">
                       <div class="row1">
-                        <span class="dot" :class="[statusDotClass(s.state), { pulse: isSessionProgressFresh(s) }]"></span>
+                        <span class="dot" :class="dotClassNames(s)"></span>
                         <span class="source-icon" x-text="sourceIcon(s.source)" :title="s.source"></span>
                         <template x-if="editingSessionId === s.id">
                           <input class="title-input" type="text" x-model="editingTitle"
@@ -616,6 +616,26 @@
                         <template x-if="!msg.text">
                           <div style="color:var(--overlay1);font-style:italic">(empty response)</div>
                         </template>
+                      </div>
+                    </div>
+                  </template>
+                  <template x-if="msg.type === 'return_value'">
+                    <div class="console-turn agent">
+                      <div class="console-turn-gutter">
+                        <span class="role agent" x-text="(selectedSessionMeta?.agent || $store.app.selectedAgent || 'agent').slice(0, 8)"></span>
+                        <span class="time" x-text="turnTimeShort(msg)"></span>
+                        <span class="turn-num" x-text="turnIndex(i)"></span>
+                      </div>
+                      <div class="console-turn-bubble">
+                        <div class="console-codeblock">
+                          <button class="cb-head result" @click="msg._open = !(msg._open ?? true)">
+                            <span class="caret" x-text="(msg._open ?? true) ? '▾' : '▸'"></span>
+                            <span class="lang">return_value</span>
+                          </button>
+                          <template x-if="msg._open ?? true">
+                            <pre class="cb-result"><code x-text="msg.dataText"></code></pre>
+                          </template>
+                        </div>
                       </div>
                     </div>
                   </template>

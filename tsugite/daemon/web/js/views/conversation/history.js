@@ -1,5 +1,6 @@
 import { get } from '../../api.js';
 import { escapeHtml, contentBlockHtml } from '../../utils.js';
+import { finalResultBubble } from './event_types.js';
 
 const _CONTENT_BLOCK_RE = /<(?:tsu:)?content\s+name="([^"]+)">([\s\S]*?)<\/(?:tsu:)?content>/g;
 
@@ -225,6 +226,19 @@ export function eventsToBubbles(events, { dropTrailing = false } = {}) {
           content: rejected,
           open: false,
         });
+      }
+      continue;
+    }
+
+    if (type === 'final_result') {
+      const bubble = finalResultBubble(data);
+      if (bubble?.type === 'return_value') {
+        flushBubble();
+        bubbles.push(bubble);
+      } else if (bubble?.type === 'agent' && !lastModelText) {
+        // Scheduled agents that go straight to return_value("...") with no model_response
+        // would otherwise show only tool steps and no answer.
+        lastModelText = bubble.text;
       }
       continue;
     }

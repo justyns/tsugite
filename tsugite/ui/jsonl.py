@@ -49,7 +49,7 @@ class JSONLUIHandler:
     - LLMMessageEvent     → {"type": "thought", "content": str}
     - CodeExecutionEvent  → {"type": "code", "content": str}
     - ObservationEvent    → {"type": "tool_result", "tool": str, "success": bool, "output"?: str, "error"?: str}
-    - FinalAnswerEvent    → {"type": "final_result", "result": str, "turns": int, "tokens": int, "cost": float}
+    - FinalAnswerEvent    → {"type": "final_result", "result": str, "result_data": Any|null, "turns": int, "tokens": int, "cost": float}
     - ErrorEvent          → {"type": "error", "error": str, "step": int}
     - FileReadEvent       → {"type": "file_read", "path": str, "line_count": int, "byte_count": int, "operation": str}
     - FileWriteEvent      → {"type": "file_write", "path": str, "line_count": int, "byte_count": int, "operation": str}
@@ -123,7 +123,13 @@ class JSONLUIHandler:
     def _handle_final_answer(self, event: FinalAnswerEvent) -> None:
         self._emit(
             "final_result",
-            {"result": event.answer, "turns": event.turns, "tokens": event.tokens, "cost": event.cost},
+            {
+                "result": event.answer,
+                "result_data": event.answer_data,
+                "turns": event.turns,
+                "tokens": event.tokens,
+                "cost": event.cost,
+            },
         )
 
     def _handle_error(self, event: ErrorEvent) -> None:
