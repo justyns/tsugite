@@ -120,7 +120,7 @@ export const inputMixin = {
       }
     }
 
-    if (e.key === 'Escape' && this.sending) {
+    if (e.key === 'Escape' && this.sendingBySession[this.selectedSessionId]) {
       e.preventDefault();
       this.cancelChat();
       return;

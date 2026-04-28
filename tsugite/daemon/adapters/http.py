@@ -404,9 +404,9 @@ class HTTPServer:
         self.session_runner = None  # Set by Gateway after SessionRunner is created
         self.push_store = None  # Set by Gateway if web-push is configured
         self.vapid_public_key = None  # Set by Gateway if web-push is configured
-        self._active_backends: dict[tuple[str, str], HTTPInteractionBackend] = {}
-        self._active_chat_tasks: dict[tuple[str, str], asyncio.Task] = {}
-        self._active_progress: dict[tuple[str, str], SSEProgressHandler] = {}
+        self._active_backends: dict[tuple[str, str, str], HTTPInteractionBackend] = {}
+        self._active_chat_tasks: dict[tuple[str, str, str], asyncio.Task] = {}
+        self._active_progress: dict[tuple[str, str, str], SSEProgressHandler] = {}
         self.event_bus = SSEBroadcaster()
         self.app = self._build_app()
 
@@ -634,9 +634,9 @@ class HTTPServer:
     async def _list_agents(self, request: Request) -> JSONResponse:
         if err := self._check_auth(request):
             return err
-        running_by_agent: dict[str, list[str]] = {}
-        for agent_name, user_id in self._active_backends:
-            running_by_agent.setdefault(agent_name, []).append(user_id)
+        running_by_agent: dict[str, set[str]] = {}
+        for agent_name, _user_id, session_id in self._active_backends:
+            running_by_agent.setdefault(agent_name, set()).add(session_id)
         agents = [
             {
                 "name": name,
@@ -763,7 +763,7 @@ class HTTPServer:
         else:
             session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
 
-        backend_key = (adapter.agent_name, user_id)
+        backend_key = (adapter.agent_name, user_id, session.id)
         backend = self._active_backends.get(backend_key)
 
         model = adapter.resolve_model()
@@ -923,7 +923,7 @@ class HTTPServer:
         snapshots = [e for e in events if e.get("type") == "prompt_snapshot"]
         breakdown = snapshots[-1].get("token_breakdown", {}) if snapshots else {}
 
-        backend_key = (agent_name, user_id)
+        backend_key = (agent_name, user_id, session_id)
         live_progress = self._active_progress.get(backend_key)
         if live_progress and live_progress.latest_prompt_messages:
             return JSONResponse(
@@ -1175,12 +1175,15 @@ class HTTPServer:
 
         user_id = adapter.resolve_http_user(body.get("user_id", "web-anonymous"))
         agent_name = request.path_params["agent"]
-        logger.info("[%s] respond from user_id=%s", agent_name, user_id)
+        session_id = body.get("session_id")
+        if not session_id:
+            return JSONResponse({"error": "session_id is required"}, status_code=400)
+        logger.info("[%s] respond from user_id=%s session_id=%s", agent_name, user_id, session_id)
 
-        key = (agent_name, user_id)
+        key = (agent_name, user_id, session_id)
         backend = self._active_backends.get(key)
         if not backend:
-            return JSONResponse({"error": "no pending question for this agent/user"}, status_code=404)
+            return JSONResponse({"error": "no pending question for this session"}, status_code=404)
 
         backend.submit_response(response)
         return JSONResponse({"status": "ok"})
@@ -1319,8 +1322,11 @@ class HTTPServer:
                     )
                 metadata["conv_id_override"] = session_id
 
-        # Without this guard, concurrent POSTs for the same (agent, user_id) both spawn run_agent tasks on the same session and any non-idempotent tool call runs twice.
-        backend_key = (agent_name, user_id)
+        if target_session is None:
+            target_session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
+        target_session_id = target_session.id
+
+        backend_key = (agent_name, user_id, target_session_id)
         existing_task = self._active_chat_tasks.get(backend_key)
         if existing_task is not None and not existing_task.done():
             return JSONResponse(
@@ -1335,10 +1341,6 @@ class HTTPServer:
             reply_to=f"http:{raw_user_id}",
             metadata=metadata,
         )
-
-        if target_session is None:
-            target_session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
-        target_session_id = target_session.id
 
         progress = SSEProgressHandler()
         progress.set_loop(asyncio.get_running_loop())
@@ -1389,6 +1391,7 @@ class HTTPServer:
                     progress._emit(
                         "session_info",
                         {
+                            "session_id": target_session_id,
                             "tokens": refreshed.cumulative_tokens,
                             "context_limit": adapter.session_store.get_context_limit(adapter.agent_name),
                             "threshold": adapter.session_store.get_compaction_threshold(adapter.agent_name),
@@ -1406,11 +1409,11 @@ class HTTPServer:
             finally:
                 self._active_backends.pop(backend_key, None)
                 self._active_chat_tasks.pop(backend_key, None)
+                self._active_progress.pop(backend_key, None)
                 progress.signal_done()
 
         task = asyncio.create_task(run_agent())
         self._active_chat_tasks[backend_key] = task
-        task.add_done_callback(lambda _: self._active_chat_tasks.pop(backend_key, None))
 
         return StreamingResponse(
             progress.event_generator(),
@@ -1419,6 +1422,7 @@ class HTTPServer:
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
                 "X-Accel-Buffering": "no",
+                "X-Session-Id": target_session_id,
             },
         )
 
@@ -1432,7 +1436,10 @@ class HTTPServer:
             return JSONResponse({"error": "invalid JSON body"}, status_code=400)
         raw_user_id = body.get("user_id", "web-anonymous")
         user_id = adapter.resolve_http_user(raw_user_id)
-        backend_key = (request.path_params["agent"], user_id)
+        session_id = body.get("session_id")
+        if not session_id:
+            return JSONResponse({"error": "session_id is required"}, status_code=400)
+        backend_key = (request.path_params["agent"], user_id, session_id)
         task = self._active_chat_tasks.get(backend_key)
         if task and not task.done():
             task.cancel()

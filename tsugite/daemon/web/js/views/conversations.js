@@ -202,7 +202,7 @@ export default () => ({
     if (this._historyDebounceTimer) clearTimeout(this._historyDebounceTimer);
     if (this._relTimeTimer) clearInterval(this._relTimeTimer);
     if (this._onVisibilityChange) document.removeEventListener('visibilitychange', this._onVisibilityChange);
-    if (this._activeReader) this._activeReader.cancel().catch(() => {});
+    Object.values(this._activeReadersBySession).forEach(r => r.cancel().catch(() => {}));
     this.pendingFiles.forEach(f => { if (f.previewUrl) URL.revokeObjectURL(f.previewUrl); });
   },
 
@@ -321,7 +321,7 @@ export default () => ({
       const data = await get(statusUrl);
       this.statusInfo = data;
       if (data.compacting !== undefined) this.compacting = data.compacting;
-      if (data.busy && data.pending_message && !this.sending &&
+      if (data.busy && data.pending_message && !this.sendingBySession[this.selectedSessionId] &&
           !this.messages.some(m => m.type === 'user' && m.text === data.pending_message)) {
         this.messages.push({ type: 'user', text: data.pending_message });
         this.messages.push({ type: 'progress', steps: [], statusText: 'Working...', turnCount: 0, toolCount: 0 });
@@ -398,7 +398,7 @@ export default () => ({
 
   async compactSession(retryMsg = null) {
     const agent = this.$store.app.selectedAgent;
-    if (!agent || this.sending || this.compacting) return;
+    if (!agent || this.sendingBySession[this.selectedSessionId] || this.compacting) return;
     this.compacting = true;
     try {
       await post(`/api/agents/${agent}/compact`, { user_id: this.userId });
@@ -422,7 +422,7 @@ export default () => ({
     msg.answered = true;
     msg.answer = response;
     try {
-      await post(`/api/agents/${agent}/respond`, { response, user_id: this.userId });
+      await post(`/api/agents/${agent}/respond`, { response, user_id: this.userId, session_id: this.selectedSessionId });
     } catch (e) {
       this.messages.push({ type: 'error', text: `Failed to submit answer: ${e.message}` });
     }
@@ -514,9 +514,9 @@ export default () => ({
     if (d.session_id !== this.selectedSessionId) return;
     // sendMessage's per-chat streaming response already populates the live
     // progress bubble while it's running; bail to avoid double-rendering.
-    // Once it finishes (or after a reload), sending=false and the global SSE
-    // feed becomes the source of in-flight progress for this session.
-    if (this.sending) return;
+    // Once it finishes (or after a reload), this session's sending flag is
+    // cleared and the global SSE feed becomes the source of in-flight progress.
+    if (this.sendingBySession[d.session_id]) return;
 
     const evType = d.event_type;
 

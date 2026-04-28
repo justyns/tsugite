@@ -3,8 +3,8 @@ import { escapeHtml, formatFileSize, contentBlockHtml } from '../../utils.js';
 import { finalResultBubble } from './event_types.js';
 
 export const streamingMixin = {
-  sending: false,
-  _activeReader: null,
+  sendingBySession: {},
+  _activeReadersBySession: {},
   _scrollTimer: null,
 
   _scrollThrottled() {
@@ -32,11 +32,12 @@ export const streamingMixin = {
   async sendMessage() {
     const msg = this.messageText.trim();
     const agent = this.$store.app.selectedAgent;
-    if ((!msg && !this.pendingFiles.length) || !agent || this.sending) return;
+    const sendSessionId = this.selectedSessionId;
+    if ((!msg && !this.pendingFiles.length) || !agent || !sendSessionId || this.sendingBySession[sendSessionId]) return;
 
     const parsed = this._parseCommand(msg);
     if (parsed && !this.pendingFiles.length) {
-      this.sending = true;
+      this.sendingBySession[sendSessionId] = true;
       this.messageText = '';
       this._clearDraft();
       this._resetInputHeight();
@@ -49,19 +50,18 @@ export const streamingMixin = {
       } catch (e) {
         this.messages.push({ type: 'error', text: `Command error: ${e.message}` });
       } finally {
-        this.sending = false;
+        delete this.sendingBySession[sendSessionId];
         this.scrollMessages(true);
       }
       return;
     }
 
-    this.sending = true;
+    this.sendingBySession[sendSessionId] = true;
     this.messageText = '';
     this._clearDraft();
     this._resetInputHeight();
 
     // Re-resolve each call: loadHistory() may swap the array reference mid-stream.
-    const sendSessionId = this.selectedSessionId;
     const sessMessages = () => (this.messagesBySession[sendSessionId] ||= []);
 
     let uploadedFiles = [];
@@ -74,7 +74,7 @@ export const streamingMixin = {
         uploadedFiles = data.files || [];
       } catch (e) {
         this.messages.push({ type: 'error', text: `Upload failed: ${e.message}` });
-        this.sending = false;
+        delete this.sendingBySession[sendSessionId];
         return;
       }
     }
@@ -95,12 +95,11 @@ export const streamingMixin = {
     sessMessages().push({ type: 'progress', steps: [], statusText: 'Working...', turnCount: 0, toolCount: 0 });
 
     try {
-      const chatBody = { message: msg, user_id: this.userId };
-      if (this.selectedSessionId) chatBody.session_id = this.selectedSessionId;
+      const chatBody = { message: msg, user_id: this.userId, session_id: sendSessionId };
       if (uploadedFiles.length) chatBody.uploaded_files = uploadedFiles;
       const resp = await streamPost(`/api/agents/${agent}/chat`, chatBody);
       const reader = resp.body.getReader();
-      this._activeReader = reader;
+      this._activeReadersBySession[sendSessionId] = reader;
       let gotResult = false;
 
       for await (const event of parseSSE(reader)) {
@@ -144,7 +143,7 @@ export const streamingMixin = {
             const bubble = finalResultBubble(event);
             if (bubble) sessMessages().push(bubble);
           } else if (event.type === 'session_info') {
-            this.updateStatusFromEvent(event);
+            if (sendSessionId === this.selectedSessionId) this.updateStatusFromEvent(event);
           } else {
             this._handleProgressEvent(progressIdx, event, sendSessionId);
           }
@@ -172,8 +171,8 @@ export const streamingMixin = {
       }
       arr.push({ type: 'error', text: `Connection error: ${e.message}` });
     } finally {
-      this._activeReader = null;
-      this.sending = false;
+      delete this._activeReadersBySession[sendSessionId];
+      delete this.sendingBySession[sendSessionId];
       this.scrollMessages();
     }
   },
@@ -206,7 +205,9 @@ export const streamingMixin = {
       }
     } else if (event.type === 'init') {
       prog.statusText = `Agent: ${event.agent}`;
-      if (event.model) this.statusInfo = { ...this.statusInfo, model: event.model };
+      if (event.model && sessionId === this.selectedSessionId) {
+        this.statusInfo = { ...this.statusInfo, model: event.model };
+      }
     } else if (event.type === 'content_block') {
       prog.steps.push({ html: contentBlockHtml(event.name, event.content || '') });
     } else if (event.type === 'code') {
@@ -269,12 +270,12 @@ export const streamingMixin = {
 
   async cancelChat() {
     const agent = this.$store.app.selectedAgent;
-    if (!agent || !this.sending) return;
+    const sid = this.selectedSessionId;
+    if (!agent || !sid || !this.sendingBySession[sid]) return;
     try {
-      await post(`/api/agents/${agent}/chat/cancel`, { user_id: this.userId });
+      await post(`/api/agents/${agent}/chat/cancel`, { user_id: this.userId, session_id: sid });
     } catch (e) { /* best effort */ }
-    if (this._activeReader) {
-      this._activeReader.cancel().catch(() => {});
-    }
+    const reader = this._activeReadersBySession[sid];
+    if (reader) reader.cancel().catch(() => {});
   },
 };

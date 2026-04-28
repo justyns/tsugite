@@ -111,7 +111,7 @@ export const sessionsMixin = {
     this.loadSessionEffort();
     this._restoreDraft();
     this._markSessionViewed(session);
-    if (!this.sending && liveTurn) {
+    if (!this.sendingBySession[convId] && liveTurn) {
       await historyPromise;
       if (this.selectedSessionId !== convId) return;
       this._rehydrateProgressFromEvents(convId);
