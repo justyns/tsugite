@@ -401,7 +401,7 @@ export default () => ({
     if (!agent || this.sendingBySession[this.selectedSessionId] || this.compacting) return;
     this.compacting = true;
     try {
-      await post(`/api/agents/${agent}/compact`, { user_id: this.userId });
+      await post(`/api/agents/${agent}/compact`, { user_id: this.userId, session_id: this.selectedSessionId });
       await this.loadHistory();
       if (retryMsg) {
         this.messageText = retryMsg;

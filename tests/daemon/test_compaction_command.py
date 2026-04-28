@@ -175,3 +175,73 @@ class TestCompactCommandRouting:
         assert resp.status_code == 200, resp.text
         compact_mock.assert_not_called()
         assert "no conversation" in resp.json().get("result", "").lower()
+
+
+class TestCompactRouteRoutesBySessionId:
+    """The web UI's compact button posts to /api/agents/{agent}/compact with the
+    selected session_id. Without per-session routing, _compact targets the
+    user's default interactive session, which is often empty when the user is
+    on a named/secondary session and 404s with 'no session to compact'.
+    """
+
+    def _seed_named_session(self, adapter, user_id: str, session_id: str):
+        from tsugite.daemon.session_store import Session, SessionSource
+
+        s = Session(
+            id=session_id,
+            agent="test-agent",
+            source=SessionSource.INTERACTIVE.value,
+            user_id=user_id,
+        )
+        adapter.session_store.create_session(s)
+        adapter.session_store.update_token_count(session_id, 100)
+        return s
+
+    def test_compact_routes_to_named_session(self, client, adapter, admin_token):
+        user_id = "alice"
+        # Default interactive session — empty
+        adapter.session_store.get_or_create_interactive(user_id, "test-agent")
+        # Named session the user is actively viewing
+        named = self._seed_named_session(adapter, user_id, "named-A")
+
+        captured = {}
+
+        async def fake_compact(session_id, instructions=None, reason=None, progress_callback=None):
+            captured["session_id"] = session_id
+
+        with patch.object(adapter, "_compact_session", new=AsyncMock(side_effect=fake_compact)):
+            resp = client.post(
+                "/api/agents/test-agent/compact",
+                content=json.dumps({"user_id": user_id, "session_id": named.id}),
+                headers={
+                    "Authorization": f"Bearer {admin_token}",
+                    "Content-Type": "application/json",
+                },
+            )
+
+        assert resp.status_code == 200, resp.text
+        assert captured.get("session_id") == named.id
+
+    def test_compact_falls_back_to_default_without_session_id(self, client, adapter, admin_token):
+        """No session_id: behave like the legacy slash-command — target default."""
+        user_id = "bob"
+        default = adapter.session_store.get_or_create_interactive(user_id, "test-agent")
+        adapter.session_store.update_token_count(default.id, 50)
+
+        captured = {}
+
+        async def fake_compact(session_id, instructions=None, reason=None, progress_callback=None):
+            captured["session_id"] = session_id
+
+        with patch.object(adapter, "_compact_session", new=AsyncMock(side_effect=fake_compact)):
+            resp = client.post(
+                "/api/agents/test-agent/compact",
+                content=json.dumps({"user_id": user_id}),
+                headers={
+                    "Authorization": f"Bearer {admin_token}",
+                    "Content-Type": "application/json",
+                },
+            )
+
+        assert resp.status_code == 200, resp.text
+        assert captured.get("session_id") == default.id

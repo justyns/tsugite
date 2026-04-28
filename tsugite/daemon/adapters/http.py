@@ -951,7 +951,15 @@ class HTTPServer:
 
         user_id = adapter.resolve_http_user(body.get("user_id", "web-anonymous"))
 
-        session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
+        session_id = body.get("session_id")
+        session = None
+        if session_id:
+            try:
+                session = adapter.session_store.get_session(session_id)
+            except ValueError:
+                session = None
+        if session is None:
+            session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
 
         if session.message_count == 0:
             return JSONResponse({"error": "no session to compact"}, status_code=404)
@@ -962,7 +970,7 @@ class HTTPServer:
         if not adapter.session_store.begin_compaction(user_id, adapter.agent_name):
             return JSONResponse({"error": "compaction already in progress"}, status_code=409)
 
-        adapter._broadcast_compaction(agent_name, started=True)
+        adapter._broadcast_compaction("compaction_started", agent_name)
         try:
             instructions = body.get("instructions")
             await adapter._compact_session(session.id, instructions=instructions, reason="manual")
@@ -972,7 +980,7 @@ class HTTPServer:
             return JSONResponse({"error": f"compaction failed: {msg}"}, status_code=500)
         finally:
             adapter.session_store.end_compaction(user_id, adapter.agent_name)
-            adapter._broadcast_compaction(agent_name, started=False)
+            adapter._broadcast_compaction("compaction_finished", agent_name)
 
         new_session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
         self.event_bus.emit("agent_status", {"agent": agent_name})
