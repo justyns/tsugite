@@ -830,3 +830,44 @@ class TestUnpackExecutionResult:
         assert unpacked[3] is None
         assert unpacked[4] is None
         assert unpacked[5] is None
+
+
+class TestBuildExecutorKwargs:
+    def _kwargs_for(self, executor):
+        import inspect
+        from pathlib import Path
+
+        from tsugite.cli.run import _build_executor_kwargs
+        from tsugite.options import ExecutionOptions, HistoryOptions
+
+        kwargs = _build_executor_kwargs(
+            agent_file=Path("/tmp/dummy.md"),
+            prompt="task",
+            exec_opts=ExecutionOptions(),
+            history_opts=HistoryOptions(continue_id="some-conv"),
+            resolved_attachments=[],
+            executor=executor,
+        )
+        accepted = set(inspect.signature(executor).parameters.keys())
+        return kwargs, accepted
+
+    def test_run_agent_kwargs_are_accepted(self):
+        """Sanity check: kwargs for run_agent are all accepted by run_agent."""
+        from tsugite.agent_runner import run_agent
+
+        kwargs, accepted = self._kwargs_for(run_agent)
+        extra = set(kwargs.keys()) - accepted
+        assert not extra, f"run_agent rejects: {extra}"
+
+    def test_run_multistep_agent_kwargs_are_accepted(self):
+        """run_multistep_agent must not receive kwargs it does not accept.
+
+        Regression: _build_executor_kwargs unconditionally added
+        continue_conversation_id/attachments/path_context, breaking every
+        multi-step CLI invocation with a TypeError.
+        """
+        from tsugite.agent_runner import run_multistep_agent
+
+        kwargs, accepted = self._kwargs_for(run_multistep_agent)
+        extra = set(kwargs.keys()) - accepted
+        assert not extra, f"run_multistep_agent rejects: {extra}"

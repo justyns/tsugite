@@ -123,18 +123,20 @@ def _build_executor_kwargs(
     """Build executor kwargs dict for run_agent/run_multistep_agent."""
     from tsugite.agent_runner import run_agent
 
-    kwargs = {
+    kwargs: Dict[str, Any] = {
         "agent_path": agent_file,
         "prompt": prompt,
         "exec_options": exec_opts,
-        "continue_conversation_id": history_opts.continue_id,
-        "attachments": resolved_attachments,
-        "path_context": path_context,
     }
-    if history_opts.enabled and executor == run_agent:
-        from dataclasses import replace
+    # continue_conversation_id, attachments, and path_context are only accepted by run_agent
+    if executor == run_agent:
+        kwargs["continue_conversation_id"] = history_opts.continue_id
+        kwargs["attachments"] = resolved_attachments
+        kwargs["path_context"] = path_context
+        if history_opts.enabled:
+            from dataclasses import replace
 
-        kwargs["exec_options"] = replace(exec_opts, return_token_usage=True)
+            kwargs["exec_options"] = replace(exec_opts, return_token_usage=True)
     return kwargs
 
 
