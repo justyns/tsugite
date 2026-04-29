@@ -259,7 +259,7 @@ export const sessionsMixin = {
     let tries = 0;
     const focusInput = () => {
       if (this.editingSessionId !== s.id) return;  // user navigated away mid-poll
-      const input = document.querySelector('.session-title-input');
+      const input = document.querySelector('.title-input');
       if (input) {
         input.focus();
         input.select();
