@@ -1,5 +1,9 @@
 """User-Agent header management for outbound HTTP requests."""
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 _user_agent_cached: str | None = ...  # type: ignore[assignment]  # ellipsis sentinel
 
 
@@ -32,7 +36,28 @@ def get_user_agent() -> str | None:
 
 
 def set_user_agent_header(headers: dict[str, str]) -> None:
-    """Set User-Agent on headers dict if configured and not already present."""
+    """Force the framework User-Agent on outbound headers.
+
+    Any caller-supplied User-Agent (any case) is dropped with a warning.
+    The framework value cannot be overridden from agent or skill code; this
+    closes a PII-leak class where agent code copied identifiers from system
+    context into a hand-rolled UA.
+
+    No-op when UA management is disabled (config user_agent=""): caller-set
+    UA is left untouched. Disable means hands-off.
+    """
     ua = get_user_agent()
-    if ua:
-        headers.setdefault("User-Agent", ua)
+    if not ua:
+        return
+    existing = None
+    for key in [k for k in headers if k.lower() == "user-agent"]:
+        popped = headers.pop(key)
+        if existing is None:
+            existing = popped
+    if existing and existing != ua:
+        logger.warning(
+            "Dropped caller-supplied User-Agent %r; framework UA %r is enforced",
+            existing[:100],
+            ua,
+        )
+    headers["User-Agent"] = ua

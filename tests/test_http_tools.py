@@ -344,10 +344,14 @@ def test_default_headers_sets_user_agent():
     assert headers["User-Agent"].startswith("Tsugite/")
 
 
-def test_default_headers_preserves_custom_user_agent():
-    """Caller-provided User-Agent is not overwritten."""
+def test_default_headers_overwrites_custom_user_agent():
+    """Caller-provided User-Agent is dropped; framework UA is enforced.
+
+    Agent code that hand-rolls a User-Agent has been observed leaking PII
+    (e.g. user emails copied from system context). The framework value wins.
+    """
     headers = _default_headers({"User-Agent": "Custom/1.0"})
-    assert headers["User-Agent"] == "Custom/1.0"
+    assert headers["User-Agent"].startswith("Tsugite/")
 
 
 def test_default_headers_disabled_user_agent():
