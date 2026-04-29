@@ -268,3 +268,37 @@ class TestSessionMetadataTool:
         with patch("tsugite.tools.sessions.get_current_session_id", return_value=None):
             result = session_metadata(key="type", value="code")
         assert "error" in result
+
+
+# ── Topic Length Cap ──
+
+
+class TestTopicLengthCap:
+    """Topic is meant for IRC-style short context. Cap at 160 chars matches the
+    de facto Freenode/EFnet/IRCnet/Undernet TOPICLEN of the era when "channel
+    topic" took its modern meaning. Longer context belongs in a forked agent file.
+    """
+
+    def test_topic_at_cap_succeeds(self, store, session_in_store):
+        topic = "x" * 160
+        result = store.set_metadata(session_in_store.id, "topic", topic)
+        assert result.metadata["topic"] == topic
+
+    def test_topic_over_cap_rejected(self, store, session_in_store):
+        with pytest.raises(ValueError, match="160"):
+            store.set_metadata(session_in_store.id, "topic", "x" * 161)
+
+    def test_topic_over_cap_via_bulk_rejected(self, store, session_in_store):
+        with pytest.raises(ValueError, match="160"):
+            store.set_metadata_bulk(session_in_store.id, {"topic": "x" * 161})
+        updated = store.get_session(session_in_store.id)
+        assert "topic" not in updated.metadata
+
+    def test_other_keys_uncapped(self, store, session_in_store):
+        long_value = "x" * 500
+        result = store.set_metadata(session_in_store.id, "task", long_value)
+        assert result.metadata["task"] == long_value
+
+    def test_non_string_topic_rejected(self, store, session_in_store):
+        with pytest.raises(ValueError, match="string"):
+            store.set_metadata(session_in_store.id, "topic", 123)

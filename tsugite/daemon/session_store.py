@@ -133,6 +133,8 @@ READ_ONLY_METADATA_KEYS = frozenset(
     }
 )
 
+TOPIC_MAX_LENGTH = 160
+
 
 class SessionSource(str, Enum):
     INTERACTIVE = "interactive"
@@ -811,6 +813,12 @@ class SessionStore:
         read_only = READ_ONLY_METADATA_KEYS & updates.keys()
         if read_only:
             raise ValueError(f"Cannot set read-only metadata key(s): {', '.join(sorted(read_only))}")
+        if "topic" in updates:
+            topic = updates["topic"]
+            if not isinstance(topic, str):
+                raise ValueError("Topic must be a string")
+            if len(topic) > TOPIC_MAX_LENGTH:
+                raise ValueError(f"Topic must be {TOPIC_MAX_LENGTH} characters or fewer (got {len(topic)})")
         with self._lock:
             if session_id not in self._sessions:
                 raise ValueError(f"Session '{session_id}' not found")

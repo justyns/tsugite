@@ -140,7 +140,7 @@ export default () => ({
         if (d.action === 'metadata_updated' && d.id && d.metadata) {
           const s = this.allSessions.find(x => x.id === d.id);
           if (s) {
-            s.metadata = { ...(s.metadata || {}), ...d.metadata };
+            s.metadata = { ...d.metadata };
             if (this.selectedSessionId === (s.conversation_id || s.id)) {
               this.selectedSessionMeta = { ...this.selectedSessionMeta, metadata: s.metadata };
             }

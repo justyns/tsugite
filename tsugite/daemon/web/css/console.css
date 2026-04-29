@@ -435,6 +435,40 @@ body.console-shell { display: flex; flex-direction: column; height: 100dvh; }
   min-width: 240px;
 }
 
+.console-thread-header .topic-row {
+  font-size: 11.5px;
+  font-family: var(--font-sans);
+  color: var(--overlay1);
+  font-style: italic;
+  gap: 8px;
+}
+.console-thread-header .topic {
+  cursor: pointer;
+  padding: 1px 4px; border-radius: 3px;
+  max-width: 100%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.console-thread-header .topic:hover { background: var(--surface0); color: var(--text); }
+.console-thread-header .topic.empty { color: var(--overlay0); }
+.console-thread-header .topic-input {
+  font-size: 11.5px;
+  font-family: var(--font-sans);
+  font-style: italic;
+  color: var(--text);
+  background: var(--crust); border: 1px solid var(--lavender); border-radius: 3px;
+  padding: 1px 6px; outline: none;
+  flex: 1; min-width: 240px;
+}
+.console-thread-header .topic-error {
+  color: var(--red); font-style: normal; font-size: 10.5px;
+}
+
+.chip.chip-topic {
+  max-width: 220px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-style: italic;
+}
+
 /* Context mini-bar (clickable, opens prompt inspector) */
 .console-thread-header .ctx-mini {
   display: flex; align-items: center; gap: 6px;

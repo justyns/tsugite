@@ -130,7 +130,7 @@
                       <a class="chip" :class="chip.cls" :href="chip.href" target="_blank" x-text="chip.label" @click.stop></a>
                     </template>
                     <template x-for="chip in metadataChips(s).filter(c => !c.href)" :key="chip.label">
-                      <span class="chip" :class="chip.cls" x-text="chip.label"></span>
+                      <span class="chip" :class="chip.cls" :title="chip.title || ''" x-text="chip.label"></span>
                     </template>
                   </div>
                 </div>
@@ -184,7 +184,7 @@
                       <a class="chip" :class="chip.cls" :href="chip.href" target="_blank" x-text="chip.label" @click.stop></a>
                     </template>
                     <template x-for="chip in metadataChips(s).filter(c => !c.href)" :key="chip.label">
-                      <span class="chip" :class="chip.cls" x-text="chip.label"></span>
+                      <span class="chip" :class="chip.cls" :title="chip.title || ''" x-text="chip.label"></span>
                     </template>
                   </div>
                 </div>
@@ -236,7 +236,7 @@
                           <a class="chip" :class="chip.cls" :href="chip.href" target="_blank" x-text="chip.label" @click.stop></a>
                         </template>
                         <template x-for="chip in metadataChips(s).filter(c => !c.href)" :key="chip.label">
-                          <span class="chip" :class="chip.cls" x-text="chip.label"></span>
+                          <span class="chip" :class="chip.cls" :title="chip.title || ''" x-text="chip.label"></span>
                         </template>
                       </div>
                     </div>
@@ -347,6 +347,22 @@
                           x-text="Math.round((statusInfo.tokens / statusInfo.context_limit) * 100) + '%'"></span>
                   </button>
                 </span>
+              </div>
+              <div class="row topic-row">
+                <template x-if="editingTopicSessionId === selectedSessionMeta?.id">
+                  <input class="topic-input" type="text" x-model="editingTopic" maxlength="160"
+                         placeholder="topic (info, not instructions)"
+                         @blur="saveTopic(selectedSessionMeta)"
+                         @keydown.enter="saveTopic(selectedSessionMeta)"
+                         @keydown.escape="editingTopicSessionId = null; topicError = ''">
+                </template>
+                <template x-if="editingTopicSessionId !== selectedSessionMeta?.id">
+                  <span class="topic" :class="{ empty: !selectedSessionMeta?.metadata?.topic }"
+                        @click="startEditTopic(selectedSessionMeta, $event)"
+                        title="Click to edit topic"
+                        x-text="selectedSessionMeta?.metadata?.topic || '+ add topic'"></span>
+                </template>
+                <span class="topic-error" x-show="topicError" x-text="topicError" x-cloak></span>
               </div>
               <div class="row meta-row">
                 <!-- agent popover -->

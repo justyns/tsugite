@@ -1,4 +1,4 @@
-import { get, post, patch } from '../../api.js';
+import { get, post, patch, del } from '../../api.js';
 import { REPLAY_SKIP_EVENTS, progressFromPayload } from './event_types.js';
 
 export const sessionsMixin = {
@@ -12,6 +12,9 @@ export const sessionsMixin = {
   sessionFilter: '',
   editingSessionId: null,
   editingTitle: '',
+  editingTopicSessionId: null,
+  editingTopic: '',
+  topicError: '',
   draggingPinId: null,
   dragOverPinId: null,
 
@@ -280,6 +283,46 @@ export const sessionsMixin = {
     }
   },
 
+  startEditTopic(s, event) {
+    event.stopPropagation();
+    this.topicError = '';
+    this.editingTopicSessionId = s.id;
+    this.editingTopic = s.metadata?.topic || '';
+    let tries = 0;
+    const focusInput = () => {
+      if (this.editingTopicSessionId !== s.id) return;
+      const input = document.querySelector('.topic-input');
+      if (input) {
+        input.focus();
+        input.select();
+      }
+      if ((!input || document.activeElement !== input) && tries++ < 30) {
+        setTimeout(focusInput, 50);
+      }
+    };
+    this.$nextTick(focusInput);
+  },
+
+  async saveTopic(s) {
+    const next = this.editingTopic.trim();
+    const current = s.metadata?.topic || '';
+    this.editingTopicSessionId = null;
+    if (next === current) return;
+    try {
+      if (next === '') {
+        const data = await del(`/api/sessions/${s.id}/metadata/topic`);
+        s.metadata = data.metadata || {};
+      } else {
+        const data = await patch(`/api/sessions/${s.id}/metadata`, { topic: next });
+        s.metadata = data.metadata || { ...(s.metadata || {}), topic: next };
+      }
+      this.topicError = '';
+    } catch (e) {
+      this.topicError = e?.message || 'Failed to update topic';
+      console.error('Failed to update topic', e);
+    }
+  },
+
   sourceIcon(source) {
     return { interactive: 'I', web: 'W', discord: 'D', cli: '>', schedule: 'S',
              background: 'B', spawned: 'P' }[source] || '?';
@@ -290,6 +333,7 @@ export const sessionsMixin = {
     const chips = [];
     if (meta.type) chips.push({ label: meta.type, cls: 'chip-type' });
     if (meta.status_text) chips.push({ label: meta.status_text, cls: 'chip-status' });
+    if (meta.topic) chips.push({ label: meta.topic, cls: 'chip-topic', title: meta.topic });
     if (meta.task) chips.push({ label: 'Task', href: meta.task, cls: 'chip-link' });
     if (meta.pr) chips.push({ label: 'PR', href: meta.pr, cls: 'chip-link' });
     return chips;

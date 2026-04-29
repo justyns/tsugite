@@ -169,6 +169,34 @@ class TestUpdateMetadata:
         resp = client.patch(f"/api/sessions/{session_id}/metadata", json={"k": "v"})
         assert resp.status_code == 401
 
+    def test_update_topic_at_cap(self, client, test_token, session_id):
+        topic = "x" * 160
+        resp = client.patch(
+            f"/api/sessions/{session_id}/metadata",
+            json={"topic": topic},
+            headers=auth(test_token),
+        )
+        assert resp.status_code == 200
+        assert resp.json()["metadata"]["topic"] == topic
+
+    def test_update_topic_over_cap_rejected(self, client, test_token, session_id):
+        resp = client.patch(
+            f"/api/sessions/{session_id}/metadata",
+            json={"topic": "x" * 161},
+            headers=auth(test_token),
+        )
+        assert resp.status_code == 400
+        assert "160" in resp.json()["error"]
+
+    def test_clear_topic_via_delete(self, client, test_token, session_id, session_store):
+        session_store.set_metadata(session_id, "topic", "old topic")
+        resp = client.delete(
+            f"/api/sessions/{session_id}/metadata/topic",
+            headers=auth(test_token),
+        )
+        assert resp.status_code == 200
+        assert "topic" not in resp.json()["metadata"]
+
 
 class TestDeleteMetadata:
     def test_delete_metadata(self, client, test_token, session_id, session_store):
