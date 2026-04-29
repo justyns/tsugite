@@ -276,6 +276,7 @@ The variable `findings` is available in Python.
 | `repeat_while`      | str   | Jinja2 expression, loop while truthy     |
 | `repeat_until`      | str   | Jinja2 expression, loop until truthy     |
 | `max_iterations`    | int   | Loop safety limit (default 10)           |
+| `agent`             | str   | Path to agent file; runs the step via `spawn_agent` instead of inline |
 
 ### Variable passing
 
@@ -283,6 +284,24 @@ When a step has `assign="var_name"`, the result is available in later steps:
 
 - In Jinja2 templates: `{{ var_name }}`
 - In Python code execution: just use `var_name` directly
+
+### Step context isolation
+
+Each `tsu:step` already runs as an independent agent invocation: a fresh system prompt, no LLM-level conversation history from prior steps.  The only thing that flows between steps is variables captured with `assign=`, substituted into later steps via Jinja.
+
+If you need a step to run with a fully separate identity (its own model defaults, attachments, skills, instructions), use `agent="path/to/other.md"`.  The step content (after Jinja rendering) becomes the spawned agent's prompt.  The spawned agent does not see the parent's `step_context` — only the rendered prompt — so any data the spawned agent needs must already be substituted in.
+
+```markdown
+<!-- tsu:step name="implement" assign="diff" -->
+Write a fix for: {{ user_prompt }}.  Return only the diff.
+
+<!-- tsu:step name="review" agent="agents/code-reviewer.md" assign="verdict" -->
+Review this diff:
+
+{{ diff }}
+```
+
+Path resolution follows the standard agent search order (workspace, project-local `agents/`, builtin agents, global config).  Unresolvable `agent=` paths fail before any step runs, so a typo in step 2 won't waste step 1's work.
 
 ## Other directives
 

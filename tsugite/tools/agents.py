@@ -12,6 +12,20 @@ def _effective_cwd() -> Path:
     return get_workspace_dir() or Path.cwd()
 
 
+def resolve_agent_path(agent_path: str) -> Optional[Path]:
+    """Resolve an agent reference (path or name) to a file. Returns None if missing.
+
+    Used by `spawn_agent` at runtime and by multi-step pre-flight validation, so
+    both paths agree on what is resolvable.
+    """
+    from ..agent_inheritance import find_agent_file
+
+    candidate = resolve_workspace_path(agent_path)
+    if candidate.exists():
+        return candidate
+    return find_agent_file(agent_path, current_agent_dir=_effective_cwd())
+
+
 @tool(parent_only=True)
 def spawn_agent(
     agent_path: str,
@@ -39,19 +53,11 @@ def spawn_agent(
     import json
     import subprocess
 
-    # Resolve agent path (supports both paths and agent names)
-    from ..agent_inheritance import find_agent_file
     from ..agent_runner import get_allowed_agents, get_current_agent
 
-    agent_file = resolve_workspace_path(agent_path)
-
-    if not agent_file.exists():
-        # Try resolving as agent name (e.g., "default" -> builtin default.md)
-        resolved = find_agent_file(agent_path, current_agent_dir=_effective_cwd())
-        if resolved:
-            agent_file = resolved
-        else:
-            raise ValueError(f"Agent not found: {agent_path}")
+    agent_file = resolve_agent_path(agent_path)
+    if agent_file is None:
+        raise ValueError(f"Agent not found: {agent_path}")
 
     # Parse agent config to check visibility and spawnable
     content = agent_file.read_text()

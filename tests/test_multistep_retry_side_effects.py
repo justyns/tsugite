@@ -22,6 +22,7 @@ def _make_step(max_retries: int = 2):
     step.assign_var = None
     step.model_kwargs = {}
     step.content = "do something"
+    step.spawn_agent_path = None
     return step
 
 

@@ -1,5 +1,7 @@
 """Tests for multi-step agent execution."""
 
+from pathlib import Path
+
 import pytest
 
 from tsugite.md_agents import extract_step_directives, has_step_directives
@@ -123,6 +125,51 @@ And this one: {{ user_prompt }}
         assert "{{ previous_result }}" in steps[0].content
         assert "{{ user_prompt }}" in steps[0].content
 
+    def test_step_with_agent_attribute(self):
+        """Test parsing the agent= attribute that runs the step via spawn_agent."""
+        content = """
+<!-- tsu:step name="review" agent="agents/code-reviewer.md" -->
+{{ implement_diff }}
+"""
+        preamble, steps = extract_step_directives(content)
+
+        assert len(steps) == 1
+        assert steps[0].name == "review"
+        assert steps[0].spawn_agent_path == "agents/code-reviewer.md"
+
+    def test_step_without_agent_defaults_none(self):
+        """Test that spawn_agent_path defaults to None when agent= is absent."""
+        content = """
+<!-- tsu:step name="inline" -->
+Run inline
+"""
+        preamble, steps = extract_step_directives(content)
+
+        assert steps[0].spawn_agent_path is None
+
+    def test_step_agent_with_single_quotes(self):
+        """Test agent= attribute with single quotes."""
+        content = """
+<!-- tsu:step name='review' agent='agents/reviewer.md' -->
+Review
+"""
+        preamble, steps = extract_step_directives(content)
+
+        assert steps[0].spawn_agent_path == "agents/reviewer.md"
+
+    def test_step_agent_composes_with_assign_and_retries(self):
+        """Test agent= composes with assign, max_retries, timeout."""
+        content = """
+<!-- tsu:step name="review" agent="agents/reviewer.md" assign="review_result" max_retries="2" timeout="60" -->
+Review the diff
+"""
+        preamble, steps = extract_step_directives(content)
+
+        assert steps[0].spawn_agent_path == "agents/reviewer.md"
+        assert steps[0].assign_var == "review_result"
+        assert steps[0].max_retries == 2
+        assert steps[0].timeout == 60
+
 
 class TestMultiStepExecution:
     def test_multistep_agent_file(self, tmp_path):
@@ -191,6 +238,61 @@ Duplicate name
 
         with pytest.raises(ValueError, match="Duplicate step names"):
             run_multistep_agent(agent_file, "test")
+
+    def test_unresolvable_spawn_agent_path_fails_preflight(self, tmp_path):
+        """A step referencing a non-existent agent file should fail before any step runs."""
+        from tsugite.agent_runner import run_multistep_agent
+
+        agent_file = tmp_path / "bad_spawn.md"
+        agent_file.write_text("""---
+name: bad_spawn
+model: ollama:qwen2.5-coder:7b
+---
+<!-- tsu:step name="review" agent="does/not/exist.md" -->
+Review nothing
+""")
+
+        with pytest.raises(ValueError, match="unresolvable agent paths") as exc_info:
+            run_multistep_agent(agent_file, "test")
+        msg = str(exc_info.value)
+        assert "review" in msg
+        assert "does/not/exist.md" in msg
+
+    def test_spawn_agent_step_routes_through_spawn_agent(self, tmp_path, monkeypatch):
+        """When agent= is set, the step should be executed via spawn_agent and its
+        return value captured into the assigned variable."""
+        from tsugite.agent_runner import run_multistep_agent
+
+        # Use the existing simple.md fixture so pre-flight resolves the path.
+        fixture_path = Path(__file__).parent / "fixtures" / "agents" / "simple.md"
+        assert fixture_path.exists(), "simple.md fixture is required for this test"
+
+        captured = {}
+
+        def fake_spawn_agent(agent_path, prompt, **kwargs):
+            captured["agent_path"] = agent_path
+            captured["prompt"] = prompt
+            return "REVIEW_OK"
+
+        # Patch where the executor imports it from.
+        monkeypatch.setattr("tsugite.tools.agents.spawn_agent", fake_spawn_agent)
+
+        agent_file = tmp_path / "spawn_step.md"
+        agent_file.write_text(f"""---
+name: spawn_step_test
+model: ollama:qwen2.5-coder:7b
+extends: none
+tools: []
+---
+<!-- tsu:step name="review" agent="{fixture_path}" assign="verdict" -->
+Review the diff: HELLO
+""")
+
+        result = run_multistep_agent(agent_file, "test")
+
+        assert result == "REVIEW_OK"
+        assert captured["agent_path"] == str(fixture_path)
+        assert "Review the diff: HELLO" in captured["prompt"]
 
     def test_step_with_prefetch(self, tmp_path):
         """Test that prefetch works with multi-step agents."""

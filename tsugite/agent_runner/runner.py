@@ -1301,30 +1301,41 @@ async def _execute_step_with_retries(
                 time.sleep(step.retry_delay)
             continue
 
-        # Prepare variables and build PreparedAgent
         injectable_vars = _build_injectable_vars(step_context, assigned_vars)
-        prepared = _build_prepared_agent_for_step(
-            agent=agent,
-            rendered_step_prompt=rendered_step_prompt,
-            step_context=step_context,
-        )
 
-        # Execute this step as a full agent run
-        try:
+        if step.spawn_agent_path:
+            from tsugite.tools.agents import spawn_agent
 
-            async def execute_step():
-                coro = _execute_agent_with_prompt(
+            def make_coro():
+                return asyncio.to_thread(
+                    spawn_agent,
+                    agent_path=step.spawn_agent_path,
+                    prompt=rendered_step_prompt,
+                )
+
+        else:
+            prepared = _build_prepared_agent_for_step(
+                agent=agent,
+                rendered_step_prompt=rendered_step_prompt,
+                step_context=step_context,
+            )
+
+            def make_coro():
+                return _execute_agent_with_prompt(
                     prepared=prepared,
                     exec_options=exec_options,
                     custom_logger=custom_logger,
                     model_kwargs=step.model_kwargs,
                     injectable_vars=injectable_vars,
                 )
-                if step.timeout:
-                    return await asyncio.wait_for(coro, timeout=step.timeout)
-                else:
-                    return await coro
 
+        async def execute_step():
+            coro = make_coro()
+            if step.timeout:
+                return await asyncio.wait_for(coro, timeout=step.timeout)
+            return await coro
+
+        try:
             step_result = await execute_step()
 
             # Store result in context if assign variable specified
@@ -1518,6 +1529,19 @@ async def _run_multistep_agent_impl(
         if len(step_names) != len(set(step_names)):
             duplicates = [name for name in step_names if step_names.count(name) > 1]
             raise ValueError(f"Duplicate step names found: {', '.join(set(duplicates))}")
+
+        # Pre-flight: resolve every step's spawn_agent_path so unresolved paths
+        # fail before any step runs
+        from tsugite.tools.agents import resolve_agent_path
+
+        unresolved = [
+            (s.name, s.spawn_agent_path)
+            for s in steps
+            if s.spawn_agent_path and resolve_agent_path(s.spawn_agent_path) is None
+        ]
+        if unresolved:
+            details = "\n".join(f"  - step '{name}': {path}" for name, path in unresolved)
+            raise ValueError(f"Step(s) reference unresolvable agent paths:\n{details}")
 
         # Create event_bus for emitting events throughout multi-step execution
         from tsugite.events import DebugMessageEvent, EventBus, InfoEvent, WarningEvent

@@ -310,6 +310,9 @@ class StepDirective:
     repeat_until: Optional[str] = None  # Jinja2 expression or helper name to stop repeating
     max_iterations: int = 10  # Maximum loop iterations (safety valve)
 
+    # If set, run via spawn_agent (isolated context); rendered step content is the prompt.
+    spawn_agent_path: Optional[str] = None
+
 
 def extract_step_directives(content: str, include_preamble: bool = True) -> tuple[str, List[StepDirective]]:
     """Extract step directives and preamble from markdown content.
@@ -371,6 +374,7 @@ def extract_step_directives(content: str, include_preamble: bool = True) -> tupl
         # Parse optional attributes
         assign_var = _parse_directive_attribute(args, "assign", r"\w+")
         timeout = _parse_directive_attribute(args, "timeout", r"[0-9]+", int)
+        spawn_agent_path = _parse_directive_attribute(args, "agent", r"[^\"'\s]+")
 
         # Use helpers for complex parsing
         model_kwargs = parse_model_kwargs_from_args(args, step_name)
@@ -392,6 +396,7 @@ def extract_step_directives(content: str, include_preamble: bool = True) -> tupl
                 max_iterations=max_iterations,
                 start_pos=start_pos,
                 end_pos=end_pos,
+                spawn_agent_path=spawn_agent_path,
             )
         )
 
