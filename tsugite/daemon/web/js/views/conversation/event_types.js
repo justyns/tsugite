@@ -39,9 +39,7 @@ export function finalResultBubble({ result, result_data }) {
   return null;
 }
 
-// Append `content` to the last reasoning bubble for `step`, or push a new one.
-// Shared by the history replay path and the live streaming path so they group
-// reasoning chunks identically.
+// Shared by history replay and live streaming so both paths group reasoning chunks identically.
 export function appendReasoningChunk(bubbles, step, content) {
   const last = bubbles[bubbles.length - 1];
   if (last?.type === 'reasoning' && last.step === step) {
@@ -51,7 +49,6 @@ export function appendReasoningChunk(bubbles, step, content) {
   }
 }
 
-// Attach a `tokens` count to the most recent reasoning bubble for `step`.
 export function attachReasoningTokens(bubbles, step, tokens) {
   for (let i = bubbles.length - 1; i >= 0; i--) {
     if (bubbles[i].type === 'reasoning' && bubbles[i].step === step) {
