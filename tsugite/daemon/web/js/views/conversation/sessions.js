@@ -348,6 +348,10 @@ export const sessionsMixin = {
 
   inlineTopic(s) { return this._inlineMeta(s, 'topic', 80); },
 
+  isSessionSelected(s) {
+    return this.selectedSessionId === (s?.conversation_id || s?.id);
+  },
+
   lastMessagePreview(s) {
     return (s.result || s.prompt || '').slice(0, 60) || '';
   },

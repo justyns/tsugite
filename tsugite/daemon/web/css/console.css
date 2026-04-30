@@ -348,30 +348,30 @@ body.console-shell { display: flex; flex-direction: column; height: 100dvh; }
 .console-session .chip.chip-link { color: var(--blue); background: color-mix(in oklab, var(--blue) 14%, var(--surface0)); }
 .console-session .chip.chip-link:hover { color: var(--lavender); }
 
-.console-session .row1 .chip.row1-status {
+.console-session .row-meta {
+  padding-left: 13px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-family: var(--font-mono);
+}
+.console-session .row-meta .row-meta-chip {
   flex-shrink: 0;
-  max-width: 90px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-size: 9px;
   padding: 0 4px;
-  margin-left: 4px;
 }
-.console-session .row1 .title { min-width: 24px; }
-.console-session .row-topic {
-  padding-left: 13px;
+.console-session .row-meta-topic {
   font-size: 10.5px;
   color: var(--subtext0);
   font-style: italic;
-  font-family: var(--font-mono);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 100%;
+  flex: 1;
+  min-width: 0;
 }
-.console-session.focused .row-topic,
-.console-session:hover .row-topic {
+.console-session:hover .row-meta-topic {
   white-space: normal;
   overflow: visible;
   text-overflow: unset;

@@ -110,16 +110,20 @@
                     <template x-if="editingSessionId !== s.id">
                       <span class="title" :class="{ unread: s.unread }" x-text="sessionLabel(s)"></span>
                     </template>
-                    <template x-if="inlineStatusText(s)">
-                      <span class="chip chip-status row1-status" x-text="inlineStatusText(s)"></span>
-                    </template>
                     <button class="icon-btn" @click.stop="startEditTitle(s, $event)" title="Rename">✎</button>
                     <button class="icon-btn pin-on" @click.stop="togglePin(s)" title="Unpin">★</button>
                     <span class="time" x-text="formatRelativeTime(s.last_active || s.created_at)"
                           :title="s.last_active || s.created_at"></span>
                   </div>
-                  <template x-if="inlineTopic(s)">
-                    <div class="row-topic" :title="s.metadata?.topic || ''" x-text="inlineTopic(s)"></div>
+                  <template x-if="inlineStatusText(s) || (inlineTopic(s) && !isSessionSelected(s))">
+                    <div class="row-meta">
+                      <template x-if="inlineStatusText(s)">
+                        <span class="chip chip-status row-meta-chip" x-text="inlineStatusText(s)"></span>
+                      </template>
+                      <template x-if="inlineTopic(s) && !isSessionSelected(s)">
+                        <span class="row-meta-topic" :title="s.metadata?.topic || ''" x-text="inlineTopic(s)"></span>
+                      </template>
+                    </div>
                   </template>
                   <div class="row2">
                     <span class="agent" x-text="s.agent || $store.app.selectedAgent"></span>
@@ -170,16 +174,20 @@
                     <template x-if="editingSessionId !== s.id">
                       <span class="title" :class="{ unread: s.unread }" x-text="sessionLabel(s)"></span>
                     </template>
-                    <template x-if="inlineStatusText(s)">
-                      <span class="chip chip-status row1-status" x-text="inlineStatusText(s)"></span>
-                    </template>
                     <button class="icon-btn" @click.stop="startEditTitle(s, $event)" title="Rename">✎</button>
                     <button class="icon-btn" @click.stop="togglePin(s)" title="Pin">☆</button>
                     <span class="time" x-text="formatRelativeTime(s.last_active || s.created_at)"
                           :title="s.last_active || s.created_at"></span>
                   </div>
-                  <template x-if="inlineTopic(s)">
-                    <div class="row-topic" :title="s.metadata?.topic || ''" x-text="inlineTopic(s)"></div>
+                  <template x-if="inlineStatusText(s) || (inlineTopic(s) && !isSessionSelected(s))">
+                    <div class="row-meta">
+                      <template x-if="inlineStatusText(s)">
+                        <span class="chip chip-status row-meta-chip" x-text="inlineStatusText(s)"></span>
+                      </template>
+                      <template x-if="inlineTopic(s) && !isSessionSelected(s)">
+                        <span class="row-meta-topic" :title="s.metadata?.topic || ''" x-text="inlineTopic(s)"></span>
+                      </template>
+                    </div>
                   </template>
                   <div class="row2">
                     <span class="agent" x-text="s.agent || $store.app.selectedAgent"></span>
