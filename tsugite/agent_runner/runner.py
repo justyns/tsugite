@@ -1347,37 +1347,30 @@ async def _execute_step_with_retries(
         if step.spawn_agent_path:
             from tsugite.tools.agents import spawn_agent
 
-            def make_coro():
-                return asyncio.to_thread(
-                    spawn_agent,
-                    agent_path=step.spawn_agent_path,
-                    prompt=rendered_step_prompt,
-                )
-
+            coro = asyncio.to_thread(
+                spawn_agent,
+                agent_path=step.spawn_agent_path,
+                prompt=rendered_step_prompt,
+            )
         else:
             prepared = _build_prepared_agent_for_step(
                 agent=agent,
                 rendered_step_prompt=rendered_step_prompt,
                 step_context=step_context,
             )
+            coro = _execute_agent_with_prompt(
+                prepared=prepared,
+                exec_options=exec_options,
+                custom_logger=custom_logger,
+                model_kwargs=step.model_kwargs,
+                injectable_vars=injectable_vars,
+            )
 
-            def make_coro():
-                return _execute_agent_with_prompt(
-                    prepared=prepared,
-                    exec_options=exec_options,
-                    custom_logger=custom_logger,
-                    model_kwargs=step.model_kwargs,
-                    injectable_vars=injectable_vars,
-                )
-
-        async def execute_step():
-            coro = make_coro()
-            if step.timeout:
-                return await asyncio.wait_for(coro, timeout=step.timeout)
-            return await coro
+        if step.timeout:
+            coro = asyncio.wait_for(coro, timeout=step.timeout)
 
         try:
-            step_result = await execute_step()
+            step_result = await coro
 
             # Store result in context if assign variable specified
             if step.assign_var:
