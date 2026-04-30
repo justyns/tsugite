@@ -15,7 +15,7 @@ from tzlocal import get_localzone
 from tsugite.agent_inheritance import find_agent_file
 from tsugite.agent_runner import run_agent
 from tsugite.daemon.config import AgentConfig
-from tsugite.daemon.session_store import READ_ONLY_METADATA_KEYS, SessionStore
+from tsugite.daemon.session_store import READ_ONLY_METADATA_KEYS, Session, SessionStore
 from tsugite.exceptions import AgentExecutionError
 from tsugite.options import ExecutionOptions
 
@@ -610,8 +610,16 @@ class BaseAdapter(ABC):
     async def _run_compaction(
         self, user_id: str, conv_id: str, custom_logger: Optional[HasUIHandler] = None, reason: str | None = None
     ) -> str:
-        """Run session compaction and return the new conv_id."""
+        """Run session compaction and return the new conv_id.
+
+        The new id comes from `_compact_session`'s return value (active branch)
+        or `old.superseded_by` (waited on another thread). Both are direct
+        consequences of the rotation that just happened; rediscovering via
+        `get_or_create_interactive` would silently substitute the user's
+        default-interactive session for non-default or non-interactive sources.
+        """
         self._emit_ui(custom_logger, "compacting")
+        new_session: Optional[Session] = None
         if self.session_store.begin_compaction(user_id, self.agent_name):
             self._broadcast_compaction("compaction_started", self.agent_name)
 
@@ -619,7 +627,7 @@ class BaseAdapter(ABC):
                 self._broadcast_compaction("compaction_progress", self.agent_name, **payload)
 
             try:
-                await self._compact_session(conv_id, reason=reason, progress_callback=progress_cb)
+                new_session = await self._compact_session(conv_id, reason=reason, progress_callback=progress_cb)
             finally:
                 self.session_store.end_compaction(user_id, self.agent_name)
                 self._broadcast_compaction("compaction_finished", self.agent_name)
@@ -627,11 +635,13 @@ class BaseAdapter(ABC):
             done = await asyncio.to_thread(self.session_store.wait_for_compaction, user_id, self.agent_name)
             if not done:
                 raise TimeoutError("Timed out waiting for session compaction to finish")
+            new_session = self.session_store.resolve_compacted_successor(conv_id)
+
         self._emit_ui(custom_logger, "compacted")
-        session = self.session_store.get_or_create_interactive(user_id, self.agent_name)
+        new_id = new_session.id if new_session else conv_id
         if self.event_bus:
-            self.event_bus.emit("session_update", {"action": "compacted", "id": session.id})
-        return session.id
+            self.event_bus.emit("session_update", {"action": "compacted", "id": new_id})
+        return new_id
 
     def _update_skill_ttl(self, conv_id: str, user_message: str, result, agent_context: dict) -> None:
         """Advance per-session TTL counters based on what happened this turn.
@@ -713,10 +723,16 @@ class BaseAdapter(ABC):
         instructions: str | None = None,
         reason: str | None = None,
         progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
-    ) -> None:
+    ) -> Optional[Session]:
         """Compact a session by summarizing older events and rotating to a new
         session whose first body event is a `compaction` summary, followed by
         the retained recent events.
+
+        Returns the new `Session` on success, or `None` when nothing was
+        rotated (all events already fit in the retention budget). Callers must
+        use the returned session for downstream id-keyed work; looking up the
+        successor via `_interactive_index` is unreliable for non-default or
+        non-interactive sessions.
         """
         if instructions is None:
             instructions = self._DEFAULT_COMPACT_INSTRUCTIONS
@@ -752,7 +768,7 @@ class BaseAdapter(ABC):
 
         if not old_events:
             logger.info("[%s] All events fit in retention budget, skipping compaction", self.agent_name)
-            return
+            return None
 
         old_user_inputs = sum(1 for e in old_events if e.type == "user_input")
         recent_user_inputs = sum(1 for e in recent_events if e.type == "user_input")
@@ -913,3 +929,4 @@ class BaseAdapter(ABC):
         clear_loaded_skills()
 
         logger.info("[%s] Session compacted", self.agent_name)
+        return new_session

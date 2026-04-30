@@ -116,15 +116,17 @@ async def cmd_compact(adapter: BaseAdapter, user_id: str, message: str | None = 
 
     old_id = session.id
     adapter._broadcast_compaction("compaction_started", adapter.agent_name)
+    new_session = None
     try:
-        await adapter._compact_session(session.id, instructions=message, reason="manual")
+        new_session = await adapter._compact_session(session.id, instructions=message, reason="manual")
     except Exception as e:
         return f"Compaction failed: {e}"
     finally:
         adapter.session_store.end_compaction(user_id, adapter.agent_name)
         adapter._broadcast_compaction("compaction_finished", adapter.agent_name)
 
-    new_session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
+    if new_session is None:
+        return f"Nothing to compact (id: {old_id[:12]})"
     return f"Session compacted (old: {old_id[:12]}, new: {new_session.id[:12]})"
 
 

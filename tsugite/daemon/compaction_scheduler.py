@@ -123,8 +123,16 @@ class CompactionScheduler:
             )
 
             try:
-                await adapter._compact_session(session.id, reason="scheduled")
-                logger.info("[%s] Scheduled compaction completed", agent_name)
+                new_session = await adapter._compact_session(session.id, reason="scheduled")
+                if new_session is None:
+                    logger.info("[%s] Scheduled compaction skipped (nothing to compact)", agent_name)
+                else:
+                    logger.info(
+                        "[%s] Scheduled compaction completed (old=%s new=%s)",
+                        agent_name,
+                        session.id,
+                        new_session.id,
+                    )
             except Exception:
                 logger.exception("[%s] Scheduled compaction failed", agent_name)
             finally:

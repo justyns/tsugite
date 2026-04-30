@@ -513,6 +513,19 @@ class SessionStore:
             self._save()
             return new_session
 
+    def resolve_compacted_successor(self, session_id: str) -> Optional[Session]:
+        """Return the post-compaction successor of `session_id`, or None.
+
+        Folds the `superseded_by` lookup and the successor fetch into one lock
+        acquisition. Returns None when `session_id` is unknown, has no
+        successor, or the successor itself has been pruned.
+        """
+        with self._lock:
+            old = self._sessions.get(session_id)
+            if not old or not old.superseded_by:
+                return None
+            return self._sessions.get(old.superseded_by)
+
     def update_token_count(self, session_id: str, tokens_used: int) -> None:
         with self._lock:
             session = self._sessions.get(session_id)

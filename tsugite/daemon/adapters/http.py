@@ -971,9 +971,10 @@ class HTTPServer:
             return JSONResponse({"error": "compaction already in progress"}, status_code=409)
 
         adapter._broadcast_compaction("compaction_started", agent_name)
+        new_session = None
         try:
             instructions = body.get("instructions")
-            await adapter._compact_session(session.id, instructions=instructions, reason="manual")
+            new_session = await adapter._compact_session(session.id, instructions=instructions, reason="manual")
         except Exception as e:
             msg = str(e) or repr(e)
             logger.exception("Compaction failed for agent %s", adapter.agent_name)
@@ -982,7 +983,6 @@ class HTTPServer:
             adapter.session_store.end_compaction(user_id, adapter.agent_name)
             adapter._broadcast_compaction("compaction_finished", agent_name)
 
-        new_session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
         self.event_bus.emit("agent_status", {"agent": agent_name})
         if new_session:
             self.event_bus.emit("session_update", {"action": "compacted", "id": new_session.id})
@@ -990,7 +990,7 @@ class HTTPServer:
             {
                 "status": "compacted",
                 "old_conversation_id": old_conv_id,
-                "new_conversation_id": new_session.id if new_session else None,
+                "new_conversation_id": new_session.id if new_session else old_conv_id,
             }
         )
 
