@@ -58,6 +58,8 @@ export async function* parseSSE(responseOrReader) {
 
 export function connectEvents(onEvent) {
   let running = true;
+  let everConnected = false;
+  let backoff = 1000;
   const controller = new AbortController();
 
   async function connect() {
@@ -73,14 +75,20 @@ export function connectEvents(onEvent) {
           return;
         }
         if (!resp.ok) throw new Error(resp.statusText);
+        // Only fire reconnect after we recover from a prior connection - the
+        // initial connect is handled by loadAgents() at boot. Without this gate
+        // the UI clears state every retry tick while the daemon is down.
+        if (everConnected) onEvent({ type: 'reconnect' });
+        everConnected = true;
+        backoff = 1000;
         for await (const event of parseSSE(resp)) {
           onEvent(event);
         }
       } catch (e) {
         if (!running) return;
       }
-      await new Promise(r => setTimeout(r, 3000));
-      if (running) onEvent({ type: 'reconnect' });
+      await new Promise(r => setTimeout(r, backoff));
+      backoff = Math.min(backoff * 2, 30000);
     }
   }
 
