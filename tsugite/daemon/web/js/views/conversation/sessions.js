@@ -328,15 +328,25 @@ export const sessionsMixin = {
              background: 'B', spawned: 'P' }[source] || '?';
   },
 
-  metadataChips(s) {
+  metadataChips(s, opts = {}) {
     const meta = s.metadata || {};
+    const exclude = new Set(opts.exclude || []);
     const chips = [];
-    if (meta.type) chips.push({ label: meta.type, cls: 'chip-type' });
-    if (meta.status_text) chips.push({ label: meta.status_text, cls: 'chip-status' });
-    if (meta.topic) chips.push({ label: meta.topic, cls: 'chip-topic', title: meta.topic });
-    if (meta.task) chips.push({ label: 'Task', href: meta.task, cls: 'chip-link' });
-    if (meta.pr) chips.push({ label: 'PR', href: meta.pr, cls: 'chip-link' });
+    const push = (chip) => { if (!exclude.has(chip.cls)) chips.push(chip); };
+    if (meta.type) push({ label: meta.type, cls: 'chip-type' });
+    if (meta.status_text) push({ label: meta.status_text, cls: 'chip-status' });
+    if (meta.topic) push({ label: meta.topic, cls: 'chip-topic', title: meta.topic });
+    if (meta.task) push({ label: 'Task', href: meta.task, cls: 'chip-link' });
+    if (meta.pr) push({ label: 'PR', href: meta.pr, cls: 'chip-link' });
     return chips;
+  },
+
+  inlineStatusText(s) {
+    return (s?.metadata?.status_text || '').replace(/\s+/g, ' ').trim().slice(0, 40);
+  },
+
+  inlineTopic(s) {
+    return (s?.metadata?.topic || '').replace(/\s+/g, ' ').trim().slice(0, 80);
   },
 
   lastMessagePreview(s) {

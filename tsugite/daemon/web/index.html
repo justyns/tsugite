@@ -110,11 +110,17 @@
                     <template x-if="editingSessionId !== s.id">
                       <span class="title" :class="{ unread: s.unread }" x-text="sessionLabel(s)"></span>
                     </template>
+                    <template x-if="inlineStatusText(s)">
+                      <span class="chip chip-status row1-status" x-text="inlineStatusText(s)"></span>
+                    </template>
                     <button class="icon-btn" @click.stop="startEditTitle(s, $event)" title="Rename">✎</button>
                     <button class="icon-btn pin-on" @click.stop="togglePin(s)" title="Unpin">★</button>
                     <span class="time" x-text="formatRelativeTime(s.last_active || s.created_at)"
                           :title="s.last_active || s.created_at"></span>
                   </div>
+                  <template x-if="inlineTopic(s)">
+                    <div class="row-topic" :title="s.metadata?.topic || ''" x-text="inlineTopic(s)"></div>
+                  </template>
                   <div class="row2">
                     <span class="agent" x-text="s.agent || $store.app.selectedAgent"></span>
                     <span class="sep">·</span>
@@ -125,11 +131,11 @@
                       <span class="preview" x-text="lastMessagePreview(s)"></span>
                     </template>
                   </div>
-                  <div class="row3" x-show="metadataChips(s).length > 0">
-                    <template x-for="chip in metadataChips(s).filter(c => c.href)" :key="chip.label">
+                  <div class="row3" x-show="metadataChips(s, { exclude: ['chip-status', 'chip-topic'] }).length > 0">
+                    <template x-for="chip in metadataChips(s, { exclude: ['chip-status', 'chip-topic'] }).filter(c => c.href)" :key="chip.label">
                       <a class="chip" :class="chip.cls" :href="chip.href" target="_blank" x-text="chip.label" @click.stop></a>
                     </template>
-                    <template x-for="chip in metadataChips(s).filter(c => !c.href)" :key="chip.label">
+                    <template x-for="chip in metadataChips(s, { exclude: ['chip-status', 'chip-topic'] }).filter(c => !c.href)" :key="chip.label">
                       <span class="chip" :class="chip.cls" :title="chip.title || ''" x-text="chip.label"></span>
                     </template>
                   </div>
@@ -164,11 +170,17 @@
                     <template x-if="editingSessionId !== s.id">
                       <span class="title" :class="{ unread: s.unread }" x-text="sessionLabel(s)"></span>
                     </template>
+                    <template x-if="inlineStatusText(s)">
+                      <span class="chip chip-status row1-status" x-text="inlineStatusText(s)"></span>
+                    </template>
                     <button class="icon-btn" @click.stop="startEditTitle(s, $event)" title="Rename">✎</button>
                     <button class="icon-btn" @click.stop="togglePin(s)" title="Pin">☆</button>
                     <span class="time" x-text="formatRelativeTime(s.last_active || s.created_at)"
                           :title="s.last_active || s.created_at"></span>
                   </div>
+                  <template x-if="inlineTopic(s)">
+                    <div class="row-topic" :title="s.metadata?.topic || ''" x-text="inlineTopic(s)"></div>
+                  </template>
                   <div class="row2">
                     <span class="agent" x-text="s.agent || $store.app.selectedAgent"></span>
                     <span class="sep">·</span>
@@ -179,11 +191,11 @@
                       <span class="preview" x-text="lastMessagePreview(s)"></span>
                     </template>
                   </div>
-                  <div class="row3" x-show="metadataChips(s).length > 0">
-                    <template x-for="chip in metadataChips(s).filter(c => c.href)" :key="chip.label">
+                  <div class="row3" x-show="metadataChips(s, { exclude: ['chip-status', 'chip-topic'] }).length > 0">
+                    <template x-for="chip in metadataChips(s, { exclude: ['chip-status', 'chip-topic'] }).filter(c => c.href)" :key="chip.label">
                       <a class="chip" :class="chip.cls" :href="chip.href" target="_blank" x-text="chip.label" @click.stop></a>
                     </template>
-                    <template x-for="chip in metadataChips(s).filter(c => !c.href)" :key="chip.label">
+                    <template x-for="chip in metadataChips(s, { exclude: ['chip-status', 'chip-topic'] }).filter(c => !c.href)" :key="chip.label">
                       <span class="chip" :class="chip.cls" :title="chip.title || ''" x-text="chip.label"></span>
                     </template>
                   </div>
