@@ -127,14 +127,31 @@ def test_http_request_post_dict_body(mock_httpx_client):
     """POST with dict body auto-serializes to JSON."""
     mock_httpx_client.request.return_value = _mock_response(200, {"id": 1})
 
-    result = http_request("https://api.example.com/items", body={"name": "test"})
+    result = http_request("https://api.example.com/items", method="POST", body={"name": "test"})
 
     assert isinstance(result, HttpResponse)
     assert result.status_code == 200
     assert result.text == '{"id": 1}'
     assert result.json() == {"id": 1}
     call_kwargs = mock_httpx_client.request.call_args
+    assert call_kwargs.kwargs["method"] == "POST"
     assert call_kwargs.kwargs["json"] == {"name": "test"}
+
+
+def test_http_request_default_method_is_get(mock_httpx_client):
+    """Omitting `method=` must default to GET, not POST.
+
+    Background: a POST default caused real data loss when an LLM omitted the
+    method on a Vikunja read-then-update flow - the empty-body POST cleared
+    fields. GET is safe and idempotent and matches the convention of
+    `requests`, `urllib`, and the rest of the http tools in this module.
+    """
+    mock_httpx_client.request.return_value = _mock_response(200, {"data": [1, 2, 3]})
+
+    http_request("https://api.example.com/items")
+
+    call_kwargs = mock_httpx_client.request.call_args
+    assert call_kwargs.kwargs["method"] == "GET"
 
 
 def test_http_request_put_string_body(mock_httpx_client):
@@ -328,7 +345,7 @@ def test_http_request_returns_headers(mock_httpx_client):
         200, {"ok": True}, headers={"x-request-id": "abc123", "content-type": "application/json"}
     )
 
-    result = http_request("https://api.example.com/items", body={"a": 1})
+    result = http_request("https://api.example.com/items", method="POST", body={"a": 1})
 
     assert "x-request-id" in result.headers
     assert result.headers["x-request-id"] == "abc123"

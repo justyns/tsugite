@@ -134,7 +134,7 @@ def fetch_text(
 @tool
 def http_request(
     url: str,
-    method: str = "POST",
+    method: str = "GET",
     body: Optional[Union[str, Dict[str, Any]]] = None,
     headers: Optional[Dict[str, str]] = None,
     timeout: int = 30,
@@ -143,7 +143,7 @@ def http_request(
 
     Args:
         url: URL to send the request to
-        method: HTTP method (POST, PUT, PATCH, DELETE, GET)
+        method: HTTP method (GET, POST, PUT, PATCH, DELETE) - defaults to GET (safe, idempotent)
         body: Request body - dict for JSON (auto-serialized), string for raw body
         headers: Optional HTTP headers
         timeout: Request timeout in seconds
