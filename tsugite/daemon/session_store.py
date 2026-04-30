@@ -536,6 +536,20 @@ class SessionStore:
                 session.last_active = datetime.now(timezone.utc).isoformat()
                 self._mark_dirty()
 
+    def set_cumulative_tokens(self, session_id: str, tokens: int) -> None:
+        """Set cumulative_tokens without bumping message_count or last_active.
+
+        Used to seed a fresh post-compaction session with an estimate of its
+        carried-over context size. Real exchanges go through update_token_count.
+        """
+        if tokens <= 0:
+            return
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if session:
+                session.cumulative_tokens = tokens
+                self._mark_dirty()
+
     # ── Generic session CRUD ──
 
     MAX_SCHEDULE_SESSIONS = 20

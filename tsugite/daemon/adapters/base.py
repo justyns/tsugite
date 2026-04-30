@@ -928,5 +928,16 @@ class BaseAdapter(ABC):
 
         clear_loaded_skills()
 
+        try:
+            from tsugite.daemon.memory import _count_tokens, _message_text
+
+            new_events = SessionStorage.load(new_session_path).load_events()
+            new_messages = events_to_messages(new_events)
+            text = "\n".join(_message_text(m) for m in new_messages)
+            estimated = _count_tokens(text, resolved_model) if text else 0
+            self.session_store.set_cumulative_tokens(new_session.id, estimated)
+        except Exception:
+            logger.debug("[%s] Failed to seed post-compaction token estimate", self.agent_name, exc_info=True)
+
         logger.info("[%s] Session compacted", self.agent_name)
         return new_session

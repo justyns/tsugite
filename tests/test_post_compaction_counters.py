@@ -136,7 +136,10 @@ async def test_post_compaction_counters_update(workspace_dir, history_dir, tmp_p
         new_session = await adapter._compact_session(conv_id)
 
     creation_ts = new_session.last_active
-    assert new_session.cumulative_tokens == 0
+    # The new session is seeded with an estimated token count covering the
+    # summary + retained events so the UI doesn't show 0% post-compaction.
+    # message_count stays at 0 because the seed isn't a real exchange.
+    assert new_session.cumulative_tokens > 0
     assert new_session.message_count == 0
 
     store.update_token_count(new_session.id, 1234)
@@ -145,6 +148,35 @@ async def test_post_compaction_counters_update(workspace_dir, history_dir, tmp_p
     assert refreshed.cumulative_tokens == 1234
     assert refreshed.message_count == 1
     assert refreshed.last_active != creation_ts
+
+
+@pytest.mark.asyncio
+async def test_post_compaction_seeds_token_estimate(workspace_dir, history_dir, tmp_path):
+    """The new session must have a non-zero cumulative_tokens after compaction
+    so the UI's "X tokens / Y%" indicator reflects the carried-over context
+    (summary + retained events) instead of showing 0%.
+    """
+    store = SessionStore(tmp_path / "session_store.json", context_limits={"test-agent": 1_000_000})
+    session = store.get_or_create_interactive("test-user", "test-agent")
+    conv_id = session.id
+
+    _seed_session_events(history_dir / f"{conv_id}.jsonl")
+
+    agent_config = AgentConfig(workspace_dir=workspace_dir, agent_file="default")
+    agent_config.context_limit = 1_000_000
+    adapter = _StubAdapter("test-agent", agent_config, store)
+
+    with ExitStack() as stack:
+        for p in _patches(history_dir):
+            stack.enter_context(p)
+        new_session = await adapter._compact_session(conv_id)
+
+    refreshed = store.get_session(new_session.id)
+    assert refreshed.cumulative_tokens > 0, (
+        "post-compaction session should have a token estimate so the UI shows non-zero context use"
+    )
+    # Seed must NOT bump message_count (no real exchange has happened yet).
+    assert refreshed.message_count == 0
 
 
 @pytest.mark.asyncio
