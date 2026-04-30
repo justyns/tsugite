@@ -115,6 +115,8 @@ Keep `topic` and `status_text` current so the sidebar reflects what each session
 - In long-running scheduled sessions, update `status_text` as work progresses, not just at the end.
 
 Example shape: `topic` = "Vikunja bridge plugin design - picking between subprocess vs Wasm"; `status_text` = "investigating".
+
+Avoid prose in `status_text` - something like "topic and status now being updated proactively as instructed" is wrong (it's a sentence describing an action). Use a state tag like "investigating" or "idle" instead.
 {% if is_channel_session | default(false) %}
 You are managing a shared channel. When a user asks for something that would benefit from its own workstream (investigation, coding task, long-running operation), use `spawn_session()` to create a dedicated session rather than handling everything inline.
 {% endif %}
