@@ -350,10 +350,15 @@ body.console-shell { display: flex; flex-direction: column; height: 100dvh; }
 
 .console-session .row1 .chip.row1-status {
   flex-shrink: 0;
+  max-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 9px;
   padding: 0 4px;
   margin-left: 4px;
 }
+.console-session .row1 .title { min-width: 24px; }
 .console-session .row-topic {
   padding-left: 13px;
   font-size: 10.5px;
