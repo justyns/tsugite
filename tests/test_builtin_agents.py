@@ -178,7 +178,7 @@ class TestBuiltinDefaultAutoDiscovery:
         agent = parse_agent_file(builtin_path)
 
         # Should have conditional block for available agents
-        assert "{% if available_agents %}" in agent.content
+        assert "{% if available_agents" in agent.content
 
         # Should mention delegation
         assert "delegate" in agent.content.lower()

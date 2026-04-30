@@ -1014,6 +1014,47 @@ async def run_agent_async(
 LOOP_HELPERS = {}
 
 
+# Framework flags that builtin agent templates (default.md and friends) may
+# reference in `{% if %}` blocks. Bare references would raise under
+# StrictUndefined when running multi-step agents, since step_context starts
+# fresh for each step. The caller (e.g. daemon adapter) can override any of
+# these by passing them in `context`; otherwise the safe default applies.
+_MULTISTEP_FRAMEWORK_FLAG_DEFAULTS: Dict[str, Any] = {
+    "is_daemon": False,
+    "is_scheduled": False,
+    "schedule_id": "",
+    "has_notify_tool": False,
+    "agent_name": "",
+    "can_spawn_sessions": False,
+    "is_channel_session": False,
+    "active_sessions": [],
+    "recent_completions": [],
+}
+
+
+def _build_multistep_step_context(
+    prompt: str, context: Dict[str, Any], agent_tools: Optional[List[Any]] = None
+) -> Dict[str, Any]:
+    """Build the initial step_context dict for a multi-step agent run.
+
+    Why this exists: builtin agent templates (notably `default.md`'s
+    environment block) reference framework flags like `is_daemon`,
+    `is_scheduled`, etc. The single-shot agent path threads those through via
+    `agent_preparation.py`, but the multi-step path renders each step against
+    `step_context` directly, so any flag the caller didn't supply would raise
+    `UndefinedError` under Jinja's StrictUndefined.
+    """
+    return {
+        **_MULTISTEP_FRAMEWORK_FLAG_DEFAULTS,
+        **context,
+        "user_prompt": prompt,
+        "is_interactive": is_interactive(),
+        "tools": agent_tools or [],
+        "is_subagent": context.get("is_subagent", False),
+        "parent_agent": context.get("parent_agent", None),
+    }
+
+
 def _build_injectable_vars(step_context: Dict[str, Any], assigned_vars: Optional[set] = None) -> Dict[str, Any]:
     """Build variables for injection into Python execution namespace.
 
@@ -1551,18 +1592,7 @@ async def _run_multistep_agent_impl(
         if ui_handler:
             event_bus.subscribe(ui_handler.handle_event)
 
-        # Check if running in interactive mode
-        interactive_mode = is_interactive()
-
-        # Initialize context with user prompt
-        step_context = {
-            **context,
-            "user_prompt": prompt,
-            "is_interactive": interactive_mode,
-            "tools": agent.config.tools,
-            "is_subagent": context.get("is_subagent", False),
-            "parent_agent": context.get("parent_agent", None),
-        }
+        step_context = _build_multistep_step_context(prompt=prompt, context=context, agent_tools=agent.config.tools)
 
         # Execute prefetch once (before any steps)
         if agent.config.prefetch:

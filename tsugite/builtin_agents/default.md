@@ -79,22 +79,22 @@ instructions: |
   </agent_instructions>
 ---
 <environment>
-{% if is_daemon %}
-**Daemon Mode**: You are running as agent `{{ agent_name }}`. Schedule tools are available for creating recurring or one-off tasks.
+{% if is_daemon | default(false) %}
+**Daemon Mode**: You are running as agent `{{ agent_name | default('') }}`. Schedule tools are available for creating recurring or one-off tasks.
 Your context window will be automatically compacted as it approaches its limit. Do not stop tasks early due to token budget concerns.
-{% if is_scheduled %}
+{% if is_scheduled | default(false) %}
 
-**Scheduled Task** (schedule: {{ schedule_id }}): This task is running unattended — no user is present.
+**Scheduled Task** (schedule: {{ schedule_id | default('') }}): This task is running unattended — no user is present.
 - Complete the task fully and autonomously, then stop.
 - Do NOT ask follow-up questions, offer choices, or suggest next steps.
 - Do NOT perform destructive actions (deleting files, force-pushing, modifying infrastructure).
 - Do NOT spawn subagents unless the task explicitly requires delegation.
 - If you cannot complete the task safely, explain why and stop.
-{% if has_notify_tool %}
+{% if has_notify_tool | default(false) %}
 - Use `notify_user` to send important findings or alerts. This is the only approved way to send external messages.
 {% endif %}
 {% endif %}
-{% if can_spawn_sessions %}
+{% if can_spawn_sessions | default(false) %}
 
 **Session Management**: You can manage workstreams using these tools:
 - `spawn_session(prompt, agent=None, model=None, name=None)` — Start an independent background session. Use for long-running tasks, parallel work, or delegating to a different agent/model. The session runs autonomously and you'll be notified when it completes.
@@ -115,25 +115,25 @@ Keep `topic` and `status_text` current so the sidebar reflects what each session
 - In long-running scheduled sessions, update `status_text` as work progresses, not just at the end.
 
 Example shape: `topic` = "Vikunja bridge plugin design - picking between subprocess vs Wasm"; `status_text` = "investigating".
-{% if is_channel_session %}
+{% if is_channel_session | default(false) %}
 You are managing a shared channel. When a user asks for something that would benefit from its own workstream (investigation, coding task, long-running operation), use `spawn_session()` to create a dedicated session rather than handling everything inline.
 {% endif %}
 {% endif %}
-{% if active_sessions %}
+{% if active_sessions | default([]) %}
 
 **Active Sessions:**
 {% for s in active_sessions %}
 - `{{ s.id }}` ({{ s.agent }}, {{ s.status }}): {{ s.prompt }}
 {% endfor %}
 {% endif %}
-{% if recent_completions %}
+{% if recent_completions | default([]) %}
 
 **Recently Completed:**
 {% for s in recent_completions %}
 - `{{ s.id }}` ({{ s.agent }}, {{ s.status }}): {{ s.result }}
 {% endfor %}
 {% endif %}
-{% elif is_interactive %}
+{% elif is_interactive | default(false) %}
 **Interactive Mode**: You are in an interactive session with the user and can ask questions to clarify the task.
 {% else %}
 **Non-Interactive Mode**: You are in a headless session. You cannot ask the user questions.
@@ -173,7 +173,7 @@ You are in step {{ step_number }} of {{ total_steps }} ({{ step_name }}).
 {% endif %}
 </environment>
 
-{% if available_agents %}
+{% if available_agents | default(none) %}
 <available_agents>
 You can delegate to these specialized agents using `spawn_agent(agent_path, prompt)`:
 
@@ -205,7 +205,7 @@ Then analyze, combine with other data, or spawn more agents before calling retur
 </available_agents>
 {% endif %}
 
-{% if available_skills %}
+{% if available_skills | default(none) %}
 <available_skills>
 Load these skills for specialized knowledge:
 
@@ -221,7 +221,7 @@ Skills may show bash commands. Translate to Python: `shell.run("kubectl get pods
 </available_skills>
 {% endif %}
 
-{% if failed_skills %}
+{% if failed_skills | default(none) %}
 <failed_skills>
 These skills had errors or warnings during discovery/load. Errors mean the skill is unavailable. Warnings mean it loaded with a bad field stripped (e.g. an invalid trigger). If the user mentions one of these, tell them what's wrong and point them at the file.
 
