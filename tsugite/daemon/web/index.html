@@ -804,6 +804,12 @@
                   </template>
                 </div>
               </template>
+              <template x-if="compacting">
+                <div class="console-compaction-banner" role="status" aria-live="polite">
+                  <span class="spinner"></span>
+                  <span x-text="compactingLabel || 'compacting…'"></span>
+                </div>
+              </template>
               <div class="console-composer-input-wrap">
                 <span class="leader">›</span>
                 <textarea id="message-input" x-ref="messageInput" x-model="messageText" rows="2"

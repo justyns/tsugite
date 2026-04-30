@@ -1218,6 +1218,17 @@ body.console-shell { display: flex; flex-direction: column; height: 100dvh; }
 }
 .console-paste-banner button:hover { color: var(--text); }
 
+.console-compaction-banner {
+  background: color-mix(in oklab, var(--mauve) 8%, var(--mantle));
+  border: 1px solid color-mix(in oklab, var(--mauve) 30%, var(--surface1));
+  border-radius: 3px;
+  padding: 4px 8px;
+  margin: 0 0 6px;
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--mauve);
+  display: flex; align-items: center; gap: 8px;
+}
+
 .console-drag-overlay {
   position: absolute; inset: 0;
   background: color-mix(in oklab, var(--lavender) 14%, transparent);
