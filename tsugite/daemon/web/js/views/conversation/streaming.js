@@ -1,6 +1,6 @@
 import { post, streamPost, uploadFiles, parseSSE } from '../../api.js';
 import { escapeHtml, formatFileSize, contentBlockHtml } from '../../utils.js';
-import { finalResultBubble } from './event_types.js';
+import { finalResultBubble, appendReasoningChunk, attachReasoningTokens } from './event_types.js';
 
 export const streamingMixin = {
   sendingBySession: {},
@@ -188,7 +188,8 @@ export const streamingMixin = {
     } else if (event.type === 'thought') {
       prog.statusText = 'Thinking...';
       if (event.content) {
-        this._pushDetailStep(prog, 'thought', event.content);
+        arr.push({ type: 'agent', text: event.content });
+        this._scrollThrottled();
       }
     } else if (event.type === 'error') {
       prog.steps.push({ html: `<span class="err">${escapeHtml(event.error)}</span>` });
@@ -238,10 +239,11 @@ export const streamingMixin = {
     } else if (event.type === 'reasoning_content') {
       prog.statusText = 'Reasoning...';
       if (event.content) {
-        this._pushDetailStep(prog, '<code>reasoning</code>', event.content);
+        appendReasoningChunk(arr, event.step, event.content);
+        this._scrollThrottled();
       }
     } else if (event.type === 'reasoning_tokens') {
-      prog.steps.push({ html: `<code>reasoning</code> ${event.tokens} tokens` });
+      attachReasoningTokens(arr, event.step, event.tokens);
     } else if (event.type === 'final_result') {
       const bubble = finalResultBubble(event);
       if (bubble) {

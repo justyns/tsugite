@@ -1,6 +1,6 @@
 import { get } from '../../api.js';
 import { escapeHtml, contentBlockHtml } from '../../utils.js';
-import { finalResultBubble } from './event_types.js';
+import { finalResultBubble, appendReasoningChunk, attachReasoningTokens } from './event_types.js';
 
 const _CONTENT_BLOCK_RE = /<(?:tsu:)?content\s+name="([^"]+)">([\s\S]*?)<\/(?:tsu:)?content>/g;
 
@@ -19,11 +19,6 @@ function _extractContentBlocks(raw) {
 // prose answer and must stay visible.
 function _stripCodeFences(text) {
   return text.replace(/```python\n[\s\S]*?```/g, '').trim();
-}
-
-function _firstCodeBlock(text) {
-  const m = text.match(/```python\n([\s\S]*?)\n```/);
-  return m ? m[1] : null;
 }
 
 function _formatDuration(ms) {
@@ -70,6 +65,7 @@ export function eventsToBubbles(events, { dropTrailing = false } = {}) {
   let currentSteps = null;
   let currentUserBubble = null;
   let lastModelText = '';
+  let sawInlineAgent = false;
 
   function flushBubble() {
     if (currentSteps && currentSteps.length) {
@@ -88,6 +84,7 @@ export function eventsToBubbles(events, { dropTrailing = false } = {}) {
     currentSteps = null;
     currentUserBubble = null;
     lastModelText = '';
+    sawInlineAgent = false;
   }
 
   for (const ev of events) {
@@ -142,30 +139,33 @@ export function eventsToBubbles(events, { dropTrailing = false } = {}) {
 
     if (currentSteps === null) continue; // events before any user_input
 
+    if (type === 'reasoning_content') {
+      if (data.content) appendReasoningChunk(bubbles, data.step, data.content);
+      continue;
+    }
+
+    if (type === 'reasoning_tokens') {
+      attachReasoningTokens(bubbles, data.step, data.tokens);
+      continue;
+    }
+
     if (type === 'model_response') {
       const raw = data.raw_content || '';
       const { prose, blocks } = _extractContentBlocks(raw);
       const textOnly = _stripCodeFences(prose);
-      lastModelText = textOnly;
 
       // Surface inline content blocks as their own steps.
       for (const [name, content] of Object.entries(blocks)) {
         currentSteps.push({ html: contentBlockHtml(name, content), _turn: false });
       }
-      // The thought prose (between user msg and code block) becomes a step.
-      const thought = textOnly && _firstCodeBlock(prose) ? textOnly : '';
-      if (thought) {
-        currentSteps.push({
-          hasDetails: true,
-          summary: 'thought',
-          content: thought,
-          open: false,
-          _turn: true,
-        });
-      } else {
-        // Mark that a turn happened so turn count is tracked.
-        currentSteps.push({ _turn: true, _hidden: true });
+      // Each turn's prose becomes its own visible agent bubble inline, so multi-turn
+      // flows show every turn's answer (not just the last).
+      if (textOnly) {
+        bubbles.push({ type: 'agent', text: textOnly });
+        sawInlineAgent = true;
       }
+      // Mark that a turn happened so turn count is tracked, even if prose was empty.
+      currentSteps.push({ _turn: true, _hidden: true });
       continue;
     }
 
@@ -235,7 +235,7 @@ export function eventsToBubbles(events, { dropTrailing = false } = {}) {
       if (bubble?.type === 'return_value') {
         flushBubble();
         bubbles.push(bubble);
-      } else if (bubble?.type === 'agent' && !lastModelText) {
+      } else if (bubble?.type === 'agent' && !sawInlineAgent && !lastModelText) {
         // Scheduled agents that go straight to return_value("...") with no model_response
         // would otherwise show only tool steps and no answer.
         lastModelText = bubble.text;

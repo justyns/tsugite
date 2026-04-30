@@ -635,6 +635,21 @@
                       </div>
                     </div>
                   </template>
+                  <template x-if="msg.type === 'reasoning'">
+                    <div class="console-turn reasoning">
+                      <div class="console-turn-gutter">
+                        <span class="role reasoning">think</span>
+                      </div>
+                      <div class="console-turn-bubble reasoning">
+                        <div class="reasoning-body" x-html="renderHtml(msg.text)"></div>
+                        <template x-if="msg.tokens">
+                          <div class="reasoning-footer">
+                            <span x-text="msg.tokens.toLocaleString() + ' reasoning tokens'"></span>
+                          </div>
+                        </template>
+                      </div>
+                    </div>
+                  </template>
                   <template x-if="msg.type === 'return_value'">
                     <div class="console-turn agent">
                       <div class="console-turn-gutter">

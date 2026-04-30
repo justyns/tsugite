@@ -704,6 +704,10 @@ body.console-shell { display: flex; flex-direction: column; height: 100dvh; }
   background: color-mix(in oklab, var(--peach) 22%, transparent);
   color: var(--peach);
 }
+.console-turn-gutter .role.reasoning {
+  background: color-mix(in oklab, var(--sapphire) 22%, transparent);
+  color: var(--sapphire);
+}
 .console-turn-gutter .time {
   color: var(--overlay1); font-size: 10px;
   font-variant-numeric: tabular-nums;
@@ -743,6 +747,25 @@ body.console-shell { display: flex; flex-direction: column; height: 100dvh; }
   color: var(--subtext0);
   font-style: italic;
   font-size: 12px;
+}
+.console-turn.reasoning .console-turn-bubble {
+  background: color-mix(in oklab, var(--sapphire) 6%, var(--mantle));
+  border-color: color-mix(in oklab, var(--sapphire) 20%, var(--surface0));
+}
+.console-turn-bubble.reasoning .reasoning-body {
+  max-height: 360px;
+  overflow-y: auto;
+  font-style: italic;
+  color: var(--subtext1);
+}
+.console-turn-bubble.reasoning .reasoning-footer {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid color-mix(in oklab, var(--sapphire) 18%, var(--surface0));
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--overlay1);
+  text-align: right;
 }
 
 /* Markdown-rendered content inside bubbles. */
