@@ -29,6 +29,31 @@ export const streamingMixin = {
     }
   },
 
+  // The active progress bubble is always the LAST element of the messages
+  // array. Reasoning/thought/final_result split the bubble: they finalize the
+  // live one, push their own bubble, and the next tool event creates a fresh
+  // progress bubble. This keeps tool steps interleaved with prose chronologically.
+  _currentLiveProgress(arr) {
+    const last = arr[arr.length - 1];
+    return last?.type === 'progress' ? last : null;
+  },
+
+  _ensureLiveProgress(arr) {
+    const cur = this._currentLiveProgress(arr);
+    if (cur) return cur;
+    const prog = { type: 'progress', steps: [], statusText: 'Working...', turnCount: 0, toolCount: 0 };
+    arr.push(prog);
+    return prog;
+  },
+
+  _finalizeLiveProgress(arr) {
+    const cur = this._currentLiveProgress(arr);
+    if (!cur) return null;
+    if (cur.steps.length > 0) cur.type = 'progress-done';
+    else arr.pop();
+    return cur;
+  },
+
   async sendMessage() {
     const msg = this.messageText.trim();
     const agent = this.$store.app.selectedAgent;
@@ -91,9 +116,6 @@ export const streamingMixin = {
 
     this.scrollMessages(true);
 
-    const progressIdx = sessMessages().length;
-    sessMessages().push({ type: 'progress', steps: [], statusText: 'Working...', turnCount: 0, toolCount: 0 });
-
     try {
       const chatBody = { message: msg, user_id: this.userId, session_id: sendSessionId };
       if (uploadedFiles.length) chatBody.uploaded_files = uploadedFiles;
@@ -106,6 +128,7 @@ export const streamingMixin = {
           if (event.type === 'done') {
             break;
           } else if (event.type === 'cancelled') {
+            this._finalizeLiveProgress(sessMessages());
             sessMessages().push({ type: 'info', text: 'Generation stopped.' });
             break;
           } else if (event.type === 'compacting') {
@@ -119,6 +142,7 @@ export const streamingMixin = {
           } else if (event.type === 'skill_unloaded') {
             this.loadedSkills = this.loadedSkills.filter(s => s.name !== event.name);
           } else if (event.type === 'ask_user') {
+            this._finalizeLiveProgress(sessMessages());
             sessMessages().push({
               type: 'ask_user',
               question: event.question,
@@ -140,20 +164,22 @@ export const streamingMixin = {
             }
           } else if (event.type === 'final_result') {
             gotResult = true;
+            const arr = sessMessages();
+            this._finalizeLiveProgress(arr);
             const bubble = finalResultBubble(event);
-            if (bubble) sessMessages().push(bubble);
+            if (bubble) arr.push(bubble);
           } else if (event.type === 'session_info') {
             if (sendSessionId === this.selectedSessionId) this.updateStatusFromEvent(event);
           } else {
-            this._handleProgressEvent(progressIdx, event, sendSessionId);
+            this._handleProgressEvent(event, sendSessionId);
           }
       }
 
       reader.cancel().catch(() => {});
 
       const arr = sessMessages();
-      const prog = arr[progressIdx];
-      if (prog && prog.type === 'progress') {
+      const prog = this._currentLiveProgress(arr);
+      if (prog) {
         if (prog.steps.length > 0) {
           prog.type = 'progress-done';
           if (!gotResult && prog.errorText) {
@@ -161,14 +187,13 @@ export const streamingMixin = {
             prog.lastMessage = msg;
           }
         } else {
-          arr.splice(progressIdx, 1);
+          arr.pop();
         }
       }
     } catch (e) {
       const arr = sessMessages();
-      if (arr[progressIdx]?.type === 'progress') {
-        arr.splice(progressIdx, 1);
-      }
+      const prog = this._currentLiveProgress(arr);
+      if (prog && prog.steps.length === 0) arr.pop();
       arr.push({ type: 'error', text: `Connection error: ${e.message}` });
     } finally {
       delete this._activeReadersBySession[sendSessionId];
@@ -177,20 +202,46 @@ export const streamingMixin = {
     }
   },
 
-  _handleProgressEvent(idx, event, sessionId = this.selectedSessionId) {
+  _handleProgressEvent(event, sessionId = this.selectedSessionId) {
     const arr = (this.messagesBySession[sessionId] ||= []);
-    const prog = arr[idx];
-    if (!prog || prog.type !== 'progress') return;
+
+    if (event.type === 'reasoning_content') {
+      this._finalizeLiveProgress(arr);
+      if (event.content) {
+        appendReasoningChunk(arr, event.step, event.content);
+        this._scrollThrottled();
+      }
+      return;
+    }
+    if (event.type === 'reasoning_tokens') {
+      attachReasoningTokens(arr, event.step, event.tokens);
+      return;
+    }
+    if (event.type === 'thought') {
+      if (event.content) {
+        this._finalizeLiveProgress(arr);
+        arr.push({ type: 'agent', text: event.content });
+        this._scrollThrottled();
+      } else {
+        this._ensureLiveProgress(arr).statusText = 'Thinking...';
+      }
+      return;
+    }
+    if (event.type === 'final_result') {
+      this._finalizeLiveProgress(arr);
+      const bubble = finalResultBubble(event);
+      if (bubble) {
+        arr.push(bubble);
+        this.scrollMessages();
+      }
+      return;
+    }
+
+    const prog = this._ensureLiveProgress(arr);
 
     if (event.type === 'turn_start') {
       prog.turnCount++;
       prog.statusText = `Turn ${event.turn}...`;
-    } else if (event.type === 'thought') {
-      prog.statusText = 'Thinking...';
-      if (event.content) {
-        arr.push({ type: 'agent', text: event.content });
-        this._scrollThrottled();
-      }
     } else if (event.type === 'error') {
       prog.steps.push({ html: `<span class="err">${escapeHtml(event.error)}</span>` });
       prog.errorText = event.error;
@@ -236,20 +287,6 @@ export const streamingMixin = {
       prog.steps.push({ html: escapeHtml(event.message) });
       arr.push({ type: 'info', text: event.message });
       this.scrollMessages();
-    } else if (event.type === 'reasoning_content') {
-      prog.statusText = 'Reasoning...';
-      if (event.content) {
-        appendReasoningChunk(arr, event.step, event.content);
-        this._scrollThrottled();
-      }
-    } else if (event.type === 'reasoning_tokens') {
-      attachReasoningTokens(arr, event.step, event.tokens);
-    } else if (event.type === 'final_result') {
-      const bubble = finalResultBubble(event);
-      if (bubble) {
-        arr.push(bubble);
-        this.scrollMessages();
-      }
     }
   },
 

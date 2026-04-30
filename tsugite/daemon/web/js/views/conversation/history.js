@@ -67,7 +67,10 @@ export function eventsToBubbles(events, { dropTrailing = false } = {}) {
   let lastModelText = '';
   let sawInlineAgent = false;
 
-  function flushBubble() {
+  // Push the accumulated tool steps as a finalized progress bubble. Called both
+  // at user_input boundaries (flushBubble) and when reasoning arrives mid-turn,
+  // so reasoning bubbles slot between the tool blocks they were emitted between.
+  function pushProgressIfHasSteps() {
     if (currentSteps && currentSteps.length) {
       const tools = currentSteps.filter(s => s._tool).length;
       const turns = currentSteps.filter(s => s._turn).length || 1;
@@ -77,7 +80,12 @@ export function eventsToBubbles(events, { dropTrailing = false } = {}) {
         turnCount: turns,
         toolCount: tools,
       });
+      currentSteps = [];
     }
+  }
+
+  function flushBubble() {
+    pushProgressIfHasSteps();
     if (lastModelText) {
       bubbles.push({ type: 'agent', text: lastModelText });
     }
@@ -140,7 +148,10 @@ export function eventsToBubbles(events, { dropTrailing = false } = {}) {
     if (currentSteps === null) continue; // events before any user_input
 
     if (type === 'reasoning_content') {
-      if (data.content) appendReasoningChunk(bubbles, data.step, data.content);
+      if (data.content) {
+        pushProgressIfHasSteps();
+        appendReasoningChunk(bubbles, data.step, data.content);
+      }
       continue;
     }
 
@@ -154,17 +165,17 @@ export function eventsToBubbles(events, { dropTrailing = false } = {}) {
       const { prose, blocks } = _extractContentBlocks(raw);
       const textOnly = _stripCodeFences(prose);
 
-      // Surface inline content blocks as their own steps.
       for (const [name, content] of Object.entries(blocks)) {
         currentSteps.push({ html: contentBlockHtml(name, content), _turn: false });
       }
       // Each turn's prose becomes its own visible agent bubble inline, so multi-turn
-      // flows show every turn's answer (not just the last).
+      // flows show every turn's answer (not just the last). Flush any pending tool
+      // steps first so the prose lands chronologically AFTER the tools that produced it.
       if (textOnly) {
+        pushProgressIfHasSteps();
         bubbles.push({ type: 'agent', text: textOnly });
         sawInlineAgent = true;
       }
-      // Mark that a turn happened so turn count is tracked, even if prose was empty.
       currentSteps.push({ _turn: true, _hidden: true });
       continue;
     }
