@@ -220,9 +220,7 @@ class TestSanitizeAttachmentBasenameElision:
         body = "# AGENTS.md\nshort file content here"
         msg = {
             "role": "user",
-            "content": self._wrap(
-                body, code_hint="<code>read_note('AGENTS.md')</code>\n"
-            ),
+            "content": self._wrap(body, code_hint="<code>read_note('AGENTS.md')</code>\n"),
         }
         out = sanitize_for_summary(
             [msg],

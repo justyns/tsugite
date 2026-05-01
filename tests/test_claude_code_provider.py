@@ -127,9 +127,9 @@ class TestClaudeCodeProcess:
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_proc) as mock_exec:
             await process.start(model="sonnet", system_prompt="test")
-            assert mock_exec.call_args[1].get("cwd") == str(
-                workspace
-            ), f"expected cwd={workspace!s}, got {mock_exec.call_args[1].get('cwd')!r}"
+            assert mock_exec.call_args[1].get("cwd") == str(workspace), (
+                f"expected cwd={workspace!s}, got {mock_exec.call_args[1].get('cwd')!r}"
+            )
 
         await process.stop()
 
@@ -778,8 +778,6 @@ class TestClaudeCodeCostTracking:
         turn_costs = [0.005, 0.010, 0.015]  # Cumulative costs from CLI
         call_count = 0
 
-        original_send = None
-
         async def mock_send(*args, **kwargs):
             nonlocal call_count
             cost = turn_costs[call_count]
@@ -1036,7 +1034,7 @@ class TestClaudeCodeMultiTurnTokens:
         mock_process.stop = AsyncMock()
 
         with patch("tsugite.core.claude_code.ClaudeCodeProcess", return_value=mock_process):
-            result = await agent.run("test", return_full_result=True)
+            await agent.run("test", return_full_result=True)
 
         # total_tokens = sum of all turns
         expected_total = (1500 + 50) + (1550 + 50)

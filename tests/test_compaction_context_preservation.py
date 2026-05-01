@@ -122,9 +122,9 @@ async def test_compact_session_preserves_context_limit(workspace_dir, tmp_path):
     history_dir = tmp_path / "history"
     history_dir.mkdir()
 
-    INITIAL_LIMIT = 1_000_000  # sonnet 1m
+    initial_limit = 1_000_000  # sonnet 1m
 
-    store = SessionStore(tmp_path / "session_store.json", context_limits={"test-agent": INITIAL_LIMIT})
+    store = SessionStore(tmp_path / "session_store.json", context_limits={"test-agent": initial_limit})
     session = store.get_or_create_interactive("test-user", "test-agent")
     conv_id = session.id
 
@@ -139,12 +139,10 @@ async def test_compact_session_preserves_context_limit(workspace_dir, tmp_path):
         storage.record("model_response", raw_content=f"reply {i}")
 
     agent_config = AgentConfig(workspace_dir=workspace_dir, agent_file="default")
-    agent_config.context_limit = INITIAL_LIMIT
+    agent_config.context_limit = initial_limit
     adapter = _StubAdapter("test-agent", agent_config, store)
 
-    old_events = [
-        Event(type="user_input", ts=datetime.now(timezone.utc), data={"text": f"old {i}"}) for i in range(4)
-    ]
+    old_events = [Event(type="user_input", ts=datetime.now(timezone.utc), data={"text": f"old {i}"}) for i in range(4)]
     recent_events = [
         Event(type="user_input", ts=datetime.now(timezone.utc), data={"text": f"recent {i}"}) for i in range(2)
     ]
@@ -171,12 +169,10 @@ async def test_compact_session_preserves_context_limit(workspace_dir, tmp_path):
     ):
         await adapter._compact_session(conv_id)
 
-    assert store.get_context_limit("test-agent") == INITIAL_LIMIT, (
+    assert store.get_context_limit("test-agent") == initial_limit, (
         "session_store context_limit was polluted by compaction"
     )
-    assert agent_config.context_limit == INITIAL_LIMIT, (
-        "agent_config context_limit was polluted by compaction"
-    )
+    assert agent_config.context_limit == initial_limit, "agent_config context_limit was polluted by compaction"
 
 
 @pytest.mark.asyncio
@@ -187,9 +183,9 @@ async def test_compact_session_restores_even_on_summarize_failure(workspace_dir,
     history_dir = tmp_path / "history"
     history_dir.mkdir()
 
-    INITIAL_LIMIT = 1_000_000
+    initial_limit = 1_000_000
 
-    store = SessionStore(tmp_path / "session_store.json", context_limits={"test-agent": INITIAL_LIMIT})
+    store = SessionStore(tmp_path / "session_store.json", context_limits={"test-agent": initial_limit})
     session = store.get_or_create_interactive("test-user", "test-agent")
     conv_id = session.id
 
@@ -204,12 +200,10 @@ async def test_compact_session_restores_even_on_summarize_failure(workspace_dir,
         storage.record("model_response", raw_content=f"reply {i}")
 
     agent_config = AgentConfig(workspace_dir=workspace_dir, agent_file="default")
-    agent_config.context_limit = INITIAL_LIMIT
+    agent_config.context_limit = initial_limit
     adapter = _StubAdapter("test-agent", agent_config, store)
 
-    old_events = [
-        Event(type="user_input", ts=datetime.now(timezone.utc), data={"text": f"old {i}"}) for i in range(2)
-    ]
+    old_events = [Event(type="user_input", ts=datetime.now(timezone.utc), data={"text": f"old {i}"}) for i in range(2)]
     recent_events = [
         Event(type="user_input", ts=datetime.now(timezone.utc), data={"text": f"recent {i}"}) for i in range(2)
     ]
@@ -235,5 +229,5 @@ async def test_compact_session_restores_even_on_summarize_failure(workspace_dir,
         with pytest.raises(RuntimeError, match="simulated summarization failure"):
             await adapter._compact_session(conv_id)
 
-    assert store.get_context_limit("test-agent") == INITIAL_LIMIT
-    assert agent_config.context_limit == INITIAL_LIMIT
+    assert store.get_context_limit("test-agent") == initial_limit
+    assert agent_config.context_limit == initial_limit

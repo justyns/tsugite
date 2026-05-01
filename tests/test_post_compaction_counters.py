@@ -61,9 +61,7 @@ def _seed_session_events(session_path, count=6):
 
 def _patches(history_dir):
     """The shared patch list for driving `_compact_session` in isolation."""
-    old_events = [
-        Event(type="user_input", ts=datetime.now(timezone.utc), data={"text": f"old {i}"}) for i in range(4)
-    ]
+    old_events = [Event(type="user_input", ts=datetime.now(timezone.utc), data={"text": f"old {i}"}) for i in range(4)]
     recent_events = [
         Event(type="user_input", ts=datetime.now(timezone.utc), data={"text": f"recent {i}"}) for i in range(2)
     ]

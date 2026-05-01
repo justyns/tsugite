@@ -11,7 +11,6 @@ from unittest.mock import patch
 
 from tsugite.user_agent import set_user_agent_header
 
-
 FRAMEWORK_UA = "Tsugite/test (+https://github.com/justyns/tsugite)"
 
 

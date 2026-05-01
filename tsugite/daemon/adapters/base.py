@@ -366,9 +366,7 @@ class BaseAdapter(ABC):
                 if topic_lines:
                     session_topic_xml = "\n" + "\n".join(topic_lines)
                 user_meta = {
-                    k: v
-                    for k, v in session.metadata.items()
-                    if k not in READ_ONLY_METADATA_KEYS and k != "topic"
+                    k: v for k, v in session.metadata.items() if k not in READ_ONLY_METADATA_KEYS and k != "topic"
                 }
                 if user_meta:
                     entries = "\n".join(f"    {k}={v}" for k, v in user_meta.items())
@@ -867,9 +865,7 @@ class BaseAdapter(ABC):
         except Exception:
             logger.debug("[%s] Failed to enumerate attachment basenames", self.agent_name, exc_info=True)
 
-        old_messages = sanitize_for_summary(
-            old_messages, model=model, attachment_basenames=attachment_basenames
-        )
+        old_messages = sanitize_for_summary(old_messages, model=model, attachment_basenames=attachment_basenames)
 
         # Snapshot the agent's tracked context limit before summarization so
         # that any mutation during the call (e.g. provider state leakage from

@@ -477,8 +477,8 @@ class TsugiteAgent:
 
         self._record_user_input_if_needed(task)
 
-        _UNSET = object()
-        final_value: Any = _UNSET
+        unset = object()
+        final_value: Any = unset
         last_response_text: str = ""
         turn_num = 0
 
@@ -614,7 +614,7 @@ class TsugiteAgent:
 
             # If we never broke out, max_turns hit. Use the last response text as
             # the answer and record the run as interrupted.
-            if final_value is _UNSET:
+            if final_value is unset:
                 final_value = last_response_text
                 status = "interrupted"
                 error_message = f"max_turns ({self.max_turns}) reached"

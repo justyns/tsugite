@@ -230,9 +230,7 @@ def test_session_progress_summary_persisted_code_execution(store, sample_session
     store.create_session(sample_session)
     store.append_event("s1", {"type": "session_start", "timestamp": "2026-04-23T10:00:00+00:00"})
     store.append_event("s1", {"type": "model_response", "timestamp": "2026-04-23T10:00:01+00:00"})
-    store.append_event(
-        "s1", {"type": "code_execution", "code": "ls", "timestamp": "2026-04-23T10:00:02+00:00"}
-    )
+    store.append_event("s1", {"type": "code_execution", "code": "ls", "timestamp": "2026-04-23T10:00:02+00:00"})
     summary = store.session_progress_summary("s1")
     assert summary["status_text"] == "Running code..."
 

@@ -115,9 +115,9 @@ async def test_parent_interactive_backend_survives_nested_session_spawn(monkeypa
         timeout=10.0,
     )
 
-    assert isinstance(
-        observations["child_backend"], NonInteractiveBackend
-    ), f"Child session should see its own NonInteractiveBackend, got {observations['child_backend']!r}"
+    assert isinstance(observations["child_backend"], NonInteractiveBackend), (
+        f"Child session should see its own NonInteractiveBackend, got {observations['child_backend']!r}"
+    )
     assert observations["parent_backend_after"] is parent_backend, (
         "Parent's interactive backend was clobbered by the child session's "
         f"set_interaction_backend. Parent now sees: "
@@ -149,17 +149,12 @@ async def test_concurrent_sessions_each_see_their_own_backend(monkeypatch, works
         session_store,
     )
 
-    runner = SessionRunner(store=session_store, adapters={"agent-a": adapter_a, "agent-b": adapter_b})
-
     backend_a = MagicMock(spec=NonInteractiveBackend)
     backend_a.tag = "backend-a"
     backend_b = MagicMock(spec=NonInteractiveBackend)
     backend_b.tag = "backend-b"
 
     sessions_observed: dict[str, object] = {}
-    both_entered = asyncio.Event()
-    entered_count = 0
-    counter_lock = asyncio.Lock()
 
     def shared_probe(**kwargs):
         ws = kwargs["path_context"].workspace_dir

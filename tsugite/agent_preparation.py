@@ -299,8 +299,7 @@ def _parse_frontmatter_for_index(text: str, path: Path) -> Dict[str, Any]:
 def _format_index_block(pattern: str, entries: List[Dict[str, Any]], fmt: str) -> str:
     """Render the index Attachment content with a one-line prelude + bullets."""
     prelude = (
-        f'File index for "{pattern}" ({len(entries)} files). '
-        "Use read_file(path=...) to read any of them when relevant."
+        f'File index for "{pattern}" ({len(entries)} files). Use read_file(path=...) to read any of them when relevant.'
     )
     lines = [prelude, ""]
     for entry in entries:
