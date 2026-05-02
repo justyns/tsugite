@@ -1042,3 +1042,126 @@ class TestClaudeCodeMultiTurnTokens:
 
         # last_input_tokens = last turn's input only
         assert agent.last_input_tokens == 1550
+
+
+class TestClaudeCodeErrorResult:
+    """The Claude CLI surfaces context-overflow and similar failures as a result
+    event with is_error=true rather than a non-zero exit. The provider must
+    raise AgentExecutionError so the daemon's existing prompt-too-long retry
+    path can fire — otherwise the user sees the raw 'Prompt is too long' text
+    as the bot's reply with no recovery.
+    """
+
+    def _mock_proc_with_events(self, events: list[str]):
+        mock_proc = AsyncMock()
+        mock_proc.stdin = AsyncMock()
+        stdout_lines = iter([line.encode() + b"\n" for line in events] + [b""])
+
+        async def readline():
+            try:
+                return next(stdout_lines)
+            except StopIteration:
+                return b""
+
+        mock_proc.stdout.readline = readline
+        return mock_proc
+
+    @pytest.mark.asyncio
+    async def test_process_yields_error_flag_for_is_error_result(self):
+        """ClaudeCodeProcess surfaces is_error/subtype on the result event so
+        the provider layer can detect the failure."""
+        from tsugite.core.claude_code import ClaudeCodeProcess
+
+        process = ClaudeCodeProcess()
+        process._process = self._mock_proc_with_events(
+            [
+                json.dumps(
+                    {
+                        "type": "result",
+                        "subtype": "error_during_execution",
+                        "is_error": True,
+                        "result": "Prompt is too long",
+                        "session_id": "s1",
+                    }
+                ),
+            ]
+        )
+        process._session_id = "s1"
+
+        events = [event async for event in process.send_message("hi")]
+        result_events = [e for e in events if e["type"] == "result"]
+        assert len(result_events) == 1
+        assert result_events[0]["is_error"] is True
+        assert result_events[0]["text"] == "Prompt is too long"
+
+    @pytest.mark.asyncio
+    async def test_provider_collect_raises_for_error_result(self):
+        """_collect raises AgentExecutionError when the CLI returns is_error=true."""
+        from tsugite.exceptions import AgentExecutionError
+        from tsugite.providers.claude_code import ClaudeCodeProvider
+
+        provider = ClaudeCodeProvider()
+
+        async def fake_send(*args, **kwargs):
+            yield {"type": "result", "text": "Prompt is too long", "is_error": True, "subtype": "error_during_execution"}
+
+        mock_process = AsyncMock()
+        mock_process.send_message = fake_send
+        mock_process.start = AsyncMock()
+        provider._process = mock_process
+
+        with pytest.raises(AgentExecutionError) as excinfo:
+            await provider.acompletion(messages=[{"role": "user", "content": "hi"}], model="opus")
+        assert "prompt is too long" in str(excinfo.value).lower()
+
+    @pytest.mark.asyncio
+    async def test_provider_collect_passes_through_normal_result(self):
+        """Sanity: non-error results still return CompletionResponse normally."""
+        from tsugite.providers.claude_code import ClaudeCodeProvider
+
+        provider = ClaudeCodeProvider()
+
+        async def fake_send(*args, **kwargs):
+            yield {"type": "text_delta", "text": "Hello"}
+            yield {
+                "type": "result",
+                "text": "Hello",
+                "is_error": False,
+                "subtype": "success",
+                "cost_usd": 0.001,
+                "input_tokens": 10,
+                "output_tokens": 5,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+            }
+
+        mock_process = AsyncMock()
+        mock_process.send_message = fake_send
+        mock_process.start = AsyncMock()
+        provider._process = mock_process
+
+        response = await provider.acompletion(messages=[{"role": "user", "content": "hi"}], model="opus")
+        assert response.content == "Hello"
+
+    @pytest.mark.asyncio
+    async def test_provider_stream_raises_for_error_result(self):
+        """_stream also raises AgentExecutionError on error result events."""
+        from tsugite.exceptions import AgentExecutionError
+        from tsugite.providers.claude_code import ClaudeCodeProvider
+
+        provider = ClaudeCodeProvider()
+
+        async def fake_send(*args, **kwargs):
+            yield {"type": "text_delta", "text": "partial"}
+            yield {"type": "result", "text": "Prompt is too long", "is_error": True, "subtype": "error_during_execution"}
+
+        mock_process = AsyncMock()
+        mock_process.send_message = fake_send
+        mock_process.start = AsyncMock()
+        provider._process = mock_process
+
+        stream = await provider.acompletion(messages=[{"role": "user", "content": "hi"}], model="opus", stream=True)
+        with pytest.raises(AgentExecutionError) as excinfo:
+            async for _ in stream:
+                pass
+        assert "prompt is too long" in str(excinfo.value).lower()

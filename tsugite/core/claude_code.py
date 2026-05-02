@@ -264,6 +264,8 @@ class ClaudeCodeProcess:
                     "cache_read_input_tokens": result_usage.get("cache_read_input_tokens") or 0,
                     "output_tokens": result_usage.get("output_tokens") or 0,
                     "context_window": context_window,
+                    "is_error": bool(event.get("is_error")),
+                    "subtype": event.get("subtype"),
                 }
                 return
 

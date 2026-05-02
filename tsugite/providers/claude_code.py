@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from typing import Any, AsyncIterator
 
+from tsugite.exceptions import AgentExecutionError
+
 from .base import CompletionResponse, ModelInfo, StreamChunk, Usage, default_count_tokens
 from .model_registry import get_model_info as _get_model_info
 from .model_registry import register_models
@@ -35,6 +37,21 @@ _ALIASES = {
     "sonnet": "claude-sonnet-4-6",
     "haiku": "claude-haiku-4-5-20251001",
 }
+
+
+def _raise_if_error(result_event: dict) -> None:
+    """Translate a Claude CLI error result into AgentExecutionError.
+
+    The CLI reports failures (context overflow, max-turns, etc.) as a result
+    event with is_error=true and a non-success subtype, NOT as a non-zero exit
+    or stderr. Without this conversion the failure text reaches the user as
+    the assistant's reply and bypasses the daemon's prompt-too-long retry path.
+    """
+    if not result_event.get("is_error"):
+        return
+    text = result_event.get("text") or "Claude Code returned an error result"
+    subtype = result_event.get("subtype") or "error"
+    raise AgentExecutionError(f"{text} (subtype={subtype})")
 
 
 class ClaudeCodeProvider:
@@ -135,6 +152,7 @@ class ClaudeCodeProvider:
             if event["type"] == "text_delta":
                 accumulated += event["text"]
             elif event["type"] == "result":
+                _raise_if_error(event)
                 if not accumulated:
                     accumulated = event.get("text", "")
                 cost = self._cost_delta(event.get("cost_usd") or 0.0)
@@ -155,6 +173,7 @@ class ClaudeCodeProvider:
             if event["type"] == "text_delta":
                 yield StreamChunk(content=event["text"])
             elif event["type"] == "result":
+                _raise_if_error(event)
                 cost = self._cost_delta(event.get("cost_usd") or 0.0)
                 usage = self._extract_usage(event)
 
