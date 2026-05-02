@@ -1,13 +1,14 @@
 [project]
 name = "tsugite-example-plugin"
 version = "0.1.0"
-description = "Example tsugite plugin demonstrating tool and adapter registration via entry points"
+description = "Example tsugite plugin demonstrating the unified entry point + a function-form adapter"
 requires-python = ">=3.11"
 
-# A single package can register plugins in multiple groups
-[project.entry-points."tsugite.tools"]
-example = "tsugite_example_plugin:register_tools"
+# Unified entry point: import triggers @tool and @subscribe decorators.
+[project.entry-points."tsugite.plugins"]
+example = "tsugite_example_plugin"
 
+# Adapters need constructor kwargs, so they keep their own group.
 [project.entry-points."tsugite.adapters"]
 example = "tsugite_example_plugin:create_adapter"
 

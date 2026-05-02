@@ -173,7 +173,8 @@ secrets/*
 
 # TODO: temp - I need to clean up the docs
 docs-old/
-examples/
+examples/*
+!examples/tsugite-example-plugin/
 agents/
 .claude/
 .tsugite/
