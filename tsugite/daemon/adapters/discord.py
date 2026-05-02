@@ -18,10 +18,14 @@ from tsugite.events import (
     ErrorEvent,
     FinalAnswerEvent,
     InfoEvent,
+    LLMMessageEvent,
+    LLMWaitProgressEvent,
     ObservationEvent,
     ReactionEvent,
     ReasoningContentEvent,
     StepStartEvent,
+    ToolCallEvent,
+    ToolResultEvent,
     WarningEvent,
 )
 from tsugite.events.base import BaseEvent
@@ -74,9 +78,43 @@ class DiscordProgressHandler:
         self.update_lock = asyncio.Lock()
         self.typing_task: Optional[asyncio.Task] = None
         self.done = False
-        self._thinking_shown = False
+        self._reasoning_shown = False
+        self._waiting_step_idx: Optional[int] = None
+        self._last_rendered: Optional[str] = None
+        self._thought_buffer: Optional[str] = None
         self._current_turn = 0
         self._max_turns = 10
+
+    def _complete_prev_and_append(self, label: str, emoji: str) -> None:
+        if self.updates:
+            prev = self.updates[-1]
+            self.updates[-1] = ProgressStep(prev.label, True, prev.emoji)
+        self.updates.append(ProgressStep(label, False, emoji))
+
+    def _mark_last_complete(self) -> bool:
+        if self.updates and not self.updates[-1].completed:
+            last = self.updates[-1]
+            self.updates[-1] = ProgressStep(last.label, True, last.emoji)
+            return True
+        return False
+
+    async def _flush_thought(self) -> None:
+        """Send the buffered LLM thought prose as a standalone Discord message."""
+        if not self._thought_buffer:
+            return
+        text = self._thought_buffer
+        self._thought_buffer = None
+
+        msg = f"💭 {text}"
+        limit = 2000
+        if len(msg) > limit:
+            suffix = "\n... (truncated)"
+            msg = msg[: limit - len(suffix)] + suffix
+
+        try:
+            await self.channel.send(msg)
+        except discord.errors.HTTPException as e:
+            logger.debug("Failed to send thought: %s", e)
 
     def handle_event(self, event: BaseEvent) -> None:
         """Handle EventBus events and update Discord message.
@@ -100,35 +138,53 @@ class DiscordProgressHandler:
         future.add_done_callback(lambda f: _handle_async_exception(f, "emit"))
 
     async def _handle_event_async(self, event: BaseEvent) -> None:
-        """Async implementation of event handling."""
+        """Async implementation of event handling.
+
+        Labels mirror _progress_status_text in tsugite/daemon/session_store.py so the
+        Discord progress message shows the same status text the web UI sidebar shows.
+        """
         async with self.update_lock:
+            if not isinstance(event, LLMWaitProgressEvent):
+                self._waiting_step_idx = None
+
             if isinstance(event, StepStartEvent):
                 self._current_turn = event.step
                 self._max_turns = event.max_turns
-                if self.updates:
-                    prev = self.updates[-1]
-                    self.updates[-1] = ProgressStep(prev.label, True, prev.emoji)
-                self.updates.append(ProgressStep(f"Turn {event.step}/{event.max_turns}", False, "🤔"))
+                self._complete_prev_and_append(f"Turn {event.step}/{event.max_turns}", "🤔")
                 await self._update_progress()
 
             elif isinstance(event, CodeExecutionEvent):
-                if self.updates:
-                    prev = self.updates[-1]
-                    self.updates[-1] = ProgressStep(prev.label, True, prev.emoji)
-                self.updates.append(ProgressStep("Executing", False, "⚙️"))
+                await self._flush_thought()
+                self._complete_prev_and_append("Running code", "⚙️")
                 await self._update_progress()
 
-            elif isinstance(event, ObservationEvent):
-                if self.updates and not self.updates[-1].completed:
-                    prev = self.updates[-1]
-                    self.updates[-1] = ProgressStep(prev.label, True, prev.emoji)
+            elif isinstance(event, ToolCallEvent):
+                await self._flush_thought()
+                self._complete_prev_and_append(f"Tool: {event.tool_name}", "🔧")
+                await self._update_progress()
+
+            elif isinstance(event, (ObservationEvent, ToolResultEvent)):
+                if self._mark_last_complete():
                     await self._update_progress()
 
+            elif isinstance(event, LLMMessageEvent):
+                if event.content:
+                    self._thought_buffer = event.content
+
             elif isinstance(event, ReasoningContentEvent):
-                if not self._thinking_shown:
-                    self._thinking_shown = True
-                    self.updates.append(ProgressStep("Thinking", False, "💭"))
+                if not self._reasoning_shown:
+                    self._reasoning_shown = True
+                    self.updates.append(ProgressStep("Reasoning", False, "💭"))
                     await self._update_progress()
+
+            elif isinstance(event, LLMWaitProgressEvent):
+                label = f"Waiting on LLM ({event.elapsed_seconds}s)"
+                if self._waiting_step_idx is not None:
+                    self.updates[self._waiting_step_idx] = ProgressStep(label, False, "⏳")
+                else:
+                    self.updates.append(ProgressStep(label, False, "⏳"))
+                    self._waiting_step_idx = len(self.updates) - 1
+                await self._update_progress()
 
             elif isinstance(event, WarningEvent):
                 self.updates.append(ProgressStep("Retrying", False, "⚠️"))
@@ -154,9 +210,8 @@ class DiscordProgressHandler:
                         logger.debug("Failed to add reaction %s: %s", event.emoji, e)
 
             elif isinstance(event, FinalAnswerEvent):
-                if self.updates and not self.updates[-1].completed:
-                    last = self.updates[-1]
-                    self.updates[-1] = ProgressStep(last.label, True, last.emoji)
+                self._thought_buffer = None
+                self._mark_last_complete()
                 await self._collapse_to_summary()
 
     async def _update_progress(self):
@@ -183,11 +238,15 @@ class DiscordProgressHandler:
         if len(text) > 2000:
             text = text[:1950] + "\n... (truncated)"
 
+        if text == self._last_rendered:
+            return
+
         try:
             if self.progress_msg is None:
                 self.progress_msg = await self.channel.send(text)
             else:
                 await self.progress_msg.edit(content=text)
+            self._last_rendered = text
         except discord.errors.HTTPException:
             pass  # Ignore errors (rate limit, deleted message, etc.)
 

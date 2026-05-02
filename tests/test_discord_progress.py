@@ -22,9 +22,13 @@ from tsugite.events import (  # noqa: E402
     ErrorEvent,
     FinalAnswerEvent,
     InfoEvent,
+    LLMMessageEvent,
+    LLMWaitProgressEvent,
     ObservationEvent,
     ReasoningContentEvent,
     StepStartEvent,
+    ToolCallEvent,
+    ToolResultEvent,
     WarningEvent,
 )  # noqa: E402
 
@@ -100,7 +104,7 @@ async def test_progress_handler_turns():
 
     # Code execution
     await handler._handle_event_async(CodeExecutionEvent(code="print('hello')"))
-    assert "Executing" in channel.messages[0].content
+    assert "Running code" in channel.messages[0].content
     assert "⚙️" in channel.messages[0].content
 
     # Observation marks previous complete
@@ -119,15 +123,158 @@ async def test_progress_handler_turns():
 
 @pytest.mark.asyncio
 async def test_progress_handler_reasoning():
-    """Test progress handler with reasoning events."""
+    """ReasoningContentEvent shows 'Reasoning' (matches web UI status_text)."""
     channel = MockChannel()
     handler = DiscordProgressHandler(channel, asyncio.get_running_loop())
 
-    # Reasoning event (use _handle_event_async directly for testing)
     await handler._handle_event_async(ReasoningContentEvent(content="Thinking about the problem..."))
     assert len(channel.messages) == 1
-    assert "Thinking" in channel.messages[0].content
+    assert "Reasoning" in channel.messages[0].content
     assert "💭" in channel.messages[0].content
+
+
+@pytest.mark.asyncio
+async def test_progress_handler_thought_buffered_until_code():
+    """LLMMessageEvent buffers content; CodeExecutionEvent flushes it as a standalone message."""
+    channel = MockChannel()
+    handler = DiscordProgressHandler(channel, asyncio.get_running_loop())
+
+    await handler._handle_event_async(LLMMessageEvent(content="Let me consider..."))
+    assert len(channel.messages) == 0
+
+    await handler._handle_event_async(CodeExecutionEvent(code="x = 1"))
+    thought_msgs = [m for m in channel.messages if "Let me consider" in m.content]
+    assert len(thought_msgs) == 1
+    assert thought_msgs[0].content.startswith("💭 ")
+
+
+@pytest.mark.asyncio
+async def test_progress_handler_thought_flushed_before_tool_call():
+    """ToolCallEvent flushes a buffered thought too (tool-calling agents without code)."""
+    channel = MockChannel()
+    handler = DiscordProgressHandler(channel, asyncio.get_running_loop())
+
+    await handler._handle_event_async(LLMMessageEvent(content="Need to grep first"))
+    assert len(channel.messages) == 0
+
+    await handler._handle_event_async(ToolCallEvent(tool_name="grep"))
+    thought_msgs = [m for m in channel.messages if "Need to grep first" in m.content]
+    assert len(thought_msgs) == 1
+
+
+@pytest.mark.asyncio
+async def test_progress_handler_thought_discarded_on_final_answer():
+    """LLMMessageEvent followed by FinalAnswerEvent discards the buffer (avoids duplicating the answer)."""
+    channel = MockChannel()
+    handler = DiscordProgressHandler(channel, asyncio.get_running_loop())
+
+    await handler._handle_event_async(LLMMessageEvent(content="Final reasoning"))
+    await handler._handle_event_async(FinalAnswerEvent(answer="Final reasoning", turns=1, tokens=10, cost=0.0))
+
+    thought_msgs = [m for m in channel.messages if "Final reasoning" in m.content]
+    assert len(thought_msgs) == 0
+
+
+@pytest.mark.asyncio
+async def test_progress_handler_llm_message_empty_buffers_nothing():
+    """Empty LLMMessageEvent neither sends nor buffers."""
+    channel = MockChannel()
+    handler = DiscordProgressHandler(channel, asyncio.get_running_loop())
+
+    await handler._handle_event_async(LLMMessageEvent(content=""))
+    await handler._handle_event_async(CodeExecutionEvent(code="x = 1"))
+
+    assert all("💭" not in m.content for m in channel.messages)
+
+
+@pytest.mark.asyncio
+async def test_progress_handler_long_thought_truncated():
+    """Thoughts exceeding Discord's 2000-char limit are truncated, not dropped."""
+    channel = MockChannel()
+    handler = DiscordProgressHandler(channel, asyncio.get_running_loop())
+
+    long_text = "x" * 2500
+    await handler._handle_event_async(LLMMessageEvent(content=long_text))
+    await handler._handle_event_async(CodeExecutionEvent(code="y = 1"))
+
+    thought_msgs = [m for m in channel.messages if m.content.startswith("💭 ")]
+    assert len(thought_msgs) == 1
+    assert len(thought_msgs[0].content) <= 2000
+    assert "(truncated)" in thought_msgs[0].content
+
+
+@pytest.mark.asyncio
+async def test_progress_handler_tool_call_shows_tool_name():
+    """ToolCallEvent appends a 'Tool: <name>' step."""
+    channel = MockChannel()
+    handler = DiscordProgressHandler(channel, asyncio.get_running_loop())
+
+    await handler._handle_event_async(StepStartEvent(step=1, max_turns=10))
+    await handler._handle_event_async(ToolCallEvent(tool_name="read_file", arguments={"path": "/foo"}))
+    assert "Tool: read_file" in channel.messages[0].content
+    assert "🔧" in channel.messages[0].content
+
+
+@pytest.mark.asyncio
+async def test_progress_handler_tool_result_marks_complete():
+    """ToolResultEvent marks the in-flight tool step as completed."""
+    channel = MockChannel()
+    handler = DiscordProgressHandler(channel, asyncio.get_running_loop())
+
+    await handler._handle_event_async(ToolCallEvent(tool_name="read_file"))
+    content_before = channel.messages[0].content
+    assert "✓" not in content_before.split("Tool: read_file", 1)[1].split("\n", 1)[0]
+
+    await handler._handle_event_async(ToolResultEvent(tool_name="read_file", success=True))
+    content_after = channel.messages[0].content
+    assert "Tool: read_file ✓" in content_after
+
+
+@pytest.mark.asyncio
+async def test_progress_handler_multiple_tool_calls_per_turn():
+    """Code agents may call multiple tools per turn; each gets its own line."""
+    channel = MockChannel()
+    handler = DiscordProgressHandler(channel, asyncio.get_running_loop())
+
+    await handler._handle_event_async(StepStartEvent(step=1, max_turns=10))
+    await handler._handle_event_async(CodeExecutionEvent(code="x"))
+    await handler._handle_event_async(ToolCallEvent(tool_name="read_file"))
+    await handler._handle_event_async(ToolCallEvent(tool_name="grep"))
+    content = channel.messages[0].content
+    assert "Running code" in content
+    assert "Tool: read_file" in content
+    assert "Tool: grep" in content
+
+
+@pytest.mark.asyncio
+async def test_progress_handler_llm_wait_updates_in_place():
+    """Repeated LLMWaitProgressEvent updates the same step rather than appending."""
+    channel = MockChannel()
+    handler = DiscordProgressHandler(channel, asyncio.get_running_loop())
+
+    await handler._handle_event_async(LLMWaitProgressEvent(elapsed_seconds=5))
+    after_first = channel.messages[0].content
+    assert "Waiting on LLM (5s)" in after_first
+    assert "⏳" in after_first
+
+    await handler._handle_event_async(LLMWaitProgressEvent(elapsed_seconds=12))
+    after_second = channel.messages[0].content
+    assert "Waiting on LLM (12s)" in after_second
+    assert "Waiting on LLM (5s)" not in after_second
+    assert after_second.count("⏳") == 1
+
+
+@pytest.mark.asyncio
+async def test_progress_handler_llm_wait_cleared_by_other_event():
+    """A non-wait event ends the wait so the next wait appends fresh."""
+    channel = MockChannel()
+    handler = DiscordProgressHandler(channel, asyncio.get_running_loop())
+
+    await handler._handle_event_async(LLMWaitProgressEvent(elapsed_seconds=5))
+    await handler._handle_event_async(StepStartEvent(step=1, max_turns=10))
+    await handler._handle_event_async(LLMWaitProgressEvent(elapsed_seconds=3))
+    content = channel.messages[0].content
+    assert content.count("⏳") == 2
 
 
 @pytest.mark.asyncio
