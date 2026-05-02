@@ -2,8 +2,17 @@
 
 from unittest.mock import MagicMock, patch
 
+from tsugite.events import EventBus, TaskStartEvent
+from tsugite.events.bus import Subscription
 from tsugite.hooks import HookRule
-from tsugite.plugins import discover_plugins, load_adapter_plugins, load_hook_plugins, load_tool_plugins
+from tsugite.plugins import (
+    discover_plugins,
+    get_plugin_subscriptions,
+    load_adapter_plugins,
+    load_event_subscriber_plugins,
+    load_hook_plugins,
+    load_tool_plugins,
+)
 
 
 def _make_entry_point(name, value, group):
@@ -272,3 +281,162 @@ class TestLoadHookPlugins:
         with patch("tsugite.plugins.importlib.metadata.entry_points", side_effect=_mock_entry_points([ep])):
             result = discover_plugins()
         assert any(p.group == "tsugite.hooks" for p in result)
+
+
+class TestLoadEventSubscriberPlugins:
+    def setup_method(self):
+        import tsugite.plugins
+
+        tsugite.plugins._plugin_subscriptions = []
+
+    def teardown_method(self):
+        import tsugite.plugins
+
+        tsugite.plugins._plugin_subscriptions = []
+
+    def test_registers_subscriptions(self):
+        def my_handler(event):
+            pass
+
+        register_fn = MagicMock(
+            return_value=[Subscription(handler=my_handler, event_name="task_start", predicate=None)]
+        )
+        ep = _make_entry_point("test-events", "test_events:register", "tsugite.event_subscribers")
+        ep.load.return_value = register_fn
+
+        with patch("tsugite.plugins.importlib.metadata.entry_points", return_value=[ep]):
+            results = load_event_subscriber_plugins()
+
+        register_fn.assert_called_once_with({})
+        assert len(results) == 1
+        assert results[0].loaded is True
+
+        subs = get_plugin_subscriptions()
+        assert len(subs) == 1
+        assert subs[0].event_name == "task_start"
+
+    def test_skips_disabled(self):
+        ep = _make_entry_point("test-events", "test_events:register", "tsugite.event_subscribers")
+
+        with patch("tsugite.plugins.importlib.metadata.entry_points", return_value=[ep]):
+            results = load_event_subscriber_plugins(plugin_config={"test-events": {"enabled": False}})
+
+        ep.load.assert_not_called()
+        assert results[0].enabled is False
+        assert results[0].loaded is False
+        assert get_plugin_subscriptions() == []
+
+    def test_graceful_failure(self):
+        ep = _make_entry_point("bad-events", "bad_events:register", "tsugite.event_subscribers")
+        ep.load.side_effect = ImportError("no such module")
+
+        with patch("tsugite.plugins.importlib.metadata.entry_points", return_value=[ep]):
+            results = load_event_subscriber_plugins()
+
+        assert results[0].loaded is False
+        assert "no such module" in results[0].error
+        assert get_plugin_subscriptions() == []
+
+    def test_passes_config(self):
+        register_fn = MagicMock(return_value=[])
+        ep = _make_entry_point("pii", "pii:register", "tsugite.event_subscribers")
+        ep.load.return_value = register_fn
+
+        config = {"pii": {"redact_pattern": r"\d{3}-\d{2}-\d{4}"}}
+        with patch("tsugite.plugins.importlib.metadata.entry_points", return_value=[ep]):
+            load_event_subscriber_plugins(plugin_config=config)
+
+        register_fn.assert_called_once_with({"redact_pattern": r"\d{3}-\d{2}-\d{4}"})
+
+    def test_event_bus_picks_up_loaded_subscriptions(self):
+        received = []
+        register_fn = MagicMock(
+            return_value=[Subscription(handler=received.append, event_name="task_start", predicate=None)]
+        )
+        ep = _make_entry_point("listener", "listener:register", "tsugite.event_subscribers")
+        ep.load.return_value = register_fn
+
+        with patch("tsugite.plugins.importlib.metadata.entry_points", return_value=[ep]):
+            load_event_subscriber_plugins()
+
+        bus = EventBus()
+        bus.emit(TaskStartEvent(task="x", model="y"))
+
+        assert len(received) == 1
+        assert received[0].event_name == "task_start"
+
+    def test_discovers_event_subscriber_plugins(self):
+        ep = _make_entry_point("listener", "listener:register", "tsugite.event_subscribers")
+        with patch("tsugite.plugins.importlib.metadata.entry_points", side_effect=_mock_entry_points([ep])):
+            result = discover_plugins()
+        assert any(p.group == "tsugite.event_subscribers" for p in result)
+
+
+class TestUnifiedPluginsGroup:
+    """Plugins can declare a single tsugite.plugins entry point and rely on
+    @tool / @hook / @subscribe decorators to register themselves at import."""
+
+    def setup_method(self):
+        import tsugite.plugins
+
+        tsugite.plugins._plugin_hooks = {}
+        tsugite.plugins._plugin_subscriptions = []
+
+    def teardown_method(self):
+        import tsugite.plugins
+
+        tsugite.plugins._plugin_hooks = {}
+        tsugite.plugins._plugin_subscriptions = []
+
+    def test_imports_module_via_unified_entry_point(self):
+        import types
+
+        from tsugite.plugins import load_decorator_plugins
+
+        fake_module = types.ModuleType("fake_unified_plugin")
+        ep = _make_entry_point("kitchen-sink", "fake_unified_plugin", "tsugite.plugins")
+        ep.load.return_value = fake_module
+
+        with patch("tsugite.plugins.importlib.metadata.entry_points", return_value=[ep]):
+            results = load_decorator_plugins()
+
+        assert results[0].loaded is True
+        ep.load.assert_called_once()
+
+    def test_skips_disabled_unified_plugin(self):
+        from tsugite.plugins import load_decorator_plugins
+
+        ep = _make_entry_point("kitchen-sink", "fake_unified_plugin", "tsugite.plugins")
+        with patch("tsugite.plugins.importlib.metadata.entry_points", return_value=[ep]):
+            results = load_decorator_plugins(plugin_config={"kitchen-sink": {"enabled": False}})
+
+        ep.load.assert_not_called()
+        assert results[0].enabled is False
+
+    def test_unified_group_in_discover(self):
+        ep = _make_entry_point("kitchen-sink", "fake_unified_plugin", "tsugite.plugins")
+        with patch("tsugite.plugins.importlib.metadata.entry_points", side_effect=_mock_entry_points([ep])):
+            result = discover_plugins()
+        assert any(p.group == "tsugite.plugins" for p in result)
+
+
+class TestModuleOnlyEntryPoint:
+    """Plugins may declare a module-only entry point (no :attr).
+
+    Importing the module is the registration (decorators do the work). The
+    loader treats this case as a successful load with no extra payload.
+    """
+
+    def test_module_only_tool_entry_point(self):
+        import types
+
+        fake_module = types.ModuleType("fake_tool_plugin")
+        ep = _make_entry_point("decorator-plugin", "fake_tool_plugin", "tsugite.tools")
+        ep.load.return_value = fake_module
+
+        with patch("tsugite.plugins.importlib.metadata.entry_points", return_value=[ep]):
+            with patch("tsugite.tools._register_tool") as mock_register:
+                results = load_tool_plugins()
+
+        assert results[0].loaded is True
+        mock_register.assert_not_called()

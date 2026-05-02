@@ -49,6 +49,13 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["tsugite"]
 
+[tool.uv.workspace]
+members = ["plugins/*"]
+
+[tool.uv.sources]
+tsugite-cli = { workspace = true }
+tsugite-tmux = { workspace = true }
+
 [tool.ruff]
 target-version = "py311"
 line-length = 120
@@ -65,7 +72,7 @@ target-version = ["py311"]
 line-length = 120
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "plugins"]
 addopts = "-n auto --dist loadscope --cov=tsugite --cov-report=term-missing --cov-report=html --cov-report=xml"
 asyncio_mode = "strict"
 asyncio_default_fixture_loop_scope = "function"
@@ -121,4 +128,5 @@ dev = [
   "pytest-xdist>=3.5.0",
   "ruff>=0.1",
   "vulture>=2.14",
+  "tsugite-tmux",
 ]

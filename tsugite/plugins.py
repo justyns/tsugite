@@ -1,19 +1,33 @@
 """Plugin discovery and loading via Python entry points."""
 
 import importlib.metadata
+import inspect
 import logging
 from dataclasses import dataclass
 
+from tsugite.events.bus import Subscription
+
 logger = logging.getLogger(__name__)
 
+GROUP_PLUGINS = "tsugite.plugins"
 GROUP_TOOLS = "tsugite.tools"
 GROUP_ADAPTERS = "tsugite.adapters"
 GROUP_PROVIDERS = "tsugite.providers"
 GROUP_SECRETS = "tsugite.secrets"
 GROUP_HOOKS = "tsugite.hooks"
-PLUGIN_GROUPS = (GROUP_TOOLS, GROUP_ADAPTERS, GROUP_PROVIDERS, GROUP_SECRETS, GROUP_HOOKS)
+GROUP_EVENT_SUBSCRIBERS = "tsugite.event_subscribers"
+PLUGIN_GROUPS = (
+    GROUP_PLUGINS,
+    GROUP_TOOLS,
+    GROUP_ADAPTERS,
+    GROUP_PROVIDERS,
+    GROUP_SECRETS,
+    GROUP_HOOKS,
+    GROUP_EVENT_SUBSCRIBERS,
+)
 
 _plugin_hooks: dict[str, list] = {}
+_plugin_subscriptions: list[Subscription] = []
 
 
 @dataclass
@@ -50,6 +64,35 @@ def discover_plugins(plugin_config: dict | None = None) -> list[PluginInfo]:
     return plugins
 
 
+def _load_plugin_group(group, plugin_config, on_loaded, summarize=None) -> list[PluginInfo]:
+    """Iterate a plugin group: skip disabled, ep.load(), invoke register_fn(cfg),
+    pass result to on_loaded(payload), accumulate PluginInfo, isolate errors.
+    `summarize(payload) -> str` adds detail to the success log line.
+    """
+    results = []
+    for ep, cfg, enabled in _iter_plugins(group, plugin_config):
+        if not enabled:
+            results.append(PluginInfo.from_entry_point(ep, group, enabled=False))
+            logger.debug("Plugin '%s' (%s) disabled, skipping", ep.name, group)
+            continue
+        try:
+            target = ep.load()
+            if inspect.ismodule(target):
+                # Module-only entry point: import did the registration via decorators.
+                payload = None
+                extra = " (module-only)"
+            else:
+                payload = target(cfg)
+                on_loaded(payload)
+                extra = f": {summarize(payload)}" if summarize else ""
+            results.append(PluginInfo.from_entry_point(ep, group, loaded=True))
+            logger.info("Loaded %s plugin '%s'%s", group, ep.name, extra)
+        except Exception as e:
+            logger.warning("Failed to load %s plugin '%s': %s", group, ep.name, e)
+            results.append(PluginInfo.from_entry_point(ep, group, error=str(e)))
+    return results
+
+
 def load_tool_plugins(plugin_config: dict | None = None) -> list[PluginInfo]:
     """Discover and register tool plugins.
 
@@ -57,23 +100,11 @@ def load_tool_plugins(plugin_config: dict | None = None) -> list[PluginInfo]:
     """
     from tsugite.tools import _register_tool
 
-    results = []
-    for ep, cfg, enabled in _iter_plugins(GROUP_TOOLS, plugin_config):
-        if not enabled:
-            results.append(PluginInfo.from_entry_point(ep, GROUP_TOOLS, enabled=False))
-            logger.debug("Plugin '%s' disabled, skipping", ep.name)
-            continue
-        try:
-            register_fn = ep.load()
-            tools = register_fn(cfg)
-            for func in tools:
-                _register_tool(func)
-            results.append(PluginInfo.from_entry_point(ep, GROUP_TOOLS, loaded=True))
-            logger.info("Loaded tool plugin '%s' (%d tools)", ep.name, len(tools))
-        except Exception as e:
-            logger.warning("Failed to load tool plugin '%s': %s", ep.name, e)
-            results.append(PluginInfo.from_entry_point(ep, GROUP_TOOLS, error=str(e)))
-    return results
+    def consume(tools):
+        for func in tools:
+            _register_tool(func)
+
+    return _load_plugin_group(GROUP_TOOLS, plugin_config, consume, summarize=lambda t: f"{len(t)} tools")
 
 
 def load_hook_plugins(plugin_config: dict | None = None) -> list[PluginInfo]:
@@ -82,30 +113,53 @@ def load_hook_plugins(plugin_config: dict | None = None) -> list[PluginInfo]:
     Each entry point should resolve to a callable that returns
     dict[str, list[HookRule]] mapping phase names to hook rules.
     """
-    global _plugin_hooks
-    results = []
-    for ep, cfg, enabled in _iter_plugins(GROUP_HOOKS, plugin_config):
-        if not enabled:
-            results.append(PluginInfo.from_entry_point(ep, GROUP_HOOKS, enabled=False))
-            logger.debug("Hook plugin '%s' disabled, skipping", ep.name)
-            continue
-        try:
-            register_fn = ep.load()
-            hooks = register_fn(cfg)
-            for phase, rules in hooks.items():
-                _plugin_hooks.setdefault(phase, []).extend(rules)
-            results.append(PluginInfo.from_entry_point(ep, GROUP_HOOKS, loaded=True))
-            hook_summary = ", ".join(f"{phase}({len(rules)})" for phase, rules in hooks.items())
-            logger.info("Loaded hook plugin '%s': %s", ep.name, hook_summary)
-        except Exception as e:
-            logger.warning("Failed to load hook plugin '%s': %s", ep.name, e)
-            results.append(PluginInfo.from_entry_point(ep, GROUP_HOOKS, error=str(e)))
-    return results
+
+    def consume(hooks):
+        for phase, rules in hooks.items():
+            _plugin_hooks.setdefault(phase, []).extend(rules)
+
+    return _load_plugin_group(
+        GROUP_HOOKS,
+        plugin_config,
+        consume,
+        summarize=lambda h: ", ".join(f"{phase}({len(rules)})" for phase, rules in h.items()),
+    )
 
 
 def get_plugin_hooks() -> dict[str, list]:
     """Return all registered plugin hooks, keyed by phase name."""
     return _plugin_hooks
+
+
+def load_event_subscriber_plugins(plugin_config: dict | None = None) -> list[PluginInfo]:
+    """Discover and register event subscriber plugins.
+
+    Each entry point should resolve to a callable that returns
+    list[Subscription]. Subscriptions are picked up by every EventBus
+    instance constructed afterwards.
+    """
+    return _load_plugin_group(
+        GROUP_EVENT_SUBSCRIBERS,
+        plugin_config,
+        _plugin_subscriptions.extend,
+        summarize=lambda subs: f"{len(subs)} subscriptions",
+    )
+
+
+def get_plugin_subscriptions() -> list[Subscription]:
+    """Return all registered plugin event subscriptions."""
+    return _plugin_subscriptions
+
+
+def load_decorator_plugins(plugin_config: dict | None = None) -> list[PluginInfo]:
+    """Discover and import unified-group plugins.
+
+    Plugins under tsugite.plugins are expected to be module-only entry points
+    whose import triggers @tool / @hook / @subscribe decorators. The loader
+    has nothing to do beyond importing the module - registration happens via
+    the decorators' side effects.
+    """
+    return _load_plugin_group(GROUP_PLUGINS, plugin_config, on_loaded=lambda _: None)
 
 
 def load_adapter_plugins(

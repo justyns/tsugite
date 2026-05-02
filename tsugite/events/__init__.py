@@ -6,6 +6,7 @@ from .events import (
     CodeExecutionEvent,
     ContentBlockEvent,
     CostSummaryEvent,
+    CustomEvent,
     DebugMessageEvent,
     ErrorEvent,
     FileReadEvent,
@@ -74,4 +75,6 @@ __all__ = [
     "SkillLoadedEvent",
     "SkillLoadFailedEvent",
     "SkillUnloadedEvent",
+    # Plugin-defined
+    "CustomEvent",
 ]

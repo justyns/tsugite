@@ -2,12 +2,14 @@
 
 This file provides guidance to AI agents (tsugite, Claude Code, etc.) when working with code in this repository.
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for commit message conventions and PR guidelines.
+
 ## Commands
 
 ### Development Setup
 ```bash
-# Install dependencies
-uv sync --dev
+# Install dependencies (core + daemon extras + core plugins)
+uv sync --all-extras
 
 # Run all tests
 uv run pytest

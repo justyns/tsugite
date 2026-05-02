@@ -57,6 +57,9 @@ class EventType(IntEnum):
     # Heartbeat while waiting on the LLM provider
     LLM_WAIT_PROGRESS = 32
 
+    # Plugin-defined custom events
+    CUSTOM = 33
+
 
 class BaseEvent(BaseModel):
     """Base class for all UI events."""
@@ -65,3 +68,11 @@ class BaseEvent(BaseModel):
 
     event_type: EventType = Field(frozen=True)
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @property
+    def event_name(self) -> str:
+        return _EVENT_TYPE_NAMES[self.event_type]
+
+
+_EVENT_TYPE_NAMES = {t: t.name.lower() for t in EventType}
+

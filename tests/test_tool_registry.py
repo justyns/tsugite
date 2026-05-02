@@ -193,6 +193,19 @@ def test_get_tools_by_category(file_tools):
     assert empty == []
 
 
+def test_tool_category_override(reset_tool_registry):
+    """Tools may declare an explicit category overriding their module name."""
+
+    @tool(category="custom_cat")
+    def aliased_tool() -> str:
+        """A tool that opts into a non-default category."""
+        return "ok"
+
+    assert "aliased_tool" in get_tools_by_category("custom_cat")
+    # Module-derived category should NOT include it.
+    assert "aliased_tool" not in get_tools_by_category(__name__.split(".")[-1])
+
+
 def test_expand_tool_specs_regular_names(file_tools):
     """Test expanding regular tool names."""
     specs = ["read_file", "write_file"]

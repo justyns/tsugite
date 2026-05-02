@@ -1,4 +1,4 @@
-"""Tmux session management tools for running interactive CLIs with automatic logging."""
+"""Tsugite plugin: tmux session management tools with automatic output logging."""
 
 import json
 import os
@@ -68,24 +68,6 @@ def _get_log_dir() -> Path:
     return get_xdg_data_path("tmux-logs")
 
 
-def _get_pane_command(prefixed_name: str) -> str:
-    result = subprocess.run(
-        ["tmux", "list-panes", "-t", prefixed_name, "-F", "#{pane_current_command}"],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        return ""
-    return result.stdout.strip().split("\n")[0]
-
-
-def _get_session_status(prefixed_name: str) -> str:
-    cmd = _get_pane_command(prefixed_name)
-    if not cmd or cmd.lower() in SHELLS:
-        return "idle"
-    return f"active: {cmd}"
-
-
 def _list_managed_sessions() -> list:
     """Fetch all managed sessions with status in a single batched subprocess call."""
     result = subprocess.run(
@@ -127,7 +109,7 @@ def _list_managed_sessions() -> list:
     return sessions
 
 
-@tool
+@tool(category="tmux")
 def tmux_create(name: str, command: Optional[str] = None) -> dict:
     """Create a named tmux session with automatic output logging.
 
@@ -187,7 +169,7 @@ def tmux_create(name: str, command: Optional[str] = None) -> dict:
     }
 
 
-@tool
+@tool(category="tmux")
 def tmux_read(name: str, lines: int = 50, source: str = "pane") -> str:
     """Read output from a tmux session.
 
@@ -228,7 +210,7 @@ def tmux_read(name: str, lines: int = 50, source: str = "pane") -> str:
         raise ValueError(f"Invalid source '{source}': must be 'pane' or 'log'")
 
 
-@tool
+@tool(category="tmux")
 def tmux_send(name: str, keys: str, enter: bool = True) -> str:
     """Send keystrokes to a tmux session.
 
@@ -258,7 +240,7 @@ def tmux_send(name: str, keys: str, enter: bool = True) -> str:
     return f"Sent {'keys' if not enter else 'command'} to session '{name}'"
 
 
-@tool
+@tool(category="tmux")
 def tmux_list() -> list:
     """List all tsugite-managed tmux sessions with their current status.
 
@@ -268,7 +250,7 @@ def tmux_list() -> list:
     return _list_managed_sessions()
 
 
-@tool
+@tool(category="tmux")
 def tmux_kill(name: str) -> str:
     """Terminate a tmux session and clean up its metadata.
 
@@ -300,7 +282,7 @@ def tmux_kill(name: str) -> str:
 
 
 def get_tmux_sessions() -> list:
-    """Get active tsugite-managed tmux sessions for use in Jinja2 templates.
+    """Active tsugite-managed tmux sessions, for use as a Jinja2 template global.
 
     Returns a list of dicts with name, status, and command for each session.
     Returns empty list if tmux is not installed or no managed sessions exist.

@@ -330,3 +330,19 @@ class ToolResultEvent(BaseEvent):
     result_summary: str = ""
     duration_ms: Optional[int] = Field(default=None, ge=0)
     step: Optional[int] = Field(default=None, ge=1)
+
+
+class CustomEvent(BaseEvent):
+    """Plugin-defined event with arbitrary name and payload.
+
+    Plugins emit these to signal cross-plugin events without registering a
+    typed event class. Filter by event_name on the receiving end.
+    """
+
+    event_type: EventType = Field(default=EventType.CUSTOM, frozen=True)
+    custom_name: str
+    payload: Dict[str, Any] = Field(default_factory=dict)
+
+    @property
+    def event_name(self) -> str:
+        return self.custom_name

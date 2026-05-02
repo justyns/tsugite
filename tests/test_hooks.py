@@ -1140,3 +1140,74 @@ class TestHookHandlerPreToolCall:
         with patch("tsugite.hooks.subprocess.run") as mock_run:
             handler.handle_event(ToolCallEvent(tool_name="read_file", arguments={}))
             mock_run.assert_not_called()
+
+
+class TestHookDecorator:
+    """The @hook decorator registers a HookRule into _plugin_hooks at import time,
+    so plugin authors don't need a register_hooks() function."""
+
+    def setup_method(self):
+        import tsugite.plugins
+
+        tsugite.plugins._plugin_hooks = {}
+
+    def teardown_method(self):
+        import tsugite.plugins
+
+        tsugite.plugins._plugin_hooks = {}
+
+    def test_decorator_registers_python_hook(self):
+        from tsugite.hooks import hook
+        from tsugite.plugins import get_plugin_hooks
+
+        @hook("pre_tool_call")
+        async def my_hook(ctx):
+            return "ok"
+
+        hooks = get_plugin_hooks()
+        assert "pre_tool_call" in hooks
+        assert len(hooks["pre_tool_call"]) == 1
+        rule = hooks["pre_tool_call"][0]
+        assert rule.type == "python"
+        assert rule.hook_callable is my_hook
+        assert rule.name == "my_hook"
+
+    def test_decorator_passes_through_kwargs(self):
+        from tsugite.hooks import hook
+        from tsugite.plugins import get_plugin_hooks
+
+        @hook("post_tool", capture_as="tool_log", tools=["run", "http_request"], match="x", only_interactive=True)
+        async def watcher(ctx):
+            return ctx
+
+        rule = get_plugin_hooks()["post_tool"][0]
+        assert rule.capture_as == "tool_log"
+        assert rule.tools == ["run", "http_request"]
+        assert rule.match == "x"
+        assert rule.only_interactive is True
+
+    def test_decorator_explicit_name_overrides_default(self):
+        from tsugite.hooks import hook
+        from tsugite.plugins import get_plugin_hooks
+
+        @hook("session_end", name="custom-name")
+        def cleanup(ctx):
+            pass
+
+        assert get_plugin_hooks()["session_end"][0].name == "custom-name"
+
+    def test_multiple_decorators_for_same_phase(self):
+        from tsugite.hooks import hook
+        from tsugite.plugins import get_plugin_hooks
+
+        @hook("pre_message")
+        async def first(ctx):
+            return 1
+
+        @hook("pre_message")
+        async def second(ctx):
+            return 2
+
+        rules = get_plugin_hooks()["pre_message"]
+        assert len(rules) == 2
+        assert {r.name for r in rules} == {"first", "second"}

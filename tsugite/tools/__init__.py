@@ -1,7 +1,6 @@
 """Tool registry for Tsugite agents."""
 
 import inspect
-import shutil
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List
 
@@ -16,6 +15,7 @@ class ToolInfo:
     parameters: Dict[str, Any]
     parent_only: bool = False
     interactive_only: bool = False
+    category: str | None = None
 
 
 # Global tool registry
@@ -50,10 +50,11 @@ def _register_tool(func: Callable) -> None:
         parameters=parameters,
         parent_only=getattr(func, "_parent_only", False),
         interactive_only=getattr(func, "_interactive_only", False),
+        category=getattr(func, "_category", None),
     )
 
 
-def tool(func=None, *, require_daemon=False, parent_only=False, interactive_only=False):
+def tool(func=None, *, require_daemon=False, parent_only=False, interactive_only=False, category: str | None = None):
     """Register a function as a tool.
 
     Args:
@@ -62,11 +63,16 @@ def tool(func=None, *, require_daemon=False, parent_only=False, interactive_only
             Used for tools that need direct user interaction or spawn subprocesses.
         interactive_only: If True, tool is only available when a UI handler is present.
             Hidden in scheduled tasks where there's no way to display output.
+        category: Override the category used by @<category> tool specs and
+            get_tools_by_category(). Defaults to the function's module basename.
+            Plugins should set this when their package name doesn't match the
+            user-facing category.
     """
 
     def decorator(fn):
         fn._parent_only = parent_only
         fn._interactive_only = interactive_only
+        fn._category = category
         if require_daemon:
             _daemon_tools[fn.__name__] = fn
             if _daemon_mode:
@@ -153,6 +159,9 @@ def list_tools() -> List[str]:
 def get_tools_by_category(category: str) -> List[str]:
     """Get all tool names in a specific category.
 
+    A tool's category is its explicit ToolInfo.category if set (via
+    @tool(category=...)), otherwise the basename of its defining module.
+
     Args:
         category: Category name (e.g., 'fs', 'http', 'shell')
 
@@ -162,8 +171,8 @@ def get_tools_by_category(category: str) -> List[str]:
     _ensure_tools_loaded()
     category_tools = []
     for tool_name, tool_info in _tools.items():
-        module = tool_info.func.__module__.split(".")[-1]
-        if module == category:
+        effective = tool_info.category or tool_info.func.__module__.split(".")[-1]
+        if effective == category:
             category_tools.append(tool_name)
 
     return sorted(category_tools)
@@ -337,16 +346,20 @@ def _ensure_tools_loaded():
     from . import shell as shell  # noqa: E402, F401
     from . import skills as skills  # noqa: E402, F401
 
-    if shutil.which("tmux"):
-        from . import tmux as tmux  # noqa: E402, F401
-
     # Load custom shell tools after built-in tools
     load_custom_shell_tools()
 
     # Load plugin tools after custom shell tools
-    from tsugite.plugins import load_hook_plugins, load_tool_plugins
+    from tsugite.plugins import (
+        load_decorator_plugins,
+        load_event_subscriber_plugins,
+        load_hook_plugins,
+        load_tool_plugins,
+    )
 
+    load_decorator_plugins()
     load_tool_plugins()
     load_hook_plugins()
+    load_event_subscriber_plugins()
 
     _tools_loaded = True

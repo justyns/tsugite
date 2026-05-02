@@ -6,8 +6,7 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
-from tsugite.tools.tmux import (
-    _get_session_status,
+from tsugite_tmux import (
     _list_managed_sessions,
     _strip_ansi,
     _validate_name,
@@ -28,8 +27,8 @@ def mock_metadata(tmp_path, monkeypatch):
     meta_dir.mkdir()
     log_dir.mkdir()
 
-    monkeypatch.setattr("tsugite.tools.tmux._get_metadata_path", lambda: meta_dir / "sessions.json")
-    monkeypatch.setattr("tsugite.tools.tmux._get_log_dir", lambda: log_dir)
+    monkeypatch.setattr("tsugite_tmux._get_metadata_path", lambda: meta_dir / "sessions.json")
+    monkeypatch.setattr("tsugite_tmux._get_log_dir", lambda: log_dir)
     return tmp_path
 
 
@@ -73,27 +72,9 @@ class TestValidateName:
                 _validate_name(name)
 
 
-class TestGetSessionStatus:
-    @patch("tsugite.tools.tmux._get_pane_command")
-    def test_idle_when_shell(self, mock_cmd):
-        for shell in ["bash", "zsh", "sh", "fish"]:
-            mock_cmd.return_value = shell
-            assert _get_session_status("tsu-test") == "idle"
-
-    @patch("tsugite.tools.tmux._get_pane_command")
-    def test_active_when_process(self, mock_cmd):
-        mock_cmd.return_value = "python3"
-        assert _get_session_status("tsu-test") == "active: python3"
-
-    @patch("tsugite.tools.tmux._get_pane_command")
-    def test_idle_when_empty(self, mock_cmd):
-        mock_cmd.return_value = ""
-        assert _get_session_status("tsu-test") == "idle"
-
-
 class TestTmuxCreate:
-    @patch("tsugite.tools.tmux._session_exists", return_value=False)
-    @patch("tsugite.tools.tmux.subprocess.run")
+    @patch("tsugite_tmux._session_exists", return_value=False)
+    @patch("tsugite_tmux.subprocess.run")
     def test_create_session(self, mock_run, mock_exists, mock_metadata):
         mock_run.return_value = _make_run_result()
 
@@ -112,8 +93,8 @@ class TestTmuxCreate:
         )
         assert calls[1].args[0][:4] == ["tmux", "pipe-pane", "-t", "tsu-test"]
 
-    @patch("tsugite.tools.tmux._session_exists", return_value=False)
-    @patch("tsugite.tools.tmux.subprocess.run")
+    @patch("tsugite_tmux._session_exists", return_value=False)
+    @patch("tsugite_tmux.subprocess.run")
     def test_create_with_command(self, mock_run, mock_exists, mock_metadata):
         mock_run.return_value = _make_run_result()
 
@@ -122,7 +103,7 @@ class TestTmuxCreate:
         new_session_call = mock_run.call_args_list[0]
         assert "htop" in new_session_call.args[0]
 
-    @patch("tsugite.tools.tmux._session_exists", return_value=True)
+    @patch("tsugite_tmux._session_exists", return_value=True)
     def test_create_already_exists(self, mock_exists):
         with pytest.raises(RuntimeError, match="already exists"):
             tmux_create("test")
@@ -131,8 +112,8 @@ class TestTmuxCreate:
         with pytest.raises(ValueError, match="Invalid session name"):
             tmux_create("bad name")
 
-    @patch("tsugite.tools.tmux._session_exists", return_value=False)
-    @patch("tsugite.tools.tmux.subprocess.run")
+    @patch("tsugite_tmux._session_exists", return_value=False)
+    @patch("tsugite_tmux.subprocess.run")
     def test_create_saves_metadata(self, mock_run, mock_exists, mock_metadata):
         mock_run.return_value = _make_run_result()
 
@@ -145,8 +126,8 @@ class TestTmuxCreate:
         assert data["myproject"]["command"] == "python3"
         assert data["myproject"]["prefixed_name"] == "tsu-myproject"
 
-    @patch("tsugite.tools.tmux._session_exists", return_value=False)
-    @patch("tsugite.tools.tmux.subprocess.run")
+    @patch("tsugite_tmux._session_exists", return_value=False)
+    @patch("tsugite_tmux.subprocess.run")
     def test_create_cleans_up_on_pipe_failure(self, mock_run, mock_exists, mock_metadata):
         mock_run.side_effect = [
             _make_run_result(),  # new-session succeeds
@@ -157,8 +138,8 @@ class TestTmuxCreate:
         with pytest.raises(RuntimeError, match="Failed to set up logging"):
             tmux_create("test")
 
-    @patch("tsugite.tools.tmux._session_exists", return_value=False)
-    @patch("tsugite.tools.tmux.subprocess.run")
+    @patch("tsugite_tmux._session_exists", return_value=False)
+    @patch("tsugite_tmux.subprocess.run")
     def test_create_pipe_pane_uses_shlex_quote(self, mock_run, mock_exists, mock_metadata):
         mock_run.return_value = _make_run_result()
 
@@ -170,8 +151,8 @@ class TestTmuxCreate:
 
 
 class TestTmuxRead:
-    @patch("tsugite.tools.tmux._session_exists", return_value=True)
-    @patch("tsugite.tools.tmux.subprocess.run")
+    @patch("tsugite_tmux._session_exists", return_value=True)
+    @patch("tsugite_tmux.subprocess.run")
     def test_read_pane(self, mock_run, mock_exists):
         mock_run.return_value = _make_run_result(stdout="\x1b[32mhello\x1b[0m world\n")
 
@@ -193,7 +174,7 @@ class TestTmuxRead:
 
         assert result == "line3\nline4\n"
 
-    @patch("tsugite.tools.tmux._session_exists", return_value=False)
+    @patch("tsugite_tmux._session_exists", return_value=False)
     def test_read_nonexistent_pane(self, mock_exists):
         with pytest.raises(RuntimeError, match="not found"):
             tmux_read("nonexistent")
@@ -206,8 +187,8 @@ class TestTmuxRead:
         with pytest.raises(ValueError, match="Invalid source"):
             tmux_read("test", source="invalid")
 
-    @patch("tsugite.tools.tmux._session_exists", return_value=True)
-    @patch("tsugite.tools.tmux.subprocess.run")
+    @patch("tsugite_tmux._session_exists", return_value=True)
+    @patch("tsugite_tmux.subprocess.run")
     def test_read_clamps_lines(self, mock_run, mock_exists):
         mock_run.return_value = _make_run_result(stdout="text\n")
 
@@ -218,8 +199,8 @@ class TestTmuxRead:
 
 
 class TestTmuxSend:
-    @patch("tsugite.tools.tmux._session_exists", return_value=True)
-    @patch("tsugite.tools.tmux.subprocess.run")
+    @patch("tsugite_tmux._session_exists", return_value=True)
+    @patch("tsugite_tmux.subprocess.run")
     def test_send_with_enter(self, mock_run, mock_exists):
         mock_run.return_value = _make_run_result()
 
@@ -232,8 +213,8 @@ class TestTmuxSend:
         )
         assert "command" in result
 
-    @patch("tsugite.tools.tmux._session_exists", return_value=True)
-    @patch("tsugite.tools.tmux.subprocess.run")
+    @patch("tsugite_tmux._session_exists", return_value=True)
+    @patch("tsugite_tmux.subprocess.run")
     def test_send_without_enter(self, mock_run, mock_exists):
         mock_run.return_value = _make_run_result()
 
@@ -246,7 +227,7 @@ class TestTmuxSend:
         )
         assert "keys" in result
 
-    @patch("tsugite.tools.tmux._session_exists", return_value=False)
+    @patch("tsugite_tmux._session_exists", return_value=False)
     def test_send_nonexistent(self, mock_exists):
         with pytest.raises(RuntimeError, match="not found"):
             tmux_send("nonexistent", "hello")
@@ -255,7 +236,7 @@ class TestTmuxSend:
 class TestListManagedSessions:
     """Tests for the shared _list_managed_sessions helper used by tmux_list and get_tmux_sessions."""
 
-    @patch("tsugite.tools.tmux.subprocess.run")
+    @patch("tsugite_tmux.subprocess.run")
     def test_filters_by_prefix(self, mock_run, mock_metadata):
         mock_run.return_value = _make_run_result(
             stdout="tsu-project1\tbash\nuser-session\tvim\ntsu-project2\tpython3\n"
@@ -278,7 +259,7 @@ class TestListManagedSessions:
         assert "project1" in names
         assert "project2" in names
 
-    @patch("tsugite.tools.tmux.subprocess.run")
+    @patch("tsugite_tmux.subprocess.run")
     def test_idle_status_for_shell(self, mock_run, mock_metadata):
         mock_run.return_value = _make_run_result(stdout="tsu-test\tbash\n")
 
@@ -286,7 +267,7 @@ class TestListManagedSessions:
 
         assert result[0]["status"] == "idle"
 
-    @patch("tsugite.tools.tmux.subprocess.run")
+    @patch("tsugite_tmux.subprocess.run")
     def test_active_status_for_process(self, mock_run, mock_metadata):
         mock_run.return_value = _make_run_result(stdout="tsu-test\tpython3\n")
 
@@ -294,13 +275,13 @@ class TestListManagedSessions:
 
         assert result[0]["status"] == "active: python3"
 
-    @patch("tsugite.tools.tmux.subprocess.run")
+    @patch("tsugite_tmux.subprocess.run")
     def test_no_server(self, mock_run):
         mock_run.return_value = _make_run_result(returncode=1, stderr="no server running")
 
         assert _list_managed_sessions() == []
 
-    @patch("tsugite.tools.tmux.subprocess.run")
+    @patch("tsugite_tmux.subprocess.run")
     def test_no_managed_sessions(self, mock_run, mock_metadata):
         mock_run.return_value = _make_run_result(stdout="user-session\tbash\n")
 
@@ -308,7 +289,7 @@ class TestListManagedSessions:
 
 
 class TestTmuxList:
-    @patch("tsugite.tools.tmux.subprocess.run")
+    @patch("tsugite_tmux.subprocess.run")
     def test_list_delegates_to_shared_helper(self, mock_run, mock_metadata):
         mock_run.return_value = _make_run_result(stdout="tsu-project1\tbash\ntsu-project2\thtop\n")
 
@@ -318,7 +299,7 @@ class TestTmuxList:
         assert result[0]["status"] == "idle"
         assert result[1]["status"] == "active: htop"
 
-    @patch("tsugite.tools.tmux.subprocess.run")
+    @patch("tsugite_tmux.subprocess.run")
     def test_list_no_server(self, mock_run):
         mock_run.return_value = _make_run_result(returncode=1)
 
@@ -326,8 +307,8 @@ class TestTmuxList:
 
 
 class TestTmuxKill:
-    @patch("tsugite.tools.tmux._session_exists", return_value=True)
-    @patch("tsugite.tools.tmux.subprocess.run")
+    @patch("tsugite_tmux._session_exists", return_value=True)
+    @patch("tsugite_tmux.subprocess.run")
     def test_kill_session(self, mock_run, mock_exists, mock_metadata):
         mock_run.return_value = _make_run_result()
 
@@ -346,19 +327,19 @@ class TestTmuxKill:
         data = json.loads(meta_path.read_text())
         assert "test" not in data
 
-    @patch("tsugite.tools.tmux._session_exists", return_value=False)
+    @patch("tsugite_tmux._session_exists", return_value=False)
     def test_kill_nonexistent(self, mock_exists):
         with pytest.raises(RuntimeError, match="not found"):
             tmux_kill("nonexistent")
 
 
 class TestGetTmuxSessions:
-    @patch("tsugite.tools.tmux.shutil.which", return_value=None)
+    @patch("tsugite_tmux.shutil.which", return_value=None)
     def test_no_tmux_installed(self, mock_which):
         assert get_tmux_sessions() == []
 
-    @patch("tsugite.tools.tmux.subprocess.run")
-    @patch("tsugite.tools.tmux.shutil.which", return_value="/usr/bin/tmux")
+    @patch("tsugite_tmux.subprocess.run")
+    @patch("tsugite_tmux.shutil.which", return_value="/usr/bin/tmux")
     def test_filters_prefix(self, mock_which, mock_run, mock_metadata):
         mock_run.return_value = _make_run_result(stdout="tsu-myproject\tbash\nother-session\tvim\n")
 
@@ -369,8 +350,8 @@ class TestGetTmuxSessions:
         assert "created_at" not in result[0]
         assert "log_file" not in result[0]
 
-    @patch("tsugite.tools.tmux.subprocess.run")
-    @patch("tsugite.tools.tmux.shutil.which", return_value="/usr/bin/tmux")
+    @patch("tsugite_tmux.subprocess.run")
+    @patch("tsugite_tmux.shutil.which", return_value="/usr/bin/tmux")
     def test_idle_status(self, mock_which, mock_run, mock_metadata):
         mock_run.return_value = _make_run_result(stdout="tsu-test\tzsh\n")
 
@@ -378,8 +359,8 @@ class TestGetTmuxSessions:
 
         assert result[0]["status"] == "idle"
 
-    @patch("tsugite.tools.tmux.subprocess.run")
-    @patch("tsugite.tools.tmux.shutil.which", return_value="/usr/bin/tmux")
+    @patch("tsugite_tmux.subprocess.run")
+    @patch("tsugite_tmux.shutil.which", return_value="/usr/bin/tmux")
     def test_active_status(self, mock_which, mock_run, mock_metadata):
         mock_run.return_value = _make_run_result(stdout="tsu-test\thtop\n")
 
@@ -387,8 +368,8 @@ class TestGetTmuxSessions:
 
         assert result[0]["status"] == "active: htop"
 
-    @patch("tsugite.tools.tmux.subprocess.run")
-    @patch("tsugite.tools.tmux.shutil.which", return_value="/usr/bin/tmux")
+    @patch("tsugite_tmux.subprocess.run")
+    @patch("tsugite_tmux.shutil.which", return_value="/usr/bin/tmux")
     def test_no_server_running(self, mock_which, mock_run):
         mock_run.return_value = _make_run_result(returncode=1)
 

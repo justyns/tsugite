@@ -91,6 +91,41 @@ class HookRule(BaseModel):
         return self
 
 
+def hook(
+    phase: str,
+    *,
+    name: Optional[str] = None,
+    capture_as: Optional[str] = None,
+    match: Optional[str] = None,
+    only_interactive: bool = False,
+    tools: Optional[list[str]] = None,
+):
+    """Register a Python callable as a plugin hook for the given phase.
+
+    Plugin authors decorate their hook function and the decorator wraps it
+    in a HookRule(type="python", ...) and appends to _plugin_hooks[phase] at
+    import time. Combined with a module-only entry point, no register_hooks()
+    function is needed.
+    """
+
+    def decorator(fn: Callable) -> Callable:
+        from tsugite.plugins import _plugin_hooks
+
+        rule = HookRule(
+            type="python",
+            hook_callable=fn,
+            name=name or fn.__name__,
+            capture_as=capture_as,
+            match=match,
+            only_interactive=only_interactive,
+            tools=tools or [],
+        )
+        _plugin_hooks.setdefault(phase, []).append(rule)
+        return fn
+
+    return decorator
+
+
 def _build_hook_env(
     context: dict[str, Any],
     custom_env: dict[str, str] | None = None,

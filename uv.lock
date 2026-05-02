@@ -8,8 +8,14 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-04-21T04:36:03.199008438Z"
+exclude-newer = "2026-04-21T19:43:38.470568416Z"
 exclude-newer-span = "P10D"
+
+[manifest]
+members = [
+    "tsugite-cli",
+    "tsugite-tmux",
+]
 
 [[package]]
 name = "aiohappyeyeballs"
@@ -2331,6 +2337,7 @@ dev = [
     { name = "pytest-playwright" },
     { name = "pytest-xdist" },
     { name = "ruff" },
+    { name = "tsugite-tmux" },
     { name = "vulture" },
 ]
 
@@ -2373,8 +2380,20 @@ dev = [
     { name = "pytest-playwright", specifier = ">=0.7.2" },
     { name = "pytest-xdist", specifier = ">=3.5.0" },
     { name = "ruff", specifier = ">=0.1" },
+    { name = "tsugite-tmux", editable = "plugins/tsugite-tmux" },
     { name = "vulture", specifier = ">=2.14" },
 ]
+
+[[package]]
+name = "tsugite-tmux"
+version = "0.13.1"
+source = { editable = "plugins/tsugite-tmux" }
+dependencies = [
+    { name = "tsugite-cli" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "tsugite-cli", editable = "." }]
 
 [[package]]
 name = "typer"

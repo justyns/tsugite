@@ -140,9 +140,12 @@ def cwd() -> str:
 
 
 def _tmux_sessions() -> list:
-    """Get active tsugite-managed tmux sessions for Jinja2 templates."""
+    """Get active tsugite-managed tmux sessions for Jinja2 templates.
+
+    Returns [] when the tsugite-tmux-plugin package is not installed.
+    """
     try:
-        from tsugite.tools.tmux import get_tmux_sessions
+        from tsugite_tmux import get_tmux_sessions
 
         return get_tmux_sessions()
     except (ImportError, FileNotFoundError, OSError):

@@ -137,7 +137,7 @@ All paths follow [XDG Base Directory](https://specifications.freedesktop.org/bas
 ```bash
 git clone https://github.com/justyns/tsugite.git
 cd tsugite
-uv sync --dev
+uv sync --all-extras
 ```
 
 ## Status
