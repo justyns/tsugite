@@ -426,10 +426,12 @@ class BaseAdapter(ABC):
             else:
                 conv_id = self.session_store.get_or_create_interactive(user_id, self.agent_name).id
 
-            if self.session_store.needs_compaction(conv_id) or self.session_store.is_compacting(
-                user_id, self.agent_name
-            ):
-                conv_id = await self._run_compaction(user_id, conv_id, custom_logger, reason="token_threshold")
+        # Compaction applies to override (pinned/explicit) sessions too —
+        # otherwise cumulative_tokens grow until the provider raises "Prompt
+        # is too long" with no recovery. compact_session migrates pin state
+        # to the successor, so the user's pin follows the rotation.
+        if self.session_store.needs_compaction(conv_id) or self.session_store.is_compacting(user_id, self.agent_name):
+            conv_id = await self._run_compaction(user_id, conv_id, custom_logger, reason="token_threshold")
 
         from tsugite.daemon.session_runner import get_current_session_id, set_current_session_id
 
@@ -507,7 +509,7 @@ class BaseAdapter(ABC):
         try:
             result = await asyncio.to_thread(ctx.run, run_in_workspace)
         except AgentExecutionError as e:
-            if "prompt too long" in str(e).lower() and not conv_id_override:
+            if "prompt too long" in str(e).lower():
                 code_events_after = self.session_store.count_events_by_type(conv_id, "code_execution")
                 if code_events_after > code_events_before:
                     logger.warning(
