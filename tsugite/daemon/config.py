@@ -45,9 +45,11 @@ class DiscordBotConfig(BaseModel):
     guild_id: Optional[str] = None  # Sync app commands to this guild only (instant; good for dev)
     dm_policy: Literal["allowlist", "open"] = "allowlist"
     allow_from: List[str] = Field(default_factory=list)
-    # When True, every message from a Discord user routes to that user's default-interactive
-    # session, regardless of channel/thread/DM. Disables per-channel and per-thread sessions.
-    unified_routing: bool = False
+    # DMs from a Discord user route to the latest non-finished session tagged with
+    # metadata.session_name == this value (auto-creates one if absent). Channels and threads
+    # keep their existing shared-team-session behavior. The name is preserved across compaction.
+    # Set to "" to fall back to the user's default-interactive session.
+    session_name: str = "discord"
 
 
 class NotificationChannelConfig(BaseModel):

@@ -632,14 +632,11 @@ class DiscordAdapter(BaseAdapter):
     ) -> Session:
         """Pick which session this message routes to.
 
-        Thread/channel routing is bypassed when unified_routing is on, so every Discord
-        message from a user lands in that user's default-interactive session — useful for
-        keeping a single conversational thread across DMs, channels, and threads.
+        Channels and threads stay shared across users (team-agent context). DMs are
+        per-user, and when bot_config.session_name is set DMs route to the named session
+        for that user instead of their default-interactive.
         """
         user_id = self.resolve_user(str(message.author.id), channel_context)
-
-        if self.bot_config.unified_routing:
-            return self.session_store.get_or_create_interactive(user_id, self.agent_name)
 
         if is_thread and thread_id:
             existing = self.session_store.find_by_thread(thread_id)
@@ -669,17 +666,26 @@ class DiscordAdapter(BaseAdapter):
                 user_id=user_id,
             )
 
+        if self.bot_config.session_name:
+            return self.session_store.get_or_create_named_session(
+                user_id, self.agent_name, self.bot_config.session_name
+            )
+
         return self.session_store.get_or_create_interactive(user_id, self.agent_name)
 
+    @staticmethod
+    def _channel_display_name(channel) -> str:
+        return getattr(channel, "name", "?")
+
     def _build_progress_header(self, message, session: Session, is_thread: bool, is_dm: bool) -> str:
-        if self.bot_config.unified_routing:
-            route = "your session"
-        elif is_dm:
-            route = "DM"
-        elif is_thread:
-            route = f"thread {getattr(message.channel, 'name', '?')}"
+        if is_thread:
+            route = f"thread {self._channel_display_name(message.channel)}"
+        elif not is_dm and message.guild:
+            route = f"#{self._channel_display_name(message.channel)}"
+        elif self.bot_config.session_name:
+            route = f"DM · named: {self.bot_config.session_name}"
         else:
-            route = f"#{getattr(message.channel, 'name', '?')}"
+            route = "DM"
 
         identifier = session.metadata.get("topic") or session.id[:6]
         return f"🤔 {route} · {identifier}"

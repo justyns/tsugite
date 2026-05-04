@@ -133,6 +133,12 @@ READ_ONLY_METADATA_KEYS = frozenset(
     }
 )
 
+METADATA_SESSION_NAME = "session_name"
+
+# Metadata keys preserved across compaction in addition to READ_ONLY ones. session_name
+# anchors named-route adapters (e.g. Discord session_name) to the successor session.
+COMPACTION_PRESERVED_METADATA_KEYS = READ_ONLY_METADATA_KEYS | frozenset({METADATA_SESSION_NAME})
+
 TOPIC_MAX_LENGTH = 160
 
 
@@ -444,6 +450,53 @@ class SessionStore:
         with self._lock:
             return {uid: sid for (uid, ag), sid in self._interactive_index.items() if ag == agent}
 
+    def _find_named_session_locked(self, user_id: str, agent: str, name: str) -> Optional[Session]:
+        """Lock-held variant of find_named_session — caller must hold self._lock."""
+        candidates = [
+            s
+            for s in self._sessions.values()
+            if s.user_id == user_id
+            and s.agent == agent
+            and s.superseded_by is None
+            and s.status not in FINISHED_STATUSES
+            and s.metadata.get(METADATA_SESSION_NAME) == name
+        ]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda s: s.last_active)
+
+    def find_named_session(self, user_id: str, agent: str, name: str) -> Optional[Session]:
+        """Find the latest non-finished, non-superseded session tagged with metadata.session_name."""
+        with self._lock:
+            return self._find_named_session_locked(user_id, agent, name)
+
+    def get_or_create_named_session(self, user_id: str, agent: str, name: str) -> Session:
+        """Resolve a named-route session for (user_id, agent), creating one if absent.
+
+        The session_name lives in metadata and is preserved across compaction so the
+        named route follows the successor session automatically.
+        """
+        with self._lock:
+            existing = self._find_named_session_locked(user_id, agent, name)
+            if existing:
+                return existing
+
+            conv_id = f"daemon_{agent}_{user_id}_{name}_{uuid4().hex[:6]}"
+            session = Session(
+                id=conv_id,
+                agent=agent,
+                source=SessionSource.INTERACTIVE.value,
+                user_id=user_id,
+                title=f"{name.title()} Session",
+                metadata={METADATA_SESSION_NAME: name},
+            )
+            tokens, msg_count = self._estimate_tokens(conv_id)
+            session.cumulative_tokens = tokens
+            session.message_count = msg_count
+            self._sessions[conv_id] = session
+            self._save()
+            return session
+
     def needs_compaction(self, session_id: str) -> bool:
         with self._lock:
             session = self._sessions.get(session_id)
@@ -465,7 +518,9 @@ class SessionStore:
                 source=old_session.source,
                 user_id=old_session.user_id,
                 parent_id=old_session.parent_id,
-                metadata={k: v for k, v in old_session.metadata.items() if k in READ_ONLY_METADATA_KEYS},
+                metadata={
+                    k: v for k, v in old_session.metadata.items() if k in COMPACTION_PRESERVED_METADATA_KEYS
+                },
                 scratchpad=old_session.scratchpad,
                 title=old_session.title,
                 pinned=old_session.pinned,
