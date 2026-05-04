@@ -264,6 +264,16 @@ export const streamingMixin = {
       prog.steps.push({ html: contentBlockHtml(event.name, event.content || '') });
     } else if (event.type === 'code') {
       this._pushDetailStep(prog, `<code>code</code>`, event.content || '');
+    } else if (event.type === 'tool_call') {
+      const name = event.tool || 'tool';
+      const args = typeof event.arguments === 'string'
+        ? event.arguments
+        : JSON.stringify(event.arguments || {}, null, 2);
+      if (args && args !== '{}') {
+        this._pushDetailStep(prog, `<code>${escapeHtml(name)}</code>`, args);
+      } else {
+        prog.steps.push({ html: `<code>${escapeHtml(name)}</code>` });
+      }
     } else if (event.type === 'tool_result') {
       const isCodeResult = event.tool === 'unknown';
       if (!isCodeResult) prog.toolCount++;

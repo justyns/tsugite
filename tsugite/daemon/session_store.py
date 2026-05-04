@@ -60,6 +60,9 @@ def _progress_status_text(event: dict) -> Optional[str]:
         return "Reasoning..."
     if etype == "tool_result":
         return f"Tool: {event['tool']}" if _is_real_tool_event(event) else None
+    if etype == "tool_call":
+        name = event.get("tool")
+        return f"Tool: {name}" if name else None
     if etype == "tool_invocation":
         name = event.get("name")
         return f"Tool: {name}" if name else None
@@ -77,7 +80,8 @@ def _progress_status_text(event: dict) -> Optional[str]:
 
 def _is_real_tool_event(event: dict) -> bool:
     """True for events that count toward the tool counter — broadcast tool_result
-    with a named tool, or persisted tool_invocation."""
+    with a named tool, or persisted tool_invocation. tool_call is NOT counted here
+    because the matching tool_result fires later for the same invocation."""
     etype = event.get("type")
     if etype == "tool_result":
         return (event.get("tool") or "unknown") != "unknown"
