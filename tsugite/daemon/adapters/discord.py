@@ -62,6 +62,7 @@ class DiscordProgressHandler:
         channel: discord.abc.Messageable,
         loop: asyncio.AbstractEventLoop,
         trigger_message: Optional[discord.Message] = None,
+        header_text: Optional[str] = None,
     ):
         """Initialize progress handler.
 
@@ -69,10 +70,12 @@ class DiscordProgressHandler:
             channel: Discord channel to send progress updates to
             loop: Discord bot's event loop (for thread-safe scheduling)
             trigger_message: The user message that triggered this interaction (for reactions)
+            header_text: First line of the progress tree, used to surface the active session
         """
         self.channel = channel
         self.loop = loop
         self.trigger_message = trigger_message
+        self.header_text = header_text or "🤔 Working..."
         self.progress_msg: Optional[discord.Message] = None
         self.updates: list[ProgressStep] = []
         self.update_lock = asyncio.Lock()
@@ -129,9 +132,12 @@ class DiscordProgressHandler:
         """Handle progress events from the base adapter (e.g. compacting/compacted)."""
         if event_type == "compacting":
             self.updates.append(ProgressStep("Compacting history", False, "📦"))
+        elif event_type == "compacting_waiting":
+            self.updates.append(ProgressStep("Waiting for compaction", False, "⌛"))
         elif event_type == "compacted":
-            if self.updates and self.updates[-1].label == "Compacting history":
-                self.updates[-1] = ProgressStep("Compacting history", True, "📦")
+            if self.updates and self.updates[-1].emoji in {"📦", "⌛"} and not self.updates[-1].completed:
+                last = self.updates[-1]
+                self.updates[-1] = ProgressStep(last.label, True, last.emoji)
         else:
             return
         future = asyncio.run_coroutine_threadsafe(self._update_progress(), self.loop)
@@ -219,7 +225,7 @@ class DiscordProgressHandler:
         if self.done:
             return
 
-        lines = ["🤔 Working..."]
+        lines = [self.header_text]
 
         display_updates = self.updates
         if len(self.updates) > self.MAX_DISPLAY_STEPS:
@@ -621,6 +627,63 @@ class DiscordAdapter(BaseAdapter):
         app_cmd = discord.app_commands.Command(name=cmd.name, description=cmd.description, callback=callback)
         self.bot.tree.add_command(app_cmd)
 
+    def _resolve_target_session(
+        self, message, channel_context: ChannelContext, is_thread: bool, is_dm: bool, thread_id: Optional[str]
+    ) -> Session:
+        """Pick which session this message routes to.
+
+        Thread/channel routing is bypassed when unified_routing is on, so every Discord
+        message from a user lands in that user's default-interactive session — useful for
+        keeping a single conversational thread across DMs, channels, and threads.
+        """
+        user_id = self.resolve_user(str(message.author.id), channel_context)
+
+        if self.bot_config.unified_routing:
+            return self.session_store.get_or_create_interactive(user_id, self.agent_name)
+
+        if is_thread and thread_id:
+            existing = self.session_store.find_by_thread(thread_id)
+            if existing:
+                return existing
+            parent_session = self.session_store.get_or_create_interactive(user_id, self.agent_name)
+            parent_channel_id = getattr(message.channel, "parent_id", None)
+            thread_session = Session(
+                id="",
+                agent=self.agent_name,
+                source=SessionSource.INTERACTIVE.value,
+                user_id=user_id,
+                parent_id=parent_session.id,
+                metadata={
+                    "thread_name": getattr(message.channel, "name", ""),
+                    "channel_id": str(parent_channel_id) if parent_channel_id else None,
+                    "thread_id": thread_id,
+                },
+            )
+            self.session_store.create_session(thread_session)
+            return thread_session
+
+        if not is_dm and message.guild:
+            return self.session_store.get_or_create_channel_session(
+                channel_id=str(message.channel.id),
+                agent=self.agent_name,
+                user_id=user_id,
+            )
+
+        return self.session_store.get_or_create_interactive(user_id, self.agent_name)
+
+    def _build_progress_header(self, message, session: Session, is_thread: bool, is_dm: bool) -> str:
+        if self.bot_config.unified_routing:
+            route = "your session"
+        elif is_dm:
+            route = "DM"
+        elif is_thread:
+            route = f"thread {getattr(message.channel, 'name', '?')}"
+        else:
+            route = f"#{getattr(message.channel, 'name', '?')}"
+
+        identifier = session.metadata.get("topic") or session.id[:6]
+        return f"🤔 {route} · {identifier}"
+
     async def _process_message(self, message, user_msg: str, bot_name: str):
         """Process a message in an isolated task."""
         is_thread = isinstance(message.channel, discord.Thread)
@@ -639,42 +702,13 @@ class DiscordAdapter(BaseAdapter):
             },
         )
 
-        # For threads, resolve the session and pass conv_id_override to skip redundant lookup
-        if is_thread and thread_id:
-            existing = self.session_store.find_by_thread(thread_id)
-            if existing:
-                channel_context.metadata["conv_id_override"] = existing.id
-            else:
-                user_id = self.resolve_user(str(message.author.id), channel_context)
-                parent_session = self.session_store.get_or_create_interactive(user_id, self.agent_name)
+        target_session = self._resolve_target_session(message, channel_context, is_thread, is_dm, thread_id)
+        channel_context.metadata["conv_id_override"] = target_session.id
 
-                parent_channel_id = getattr(message.channel, "parent_id", None)
-                thread_session = Session(
-                    id="",
-                    agent=self.agent_name,
-                    source=SessionSource.INTERACTIVE.value,
-                    user_id=user_id,
-                    parent_id=parent_session.id,
-                    metadata={
-                        "thread_name": getattr(message.channel, "name", ""),
-                        "channel_id": str(parent_channel_id) if parent_channel_id else None,
-                        "thread_id": thread_id,
-                    },
-                )
-                self.session_store.create_session(thread_session)
-                channel_context.metadata["conv_id_override"] = thread_session.id
-
-        if not is_thread and not is_dm and message.guild:
-            user_id = self.resolve_user(str(message.author.id), channel_context)
-            channel_session = self.session_store.get_or_create_channel_session(
-                channel_id=str(message.channel.id),
-                agent=self.agent_name,
-                user_id=user_id,
-            )
-            channel_context.metadata["conv_id_override"] = channel_session.id
+        header_text = self._build_progress_header(message, target_session, is_thread, is_dm)
 
         loop = asyncio.get_running_loop()
-        progress = DiscordProgressHandler(message.channel, loop, trigger_message=message)
+        progress = DiscordProgressHandler(message.channel, loop, trigger_message=message, header_text=header_text)
         custom_logger = SimpleNamespace(ui_handler=progress)
 
         from tsugite.interaction import set_interaction_backend

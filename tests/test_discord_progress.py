@@ -278,6 +278,61 @@ async def test_progress_handler_llm_wait_cleared_by_other_event():
 
 
 @pytest.mark.asyncio
+async def test_progress_handler_custom_header():
+    """Custom header_text replaces the default '🤔 Working...' first line."""
+    channel = MockChannel()
+    handler = DiscordProgressHandler(
+        channel, asyncio.get_running_loop(), header_text="🤔 #general · refactor-auth"
+    )
+
+    await handler._handle_event_async(StepStartEvent(step=1, max_turns=10))
+    content = channel.messages[0].content
+    assert content.startswith("🤔 #general · refactor-auth")
+    assert "🤔 Working..." not in content
+
+
+@pytest.mark.asyncio
+async def test_progress_handler_compacting_active():
+    """compacting event renders 'Compacting history' with 📦."""
+    channel = MockChannel()
+    handler = DiscordProgressHandler(channel, asyncio.get_running_loop())
+
+    handler._emit("compacting", {})
+    await asyncio.sleep(0.05)
+    content = channel.messages[0].content
+    assert "Compacting history" in content
+    assert "📦" in content
+
+
+@pytest.mark.asyncio
+async def test_progress_handler_compacting_waiting_distinct_label():
+    """compacting_waiting renders 'Waiting for compaction' with ⌛, separate from active."""
+    channel = MockChannel()
+    handler = DiscordProgressHandler(channel, asyncio.get_running_loop())
+
+    handler._emit("compacting_waiting", {})
+    await asyncio.sleep(0.05)
+    content = channel.messages[0].content
+    assert "Waiting for compaction" in content
+    assert "⌛" in content
+    assert "Compacting history" not in content
+
+
+@pytest.mark.asyncio
+async def test_progress_handler_compacted_marks_either_complete():
+    """compacted marks the in-flight compaction step done whether active or waiting."""
+    channel = MockChannel()
+    handler = DiscordProgressHandler(channel, asyncio.get_running_loop())
+
+    handler._emit("compacting_waiting", {})
+    await asyncio.sleep(0.05)
+    handler._emit("compacted", {})
+    await asyncio.sleep(0.05)
+    content = channel.messages[0].content
+    assert "Waiting for compaction ✓" in content
+
+
+@pytest.mark.asyncio
 async def test_progress_handler_warning_and_error():
     """Test progress handler with warning and error events."""
     channel = MockChannel()

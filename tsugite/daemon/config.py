@@ -45,6 +45,9 @@ class DiscordBotConfig(BaseModel):
     guild_id: Optional[str] = None  # Sync app commands to this guild only (instant; good for dev)
     dm_policy: Literal["allowlist", "open"] = "allowlist"
     allow_from: List[str] = Field(default_factory=list)
+    # When True, every message from a Discord user routes to that user's default-interactive
+    # session, regardless of channel/thread/DM. Disables per-channel and per-thread sessions.
+    unified_routing: bool = False
 
 
 class NotificationChannelConfig(BaseModel):

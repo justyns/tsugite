@@ -618,9 +618,9 @@ class BaseAdapter(ABC):
         `get_or_create_interactive` would silently substitute the user's
         default-interactive session for non-default or non-interactive sources.
         """
-        self._emit_ui(custom_logger, "compacting")
         new_session: Optional[Session] = None
         if self.session_store.begin_compaction(user_id, self.agent_name):
+            self._emit_ui(custom_logger, "compacting")
             self._broadcast_compaction("compaction_started", self.agent_name)
 
             def progress_cb(payload: Dict[str, Any]) -> None:
@@ -632,6 +632,7 @@ class BaseAdapter(ABC):
                 self.session_store.end_compaction(user_id, self.agent_name)
                 self._broadcast_compaction("compaction_finished", self.agent_name)
         else:
+            self._emit_ui(custom_logger, "compacting_waiting")
             done = await asyncio.to_thread(self.session_store.wait_for_compaction, user_id, self.agent_name)
             if not done:
                 raise TimeoutError("Timed out waiting for session compaction to finish")
