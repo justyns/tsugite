@@ -412,16 +412,41 @@ class BaseAdapter(ABC):
         Returns:
             Agent's response
         """
+        broadcast_state: Dict[str, Optional[str]] = {"conv_id": None}
         try:
-            return await self._handle_message_inner(user_id, message, channel_context, custom_logger)
+            return await self._handle_message_inner(
+                user_id, message, channel_context, custom_logger, _broadcast_state=broadcast_state
+            )
         finally:
             try:
                 self.session_store.flush()
             except Exception as e:
                 logger.warning("session_store.flush after handle_message failed: %s", e)
+            self._broadcast_turn_complete(broadcast_state.get("conv_id"))
+
+    def _broadcast_turn_complete(self, conv_id: Optional[str]) -> None:
+        """Notify SSE listeners (web UI) that a turn just finished, so the
+        sidebar refreshes message_count/last_active and the open conversation
+        reloads from JSONL. Without this, adapter-driven turns (Discord/Slack)
+        don't fire SSE updates and the UI looks frozen until the user clicks.
+        """
+        if not self.event_bus:
+            return
+        try:
+            self.event_bus.emit("history_update", {"agent": self.agent_name})
+            if conv_id:
+                self.event_bus.emit("session_update", {"action": "updated", "id": conv_id})
+        except Exception as e:
+            logger.debug("turn-complete broadcast failed: %s", e)
 
     async def _handle_message_inner(
-        self, user_id: str, message: str, channel_context: ChannelContext, custom_logger: Optional[HasUIHandler] = None
+        self,
+        user_id: str,
+        message: str,
+        channel_context: ChannelContext,
+        custom_logger: Optional[HasUIHandler] = None,
+        *,
+        _broadcast_state: Optional[Dict[str, Optional[str]]] = None,
     ) -> str:
         user_id = self.resolve_user(user_id, channel_context)
 
@@ -436,6 +461,8 @@ class BaseAdapter(ABC):
                 conv_id = thread_session.id
             else:
                 conv_id = self.session_store.get_or_create_interactive(user_id, self.agent_name).id
+        if _broadcast_state is not None:
+            _broadcast_state["conv_id"] = conv_id
 
         # Compaction applies to override (pinned/explicit) sessions too —
         # otherwise cumulative_tokens grow until the provider raises "Prompt
@@ -443,6 +470,8 @@ class BaseAdapter(ABC):
         # to the successor, so the user's pin follows the rotation.
         if self.session_store.needs_compaction(conv_id) or self.session_store.is_compacting(user_id, self.agent_name):
             conv_id = await self._run_compaction(user_id, conv_id, custom_logger, reason="token_threshold")
+            if _broadcast_state is not None:
+                _broadcast_state["conv_id"] = conv_id
 
         from tsugite.daemon.session_runner import get_current_session_id, set_current_session_id
 
@@ -532,6 +561,8 @@ class BaseAdapter(ABC):
                     raise
                 logger.warning("[%s] Prompt too long, auto-compacting and retrying", self.agent_name)
                 conv_id = await self._run_compaction(user_id, conv_id, custom_logger, reason="prompt_too_long")
+                if _broadcast_state is not None:
+                    _broadcast_state["conv_id"] = conv_id
                 ctx = contextvars.copy_context()
                 result = await asyncio.to_thread(ctx.run, run_in_workspace)
             else:
