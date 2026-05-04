@@ -412,6 +412,17 @@ class BaseAdapter(ABC):
         Returns:
             Agent's response
         """
+        try:
+            return await self._handle_message_inner(user_id, message, channel_context, custom_logger)
+        finally:
+            try:
+                self.session_store.flush()
+            except Exception as e:
+                logger.warning("session_store.flush after handle_message failed: %s", e)
+
+    async def _handle_message_inner(
+        self, user_id: str, message: str, channel_context: ChannelContext, custom_logger: Optional[HasUIHandler] = None
+    ) -> str:
         user_id = self.resolve_user(user_id, channel_context)
 
         conv_id_override = (channel_context.metadata or {}).get("conv_id_override")
@@ -596,6 +607,7 @@ class BaseAdapter(ABC):
             title = await compute_session_title(user_message, assistant_response, self.resolve_model())
             if title:
                 self.session_store.update_session(session_id, title=title)
+                self.session_store.flush()
                 if self.event_bus:
                     self.event_bus.emit("session_update", {"action": "titled", "id": session_id, "title": title})
         except Exception as e:
