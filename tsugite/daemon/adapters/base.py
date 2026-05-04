@@ -16,8 +16,10 @@ from tsugite.agent_inheritance import find_agent_file
 from tsugite.agent_runner import run_agent
 from tsugite.daemon.config import AgentConfig
 from tsugite.daemon.session_store import READ_ONLY_METADATA_KEYS, Session, SessionStore
+from tsugite.events.base import BaseEvent
 from tsugite.exceptions import AgentExecutionError
 from tsugite.options import ExecutionOptions
+from tsugite.ui.jsonl import JSONLUIHandler
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +77,67 @@ class ThreadCapability(Protocol):
     async def close_thread(self, platform_thread_id: str) -> None:
         """Archive/close a thread."""
         ...
+
+
+# Mid-stream events that the cross-session SSE feed deliberately drops to avoid
+# duplicating what the per-chat streaming response already delivers.
+_BROADCAST_SKIP_EVENTS = frozenset({"stream_chunk", "stream_complete", "prompt_snapshot"})
+
+# Event types persisted to the session JSONL by the SSE handler so the web UI
+# can replay them after a reload (the agent already records execution events).
+_PERSIST_EVENT_TYPES = frozenset({"prompt_snapshot", "reaction", "final_result", "error", "cancelled"})
+
+
+class SSEBroadcastHandler(JSONLUIHandler):
+    """ui_handler that fans agent events out to the cross-session SSE feed.
+
+    HTTP turns get this implicitly via SSEProgressHandler; non-HTTP adapters
+    (Discord, future Slack) compose this with their own progress handler so the
+    web UI sees the same live updates regardless of which surface drove the turn.
+    """
+
+    def __init__(
+        self,
+        broadcaster: Any,
+        session_id: str,
+        persist_event: Optional[Callable[[Dict[str, Any]], None]] = None,
+    ):
+        self._broadcaster = broadcaster
+        self._session_id = session_id
+        self._persist_event = persist_event
+        self.has_final = False
+
+    def _emit(self, event_type: str, data: Dict[str, Any]) -> None:
+        if event_type == "final_result":
+            self.has_final = True
+        payload = {"type": event_type, **data}
+        if self._persist_event and event_type in _PERSIST_EVENT_TYPES:
+            try:
+                self._persist_event(payload)
+            except Exception as e:
+                logger.debug("SSE persist failed: %s", e)
+        if self._broadcaster and self._session_id and event_type not in _BROADCAST_SKIP_EVENTS:
+            try:
+                self._broadcaster.emit(
+                    "session_event",
+                    {"session_id": self._session_id, "event_type": event_type, **data},
+                )
+            except Exception as e:
+                logger.debug("SSE broadcast failed: %s", e)
+
+
+class CompositeUIHandler:
+    """Fans BaseEvent dispatches out to multiple sub-handlers."""
+
+    def __init__(self, *handlers: Any):
+        self._handlers = handlers
+
+    def handle_event(self, event: BaseEvent) -> None:
+        for h in self._handlers:
+            try:
+                h.handle_event(event)
+            except Exception as e:
+                logger.debug("composite ui_handler sub-handler error: %s", e)
 
 
 def resolve_agent_path(agent_file: str, workspace_dir: Path, workspace: Any = None) -> Optional[Path]:

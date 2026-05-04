@@ -4,13 +4,14 @@ import asyncio
 import inspect
 import logging
 import re
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import NamedTuple, Optional
 
 import discord
 from discord.ext import commands
 
-from tsugite.daemon.adapters.base import BaseAdapter, ChannelContext
+from tsugite.daemon.adapters.base import BaseAdapter, ChannelContext, CompositeUIHandler, SSEBroadcastHandler
 from tsugite.daemon.config import AgentConfig, DiscordBotConfig
 from tsugite.daemon.session_store import Session, SessionSource, SessionStore
 from tsugite.events import (
@@ -715,7 +716,15 @@ class DiscordAdapter(BaseAdapter):
 
         loop = asyncio.get_running_loop()
         progress = DiscordProgressHandler(message.channel, loop, trigger_message=message, header_text=header_text)
-        custom_logger = SimpleNamespace(ui_handler=progress)
+        sse_handler = SSEBroadcastHandler(
+            broadcaster=self.event_bus,
+            session_id=target_session.id,
+            persist_event=lambda payload: self.session_store.append_event(
+                target_session.id,
+                {**payload, "timestamp": datetime.now(timezone.utc).isoformat()},
+            ),
+        )
+        custom_logger = SimpleNamespace(ui_handler=CompositeUIHandler(progress, sse_handler))
 
         from tsugite.interaction import set_interaction_backend
 
@@ -738,11 +747,15 @@ class DiscordAdapter(BaseAdapter):
                 custom_logger=custom_logger,
             )
             await progress.cleanup(success=True)
+            if not sse_handler.has_final:
+                sse_handler._emit("final_result", {"result": response})
 
         except Exception as e:
             await progress.cleanup(success=False)
             response = f"Error processing message: {e}"
             logger.error("[%s] %s", bot_name, e, exc_info=True)
+            if not sse_handler.has_final:
+                sse_handler._emit("error", {"error": str(e)})
         finally:
             # Remove from active handlers after cleanup
             if progress in self.active_progress_handlers:

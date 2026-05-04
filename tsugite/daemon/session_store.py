@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 
 _SESSION_END_EVENT_TYPES = frozenset(
-    {"session_complete", "session_error", "session_cancelled", "final_result", "error", "cancelled"}
+    {"session_complete", "session_error", "session_cancelled", "final_result", "error", "cancelled", "session_end"}
 )
 
 

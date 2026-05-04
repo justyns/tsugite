@@ -5,9 +5,15 @@ from pathlib import Path
 
 import pytest
 
-from tsugite.daemon.adapters.base import BaseAdapter, ChannelContext
+from tsugite.daemon.adapters.base import (
+    BaseAdapter,
+    ChannelContext,
+    CompositeUIHandler,
+    SSEBroadcastHandler,
+)
 from tsugite.daemon.config import AgentConfig
 from tsugite.daemon.session_store import Session, SessionSource, SessionStore
+from tsugite.events import FinalAnswerEvent, StepStartEvent
 
 
 class _StubAdapter(BaseAdapter):
@@ -139,3 +145,72 @@ async def test_handle_message_broadcasts_on_error_path(adapter, monkeypatch):
     types = [t for t, _ in a.event_bus.emitted]
     assert "history_update" in types
     assert "session_update" in types
+
+
+def test_sse_broadcast_handler_emits_session_event():
+    """SSEBroadcastHandler turns BaseEvent into a session_event SSE message."""
+    bus = _RecordingEventBus()
+    handler = SSEBroadcastHandler(broadcaster=bus, session_id="s1")
+
+    handler.handle_event(StepStartEvent(step=2, max_turns=10))
+
+    types = [t for t, _ in bus.emitted]
+    assert "session_event" in types
+    payload = next(p for t, p in bus.emitted if t == "session_event")
+    assert payload["session_id"] == "s1"
+    assert payload["event_type"] == "turn_start"
+    assert payload["turn"] == 2
+
+
+def test_sse_broadcast_handler_persists_final_result():
+    """final_result events get persisted to JSONL via the persist_event callback."""
+    bus = _RecordingEventBus()
+    persisted: list[dict] = []
+    handler = SSEBroadcastHandler(
+        broadcaster=bus,
+        session_id="s1",
+        persist_event=persisted.append,
+    )
+
+    handler.handle_event(FinalAnswerEvent(answer="all done", turns=1, tokens=10, cost=0.0))
+
+    assert handler.has_final
+    assert any(p.get("type") == "final_result" for p in persisted)
+
+
+def test_composite_ui_handler_fans_out_to_all_subhandlers():
+    """CompositeUIHandler forwards each event to every subhandler."""
+    seen_a: list = []
+    seen_b: list = []
+
+    class _Recorder:
+        def __init__(self, sink):
+            self._sink = sink
+
+        def handle_event(self, event):
+            self._sink.append(event)
+
+    composite = CompositeUIHandler(_Recorder(seen_a), _Recorder(seen_b))
+    event = StepStartEvent(step=1, max_turns=10)
+    composite.handle_event(event)
+
+    assert seen_a == [event]
+    assert seen_b == [event]
+
+
+def test_composite_ui_handler_isolates_subhandler_failures():
+    """A throwing subhandler must not stop other subhandlers from receiving the event."""
+    seen: list = []
+
+    class _Boom:
+        def handle_event(self, _event):
+            raise RuntimeError("boom")
+
+    class _Recorder:
+        def handle_event(self, event):
+            seen.append(event)
+
+    composite = CompositeUIHandler(_Boom(), _Recorder())
+    composite.handle_event(StepStartEvent(step=1, max_turns=10))
+
+    assert len(seen) == 1
