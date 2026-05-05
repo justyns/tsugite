@@ -519,6 +519,11 @@ export default () => ({
     if (this.sendingBySession[d.session_id]) return;
 
     const evType = d.event_type;
+    // Defense-in-depth: even if a future adapter broadcasts turn-end events,
+    // loadHistory (fired by the paired history_update) reconciles them from
+    // JSONL. Pushing here would race the per-chat reader's clear of
+    // sendingBySession and produce duplicate bubbles.
+    if (TURN_END_EVENTS.has(evType)) return;
 
     if (!this._sessionProgress) {
       this._sessionProgress = { type: 'progress', steps: [], statusText: 'Working...', turnCount: 0, toolCount: 0 };

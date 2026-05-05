@@ -237,11 +237,23 @@ async def sse_stream(queue: asyncio.Queue, keepalive_interval: float = 15.0):
 # on the cross-session broadcaster prevents the active tab from rendering the
 # same progress twice, and keeps the broadcast to what other surfaces (sidebar
 # progress cache, non-active session detail view) actually read.
+#
+# Turn-end events (final_result, error, cancelled) are deliberately included
+# here even though other tabs won't see them live: the same _emit() flow also
+# fires history_update on the global event bus after the turn settles, which
+# triggers loadHistory() in those tabs and rebuilds the message list from JSONL.
+# Broadcasting turn-end events too would race the active tab's per-chat reader
+# (sendingBySession is cleared in streaming.js's finally block, leaving a window
+# where late-arriving session_event(final_result) bypasses the dedup guard and
+# pushes a duplicate bubble until the next reload).
 _BROADCAST_SKIP_EVENTS = frozenset(
     {
         "stream_chunk",
         "stream_complete",
         "prompt_snapshot",
+        "final_result",
+        "error",
+        "cancelled",
     }
 )
 

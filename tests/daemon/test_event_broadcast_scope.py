@@ -28,6 +28,17 @@ def test_noisy_events_not_broadcast():
     assert _broadcast_event_types(handler, noisy) == []
 
 
+def test_turn_end_events_not_broadcast():
+    """final_result/error/cancelled are delivered to the active tab via the
+    per-chat streaming SSE response. Broadcasting them on the cross-session bus
+    races with the streaming reader's clear of sendingBySession in the web UI
+    and produces duplicate bubbles. history_update + loadHistory keep other
+    tabs in sync."""
+    handler = SSEProgressHandler()
+    turn_end = ["final_result", "error", "cancelled"]
+    assert _broadcast_event_types(handler, turn_end) == []
+
+
 def test_sidebar_relevant_events_still_broadcast():
     handler = SSEProgressHandler()
     needed = [
@@ -39,8 +50,6 @@ def test_sidebar_relevant_events_still_broadcast():
         "session_complete",
         "session_error",
         "session_cancelled",
-        "final_result",
-        "error",
     ]
     forwarded = _broadcast_event_types(handler, needed)
     assert len(forwarded) == len(needed)
