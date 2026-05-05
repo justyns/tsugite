@@ -13,7 +13,9 @@ Error Handling Patterns:
 
 from typing import Any, Dict, List, Optional
 
-from pydantic import Field
+from pydantic import Field, field_validator
+
+from tsugite.secrets.registry import get_registry
 
 from .base import BaseEvent, EventType
 
@@ -320,6 +322,11 @@ class ToolCallEvent(BaseEvent):
     arguments: Dict[str, Any] = Field(default_factory=dict)
     step: Optional[int] = Field(default=None, ge=1)
 
+    @field_validator("arguments", mode="before")
+    @classmethod
+    def _mask_arguments(cls, v):
+        return get_registry().mask_obj(v)
+
 
 class ToolResultEvent(BaseEvent):
     """Tool invocation completed (audit trail)."""
@@ -330,6 +337,12 @@ class ToolResultEvent(BaseEvent):
     result_summary: str = ""
     duration_ms: Optional[int] = Field(default=None, ge=0)
     step: Optional[int] = Field(default=None, ge=1)
+
+    @field_validator("result_summary", mode="before")
+    @classmethod
+    def _mask_summary(cls, v):
+        # mode="before" sees raw input; non-str passes through to Pydantic coercion.
+        return get_registry().mask(v) if isinstance(v, str) else v
 
 
 class CustomEvent(BaseEvent):

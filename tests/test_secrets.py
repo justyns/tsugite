@@ -251,6 +251,43 @@ class TestSecretRegistry:
         registry.clear()
         assert registry.mask("val") == "val"
 
+    def test_mask_obj_string_leaf(self, registry):
+        registry.register("k", "secret123")
+        assert registry.mask_obj("token: secret123") == "token: ***"
+
+    def test_mask_obj_dict_with_secret(self, registry):
+        registry.register("k", "secret123")
+        assert registry.mask_obj({"Authorization": "token secret123"}) == {"Authorization": "token ***"}
+
+    def test_mask_obj_nested_dict(self, registry):
+        registry.register("k", "secret123")
+        result = registry.mask_obj({"headers": {"Authorization": "token secret123"}})
+        assert result == {"headers": {"Authorization": "token ***"}}
+
+    def test_mask_obj_list_of_strings(self, registry):
+        registry.register("k", "secret123")
+        assert registry.mask_obj(["ok", "has secret123 inside", "fine"]) == ["ok", "has *** inside", "fine"]
+
+    def test_mask_obj_tuple_preserves_type(self, registry):
+        registry.register("k", "secret123")
+        result = registry.mask_obj(("ok", "secret123"))
+        assert isinstance(result, tuple)
+        assert result == ("ok", "***")
+
+    def test_mask_obj_non_string_leaves_passthrough(self, registry):
+        registry.register("k", "secret123")
+        result = registry.mask_obj({"count": 5, "ok": True, "missing": None, "ratio": 1.5})
+        assert result == {"count": 5, "ok": True, "missing": None, "ratio": 1.5}
+
+    def test_mask_obj_no_secrets_returns_input(self, registry):
+        payload = {"a": "b", "c": [1, "d"]}
+        assert registry.mask_obj(payload) is payload
+
+    def test_mask_obj_mixed_nested(self, registry):
+        registry.register("k", "secret123")
+        result = registry.mask_obj({"a": [1, "secret123", {"b": "x secret123 y"}]})
+        assert result == {"a": [1, "***", {"b": "x *** y"}]}
+
 
 # -- MaskingFilter --
 

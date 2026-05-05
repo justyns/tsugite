@@ -5,6 +5,7 @@ Tracks all resolved secret values and masks them in output.
 
 import logging
 import threading
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,26 @@ class SecretRegistry:
             if value in text:
                 text = text.replace(value, "***")
         return text
+
+    def mask_obj(self, obj: Any) -> Any:
+        """Recursively mask known secret values in nested str/dict/list/tuple structures.
+
+        Bytes, sets, and custom types pass through unchanged.
+        """
+        if not self._sorted:
+            return obj
+        return self._mask_walk(obj)
+
+    def _mask_walk(self, obj: Any) -> Any:
+        if isinstance(obj, str):
+            return self.mask(obj)
+        if isinstance(obj, dict):
+            return {k: self._mask_walk(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [self._mask_walk(v) for v in obj]
+        if isinstance(obj, tuple):
+            return tuple(self._mask_walk(v) for v in obj)
+        return obj
 
     def clear(self):
         with self._lock:

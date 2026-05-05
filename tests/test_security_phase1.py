@@ -178,6 +178,56 @@ class TestAuditEvents:
 
 
 # ============================================================================
+# Audit events mask registered secrets
+# ============================================================================
+
+
+@pytest.fixture
+def registered_secret():
+    """Register a secret on the global singleton; clear after each test."""
+    from tsugite.secrets.registry import get_registry
+
+    r = get_registry()
+    r.clear()
+    r.register("test-secret", "secret123")
+    yield "secret123"
+    r.clear()
+
+
+class TestAuditEventsMaskSecrets:
+    def test_tool_call_event_masks_top_level_string_arg(self, registered_secret):
+        event = ToolCallEvent(tool_name="x", arguments={"token": "secret123"})
+        assert event.arguments == {"token": "***"}
+
+    def test_tool_call_event_masks_nested_header(self, registered_secret):
+        event = ToolCallEvent(
+            tool_name="http_request",
+            arguments={"headers": {"Authorization": "token secret123"}},
+        )
+        assert event.arguments == {"headers": {"Authorization": "token ***"}}
+
+    def test_tool_call_event_masks_inside_list(self, registered_secret):
+        event = ToolCallEvent(tool_name="x", arguments={"items": ["secret123", "ok"]})
+        assert event.arguments == {"items": ["***", "ok"]}
+
+    def test_tool_call_event_no_registered_secrets_passthrough(self):
+        from tsugite.secrets.registry import get_registry
+
+        get_registry().clear()
+        args = {"path": "/etc/hosts", "count": 3}
+        event = ToolCallEvent(tool_name="read_file", arguments=args)
+        assert event.arguments == {"path": "/etc/hosts", "count": 3}
+
+    def test_tool_result_event_masks_summary(self, registered_secret):
+        event = ToolResultEvent(
+            tool_name="http_request",
+            success=True,
+            result_summary="returned secret123 ok",
+        )
+        assert event.result_summary == "returned *** ok"
+
+
+# ============================================================================
 # JSONL handler for audit events
 # ============================================================================
 
