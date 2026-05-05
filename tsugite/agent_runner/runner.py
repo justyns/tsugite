@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional  # noqa: E402
 from tsugite.config import get_xdg_data_path  # noqa: E402
 from tsugite.core.agent import TsugiteAgent  # noqa: E402
 from tsugite.core.executor import LocalExecutor  # noqa: E402
-from tsugite.exceptions import AgentExecutionError  # noqa: E402
+from tsugite.exceptions import AgentExecutionError, is_prompt_too_long_error  # noqa: E402
 from tsugite.md_agents import AgentConfig, parse_agent_file  # noqa: E402
 from tsugite.models import resolve_effective_model  # noqa: E402
 from tsugite.options import ExecutionOptions  # noqa: E402
@@ -982,7 +982,7 @@ async def run_agent_async(
             if claude_code_resume_session and (
                 "process ended" in err_str
                 or "no conversation found" in err_str
-                or "prompt too long" in err_str
+                or is_prompt_too_long_error(err_str)
                 or "format_error_loop" in err_str
             ):
                 logger.warning("Claude Code resume failed (%s), retrying with fresh session", e)

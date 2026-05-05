@@ -17,7 +17,7 @@ from tsugite.agent_runner import run_agent
 from tsugite.daemon.config import AgentConfig
 from tsugite.daemon.session_store import READ_ONLY_METADATA_KEYS, Session, SessionStore
 from tsugite.events.base import BaseEvent
-from tsugite.exceptions import AgentExecutionError
+from tsugite.exceptions import AgentExecutionError, is_prompt_too_long_error
 from tsugite.options import ExecutionOptions
 from tsugite.ui.jsonl import JSONLUIHandler
 
@@ -612,7 +612,7 @@ class BaseAdapter(ABC):
         try:
             result = await asyncio.to_thread(ctx.run, run_in_workspace)
         except AgentExecutionError as e:
-            if "prompt too long" in str(e).lower():
+            if is_prompt_too_long_error(e):
                 code_events_after = self.session_store.count_events_by_type(conv_id, "code_execution")
                 if code_events_after > code_events_before:
                     logger.warning(

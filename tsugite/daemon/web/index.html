@@ -760,7 +760,7 @@
                           <div style="display:flex;gap:8px;margin:8px 0 0;flex-wrap:wrap">
                             <button class="hbtn archive" @click="retryMessage(msg.lastMessage)">retry</button>
                             <button class="hbtn" @click="continueAfterError(msg.lastMessage, msg.errorText)">continue</button>
-                            <template x-if="msg.errorText && msg.errorText.toLowerCase().includes('prompt too long')">
+                            <template x-if="msg.errorText && (msg.errorText.toLowerCase().includes('prompt is too long') || msg.errorText.toLowerCase().includes('prompt too long') || msg.errorText.toLowerCase().includes('context length exceeded'))">
                               <button class="hbtn" @click="compactSession(msg.lastMessage)">compact &amp; retry</button>
                             </template>
                           </div>

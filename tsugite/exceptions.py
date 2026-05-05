@@ -53,3 +53,14 @@ class AgentExecutionError(RuntimeError):
         self.cost = cost
         self.step_count = step_count
         self.partial_output = partial_output
+
+
+def is_prompt_too_long_error(error: BaseException | str) -> bool:
+    """Return True if `error` looks like a context-overflow signal from any provider.
+
+    Centralized so the daemon retry, runner fallback, and UI footer all agree
+    on what counts. The Claude Code CLI emits "Prompt is too long"; LiteLLM and
+    OpenAI-compatible providers use "prompt too long" or "context length exceeded".
+    """
+    s = str(error).lower()
+    return any(needle in s for needle in ("prompt is too long", "prompt too long", "context length exceeded"))

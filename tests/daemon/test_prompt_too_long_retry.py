@@ -85,7 +85,7 @@ async def test_retry_skipped_after_side_effecting_code_ran(stub_adapter_internal
                 session.id,
                 {"type": "code_execution", "code": "x=1", "output": "ok"},
             )
-            raise AgentExecutionError("context length exceeded, prompt too long")
+            raise AgentExecutionError("Prompt is too long (subtype=success)")
         return MagicMock(token_count=0, cost=0, execution_steps=[])
 
     async def fake_compaction(*args, **kwargs):
@@ -118,7 +118,7 @@ async def test_retry_still_fires_when_no_side_effects_yet(stub_adapter_internals
     def fake_run_agent(*args, **kwargs):
         call_count["n"] += 1
         if call_count["n"] == 1:
-            raise AgentExecutionError("prompt too long")
+            raise AgentExecutionError("Prompt is too long (subtype=success)")
         return MagicMock(token_count=0, cost=0, execution_steps=[], __str__=lambda self: "ok")
 
     async def fake_compaction(*args, **kwargs):
@@ -150,7 +150,7 @@ async def test_retry_fires_for_pinned_session_when_no_side_effects(stub_adapter_
     def fake_run_agent(*args, **kwargs):
         call_count["n"] += 1
         if call_count["n"] == 1:
-            raise AgentExecutionError("prompt too long")
+            raise AgentExecutionError("Prompt is too long (subtype=success)")
         return MagicMock(token_count=0, cost=0, execution_steps=[], __str__=lambda self: "ok")
 
     async def fake_compaction(*args, **kwargs):
@@ -185,7 +185,7 @@ async def test_retry_skipped_for_pinned_session_after_side_effects(stub_adapter_
                 session.id,
                 {"type": "code_execution", "code": "x=1", "output": "ok"},
             )
-            raise AgentExecutionError("context length exceeded, prompt too long")
+            raise AgentExecutionError("Prompt is too long (subtype=success)")
         return MagicMock(token_count=0, cost=0, execution_steps=[])
 
     async def fake_compaction(*args, **kwargs):
