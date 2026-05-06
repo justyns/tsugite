@@ -203,6 +203,10 @@ class Session:
     last_viewed_at: str = ""
     superseded_by: Optional[str] = None
 
+    @property
+    def is_primary(self) -> bool:
+        return bool(self.metadata.get(METADATA_PRIMARY_FLAG))
+
     def __post_init__(self):
         if not self.id:
             self.id = f"session-{uuid4().hex[:8]}"
@@ -524,13 +528,16 @@ class SessionStore:
             self._save()
             return target
 
-    def clear_primary_session(self, user_id: str, agent: str) -> None:
-        """Remove the primary flag from any session for (user_id, agent)."""
+    def clear_primary_session(self, user_id: str, agent: str) -> Optional[Session]:
+        """Remove the primary flag from any session for (user_id, agent). Returns the cleared session, if any."""
         with self._lock:
+            cleared: Optional[Session] = None
             for s in self._sessions.values():
                 if s.user_id == user_id and s.agent == agent and s.metadata.get(METADATA_PRIMARY_FLAG):
                     s.metadata.pop(METADATA_PRIMARY_FLAG, None)
+                    cleared = s
             self._save()
+            return cleared
 
     def get_or_create_named_session(self, user_id: str, agent: str, name: str) -> Session:
         """Resolve a named-route session for (user_id, agent), creating one if absent.

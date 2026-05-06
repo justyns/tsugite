@@ -499,6 +499,9 @@ class HTTPServer:
             Route("/api/sessions/{session_id}/pin", self._api_pin_session, methods=["POST"]),
             Route("/api/sessions/{session_id}/unpin", self._api_unpin_session, methods=["POST"]),
             Route("/api/sessions/pinned/reorder", self._api_reorder_pins, methods=["POST"]),
+            # NB: clear-primary literal must precede {session_id}/set-primary -- Starlette matches in order.
+            Route("/api/sessions/clear-primary", self._api_clear_primary, methods=["POST"]),
+            Route("/api/sessions/{session_id}/set-primary", self._api_set_primary, methods=["POST"]),
             Route("/api/sessions/{session_id}/mark-viewed", self._api_mark_viewed, methods=["POST"]),
             Route("/api/webhooks", self._list_webhooks, methods=["GET"]),
             Route("/api/webhooks", self._create_webhook, methods=["POST"]),
@@ -1627,7 +1630,9 @@ class HTTPServer:
         return None
 
     def _session_detail(self, session_id: str) -> dict:
-        return self.session_runner.store.session_detail(session_id)
+        detail = self.session_runner.store.session_detail(session_id)
+        detail["is_primary"] = bool(detail.get("metadata", {}).get("is_primary"))
+        return detail
 
     async def _api_list_sessions(self, request: Request) -> JSONResponse:
         if err := self._require_auth_and_sessions(request):
@@ -1648,6 +1653,7 @@ class HTTPServer:
                         "error": s.error,
                         "title": s.title,
                         "metadata": s.metadata or {},
+                        "is_primary": s.is_primary,
                     }
                     for s in sessions
                 ]
@@ -1785,6 +1791,28 @@ class HTTPServer:
             return JSONResponse({"error": "ids must be a list of strings"}, status_code=400)
         ordered = self.session_runner.reorder_pins(ids)
         return JSONResponse({"ok": True, "ordered": [s.id for s in ordered]})
+
+    async def _api_set_primary(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_sessions(request):
+            return err
+        session_id = request.path_params["session_id"]
+        try:
+            self.session_runner.set_primary_session(session_id)
+        except ValueError as e:
+            msg = str(e)
+            status = 404 if "not found" in msg else 400
+            return JSONResponse({"error": msg}, status_code=status)
+        return JSONResponse({"ok": True, "id": session_id, "is_primary": True})
+
+    async def _api_clear_primary(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_sessions(request):
+            return err
+        agent = request.query_params.get("agent")
+        user_id = request.query_params.get("user_id")
+        if not agent or not user_id:
+            return JSONResponse({"error": "agent and user_id query params required"}, status_code=400)
+        self.session_runner.clear_primary_session(user_id, agent)
+        return JSONResponse({"ok": True})
 
     async def _api_mark_viewed(self, request: Request) -> JSONResponse:
         if err := self._require_auth_and_sessions(request):

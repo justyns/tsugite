@@ -240,6 +240,21 @@ class SessionRunner:
             self._event_bus.emit("session_update", {"action": "reordered", "ids": [s.id for s in ordered]})
         return ordered
 
+    def set_primary_session(self, session_id: str) -> Session:
+        session = self._store.set_primary_session(session_id)
+        if self._event_bus:
+            self._event_bus.emit("session_update", {"action": "primary_set", "id": session_id})
+        return session
+
+    def clear_primary_session(self, user_id: str, agent: str) -> Optional[Session]:
+        cleared = self._store.clear_primary_session(user_id, agent)
+        if self._event_bus:
+            self._event_bus.emit(
+                "session_update",
+                {"action": "primary_cleared", "id": cleared.id if cleared else None},
+            )
+        return cleared
+
     def mark_viewed(self, session_id: str, ts: Optional[str] = None) -> Session:
         session = self._store.mark_viewed(session_id, ts=ts)
         if self._event_bus:

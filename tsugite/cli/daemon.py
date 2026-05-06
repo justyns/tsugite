@@ -440,6 +440,63 @@ schedule_app = typer.Typer(help="Manage daemon schedules")
 daemon_app.add_typer(schedule_app, name="schedule")
 
 
+session_app = typer.Typer(help="Manage daemon sessions")
+daemon_app.add_typer(session_app, name="session")
+
+
+@session_app.command("set-primary")
+def session_set_primary(
+    session_id: str = typer.Argument(help="Session ID to mark as primary"),
+    host: str = typer.Option("127.0.0.1", "--host", help="Daemon HTTP host"),
+    port: int = typer.Option(8321, "--port", "-p", help="Daemon HTTP port"),
+    token: Optional[str] = typer.Option(None, "--token", "-t", help="Auth token"),
+):
+    """Mark a session as the user's primary for its agent."""
+    _daemon_request("POST", host, port, f"/api/sessions/{session_id}/set-primary", token, json={})
+    console.print(f"[green]✓[/green] Session [cyan]{session_id}[/cyan] is now primary")
+
+
+@session_app.command("clear-primary")
+def session_clear_primary(
+    agent: str = typer.Option(..., "--agent", "-a", help="Agent name"),
+    user_id: str = typer.Option("web-anonymous", "--user", "-u", help="User ID"),
+    host: str = typer.Option("127.0.0.1", "--host", help="Daemon HTTP host"),
+    port: int = typer.Option(8321, "--port", "-p", help="Daemon HTTP port"),
+    token: Optional[str] = typer.Option(None, "--token", "-t", help="Auth token"),
+):
+    """Remove the primary flag from any session for (user, agent)."""
+    path = f"/api/sessions/clear-primary?agent={agent}&user_id={user_id}"
+    _daemon_request("POST", host, port, path, token)
+    console.print(f"[green]✓[/green] Cleared primary for agent [cyan]{agent}[/cyan] user [cyan]{user_id}[/cyan]")
+
+
+@session_app.command("list")
+def session_list(
+    host: str = typer.Option("127.0.0.1", "--host", help="Daemon HTTP host"),
+    port: int = typer.Option(8321, "--port", "-p", help="Daemon HTTP port"),
+    token: Optional[str] = typer.Option(None, "--token", "-t", help="Auth token"),
+):
+    """List all daemon sessions, indicating which one is primary."""
+    from rich.table import Table
+
+    data = _daemon_request("GET", host, port, "/api/sessions", token)
+    sessions = data.get("sessions", [])
+    if not sessions:
+        console.print("No sessions")
+        return
+
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("Primary", justify="center")
+    table.add_column("ID", style="cyan")
+    table.add_column("Agent")
+    table.add_column("Title")
+    table.add_column("State")
+    for s in sessions:
+        primary = "★" if s.get("is_primary") else ""
+        table.add_row(primary, s["id"], s.get("agent", ""), s.get("title") or "", s.get("state", ""))
+    console.print(table)
+
+
 def _parse_every_to_cron(every: str) -> str:
     """Convert --every shorthand (e.g., '2h', '30m', '1d') to cron expression."""
     m = re.match(r"^(\d+)([mhd])$", every.strip())
