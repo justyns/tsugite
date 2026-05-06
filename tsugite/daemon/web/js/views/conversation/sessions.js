@@ -408,6 +408,25 @@ export const sessionsMixin = {
     }
   },
 
+  async togglePrimary(s) {
+    if (!s || !s.id) return;
+    const wasPrimary = !!s.is_primary;
+    s.is_primary = !wasPrimary;  // optimistic
+    try {
+      if (wasPrimary) {
+        const agent = s.agent || '';
+        const userId = s.user_id || s.metadata?.user_id || 'web-anonymous';
+        await post(`/api/sessions/clear-primary?agent=${encodeURIComponent(agent)}&user_id=${encodeURIComponent(userId)}`, {});
+      } else {
+        await post(`/api/sessions/${s.id}/set-primary`, {});
+      }
+      await this.loadSessions();
+    } catch (e) {
+      s.is_primary = wasPrimary;  // revert
+      this.messages.push({ type: 'error', text: `Primary toggle failed: ${e.message}` });
+    }
+  },
+
   onPinDragStart(s, event) {
     this.draggingPinId = s.id;
     if (event.dataTransfer) {

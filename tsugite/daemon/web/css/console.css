@@ -288,9 +288,11 @@ body.console-shell { display: flex; flex-direction: column; height: 100dvh; }
 }
 .console-session:hover .row1 .icon-btn,
 .console-session:focus-within .row1 .icon-btn,
-.console-session .row1 .icon-btn.pin-on { opacity: 1; }
+.console-session .row1 .icon-btn.pin-on,
+.console-session .row1 .icon-btn.primary-on { opacity: 1; }
 .console-session .row1 .icon-btn:hover { color: var(--lavender); }
 .console-session .row1 .icon-btn.pin-on { color: var(--yellow); }
+.console-session .row1 .icon-btn.primary-on { color: var(--green); }
 .console-session .row1 .unread-dot {
   width: 6px; height: 6px; border-radius: 50%;
   background: var(--lavender);
