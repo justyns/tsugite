@@ -43,12 +43,6 @@ def _resolve_originating(entry: ScheduleEntry, store) -> Session | None:
     return session
 
 
-def _find_primary(store, user_id: str, agent: str) -> Session | None:
-    """Look up the user's primary session. Returns None until Tier 2 adds the API."""
-    fn = getattr(store, "find_primary_session", None)
-    return fn(user_id, agent) if fn else None
-
-
 def resolve_target_session(entry: ScheduleEntry, user_id: str, store, agent: str) -> Session | None:
     """Resolve `entry.target_session` to a concrete Session, or None to skip injection.
 
@@ -58,9 +52,9 @@ def resolve_target_session(entry: ScheduleEntry, user_id: str, store, agent: str
     if spec == "none":
         return None
     if spec is None:
-        return _find_primary(store, user_id, agent) or _resolve_originating(entry, store)
+        return store.find_primary_session(user_id, agent) or _resolve_originating(entry, store)
     if spec == "primary":
-        return _find_primary(store, user_id, agent)
+        return store.find_primary_session(user_id, agent)
     if spec == "originating":
         return _resolve_originating(entry, store)
     if spec.startswith("name:"):

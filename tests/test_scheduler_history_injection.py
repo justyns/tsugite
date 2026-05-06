@@ -299,6 +299,26 @@ class TestResolveTargetSession:
         assert result is not None
         assert result.id in {"sess-a", "sess-b"}
 
+    def test_null_routes_to_primary_when_set(self, store):
+        from tsugite.daemon.adapters.scheduler_adapter import resolve_target_session
+
+        primary = self._add_session(store, "primary-id")
+        self._add_session(store, "orig-id")
+        store.set_primary_session(primary.id)
+
+        entry = _make_entry(target_session=None, originating_session_id="orig-id")
+        result = resolve_target_session(entry, "justyn", store, "bot")
+        assert result is not None
+        assert result.id == "primary-id"
+
+    def test_primary_explicit_no_fallback_to_originating(self, store):
+        """target_session='primary' returns None when no primary; does NOT fall through."""
+        from tsugite.daemon.adapters.scheduler_adapter import resolve_target_session
+
+        self._add_session(store, "orig-id")
+        entry = _make_entry(target_session="primary", originating_session_id="orig-id")
+        assert resolve_target_session(entry, "justyn", store, "bot") is None
+
 
 class TestRecordSyntheticTurnWithResolver:
     """Integration: _record_synthetic_turn uses resolve_target_session, not get_or_create_interactive."""

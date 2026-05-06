@@ -138,10 +138,14 @@ READ_ONLY_METADATA_KEYS = frozenset(
 )
 
 METADATA_SESSION_NAME = "session_name"
+METADATA_PRIMARY_FLAG = "is_primary"
 
 # Metadata keys preserved across compaction in addition to READ_ONLY ones. session_name
-# anchors named-route adapters (e.g. Discord session_name) to the successor session.
-COMPACTION_PRESERVED_METADATA_KEYS = READ_ONLY_METADATA_KEYS | frozenset({METADATA_SESSION_NAME})
+# anchors named-route adapters (e.g. Discord session_name) to the successor session;
+# is_primary makes the user's chosen primary session "follow" compaction.
+COMPACTION_PRESERVED_METADATA_KEYS = READ_ONLY_METADATA_KEYS | frozenset(
+    {METADATA_SESSION_NAME, METADATA_PRIMARY_FLAG}
+)
 
 TOPIC_MAX_LENGTH = 160
 
@@ -427,6 +431,10 @@ class SessionStore:
 
     def get_or_create_interactive(self, user_id: str, agent: str) -> Session:
         with self._lock:
+            primary = self._find_primary_session_locked(user_id, agent)
+            if primary is not None:
+                return primary
+
             key = (user_id, agent)
             is_replacement = False
             if key in self._interactive_index:
@@ -473,6 +481,56 @@ class SessionStore:
         """Find the latest non-finished, non-superseded session tagged with metadata.session_name."""
         with self._lock:
             return self._find_named_session_locked(user_id, agent, name)
+
+    def _find_primary_session_locked(self, user_id: str, agent: str) -> Optional[Session]:
+        """Lock-held variant of find_primary_session. Caller must hold self._lock."""
+        candidates = [
+            s
+            for s in self._sessions.values()
+            if s.user_id == user_id
+            and s.agent == agent
+            and s.superseded_by is None
+            and s.status not in FINISHED_STATUSES
+            and s.metadata.get(METADATA_PRIMARY_FLAG)
+        ]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda s: s.last_active)
+
+    def find_primary_session(self, user_id: str, agent: str) -> Optional[Session]:
+        """Return the user's primary session for this agent, or None."""
+        with self._lock:
+            return self._find_primary_session_locked(user_id, agent)
+
+    def set_primary_session(self, session_id: str) -> Session:
+        """Mark `session_id` as primary, demoting any prior primary for the same (user, agent)."""
+        with self._lock:
+            if session_id not in self._sessions:
+                raise ValueError(f"Session '{session_id}' not found")
+            target = self._sessions[session_id]
+            if target.status in FINISHED_STATUSES:
+                raise ValueError(f"Cannot promote finished session '{session_id}' to primary")
+            if target.superseded_by:
+                raise ValueError(f"Cannot promote superseded session '{session_id}' to primary")
+            for s in self._sessions.values():
+                if (
+                    s.user_id == target.user_id
+                    and s.agent == target.agent
+                    and s.id != target.id
+                    and s.metadata.get(METADATA_PRIMARY_FLAG)
+                ):
+                    s.metadata.pop(METADATA_PRIMARY_FLAG, None)
+            target.metadata[METADATA_PRIMARY_FLAG] = True
+            self._save()
+            return target
+
+    def clear_primary_session(self, user_id: str, agent: str) -> None:
+        """Remove the primary flag from any session for (user_id, agent)."""
+        with self._lock:
+            for s in self._sessions.values():
+                if s.user_id == user_id and s.agent == agent and s.metadata.get(METADATA_PRIMARY_FLAG):
+                    s.metadata.pop(METADATA_PRIMARY_FLAG, None)
+            self._save()
 
     def get_or_create_named_session(self, user_id: str, agent: str, name: str) -> Session:
         """Resolve a named-route session for (user_id, agent), creating one if absent.

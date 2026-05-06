@@ -110,6 +110,21 @@ def test_set_primary_unknown_session_raises(store):
         store.set_primary_session("does-not-exist")
 
 
+def test_set_primary_rejects_finished_session(store):
+    s = _make_session(store, "s-1")
+    store.update_session(s.id, status=SessionStatus.COMPLETED.value)
+    with pytest.raises(ValueError, match="finished"):
+        store.set_primary_session(s.id)
+
+
+def test_set_primary_rejects_superseded_session(store):
+    a = _make_session(store, "s-a")
+    b = _make_session(store, "s-b")
+    store.update_session(a.id, superseded_by=b.id)
+    with pytest.raises(ValueError, match="superseded"):
+        store.set_primary_session(a.id)
+
+
 def test_set_primary_concurrent_lock(store):
     """Two threads racing set_primary on different sessions -> exactly one wins."""
     a = _make_session(store, "s-a")
