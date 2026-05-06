@@ -726,6 +726,7 @@ class HTTPServer:
                 "last_viewed_at": s.last_viewed_at,
                 "superseded_by": s.superseded_by,
                 "unread": unread,
+                "is_primary": s.is_primary,
             }
             if s.status in live_statuses:
                 row["progress"] = adapter.session_store.session_progress_summary(s.id)
