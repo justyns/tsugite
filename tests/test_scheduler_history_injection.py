@@ -165,3 +165,162 @@ class TestInjectIntoUserSessions:
             await sa._run_agent(entry)
 
         mock_inject.assert_not_called()
+
+
+class TestTargetSessionField:
+    def test_defaults_to_none(self):
+        entry = _make_entry()
+        assert entry.target_session is None
+
+    def test_explicit_value(self):
+        entry = _make_entry(target_session="primary")
+        assert entry.target_session == "primary"
+
+    def test_serialization_roundtrip(self):
+        entry = _make_entry(target_session="name:research")
+        data = asdict(entry)
+        assert data["target_session"] == "name:research"
+        restored = ScheduleEntry(**data)
+        assert restored.target_session == "name:research"
+
+    def test_old_schedules_default(self):
+        """Schedules saved before this field existed should default to None."""
+        data = asdict(_make_entry())
+        del data["target_session"]
+        entry = ScheduleEntry(**data)
+        assert entry.target_session is None
+
+
+class TestResolveTargetSession:
+    @pytest.fixture
+    def store(self, tmp_path):
+        from tsugite.daemon.session_store import SessionStore
+
+        return SessionStore(tmp_path / "session_store.json")
+
+    @staticmethod
+    def _add_session(store, sid, user_id="justyn", agent="bot"):
+        from tsugite.daemon.session_store import Session, SessionSource
+
+        s = Session(id=sid, agent=agent, source=SessionSource.INTERACTIVE.value, user_id=user_id)
+        store.create_session(s)
+        return s
+
+    def test_null_falls_to_originating_when_no_primary(self, store):
+        from tsugite.daemon.adapters.scheduler_adapter import resolve_target_session
+
+        self._add_session(store, "orig-sess")
+        entry = _make_entry(target_session=None, originating_session_id="orig-sess")
+        result = resolve_target_session(entry, "justyn", store, "bot")
+        assert result is not None
+        assert result.id == "orig-sess"
+
+    def test_null_no_primary_no_originating_skipped(self, store):
+        from tsugite.daemon.adapters.scheduler_adapter import resolve_target_session
+
+        entry = _make_entry(target_session=None, originating_session_id=None)
+        assert resolve_target_session(entry, "justyn", store, "bot") is None
+
+    def test_explicit_session_id(self, store):
+        from tsugite.daemon.adapters.scheduler_adapter import resolve_target_session
+
+        self._add_session(store, "explicit-id")
+        entry = _make_entry(target_session="explicit-id")
+        result = resolve_target_session(entry, "justyn", store, "bot")
+        assert result is not None
+        assert result.id == "explicit-id"
+
+    def test_name_lookup(self, store):
+        from tsugite.daemon.adapters.scheduler_adapter import resolve_target_session
+
+        named = store.get_or_create_named_session("justyn", "bot", "research")
+        entry = _make_entry(target_session="name:research")
+        result = resolve_target_session(entry, "justyn", store, "bot")
+        assert result is not None
+        assert result.id == named.id
+
+    def test_none_string_skips_injection(self, store):
+        from tsugite.daemon.adapters.scheduler_adapter import resolve_target_session
+
+        self._add_session(store, "orig-sess")
+        entry = _make_entry(target_session="none", originating_session_id="orig-sess")
+        assert resolve_target_session(entry, "justyn", store, "bot") is None
+
+    def test_originating_explicit(self, store):
+        from tsugite.daemon.adapters.scheduler_adapter import resolve_target_session
+
+        self._add_session(store, "orig-sess")
+        entry = _make_entry(target_session="originating", originating_session_id="orig-sess")
+        result = resolve_target_session(entry, "justyn", store, "bot")
+        assert result is not None
+        assert result.id == "orig-sess"
+
+    def test_unknown_session_id_skipped(self, store):
+        from tsugite.daemon.adapters.scheduler_adapter import resolve_target_session
+
+        entry = _make_entry(target_session="does-not-exist")
+        assert resolve_target_session(entry, "justyn", store, "bot") is None
+
+    def test_originating_explicit_skipped_when_session_missing(self, store):
+        from tsugite.daemon.adapters.scheduler_adapter import resolve_target_session
+
+        entry = _make_entry(target_session="originating", originating_session_id=None)
+        assert resolve_target_session(entry, "justyn", store, "bot") is None
+
+    def test_originating_follows_superseded_chain(self, store):
+        """A compacted originating session resolves to its successor."""
+        from tsugite.daemon.adapters.scheduler_adapter import resolve_target_session
+        from tsugite.daemon.session_store import Session, SessionSource
+
+        old = self._add_session(store, "orig-sess")
+        new = Session(id="new-sess", agent="bot", source=SessionSource.INTERACTIVE.value, user_id="justyn")
+        store.create_session(new)
+        store.update_session(old.id, superseded_by=new.id)
+
+        entry = _make_entry(target_session="originating", originating_session_id="orig-sess")
+        result = resolve_target_session(entry, "justyn", store, "bot")
+        assert result is not None
+        assert result.id == "new-sess"
+
+
+class TestRecordSyntheticTurnWithResolver:
+    """Integration: _record_synthetic_turn uses resolve_target_session, not get_or_create_interactive."""
+
+    def _make_real_adapter(self, store, agent="bot"):
+        adapter = MagicMock()
+        adapter.agent_name = agent
+        adapter.resolve_model.return_value = "test-model"
+        adapter.session_store = store
+        return adapter
+
+    def test_writes_to_resolved_target(self, tmp_path):
+        from tsugite.daemon.session_store import Session, SessionSource, SessionStore
+
+        store = SessionStore(tmp_path / "session_store.json")
+        target = Session(
+            id="resolved-target", agent="bot", source=SessionSource.INTERACTIVE.value, user_id="justyn"
+        )
+        store.create_session(target)
+        adapter = self._make_real_adapter(store)
+        entry = _make_entry(target_session="resolved-target")
+
+        history_dir = tmp_path / "history"
+        history_dir.mkdir()
+        with patch("tsugite.history.get_history_dir", return_value=history_dir):
+            SchedulerAdapter._record_synthetic_turn(adapter, "justyn", entry, "result")
+
+        assert (history_dir / "resolved-target.jsonl").exists()
+
+    def test_no_target_skips_injection(self, tmp_path):
+        from tsugite.daemon.session_store import SessionStore
+
+        store = SessionStore(tmp_path / "session_store.json")
+        adapter = self._make_real_adapter(store)
+        entry = _make_entry(target_session="none", originating_session_id="orig-sess")
+
+        history_dir = tmp_path / "history"
+        history_dir.mkdir()
+        with patch("tsugite.history.get_history_dir", return_value=history_dir):
+            SchedulerAdapter._record_synthetic_turn(adapter, "justyn", entry, "result")
+
+        assert list(history_dir.iterdir()) == []
