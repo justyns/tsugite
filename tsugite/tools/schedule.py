@@ -77,6 +77,7 @@ def schedule_create(
     expires_at: Optional[str] = None,
     max_runs: Optional[int] = None,
     session_id: Optional[str] = None,
+    target_session: Optional[str] = None,
 ) -> dict:
     """Create a recurring (cron) or one-off schedule to run an agent or script.
 
@@ -102,6 +103,13 @@ def schedule_create(
         expires_at: ISO datetime after which the schedule auto-disables (e.g., "2026-04-01T00:00:00Z").
         max_runs: Auto-disable after this many successful executions.
         session_id: If set, all runs of this schedule share the same session (persistent LLM context across runs). If omitted, each run gets its own isolated session.
+        target_session: Where the inject_history synthetic turn lands. Distinct from session_id (which controls the agent's run session). Legal forms:
+            None (default) - fallback chain: primary -> originating -> none
+            "primary" - primary lookup only (no fallback)
+            "originating" - originating_session_id only
+            "none" - skip injection
+            "name:<n>" - lookup by metadata.session_name
+            "<sid>" - bare session id
 
     Returns:
         Created schedule details including computed next_run
@@ -143,6 +151,7 @@ def schedule_create(
         expires_at=expires_at,
         max_runs=max_runs,
         session_id=session_id,
+        target_session=target_session,
     )
     result = _call(_scheduler.add, entry)
     return asdict(result)
@@ -219,6 +228,7 @@ def schedule_update(
     expires_at: Optional[str] = None,
     max_runs: Optional[int] = None,
     session_id: Optional[str] = None,
+    target_session: Optional[str] = None,
 ) -> dict:
     """Update fields on an existing schedule.
 
@@ -239,6 +249,7 @@ def schedule_update(
         expires_at: ISO datetime for auto-disable (optional). Set to empty string to clear.
         max_runs: Auto-disable after N successful runs (optional).
         session_id: Persistent session ID for this schedule (optional). Set to empty string to clear (reverts to per-run sessions).
+        target_session: Routing target for inject_history synthetic turn (optional). See schedule_create for legal forms. Set to empty string to clear (reverts to fallback chain).
 
     Returns:
         Updated schedule details
@@ -273,6 +284,7 @@ def schedule_update(
         ("command", command),
         ("expires_at", expires_at),
         ("session_id", session_id),
+        ("target_session", target_session),
     ]:
         if value is not None:
             fields[param_name] = value or None
@@ -371,6 +383,7 @@ def background_task(
     command: Optional[str] = None,
     script_timeout: int = 60,
     on_complete: Optional[dict] = None,
+    target_session: Optional[str] = None,
 ) -> dict:
     """Launch a background task that auto-replies with results when complete.
 
@@ -397,6 +410,9 @@ def background_task(
         script_timeout: Max seconds for script execution (default: 60).
         on_complete: Completion callback. Currently supports {"action": "reply"} to auto-reply
             to the originating session when the task finishes, allowing the agent to chain work.
+        target_session: Routing target for the inject_history synthetic turn. See schedule_create for
+            legal forms. Defaults to "originating" when on_complete is set so completion replies still
+            land in the spawning session; otherwise defaults to None (fallback chain).
 
     Returns:
         Dict with status and generated task ID
@@ -423,6 +439,9 @@ def background_task(
         raise ValueError("on_complete requires a session context (daemon mode)")
     chain_depth = get_current_chain_depth() if on_complete else 0
 
+    if target_session is None and on_complete:
+        target_session = "originating"
+
     task_id = f"bg-{uuid4().hex[:8]}"
     # run_at in the past so it's immediately eligible
     run_at = "2000-01-01T00:00:00Z"
@@ -445,6 +464,7 @@ def background_task(
         originating_session_id=originating_session_id,
         on_complete=on_complete,
         chain_depth=chain_depth,
+        target_session=target_session,
     )
     _call(_scheduler.add, entry)
     _call(_scheduler.fire_now, task_id)

@@ -111,6 +111,46 @@ class TestScheduleCreateValidation:
         with pytest.raises(ValueError, match="Unknown agent 'nonexistent'"):
             schedule_create(id="test", prompt="hi", agent="nonexistent", cron="0 9 * * *")
 
+    def test_target_session_passed_through(self, tool_loop):
+        from tsugite.tools.schedule import schedule_create, set_scheduler
+
+        mock_sched = MagicMock()
+        mock_sched.add.side_effect = lambda entry: entry
+        set_scheduler(mock_sched, tool_loop, agent_names={"bot"})
+
+        result = schedule_create(
+            id="t1", prompt="hi", agent="bot", cron="0 9 * * *", target_session="primary"
+        )
+        assert result["target_session"] == "primary"
+
+    def test_schedule_update_target_session(self, tool_loop):
+        from tsugite.tools.schedule import schedule_update, set_scheduler
+
+        mock_sched = MagicMock()
+        existing = ScheduleEntry(id="t1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
+        mock_sched.get.return_value = existing
+        mock_sched.update.side_effect = lambda sid, **fields: ScheduleEntry(
+            id=sid, agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *", **fields
+        )
+        set_scheduler(mock_sched, tool_loop)
+
+        result = schedule_update(id="t1", target_session="name:research")
+        assert result["target_session"] == "name:research"
+        mock_sched.update.assert_called_once()
+        assert mock_sched.update.call_args.kwargs["target_session"] == "name:research"
+
+    def test_schedule_update_clears_target_session_with_empty_string(self, tool_loop):
+        from tsugite.tools.schedule import schedule_update, set_scheduler
+
+        mock_sched = MagicMock()
+        mock_sched.update.side_effect = lambda sid, **fields: ScheduleEntry(
+            id=sid, agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *", **fields
+        )
+        set_scheduler(mock_sched, tool_loop)
+
+        schedule_update(id="t1", target_session="")
+        assert mock_sched.update.call_args.kwargs["target_session"] is None
+
 
 class TestScheduleRunTool:
     def test_calls_fire_now(self, tool_loop):
@@ -163,6 +203,54 @@ class TestBackgroundTaskTool:
 
         with pytest.raises(ValueError, match="Unknown agent 'nonexistent'"):
             background_task(prompt="test", agent="nonexistent")
+
+    def test_default_target_session_is_originating_when_on_complete_set(self, tool_loop):
+        """on_complete tasks must default target_session='originating' so completion replies still land in the spawning session."""
+        from tsugite.daemon.session_runner import set_current_session_id
+        from tsugite.tools.schedule import background_task, set_scheduler
+
+        mock_sched = MagicMock()
+        set_scheduler(mock_sched, tool_loop, channel_names={"my-discord"}, agent_names={"bot"})
+
+        set_current_session_id("session-xyz")
+        try:
+            with patch("tsugite.agent_runner.helpers.get_current_agent", return_value="bot"):
+                background_task(
+                    prompt="research X",
+                    notify=["my-discord"],
+                    on_complete={"action": "reply"},
+                )
+        finally:
+            set_current_session_id(None)
+
+        added_entry = mock_sched.add.call_args[0][0]
+        assert added_entry.target_session == "originating"
+        assert added_entry.originating_session_id == "session-xyz"
+
+    def test_target_session_explicit_override(self, tool_loop):
+        """Caller can override the default target_session."""
+        from tsugite.tools.schedule import background_task, set_scheduler
+
+        mock_sched = MagicMock()
+        set_scheduler(mock_sched, tool_loop, channel_names={"my-discord"}, agent_names={"bot"})
+
+        with patch("tsugite.agent_runner.helpers.get_current_agent", return_value="bot"):
+            background_task(prompt="x", notify=["my-discord"], target_session="primary")
+
+        added_entry = mock_sched.add.call_args[0][0]
+        assert added_entry.target_session == "primary"
+
+    def test_target_session_default_none_when_no_on_complete(self, tool_loop):
+        from tsugite.tools.schedule import background_task, set_scheduler
+
+        mock_sched = MagicMock()
+        set_scheduler(mock_sched, tool_loop, channel_names={"my-discord"}, agent_names={"bot"})
+
+        with patch("tsugite.agent_runner.helpers.get_current_agent", return_value="bot"):
+            background_task(prompt="x", notify=["my-discord"])
+
+        added_entry = mock_sched.add.call_args[0][0]
+        assert added_entry.target_session is None
 
 
 def _make_discord_channel(user_id="123456789", bot="my-bot") -> NotificationChannelConfig:

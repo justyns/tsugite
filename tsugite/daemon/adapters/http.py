@@ -1544,6 +1544,7 @@ class HTTPServer:
             "execution_type",
             "command",
             "script_timeout",
+            "target_session",
         }
         fields = {k: v for k, v in body.items() if k in allowed}
         if not fields:

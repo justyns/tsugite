@@ -511,6 +511,11 @@ def schedule_add(
     no_inject_history: bool = typer.Option(
         False, "--no-inject-history", help="Don't inject result into user chat sessions"
     ),
+    target_session: Optional[str] = typer.Option(
+        None,
+        "--target-session",
+        help="Where the inject_history turn lands: primary, originating, none, name:<n>, or <session_id>",
+    ),
     host: str = typer.Option("127.0.0.1", "--host", help="Daemon HTTP host"),
     port: int = typer.Option(8321, "--port", help="Daemon HTTP port"),
     token: Optional[str] = typer.Option(None, "--token", "-t", help="Auth token"),
@@ -538,6 +543,8 @@ def schedule_add(
         body["run_at"] = at
     if model:
         body["model"] = model
+    if target_session:
+        body["target_session"] = target_session
 
     data = _daemon_request("POST", host, port, "/api/schedules", token, json=body)
     console.print(f"[green]✓[/green] Schedule [cyan]{schedule_id}[/cyan] created")
