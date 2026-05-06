@@ -440,7 +440,9 @@ def background_task(
     chain_depth = get_current_chain_depth() if on_complete else 0
 
     if target_session is None and on_complete:
-        target_session = "originating"
+        from tsugite.daemon.scheduler import TARGET_SESSION_ORIGINATING
+
+        target_session = TARGET_SESSION_ORIGINATING
 
     task_id = f"bg-{uuid4().hex[:8]}"
     # run_at in the past so it's immediately eligible

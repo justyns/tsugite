@@ -18,6 +18,13 @@ from cronsim import CronSim, CronSimError
 logger = logging.getLogger(__name__)
 
 
+# target_session sentinel values (see ScheduleEntry.target_session field below).
+TARGET_SESSION_PRIMARY = "primary"
+TARGET_SESSION_ORIGINATING = "originating"
+TARGET_SESSION_NONE = "none"
+TARGET_SESSION_NAME_PREFIX = "name:"
+
+
 @dataclass
 class ScheduleEntry:
     id: str

@@ -525,7 +525,7 @@ class SessionStore:
                 ):
                     s.metadata.pop(METADATA_PRIMARY_FLAG, None)
             target.metadata[METADATA_PRIMARY_FLAG] = True
-            self._save()
+            self._mark_dirty()
             return target
 
     def clear_primary_session(self, user_id: str, agent: str) -> Optional[Session]:
@@ -536,7 +536,7 @@ class SessionStore:
                 if s.user_id == user_id and s.agent == agent and s.metadata.get(METADATA_PRIMARY_FLAG):
                     s.metadata.pop(METADATA_PRIMARY_FLAG, None)
                     cleared = s
-            self._save()
+            self._mark_dirty()
             return cleared
 
     def get_or_create_named_session(self, user_id: str, agent: str, name: str) -> Session:
@@ -909,6 +909,7 @@ class SessionStore:
         session = self.get_session(session_id)
         result = asdict(session)
         result["event_count"] = self.event_count(session_id)
+        result["is_primary"] = session.is_primary
         return result
 
     def session_events_since(self, session_id: str, since: Optional[str] = None) -> list[dict]:

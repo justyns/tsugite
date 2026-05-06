@@ -11,7 +11,15 @@ from tsugite.agent_runner.models import AgentSkippedError
 from tsugite.daemon.adapters.base import BaseAdapter, ChannelContext
 from tsugite.daemon.auth import TokenStore
 from tsugite.daemon.config import NotificationChannelConfig
-from tsugite.daemon.scheduler import RunResult, ScheduleEntry, Scheduler
+from tsugite.daemon.scheduler import (
+    TARGET_SESSION_NAME_PREFIX,
+    TARGET_SESSION_NONE,
+    TARGET_SESSION_ORIGINATING,
+    TARGET_SESSION_PRIMARY,
+    RunResult,
+    ScheduleEntry,
+    Scheduler,
+)
 from tsugite.daemon.session_store import Session, SessionSource, SessionStatus
 from tsugite.exceptions import AgentExecutionError
 from tsugite.tools.notify import notify_context, send_notification
@@ -49,16 +57,16 @@ def resolve_target_session(entry: ScheduleEntry, user_id: str, store, agent: str
     See ScheduleEntry.target_session for the legal value forms.
     """
     spec = entry.target_session
-    if spec == "none":
+    if spec == TARGET_SESSION_NONE:
         return None
     if spec is None:
         return store.find_primary_session(user_id, agent) or _resolve_originating(entry, store)
-    if spec == "primary":
+    if spec == TARGET_SESSION_PRIMARY:
         return store.find_primary_session(user_id, agent)
-    if spec == "originating":
+    if spec == TARGET_SESSION_ORIGINATING:
         return _resolve_originating(entry, store)
-    if spec.startswith("name:"):
-        return store.find_named_session(user_id, agent, spec[5:])
+    if spec.startswith(TARGET_SESSION_NAME_PREFIX):
+        return store.find_named_session(user_id, agent, spec[len(TARGET_SESSION_NAME_PREFIX) :])
     try:
         return store.get_session(spec)
     except ValueError:

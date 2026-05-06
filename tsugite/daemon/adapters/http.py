@@ -1631,9 +1631,7 @@ class HTTPServer:
         return None
 
     def _session_detail(self, session_id: str) -> dict:
-        detail = self.session_runner.store.session_detail(session_id)
-        detail["is_primary"] = bool(detail.get("metadata", {}).get("is_primary"))
-        return detail
+        return self.session_runner.store.session_detail(session_id)
 
     async def _api_list_sessions(self, request: Request) -> JSONResponse:
         if err := self._require_auth_and_sessions(request):

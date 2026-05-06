@@ -465,7 +465,9 @@ def session_clear_primary(
     token: Optional[str] = typer.Option(None, "--token", "-t", help="Auth token"),
 ):
     """Remove the primary flag from any session for (user, agent)."""
-    path = f"/api/sessions/clear-primary?agent={agent}&user_id={user_id}"
+    from urllib.parse import urlencode
+
+    path = f"/api/sessions/clear-primary?{urlencode({'agent': agent, 'user_id': user_id})}"
     _daemon_request("POST", host, port, path, token)
     console.print(f"[green]✓[/green] Cleared primary for agent [cyan]{agent}[/cyan] user [cyan]{user_id}[/cyan]")
 
