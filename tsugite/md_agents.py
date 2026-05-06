@@ -21,8 +21,12 @@ def _parse_directive_attribute(
     converter: Optional[Callable[[str], Any]] = None,
     default: Any = None,
 ) -> Any:
-    """Parse an attribute from directive arguments using regex."""
-    pattern = rf'{attr_name}=(["\']?)({value_pattern})\1'
+    """Parse an attribute from directive arguments using regex.
+
+    The leading `\\b` prevents attr names from matching as suffixes of longer ones
+    (e.g. `assign=` would otherwise match inside `stdout_assign=`).
+    """
+    pattern = rf'\b{attr_name}=(["\']?)({value_pattern})\1'
     match = re.search(pattern, args)
     if not match:
         return default
@@ -284,6 +288,89 @@ def extract_tool_directives(content: str) -> List[ToolDirective]:
                 start_pos=start_pos,
                 end_pos=end_pos,
                 raw_match=raw_match,
+            )
+        )
+
+    return directives
+
+
+@dataclass
+class ExecDirective:
+    """Represents a `<!-- tsu:exec -->` directive in agent content.
+
+    Attributes:
+        name: Label for logs/errors (required).
+        code: Python source code in the block body.
+        assign_var: Optional Jinja var to receive return_value / last-expr value.
+        stdout_assign: Optional Jinja var to receive captured stdout.
+        timeout: Wall-clock timeout in seconds (default 30).
+        continue_on_error: If true, exceptions become None instead of aborting.
+        start_pos / end_pos: Source byte offsets of the full open-to-close span.
+        raw_match: The exact substring matched (for content replacement).
+    """
+
+    name: str
+    code: str
+    assign_var: Optional[str] = None
+    stdout_assign: Optional[str] = None
+    timeout: int = 30
+    continue_on_error: bool = False
+    start_pos: int = 0
+    end_pos: int = 0
+    raw_match: str = ""
+
+
+_EXEC_OPEN_RE = re.compile(r"<!--\s*tsu:exec\s+([^>]+?)\s*-->", re.DOTALL)
+_EXEC_PAIR_RE = re.compile(
+    r"<!--\s*tsu:exec\s+([^>]+?)\s*-->(.*?)<!--\s*/tsu:exec\s*-->",
+    re.DOTALL,
+)
+
+
+def extract_exec_directives(content: str) -> List[ExecDirective]:
+    """Extract `<!-- tsu:exec ... -->...<!-- /tsu:exec -->` directives.
+
+    Open/close pair grammar mirrors `tsu:ignore` (renderer.py).
+    Body is opaque (not Jinja-rendered) and surfaces verbatim as the directive's `code`.
+    The non-greedy match means a literal `<!-- /tsu:exec -->` inside a Python string
+    will truncate the block at that point - documented limitation.
+    """
+    directives: List[ExecDirective] = []
+    pair_matches = list(_EXEC_PAIR_RE.finditer(content))
+
+    paired_starts = {m.start() for m in pair_matches}
+    for open_match in _EXEC_OPEN_RE.finditer(content):
+        if open_match.start() not in paired_starts:
+            args_preview = open_match.group(1).strip().split()[0] if open_match.group(1).strip() else "?"
+            raise ValueError(
+                f"tsu:exec directive has unmatched open tag (no <!-- /tsu:exec --> follows): {args_preview}"
+            )
+
+    for match in pair_matches:
+        args = match.group(1).strip()
+        body = match.group(2)
+
+        name = _parse_directive_attribute(args, "name", r"\w+")
+        if not name:
+            raise ValueError(f"tsu:exec directive missing required 'name' attribute: {args}")
+
+        assign_var = _parse_directive_attribute(args, "assign", r"\w+")
+        stdout_assign = _parse_directive_attribute(args, "stdout_assign", r"\w+")
+        timeout = _parse_directive_attribute(args, "timeout", r"[0-9]+", int, default=30)
+        continue_on_error_str = _parse_directive_attribute(args, "continue_on_error", r"true|false", default="false")
+        continue_on_error = continue_on_error_str.lower() == "true"
+
+        directives.append(
+            ExecDirective(
+                name=name,
+                code=body.strip("\r\n"),
+                assign_var=assign_var,
+                stdout_assign=stdout_assign,
+                timeout=timeout,
+                continue_on_error=continue_on_error,
+                start_pos=match.start(),
+                end_pos=match.end(),
+                raw_match=match.group(0),
             )
         )
 

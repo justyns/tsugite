@@ -48,6 +48,11 @@ def render(
     conversation_id: Optional[str] = typer.Option(
         None, "--conversation-id", help="Specific conversation ID (use with --continue)"
     ),
+    no_exec: bool = typer.Option(
+        False,
+        "--no-exec",
+        help="Skip executing <!-- tsu:exec --> blocks; show placeholders instead",
+    ),
 ):
     """Render an agent template without executing it.
 
@@ -133,6 +138,7 @@ def render(
                 agent=agent,
                 prompt=prompt_updated,
                 skip_tool_directives=True,
+                skip_exec_directives=no_exec,
                 context=context,
                 attachments=resolved_attachments,
             )

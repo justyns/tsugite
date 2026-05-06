@@ -75,6 +75,7 @@ Tsugite is an agentic CLI that executes AI agents defined as markdown files with
      - `<!-- tsu:step -->` - Multi-step workflow stages
      - `<!-- tsu:ignore -->` - Documentation blocks (stripped before LLM)
      - `<!-- tsu:tool -->` - Execute tools during rendering
+     - `<!-- tsu:exec --> ... <!-- /tsu:exec -->` - Run arbitrary Python at render time, capture result into Jinja context
 
 4. **Agent Preparation** (`tsugite/agent_preparation.py`)
    - **Unified preparation pipeline** (used by both `run` and `render` commands)
@@ -178,6 +179,37 @@ Summarize findings
 - Helper conditions: `has_pending_tasks`, `all_tasks_complete`, etc.
 - Safety: `max_iterations` (default 10) prevents infinite loops
 - Loop context: `{{ iteration }}`, `{{ max_iterations }}`, `{{ is_looping_step }}`
+
+### Exec Directives
+
+`<!-- tsu:exec name="..." assign="..." -->...<!-- /tsu:exec -->` runs an arbitrary Python block at agent-prep time and binds the return value (or last expression) to a Jinja variable. Use it for deterministic dispatchers, preprocessing, and branching that don't justify an LLM round-trip.
+
+```markdown
+<!-- tsu:exec name="dispatch" assign="targets" -->
+import os, json
+out = []
+for p in sorted(os.listdir("inbox")):
+    if p.endswith(".json"):
+        out.append({"path": p, "source": json.loads(open(f"inbox/{p}").read())["source"]})
+out
+<!-- /tsu:exec -->
+
+Inventory: {{ targets }}
+```
+
+**Semantics:**
+- Block body is opaque to Jinja; prior-directive vars (prefetch, tool, earlier exec) arrive as **Python locals**, not via `{{ }}` substitution. So `{{ }}` literals inside Python strings work.
+- Return value: explicit `return_value(x)` or the last expression in the block (Jupyter-style). Explicit `return_value` wins.
+- Plain Python is allowed (`open`, `os`, etc.) - the directive is for trusted preprocessing, distinct from LLM-emitted code in `tsugite/core/subprocess_executor.py`.
+- Top-level only in v1: between/before/after `tsu:step` directives, never inside step content.
+
+**Optional attributes:** `assign="var"`, `stdout_assign="var"`, `timeout=30`, `continue_on_error=true`.
+
+**Render mode:** `tsu render` executes exec blocks by default. Pass `--no-exec` to substitute placeholders instead (e.g. when the block has side effects you want to inspect without running).
+
+**Return-type policy:** values must JSON-serialize. `Path -> str`, `datetime -> isoformat()`, `set -> sorted list` are coerced automatically. Other non-serializable types raise (convert explicitly).
+
+See `examples/exec_dispatcher.md` for a runnable inbox-watcher pattern.
 
 ### Event-Driven UI
 

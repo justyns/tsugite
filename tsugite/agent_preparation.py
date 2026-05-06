@@ -3,7 +3,7 @@
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
 
 logger = logging.getLogger(__name__)
 
@@ -404,36 +404,48 @@ class AgentPreparer:
     This ensures that render shows EXACTLY what run executes.
     """
 
-    def _extract_tool_directive_placeholders(self, content: str) -> Dict[str, str]:
-        """Extract variable names from tool directives and return placeholders.
+    def _build_directive_placeholders(
+        self,
+        content: str,
+        extractor: Callable[[str], List[Any]],
+        kind: str,
+        rewrite_to: Optional[Callable[[Any], str]] = None,
+    ) -> Tuple[str, Dict[str, str]]:
+        """Build {assign_var: placeholder} for directives that won't actually run.
 
-        When rendering without executing directives, we still need variables to
-        be defined so the template doesn't fail. This extracts all assign="var"
-        names and creates placeholder values.
-
-        Args:
-            content: Markdown content with tool directives
-
-        Returns:
-            Dict mapping variable names to placeholder values
+        Used by render-mode shortcuts so the template still has all its variables
+        defined. When `rewrite_to` is given, the directive substring is also
+        replaced in `content` with the callable's per-directive output.
         """
+        try:
+            directives = extractor(content)
+        except Exception:
+            return content, {}
+
+        placeholders: Dict[str, str] = {}
+        modified = content
+        for d in directives:
+            if d.assign_var:
+                placeholders[d.assign_var] = f"[{kind} directive: {d.name}(...) - not executed in render mode]"
+            if rewrite_to is not None:
+                modified = modified.replace(d.raw_match, rewrite_to(d))
+        return modified, placeholders
+
+    def _extract_tool_directive_placeholders(self, content: str) -> Dict[str, str]:
         from tsugite.md_agents import extract_tool_directives
 
-        try:
-            directives = extract_tool_directives(content)
-        except Exception:
-            # If extraction fails, return empty dict
-            return {}
-
-        placeholders = {}
-        for directive in directives:
-            if directive.assign_var:
-                # Create a descriptive placeholder showing what would be executed
-                placeholders[directive.assign_var] = (
-                    f"[Tool directive: {directive.name}(...) - not executed in render mode]"
-                )
-
+        _, placeholders = self._build_directive_placeholders(content, extract_tool_directives, "Tool")
         return placeholders
+
+    def _extract_exec_directive_placeholders(self, content: str) -> Tuple[str, Dict[str, str]]:
+        from tsugite.md_agents import extract_exec_directives
+
+        return self._build_directive_placeholders(
+            content,
+            extract_exec_directives,
+            "Exec",
+            rewrite_to=lambda d: f"<!-- Exec '{d.name}' skipped (--no-exec) -->",
+        )
 
     def prepare(
         self,
@@ -442,6 +454,7 @@ class AgentPreparer:
         context: Optional[Dict[str, Any]] = None,
         workspace: Optional["Workspace"] = None,
         skip_tool_directives: bool = False,
+        skip_exec_directives: bool = False,
         attachments: Optional[List[Attachment]] = None,
         event_bus: Optional[Any] = None,
         path_context: Optional[Any] = None,
@@ -454,6 +467,7 @@ class AgentPreparer:
             context: Additional context variables
             workspace: Optional workspace for context files and persistent sessions
             skip_tool_directives: Skip executing tool directives (for render)
+            skip_exec_directives: Skip executing exec directives (for render --no-exec)
             attachments: List of Attachment objects for multi-modal inputs
             event_bus: Optional event bus for emitting skill load events
             path_context: Optional PathContext with invoked_from, workspace_dir, effective_cwd
@@ -466,6 +480,7 @@ class AgentPreparer:
         """
         from tsugite.agent_runner import (
             _combine_instructions,
+            execute_exec_directives,
             execute_prefetch,
             execute_tool_directives,
             get_default_instructions,
@@ -540,6 +555,18 @@ class AgentPreparer:
         else:
             modified_content, tool_context = execute_tool_directives(agent.content, prefetch_context)
 
+        # Step 2.5: Execute exec directives. Default-on for `tsu render` so the preview
+        # reflects what the LLM would see; `--no-exec` opts out for side-effecty blocks.
+        if skip_exec_directives:
+            modified_content, exec_context = self._extract_exec_directive_placeholders(modified_content)
+        else:
+            exec_locals: Dict[str, Any] = {**context, **prefetch_context, **tool_context}
+            modified_content, exec_context = execute_exec_directives(
+                modified_content,
+                existing_context=exec_locals,
+                event_bus=event_bus,
+            )
+
         # Step 3: Build template context
         interactive_mode = is_interactive()
 
@@ -556,6 +583,7 @@ class AgentPreparer:
             **context,
             **prefetch_context,
             **tool_context,
+            **exec_context,
             "user_prompt": prompt,
             "agent_name": agent_config.name,
             "is_interactive": interactive_mode,
