@@ -24,6 +24,53 @@ _MAX_RESULT_CHARS = 4000
 MAX_CHAIN_DEPTH = 5
 
 
+def _resolve_originating(entry: ScheduleEntry, store) -> Session | None:
+    """Resolve `entry.originating_session_id`, following `superseded_by` to the live successor."""
+    sid = entry.originating_session_id
+    if not sid:
+        return None
+    visited: set[str] = set()
+    try:
+        session = store.get_session(sid)
+    except ValueError:
+        return None
+    while session.superseded_by and session.id not in visited:
+        visited.add(session.id)
+        try:
+            session = store.get_session(session.superseded_by)
+        except ValueError:
+            return None
+    return session
+
+
+def _find_primary(store, user_id: str, agent: str) -> Session | None:
+    """Look up the user's primary session. Returns None until Tier 2 adds the API."""
+    fn = getattr(store, "find_primary_session", None)
+    return fn(user_id, agent) if fn else None
+
+
+def resolve_target_session(entry: ScheduleEntry, user_id: str, store, agent: str) -> Session | None:
+    """Resolve `entry.target_session` to a concrete Session, or None to skip injection.
+
+    See ScheduleEntry.target_session for the legal value forms.
+    """
+    spec = entry.target_session
+    if spec == "none":
+        return None
+    if spec is None:
+        return _find_primary(store, user_id, agent) or _resolve_originating(entry, store)
+    if spec == "primary":
+        return _find_primary(store, user_id, agent)
+    if spec == "originating":
+        return _resolve_originating(entry, store)
+    if spec.startswith("name:"):
+        return store.find_named_session(user_id, agent, spec[5:])
+    try:
+        return store.get_session(spec)
+    except ValueError:
+        return None
+
+
 class SchedulerAdapter:
     """Integrates the Scheduler with the daemon, executing agents via existing adapters."""
 
@@ -342,7 +389,14 @@ class SchedulerAdapter:
     @staticmethod
     def _record_synthetic_turn(adapter: BaseAdapter, user_id: str, entry: ScheduleEntry, result: str) -> None:
         """Write synthetic user_input + model_response events for a scheduled task."""
-        session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
+        session = resolve_target_session(entry, user_id, adapter.session_store, adapter.agent_name)
+        if session is None:
+            logger.debug(
+                "Schedule '%s' has no resolvable target_session for user '%s'; skipping injection",
+                entry.id,
+                user_id,
+            )
+            return
         storage = SchedulerAdapter._get_session_storage(session.id, adapter)
         SchedulerAdapter._write_synthetic_pair(
             storage,

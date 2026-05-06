@@ -58,8 +58,10 @@ class TestRecordSyntheticTurn:
         adapter.resolve_model.return_value = "test-model"
         mock_session = MagicMock()
         mock_session.id = session_id
+        mock_session.superseded_by = None
         adapter.session_store = MagicMock()
-        adapter.session_store.get_or_create_interactive.return_value = mock_session
+        # Simulate a user with primary session set.
+        adapter.session_store.find_primary_session.return_value = mock_session
         return adapter
 
     def _record_and_load(self, tmp_path, session_id, result):
@@ -281,6 +283,21 @@ class TestResolveTargetSession:
         result = resolve_target_session(entry, "justyn", store, "bot")
         assert result is not None
         assert result.id == "new-sess"
+
+    def test_originating_cycle_protection(self, store):
+        """A bogus superseded_by cycle must not loop forever."""
+        from tsugite.daemon.adapters.scheduler_adapter import resolve_target_session
+
+        a = self._add_session(store, "sess-a")
+        b = self._add_session(store, "sess-b")
+        store.update_session(a.id, superseded_by=b.id)
+        store.update_session(b.id, superseded_by=a.id)
+
+        entry = _make_entry(target_session="originating", originating_session_id="sess-a")
+        # Returns whichever session the walk halts on, but must terminate.
+        result = resolve_target_session(entry, "justyn", store, "bot")
+        assert result is not None
+        assert result.id in {"sess-a", "sess-b"}
 
 
 class TestRecordSyntheticTurnWithResolver:

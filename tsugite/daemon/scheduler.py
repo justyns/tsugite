@@ -57,6 +57,14 @@ class ScheduleEntry:
     originating_session_id: str | None = None  # Session that spawned this task
     on_complete: dict | None = None  # {"action": "reply"} to auto-reply on completion
     chain_depth: int = 0  # How many chained completions deep (safety limit)
+    # Where the inject_history synthetic turn lands. Legal forms:
+    #   None         -> fallback chain: primary -> originating -> none
+    #   "primary"    -> primary lookup only (no fallback)
+    #   "originating"-> originating_session_id only
+    #   "none"       -> skip injection
+    #   "name:<n>"   -> find_named_session(name)
+    #   "<sid>"      -> bare session id
+    target_session: str | None = None
 
     def __post_init__(self):
         if not self.created_at:
