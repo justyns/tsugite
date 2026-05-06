@@ -6,10 +6,22 @@ text is sent back verbatim (no re-rendering from parsed pieces) so parser bugs
 can't corrupt what the model sees as its own past output.
 """
 
+from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional
 from xml.sax.saxutils import escape
 
+from tsugite.renderer import format_prompt_ts, parse_iso_utc
+
 from .models import Event
+
+
+def _format_event_ts(ts: Optional[datetime]) -> str:
+    """Format an event timestamp as `YYYY-MM-DD HH:MM TZ` for prompt prefixes.
+
+    Stays absolute (no relative phrase) so prefixes on past messages remain
+    byte-stable across turns and the prompt cache keeps hitting.
+    """
+    return format_prompt_ts(ts) if ts else ""
 
 
 def last_index_of(events: List[Event], type_: str) -> Optional[int]:
@@ -34,8 +46,7 @@ def events_to_messages(events: Iterable[Event], provider: Optional[str] = None) 
 
     messages: List[Dict[str, Any]] = []
     if cutoff is not None:
-        summary = events[cutoff].data.get("summary", "")
-        messages.append({"role": "user", "content": _compaction_user_block(summary)})
+        messages.append({"role": "user", "content": _compaction_user_block(events[cutoff])})
         messages.append(
             {"role": "assistant", "content": "I've reviewed our previous conversation and I'm ready to continue."}
         )
@@ -54,18 +65,20 @@ def events_to_messages(events: Iterable[Event], provider: Optional[str] = None) 
 def _event_to_message(event: Event) -> Optional[Dict[str, Any]]:
     if event.type == "user_input":
         text = event.data.get("text", "")
-        return {"role": "user", "content": text}
+        ts_str = _format_event_ts(event.ts)
+        content = f"[{ts_str}] {text}" if ts_str else text
+        return {"role": "user", "content": content}
     if event.type == "model_response":
         raw = event.data.get("raw_content", "")
         return {"role": "assistant", "content": raw}
     if event.type == "code_execution":
-        return {"role": "user", "content": _execution_xml(event.data)}
+        return {"role": "user", "content": _execution_xml(event.data, event.ts)}
     if event.type == "format_error":
         return {"role": "user", "content": _format_error_xml(event.data)}
     return None
 
 
-def _execution_xml(data: Dict[str, Any]) -> str:
+def _execution_xml(data: Dict[str, Any], ts: Optional[datetime] = None) -> str:
     """Build the <tsugite_execution_result> envelope from event data."""
     output = data.get("output") or ""
     error = data.get("error")
@@ -75,6 +88,9 @@ def _execution_xml(data: Dict[str, Any]) -> str:
     attrs = f'status="{status}"'
     if duration_ms:
         attrs += f' duration_ms="{duration_ms}"'
+    ts_str = _format_event_ts(ts)
+    if ts_str:
+        attrs += f' ts="{ts_str}"'
 
     parts = [f"<tsugite_execution_result {attrs}>", f"<output>{escape(output)}</output>"]
     if error:
@@ -97,16 +113,37 @@ def _format_error_xml(data: Dict[str, Any]) -> str:
     )
 
 
-def _compaction_user_block(summary: str) -> str:
+def _compaction_user_block(event: Event) -> str:
+    summary = event.data.get("summary", "")
+    intro = _compaction_intro_line(event)
     return (
         "<previous_conversation>\n"
-        "The following is a summary of our earlier conversation, "
-        "which was compacted to save context space.\n"
+        f"{intro}\n"
         "Continue from where this conversation left off. "
         "Pay attention to file paths, decisions, and incomplete work mentioned below.\n\n"
         f"{summary}\n"
         "</previous_conversation>"
     )
+
+
+def _compaction_intro_line(event: Event) -> str:
+    """First line of the compaction block, naming the time period and when the
+    compaction itself happened. Falls back to the legacy generic phrasing when
+    pre-existing JSONLs lack the range fields.
+    """
+    range_start = parse_iso_utc(event.data.get("range_start"))
+    range_end = parse_iso_utc(event.data.get("range_end"))
+    compacted_at = event.ts
+
+    if range_start and range_end:
+        start_str = range_start.strftime("%Y-%m-%d %H:%M")
+        end_str = range_end.strftime("%Y-%m-%d %H:%M")
+        when_str = compacted_at.strftime("%Y-%m-%d %H:%M") if compacted_at else None
+        if when_str:
+            return f"Summary of conversation from {start_str} to {end_str} (compacted on {when_str})."
+        return f"Summary of conversation from {start_str} to {end_str}."
+
+    return "The following is a summary of our earlier conversation, which was compacted to save context space."
 
 
 def _claude_code_tail(

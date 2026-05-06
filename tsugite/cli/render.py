@@ -33,7 +33,6 @@ def render(
     root: Optional[str] = typer.Option(None, "--root", help="Working directory"),
     no_color: bool = typer.Option(False, "--no-color", help="Disable ANSI colors"),
     verbose: bool = typer.Option(False, "--verbose", help="Show full attachment content (default: truncated)"),
-    raw: bool = typer.Option(False, "--raw", help="Show raw Jinja templates in instructions without rendering"),
     attachment: Optional[List[str]] = typer.Option(
         None, "-f", "--attachment", help="Attachment(s) to include (repeatable)"
     ),

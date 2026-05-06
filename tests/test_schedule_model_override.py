@@ -107,3 +107,42 @@ class TestBaseAdapterMaxTurnsOverride:
 
     def test_fallback_when_no_metadata(self):
         assert _resolve_max_turns_override(None) == 50
+
+
+class TestSchedulerAdapterFireTiming:
+    """Scheduled-task channel context surfaces when this fire was planned for
+    and when it actually fired, so the agent can spot misfires / drift.
+    """
+
+    @pytest.mark.asyncio
+    async def test_actual_fire_time_present(self):
+        sa, adapter_mock = _make_scheduler_adapter()
+        entry = ScheduleEntry(id="test", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
+        await sa._run_agent(entry)
+
+        ctx = adapter_mock.handle_message.call_args[1]["channel_context"]
+        from datetime import datetime
+
+        parsed = datetime.fromisoformat(ctx.metadata["actual_fire_time"])
+        assert parsed.tzinfo is not None
+
+    @pytest.mark.asyncio
+    async def test_scheduled_for_threaded_through(self):
+        sa, adapter_mock = _make_scheduler_adapter()
+        entry = ScheduleEntry(id="test", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
+        entry.last_scheduled_for = "2026-05-04T09:00:00+00:00"
+
+        await sa._run_agent(entry)
+
+        ctx = adapter_mock.handle_message.call_args[1]["channel_context"]
+        assert ctx.metadata["scheduled_for"] == "2026-05-04T09:00:00+00:00"
+
+    @pytest.mark.asyncio
+    async def test_scheduled_for_absent_when_unset(self):
+        sa, adapter_mock = _make_scheduler_adapter()
+        entry = ScheduleEntry(id="test", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
+        # last_scheduled_for unset (manual fire, replay, etc.)
+        await sa._run_agent(entry)
+
+        ctx = adapter_mock.handle_message.call_args[1]["channel_context"]
+        assert "scheduled_for" not in ctx.metadata

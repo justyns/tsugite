@@ -1,11 +1,13 @@
 """File system tools for Tsugite agents."""
 
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import pathspec
 
 from ..cli.helpers import resolve_workspace_path
+from ..renderer import format_prompt_ts, local_tz, parse_iso_utc
 from ..tools import tool
 
 
@@ -16,23 +18,75 @@ def _format_lines(lines: list[str], start_line: int, line_numbers: bool) -> str:
     return "\n".join(lines)
 
 
+def _format_mtime(file_path: Path, mtime: Optional[float] = None) -> str:
+    """Render an mtime as `YYYY-MM-DD HH:MM TZ (N units ago)`.
+
+    Pass `mtime` (epoch float) to reuse a stat the caller already performed.
+    """
+    tz = local_tz()
+    epoch = mtime if mtime is not None else file_path.stat().st_mtime
+    return format_prompt_ts(datetime.fromtimestamp(epoch, tz=tz), ref=datetime.now(tz=tz))
+
+
+def _wrap_file_metadata(
+    body: str,
+    file_path: Path,
+    path: str,
+    start_line: Optional[int],
+    end_line: Optional[int],
+    total_lines: Optional[int],
+) -> str:
+    """Wrap raw file content in a `<file ...>` envelope with mtime and size.
+
+    The `mtime` attribute is machine-readable ISO so agents can round-trip it
+    back to `edit_file(expected_mtime=...)` for race-condition checks.
+    """
+    try:
+        stats = file_path.stat()
+    except Exception:
+        return body
+
+    tz = local_tz()
+    mtime_iso = datetime.fromtimestamp(stats.st_mtime, tz=tz).isoformat()
+    attrs = [
+        f'path="{path}"',
+        f'modified="{_format_mtime(file_path, mtime=stats.st_mtime)}"',
+        f'mtime="{mtime_iso}"',
+        f'size_bytes="{stats.st_size}"',
+    ]
+    if start_line is not None:
+        end_label = end_line if end_line is not None else (total_lines if total_lines is not None else "end")
+        attrs.append(f'lines="{start_line}-{end_label}"')
+    return f"<file {' '.join(attrs)}>\n{body}\n</file>"
+
+
 @tool
 def read_file(
     path: str,
     start_line: Optional[int] = None,
     end_line: Optional[int] = None,
     line_numbers: bool = False,
+    with_metadata: bool = True,
 ) -> str:
     """Read content from a file, optionally with line range and line numbers.
+
+    By default the file's content is wrapped in a `<file path="..." modified="..."
+    size_bytes="...">...</file>` envelope so the agent can judge how stale the
+    content is. The inner body is verbatim file content. Pass
+    `with_metadata=False` to get raw content back (e.g. when piping into a JSON
+    parser).
 
     Args:
         path: Path to the file to read
         start_line: Starting line number (1-indexed, 0 also accepted).
         end_line: Ending line number (1-indexed, inclusive). Defaults to end of file.
         line_numbers: If True, prefix each line with its line number in "NUM: content" format.
+        with_metadata: If True (default), wrap the content in a `<file>` envelope
+            with mtime and size attributes. Set False to return raw content only.
 
     Returns:
-        File content, optionally with line numbers prefixed.
+        File content, optionally with line numbers prefixed and wrapped in
+        the `<file>` metadata envelope.
     """
     file_path = resolve_workspace_path(path)
 
@@ -59,23 +113,28 @@ def read_file(
 
     emit_file_read_event(str(file_path), content, "tool_call")
 
+    total_lines: Optional[int] = None
     if start_line is None and not line_numbers:
-        return content
+        body = content
+    else:
+        lines = content.splitlines()
+        total_lines = len(lines)
 
-    lines = content.splitlines()
-    total_lines = len(lines)
+        if start_line is None:
+            body = _format_lines(lines, 1, line_numbers)
+        else:
+            start_idx = start_line - 1
+            if start_idx >= total_lines:
+                return f"File only has {total_lines} lines, but start_line is {start_line}"
 
-    if start_line is None:
-        return _format_lines(lines, 1, line_numbers)
+            effective_end = min(end_line, total_lines) if end_line is not None else total_lines
+            selected = lines[start_idx:effective_end]
+            body = _format_lines(selected, start_line, line_numbers)
 
-    start_idx = start_line - 1
-    if start_idx >= total_lines:
-        return f"File only has {total_lines} lines, but start_line is {start_line}"
+    if not with_metadata:
+        return body
 
-    effective_end = min(end_line, total_lines) if end_line is not None else total_lines
-    selected = lines[start_idx:effective_end]
-
-    return _format_lines(selected, start_line, line_numbers)
+    return _wrap_file_metadata(body, file_path, path, start_line, end_line, total_lines)
 
 
 @tool
@@ -146,7 +205,12 @@ def _build_gitignore_matcher(base_path: Path) -> Optional[pathspec.PathSpec]:
 
 
 @tool
-def list_files(path: str = ".", pattern: str = "*", respect_gitignore: bool = True) -> List[str]:
+def list_files(
+    path: str = ".",
+    pattern: str = "*",
+    respect_gitignore: bool = True,
+    with_metadata: bool = False,
+):
     """List files in a directory with optional pattern matching.
 
     Args:
@@ -154,6 +218,12 @@ def list_files(path: str = ".", pattern: str = "*", respect_gitignore: bool = Tr
         pattern: Glob pattern to match files
         respect_gitignore: If True (default), respects .gitignore files and excludes .git/ directory.
                           Follows the behavior of modern tools like ripgrep and fd.
+        with_metadata: If True, returns List[Dict] with `path` and `modified` per
+                       file (formatted as "YYYY-MM-DD HH:MM TZ (N units ago)").
+                       Default False returns List[str] of paths only.
+
+    Returns:
+        List[str] by default; List[Dict[str, str]] when with_metadata=True.
     """
     dir_path = resolve_workspace_path(path)
 
@@ -169,7 +239,7 @@ def list_files(path: str = ".", pattern: str = "*", respect_gitignore: bool = Tr
         if respect_gitignore:
             gitignore_spec = _build_gitignore_matcher(dir_path)
 
-        files = []
+        matched: list[Path] = []
         for item in dir_path.glob(pattern):
             if item.is_file():
                 rel_path = str(item.relative_to(dir_path))
@@ -178,9 +248,14 @@ def list_files(path: str = ".", pattern: str = "*", respect_gitignore: bool = Tr
                 if gitignore_spec and gitignore_spec.match_file(rel_path):
                     continue
 
-                files.append(rel_path)
+                matched.append(item)
 
-        return sorted(files)
+        matched.sort(key=lambda p: str(p.relative_to(dir_path)))
+
+        if not with_metadata:
+            return [str(p.relative_to(dir_path)) for p in matched]
+
+        return [{"path": str(p.relative_to(dir_path)), "modified": _format_mtime(p)} for p in matched]
     except Exception as e:
         raise RuntimeError(f"Failed to list files in directory {path}: {e}") from e
 
@@ -223,10 +298,13 @@ def get_file_info(path: str) -> Dict[str, Any]:
         - line_count: Total number of lines
         - size_bytes: File size in bytes
         - last_modified: Last modification timestamp (ISO format)
+        - last_modified_relative: Humanized age (e.g. "6 days ago", "just now")
         - exists: Whether file exists
         - is_directory: Whether path is a directory
     """
-    import datetime
+    import datetime as _dt
+
+    from tsugite.renderer import humanize_relative
 
     file_path = resolve_workspace_path(path)
 
@@ -236,6 +314,7 @@ def get_file_info(path: str) -> Dict[str, Any]:
         "line_count": 0,
         "size_bytes": 0,
         "last_modified": None,
+        "last_modified_relative": None,
     }
 
     if not file_path.exists():
@@ -250,7 +329,10 @@ def get_file_info(path: str) -> Dict[str, Any]:
         # Get file stats
         stats = file_path.stat()
         info["size_bytes"] = stats.st_size
-        info["last_modified"] = datetime.datetime.fromtimestamp(stats.st_mtime).isoformat()
+        tz = local_tz()
+        mtime = _dt.datetime.fromtimestamp(stats.st_mtime, tz=tz)
+        info["last_modified"] = mtime.isoformat()
+        info["last_modified_relative"] = humanize_relative(mtime, _dt.datetime.now(tz=tz))
 
         # Count lines
         content = file_path.read_text(encoding="utf-8")
@@ -316,6 +398,27 @@ def _apply_exact_replacement(
     return new_content, match_count, None
 
 
+def _check_expected_mtime(file_path: Path, expected_mtime: str) -> None:
+    """Raise if the file changed externally since the agent last saw it.
+
+    Tolerance is 1 second to absorb filesystem-precision quirks. The expected
+    value is the ISO string surfaced by `read_file`'s `<file mtime="...">`
+    envelope or `get_file_info`'s `last_modified`, so agents can round-trip it.
+    """
+    expected_dt = parse_iso_utc(expected_mtime)
+    if expected_dt is None:
+        raise RuntimeError(f"expected_mtime '{expected_mtime}' is not a valid ISO datetime")
+
+    actual_epoch = file_path.stat().st_mtime
+    if actual_epoch > expected_dt.timestamp() + 1.0:
+        actual_iso = datetime.fromtimestamp(actual_epoch, tz=local_tz()).isoformat()
+        raise RuntimeError(
+            f"File {file_path} was modified externally "
+            f"(expected mtime {expected_mtime}, actual {actual_iso}). "
+            "Re-read the file to pick up the latest contents before editing."
+        )
+
+
 @tool
 def edit_file(
     path: str,
@@ -323,6 +426,7 @@ def edit_file(
     new_string: Optional[str] = None,
     expected_replacements: int = 1,
     edits: Optional[List[Dict[str, Any]]] = None,
+    expected_mtime: Optional[str] = None,
 ) -> str:
     """Edit a file with single or multiple exact string replacements.
 
@@ -343,6 +447,10 @@ def edit_file(
         expected_replacements: Expected match count (default: 1, for single edit mode)
         edits: List of edit dicts (for batch edit mode)
             Each dict: {"old_string": str, "new_string": str, "expected_replacements": int}
+        expected_mtime: Optional ISO datetime from a prior `read_file`/`get_file_info`.
+            If the file was modified after this timestamp, the edit aborts so a
+            concurrent write doesn't get silently overwritten. Pass the value
+            from the `<file mtime="...">` envelope to enable the check.
 
     Returns:
         Success message with number of replacements made
@@ -359,7 +467,7 @@ def edit_file(
 
     Raises:
         ValueError: If parameters are invalid or conflicting
-        RuntimeError: If edits fail
+        RuntimeError: If edits fail or `expected_mtime` indicates external modification
     """
     single_mode = old_string is not None
     batch_mode = edits is not None
@@ -379,6 +487,9 @@ def edit_file(
 
     if file_path.is_dir():
         raise IsADirectoryError(f"Path is a directory: {path}")
+
+    if expected_mtime is not None:
+        _check_expected_mtime(file_path, expected_mtime)
 
     try:
         original_content = file_path.read_text(encoding="utf-8")

@@ -522,14 +522,16 @@ class SessionStore:
                 source=old_session.source,
                 user_id=old_session.user_id,
                 parent_id=old_session.parent_id,
-                metadata={
-                    k: v for k, v in old_session.metadata.items() if k in COMPACTION_PRESERVED_METADATA_KEYS
-                },
+                metadata={k: v for k, v in old_session.metadata.items() if k in COMPACTION_PRESERVED_METADATA_KEYS},
                 scratchpad=old_session.scratchpad,
                 title=old_session.title,
                 pinned=old_session.pinned,
                 pin_position=old_session.pin_position,
             )
+            # Preserve original conversation start so <session_started> in the
+            # message context reflects the user's perceived session age, not
+            # the compaction moment.
+            new_session.created_at = old_session.created_at
 
             self._sessions[new_id] = new_session
 

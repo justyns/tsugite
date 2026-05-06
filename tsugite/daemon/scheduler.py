@@ -29,6 +29,7 @@ class ScheduleEntry:
     enabled: bool = True
     created_at: str = ""
     last_run: str | None = None
+    last_scheduled_for: str | None = None  # planned fire time of last run (ISO)
     next_run: str | None = None  # computed
     last_status: str | None = None  # "success" | "error" | "skipped"
     last_error: str | None = None
@@ -184,6 +185,11 @@ class Scheduler:
                 entry.next_run = self._compute_next_run_iso(entry)
                 self._save()
                 continue
+
+            # Capture the planned fire time before rolling next_run forward,
+            # so the adapter can surface scheduled_for vs actual_fire_time to
+            # the agent (drift detection on misfires/queue delays).
+            entry.last_scheduled_for = entry.next_run
 
             # Update next_run IMMEDIATELY so the main loop doesn't busy-spin
             if entry.schedule_type == "once":

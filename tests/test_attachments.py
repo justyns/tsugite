@@ -912,6 +912,18 @@ class TestIndexResolution:
         assert "Heading X" in idx_content
         assert "Real Heading Y" in idx_content
 
+    def test_index_includes_humanized_mtime(self, tmp_path):
+        """Each indexed file's bullet should show how stale it is so the agent
+        prefers fresh files when picking what to read."""
+        (tmp_path / "fresh.md").write_text("# Fresh\nbody")
+
+        atts, _ = resolve_agent_config_attachments(
+            [AttachmentSpec(path=str(tmp_path / "*.md"), mode="index", index_format="first_heading")]
+        )
+        idx_content = atts[0].content
+        # Just-written file renders as "just now"
+        assert "just now" in idx_content
+
     def test_index_first_line_format(self, tmp_path):
         (tmp_path / "p.md").write_text("just one line\n\n# heading later")
         (tmp_path / "q.md").write_text("first line of q")

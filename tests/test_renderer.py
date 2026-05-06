@@ -1,6 +1,6 @@
 """Tests for the Jinja2 template renderer."""
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import pytest
@@ -8,6 +8,7 @@ import pytest
 from tsugite.renderer import (
     AgentRenderer,
     file_exists,
+    humanize_relative,
     is_dir,
     is_file,
     now,
@@ -241,6 +242,33 @@ Custom: {{ env.get('CUSTOM_VAR', 'not_set') }}
     assert "Home:" in result  # Just check that HOME is rendered
     assert "Path exists: True" in result
     assert "Custom: not_set" in result
+
+
+def test_humanize_relative_buckets():
+    """humanize_relative collapses a delta into the largest meaningful unit."""
+    now_ref = datetime(2026, 5, 4, 10, 0, 0, tzinfo=timezone.utc)
+
+    assert humanize_relative(now_ref - timedelta(seconds=30), now_ref) == "just now"
+    assert humanize_relative(now_ref - timedelta(minutes=1), now_ref) == "1 minute ago"
+    assert humanize_relative(now_ref - timedelta(minutes=42), now_ref) == "42 minutes ago"
+    assert humanize_relative(now_ref - timedelta(hours=1), now_ref) == "1 hour ago"
+    assert humanize_relative(now_ref - timedelta(hours=12), now_ref) == "12 hours ago"
+    assert humanize_relative(now_ref - timedelta(days=1), now_ref) == "1 day ago"
+    assert humanize_relative(now_ref - timedelta(days=6), now_ref) == "6 days ago"
+    assert humanize_relative(now_ref - timedelta(days=7), now_ref) == "1 week ago"
+    assert humanize_relative(now_ref - timedelta(days=20), now_ref) == "2 weeks ago"
+    assert humanize_relative(now_ref - timedelta(days=30), now_ref) == "1 month ago"
+    assert humanize_relative(now_ref - timedelta(days=364), now_ref) == "12 months ago"
+    assert humanize_relative(now_ref - timedelta(days=365), now_ref) == "1 year ago"
+    assert humanize_relative(now_ref - timedelta(days=730), now_ref) == "2 years ago"
+
+
+def test_humanize_relative_future_or_zero():
+    """Future or equal timestamps render as 'just now' (no negative ages)."""
+    now_ref = datetime(2026, 5, 4, 10, 0, 0, tzinfo=timezone.utc)
+
+    assert humanize_relative(now_ref, now_ref) == "just now"
+    assert humanize_relative(now_ref + timedelta(seconds=30), now_ref) == "just now"
 
 
 def test_slugify_edge_cases():

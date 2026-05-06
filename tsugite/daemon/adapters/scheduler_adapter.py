@@ -157,7 +157,10 @@ class SchedulerAdapter:
             "schedule_id": entry.id,
             "running_tasks": self.scheduler.get_running_ids(),
             "conv_id_override": conv_id,
+            "actual_fire_time": datetime.now(timezone.utc).isoformat(),
         }
+        if entry.last_scheduled_for:
+            metadata["scheduled_for"] = entry.last_scheduled_for
         if entry.notify_tool:
             metadata["notify_tool"] = True
         if entry.model:

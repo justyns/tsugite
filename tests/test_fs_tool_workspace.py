@@ -27,7 +27,7 @@ def test_read_file_relative_resolves_against_workspace(workspace, tmp_path, monk
     # chdir somewhere else to prove we aren't silently using cwd
     monkeypatch.chdir(tmp_path)
     set_workspace_dir(workspace)
-    assert read_file("notes.txt").strip() == "hello world"
+    assert read_file("notes.txt", with_metadata=False).strip() == "hello world"
 
 
 def test_write_file_relative_writes_into_workspace(workspace, tmp_path, monkeypatch):
@@ -43,7 +43,7 @@ def test_absolute_path_passes_through(workspace, tmp_path):
     elsewhere = tmp_path / "elsewhere.txt"
     elsewhere.write_text("outside")
     set_workspace_dir(workspace)
-    assert read_file(str(elsewhere)).strip() == "outside"
+    assert read_file(str(elsewhere), with_metadata=False).strip() == "outside"
 
 
 def test_list_files_relative_resolves_against_workspace(workspace, tmp_path, monkeypatch):
@@ -86,4 +86,4 @@ def test_relative_paths_use_cwd_when_no_workspace(tmp_path, monkeypatch):
     (tmp_path / "local.txt").write_text("local")
     monkeypatch.chdir(tmp_path)
     # Intentionally do NOT call set_workspace_dir
-    assert read_file("local.txt").strip() == "local"
+    assert read_file("local.txt", with_metadata=False).strip() == "local"

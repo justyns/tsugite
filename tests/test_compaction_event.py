@@ -76,7 +76,54 @@ class TestEventsToMessagesAfterCompaction:
         msgs = events_to_messages(events)
         # Pre-compaction events drop out; the synthetic summary appears.
         assert "we worked on cats" in msgs[0]["content"]
-        assert msgs[2] == {"role": "user", "content": "new"}
+        assert msgs[2]["role"] == "user"
+        assert msgs[2]["content"].endswith("] new")
+
+
+class TestCompactionSummaryDateRange:
+    """The <previous_conversation> block tells the agent what time period the
+    summary covers and when the compaction itself happened. After multiple
+    compactions in a long-running conversation this is the only way to anchor
+    recalled facts in time.
+    """
+
+    def test_summary_block_includes_compacted_range(self):
+        compaction_ts = datetime(2026, 5, 4, 8, 15, tzinfo=timezone.utc)
+        events = [
+            Event(
+                type="compaction",
+                ts=compaction_ts,
+                data={
+                    "summary": "we discussed a refactor",
+                    "range_start": "2026-04-27T11:26:00+00:00",
+                    "range_end": "2026-05-01T14:30:00+00:00",
+                },
+            ),
+            _ev("user_input", text="continuing"),
+        ]
+        msgs = events_to_messages(events)
+        block = msgs[0]["content"]
+        assert "2026-04-27" in block
+        assert "2026-05-01" in block
+        assert "2026-05-04" in block  # compaction time
+        assert "we discussed a refactor" in block
+
+    def test_summary_block_omits_range_when_missing(self):
+        # Pre-existing JSONLs from before this change won't have range_start /
+        # range_end. The block must still render gracefully.
+        events = [
+            Event(
+                type="compaction",
+                ts=datetime(2026, 5, 4, tzinfo=timezone.utc),
+                data={"summary": "old-format compaction"},
+            ),
+            _ev("user_input", text="continuing"),
+        ]
+        msgs = events_to_messages(events)
+        block = msgs[0]["content"]
+        assert "old-format compaction" in block
+        # Should not crash and should not produce empty/None placeholders
+        assert "None" not in block
 
 
 class TestCompactionWritesEventInPlace:

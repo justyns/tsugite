@@ -10,8 +10,6 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Protocol
 from zoneinfo import ZoneInfo
 
-from tzlocal import get_localzone
-
 from tsugite.agent_inheritance import find_agent_file
 from tsugite.agent_runner import run_agent
 from tsugite.daemon.config import AgentConfig
@@ -403,20 +401,31 @@ class BaseAdapter(ABC):
         Keeps dynamic metadata in the user message turn (not the cached
         attachment context turn) for better cache efficiency.
         """
+        from tsugite.renderer import local_tz, render_iso_element
+
         tz_name = self.agent_config.timezone
         try:
-            if tz_name:
-                tz = ZoneInfo(tz_name)
-            else:
-                tz = get_localzone()
-            now = datetime.now(tz)
+            tz = ZoneInfo(tz_name) if tz_name else local_tz()
             tz_label = tz_name or str(tz)
+            now = datetime.now(tz)
             timestamp = now.strftime("%Y-%m-%d %H:%M:%S ") + tz_label
         except Exception:
-            timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+            tz = timezone.utc
+            tz_label = "UTC"
+            now = datetime.now(timezone.utc)
+            timestamp = now.strftime("%Y-%m-%d %H:%M:%S UTC")
+        session_started_xml = ""
+        last_active_xml = ""
+        scheduler_timing_xml = ""
         session_topic_xml = ""
         session_meta_xml = ""
         scratchpad_xml = ""
+
+        meta = channel_context.metadata or {}
+        if channel_context.source == "scheduler" and (meta.get("scheduled_for") or meta.get("actual_fire_time")):
+            scheduled_xml = render_iso_element("scheduled_for", meta.get("scheduled_for"), tz, tz_label, now)
+            actual_xml = render_iso_element("actual_fire_time", meta.get("actual_fire_time"), tz, tz_label, now)
+            scheduler_timing_xml = scheduled_xml + actual_xml
         try:
             conv_id_override = (channel_context.metadata or {}).get("conv_id_override")
             if conv_id_override:
@@ -424,6 +433,8 @@ class BaseAdapter(ABC):
             else:
                 session = self.session_store.get_or_create_interactive(user_id, self.agent_name)
             tokens_used = session.cumulative_tokens
+            session_started_xml = render_iso_element("session_started", session.created_at, tz, tz_label, now)
+            last_active_xml = render_iso_element("last_active", session.last_active, tz, tz_label, now)
             if session.metadata:
                 topic_lines = _render_session_topic_lines(session.metadata.get("topic"), indent="  ")
                 if topic_lines:
@@ -440,7 +451,7 @@ class BaseAdapter(ABC):
             tokens_used = 0
 
         return f"""<message_context>
-  <datetime>{timestamp}</datetime>
+  <datetime>{timestamp}</datetime>{session_started_xml}{last_active_xml}{scheduler_timing_xml}
   <working_directory>{self.agent_config.workspace_dir}</working_directory>
   <source>{channel_context.source}</source>
   <user_id>{channel_context.user_id}</user_id>
@@ -1005,12 +1016,16 @@ class BaseAdapter(ABC):
             session_path=new_session_path,
         )
 
+        range_start = old_events[0].ts.isoformat() if old_events else None
+        range_end = old_events[-1].ts.isoformat() if old_events else None
         new_storage.record(
             "compaction",
             summary=summary,
             replaced_count=old_user_inputs,
             retained_count=recent_user_inputs,
             reason=reason,
+            range_start=range_start,
+            range_end=range_end,
         )
         for event in recent_events:
             new_storage.record(event.type, **event.data)

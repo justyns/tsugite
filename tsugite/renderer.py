@@ -2,10 +2,40 @@
 
 import os
 import re
-from datetime import datetime, timedelta
-from typing import Any, Dict
+from datetime import datetime, timedelta, timezone
+from functools import lru_cache
+from typing import Any, Dict, Optional
 
 from jinja2 import DictLoader, Environment, StrictUndefined
+
+
+@lru_cache(maxsize=1)
+def local_tz():
+    """Return the system local tzinfo, falling back to UTC if tzlocal can't resolve it.
+
+    Cached because tzlocal does syscalls and the process timezone doesn't change
+    at runtime; called per-stat in file tools and per-turn in the message context.
+    """
+    try:
+        from tzlocal import get_localzone
+
+        return get_localzone()
+    except Exception:
+        return timezone.utc
+
+
+def parse_iso_utc(value: Optional[str]) -> Optional[datetime]:
+    """Parse an ISO-8601 string (with or without `Z` suffix) into a tz-aware datetime.
+
+    Returns None for empty input or unparseable values so callers can render
+    with a graceful fallback rather than guarding every site with try/except.
+    """
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (ValueError, TypeError, AttributeError):
+        return None
 
 
 def now() -> str:
@@ -26,27 +56,13 @@ def tomorrow() -> str:
 
 def days_ago(n: int) -> datetime:
     """Return a timezone-aware datetime for N days ago."""
-    try:
-        from tzlocal import get_localzone
-
-        tz = get_localzone()
-    except Exception:
-        tz = None
-    return datetime.now(tz=tz) - timedelta(days=n)
+    return datetime.now(tz=local_tz()) - timedelta(days=n)
 
 
 def weeks_ago(n: int) -> datetime:
     """Return a timezone-aware datetime for Monday of the ISO week N weeks ago."""
-    try:
-        from tzlocal import get_localzone
-
-        tz = get_localzone()
-    except Exception:
-        tz = None
-    dt = datetime.now(tz=tz) - timedelta(weeks=n)
-    # Roll back to Monday of that ISO week
-    dt = dt - timedelta(days=dt.weekday())
-    return dt
+    dt = datetime.now(tz=local_tz()) - timedelta(weeks=n)
+    return dt - timedelta(days=dt.weekday())
 
 
 def date_format(dt, fmt: str) -> str:
@@ -54,6 +70,86 @@ def date_format(dt, fmt: str) -> str:
     if isinstance(dt, str):
         dt = datetime.fromisoformat(dt)
     return dt.strftime(fmt)
+
+
+def humanize_relative(dt: datetime, ref: datetime) -> str:
+    """Render `dt` as a coarse human delta relative to `ref`.
+
+    Picks the largest meaningful unit (just now / minutes / hours / days /
+    weeks / months / years). Future or equal timestamps render as "just now"
+    so callers don't have to special-case negative deltas.
+    """
+    delta = ref - dt
+    seconds = int(delta.total_seconds())
+    if seconds < 60:
+        return "just now"
+
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes} minute{'s' if minutes != 1 else ''} ago"
+
+    hours = minutes // 60
+    if hours < 24:
+        return f"{hours} hour{'s' if hours != 1 else ''} ago"
+
+    days = hours // 24
+    if days < 7:
+        return f"{days} day{'s' if days != 1 else ''} ago"
+
+    if days < 30:
+        weeks = days // 7
+        return f"{weeks} week{'s' if weeks != 1 else ''} ago"
+
+    if days < 365:
+        months = days // 30
+        return f"{months} month{'s' if months != 1 else ''} ago"
+
+    years = days // 365
+    return f"{years} year{'s' if years != 1 else ''} ago"
+
+
+def format_prompt_ts(dt: datetime, *, ref: Optional[datetime] = None, tz_label: Optional[str] = None) -> str:
+    """Render a tz-aware datetime as `YYYY-MM-DD HH:MM TZ`, optionally with a humanized delta.
+
+    Used wherever the agent prompt or replay surfaces a timestamp. Stays
+    byte-stable when `ref` is None (no relative phrase) so prompt-cache hits
+    on replayed history aren't invalidated.
+    """
+    label = tz_label if tz_label is not None else (dt.strftime("%Z") or "UTC")
+    out = dt.strftime("%Y-%m-%d %H:%M ") + label
+    if ref is not None:
+        out += f" ({humanize_relative(dt, ref)})"
+    return out
+
+
+def render_iso_element(name: str, raw: str, tz, tz_label: str, now: datetime) -> str:
+    """Render `<name>YYYY-MM-DD HH:MM TZ (N units ago)</name>` from an ISO string.
+
+    Returns "" if `raw` is missing or unparseable so the element is silently
+    omitted rather than rendered broken. Adapter callers compose multiple of
+    these into the message-context block.
+    """
+    dt = parse_iso_utc(raw)
+    if dt is None:
+        return ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    local = dt.astimezone(tz)
+    return f"\n  <{name}>{format_prompt_ts(local, ref=now, tz_label=tz_label)}</{name}>"
+
+
+def humanize_mtime(epoch: Any) -> str:
+    """Render an epoch float as a coarse human delta (e.g. "6 days ago").
+
+    Returns "" if epoch is missing or zero, so callers can append unconditionally.
+    """
+    if not epoch:
+        return ""
+    try:
+        tz = local_tz()
+        return humanize_relative(datetime.fromtimestamp(float(epoch), tz=tz), datetime.now(tz=tz))
+    except (ValueError, TypeError, OSError):
+        return ""
 
 
 def slugify(text: str) -> str:
@@ -176,6 +272,8 @@ class AgentRenderer:
                 "days_ago": days_ago,
                 "weeks_ago": weeks_ago,
                 "date_format": date_format,
+                "humanize_relative": humanize_relative,
+                "humanize_mtime": humanize_mtime,
                 "file_exists": file_exists,
                 "is_file": is_file,
                 "is_dir": is_dir,

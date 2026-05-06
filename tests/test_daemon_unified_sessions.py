@@ -468,6 +468,84 @@ class TestCompactSessionClearsSkills:
         assert manager._loaded_skills == {}
 
 
+class TestCompactSessionRecordsRange:
+    """The recorded compaction event must carry the time span it summarized,
+    so the resumed session's <previous_conversation> block can tell the agent
+    *what time period* the summary covers.
+    """
+
+    @pytest.mark.asyncio
+    async def test_compaction_event_records_range_start_and_end(self, workspace_dir, tmp_path):
+        from tsugite.history import SessionStorage
+        from tsugite.history.models import Event
+
+        history_dir = tmp_path / "history"
+        history_dir.mkdir()
+
+        store = SessionStore(tmp_path / "session_store.json", context_limits={"test-agent": 128000})
+        session = store.get_or_create_interactive("test-user", "test-agent")
+        conv_id = session.id
+
+        session_path = history_dir / f"{conv_id}.jsonl"
+        storage = SessionStorage.create(
+            agent_name="test-agent",
+            model="openai:gpt-4o-mini",
+            session_path=session_path,
+        )
+        for i in range(5):
+            storage.record("user_input", text=f"message {i}")
+
+        adapter = _make_adapter(workspace_dir, store)
+
+        first_ts = datetime(2026, 4, 27, 11, 26, tzinfo=timezone.utc)
+        last_ts = datetime(2026, 5, 1, 14, 30, tzinfo=timezone.utc)
+        old_events = [
+            Event(type="user_input", ts=first_ts, data={"text": "first"}),
+            Event(type="user_input", ts=last_ts, data={"text": "last"}),
+        ]
+        recent_events = [Event(type="user_input", ts=datetime.now(timezone.utc), data={"text": "recent"})]
+
+        with (
+            patch("tsugite.daemon.memory.get_context_limit", return_value=128_000),
+            patch("tsugite.daemon.memory.infer_compaction_model", return_value="openai:gpt-4o-mini"),
+            patch(
+                "tsugite.daemon.memory.split_events_for_compaction",
+                return_value=(old_events, recent_events),
+            ),
+            patch("tsugite.daemon.memory.summarize_session", new_callable=AsyncMock, return_value="Summary"),
+            patch("tsugite.history.get_history_dir", return_value=history_dir),
+            patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
+            patch("tsugite.history.storage.get_machine_name", return_value="test"),
+            patch("tsugite.hooks.fire_compact_hooks", new_callable=AsyncMock, return_value=[]),
+        ):
+            new_session = await adapter._compact_session(conv_id)
+
+        new_events = SessionStorage.load(history_dir / f"{new_session.id}.jsonl").load_events()
+        compaction_event = next(e for e in new_events if e.type == "compaction")
+        assert compaction_event.data["range_start"] == first_ts.isoformat()
+        assert compaction_event.data["range_end"] == last_ts.isoformat()
+
+
+class TestCompactSessionPreservesCreatedAt:
+    """Compaction must carry the original session start time forward.
+
+    Otherwise a 7-day-old conversation that just got compacted would report
+    `<session_started>` as "now", losing the time-grounding signal that
+    distinguishes long-running sessions from fresh ones.
+    """
+
+    def test_created_at_carries_through_compaction(self, tmp_path):
+        store = SessionStore(tmp_path / "session_store.json")
+        session = store.get_or_create_interactive("alice", "test-agent")
+        original_created_at = session.created_at
+        assert original_created_at, "fixture sanity: created_at must be populated"
+
+        new_session = store.compact_session(session.id)
+
+        assert new_session.id != session.id
+        assert new_session.created_at == original_created_at
+
+
 class TestCompactionLocking:
     """Tests for session compaction lock/queue mechanism."""
 

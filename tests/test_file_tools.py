@@ -1,5 +1,7 @@
 """Tests for file system tools."""
 
+from datetime import datetime, timedelta
+
 import pytest
 
 from tsugite.tools import call_tool
@@ -18,7 +20,7 @@ def test_write_and_read_file(temp_dir, file_tools):
     assert test_file.exists()
 
     # Test read
-    read_content = call_tool("read_file", path=str(test_file))
+    read_content = call_tool("read_file", path=str(test_file), with_metadata=False)
     assert read_content == content
 
 
@@ -230,8 +232,8 @@ def test_file_tools_integration(temp_dir, file_tools):
     assert "utils.py" in files
 
     # Read files
-    content1 = call_tool("read_file", path=str(file1))
-    content2 = call_tool("read_file", path=str(file2))
+    content1 = call_tool("read_file", path=str(file1), with_metadata=False)
+    content2 = call_tool("read_file", path=str(file2), with_metadata=False)
     assert content1 == "# Main module"
     assert content2 == "# Utilities"
 
@@ -246,7 +248,7 @@ def test_unicode_content(temp_dir, file_tools):
     call_tool("write_file", path=str(test_file), content=unicode_content)
 
     # Read back Unicode content
-    read_content = call_tool("read_file", path=str(test_file))
+    read_content = call_tool("read_file", path=str(test_file), with_metadata=False)
     assert read_content == unicode_content
 
 
@@ -260,7 +262,7 @@ def test_large_file_handling(temp_dir, file_tools):
     result = call_tool("write_file", path=str(large_file), content=large_content)
     assert "Successfully wrote 1048576 characters" in result
 
-    read_content = call_tool("read_file", path=str(large_file))
+    read_content = call_tool("read_file", path=str(large_file), with_metadata=False)
     assert len(read_content) == 1048576
     assert read_content == large_content
 
@@ -274,7 +276,7 @@ def test_empty_file_handling(temp_dir, file_tools):
     call_tool("write_file", path=str(empty_file), content="")
 
     # Read empty content
-    content = call_tool("read_file", path=str(empty_file))
+    content = call_tool("read_file", path=str(empty_file), with_metadata=False)
     assert content == ""
 
     # File should exist
@@ -344,21 +346,163 @@ def test_read_file_full_with_line_numbers(temp_dir, file_tools):
     test_file = temp_dir / "lines.txt"
     test_file.write_text("alpha\nbeta\ngamma")
 
-    result = call_tool("read_file", path=str(test_file), line_numbers=True)
+    result = call_tool("read_file", path=str(test_file), line_numbers=True, with_metadata=False)
     assert result == "1: alpha\n2: beta\n3: gamma"
 
 
 def test_read_file_ranged_without_line_numbers(five_line_file, file_tools):
     """Test ranged read without line numbers returns plain lines."""
-    result = call_tool("read_file", path=str(five_line_file), start_line=2, end_line=4)
+    result = call_tool("read_file", path=str(five_line_file), start_line=2, end_line=4, with_metadata=False)
     assert result == "Line 2\nLine 3\nLine 4"
     assert "2:" not in result
 
 
 def test_read_file_ranged_with_line_numbers(five_line_file, file_tools):
     """Test ranged read with line_numbers=True returns numbered lines."""
-    result = call_tool("read_file", path=str(five_line_file), start_line=2, end_line=4, line_numbers=True)
+    result = call_tool(
+        "read_file", path=str(five_line_file), start_line=2, end_line=4, line_numbers=True, with_metadata=False
+    )
     assert result == "2: Line 2\n3: Line 3\n4: Line 4"
+
+
+# Tests for the <file> metadata envelope (default behavior)
+
+
+def test_read_file_default_wraps_in_envelope(temp_dir, file_tools):
+    """Default read_file wraps content in a <file> envelope with mtime + size."""
+    test_file = temp_dir / "memo.md"
+    test_file.write_text("hello envelope")
+
+    result = call_tool("read_file", path=str(test_file))
+
+    assert result.startswith("<file ")
+    assert result.endswith("</file>")
+    assert f'path="{test_file}"' in result
+    assert "modified=" in result
+    assert "size_bytes=" in result
+    assert "hello envelope" in result
+
+
+def test_read_file_envelope_includes_humanized_mtime(temp_dir, file_tools):
+    """The modified attr ends with a `(N units ago)` relative marker."""
+    test_file = temp_dir / "fresh.md"
+    test_file.write_text("just written")
+
+    result = call_tool("read_file", path=str(test_file))
+    # Just-written file should render as "just now"
+    assert "just now" in result
+
+
+def test_read_file_envelope_with_partial_read_includes_lines_attr(five_line_file, file_tools):
+    """Partial reads add a `lines="start-end"` attribute so the agent knows
+    the rendered window doesn't span the whole file."""
+    result = call_tool("read_file", path=str(five_line_file), start_line=2, end_line=4)
+
+    assert 'lines="2-4"' in result
+    assert "Line 2" in result
+    assert "Line 5" not in result
+
+
+def test_read_file_envelope_with_partial_read_to_end(five_line_file, file_tools):
+    """When end_line is omitted, the lines attr renders the resolved upper bound."""
+    result = call_tool("read_file", path=str(five_line_file), start_line=3)
+    assert 'lines="3-' in result
+    assert "Line 3" in result
+
+
+def test_read_file_with_metadata_false_returns_raw(temp_dir, file_tools):
+    """Opt-out path: with_metadata=False returns the file content unwrapped."""
+    test_file = temp_dir / "raw.json"
+    test_file.write_text('{"key": "value"}')
+
+    result = call_tool("read_file", path=str(test_file), with_metadata=False)
+    assert result == '{"key": "value"}'
+    assert "<file" not in result
+
+
+def test_read_file_envelope_includes_machine_readable_mtime(temp_dir, file_tools):
+    """The wrapper exposes mtime as a parseable ISO string so agents can
+    round-trip it back to edit_file's expected_mtime check."""
+    test_file = temp_dir / "round_trip.md"
+    test_file.write_text("body")
+
+    result = call_tool("read_file", path=str(test_file))
+    import re
+
+    match = re.search(r'mtime="([^"]+)"', result)
+    assert match is not None, "envelope must expose mtime= for round-trip"
+    parsed = datetime.fromisoformat(match.group(1))
+    assert parsed.tzinfo is not None
+
+
+def test_edit_file_expected_mtime_match_succeeds(temp_dir, file_tools):
+    test_file = temp_dir / "stable.txt"
+    test_file.write_text("hello world")
+
+    info = call_tool("get_file_info", path=str(test_file))
+    result = call_tool(
+        "edit_file",
+        path=str(test_file),
+        old_string="hello",
+        new_string="hi",
+        expected_mtime=info["last_modified"],
+    )
+    assert "1 replacement" in result
+    assert test_file.read_text() == "hi world"
+
+
+def test_edit_file_expected_mtime_stale_raises(temp_dir, file_tools):
+    """Edit aborts when the file changed between read and edit, so concurrent
+    writes don't get silently overwritten."""
+    test_file = temp_dir / "racy.txt"
+    test_file.write_text("hello world")
+
+    stale_mtime = (datetime.now().astimezone() - timedelta(hours=1)).isoformat()
+    with pytest.raises(RuntimeError, match="modified externally"):
+        call_tool(
+            "edit_file",
+            path=str(test_file),
+            old_string="hello",
+            new_string="hi",
+            expected_mtime=stale_mtime,
+        )
+    # File untouched
+    assert test_file.read_text() == "hello world"
+
+
+def test_edit_file_no_expected_mtime_skips_check(temp_dir, file_tools):
+    """Default behavior unchanged: no expected_mtime means no check."""
+    test_file = temp_dir / "unchecked.txt"
+    test_file.write_text("hello world")
+
+    result = call_tool("edit_file", path=str(test_file), old_string="hello", new_string="hi")
+    assert "1 replacement" in result
+
+
+def test_list_files_default_returns_paths(temp_dir, file_tools):
+    """Default list_files returns List[str] - existing iteration code keeps working."""
+    (temp_dir / "a.txt").write_text("a")
+    (temp_dir / "b.txt").write_text("b")
+
+    result = call_tool("list_files", path=str(temp_dir))
+    assert isinstance(result, list)
+    assert all(isinstance(item, str) for item in result)
+    assert sorted(result) == ["a.txt", "b.txt"]
+
+
+def test_list_files_with_metadata_returns_dicts(temp_dir, file_tools):
+    """with_metadata=True returns List[Dict] with path and modified per entry."""
+    (temp_dir / "a.txt").write_text("a")
+    (temp_dir / "b.txt").write_text("b")
+
+    result = call_tool("list_files", path=str(temp_dir), with_metadata=True)
+    assert isinstance(result, list)
+    assert all(isinstance(item, dict) for item in result)
+    assert all(set(item.keys()) == {"path", "modified"} for item in result)
+    paths = sorted(item["path"] for item in result)
+    assert paths == ["a.txt", "b.txt"]
+    # All modified strings should include a humanized relative marker
+    assert all("ago" in item["modified"] or "just now" in item["modified"] for item in result)
 
 
 def test_get_file_info_existing(temp_dir, file_tools):
@@ -373,6 +517,8 @@ def test_get_file_info_existing(temp_dir, file_tools):
     assert info["line_count"] == 3
     assert info["size_bytes"] > 0
     assert info["last_modified"] is not None
+    # Humanized companion to last_modified for quick "is this fresh?" checks.
+    assert info["last_modified_relative"] in ("just now",) or "ago" in info["last_modified_relative"]
 
 
 def test_get_file_info_nonexistent(temp_dir, file_tools):

@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 from tsugite.attachments.base import Attachment, AttachmentContentType  # noqa: E402
 from tsugite.core.tools import Tool  # noqa: E402
 from tsugite.md_agents import Agent, AgentConfig, AttachmentSpec  # noqa: E402
+from tsugite.renderer import humanize_mtime  # noqa: E402
 from tsugite.skill_discovery import Skill  # noqa: E402
 from tsugite.utils import has_glob_chars  # noqa: E402
 
@@ -306,18 +307,25 @@ def _format_index_block(pattern: str, entries: List[Dict[str, Any]], fmt: str) -
         path = entry.get("path", "")
         if fmt == "path_only":
             lines.append(path)
-        elif fmt == "frontmatter":
+            continue
+
+        if fmt == "frontmatter":
             title = entry.get("title") or entry.get("heading") or ""
             desc = entry.get("description", "")
             if title and desc:
-                lines.append(f"{path} - {title}: {desc}")
+                bullet = f"{path} - {title}: {desc}"
             elif title:
-                lines.append(f"{path} - {title}")
+                bullet = f"{path} - {title}"
             else:
-                lines.append(path)
+                bullet = path
         else:
             heading = entry.get("heading", "")
-            lines.append(f"{path} - {heading}" if heading else path)
+            bullet = f"{path} - {heading}" if heading else path
+
+        relative = humanize_mtime(entry.get("mtime"))
+        if relative:
+            bullet = f"{bullet} ({relative})"
+        lines.append(bullet)
     return "\n".join(lines)
 
 
