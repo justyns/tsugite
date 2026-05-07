@@ -8,13 +8,12 @@ doesn't re-parse megabytes of history per running session.
 
 from __future__ import annotations
 
-import builtins
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from tsugite.daemon.session_store import SessionStore
+from tsugite.daemon.session_store import SessionStatus, SessionStore
 from tsugite.history import SessionStorage
 
 
@@ -39,109 +38,61 @@ def _make_history_session(history_dir: Path, session_id: str) -> SessionStorage:
     )
 
 
-class _OpenSpy:
-    """Track every file opened — both via builtin open() and Path.open."""
-
-    def __init__(self):
-        self.paths: list[str] = []
-        self._real_builtin = builtins.open
-        self._real_path = Path.open
-
-    def __enter__(self):
-        spy = self
-
-        def _track(p):
-            try:
-                spy.paths.append(str(p))
-            except Exception:
-                pass
-
-        def builtin_open(file, *a, **kw):
-            _track(file)
-            return spy._real_builtin(file, *a, **kw)
-
-        def path_open(self, *a, **kw):
-            _track(self)
-            return spy._real_path(self, *a, **kw)
-
-        self._patch_b = patch.object(builtins, "open", builtin_open)
-        self._patch_p = patch.object(Path, "open", path_open)
-        self._patch_b.start()
-        self._patch_p.start()
-        return self
-
-    def __exit__(self, *exc):
-        self._patch_b.stop()
-        self._patch_p.stop()
-
-    def jsonl_opens(self) -> list[str]:
-        return [p for p in self.paths if p.endswith(".jsonl")]
-
-
-def test_progress_summary_cold_then_warm(store, history_dir):
+def test_progress_summary_cold_then_warm(store, history_dir, jsonl_open_spy):
     sid = "warm-test"
     _make_history_session(history_dir, sid)
     store.append_event(sid, {"type": "user_input", "text": "hi", "timestamp": "2026-01-01T00:00:00+00:00"})
     store.append_event(sid, {"type": "tool_invocation", "name": "bash", "timestamp": "2026-01-01T00:00:01+00:00"})
 
-    # First call may read the file (cold). Second call MUST be cache-only.
     store.session_progress_summary(sid)  # warm the cache
-    target = history_dir / f"{sid}.jsonl"
-
-    with _OpenSpy() as spy:
-        result = store.session_progress_summary(sid)
-
-    assert str(target) not in spy.jsonl_opens(), (
-        f"warm session_progress_summary opened {target} — cache miss: {spy.jsonl_opens()}"
-    )
+    target = str(history_dir / f"{sid}.jsonl")
+    jsonl_open_spy.clear()
+    result = store.session_progress_summary(sid)
+    assert target not in jsonl_open_spy
     assert result["tool_count"] == 1
 
 
-def test_progress_updates_incrementally_on_append(store, history_dir):
+def test_progress_updates_incrementally_on_append(store, history_dir, jsonl_open_spy):
     sid = "incr-test"
     _make_history_session(history_dir, sid)
-    # Prime the cache with no events
-    store.session_progress_summary(sid)
+    store.session_progress_summary(sid)  # prime cache with empty session
 
-    target = history_dir / f"{sid}.jsonl"
-    with _OpenSpy() as spy:
-        store.append_event(sid, {"type": "tool_invocation", "name": "bash", "timestamp": "2026-01-01T00:00:00+00:00"})
-        store.append_event(sid, {"type": "tool_invocation", "name": "read", "timestamp": "2026-01-01T00:00:01+00:00"})
-        result = store.session_progress_summary(sid)
+    target = str(history_dir / f"{sid}.jsonl")
+    jsonl_open_spy.clear()
+    store.append_event(sid, {"type": "tool_invocation", "name": "bash", "timestamp": "2026-01-01T00:00:00+00:00"})
+    store.append_event(sid, {"type": "tool_invocation", "name": "read", "timestamp": "2026-01-01T00:00:01+00:00"})
+    result = store.session_progress_summary(sid)
 
-    # append_event itself writes (one open per append). What we forbid is the
-    # progress summary call doing its own read after an append-driven update.
-    summary_reads = [p for p in spy.jsonl_opens() if str(target) in p]
-    # Two appends = two opens. A third would be the (forbidden) summary re-read.
+    # Two appends = two writes; a third open would be the (forbidden) summary re-read.
+    summary_reads = [p for p in jsonl_open_spy if target in p]
     assert len(summary_reads) <= 2, f"Too many opens: {summary_reads}"
     assert result["tool_count"] == 2
 
 
-def test_event_count_cold_then_warm(store, history_dir):
+def test_event_count_cold_then_warm(store, history_dir, jsonl_open_spy):
     sid = "ec-test"
     _make_history_session(history_dir, sid)
     for _ in range(3):
         store.append_event(sid, {"type": "user_input", "text": "x"})
 
-    # session_start + 3 = 4
     store.event_count(sid)  # cold
-    target = history_dir / f"{sid}.jsonl"
-    with _OpenSpy() as spy:
-        count = store.event_count(sid)
-    assert count == 4
-    assert str(target) not in spy.jsonl_opens()
+    target = str(history_dir / f"{sid}.jsonl")
+    jsonl_open_spy.clear()
+    count = store.event_count(sid)
+    assert count == 4  # session_start + 3 appends
+    assert target not in jsonl_open_spy
 
 
-def test_event_count_increments_on_append(store, history_dir):
+def test_event_count_increments_on_append(store, history_dir, jsonl_open_spy):
     sid = "ec-incr"
     _make_history_session(history_dir, sid)
     store.event_count(sid)  # prime to 1 (just session_start)
     store.append_event(sid, {"type": "reaction", "emoji": "🎉"})
-    target = history_dir / f"{sid}.jsonl"
-    with _OpenSpy() as spy:
-        n = store.event_count(sid)
+    target = str(history_dir / f"{sid}.jsonl")
+    jsonl_open_spy.clear()
+    n = store.event_count(sid)
     assert n == 2
-    assert str(target) not in spy.jsonl_opens()
+    assert target not in jsonl_open_spy
 
 
 def test_progress_session_end_resets_counts(store, history_dir):
@@ -165,7 +116,24 @@ def test_cache_survives_store_reload(tmp_path: Path, history_dir):
     s1.append_event(sid, {"type": "tool_invocation", "name": "read"})
     s1.flush()
 
-    # Simulate restart with a fresh store instance
     s2 = SessionStore(path, history_dir=history_dir)
     summary = s2.session_progress_summary(sid)
     assert summary["tool_count"] == 2
+
+
+def test_progress_cache_evicted_on_session_finish(store, history_dir):
+    """Once a session is marked COMPLETED/FAILED/CANCELLED it stops appending
+    events and the sidebar stops reading its progress, so the cache entry
+    just leaks memory until daemon restart. Verify it's evicted on the
+    status transition."""
+    from tsugite.daemon.session_store import Session
+
+    session = store.create_session(Session(id="finish-test", agent="t", status=SessionStatus.ACTIVE.value))
+    sid = session.id
+    _make_history_session(history_dir, sid)
+    store.append_event(sid, {"type": "tool_invocation", "name": "bash"})
+    store.session_progress_summary(sid)  # populate cache
+    assert sid in store._progress_cache
+
+    store.update_session(sid, status=SessionStatus.COMPLETED.value)
+    assert sid not in store._progress_cache

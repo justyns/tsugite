@@ -62,45 +62,20 @@ def test_limit_keeps_last_n_user_inputs(history_dir):
     assert user_inputs == ["long-input-7", "long-input-8", "long-input-9"]
 
 
-def test_limit_short_circuits_chain_walk(history_dir, monkeypatch):
+def test_limit_short_circuits_chain_walk(history_dir, jsonl_open_spy):
     """When the newest file's user_input count >= limit, the parent file must
     not be opened. This is the user-reported case: legacy chained sessions
     shouldn't pull old files into memory when only the recent tail is needed."""
     _seed_session(history_dir, "old", n_user_inputs=5)
     _seed_session(history_dir, "new", parent="old", n_user_inputs=10)
-
-    # Track all .jsonl opens — both Path.open and builtin open. SessionStorage
-    # uses builtin open() in some paths; the new _collect_events uses Path.open.
-    opened: list[Path] = []
-    import builtins
-    real_builtin_open = builtins.open
-    real_path_open = Path.open
-
-    def _record(path):
-        try:
-            p = Path(path) if not isinstance(path, Path) else path
-            if str(p).endswith(".jsonl"):
-                opened.append(p)
-        except Exception:
-            pass
-
-    def tracking_builtin_open(file, *args, **kwargs):
-        _record(file)
-        return real_builtin_open(file, *args, **kwargs)
-
-    def tracking_path_open(self, *args, **kwargs):
-        _record(self)
-        return real_path_open(self, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "open", tracking_builtin_open)
-    monkeypatch.setattr(Path, "open", tracking_path_open)
+    jsonl_open_spy.clear()
 
     events = HTTPServer._collect_events("new", limit=3)
 
     user_inputs = [e["data"]["text"] for e in events if e.get("type") == "user_input"]
     assert user_inputs == ["new-input-7", "new-input-8", "new-input-9"]
-    parent_opens = [p for p in opened if p.name == "old.jsonl"]
-    assert parent_opens == [], f"Parent file should not be opened when limit covers newest: {opened}"
+    parent_opens = [p for p in jsonl_open_spy if p.endswith("old.jsonl")]
+    assert parent_opens == [], f"Parent file should not be opened when limit covers newest: {jsonl_open_spy}"
 
 
 def test_limit_walks_into_parent_when_newest_too_short(history_dir):

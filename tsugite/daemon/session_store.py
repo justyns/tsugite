@@ -657,7 +657,8 @@ class SessionStore:
             old_session.pin_position = None
 
             self._save()
-            return new_session
+        self._evict_progress_cache(session_id)
+        return new_session
 
     def resolve_compacted_successor(self, session_id: str) -> Optional[Session]:
         """Return the post-compaction successor of `session_id`, or None.
@@ -767,7 +768,20 @@ class SessionStore:
                 setattr(session, key, value)
             session.last_active = datetime.now(timezone.utc).isoformat()
             self._mark_dirty()
-            return session
+        if session.status in FINISHED_STATUSES:
+            self._evict_progress_cache(session_id)
+        return session
+
+    def _evict_progress_cache(self, session_id: str) -> None:
+        """Drop a session's live-progress entry once it stops appending events.
+
+        Sidebar refreshes only call `session_progress_summary` for sessions in
+        live statuses, so finished sessions never re-read the cache; keeping
+        them resident grows memory without bound across daemon uptime. The
+        event_count entry stays — it's still hit by `session_detail`.
+        """
+        with self._cache_lock:
+            self._progress_cache.pop(session_id, None)
 
     def _pinned_for_agent(self, agent: str, exclude_id: Optional[str] = None) -> list[Session]:
         """Return pinned sessions for an agent, sorted by current pin_position (None last)."""
@@ -969,18 +983,23 @@ class SessionStore:
         with what the UI would render if it replayed the event log. The first
         call cold-loads the file; subsequent calls hit the in-memory cache,
         which `append_event` keeps current.
+
+        Callers MUST treat the returned dict as read-only — it's the cached
+        object itself, shared across calls. Mutating it corrupts the cache.
+        The sole production caller hands the result straight to JSONResponse
+        and never mutates.
         """
         with self._cache_lock:
             cached = self._progress_cache.get(session_id)
         if cached is not None:
-            return dict(cached)
+            return cached
         events = self.read_events(session_id)
         progress = _progress_from_events(events)
         with self._cache_lock:
             self._progress_cache[session_id] = progress
             if session_id not in self._event_count_cache:
                 self._event_count_cache[session_id] = len(events)
-        return dict(progress)
+        return progress
 
     def session_summary(self, session_id: str) -> dict:
         """Return a summary dict for a session including event stats."""

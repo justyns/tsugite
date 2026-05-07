@@ -534,3 +534,40 @@ def mock_default_agent_prefetch():
         "agents/example.md",  # list_agents
         [],  # get_skills_for_template
     ]
+
+
+@pytest.fixture
+def jsonl_open_spy(monkeypatch):
+    """Track every .jsonl file opened during a test.
+
+    Patches both `builtins.open` and `Path.open` because tsugite mixes both
+    styles (SessionStorage uses builtin open(); the http _collect_events
+    refactor uses Path.open). Returns a list that grows with each open call;
+    test reads `[p for p in spy if "session-id" in p]` to assert which files
+    were touched.
+    """
+    import builtins
+
+    paths: list[str] = []
+    real_builtin = builtins.open
+    real_path = Path.open
+
+    def _track(p):
+        try:
+            s = str(p)
+            if s.endswith(".jsonl"):
+                paths.append(s)
+        except (TypeError, ValueError):
+            pass
+
+    def builtin_open(file, *a, **kw):
+        _track(file)
+        return real_builtin(file, *a, **kw)
+
+    def path_open(self, *a, **kw):
+        _track(self)
+        return real_path(self, *a, **kw)
+
+    monkeypatch.setattr(builtins, "open", builtin_open)
+    monkeypatch.setattr(Path, "open", path_open)
+    return paths

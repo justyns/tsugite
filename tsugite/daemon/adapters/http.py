@@ -867,8 +867,12 @@ class HTTPServer:
         history_dir = get_history_dir()
         visited: set[str] = set()
 
+        # Each batch carries the events from one file plus the indexes (within
+        # the merged output) of its user_input events. Tracked at parse time so
+        # the trim-to-limit step doesn't have to re-scan the merged list.
         per_file_batches: list[list[dict]] = []
-        user_inputs_collected = 0
+        per_file_user_inputs: list[list[int]] = []
+        user_inputs_total = 0
         current_id: Optional[str] = session_id
 
         while current_id and current_id not in visited:
@@ -877,40 +881,47 @@ class HTTPServer:
             if not path.exists():
                 break
 
+            file_events: list[dict] = []
+            file_user_input_offsets: list[int] = []
             try:
                 with path.open(encoding="utf-8") as f:
-                    file_events: list[dict] = []
                     for line in f:
                         line = line.strip()
                         if not line:
                             continue
                         try:
-                            file_events.append(json.loads(line))
+                            ev = json.loads(line)
                         except json.JSONDecodeError:
                             continue
+                        if ev.get("type") == "user_input":
+                            file_user_input_offsets.append(len(file_events))
+                        file_events.append(ev)
             except Exception:
                 file_events = []
+                file_user_input_offsets = []
 
             next_parent: Optional[str] = None
             if file_events and file_events[0].get("type") == "session_start":
                 next_parent = (file_events[0].get("data") or {}).get("parent_session")
 
             per_file_batches.append(file_events)
-            user_inputs_collected += sum(1 for e in file_events if e.get("type") == "user_input")
+            per_file_user_inputs.append(file_user_input_offsets)
+            user_inputs_total += len(file_user_input_offsets)
 
-            if limit > 0 and user_inputs_collected >= limit:
+            if limit > 0 and user_inputs_total >= limit:
                 break
 
             current_id = next_parent
 
         events: list[dict] = []
-        for batch in reversed(per_file_batches):
+        merged_user_inputs: list[int] = []
+        for batch, offsets in zip(reversed(per_file_batches), reversed(per_file_user_inputs)):
+            base = len(events)
             events.extend(batch)
+            merged_user_inputs.extend(base + off for off in offsets)
 
-        if limit > 0:
-            user_inputs = [i for i, e in enumerate(events) if e.get("type") == "user_input"]
-            if len(user_inputs) > limit:
-                events = events[user_inputs[-limit] :]
+        if limit > 0 and len(merged_user_inputs) > limit:
+            events = events[merged_user_inputs[-limit] :]
 
         return events
 
