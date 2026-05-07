@@ -851,36 +851,61 @@ class HTTPServer:
             attachments.append(entry)
         return JSONResponse({"attachments": attachments})
 
-    def _collect_events(self, session_id: str, limit: int = 0) -> list[dict]:
+    @staticmethod
+    def _collect_events(session_id: str, limit: int = 0) -> list[dict]:
         """Walk the compaction chain newest-first and return a chronological
         list of event dicts. ``limit`` caps the number of user_input bubbles.
 
-        Compaction was historically a chain of separate session files. New
+        Compaction was historically a chain of separate session files; new
         sessions record compaction as an in-place event, so for new files the
-        chain has length 1.
+        chain has length 1. We read newest-first and stop walking parents
+        once ``limit`` user_inputs have been collected, so legacy chained
+        sessions don't pull old files into memory when only the recent tail
+        is needed. Lines are returned as raw JSON dicts (the on-disk shape)
+        without a pydantic Event round-trip.
         """
         history_dir = get_history_dir()
         visited: set[str] = set()
-        chain_files: list = []
-        current_id = session_id
+
+        per_file_batches: list[list[dict]] = []
+        user_inputs_collected = 0
+        current_id: Optional[str] = session_id
+
         while current_id and current_id not in visited:
             visited.add(current_id)
             path = history_dir / f"{current_id}.jsonl"
             if not path.exists():
                 break
-            chain_files.append(path)
-            # Inspect session_start event for parent_session linkage (chain support)
-            meta = SessionStorage.load_meta_fast(path)
-            current_id = meta.data.get("parent_session") if meta else None
+
+            try:
+                with path.open(encoding="utf-8") as f:
+                    file_events: list[dict] = []
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            file_events.append(json.loads(line))
+                        except json.JSONDecodeError:
+                            continue
+            except Exception:
+                file_events = []
+
+            next_parent: Optional[str] = None
+            if file_events and file_events[0].get("type") == "session_start":
+                next_parent = (file_events[0].get("data") or {}).get("parent_session")
+
+            per_file_batches.append(file_events)
+            user_inputs_collected += sum(1 for e in file_events if e.get("type") == "user_input")
+
+            if limit > 0 and user_inputs_collected >= limit:
+                break
+
+            current_id = next_parent
 
         events: list[dict] = []
-        for path in reversed(chain_files):
-            try:
-                storage = SessionStorage.load(path)
-                for event in storage.iter_events():
-                    events.append(event.model_dump(mode="json", exclude_none=True))
-            except Exception:
-                continue
+        for batch in reversed(per_file_batches):
+            events.extend(batch)
 
         if limit > 0:
             user_inputs = [i for i, e in enumerate(events) if e.get("type") == "user_input"]
