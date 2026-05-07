@@ -90,39 +90,49 @@ def _is_real_tool_event(event: dict) -> bool:
     return False
 
 
+def _empty_progress() -> dict:
+    return {
+        "turn_count": 0,
+        "tool_count": 0,
+        "status_text": "Starting...",
+        "last_event_time": None,
+    }
+
+
+def _apply_event_to_progress(progress: dict, event: dict) -> None:
+    """Fold one event into a progress dict in place.
+
+    Mirrors `_progress_from_events` so the cache can be primed from a full
+    event list and then updated incrementally without reloading the file.
+    """
+    etype = event.get("type")
+    progress["last_event_time"] = event.get("timestamp") or progress.get("last_event_time")
+    if etype in _SESSION_END_EVENT_TYPES:
+        progress["turn_count"] = 0
+        progress["tool_count"] = 0
+        progress["status_text"] = ""
+        return
+    if etype == "turn_start":
+        turn = event.get("turn")
+        if isinstance(turn, int) and turn > progress.get("turn_count", 0):
+            progress["turn_count"] = turn
+    elif _is_real_tool_event(event):
+        progress["tool_count"] = progress.get("tool_count", 0) + 1
+    label = _progress_status_text(event)
+    if label:
+        progress["status_text"] = label
+
+
 def _progress_from_events(events: list[dict]) -> dict:
     """Compute a progress summary dict from the raw event list.
 
     A session/turn-end event clears live progress fields so the sidebar doesn't
     re-render a stale label between turns of an active session.
     """
-    turn_count = 0
-    tool_count = 0
-    status_text = "Starting..."
-    last_event_time = None
+    progress = _empty_progress()
     for event in events:
-        etype = event.get("type")
-        last_event_time = event.get("timestamp") or last_event_time
-        if etype in _SESSION_END_EVENT_TYPES:
-            turn_count = 0
-            tool_count = 0
-            status_text = ""
-            continue
-        if etype == "turn_start":
-            turn = event.get("turn")
-            if isinstance(turn, int) and turn > turn_count:
-                turn_count = turn
-        elif _is_real_tool_event(event):
-            tool_count += 1
-        label = _progress_status_text(event)
-        if label:
-            status_text = label
-    return {
-        "turn_count": turn_count,
-        "tool_count": tool_count,
-        "status_text": status_text,
-        "last_event_time": last_event_time,
-    }
+        _apply_event_to_progress(progress, event)
+    return progress
 
 
 READ_ONLY_METADATA_KEYS = frozenset(
@@ -269,6 +279,16 @@ class SessionStore:
 
         self._reasoning_effort: dict[str, str] = {}
         self._model_overrides: dict[str, str] = {}
+
+        # Hot caches keyed by session_id, populated lazily on first read and
+        # then updated incrementally inside `append_event`. Without these,
+        # `session_progress_summary` and `event_count` would re-parse the
+        # full .jsonl on every sidebar refresh — at 800+ sessions and
+        # multi-MB active session files that's tens of MB of file I/O per
+        # SSE-driven update.
+        self._progress_cache: dict[str, dict] = {}
+        self._event_count_cache: dict[str, int] = {}
+        self._cache_lock = threading.Lock()
 
         self._load()
         self._migrate_legacy()
@@ -874,6 +894,15 @@ class SessionStore:
         data = {k: v for k, v in event.items() if k not in ("type", "timestamp")}
         storage.record(event.get("type", "unknown"), ts=ts, **data)
 
+        # Update hot caches incrementally. Skip when the session_id has never
+        # been read — the cold-load path will populate everything in one go.
+        with self._cache_lock:
+            if session_id in self._event_count_cache:
+                self._event_count_cache[session_id] += 1
+            progress = self._progress_cache.get(session_id)
+            if progress is not None:
+                _apply_event_to_progress(progress, event)
+
     def read_events(self, session_id: str) -> list[dict]:
         """Return events as flat dicts for backward compatibility with callers."""
         path = self._history_path(session_id)
@@ -886,14 +915,23 @@ class SessionStore:
         return [{"type": e.type, "timestamp": e.ts.isoformat(), **e.data} for e in storage.iter_events()]
 
     def event_count(self, session_id: str) -> int:
+        with self._cache_lock:
+            cached = self._event_count_cache.get(session_id)
+        if cached is not None:
+            return cached
         path = self._history_path(session_id)
         if not path.exists():
+            with self._cache_lock:
+                self._event_count_cache[session_id] = 0
             return 0
         try:
             storage = SessionStorage.load(path)
+            count = sum(1 for _ in storage.iter_events())
         except Exception:
-            return 0
-        return sum(1 for _ in storage.iter_events())
+            count = 0
+        with self._cache_lock:
+            self._event_count_cache[session_id] = count
+        return count
 
     def count_events_by_type(self, session_id: str, event_type: str) -> int:
         path = self._history_path(session_id)
@@ -928,10 +966,21 @@ class SessionStore:
         """Return a lightweight live-progress summary for a running session.
 
         Fields are derived entirely from events.jsonl so they stay consistent
-        with what the UI would render if it replayed the event log.
+        with what the UI would render if it replayed the event log. The first
+        call cold-loads the file; subsequent calls hit the in-memory cache,
+        which `append_event` keeps current.
         """
+        with self._cache_lock:
+            cached = self._progress_cache.get(session_id)
+        if cached is not None:
+            return dict(cached)
         events = self.read_events(session_id)
-        return _progress_from_events(events)
+        progress = _progress_from_events(events)
+        with self._cache_lock:
+            self._progress_cache[session_id] = progress
+            if session_id not in self._event_count_cache:
+                self._event_count_cache[session_id] = len(events)
+        return dict(progress)
 
     def session_summary(self, session_id: str) -> dict:
         """Return a summary dict for a session including event stats."""
