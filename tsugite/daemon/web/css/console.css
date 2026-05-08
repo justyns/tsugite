@@ -387,6 +387,14 @@ body.is-resizing-sidebar { cursor: col-resize; user-select: none; }
 }
 @keyframes blink { 50% { opacity: 0; } }
 
+.console-thread-loading {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 32px 12px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--overlay1);
+}
+
 .console-empty {
   padding: 14px 12px;
   color: var(--overlay1);

@@ -32,6 +32,11 @@ export default () => ({
   messages: [],
   // session_id -> bubbles. Stream pushes target the original session even after the user switches.
   messagesBySession: {},
+  // session_id -> raw history events, populated by boot prefetch and consumed (single-use) by loadHistory.
+  historyEventsCache: {},
+  // session_id -> bool. Drives the spinner in the conversation pane during a real network fetch.
+  historyLoadingBySession: {},
+  _prefetchInFlight: new Set(),
   loading: true,
   compacting: false,
   compactingCounts: null,
@@ -228,6 +233,39 @@ export default () => ({
     } else {
       this.autoSelectInteractive();
     }
+    this._prefetchTopSessions();
+  },
+
+  _prefetchTopSessions() {
+    const g = this.groupedSessions;
+    const seen = new Set();
+    const picks = [];
+    const take = (s) => {
+      const sid = s?.conversation_id || s?.id;
+      if (!sid || seen.has(sid) || sid === this.selectedSessionId) return;
+      seen.add(sid);
+      picks.push(sid);
+    };
+    g.pinned.forEach(take);
+    g.active.forEach(take);
+    g.recent.forEach(take);
+    picks.slice(0, 5).forEach(sid => this._prefetchHistory(sid));
+  },
+
+  async _prefetchHistory(sessionId) {
+    if (!sessionId) return;
+    if (this.historyEventsCache[sessionId]) return;
+    if (this.messagesBySession[sessionId]?.length) return;
+    if (this._prefetchInFlight.has(sessionId)) return;
+    const agent = this.$store.app.selectedAgent;
+    if (!agent) return;
+    this._prefetchInFlight.add(sessionId);
+    try {
+      const url = `/api/agents/${agent}/history?user_id=${encodeURIComponent(this.userId)}&limit=100&session_id=${encodeURIComponent(sessionId)}`;
+      const data = await get(url);
+      this.historyEventsCache[sessionId] = data.events || [];
+    } catch { /* non-fatal */ }
+    this._prefetchInFlight.delete(sessionId);
   },
 
   async loadEffortLevels() {

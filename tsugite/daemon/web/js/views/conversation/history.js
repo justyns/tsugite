@@ -342,11 +342,21 @@ export const historyMixin = {
     const agent = this.$store.app.selectedAgent;
     if (!agent) return;
     this.resetHistory();
+    const sid = this.selectedSessionId;
+    let usedCache = false;
     try {
-      let url = `/api/agents/${agent}/history?user_id=${encodeURIComponent(this.userId)}&limit=100`;
-      if (this.selectedSessionId) url += `&session_id=${encodeURIComponent(this.selectedSessionId)}`;
-      const data = await get(url);
-      const events = data.events || [];
+      let events;
+      if (sid && this.historyEventsCache[sid]) {
+        events = this.historyEventsCache[sid];
+        delete this.historyEventsCache[sid];
+        usedCache = true;
+      } else {
+        if (sid) this.historyLoadingBySession[sid] = true;
+        let url = `/api/agents/${agent}/history?user_id=${encodeURIComponent(this.userId)}&limit=100`;
+        if (sid) url += `&session_id=${encodeURIComponent(sid)}`;
+        const data = await get(url);
+        events = data.events || [];
+      }
       // Surface the most recent compaction event for the banner.
       const lastCompact = [...events].reverse().find(e => e.type === 'compaction');
       if (lastCompact) {
@@ -361,6 +371,9 @@ export const historyMixin = {
       }
       this._showRecentHistory();
     } catch { /* ignore */ }
+    finally {
+      if (sid && !usedCache) this.historyLoadingBySession[sid] = false;
+    }
     this.scrollMessages(true);
   },
 

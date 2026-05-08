@@ -580,6 +580,12 @@
             <div id="messages" class="console-thread" x-ref="messages"
                  @scroll.passive="onMessagesScroll()"
                  @click="handleMessagesClick($event)">
+              <template x-if="historyLoadingBySession[selectedSessionId] && messages.length === 0">
+                <div class="console-thread-loading">
+                  <span class="spinner"></span>
+                  <span>loading conversation…</span>
+                </div>
+              </template>
               <template x-if="compactionSummary">
                 <div class="console-compaction-banner">
                   <h4>Previous conversation summary</h4>
