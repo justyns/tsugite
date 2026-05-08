@@ -15,7 +15,7 @@ details > summary::-webkit-details-marker { display: none; }
    ============================================================================ */
 .console-app {
   display: grid;
-  grid-template-columns: 280px 1fr;
+  grid-template-columns: var(--sidebar-w, 280px) 1fr;
   grid-template-rows: 1fr;
   grid-template-areas: "sidebar main";
   flex: 1 1 auto;
@@ -148,7 +148,20 @@ body.console-shell { display: flex; flex-direction: column; height: 100dvh; }
   min-height: 0;
   font-family: var(--font-mono);
   font-size: 12px;
+  position: relative;
 }
+.sidebar-resizer {
+  position: absolute;
+  top: 0; bottom: 0; right: -2px;
+  width: 5px;
+  cursor: col-resize;
+  z-index: 5;
+  background: transparent;
+  transition: background 100ms ease;
+}
+.sidebar-resizer:hover,
+.sidebar-resizer.dragging { background: var(--blue); opacity: 0.5; }
+body.is-resizing-sidebar { cursor: col-resize; user-select: none; }
 .console-sidebar-head {
   display: flex; align-items: center; justify-content: space-between;
   padding: 10px 12px 4px;
@@ -332,12 +345,11 @@ body.console-shell { display: flex; flex-direction: column; height: 100dvh; }
   overflow: hidden;
   transition: max-height 120ms ease, margin-top 120ms ease;
 }
-.console-session.focused .row3,
-.console-session:hover .row3 {
+.console-session.focused .row3 {
   max-height: 60px;
   margin-top: 2px;
 }
-.console-session .chip {
+.chip {
   font-size: 9.5px;
   padding: 0 5px;
   border-radius: 2px;
@@ -345,10 +357,10 @@ body.console-shell { display: flex; flex-direction: column; height: 100dvh; }
   color: var(--subtext0);
   text-decoration: none;
 }
-.console-session .chip.chip-type { color: var(--mauve); background: color-mix(in oklab, var(--mauve) 14%, var(--surface0)); }
-.console-session .chip.chip-status { color: var(--peach); background: color-mix(in oklab, var(--peach) 14%, var(--surface0)); }
-.console-session .chip.chip-link { color: var(--blue); background: color-mix(in oklab, var(--blue) 14%, var(--surface0)); }
-.console-session .chip.chip-link:hover { color: var(--lavender); }
+.chip.chip-type { color: var(--mauve); background: color-mix(in oklab, var(--mauve) 14%, var(--surface0)); }
+.chip.chip-status { color: var(--peach); background: color-mix(in oklab, var(--peach) 14%, var(--surface0)); }
+.chip.chip-link { color: var(--blue); background: color-mix(in oklab, var(--blue) 14%, var(--surface0)); }
+.chip.chip-link:hover { color: var(--lavender); }
 
 .console-session .row-meta {
   padding-left: 13px;
@@ -373,12 +385,6 @@ body.console-shell { display: flex; flex-direction: column; height: 100dvh; }
   flex: 1;
   min-width: 0;
 }
-.console-session:hover .row-meta-topic {
-  white-space: normal;
-  overflow: visible;
-  text-overflow: unset;
-}
-
 @keyframes blink { 50% { opacity: 0; } }
 
 .console-empty {

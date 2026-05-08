@@ -10,6 +10,20 @@ import usageView from './views/usage.js';
 window.Alpine = Alpine;
 window.tsugiteApi = { get, post, patch };
 
+// Restore persisted sidebar width before Alpine paints, so the layout doesn't flash.
+const SIDEBAR_W_KEY = 'tsugite-sidebar-width';
+const SIDEBAR_W_VAR = '--sidebar-w';
+const SIDEBAR_W_MIN = 200;
+const SIDEBAR_W_MAX = 480;
+(() => {
+  const saved = localStorage.getItem(SIDEBAR_W_KEY);
+  if (!saved) return;
+  const n = parseInt(saved, 10);
+  if (Number.isFinite(n) && n >= SIDEBAR_W_MIN && n <= SIDEBAR_W_MAX) {
+    document.documentElement.style.setProperty(SIDEBAR_W_VAR, n + 'px');
+  }
+})();
+
 function parseHash(hash) {
   const [view, query] = hash.split('?');
   const params = new URLSearchParams(query || '');
@@ -49,6 +63,41 @@ Alpine.data('agentFileView', fileEditorView('agents', 'agent-files'));
 Alpine.data('skillFileView', fileEditorView('skills', 'skill-files'));
 Alpine.data('workspaceView', workspaceView);
 Alpine.data('usageView', usageView);
+
+Alpine.data('sidebarResizer', () => ({
+  onDown(e) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const handle = e.currentTarget;
+    const start = e.clientX;
+    const startW = handle.parentElement?.getBoundingClientRect().width || 280;
+    let lastW = startW;
+    handle.classList.add('dragging');
+    document.body.classList.add('is-resizing-sidebar');
+    try { handle.setPointerCapture(e.pointerId); } catch {}
+    const onMove = (ev) => {
+      const w = Math.max(SIDEBAR_W_MIN, Math.min(SIDEBAR_W_MAX, startW + (ev.clientX - start)));
+      if (w === lastW) return;
+      lastW = w;
+      document.documentElement.style.setProperty(SIDEBAR_W_VAR, w + 'px');
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      handle.classList.remove('dragging');
+      document.body.classList.remove('is-resizing-sidebar');
+      localStorage.setItem(SIDEBAR_W_KEY, String(lastW));
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+  },
+  onReset() {
+    document.documentElement.style.removeProperty(SIDEBAR_W_VAR);
+    localStorage.removeItem(SIDEBAR_W_KEY);
+  },
+}));
 
 window.addEventListener('hashchange', () => {
   const { view, sessionId } = parseHash(location.hash.slice(1));

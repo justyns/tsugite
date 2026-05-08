@@ -280,6 +280,7 @@
             </details>
           </template>
         </div>
+        <div class="sidebar-resizer" x-data="sidebarResizer()" @pointerdown="onDown($event)" @dblclick="onReset()"></div>
       </aside>
 
       <!-- Main pane -->
@@ -391,6 +392,14 @@
                         title="Click to edit topic"
                         x-text="selectedSessionMeta?.metadata?.topic || '+ add topic'"></span>
                 </template>
+                <template x-for="chip in metadataChips(selectedSessionMeta || {}, { excludeKeys: ['topic'] })" :key="chip.label">
+                  <template x-if="chip.href">
+                    <a class="chip" :class="chip.cls" :href="chip.href" target="_blank" x-text="chip.label"></a>
+                  </template>
+                  <template x-if="!chip.href">
+                    <span class="chip" :class="chip.cls" :title="chip.title || ''" x-text="chip.label"></span>
+                  </template>
+                </template>
                 <span class="topic-error" x-show="topicError" x-text="topicError" x-cloak></span>
               </div>
               <div class="row meta-row">
@@ -492,14 +501,6 @@
                 <template x-if="(selectedSessionMeta?.metadata||{}).working_dir">
                   <span class="meta-tag" x-text="selectedSessionMeta.metadata.working_dir"
                         :title="selectedSessionMeta.metadata.working_dir"></span>
-                </template>
-                <template x-for="chip in metadataChips(selectedSessionMeta || {})" :key="chip.label">
-                  <template x-if="chip.href">
-                    <a class="meta-tag" :href="chip.href" target="_blank" x-text="chip.label"></a>
-                  </template>
-                  <template x-if="!chip.href">
-                    <span class="meta-tag" x-text="chip.label"></span>
-                  </template>
                 </template>
               </div>
 
@@ -1018,6 +1019,7 @@
             </template>
           </div>
         </div>
+        <div class="sidebar-resizer" x-data="sidebarResizer()" @pointerdown="onDown($event)" @dblclick="onReset()"></div>
       </aside>
       <main class="console-main" :class="{ 'mobile-hidden': !selectedFile }">
         <template x-if="!selectedFile">
@@ -1096,6 +1098,7 @@
             </div>
           </template>
         </div>
+        <div class="sidebar-resizer" x-data="sidebarResizer()" @pointerdown="onDown($event)" @dblclick="onReset()"></div>
       </aside>
       <main class="console-main" :class="{ 'mobile-hidden': !selectedFile }">
         <template x-if="!selectedFile">
@@ -1186,6 +1189,7 @@
             </div>
           </template>
         </div>
+        <div class="sidebar-resizer" x-data="sidebarResizer()" @pointerdown="onDown($event)" @dblclick="onReset()"></div>
       </aside>
       <main class="console-main" :class="{ 'mobile-hidden': !selectedFile }">
         <template x-if="!selectedFile">

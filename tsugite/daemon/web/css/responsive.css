@@ -13,7 +13,7 @@
    so long args/results don't push the bubble past the bezel. */
 @media (max-width: 860px) {
   .console-app {
-    grid-template-columns: 240px 1fr;
+    grid-template-columns: var(--sidebar-w, 240px) 1fr;
   }
   .console-tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .console-tabs::-webkit-scrollbar { display: none; }
@@ -49,6 +49,7 @@
   .console-app .console-main { grid-area: main; }
   .console-sidebar.mobile-hidden,
   .console-main.mobile-hidden { display: none; }
+  .sidebar-resizer { display: none; }
 
   /* Slide-out nav drawer (preserved from previous design) */
   .nav-menu {
