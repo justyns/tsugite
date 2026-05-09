@@ -8,7 +8,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-04-21T19:43:38.470568416Z"
+exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
 exclude-newer-span = "P10D"
 
 [manifest]
@@ -2294,7 +2294,7 @@ wheels = [
 
 [[package]]
 name = "tsugite-cli"
-version = "0.13.1"
+version = "0.14.0"
 source = { editable = "." }
 dependencies = [
     { name = "cryptography" },
@@ -2386,7 +2386,7 @@ dev = [
 
 [[package]]
 name = "tsugite-tmux"
-version = "0.13.1"
+version = "0.14.0"
 source = { editable = "plugins/tsugite-tmux" }
 dependencies = [
     { name = "tsugite-cli" },
