@@ -7,7 +7,7 @@ execution note, and returns the modified content plus a context dict of assigned
 
 from typing import Any, Dict, List, Optional, Tuple
 
-from tsugite.agent_runner.exec_runner import run_python_block
+from tsugite.agent_runner.exec_runner import ExecBlockResult, run_python_block
 from tsugite.md_agents import ExecDirective, extract_exec_directives
 
 

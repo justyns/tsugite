@@ -60,12 +60,9 @@ def chat(
         workspace_attachments = _build_workspace_attachments(resolved_workspace)
 
     with workspace_directory_context(resolved_workspace, root, console) as path_context:
-        # Handle conversation resume
-        resume_turns = None
-
         if continue_ is not None:
             from tsugite.agent_runner.history_integration import get_latest_conversation
-            from tsugite.history import get_history_dir, get_turns
+            from tsugite.history import get_history_dir
 
             if continue_ == "" or continue_.lower() == "latest":
                 history_opts.continue_id = get_latest_conversation()
@@ -77,15 +74,9 @@ def chat(
                 history_opts.continue_id = continue_
                 console.print(f"[cyan]Resuming conversation: {history_opts.continue_id}[/cyan]")
 
-            try:
-                session_path = get_history_dir() / f"{history_opts.continue_id}.jsonl"
-                resume_turns = get_turns(session_path)
-                console.print(f"[cyan]Loaded {len(resume_turns)} previous turns[/cyan]")
-            except FileNotFoundError:
+            session_path = get_history_dir() / f"{history_opts.continue_id}.jsonl"
+            if not session_path.exists():
                 console.print(f"[red]Conversation not found: {history_opts.continue_id}[/red]")
-                raise typer.Exit(1)
-            except Exception as e:
-                console.print(f"[red]Failed to load conversation: {e}[/red]")
                 raise typer.Exit(1)
 
         agent_to_load = agent if agent else "default"
@@ -100,7 +91,6 @@ def chat(
             agent_path=primary_agent_path,
             exec_options=exec_opts,
             history_options=history_opts,
-            resume_turns=resume_turns,
             path_context=path_context,
             workspace_attachments=workspace_attachments,
         )

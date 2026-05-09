@@ -28,7 +28,7 @@ from tsugite.daemon.config import AgentConfig, HTTPConfig
 from tsugite.daemon.scheduler import ScheduleEntry
 from tsugite.daemon.webhook_store import WebhookStore
 from tsugite.events.base import BaseEvent
-from tsugite.history.storage import SessionStorage, get_history_dir
+from tsugite.history.storage import get_history_dir
 from tsugite.skill_discovery import get_builtin_skills_path
 from tsugite.ui.jsonl import JSONLUIHandler
 from tsugite.utils import parse_yaml_frontmatter

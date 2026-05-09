@@ -112,54 +112,6 @@ class ChatManager:
                 print(f"Warning: Failed to initialize conversation history: {e}")
                 self.conversation_id = None
 
-    def load_from_history(self, conversation_id: str, turns: List[Any]) -> None:
-        """Load conversation history from JSONL storage.
-
-        Args:
-            conversation_id: Conversation ID to resume
-            turns: List of Turn objects from history (V2 format)
-
-        Raises:
-            RuntimeError: If loading fails
-        """
-        try:
-            from tsugite.history import Turn
-
-            self.conversation_id = conversation_id
-            self.conversation_history = []
-
-            # Convert Turn objects from history to ChatTurn objects
-            for turn in turns:
-                if not isinstance(turn, Turn):
-                    continue
-
-                chat_turn = ChatTurn(
-                    timestamp=turn.timestamp,
-                    user_message=turn.user_summary or "",
-                    agent_response=turn.final_answer or "",
-                    tool_calls=turn.functions_called or [],
-                    token_count=turn.tokens,
-                    cost=turn.cost,
-                )
-                self.conversation_history.append(chat_turn)
-
-            # Update session_start to first turn's timestamp if available
-            if self.conversation_history:
-                # Strip timezone to match datetime.now() (which is naive)
-                timestamp = self.conversation_history[0].timestamp
-                self.session_start = timestamp.replace(tzinfo=None) if timestamp.tzinfo else timestamp
-
-            # Restore cumulative metrics from loaded history
-            self.cumulative_tokens = sum(turn.token_count for turn in self.conversation_history if turn.token_count)
-            self.cumulative_cost = sum(turn.cost for turn in self.conversation_history if turn.cost)
-
-            # Prune if history exceeds max_history
-            if len(self.conversation_history) > self.max_history:
-                self.conversation_history = self.conversation_history[-self.max_history :]
-
-        except Exception as e:
-            raise RuntimeError(f"Failed to load conversation from history: {e}")
-
     def add_turn(
         self,
         user_message: str,
@@ -170,7 +122,11 @@ class ChatManager:
         execution_steps: Optional[list] = None,
         messages: Optional[list] = None,
     ) -> None:
-        """Add a turn to conversation history."""
+        """Add a turn to in-memory conversation history.
+
+        Persistent history is recorded by the agent runner via per-event JSONL,
+        so this method only updates the in-memory ChatManager state.
+        """
         turn = ChatTurn(
             timestamp=datetime.now(),
             user_message=user_message,
@@ -181,35 +137,11 @@ class ChatManager:
         )
         self.conversation_history.append(turn)
 
-        # Update cumulative metrics
         if token_count is not None:
             self.cumulative_tokens += token_count
         if cost is not None:
             self.cumulative_cost += cost
 
-        # Save to persistent history if enabled
-        if self.conversation_id:
-            try:
-                from tsugite.history import SessionStorage, get_history_dir
-
-                session_path = get_history_dir() / f"{self.conversation_id}.jsonl"
-                storage = SessionStorage.load(session_path)
-                storage.record_turn(
-                    messages=messages
-                    or [
-                        {"role": "user", "content": user_message},
-                        {"role": "assistant", "content": agent_response},
-                    ],
-                    final_answer=agent_response,
-                    tokens=token_count,
-                    cost=cost,
-                    functions_called=tool_calls or [],
-                )
-            except Exception as e:
-                # Don't fail the turn if history save fails
-                print(f"Warning: Failed to save turn to history: {e}")
-
-        # Prune old history if needed
         if len(self.conversation_history) > self.max_history:
             self.conversation_history = self.conversation_history[-self.max_history :]
 

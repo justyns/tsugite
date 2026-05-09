@@ -31,10 +31,12 @@ def test_cli_help(cli_runner):
 
 def test_version_command(cli_runner):
     """Test the version command."""
+    from tsugite import __version__
+
     result = cli_runner.invoke(app, ["version"])
 
     assert result.exit_code == 0
-    assert "Tsugite version 0.1.0" in result.stdout
+    assert f"Tsugite version {__version__}" in result.stdout
 
 
 def test_run_command_nonexistent_file(cli_runner, temp_dir):

@@ -142,7 +142,6 @@ def onboard_workspace(
         agent_path=agent_path,
         exec_options=exec_opts,
         history_options=history_opts,
-        resume_turns=None,
         path_context=path_context,
         workspace_attachments=workspace_attachments,
     )

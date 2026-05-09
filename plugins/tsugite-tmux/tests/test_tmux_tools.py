@@ -5,7 +5,6 @@ import subprocess
 from unittest.mock import MagicMock, call, patch
 
 import pytest
-
 from tsugite_tmux import (
     _list_managed_sessions,
     _strip_ansi,

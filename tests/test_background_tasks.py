@@ -118,9 +118,7 @@ class TestScheduleCreateValidation:
         mock_sched.add.side_effect = lambda entry: entry
         set_scheduler(mock_sched, tool_loop, agent_names={"bot"})
 
-        result = schedule_create(
-            id="t1", prompt="hi", agent="bot", cron="0 9 * * *", target_session="primary"
-        )
+        result = schedule_create(id="t1", prompt="hi", agent="bot", cron="0 9 * * *", target_session="primary")
         assert result["target_session"] == "primary"
 
     def test_schedule_update_target_session(self, tool_loop):
@@ -679,6 +677,13 @@ class TestPartialHistoryOnError:
         mock_adapter.agent_config.workspace_dir = tmp_path
         mock_adapter.session_store = MagicMock()
         mock_adapter.session_store.needs_compaction.return_value = False
+        mock_adapter.session_store.is_compacting.return_value = False
+        mock_adapter.session_store.find_by_thread.return_value = None
+        mock_adapter.session_store.count_events_by_type.return_value = 0
+        mock_adapter.session_store.get_suppressed_skills.return_value = set()
+        mock_adapter.session_store.get_sticky_skills.return_value = {}
+        mock_adapter.session_store.get_reasoning_effort.return_value = None
+        mock_adapter.session_store.get_model_override.return_value = None
         mock_session = MagicMock()
         mock_session.id = "conv-123"
         mock_adapter.session_store.get_or_create_interactive.return_value = mock_session
@@ -689,6 +694,7 @@ class TestPartialHistoryOnError:
         mock_adapter._get_workspace_attachments = MagicMock(return_value=[])
         mock_adapter._emit_ui = MagicMock()
         mock_adapter._identity_map = {}
+        mock_adapter.event_bus = None
 
         channel_ctx = ChannelContext(source="test", channel_id="ch1", user_id="test-user", reply_to="test:test-user")
 
@@ -706,6 +712,7 @@ class TestPartialHistoryOnError:
         ):
             mock_adapter.resolve_model = MagicMock(return_value="test-model")
             mock_adapter._save_history = BaseAdapter._save_history.__get__(mock_adapter, BaseAdapter)
+            mock_adapter._handle_message_inner = BaseAdapter._handle_message_inner.__get__(mock_adapter, BaseAdapter)
             with pytest.raises(AgentExecutionError):
                 await BaseAdapter.handle_message(
                     mock_adapter,

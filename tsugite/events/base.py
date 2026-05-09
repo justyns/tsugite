@@ -75,4 +75,3 @@ class BaseEvent(BaseModel):
 
 
 _EVENT_TYPE_NAMES = {t: t.name.lower() for t in EventType}
-

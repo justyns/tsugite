@@ -11,7 +11,7 @@ from tsugite.tools.agents import spawn_agent
 @pytest.fixture
 def register_spawn_agent():
     """Register spawn_agent tool for testing."""
-    tool(spawn_agent)
+    tool(parent_only=True)(spawn_agent)
     return spawn_agent
 
 
@@ -121,7 +121,7 @@ class TestAgentOrchestrationIntegration:
         # Verify spawn_agent tool is available
         from tsugite.tools import list_tools
 
-        tool(spawn_agent)  # Register for this test
+        tool(parent_only=True)(spawn_agent)  # Register for this test
         assert "spawn_agent" in list_tools()
 
 

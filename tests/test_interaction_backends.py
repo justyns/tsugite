@@ -91,7 +91,7 @@ class TestAskUserDispatch:
         from tsugite.tools import tool
         from tsugite.tools.interactive import ask_user
 
-        tool(ask_user)
+        tool(parent_only=True)(ask_user)
 
     def test_dispatches_to_backend(self, interactive_tool):
         mock_backend = MagicMock(spec=InteractionBackend)
@@ -143,7 +143,7 @@ class TestAskUserBatchDispatch:
         from tsugite.tools import tool
         from tsugite.tools.interactive import ask_user_batch
 
-        tool(ask_user_batch)
+        tool(parent_only=True)(ask_user_batch)
 
     def test_batch_dispatches_to_backend(self, batch_tool):
         mock_backend = MagicMock(spec=InteractionBackend)

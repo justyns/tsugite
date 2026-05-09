@@ -153,9 +153,7 @@ METADATA_PRIMARY_FLAG = "is_primary"
 # Metadata keys preserved across compaction in addition to READ_ONLY ones. session_name
 # anchors named-route adapters (e.g. Discord session_name) to the successor session;
 # is_primary makes the user's chosen primary session "follow" compaction.
-COMPACTION_PRESERVED_METADATA_KEYS = READ_ONLY_METADATA_KEYS | frozenset(
-    {METADATA_SESSION_NAME, METADATA_PRIMARY_FLAG}
-)
+COMPACTION_PRESERVED_METADATA_KEYS = READ_ONLY_METADATA_KEYS | frozenset({METADATA_SESSION_NAME, METADATA_PRIMARY_FLAG})
 
 TOPIC_MAX_LENGTH = 160
 

@@ -84,7 +84,6 @@ def run_repl_chat(
     agent_path: Path,
     exec_options: "ExecutionOptions",
     history_options: "HistoryOptions",
-    resume_turns: Optional[list] = None,
     path_context: Optional["PathContext"] = None,
     workspace_attachments: Optional[List[str]] = None,
 ) -> None:
@@ -94,7 +93,6 @@ def run_repl_chat(
         agent_path: Path to agent markdown file
         exec_options: Execution options (model, stream, etc.)
         history_options: History options (enabled, max_turns, continue_id)
-        resume_turns: Optional list of Turn objects to resume from
         path_context: Optional workspace path context
         workspace_attachments: Optional list of workspace attachment paths
     """
@@ -126,12 +124,6 @@ def run_repl_chat(
             path_context=path_context,
             workspace_attachments=workspace_attachments,
         )
-
-        # Load history if resuming
-        if resume_turns:
-            manager.load_from_history(history_options.continue_id, resume_turns)
-            console.print(f"[cyan]Loaded {len(resume_turns)} previous turns[/cyan]")
-            console.print()
 
         # Track session stats
         turn_count = len(manager.conversation_history)

@@ -281,9 +281,7 @@ async def test_progress_handler_llm_wait_cleared_by_other_event():
 async def test_progress_handler_custom_header():
     """Custom header_text replaces the default '🤔 Working...' first line."""
     channel = MockChannel()
-    handler = DiscordProgressHandler(
-        channel, asyncio.get_running_loop(), header_text="🤔 #general · refactor-auth"
-    )
+    handler = DiscordProgressHandler(channel, asyncio.get_running_loop(), header_text="🤔 #general · refactor-auth")
 
     await handler._handle_event_async(StepStartEvent(step=1, max_turns=10))
     content = channel.messages[0].content

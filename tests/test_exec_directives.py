@@ -93,7 +93,7 @@ x = 1
         assert directives[0].code.strip() == ""
 
     def test_extract_exec_directive_crlf_line_endings(self):
-        content = '<!-- tsu:exec name="crlf" assign="x" -->\r\n' "x = 7\r\n" "x\r\n" "<!-- /tsu:exec -->\r\n"
+        content = '<!-- tsu:exec name="crlf" assign="x" -->\r\nx = 7\r\nx\r\n<!-- /tsu:exec -->\r\n'
         directives = extract_exec_directives(content)
         assert len(directives) == 1
         assert "x = 7" in directives[0].code

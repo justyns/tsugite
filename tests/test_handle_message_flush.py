@@ -46,9 +46,7 @@ def adapter(tmp_path):
 async def test_handle_message_persists_dirty_state(adapter, monkeypatch):
     """handle_message must flush() so session metadata mutations land on disk."""
     a, store = adapter
-    session = Session(
-        id="s1", agent="test-agent", source=SessionSource.INTERACTIVE.value, user_id="u1"
-    )
+    session = Session(id="s1", agent="test-agent", source=SessionSource.INTERACTIVE.value, user_id="u1")
     store.create_session(session)
 
     async def fake_inner(*_args, **kwargs):
@@ -73,9 +71,7 @@ async def test_handle_message_persists_dirty_state(adapter, monkeypatch):
 async def test_handle_message_flushes_even_when_inner_raises(adapter, monkeypatch):
     """Flush must run on the error path too, otherwise failed-turn state stays stale."""
     a, store = adapter
-    session = Session(
-        id="s1", agent="test-agent", source=SessionSource.INTERACTIVE.value, user_id="u1"
-    )
+    session = Session(id="s1", agent="test-agent", source=SessionSource.INTERACTIVE.value, user_id="u1")
     store.create_session(session)
 
     async def fake_inner(*_args, **kwargs):
@@ -100,9 +96,7 @@ async def test_handle_message_flushes_even_when_inner_raises(adapter, monkeypatc
 async def test_handle_message_broadcasts_history_and_session_update(adapter, monkeypatch):
     """SSE listeners must see history_update + session_update so the web UI refreshes."""
     a, store = adapter
-    session = Session(
-        id="s1", agent="test-agent", source=SessionSource.INTERACTIVE.value, user_id="u1"
-    )
+    session = Session(id="s1", agent="test-agent", source=SessionSource.INTERACTIVE.value, user_id="u1")
     store.create_session(session)
 
     async def fake_inner(*_args, **kwargs):
@@ -126,9 +120,7 @@ async def test_handle_message_broadcasts_history_and_session_update(adapter, mon
 async def test_handle_message_broadcasts_on_error_path(adapter, monkeypatch):
     """Broadcast must fire on the error path too — UI should see the failed-turn state."""
     a, store = adapter
-    session = Session(
-        id="s1", agent="test-agent", source=SessionSource.INTERACTIVE.value, user_id="u1"
-    )
+    session = Session(id="s1", agent="test-agent", source=SessionSource.INTERACTIVE.value, user_id="u1")
     store.create_session(session)
 
     async def fake_inner(*_args, **kwargs):

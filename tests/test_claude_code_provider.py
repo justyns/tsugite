@@ -44,6 +44,12 @@ class TestClaudeCodeModelParams:
 
 
 class TestClaudeCodeProcess:
+    @pytest.fixture(autouse=True)
+    def _mock_claude_cli(self):
+        """Pretend the claude CLI is on PATH so tests don't depend on the host environment."""
+        with patch("shutil.which", return_value="/usr/bin/claude"):
+            yield
+
     @pytest.fixture
     def process(self):
         from tsugite.core.claude_code import ClaudeCodeProcess
@@ -314,6 +320,12 @@ class TestClaudeCodeProcess:
 
 
 class TestClaudeCodeEffort:
+    @pytest.fixture(autouse=True)
+    def _mock_claude_cli(self):
+        """Pretend the claude CLI is on PATH so tests don't depend on the host environment."""
+        with patch("shutil.which", return_value="/usr/bin/claude"):
+            yield
+
     def test_model_info_declares_effort_levels(self):
         from tsugite.providers.claude_code import ClaudeCodeProvider
 
@@ -1103,7 +1115,12 @@ class TestClaudeCodeErrorResult:
         provider = ClaudeCodeProvider()
 
         async def fake_send(*args, **kwargs):
-            yield {"type": "result", "text": "Prompt is too long", "is_error": True, "subtype": "error_during_execution"}
+            yield {
+                "type": "result",
+                "text": "Prompt is too long",
+                "is_error": True,
+                "subtype": "error_during_execution",
+            }
 
         mock_process = AsyncMock()
         mock_process.send_message = fake_send
@@ -1153,7 +1170,12 @@ class TestClaudeCodeErrorResult:
 
         async def fake_send(*args, **kwargs):
             yield {"type": "text_delta", "text": "partial"}
-            yield {"type": "result", "text": "Prompt is too long", "is_error": True, "subtype": "error_during_execution"}
+            yield {
+                "type": "result",
+                "text": "Prompt is too long",
+                "is_error": True,
+                "subtype": "error_during_execution",
+            }
 
         mock_process = AsyncMock()
         mock_process.send_message = fake_send

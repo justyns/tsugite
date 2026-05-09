@@ -1,9 +1,9 @@
 [project]
 name = "tsugite-tmux"
-version = "0.14.0"
+version = "0.14.1"
 description = "Tsugite plugin: tmux session management tools with automatic output logging"
 requires-python = ">=3.11"
-dependencies = ["tsugite-cli==0.14.0"]
+dependencies = ["tsugite-cli==0.14.1"]
 
 [project.entry-points."tsugite.plugins"]
 tmux = "tsugite_tmux"
@@ -11,6 +11,15 @@ tmux = "tsugite_tmux"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["tsugite_tmux"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/tsugite_tmux",
+  "/pyproject.toml",
+]
 
 [tool.uv.sources]
 tsugite-cli = { workspace = true }

@@ -334,9 +334,7 @@ class TestRecordSyntheticTurnWithResolver:
         from tsugite.daemon.session_store import Session, SessionSource, SessionStore
 
         store = SessionStore(tmp_path / "session_store.json")
-        target = Session(
-            id="resolved-target", agent="bot", source=SessionSource.INTERACTIVE.value, user_id="justyn"
-        )
+        target = Session(id="resolved-target", agent="bot", source=SessionSource.INTERACTIVE.value, user_id="justyn")
         store.create_session(target)
         adapter = self._make_real_adapter(store)
         entry = _make_entry(target_session="resolved-target")

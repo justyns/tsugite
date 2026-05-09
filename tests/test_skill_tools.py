@@ -44,8 +44,8 @@ def _register_skill_tools():
     from tsugite.tools import tool
     from tsugite.tools.skills import list_available_skills, load_skill, unload_skill
 
-    tool(load_skill)
-    tool(unload_skill)
+    tool(parent_only=True)(load_skill)
+    tool(parent_only=True)(unload_skill)
     tool(list_available_skills)
 
 

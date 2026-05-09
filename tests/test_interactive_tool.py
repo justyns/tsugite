@@ -14,8 +14,8 @@ def interactive_tool(reset_tool_registry):
     from tsugite.tools import tool
     from tsugite.tools.interactive import ask_user, ask_user_batch
 
-    tool(ask_user)
-    tool(ask_user_batch)
+    tool(parent_only=True)(ask_user)
+    tool(parent_only=True)(ask_user_batch)
 
 
 def test_ask_user_text_interactive(interactive_tool, monkeypatch):

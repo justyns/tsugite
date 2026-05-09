@@ -309,7 +309,7 @@ def spawn_agent_tool(reset_tool_registry, request):
     from tsugite.tools.agents import spawn_agent
 
     # Re-register the tools after registry reset
-    tool(spawn_agent)
+    tool(parent_only=True)(spawn_agent)
 
 
 @pytest.fixture
@@ -319,8 +319,8 @@ def interactive_tools(reset_tool_registry):
     from tsugite.tools.interactive import ask_user, ask_user_batch, react_to_message, return_value, send_message
 
     # Re-register the tools after registry reset
-    tool(ask_user)
-    tool(ask_user_batch)
+    tool(parent_only=True)(ask_user)
+    tool(parent_only=True)(ask_user_batch)
     tool(return_value)
     tool(send_message)
     tool(react_to_message)
@@ -334,7 +334,7 @@ def agents_tools(reset_tool_registry):
 
     # Re-register the tools after registry reset
     tool(list_agents)
-    tool(spawn_agent)
+    tool(parent_only=True)(spawn_agent)
 
 
 @pytest.fixture
@@ -370,7 +370,7 @@ def skill_tools(reset_tool_registry):
     )
 
     # Re-register the tools after registry reset
-    tool(load_skill)
+    tool(parent_only=True)(load_skill)
     tool(list_available_skills)
     tool(get_skills_for_template)
 

@@ -156,15 +156,15 @@ def test_hello_custom():
 
 def _patch_root_pyproject(root_pyproject: Path, dist_name: str) -> None:
     text = root_pyproject.read_text()
-    sources_line = f'{dist_name} = {{ workspace = true }}\n'
+    sources_line = f"{dist_name} = {{ workspace = true }}\n"
     dev_dep_line = f'  "{dist_name}",\n'
 
     if dist_name in text:
         return  # idempotent
 
     new_text = re.sub(
-        r'(\[tool\.uv\.sources\][^\[]*?tsugite-cli = \{ workspace = true \}\n)',
-        rf'\1{sources_line}',
+        r"(\[tool\.uv\.sources\][^\[]*?tsugite-cli = \{ workspace = true \}\n)",
+        rf"\1{sources_line}",
         text,
         count=1,
     )
@@ -172,8 +172,8 @@ def _patch_root_pyproject(root_pyproject: Path, dist_name: str) -> None:
         raise typer.BadParameter("Could not locate [tool.uv.sources] block in root pyproject.toml")
 
     new_text2 = re.sub(
-        r'(\[dependency-groups\]\s*\ndev\s*=\s*\[(?:[^\]]|\n)*?)\n\]',
-        rf'\1\n{dev_dep_line.rstrip()}\n]',
+        r"(\[dependency-groups\]\s*\ndev\s*=\s*\[(?:[^\]]|\n)*?)\n\]",
+        rf"\1\n{dev_dep_line.rstrip()}\n]",
         new_text,
         count=1,
     )
@@ -185,7 +185,9 @@ def _patch_root_pyproject(root_pyproject: Path, dist_name: str) -> None:
 
 @plugin_app.command("create")
 def plugin_create(
-    name: str = typer.Argument(help="Plugin short name (lowercase, alphanumeric + hyphens). E.g. 'discord' creates tsugite-discord."),
+    name: str = typer.Argument(
+        help="Plugin short name (lowercase, alphanumeric + hyphens). E.g. 'discord' creates tsugite-discord."
+    ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print planned changes without writing"),
 ):
     """Scaffold a new workspace plugin under plugins/tsugite-<name>/."""

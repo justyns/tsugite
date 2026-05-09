@@ -103,7 +103,9 @@ class EventBus:
         for sub in self._filtered:
             if sub.event_name is not None and sub.event_name != name:
                 continue
-            if sub.predicate is not None and not _safe_invoke(sub.predicate, event, "Subscription predicate", default=False):
+            if sub.predicate is not None and not _safe_invoke(
+                sub.predicate, event, "Subscription predicate", default=False
+            ):
                 continue
             _safe_invoke(sub.handler, event, "Subscription handler")
 
