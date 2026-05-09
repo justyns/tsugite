@@ -17,7 +17,8 @@ Standard event types (documented for reference; runtime treats `type` as opaque)
 - attachment_added / attachment_removed: name, sha256, type, source
 - skill_added / skill_removed: name
 - hook_execution: phase, command, exit_code, stdout, stderr, duration_ms
-- compaction: summary, replaced_count, retained_count, reason
+- compaction: summary, replaced_count, retained_count, reason, range_start, range_end, source_session_id
+- compacted_into: new_session_id, reason, replaced_count, retained_count
 - session_end: status (success|error|interrupted), error_message
 """
 

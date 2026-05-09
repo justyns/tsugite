@@ -1026,6 +1026,7 @@ class BaseAdapter(ABC):
             reason=reason,
             range_start=range_start,
             range_end=range_end,
+            source_session_id=old_conv_id,
         )
         for event in recent_events:
             new_storage.record(event.type, **event.data)
@@ -1043,6 +1044,22 @@ class BaseAdapter(ABC):
         )
         for ex in post_compact_execs:
             new_storage.record("hook_execution", **ex.model_dump(exclude_none=True))
+
+        # Forward pointer on the old file. Written after the new file is fully
+        # populated so a crash mid-compaction can't leave an orphan pointer to a
+        # partial successor. Wrapped in try/except: superseded_by in session_store.json
+        # is the load-bearing chain link; this terminal event is a self-describing
+        # convenience for offline log walks and the UI banner.
+        try:
+            storage.record(
+                "compacted_into",
+                new_session_id=new_session.id,
+                reason=reason,
+                replaced_count=old_user_inputs,
+                retained_count=recent_user_inputs,
+            )
+        except Exception:
+            logger.debug("[%s] Failed to write compacted_into pointer to old file", self.agent_name, exc_info=True)
 
         from tsugite.tools.skills import clear_loaded_skills
 

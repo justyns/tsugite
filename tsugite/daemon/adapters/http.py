@@ -853,75 +853,38 @@ class HTTPServer:
 
     @staticmethod
     def _collect_events(session_id: str, limit: int = 0) -> list[dict]:
-        """Walk the compaction chain newest-first and return a chronological
-        list of event dicts. ``limit`` caps the number of user_input bubbles.
+        """Read one session's JSONL and return its events as raw dicts in file
+        order. ``limit`` trims to the last N ``user_input`` bubbles plus
+        whatever follows them.
 
-        Compaction was historically a chain of separate session files; new
-        sessions record compaction as an in-place event, so for new files the
-        chain has length 1. We read newest-first and stop walking parents
-        once ``limit`` user_inputs have been collected, so legacy chained
-        sessions don't pull old files into memory when only the recent tail
-        is needed. Lines are returned as raw JSON dicts (the on-disk shape)
-        without a pydantic Event round-trip.
+        Predecessor files are not walked: the new file's leading ``compaction``
+        event already carries the canonical pre-compaction summary, so reading
+        ancestor files would duplicate context the agent has already received.
+        Offline chain traversal is supported via the ``compacted_into`` /
+        ``source_session_id`` pointers written into each file at compaction
+        time.
         """
-        history_dir = get_history_dir()
-        visited: set[str] = set()
-
-        # Each batch carries the events from one file plus the indexes (within
-        # the merged output) of its user_input events. Tracked at parse time so
-        # the trim-to-limit step doesn't have to re-scan the merged list.
-        per_file_batches: list[list[dict]] = []
-        per_file_user_inputs: list[list[int]] = []
-        user_inputs_total = 0
-        current_id: Optional[str] = session_id
-
-        while current_id and current_id not in visited:
-            visited.add(current_id)
-            path = history_dir / f"{current_id}.jsonl"
-            if not path.exists():
-                break
-
-            file_events: list[dict] = []
-            file_user_input_offsets: list[int] = []
-            try:
-                with path.open(encoding="utf-8") as f:
-                    for line in f:
-                        line = line.strip()
-                        if not line:
-                            continue
-                        try:
-                            ev = json.loads(line)
-                        except json.JSONDecodeError:
-                            continue
-                        if ev.get("type") == "user_input":
-                            file_user_input_offsets.append(len(file_events))
-                        file_events.append(ev)
-            except Exception:
-                file_events = []
-                file_user_input_offsets = []
-
-            next_parent: Optional[str] = None
-            if file_events and file_events[0].get("type") == "session_start":
-                next_parent = (file_events[0].get("data") or {}).get("parent_session")
-
-            per_file_batches.append(file_events)
-            per_file_user_inputs.append(file_user_input_offsets)
-            user_inputs_total += len(file_user_input_offsets)
-
-            if limit > 0 and user_inputs_total >= limit:
-                break
-
-            current_id = next_parent
-
+        path = get_history_dir() / f"{session_id}.jsonl"
         events: list[dict] = []
-        merged_user_inputs: list[int] = []
-        for batch, offsets in zip(reversed(per_file_batches), reversed(per_file_user_inputs)):
-            base = len(events)
-            events.extend(batch)
-            merged_user_inputs.extend(base + off for off in offsets)
+        user_input_offsets: list[int] = []
+        try:
+            with path.open(encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        ev = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if ev.get("type") == "user_input":
+                        user_input_offsets.append(len(events))
+                    events.append(ev)
+        except FileNotFoundError:
+            return []
 
-        if limit > 0 and len(merged_user_inputs) > limit:
-            events = events[merged_user_inputs[-limit] :]
+        if limit > 0 and len(user_input_offsets) > limit:
+            events = events[user_input_offsets[-limit] :]
 
         return events
 

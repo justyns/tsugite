@@ -67,6 +67,15 @@ export const sessionsMixin = {
     return s.source === 'interactive' && (s.user_id === this.userId || s.conversation_id === this.userId);
   },
 
+  findSession(id) {
+    return this.allSessions.find(s => s.id === id);
+  },
+
+  selectSessionById(id, opts = {}) {
+    const s = this.findSession(id);
+    if (s) this.selectSession(s, opts);
+  },
+
   autoSelectInteractive() {
     // Pinned-and-mine wins over a recently-fired schedule run; if no pinned
     // interactive session exists, fall back to any of mine, then to whatever's
@@ -77,16 +86,22 @@ export const sessionsMixin = {
     if (first) this.selectSession(first);
   },
 
-  async selectSession(session) {
+  async selectSession(session, opts = {}) {
     // Compaction marks the old session completed and stamps superseded_by on it.
     // The localStorage sidebar cache may still show the old one as pinned on
-    // cold load, so chase the chain to land on the live continuation.
-    const visited = new Set();
-    while (session?.superseded_by && !visited.has(session.id)) {
-      visited.add(session.id);
-      const next = this.allSessions.find(s => s.id === session.superseded_by);
-      if (!next) break;
-      session = next;
+    // cold load, so chase the chain to land on the live continuation. Pass
+    // {follow: false} from the back-link affordance on a new session's
+    // compaction summary bubble — that explicitly wants to land on the
+    // predecessor, not auto-forward back.
+    const follow = opts.follow !== false;
+    if (follow) {
+      const visited = new Set();
+      while (session?.superseded_by && !visited.has(session.id)) {
+        visited.add(session.id);
+        const next = this.allSessions.find(s => s.id === session.superseded_by);
+        if (!next) break;
+        session = next;
+      }
     }
     this.sidebarOpen = false;
     this._saveDraftNow();

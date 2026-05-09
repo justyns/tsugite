@@ -109,6 +109,7 @@ export function eventsToBubbles(events, { dropTrailing = false } = {}) {
         type: 'compaction',
         summary: data.summary || null,
         reason: data.reason || null,
+        source_session_id: data.source_session_id || null,
       });
       continue;
     }
@@ -320,6 +321,7 @@ export const historyMixin = {
   HISTORY_PAGE_SIZE: 20,
   hasMoreHistory: false,
   compactionSummary: null,
+  compactedIntoEvent: null,
 
   _historyDebounceTimer: null,
 
@@ -333,6 +335,7 @@ export const historyMixin = {
     this._historyLoaded = 0;
     this.hasMoreHistory = false;
     this.compactionSummary = null;
+    this.compactedIntoEvent = null;
   },
 
   // dropTrailing only when the caller will spawn a live bubble for the
@@ -357,11 +360,16 @@ export const historyMixin = {
         const data = await get(url);
         events = data.events || [];
       }
-      // Surface the most recent compaction event for the banner.
-      const lastCompact = [...events].reverse().find(e => e.type === 'compaction');
+      // Last wins for multi-compaction chains.
+      const lastCompact = events.findLast(e => e.type === 'compaction');
       if (lastCompact) {
         this.compactionSummary = lastCompact.data?.summary || null;
       }
+      // The trailing `compacted_into` event (post-feature only) carries the
+      // forward-direction banner's timestamp + counts. Legacy chains leave
+      // compactedIntoEvent null; the banner falls back to bare-link rendering
+      // driven by selectedSessionMeta.superseded_by.
+      this.compactedIntoEvent = events.findLast(e => e.type === 'compacted_into') || null;
       const meta = this.selectedSessionMeta;
       this._allHistoryMessages = eventsToBubbles(events, { dropTrailing });
       if (this._allHistoryMessages.length === 0 && meta) {
