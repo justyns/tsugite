@@ -65,6 +65,7 @@ members = ["plugins/*"]
 [tool.uv.sources]
 tsugite-cli = { workspace = true }
 tsugite-tmux = { workspace = true }
+tsugite-acp = { workspace = true }
 
 [tool.ruff]
 target-version = "py311"
@@ -139,4 +140,5 @@ dev = [
   "ruff>=0.1",
   "vulture>=2.14",
   "tsugite-tmux",
+  "tsugite-acp",
 ]
