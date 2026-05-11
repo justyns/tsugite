@@ -431,7 +431,9 @@ class BaseAdapter(ABC):
             if conv_id_override:
                 session = self.session_store.get_session(conv_id_override)
             else:
-                session = self.session_store.get_or_create_interactive(user_id, self.agent_name)
+                session = self.session_store.find_default_session(user_id, self.agent_name)
+            if session is None:
+                raise ValueError("no default session yet")
             tokens_used = session.cumulative_tokens
             session_started_xml = render_iso_element("session_started", session.created_at, tz, tz_label, now)
             last_active_xml = render_iso_element("last_active", session.last_active, tz, tz_label, now)
@@ -530,13 +532,16 @@ class BaseAdapter(ABC):
         if conv_id_override:
             conv_id = conv_id_override
         else:
-            # Route: thread_id lookup → default interactive session
+            # Route: thread_id lookup, then default primary, then create a fresh one.
             thread_id = channel_context.thread_id
             thread_session = self.session_store.find_by_thread(thread_id) if thread_id else None
             if thread_session:
                 conv_id = thread_session.id
             else:
-                conv_id = self.session_store.get_or_create_interactive(user_id, self.agent_name).id
+                default = self.session_store.find_default_session(user_id, self.agent_name)
+                if default is None:
+                    default = self.session_store.create_default_session(user_id, self.agent_name)
+                conv_id = default.id
         if _broadcast_state is not None:
             _broadcast_state["conv_id"] = conv_id
 
@@ -734,8 +739,8 @@ class BaseAdapter(ABC):
         The new id comes from `_compact_session`'s return value (active branch)
         or `old.superseded_by` (waited on another thread). Both are direct
         consequences of the rotation that just happened; rediscovering via
-        `get_or_create_interactive` would silently substitute the user's
-        default-interactive session for non-default or non-interactive sources.
+        `find_default_session` would silently substitute the user's primary
+        for non-default or non-interactive sources.
         """
         new_session: Optional[Session] = None
         if self.session_store.begin_compaction(user_id, self.agent_name):

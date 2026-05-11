@@ -643,7 +643,9 @@ class DiscordAdapter(BaseAdapter):
             existing = self.session_store.find_by_thread(thread_id)
             if existing:
                 return existing
-            parent_session = self.session_store.get_or_create_interactive(user_id, self.agent_name)
+            parent_session = self.session_store.find_default_session(user_id, self.agent_name)
+            if parent_session is None:
+                parent_session = self.session_store.create_default_session(user_id, self.agent_name)
             parent_channel_id = getattr(message.channel, "parent_id", None)
             thread_session = Session(
                 id="",
@@ -672,7 +674,10 @@ class DiscordAdapter(BaseAdapter):
                 user_id, self.agent_name, self.bot_config.session_name
             )
 
-        return self.session_store.get_or_create_interactive(user_id, self.agent_name)
+        default = self.session_store.find_default_session(user_id, self.agent_name)
+        if default is None:
+            default = self.session_store.create_default_session(user_id, self.agent_name)
+        return default
 
     @staticmethod
     def _channel_display_name(channel) -> str:
