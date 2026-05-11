@@ -180,3 +180,37 @@ def test_set_primary_picks_latest_active(store):
     found = store.find_primary_session("u1", "agent-x")
     assert found is not None
     assert found.id == "s-b"
+
+
+def test_find_default_session_returns_primary_when_set(store):
+    s = _make_session(store, "s-default")
+    store.set_primary_session(s.id)
+    assert store.find_default_session("u1", "agent-x").id == s.id
+
+
+def test_find_default_session_returns_none_when_no_primary(store):
+    _make_session(store, "s-no-primary")
+    assert store.find_default_session("u1", "agent-x") is None
+
+
+def test_create_default_session_marks_as_primary(store):
+    session = store.create_default_session("u1", "agent-x", title="hello")
+    assert session.user_id == "u1"
+    assert session.agent == "agent-x"
+    assert session.title == "hello"
+    assert session.metadata.get("is_primary") is True
+    assert store.find_default_session("u1", "agent-x").id == session.id
+
+
+def test_create_default_session_uses_modern_id_format(store):
+    """No `daemon_{agent}_{user_id}` literal, no hex suffix - use generate_session_id."""
+    session = store.create_default_session("u1", "agent-x")
+    assert "daemon_agent-x_u1" not in session.id
+    assert session.id.startswith("agent-x_") or "agent-x" in session.id
+
+
+def test_create_default_session_demotes_prior_primary(store):
+    first = store.create_default_session("u1", "agent-x")
+    second = store.create_default_session("u1", "agent-x")
+    assert store.find_default_session("u1", "agent-x").id == second.id
+    assert not store.get_session(first.id).metadata.get("is_primary")

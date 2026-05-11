@@ -524,6 +524,29 @@ class SessionStore:
         with self._lock:
             return self._find_primary_session_locked(user_id, agent)
 
+    def find_default_session(self, user_id: str, agent: str) -> Optional[Session]:
+        """Canonical lookup for where a default request should land."""
+        return self.find_primary_session(user_id, agent)
+
+    def create_default_session(self, user_id: str, agent: str, *, title: Optional[str] = None) -> Session:
+        """Create a fresh interactive session and mark it primary."""
+        with self._lock:
+            conv_id = generate_session_id(agent)
+            for s in self._sessions.values():
+                if s.user_id == user_id and s.agent == agent and s.metadata.get(METADATA_PRIMARY_FLAG):
+                    s.metadata.pop(METADATA_PRIMARY_FLAG, None)
+            session = Session(
+                id=conv_id,
+                agent=agent,
+                source=SessionSource.INTERACTIVE.value,
+                user_id=user_id,
+                title=title,
+                metadata={METADATA_PRIMARY_FLAG: True},
+            )
+            self._sessions[conv_id] = session
+            self._save()
+            return session
+
     def set_primary_session(self, session_id: str) -> Session:
         """Mark `session_id` as primary, demoting any prior primary for the same (user, agent)."""
         with self._lock:
