@@ -120,3 +120,52 @@ def test_sidebar_progress_label_clears_after_turn_ends(authenticated_page, e2e_s
         f"return view.sessionProgressLabel(s) === ''; }})()",
         timeout=3000,
     )
+
+
+def test_ui_follows_session_after_compaction(authenticated_page, e2e_session_store, base_url):
+    """When the active session compacts, an SSE 'compacted' update auto-follows the UI to the successor.
+
+    Without this, the user keeps interacting with a now-completed predecessor and
+    the next /chat POST gets routed to the successor by the server but the UI URL
+    and selected-meta state stay on the old session - confusing.
+    """
+    from tsugite.daemon.session_store import Session, SessionSource, SessionStatus
+
+    page = authenticated_page
+    user_id = page.evaluate("Alpine.store('app').userId")
+    predecessor = e2e_session_store.get_or_create_interactive(user_id, "test-agent")
+    successor = e2e_session_store.create_session(
+        Session(
+            id="ui-follow-successor",
+            agent="test-agent",
+            source=SessionSource.INTERACTIVE.value,
+            status=SessionStatus.ACTIVE.value,
+            user_id=user_id,
+        )
+    )
+    e2e_session_store.update_session(predecessor.id, status=SessionStatus.COMPLETED.value, superseded_by=successor.id)
+
+    view_selector = "[x-data*=conversationsView]"
+    page.goto(base_url + f"#conversations?session={predecessor.id}")
+    page.wait_for_function("Alpine.store('app').view === 'conversations'", timeout=3000)
+    page.evaluate(f"Alpine.$data(document.querySelector({view_selector!r})).reload()")
+    # selectSession chases superseded_by forward; explicitly switch to predecessor
+    # by URL to simulate a stale tab that loaded before compaction was visible.
+    page.evaluate(
+        f"const view = Alpine.$data(document.querySelector({view_selector!r})); "
+        f"view.selectedSessionId = {predecessor.id!r};"
+    )
+
+    page.evaluate(
+        f"""
+        Alpine.store('app').lastEvent = {{
+            type: 'session_update',
+            data: {{ action: 'compacted', id: {predecessor.id!r}, successor_id: {successor.id!r} }},
+            _ts: Date.now()
+        }};
+        """
+    )
+    page.wait_for_function(
+        f"Alpine.$data(document.querySelector({view_selector!r})).selectedSessionId === {successor.id!r}",
+        timeout=3000,
+    )
