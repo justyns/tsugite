@@ -147,10 +147,9 @@ def test_set_primary_concurrent_lock(store):
 
 
 def test_get_or_create_interactive_routes_to_primary(store):
-    """When primary is set, get_or_create_interactive returns it regardless of _interactive_index."""
-    legacy = _make_session(store, "legacy-id")
+    """When primary is set, get_or_create_interactive returns it."""
+    _make_session(store, "other-id")
     chosen = _make_session(store, "chosen-id")
-    store._interactive_index[("u1", "agent-x")] = legacy.id
     store.set_primary_session(chosen.id)
 
     result = store.get_or_create_interactive("u1", "agent-x")
@@ -223,7 +222,7 @@ def test_get_or_create_interactive_does_not_spawn_hex_replacement(store):
     or compacted - resurrecting a 'Main Session' clone is the exact bug we're fixing.
     """
     legacy = _make_session(store, "daemon_agent-x_u1")
-    store._interactive_index[("u1", "agent-x")] = legacy.id
+    store.set_primary_session(legacy.id)
     store.update_session(legacy.id, status=SessionStatus.COMPLETED.value)
 
     result = store.get_or_create_interactive("u1", "agent-x")

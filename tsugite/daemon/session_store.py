@@ -251,9 +251,6 @@ class SessionStore:
         # Per-agent context limits for compaction
         self._context_limits: dict[str, int] = context_limits or {}
 
-        # Index: (user_id, agent) -> session_id for fast interactive lookup
-        self._interactive_index: dict[tuple[str, str], str] = {}
-
         # Index: platform_thread_id -> session_id for fast thread lookup
         self._thread_index: dict[str, str] = {}
 
@@ -452,29 +449,21 @@ class SessionStore:
     # ── Interactive session management ──
 
     def get_or_create_interactive(self, user_id: str, agent: str) -> Session:
+        """Return the user's primary session, or create a fresh default one."""
+        return self.find_default_session(user_id, agent) or self.create_default_session(user_id, agent)
+
+    def default_primary_ids(self, agent: str) -> dict:
+        """Return {user_id: session_id} for all primary sessions for this agent."""
         with self._lock:
-            primary = self._find_primary_session_locked(user_id, agent)
-            if primary is not None:
-                return primary
-
-            key = (user_id, agent)
-            if key in self._interactive_index:
-                session_id = self._interactive_index[key]
-                if session_id in self._sessions:
-                    existing = self._sessions[session_id]
-                    if existing.status not in FINISHED_STATUSES:
-                        return existing
-                    # The indexed session finished. Fall through to create_default_session
-                    # rather than spawning a hex-suffix replacement that resurrects "Main Session".
-
-            # Drop the lock for create_default_session, which re-acquires it.
-            pass
-        return self.create_default_session(user_id, agent)
-
-    def default_interactive_ids(self, agent: str) -> dict:
-        """Return {user_id: session_id} for all default interactive sessions for this agent."""
-        with self._lock:
-            return {uid: sid for (uid, ag), sid in self._interactive_index.items() if ag == agent}
+            return {
+                s.user_id: s.id
+                for s in self._sessions.values()
+                if s.agent == agent
+                and s.user_id
+                and s.metadata.get(METADATA_PRIMARY_FLAG)
+                and s.superseded_by is None
+                and s.status not in FINISHED_STATUSES
+            }
 
     def _find_named_session_locked(self, user_id: str, agent: str, name: str) -> Optional[Session]:
         """Lock-held variant of find_named_session — caller must hold self._lock."""
@@ -633,10 +622,8 @@ class SessionStore:
 
             self._sessions[new_id] = new_session
 
-            # Update indexes
-            if old_session.user_id and old_session.source == SessionSource.INTERACTIVE.value:
-                key = (old_session.user_id, old_session.agent)
-                self._interactive_index[key] = new_id
+            # Compaction preserves is_primary metadata, so the new session automatically
+            # becomes the user's default if the predecessor was. Thread index needs updating.
             thread_id = new_session.metadata.get("thread_id")
             if thread_id:
                 self._thread_index[thread_id] = new_id
@@ -721,8 +708,6 @@ class SessionStore:
                 raise ValueError(f"Session '{session.id}' already exists")
             self._sessions[session.id] = session
 
-            if session.source == SessionSource.INTERACTIVE.value and session.user_id:
-                self._interactive_index[(session.user_id, session.agent)] = session.id
             thread_id = session.metadata.get("thread_id")
             if thread_id:
                 self._thread_index[thread_id] = session.id
@@ -1143,19 +1128,35 @@ class SessionStore:
                     sdata["metadata"] = meta
                 sdata = {k: v for k, v in sdata.items() if k in valid_fields}
                 self._sessions[sid] = Session(**sdata)
-            # Rebuild indexes
+            # Rebuild indexes. Legacy stores have no is_primary flag; stamp it on the
+            # most-recently-active interactive session per (user, agent) to preserve
+            # the user's existing default-routing across the upgrade.
+            primary_candidates: dict[tuple[str, str], str] = {}
             for sid, session in self._sessions.items():
-                if session.source == SessionSource.INTERACTIVE.value and session.user_id:
+                if (
+                    session.source == SessionSource.INTERACTIVE.value
+                    and session.user_id
+                    and session.superseded_by is None
+                    and session.status not in FINISHED_STATUSES
+                ):
                     key = (session.user_id, session.agent)
-                    existing_id = self._interactive_index.get(key)
+                    existing_id = primary_candidates.get(key)
                     if not existing_id or session.last_active > self._sessions[existing_id].last_active:
-                        self._interactive_index[key] = sid
+                        primary_candidates[key] = sid
                 thread_id = session.metadata.get("thread_id") if session.metadata else None
                 if thread_id:
                     self._thread_index[thread_id] = sid
                 channel_id = session.metadata.get("channel_id") if session.metadata else None
                 if channel_id:
                     self._channel_index[(channel_id, session.agent)] = sid
+            for key, sid in primary_candidates.items():
+                session = self._sessions[sid]
+                already_primary = any(
+                    s.user_id == key[0] and s.agent == key[1] and s.metadata.get(METADATA_PRIMARY_FLAG)
+                    for s in self._sessions.values()
+                )
+                if not already_primary:
+                    session.metadata[METADATA_PRIMARY_FLAG] = True
         except (json.JSONDecodeError, TypeError, KeyError) as e:
             logger.error("Failed to load session store from %s: %s", self._path, e)
 
@@ -1239,12 +1240,12 @@ class SessionStore:
                         source=SessionSource.INTERACTIVE.value,
                         user_id=user_id,
                         created_at=data.get("created_at", ""),
+                        metadata={METADATA_PRIMARY_FLAG: True},
                     )
                     tokens, msg_count = self._estimate_tokens(conv_id)
                     session.cumulative_tokens = tokens
                     session.message_count = msg_count
                     self._sessions[conv_id] = session
-                    self._interactive_index[(user_id, agent_name)] = conv_id
                     migrated = True
                 except (json.JSONDecodeError, OSError) as e:
                     logger.warning("Skipping legacy session file %s: %s", path, e)

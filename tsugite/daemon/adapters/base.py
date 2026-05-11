@@ -858,8 +858,8 @@ class BaseAdapter(ABC):
 
         Returns the new `Session` on success, or `None` when nothing was
         rotated (all events already fit in the retention budget). Callers must
-        use the returned session for downstream id-keyed work; looking up the
-        successor via `_interactive_index` is unreliable for non-default or
+        use the returned session for downstream id-keyed work; rediscovering
+        via `find_default_session` is unreliable for non-default or
         non-interactive sessions.
         """
         if instructions is None:

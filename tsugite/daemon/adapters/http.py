@@ -688,7 +688,7 @@ class HTTPServer:
 
         from tsugite.daemon.session_store import SessionStatus
 
-        default_ids = adapter.session_store.default_interactive_ids(adapter.agent_name)
+        default_ids = adapter.session_store.default_primary_ids(adapter.agent_name)
         live_statuses = {SessionStatus.RUNNING.value, SessionStatus.ACTIVE.value}
 
         def _user_label(user_id: str, source: str) -> str:

@@ -87,7 +87,7 @@ def _patches(history_dir):
 @pytest.mark.asyncio
 async def test_compact_session_returns_new_session(workspace_dir, history_dir, tmp_path):
     """`_compact_session` must return the `Session` it created so callers
-    don't have to rediscover it via the fragile `_interactive_index`.
+    don't have to rediscover it through any lookup index.
     """
     store = SessionStore(tmp_path / "session_store.json", context_limits={"test-agent": 1_000_000})
     session = store.get_or_create_interactive("test-user", "test-agent")
