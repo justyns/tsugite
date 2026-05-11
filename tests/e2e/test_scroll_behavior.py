@@ -5,8 +5,10 @@ events no longer yank the user down when they have scrolled up to read
 history. A floating `.scroll-fab` button appears while `isAtBottom` is false.
 """
 
+from datetime import datetime, timezone
 from unittest.mock import patch
 
+from tsugite.history.models import Event
 from tsugite.history.storage import SessionStorage
 
 
@@ -17,11 +19,12 @@ def _seed_long_session(e2e_adapter, e2e_tmp, label, turns):
     history_dir.mkdir(exist_ok=True)
     session_path = history_dir / f"{session.id}.jsonl"
     storage = SessionStorage.create("test-agent", model="test", session_path=session_path)
+    now = datetime.now(timezone.utc)
+    events = []
     for i in range(turns):
-        storage.record_turn(
-            messages=[{"role": "user", "content": f"ask {i}"}],
-            final_answer=f"answer {i}\n\n" + ("filler line\n" * 20),
-        )
+        events.append(Event(type="user_input", ts=now, data={"text": f"ask {i}"}))
+        events.append(Event(type="final_result", ts=now, data={"result": f"answer {i}\n\n" + ("filler line\n" * 20)}))
+    storage.record_many(events)
     return history_dir, unique_user, session.id
 
 
@@ -29,9 +32,32 @@ def _open_session(page, user_id, session_id):
     page.evaluate(f"localStorage.setItem('tsugite_user_id', {user_id!r})")
     page.goto(page.url.split("#")[0] + f"#conversations?session={session_id}")
     page.reload()
-    page.wait_for_function("!Alpine.store('app').authRequired", timeout=5000)
+    page.wait_for_function(
+        "typeof Alpine !== 'undefined' && Alpine.store('app') && !Alpine.store('app').authRequired",
+        timeout=10000,
+    )
     page.wait_for_function(f"Alpine.store('app').userId === {user_id!r}", timeout=3000)
-    page.wait_for_selector(".msg.agent", timeout=5000)
+    page.wait_for_selector(".console-turn.agent", timeout=5000)
+
+
+def _wait_at_bottom(page, timeout=2000):
+    page.wait_for_function(
+        "(() => { const el = document.getElementById('messages'); "
+        "return el.scrollHeight - el.scrollTop - el.clientHeight < 40; })()",
+        timeout=timeout,
+    )
+
+
+def _switch_session(page, session_id):
+    page.evaluate(
+        f"const view = Alpine.$data(document.getElementById('messages')); "
+        f"const t = view.allSessions.find(s => (s.conversation_id || s.id) === {session_id!r}); "
+        f"view.selectSession(t);"
+    )
+    page.wait_for_function(
+        f"Alpine.$data(document.getElementById('messages')).selectedSessionId === {session_id!r}",
+        timeout=3000,
+    )
 
 
 def test_scroll_fab_hidden_when_at_bottom(authenticated_page, e2e_adapter, e2e_tmp):
@@ -135,3 +161,27 @@ def test_streaming_follows_when_user_is_at_bottom(authenticated_page, e2e_adapte
             "return el.scrollHeight - el.scrollTop - el.clientHeight < 40; })()",
             timeout=2000,
         )
+
+
+def test_revisiting_session_lands_at_bottom(authenticated_page, e2e_adapter, e2e_tmp):
+    """Switching back to a previously-visited session must scroll to the latest message.
+
+    A long A and a short B expose the bug: B's first-visit scrolls to B's small
+    bottom, and on revisit A would otherwise land mid-conversation at the old scrollTop.
+    """
+    page = authenticated_page
+    history_dir_a, user_id, session_a = _seed_long_session(e2e_adapter, e2e_tmp, "revisit-a", turns=30)
+    _, _, session_b = _seed_long_session(e2e_adapter, e2e_tmp, "revisit-b", turns=3)
+    # Both sessions must resolve via the same get_history_dir patch.
+    history_dir_b = e2e_tmp / "history-scroll-revisit-b"
+    (history_dir_b / f"{session_b}.jsonl").rename(history_dir_a / f"{session_b}.jsonl")
+
+    with patch("tsugite.daemon.adapters.http.get_history_dir", return_value=history_dir_a):
+        _open_session(page, user_id, session_a)
+        _wait_at_bottom(page)
+
+        _switch_session(page, session_b)
+        _wait_at_bottom(page)
+
+        _switch_session(page, session_a)
+        _wait_at_bottom(page)

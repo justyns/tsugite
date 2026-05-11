@@ -139,6 +139,8 @@ export const sessionsMixin = {
       if (this.selectedSessionId !== convId) return;
       this._rehydrateProgressFromEvents(convId);
     }
+    // Revisits skip loadHistory's scroll-to-bottom; force it so sidebar clicks always land at the latest message.
+    if (!isFirstVisit) this.scrollMessages(true);
   },
 
   async _markSessionViewed(session) {

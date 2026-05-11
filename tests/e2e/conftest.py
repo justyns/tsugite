@@ -115,7 +115,13 @@ def authenticated_page(page, base_url, e2e_auth_token):
     page.goto(base_url + "/api/health")
     page.evaluate(f"localStorage.setItem('tsugite_token', '{e2e_auth_token}')")
     page.goto(base_url)
-    page.wait_for_function("!Alpine.store('app').authRequired", timeout=5000)
+    # Alpine loads as an ES module; the predicate must tolerate the brief window
+    # before Alpine becomes a global, otherwise the first poll throws ReferenceError
+    # and Playwright bails before the import finishes.
+    page.wait_for_function(
+        "typeof Alpine !== 'undefined' && Alpine.store('app') && !Alpine.store('app').authRequired",
+        timeout=10000,
+    )
     return page
 
 
