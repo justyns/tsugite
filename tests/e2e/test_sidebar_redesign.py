@@ -71,3 +71,52 @@ def test_sidebar_metadata_chips_render(authenticated_page, e2e_session_store):
 
     chips = page.locator(".session-chip")
     assert chips.count() >= 1
+
+
+def test_sidebar_progress_label_clears_after_turn_ends(authenticated_page, e2e_session_store, base_url):
+    """A stale live-progress entry in progressCache must yield to the server's cleared progress.
+
+    The bug: after a turn ends, the SSE turn-end event may be missed (reconnect, race
+    with loadSessions). The cache keeps showing 'Turn N · Thinking...' indefinitely even
+    though the server's session_progress_summary correctly reports status_text=''.
+    Refreshing the page worked around it. loadSessions must reconcile.
+    """
+    page = authenticated_page
+    user_id = page.evaluate("Alpine.store('app').userId")
+    session = e2e_session_store.get_or_create_interactive(user_id, "test-agent")
+    e2e_session_store.append_event(session.id, {"type": "turn_start", "turn": 3})
+    e2e_session_store.append_event(session.id, {"type": "thought", "text": "thinking"})
+    e2e_session_store.append_event(session.id, {"type": "final_result", "result": "done"})
+
+    view_selector = "[x-data*=conversationsView]"
+    page.goto(base_url + "#conversations")
+    page.wait_for_function("Alpine.store('app').view === 'conversations'", timeout=3000)
+    page.evaluate(f"Alpine.$data(document.querySelector({view_selector!r})).reload()")
+    page.wait_for_function(
+        f"(() => {{ const view = Alpine.$data(document.querySelector({view_selector!r})); "
+        f"return view && view.allSessions && view.allSessions.some(s => s.id === {session.id!r}); }})()",
+        timeout=5000,
+    )
+
+    page.evaluate(
+        f"""
+        const view = Alpine.$data(document.querySelector({view_selector!r}));
+        view.progressCache[{session.id!r}] = {{
+            turnCount: 3, toolCount: 0, statusText: 'Thinking...', lastEventTime: new Date().toISOString()
+        }};
+        """
+    )
+    label_before = page.evaluate(
+        f"(() => {{ const view = Alpine.$data(document.querySelector({view_selector!r})); "
+        f"const s = view.allSessions.find(x => x.id === {session.id!r}); "
+        f"return view.sessionProgressLabel(s); }})()"
+    )
+    assert "Turn 3" in label_before, f"expected stale label, got {label_before!r}"
+
+    page.evaluate(f"Alpine.$data(document.querySelector({view_selector!r})).loadSessions()")
+    page.wait_for_function(
+        f"(() => {{ const view = Alpine.$data(document.querySelector({view_selector!r})); "
+        f"const s = view.allSessions.find(x => x.id === {session.id!r}); "
+        f"return view.sessionProgressLabel(s) === ''; }})()",
+        timeout=3000,
+    )

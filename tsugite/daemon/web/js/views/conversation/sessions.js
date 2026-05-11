@@ -48,7 +48,10 @@ export const sessionsMixin = {
       for (const s of this.allSessions) {
         if (s.state !== 'running' && s.state !== 'active') continue;
         liveIds.add(s.id);
-        if (s.progress && !this.progressCache[s.id]) {
+        // Server clears status_text on turn-end; reconcile so a missed SSE can't keep a stale cache alive.
+        if (s.progress?.status_text === '') {
+          delete this.progressCache[s.id];
+        } else if (s.progress && !this.progressCache[s.id]) {
           this.progressCache[s.id] = progressFromPayload(s.progress);
         }
       }
