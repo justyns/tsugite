@@ -1000,7 +1000,10 @@ class HTTPServer:
 
         self.event_bus.emit("agent_status", {"agent": agent_name})
         if new_session:
-            self.event_bus.emit("session_update", {"action": "compacted", "id": new_session.id})
+            self.event_bus.emit(
+                "session_update",
+                {"action": "compacted", "id": old_conv_id, "successor_id": new_session.id},
+            )
         return JSONResponse(
             {
                 "status": "compacted",
@@ -1337,13 +1340,17 @@ class HTTPServer:
                 target_session = adapter.session_store.get_session(session_id)
             except ValueError:
                 target_session = None
-            if target_session is not None:
-                if target_session.status in FINISHED_STATUSES:
+            if target_session is not None and target_session.status in FINISHED_STATUSES:
+                successor = adapter.session_store.resolve_compacted_successor(session_id)
+                if successor is not None and successor.status not in FINISHED_STATUSES:
+                    target_session = successor
+                else:
                     return JSONResponse(
                         {"error": f"Session is {target_session.status}. Start a new session to continue."},
                         status_code=409,
                     )
-                metadata["conv_id_override"] = session_id
+            if target_session is not None:
+                metadata["conv_id_override"] = target_session.id
 
         if target_session is None:
             target_session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)

@@ -758,7 +758,10 @@ class BaseAdapter(ABC):
         self._emit_ui(custom_logger, "compacted")
         new_id = new_session.id if new_session else conv_id
         if self.event_bus:
-            self.event_bus.emit("session_update", {"action": "compacted", "id": new_id})
+            self.event_bus.emit(
+                "session_update",
+                {"action": "compacted", "id": conv_id, "successor_id": new_id},
+            )
         return new_id
 
     def _update_skill_ttl(self, conv_id: str, user_message: str, result, agent_context: dict) -> None:

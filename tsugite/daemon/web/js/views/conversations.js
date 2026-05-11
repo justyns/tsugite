@@ -152,6 +152,12 @@ export default () => ({
             return;
           }
         }
+        if (d.action === 'compacted' && d.successor_id && this.selectedSessionId === d.id) {
+          // The session the user is looking at just compacted; follow the chain forward
+          // so the next message doesn't post to a now-completed predecessor.
+          this.loadSessions().then(() => this.selectSessionById(d.successor_id));
+          return;
+        }
         this._debouncedLoadSessions();
       }
       if (ev.type === 'session_event') {

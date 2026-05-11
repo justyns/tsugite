@@ -144,6 +144,63 @@ class TestChatEndpoint:
         )
         assert resp.status_code == 400
 
+    def test_chat_with_compacted_session_id_routes_to_successor(
+        self, client, server, mock_adapter, test_token
+    ):
+        """POST with a compacted predecessor's session_id must transparently route to its successor, not 409."""
+        from tsugite.daemon.session_store import Session, SessionSource, SessionStatus
+
+        store = mock_adapter.session_store
+        successor = store.create_session(
+            Session(
+                id="successor-1",
+                agent="test-agent",
+                source=SessionSource.INTERACTIVE.value,
+                status=SessionStatus.ACTIVE.value,
+                user_id="web-anonymous",
+            )
+        )
+        old = store.create_session(
+            Session(
+                id="old-compacted",
+                agent="test-agent",
+                source=SessionSource.INTERACTIVE.value,
+                status=SessionStatus.COMPLETED.value,
+                superseded_by=successor.id,
+                user_id="web-anonymous",
+            )
+        )
+
+        recorded: list[dict] = []
+        original_emit = server.event_bus.emit
+
+        def capture(event_type, data=None):
+            if event_type == "session_event":
+                recorded.append(dict(data or {}))
+            return original_emit(event_type, data)
+
+        with (
+            patch.object(
+                type(mock_adapter),
+                "handle_message",
+                new=AsyncMock(return_value="ok"),
+            ),
+            patch.object(server.event_bus, "emit", side_effect=capture),
+        ):
+            resp = client.post(
+                "/api/agents/test-agent/chat",
+                json={"message": "hello", "session_id": old.id},
+                headers={"Authorization": f"Bearer {test_token}"},
+            )
+            list(resp.iter_lines())
+
+        assert resp.status_code == 200, f"expected 200, got {resp.status_code}: {resp.text!r}"
+        assert recorded, "expected progress broadcasts"
+        for payload in recorded:
+            assert payload.get("session_id") == successor.id, (
+                f"broadcast routed to {payload.get('session_id')!r}, expected successor {successor.id!r}"
+            )
+
     def test_chat_with_explicit_session_id_routes_progress_to_that_session(
         self, client, server, mock_adapter, test_token
     ):
