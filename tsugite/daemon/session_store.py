@@ -509,13 +509,20 @@ class SessionStore:
         """Canonical lookup for where a default request should land."""
         return self.find_primary_session(user_id, agent)
 
+    def _demote_primaries_locked(self, user_id: str, agent: str, *, except_id: Optional[str] = None) -> Optional[Session]:
+        """Clear primary flag from all (user, agent) sessions except `except_id`. Returns the last one cleared."""
+        cleared: Optional[Session] = None
+        for s in self._sessions.values():
+            if s.user_id == user_id and s.agent == agent and s.id != except_id and s.metadata.get(METADATA_PRIMARY_FLAG):
+                s.metadata.pop(METADATA_PRIMARY_FLAG, None)
+                cleared = s
+        return cleared
+
     def create_default_session(self, user_id: str, agent: str, *, title: Optional[str] = None) -> Session:
         """Create a fresh interactive session and mark it primary."""
         with self._lock:
             conv_id = generate_session_id(agent)
-            for s in self._sessions.values():
-                if s.user_id == user_id and s.agent == agent and s.metadata.get(METADATA_PRIMARY_FLAG):
-                    s.metadata.pop(METADATA_PRIMARY_FLAG, None)
+            self._demote_primaries_locked(user_id, agent)
             session = Session(
                 id=conv_id,
                 agent=agent,
@@ -538,14 +545,7 @@ class SessionStore:
                 raise ValueError(f"Cannot promote finished session '{session_id}' to primary")
             if target.superseded_by:
                 raise ValueError(f"Cannot promote superseded session '{session_id}' to primary")
-            for s in self._sessions.values():
-                if (
-                    s.user_id == target.user_id
-                    and s.agent == target.agent
-                    and s.id != target.id
-                    and s.metadata.get(METADATA_PRIMARY_FLAG)
-                ):
-                    s.metadata.pop(METADATA_PRIMARY_FLAG, None)
+            self._demote_primaries_locked(target.user_id, target.agent, except_id=target.id)
             target.metadata[METADATA_PRIMARY_FLAG] = True
             self._mark_dirty()
             return target
@@ -553,11 +553,7 @@ class SessionStore:
     def clear_primary_session(self, user_id: str, agent: str) -> Optional[Session]:
         """Remove the primary flag from any session for (user_id, agent). Returns the cleared session, if any."""
         with self._lock:
-            cleared: Optional[Session] = None
-            for s in self._sessions.values():
-                if s.user_id == user_id and s.agent == agent and s.metadata.get(METADATA_PRIMARY_FLAG):
-                    s.metadata.pop(METADATA_PRIMARY_FLAG, None)
-                    cleared = s
+            cleared = self._demote_primaries_locked(user_id, agent)
             self._mark_dirty()
             return cleared
 
@@ -1132,6 +1128,7 @@ class SessionStore:
             # most-recently-active interactive session per (user, agent) to preserve
             # the user's existing default-routing across the upgrade.
             primary_candidates: dict[tuple[str, str], str] = {}
+            already_primary_keys: set[tuple[str, str]] = set()
             for sid, session in self._sessions.items():
                 if (
                     session.source == SessionSource.INTERACTIVE.value
@@ -1140,6 +1137,8 @@ class SessionStore:
                     and session.status not in FINISHED_STATUSES
                 ):
                     key = (session.user_id, session.agent)
+                    if session.metadata.get(METADATA_PRIMARY_FLAG):
+                        already_primary_keys.add(key)
                     existing_id = primary_candidates.get(key)
                     if not existing_id or session.last_active > self._sessions[existing_id].last_active:
                         primary_candidates[key] = sid
@@ -1150,13 +1149,8 @@ class SessionStore:
                 if channel_id:
                     self._channel_index[(channel_id, session.agent)] = sid
             for key, sid in primary_candidates.items():
-                session = self._sessions[sid]
-                already_primary = any(
-                    s.user_id == key[0] and s.agent == key[1] and s.metadata.get(METADATA_PRIMARY_FLAG)
-                    for s in self._sessions.values()
-                )
-                if not already_primary:
-                    session.metadata[METADATA_PRIMARY_FLAG] = True
+                if key not in already_primary_keys:
+                    self._sessions[sid].metadata[METADATA_PRIMARY_FLAG] = True
         except (json.JSONDecodeError, TypeError, KeyError) as e:
             logger.error("Failed to load session store from %s: %s", self._path, e)
 

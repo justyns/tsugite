@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 from tsugite.agent_inheritance import find_agent_file
 from tsugite.agent_runner import run_agent
 from tsugite.daemon.config import AgentConfig
-from tsugite.daemon.session_store import READ_ONLY_METADATA_KEYS, Session, SessionStore
+from tsugite.daemon.session_store import METADATA_PRIMARY_FLAG, READ_ONLY_METADATA_KEYS, Session, SessionStore
 from tsugite.events.base import BaseEvent
 from tsugite.exceptions import AgentExecutionError, is_prompt_too_long_error
 from tsugite.options import ExecutionOptions
@@ -444,7 +444,7 @@ class BaseAdapter(ABC):
                 user_meta = {
                     k: v
                     for k, v in session.metadata.items()
-                    if k not in READ_ONLY_METADATA_KEYS and k not in ("topic", "is_primary")
+                    if k not in READ_ONLY_METADATA_KEYS and k not in ("topic", METADATA_PRIMARY_FLAG)
                 }
                 if user_meta:
                     entries = "\n".join(f"    {k}={v}" for k, v in user_meta.items())
@@ -538,10 +538,7 @@ class BaseAdapter(ABC):
             if thread_session:
                 conv_id = thread_session.id
             else:
-                default = self.session_store.find_default_session(user_id, self.agent_name)
-                if default is None:
-                    default = self.session_store.create_default_session(user_id, self.agent_name)
-                conv_id = default.id
+                conv_id = self.session_store.get_or_create_interactive(user_id, self.agent_name).id
         if _broadcast_state is not None:
             _broadcast_state["conv_id"] = conv_id
 

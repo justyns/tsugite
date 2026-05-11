@@ -786,18 +786,24 @@ class HTTPServer:
             {"name": a.name, "content_type": a.content_type.value, "mime_type": a.mime_type}
             for a in adapter._get_all_attachments()
         ]
-        backend = self._active_backends.get((adapter.agent_name, user_id, session.id)) if session else None
+        if session is not None:
+            tokens = session.cumulative_tokens
+            message_count = session.message_count
+            session_metadata = session.metadata or {}
+            backend = self._active_backends.get((adapter.agent_name, user_id, session.id))
+        else:
+            tokens, message_count, session_metadata, backend = 0, 0, {}, None
 
         return JSONResponse(
             {
                 "model": model,
                 "resolved_model": resolved_model if resolved_model != model else None,
-                "tokens": session.cumulative_tokens if session else 0,
+                "tokens": tokens,
                 "context_limit": adapter.session_store.get_context_limit(adapter.agent_name),
                 "threshold": adapter.session_store.get_compaction_threshold(adapter.agent_name),
-                "message_count": session.message_count if session else 0,
+                "message_count": message_count,
                 "compacting": adapter.session_store.is_compacting(user_id, adapter.agent_name),
-                "metadata": (session.metadata or {}) if session else {},
+                "metadata": session_metadata,
                 "busy": backend is not None,
                 "pending_message": backend.pending_message if backend else None,
                 "attachments": attachments,
@@ -1360,9 +1366,7 @@ class HTTPServer:
                 metadata["conv_id_override"] = target_session.id
 
         if target_session is None:
-            target_session = adapter.session_store.find_default_session(user_id, adapter.agent_name)
-            if target_session is None:
-                target_session = adapter.session_store.create_default_session(user_id, adapter.agent_name)
+            target_session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
         target_session_id = target_session.id
 
         backend_key = (agent_name, user_id, target_session_id)
