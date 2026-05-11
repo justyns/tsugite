@@ -458,26 +458,18 @@ class SessionStore:
                 return primary
 
             key = (user_id, agent)
-            is_replacement = False
             if key in self._interactive_index:
                 session_id = self._interactive_index[key]
                 if session_id in self._sessions:
                     existing = self._sessions[session_id]
                     if existing.status not in FINISHED_STATUSES:
                         return existing
-                    is_replacement = True
+                    # The indexed session finished. Fall through to create_default_session
+                    # rather than spawning a hex-suffix replacement that resurrects "Main Session".
 
-            conv_id = f"daemon_{agent}_{user_id}_{uuid4().hex[:6]}" if is_replacement else f"daemon_{agent}_{user_id}"
-            session = Session(
-                id=conv_id, agent=agent, source=SessionSource.INTERACTIVE.value, user_id=user_id, title="Main Session"
-            )
-            tokens, msg_count = self._estimate_tokens(conv_id)
-            session.cumulative_tokens = tokens
-            session.message_count = msg_count
-            self._sessions[conv_id] = session
-            self._interactive_index[key] = conv_id
-            self._save()
-            return session
+            # Drop the lock for create_default_session, which re-acquires it.
+            pass
+        return self.create_default_session(user_id, agent)
 
     def default_interactive_ids(self, agent: str) -> dict:
         """Return {user_id: session_id} for all default interactive sessions for this agent."""

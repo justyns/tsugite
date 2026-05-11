@@ -214,3 +214,19 @@ def test_create_default_session_demotes_prior_primary(store):
     second = store.create_default_session("u1", "agent-x")
     assert store.find_default_session("u1", "agent-x").id == second.id
     assert not store.get_session(first.id).metadata.get("is_primary")
+
+
+def test_get_or_create_interactive_does_not_spawn_hex_replacement(store):
+    """When the indexed session is finished, fall through to create_default_session
+
+    rather than re-using the legacy hex-suffix replacement path. The user cancelled
+    or compacted - resurrecting a 'Main Session' clone is the exact bug we're fixing.
+    """
+    legacy = _make_session(store, "daemon_agent-x_u1")
+    store._interactive_index[("u1", "agent-x")] = legacy.id
+    store.update_session(legacy.id, status=SessionStatus.COMPLETED.value)
+
+    result = store.get_or_create_interactive("u1", "agent-x")
+    assert result.id != legacy.id
+    # No hex suffix: the new path uses generate_session_id, not f"daemon_{a}_{u}_{hex}".
+    assert "daemon_agent-x_u1_" not in result.id

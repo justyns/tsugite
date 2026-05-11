@@ -211,9 +211,8 @@ class TestChatEndpoint:
         # User's older interactive session, still visible in sidebar.
         target = store.get_or_create_interactive("web-anonymous", "test-agent")
         target_id = target.id
-        # User clicked "New Session" — a fresh interactive becomes the default in the
-        # store's interactive index, displacing `target` as the default for chats with
-        # no explicit session_id.
+        # User clicked "New Session" - a fresh interactive becomes the primary default,
+        # displacing `target` as where chats with no explicit session_id land.
         newer = store.create_session(
             Session(
                 id="newer-default-session",
@@ -224,6 +223,7 @@ class TestChatEndpoint:
                 title="Newer session",
             )
         )
+        store.set_primary_session(newer.id)
         assert store.get_or_create_interactive("web-anonymous", "test-agent").id == newer.id
         assert target_id != newer.id
 

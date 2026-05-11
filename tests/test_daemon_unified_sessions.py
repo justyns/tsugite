@@ -130,7 +130,7 @@ class TestSessionStoreInteractive:
     def test_get_or_create_interactive(self, tmp_path):
         store = SessionStore(tmp_path / "session_store.json")
         session = store.get_or_create_interactive("user1", "agent1")
-        assert session.id == "daemon_agent1_user1"
+        assert "agent1" in session.id
         assert session.source == "interactive"
         assert session.user_id == "user1"
 
