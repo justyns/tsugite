@@ -421,6 +421,7 @@ class TestUnloadSkillEndpoint:
         return {"Authorization": f"Bearer {token}"}
 
     def test_unload_skill_happy_path(self, client, test_token, mock_adapter):
+        session = mock_adapter.session_store.create_default_session("alice", "test-agent")
         resp = client.post(
             "/api/agents/test-agent/unload-skill",
             json={"user_id": "alice", "name": "skill-a"},
@@ -430,12 +431,11 @@ class TestUnloadSkillEndpoint:
         data = resp.json()
         assert data["status"] == "ok"
         assert data["name"] == "skill-a"
-        # Resolves the interactive session and stores the suppression there.
-        session = mock_adapter.session_store.get_or_create_interactive("alice", "test-agent")
         assert data["session_id"] == session.id
         assert mock_adapter.session_store.get_suppressed_skills(session.id) == {"skill-a"}
 
     def test_unload_skill_is_idempotent(self, client, test_token, mock_adapter):
+        session = mock_adapter.session_store.create_default_session("alice", "test-agent")
         for _ in range(3):
             resp = client.post(
                 "/api/agents/test-agent/unload-skill",
@@ -443,10 +443,10 @@ class TestUnloadSkillEndpoint:
                 headers=self._headers(test_token),
             )
             assert resp.status_code == 200
-        session = mock_adapter.session_store.get_or_create_interactive("alice", "test-agent")
         assert mock_adapter.session_store.get_suppressed_skills(session.id) == {"skill-a"}
 
     def test_unload_multiple_skills(self, client, test_token, mock_adapter):
+        session = mock_adapter.session_store.create_default_session("alice", "test-agent")
         for name in ("skill-a", "skill-b", "skill-c"):
             resp = client.post(
                 "/api/agents/test-agent/unload-skill",
@@ -454,17 +454,16 @@ class TestUnloadSkillEndpoint:
                 headers=self._headers(test_token),
             )
             assert resp.status_code == 200
-        session = mock_adapter.session_store.get_or_create_interactive("alice", "test-agent")
         assert mock_adapter.session_store.get_suppressed_skills(session.id) == {"skill-a", "skill-b", "skill-c"}
 
     def test_unload_skill_isolated_per_user(self, client, test_token, mock_adapter):
+        alice_session = mock_adapter.session_store.create_default_session("alice", "test-agent")
+        bob_session = mock_adapter.session_store.create_default_session("bob", "test-agent")
         client.post(
             "/api/agents/test-agent/unload-skill",
             json={"user_id": "alice", "name": "skill-a"},
             headers=self._headers(test_token),
         )
-        alice_session = mock_adapter.session_store.get_or_create_interactive("alice", "test-agent")
-        bob_session = mock_adapter.session_store.get_or_create_interactive("bob", "test-agent")
         assert alice_session.id != bob_session.id
         assert mock_adapter.session_store.get_suppressed_skills(bob_session.id) == set()
 
@@ -516,9 +515,10 @@ class TestUnloadSkillEndpoint:
         )
         assert resp.status_code == 401
 
-    def test_unload_skill_invokes_manager(self, client, test_token):
+    def test_unload_skill_invokes_manager(self, client, test_token, mock_adapter):
         """The handler also tells the global SkillManager to drop the skill so any
         in-flight read of its state reflects the removal immediately."""
+        mock_adapter.session_store.create_default_session("alice", "test-agent")
         with patch("tsugite.tools.skills.get_skill_manager") as get_mgr:
             client.post(
                 "/api/agents/test-agent/unload-skill",

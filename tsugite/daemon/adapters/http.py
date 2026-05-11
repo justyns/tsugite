@@ -771,36 +771,36 @@ class HTTPServer:
 
         user_id = adapter.resolve_http_user(request.query_params.get("user_id", "web-anonymous"))
         session_id = request.query_params.get("session_id")
+        session = None
         if session_id:
             try:
                 session = adapter.session_store.get_session(session_id)
             except ValueError:
-                session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
-        else:
-            session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
-
-        backend_key = (adapter.agent_name, user_id, session.id)
-        backend = self._active_backends.get(backend_key)
+                session = None
+        if session is None:
+            session = adapter.session_store.find_default_session(user_id, adapter.agent_name)
 
         model = adapter.resolve_model()
         resolved_model = _resolve_full_model_id(model)
+        attachments = [
+            {"name": a.name, "content_type": a.content_type.value, "mime_type": a.mime_type}
+            for a in adapter._get_all_attachments()
+        ]
+        backend = self._active_backends.get((adapter.agent_name, user_id, session.id)) if session else None
 
         return JSONResponse(
             {
                 "model": model,
                 "resolved_model": resolved_model if resolved_model != model else None,
-                "tokens": session.cumulative_tokens,
+                "tokens": session.cumulative_tokens if session else 0,
                 "context_limit": adapter.session_store.get_context_limit(adapter.agent_name),
                 "threshold": adapter.session_store.get_compaction_threshold(adapter.agent_name),
-                "message_count": session.message_count,
+                "message_count": session.message_count if session else 0,
                 "compacting": adapter.session_store.is_compacting(user_id, adapter.agent_name),
-                "metadata": session.metadata or {},
+                "metadata": (session.metadata or {}) if session else {},
                 "busy": backend is not None,
                 "pending_message": backend.pending_message if backend else None,
-                "attachments": [
-                    {"name": a.name, "content_type": a.content_type.value, "mime_type": a.mime_type}
-                    for a in adapter._get_all_attachments()
-                ],
+                "attachments": attachments,
             }
         )
 
@@ -889,12 +889,13 @@ class HTTPServer:
         return events
 
     @staticmethod
-    def _resolve_session_id(adapter, user_id: str, request: Request) -> str:
-        """Use ?session_id= when given, otherwise the user's interactive session."""
+    def _resolve_session_id(adapter, user_id: str, request: Request) -> Optional[str]:
+        """Use ?session_id= when given, otherwise the user's primary session, otherwise None."""
         session_id = request.query_params.get("session_id")
         if session_id:
             return session_id
-        return adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name).id
+        primary = adapter.session_store.find_default_session(user_id, adapter.agent_name)
+        return primary.id if primary else None
 
     async def _history(self, request: Request) -> JSONResponse:
         adapter, err = self._get_adapter(request)
@@ -907,6 +908,8 @@ class HTTPServer:
         except (ValueError, TypeError):
             limit = 100
         conversation_id = self._resolve_session_id(adapter, user_id, request)
+        if conversation_id is None:
+            return JSONResponse({"conversation_id": None, "events": []})
 
         events = self._collect_events(conversation_id, limit=limit)
 
@@ -934,6 +937,8 @@ class HTTPServer:
         agent_name = request.path_params["agent"]
 
         session_id = self._resolve_session_id(adapter, user_id, request)
+        if session_id is None:
+            return JSONResponse({"prompt_snapshot": None})
         events = adapter.session_store.read_events(session_id)
         snapshots = [e for e in events if e.get("type") == "prompt_snapshot"]
         breakdown = snapshots[-1].get("token_breakdown", {}) if snapshots else {}
@@ -974,9 +979,9 @@ class HTTPServer:
             except ValueError:
                 session = None
         if session is None:
-            session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
+            session = adapter.session_store.find_default_session(user_id, adapter.agent_name)
 
-        if session.message_count == 0:
+        if session is None or session.message_count == 0:
             return JSONResponse({"error": "no session to compact"}, status_code=404)
 
         agent_name = request.path_params["agent"]
@@ -1033,7 +1038,9 @@ class HTTPServer:
             return JSONResponse({"error": "name is required"}, status_code=400)
 
         user_id = adapter.resolve_http_user(body.get("user_id", "web-anonymous"))
-        session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
+        session = adapter.session_store.find_default_session(user_id, adapter.agent_name)
+        if session is None:
+            return JSONResponse({"error": "no default session"}, status_code=404)
         adapter.session_store.suppress_skill(session.id, skill_name)
 
         # Drop it from the currently-loaded manager too so any in-flight code path
@@ -1353,7 +1360,9 @@ class HTTPServer:
                 metadata["conv_id_override"] = target_session.id
 
         if target_session is None:
-            target_session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
+            target_session = adapter.session_store.find_default_session(user_id, adapter.agent_name)
+            if target_session is None:
+                target_session = adapter.session_store.create_default_session(user_id, adapter.agent_name)
         target_session_id = target_session.id
 
         backend_key = (agent_name, user_id, target_session_id)

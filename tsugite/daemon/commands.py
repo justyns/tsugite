@@ -106,9 +106,8 @@ async def cmd_bg(adapter: BaseAdapter, prompt: str, agent: str | None = None) ->
 )
 async def cmd_compact(adapter: BaseAdapter, user_id: str, message: str | None = None) -> str:
     """Compact the interactive session for the given user."""
-    session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
-
-    if session.message_count == 0:
+    session = adapter.session_store.find_default_session(user_id, adapter.agent_name)
+    if session is None or session.message_count == 0:
         return "No conversation to compact."
 
     if not adapter.session_store.begin_compaction(user_id, adapter.agent_name):
@@ -137,7 +136,9 @@ async def cmd_compact(adapter: BaseAdapter, user_id: str, message: str | None = 
 )
 async def cmd_status(adapter: BaseAdapter, user_id: str) -> str:
     """Show current agent status, token usage, and context window info."""
-    session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
+    session = adapter.session_store.find_default_session(user_id, adapter.agent_name)
+    if session is None:
+        return "No active session. Send a message to start one."
     context_limit = adapter.session_store.get_context_limit(adapter.agent_name)
     tokens = session.cumulative_tokens
     pct = int(tokens / context_limit * 100) if context_limit else 0
@@ -160,7 +161,9 @@ async def cmd_status(adapter: BaseAdapter, user_id: str) -> str:
 )
 async def cmd_context(adapter: BaseAdapter, user_id: str) -> str:
     """Show per-category token breakdown from the latest prompt snapshot."""
-    session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
+    session = adapter.session_store.find_default_session(user_id, adapter.agent_name)
+    if session is None:
+        return "No active session. Send a message to start one."
     events = adapter.session_store.read_events(session.id)
     snapshots = [e for e in events if e.get("type") == "prompt_snapshot" and e.get("token_breakdown")]
     if not snapshots:
