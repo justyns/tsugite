@@ -13,6 +13,8 @@ import pytest
 
 from tsugite.history.storage import SessionStorage
 
+from .helpers import open_session_by_url
+
 
 def _seed_session(e2e_adapter, e2e_tmp, label):
     """Open an empty SessionStorage for label; caller records the events."""
@@ -28,15 +30,8 @@ def _seed_session(e2e_adapter, e2e_tmp, label):
 
 
 def _open_progress_trace(page, user_id, session_id):
-    """Reload as user_id, navigate to the session, and expand the progress block."""
-    page.evaluate(f"localStorage.setItem('tsugite_user_id', {user_id!r})")
-    page.goto(page.url.split("#")[0] + f"#conversations?session={session_id}")
-    page.reload()
-    page.wait_for_function(
-        "typeof Alpine !== 'undefined' && Alpine.store('app') && !Alpine.store('app').authRequired",
-        timeout=5000,
-    )
-    page.wait_for_function(f"Alpine.store('app').userId === {user_id!r}", timeout=3000)
+    """Reload as user_id, navigate to the session, and wait for the progress block."""
+    open_session_by_url(page, page.url.split("#")[0], user_id, session_id)
     page.wait_for_selector(".console-turn.user", timeout=5000)
     page.wait_for_selector(".console-codeblock", timeout=5000)
     # progress block is open by default (msg._codeOpen ?? true)

@@ -15,6 +15,15 @@ from tsugite.daemon.config import AgentConfig, HTTPConfig
 from tsugite.daemon.session_store import SessionStore
 from tsugite.daemon.webhook_store import WebhookStore
 
+from .helpers import (
+    ALPINE_READY,
+    open_conversations,
+    reload_conversations_view,
+    select_session_in_view,
+    wait_for_alpine_ready,
+    wait_for_session_in_list,
+)
+
 
 def _free_port():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -139,9 +148,7 @@ def _reset_daemon_state(e2e_session_store, e2e_server):
         e2e_session_store._suppressed_skills.clear()
     server._active_backends.clear()
     server._active_progress.clear()
-    # Don't touch _active_chat_tasks: a still-running coroutine from a hung
-    # prior test would error on cancel; let it complete naturally. Empty
-    # backends prevent it from doing anything observable to the next test.
+    server._active_chat_tasks.clear()
     yield
 
 
@@ -151,13 +158,7 @@ def authenticated_page(page, base_url, e2e_auth_token):
     page.goto(base_url + "/api/health")
     page.evaluate(f"localStorage.setItem('tsugite_token', '{e2e_auth_token}')")
     page.goto(base_url)
-    # Alpine loads as an ES module; the predicate must tolerate the brief window
-    # before Alpine becomes a global, otherwise the first poll throws ReferenceError
-    # and Playwright bails before the import finishes.
-    page.wait_for_function(
-        "typeof Alpine !== 'undefined' && Alpine.store('app') && !Alpine.store('app').authRequired",
-        timeout=10000,
-    )
+    wait_for_alpine_ready(page)
     return page
 
 
@@ -166,28 +167,13 @@ def chat_page(authenticated_page, e2e_session_store):
     """Authenticated page with conversations view open and a session selected."""
     page = authenticated_page
 
-    # Ensure an interactive session exists for the default user
     user_id = page.evaluate("Alpine.store('app').userId")
     session = e2e_session_store.get_or_create_interactive(user_id, "test-agent")
 
-    page.locator(".console-tabs button.console-tab", has_text="Conversations").click()
-    page.wait_for_function("Alpine.store('app').view === 'conversations'", timeout=3000)
-    # Force reload — the autouse reset clears sessions, and the seeded session
-    # was added after the page loaded.
-    page.evaluate("Alpine.$data(document.querySelector('[x-data*=conversationsView]')).reload()")
-    page.wait_for_function(
-        f"(() => {{ const v = Alpine.$data(document.querySelector('[x-data*=conversationsView]')); "
-        f"return v && v.allSessions && v.allSessions.some(s => s.id === {session.id!r}); }})()",
-        timeout=5000,
-    )
-    page.evaluate(
-        f"Alpine.$data(document.querySelector('[x-data*=conversationsView]'))"
-        f".selectSessionById({session.id!r}, {{follow: false}})"
-    )
-    page.wait_for_function(
-        f"Alpine.$data(document.querySelector('[x-data*=conversationsView]')).selectedSessionId === {session.id!r}",
-        timeout=3000,
-    )
+    open_conversations(page)
+    reload_conversations_view(page)
+    wait_for_session_in_list(page, session.id)
+    select_session_in_view(page, session.id)
     page.wait_for_selector("textarea#message-input", timeout=5000)
     return page
 

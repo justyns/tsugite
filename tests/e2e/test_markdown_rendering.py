@@ -11,6 +11,8 @@ import pytest
 
 from tsugite.history.storage import SessionStorage
 
+from .helpers import open_session_by_url
+
 
 def _seed_agent_turn(e2e_adapter, e2e_tmp, label, final_answer):
     """Seed a fresh session whose single turn has the given markdown final_answer."""
@@ -29,14 +31,7 @@ def _seed_agent_turn(e2e_adapter, e2e_tmp, label, final_answer):
 
 
 def _open_session(page, user_id, session_id):
-    page.evaluate(f"localStorage.setItem('tsugite_user_id', {user_id!r})")
-    page.goto(page.url.split("#")[0] + f"#conversations?session={session_id}")
-    page.reload()
-    page.wait_for_function(
-        "typeof Alpine !== 'undefined' && Alpine.store('app') && !Alpine.store('app').authRequired",
-        timeout=5000,
-    )
-    page.wait_for_function(f"Alpine.store('app').userId === {user_id!r}", timeout=3000)
+    open_session_by_url(page, page.url.split("#")[0], user_id, session_id)
     page.wait_for_selector(".console-turn.agent", timeout=5000)
 
 
