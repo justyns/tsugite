@@ -3,6 +3,8 @@
 from tsugite.daemon.session_store import Session, SessionSource
 from tsugite.history.storage import generate_session_id
 
+from .helpers import CONV_VIEW
+
 
 def _new_session(e2e_session_store, user_id):
     """Create a fresh interactive session."""
@@ -34,10 +36,11 @@ def test_draft_survives_page_reload(authenticated_page, base_url, e2e_session_st
     page.wait_for_selector("#message-input", timeout=10000)
 
     page.locator("#message-input").fill("unsent draft message")
-    page.wait_for_timeout(400)
-
-    # Verify it was saved
     draft_key = f"tsugite_draft_{session.id}"
+    page.wait_for_function(
+        f"localStorage.getItem('{draft_key}') === 'unsent draft message'",
+        timeout=2000,
+    )
     draft = page.evaluate(f"localStorage.getItem('{draft_key}')")
     assert draft == "unsent draft message"
 
@@ -90,35 +93,54 @@ def test_drafts_isolated_between_sessions(authenticated_page, e2e_session_store)
     page = authenticated_page
     user_id = page.evaluate("Alpine.store('app').userId")
 
-    _new_session(e2e_session_store, user_id)
-    _new_session(e2e_session_store, user_id)
+    s1 = _new_session(e2e_session_store, user_id)
+    s2 = _new_session(e2e_session_store, user_id)
 
-    # Reload to pick up sessions
     page.reload()
-    page.wait_for_function("!Alpine.store('app').authRequired", timeout=5000)
+    page.wait_for_function(
+        "typeof Alpine !== 'undefined' && Alpine.store('app') && !Alpine.store('app').authRequired",
+        timeout=5000,
+    )
     _go_to_conversations(page)
 
     items = page.locator(".console-session")
     assert items.count() >= 2
 
-    # Type draft in first session
-    items.first.click()
-    page.wait_for_selector("#message-input", timeout=5000)
+    def _select(sid):
+        page.evaluate(
+            f"Alpine.$data(document.querySelector({CONV_VIEW!r}))"
+            f".selectSessionById({sid!r}, {{follow: false}})"
+        )
+        page.wait_for_function(
+            f"Alpine.$data(document.querySelector({CONV_VIEW!r})).selectedSessionId === {sid!r}",
+            timeout=3000,
+        )
+        page.wait_for_selector("#message-input", timeout=5000)
+
+    _select(s1.id)
     page.locator("#message-input").fill("draft for session 1")
-    page.wait_for_timeout(400)
+    page.wait_for_function(
+        f"localStorage.getItem('tsugite_draft_{s1.id}') === 'draft for session 1'",
+        timeout=2000,
+    )
 
-    # Switch to second session and type different draft
-    items.nth(1).click()
-    page.wait_for_timeout(500)
+    _select(s2.id)
     page.locator("#message-input").fill("draft for session 2")
-    page.wait_for_timeout(400)
+    page.wait_for_function(
+        f"localStorage.getItem('tsugite_draft_{s2.id}') === 'draft for session 2'",
+        timeout=2000,
+    )
 
-    # Switch back to first - should restore its draft
-    items.first.click()
-    page.wait_for_timeout(500)
+    _select(s1.id)
+    page.wait_for_function(
+        f"document.getElementById('message-input').value === 'draft for session 1'",
+        timeout=2000,
+    )
     assert page.locator("#message-input").input_value() == "draft for session 1"
 
-    # Switch to second again - should restore its draft
-    items.nth(1).click()
-    page.wait_for_timeout(500)
+    _select(s2.id)
+    page.wait_for_function(
+        f"document.getElementById('message-input').value === 'draft for session 2'",
+        timeout=2000,
+    )
     assert page.locator("#message-input").input_value() == "draft for session 2"
