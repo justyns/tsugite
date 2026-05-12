@@ -123,21 +123,25 @@ def base_url(e2e_server):
 
 
 @pytest.fixture(autouse=True)
-def _reset_daemon_state(e2e_session_store, e2e_adapter):
-    """Drop every session and any live adapter state between tests.
+def _reset_daemon_state(e2e_session_store, e2e_server):
+    """Drop every session and any live server state between tests.
 
     The daemon (uvicorn) and its session store are `scope="session"` because
     standing up a fresh server per test would be too slow. Clearing the
     in-memory dicts at fixture setup is cheap and gives each test a clean
     sidebar plus a clean live-progress map.
     """
+    _url, server = e2e_server
     with e2e_session_store._lock:
         e2e_session_store._sessions.clear()
         e2e_session_store._thread_index.clear()
         e2e_session_store._channel_index.clear()
         e2e_session_store._suppressed_skills.clear()
-    if hasattr(e2e_adapter, "_active_progress"):
-        e2e_adapter._active_progress.clear()
+    server._active_backends.clear()
+    server._active_progress.clear()
+    # Don't touch _active_chat_tasks: a still-running coroutine from a hung
+    # prior test would error on cancel; let it complete naturally. Empty
+    # backends prevent it from doing anything observable to the next test.
     yield
 
 
