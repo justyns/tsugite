@@ -14,9 +14,9 @@ def _new_session(e2e_session_store, user_id):
 
 def _go_to_conversations(page):
     """Navigate to conversations and wait for session list to load."""
-    page.locator("nav button", has_text="Conversations").click()
+    page.locator(".console-tabs button.console-tab", has_text="Conversations").click()
     page.wait_for_function("Alpine.store('app').view === 'conversations'", timeout=3000)
-    page.wait_for_timeout(1500)
+    page.wait_for_selector(".console-session", timeout=5000)
 
 
 def test_draft_survives_page_reload(authenticated_page, base_url, e2e_session_store):
@@ -60,15 +60,24 @@ def test_draft_cleared_after_send(authenticated_page, base_url, e2e_session_stor
     user_id = page.evaluate("Alpine.store('app').userId")
     session = _new_session(e2e_session_store, user_id)
 
-    page.goto(f"{base_url}#conversations?session={session.id}")
-    page.wait_for_function("!Alpine.store('app').authRequired", timeout=5000)
+    page.goto(base_url)
+    page.wait_for_function(
+        "typeof Alpine !== 'undefined' && Alpine.store('app') && !Alpine.store('app').authRequired",
+        timeout=5000,
+    )
+    page.wait_for_function("Alpine.store('app').selectedAgent", timeout=5000)
+    # Set hash after Alpine is ready so viewSessionId triggers properly.
+    page.evaluate(f"location.hash = 'conversations?session={session.id}'")
     page.wait_for_selector("#message-input", timeout=10000)
 
     page.locator("#message-input").fill("message to send")
-    page.wait_for_timeout(400)
+    page.wait_for_function(
+        f"localStorage.getItem('tsugite_draft_{session.id}') === 'message to send'",
+        timeout=2000,
+    )
 
     page.locator("#message-input").press("Enter")
-    page.wait_for_selector(".msg.agent", timeout=15000)
+    page.wait_for_selector(".console-turn.agent", timeout=15000)
 
     draft = page.evaluate(
         "localStorage.getItem(Object.keys(localStorage).find(k => k.startsWith('tsugite_draft_')) || 'missing')"
@@ -89,7 +98,7 @@ def test_drafts_isolated_between_sessions(authenticated_page, e2e_session_store)
     page.wait_for_function("!Alpine.store('app').authRequired", timeout=5000)
     _go_to_conversations(page)
 
-    items = page.locator(".turn-item[role='button']")
+    items = page.locator(".console-session")
     assert items.count() >= 2
 
     # Type draft in first session

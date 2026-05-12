@@ -9,8 +9,11 @@ def test_valid_token_unlocks_app(page, base_url, e2e_auth_token):
     page.locator(".auth-gate input[type='password']").fill(e2e_auth_token)
     page.locator(".auth-btn").click()
 
-    # After successful auth, page reloads and auth gate should be gone
-    page.wait_for_function("!Alpine.store('app').authRequired", timeout=10000)
+    # After successful auth, page reloads; tolerate the brief window before Alpine is global.
+    page.wait_for_function(
+        "typeof Alpine !== 'undefined' && Alpine.store('app') && !Alpine.store('app').authRequired",
+        timeout=10000,
+    )
     assert not page.locator(".auth-gate.open").is_visible()
 
 

@@ -5,7 +5,7 @@ import pytest
 
 def test_app_loads(authenticated_page):
     page = authenticated_page
-    assert "Tsugite" in page.title() or page.locator("nav h1").text_content() == "Tsugite"
+    assert "Tsugite" in page.title() or page.locator(".console-tab-brand").is_visible()
 
 
 def test_auth_gate_shown_without_token(page, base_url):
@@ -28,8 +28,11 @@ def test_tab_loads_without_errors(authenticated_page, tab):
     errors = []
     page.on("pageerror", lambda exc: errors.append(str(exc)))
 
-    page.locator("nav button", has_text=tab.capitalize()).click()
+    page.locator(".console-tabs button.console-tab", has_text=tab).click()
     page.wait_for_function(f"Alpine.store('app').view === '{tab}'", timeout=3000)
-    page.wait_for_timeout(500)  # let any async init settle
+    page.wait_for_function(
+        f"Alpine.store('app').view === '{tab}' && !document.querySelector('[x-cloak]')",
+        timeout=3000,
+    )
 
     assert not errors, f"JS errors on {tab} tab: {errors}"

@@ -2,19 +2,14 @@
 
 
 def test_metadata_update_via_sse(chat_page):
-    """Simulating a metadata SSE event updates the session in-place."""
+    """Simulating a metadata SSE event leaves the thread header in a visible state."""
     page = chat_page
 
-    page.wait_for_selector(".context-bar", timeout=5000)
+    page.wait_for_selector("[x-data*=conversationsView] .title-row", timeout=5000)
 
-    page.evaluate("""
-        (() => {
-            const items = document.querySelectorAll('.turn-item.active');
-            if (items.length) return items[0].getAttribute('x-data') || 'unknown';
-            return 'test-session';
-        })()
-    """)
-
+    # Fire the SSE event; we don't assert on lastEvent (the conversationsView
+    # may clear it as it consumes). The contract under test is "page stays
+    # healthy after the event fires" — verify the title row is still rendered.
     page.evaluate("""
         Alpine.store('app').lastEvent = {
             type: 'session_update',
@@ -26,6 +21,6 @@ def test_metadata_update_via_sse(chat_page):
             _ts: Date.now()
         };
     """)
-    page.wait_for_timeout(500)
-
-    assert page.locator(".context-bar").is_visible()
+    # Briefly wait for any reactive handlers to settle.
+    page.wait_for_function("Alpine.store('app').view === 'conversations'", timeout=2000)
+    assert page.locator("[x-data*=conversationsView] .title-row").is_visible()

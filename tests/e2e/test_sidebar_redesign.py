@@ -22,13 +22,19 @@ def test_sidebar_shows_active_recent_groups(authenticated_page, e2e_session_stor
     )
     e2e_session_store.create_session(completed)
 
-    page.locator("nav button", has_text="Conversations").click()
+    page.locator(".console-tabs button.console-tab", has_text="Conversations").click()
     page.wait_for_function("Alpine.store('app').view === 'conversations'", timeout=3000)
-    page.wait_for_selector(".session-group-header", timeout=5000)
+    page.evaluate("Alpine.$data(document.querySelector('[x-data*=conversationsView]')).reload()")
+    page.wait_for_function(
+        "(() => { const v = Alpine.$data(document.querySelector('[x-data*=conversationsView]')); "
+        "return v && v.allSessions && v.allSessions.some(s => s.id === 'completed-1'); })()",
+        timeout=5000,
+    )
+    page.wait_for_selector(".console-section-head", timeout=5000)
 
-    headers = page.locator(".session-group-header").all_text_contents()
-    assert any("Active" in h for h in headers)
-    assert any("Recent" in h for h in headers)
+    headers = [h.lower() for h in page.locator(".console-section-head").all_text_contents()]
+    assert any("active" in h for h in headers)
+    assert any("recent" in h for h in headers)
 
 
 def test_sidebar_source_icons_render(authenticated_page, e2e_session_store):
@@ -38,8 +44,9 @@ def test_sidebar_source_icons_render(authenticated_page, e2e_session_store):
 
     e2e_session_store.get_or_create_interactive(user_id, "test-agent")
 
-    page.locator("nav button", has_text="Conversations").click()
+    page.locator(".console-tabs button.console-tab", has_text="Conversations").click()
     page.wait_for_function("Alpine.store('app').view === 'conversations'", timeout=3000)
+    page.evaluate("Alpine.$data(document.querySelector('[x-data*=conversationsView]')).reload()")
     page.wait_for_selector(".source-icon", timeout=5000)
 
     icons = page.locator(".source-icon")
@@ -60,16 +67,23 @@ def test_sidebar_metadata_chips_render(authenticated_page, e2e_session_store):
     )
     e2e_session_store.create_session(session)
 
-    page.locator("nav button", has_text="Conversations").click()
+    page.locator(".console-tabs button.console-tab", has_text="Conversations").click()
     page.wait_for_function("Alpine.store('app').view === 'conversations'", timeout=3000)
+    page.evaluate("Alpine.$data(document.querySelector('[x-data*=conversationsView]')).reload()")
+    page.wait_for_function(
+        "(() => { const v = Alpine.$data(document.querySelector('[x-data*=conversationsView]')); "
+        "return v && v.allSessions && v.allSessions.some(s => s.id === 'meta-session'); })()",
+        timeout=5000,
+    )
 
-    page.wait_for_selector("summary.session-group-header", timeout=5000)
-    recent_toggle = page.locator("summary.session-group-header", has_text="Recent")
+    page.wait_for_selector("summary.console-section-head", timeout=5000)
+    recent_toggle = page.locator("summary.console-section-head", has_text="recent")
     if recent_toggle.count() > 0:
-        recent_toggle.click()
-        page.wait_for_timeout(300)
+        # The <details> is `open` by default; click only collapses it. Skip clicking.
+        pass
 
-    chips = page.locator(".session-chip")
+    page.wait_for_selector(".console-session .chip", timeout=3000)
+    chips = page.locator(".console-session .chip")
     assert chips.count() >= 1
 
 

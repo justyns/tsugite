@@ -5,26 +5,31 @@ def test_send_message_shows_response(chat_page, mock_chat):
     mock_chat("I can help with that!")
 
     page = chat_page
-    textarea = page.locator("textarea").first
+    textarea = page.locator("textarea#message-input")
     textarea.fill("Hello agent")
     textarea.press("Enter")
 
-    page.wait_for_selector(".msg.user", timeout=5000)
-    page.wait_for_selector(".msg.agent", timeout=15000)
-    assert "I can help with that!" in page.locator(".msg.agent").last.text_content()
+    page.wait_for_selector(".console-turn.user", timeout=5000)
+    page.wait_for_selector(".console-turn.agent", timeout=15000)
+    assert "I can help with that!" in page.locator(".console-turn.agent").last.text_content()
 
 
 def test_reaction_emoji_appears(chat_page, mock_chat):
     mock_chat("Done!", events=[("reaction", {"emoji": "👍"})])
 
     page = chat_page
-    textarea = page.locator("textarea").first
+    textarea = page.locator("textarea#message-input")
     textarea.fill("React to this")
     textarea.press("Enter")
 
-    page.wait_for_selector(".msg.agent", timeout=15000)
-    page.wait_for_selector(".reaction-badge", timeout=3000)
-    assert page.locator(".reaction-badge").first.text_content().strip() == "👍"
+    page.wait_for_selector(".console-turn.agent", timeout=15000)
+    # Reactions attach to the user_input bubble as inline emoji spans.
+    user_bubble = page.locator(".console-turn.user .console-turn-bubble").first
+    page.wait_for_function(
+        "document.querySelector('.console-turn.user .console-turn-bubble')?.textContent?.includes('👍')",
+        timeout=3000,
+    )
+    assert "👍" in user_bubble.text_content()
 
 
 def test_tool_call_progress_display(chat_page, mock_chat):
@@ -37,19 +42,18 @@ def test_tool_call_progress_display(chat_page, mock_chat):
     )
 
     page = chat_page
-    textarea = page.locator("textarea").first
+    textarea = page.locator("textarea#message-input")
     textarea.fill("List the files")
     textarea.press("Enter")
 
-    page.wait_for_selector(".msg.agent", timeout=15000)
-    # Progress section should exist with the tool step
-    progress = page.locator(".step-row, details")
-    assert progress.count() > 0
-    assert "list_files" in page.locator(".step-row, details").first.text_content()
+    page.wait_for_selector(".console-turn.agent", timeout=15000)
+    steps = page.locator(".console-codeblock .tool-step")
+    assert steps.count() > 0
+    assert "list_files" in steps.first.text_content()
 
 
 def test_error_displayed_on_failure(chat_page, e2e_adapter):
-    """When the agent raises, the error message should appear in chat."""
+    """When the agent raises, the error message should appear in the progress block."""
     from unittest.mock import AsyncMock
 
     async def failing_handle(user_id, message, channel_context, custom_logger=None):
@@ -58,12 +62,11 @@ def test_error_displayed_on_failure(chat_page, e2e_adapter):
     e2e_adapter.handle_message = AsyncMock(side_effect=failing_handle)
 
     page = chat_page
-    textarea = page.locator("textarea").first
+    textarea = page.locator("textarea#message-input")
     textarea.fill("Do something")
     textarea.press("Enter")
 
-    # Error appears inside collapsed progress details — open it, then check
-    page.wait_for_selector(".msg.progress", timeout=10000)
-    page.locator(".msg.progress details summary").first.click()
-    page.wait_for_selector(".err", timeout=3000)
-    assert "out of memory" in page.locator(".err").first.text_content()
+    # Error event becomes a tool-step with an .err span inside the progress block.
+    page.wait_for_selector(".console-codeblock .tool-row .err", timeout=10000)
+    err_text = page.locator(".console-codeblock .tool-row").first.text_content()
+    assert "out of memory" in err_text

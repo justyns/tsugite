@@ -66,6 +66,19 @@ def e2e_adapter(e2e_workspace, e2e_session_store):
             agent_config=agent_config,
             session_store=e2e_session_store,
         )
+
+    # Tripwire: every e2e test that triggers chat must use mock_chat() first.
+    # No real provider calls are allowed from this suite. Replace the default
+    # handle_message with a raiser; mock_chat() swaps it for a configured fake.
+    async def _require_mock_chat(*args, **kwargs):
+        raise AssertionError(
+            "e2e tests must call mock_chat(...) before sending a message. "
+            "Real handle_message was invoked without the fixture; this would "
+            "hit a real LLM provider."
+        )
+
+    adapter._original_handle_message = _require_mock_chat
+    adapter.handle_message = _require_mock_chat
     return adapter
 
 
@@ -109,6 +122,25 @@ def base_url(e2e_server):
     return url
 
 
+@pytest.fixture(autouse=True)
+def _reset_daemon_state(e2e_session_store, e2e_adapter):
+    """Drop every session and any live adapter state between tests.
+
+    The daemon (uvicorn) and its session store are `scope="session"` because
+    standing up a fresh server per test would be too slow. Clearing the
+    in-memory dicts at fixture setup is cheap and gives each test a clean
+    sidebar plus a clean live-progress map.
+    """
+    with e2e_session_store._lock:
+        e2e_session_store._sessions.clear()
+        e2e_session_store._thread_index.clear()
+        e2e_session_store._channel_index.clear()
+        e2e_session_store._suppressed_skills.clear()
+    if hasattr(e2e_adapter, "_active_progress"):
+        e2e_adapter._active_progress.clear()
+    yield
+
+
 @pytest.fixture
 def authenticated_page(page, base_url, e2e_auth_token):
     """Page with auth token pre-injected into localStorage."""
@@ -132,11 +164,27 @@ def chat_page(authenticated_page, e2e_session_store):
 
     # Ensure an interactive session exists for the default user
     user_id = page.evaluate("Alpine.store('app').userId")
-    e2e_session_store.get_or_create_interactive(user_id, "test-agent")
+    session = e2e_session_store.get_or_create_interactive(user_id, "test-agent")
 
-    page.locator("nav button", has_text="Conversations").click()
+    page.locator(".console-tabs button.console-tab", has_text="Conversations").click()
     page.wait_for_function("Alpine.store('app').view === 'conversations'", timeout=3000)
-    page.wait_for_selector("textarea", timeout=5000)
+    # Force reload — the autouse reset clears sessions, and the seeded session
+    # was added after the page loaded.
+    page.evaluate("Alpine.$data(document.querySelector('[x-data*=conversationsView]')).reload()")
+    page.wait_for_function(
+        f"(() => {{ const v = Alpine.$data(document.querySelector('[x-data*=conversationsView]')); "
+        f"return v && v.allSessions && v.allSessions.some(s => s.id === {session.id!r}); }})()",
+        timeout=5000,
+    )
+    page.evaluate(
+        f"Alpine.$data(document.querySelector('[x-data*=conversationsView]'))"
+        f".selectSessionById({session.id!r}, {{follow: false}})"
+    )
+    page.wait_for_function(
+        f"Alpine.$data(document.querySelector('[x-data*=conversationsView]')).selectedSessionId === {session.id!r}",
+        timeout=3000,
+    )
+    page.wait_for_selector("textarea#message-input", timeout=5000)
     return page
 
 
