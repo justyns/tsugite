@@ -1839,6 +1839,15 @@ wheels = [
 ]
 
 [[package]]
+name = "python-multipart"
+version = "0.0.27"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/69/9b/f23807317a113dc36e74e75eb265a02dd1a4d9082abc3c1064acd22997c4/python_multipart-0.0.27.tar.gz", hash = "sha256:9870a6a8c5a20a5bf4f07c017bd1489006ff8836cff097b6933355ee2b49b602", size = 44043, upload-time = "2026-04-27T10:51:26.649Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/99/78/4126abcbdbd3c559d43e0db7f7b9173fc6befe45d39a2856cc0b8ec2a5a6/python_multipart-0.0.27-py3-none-any.whl", hash = "sha256:6fccfad17a27334bd0193681b369f476eda3409f17381a2d65aa7df3f7275645", size = 29254, upload-time = "2026-04-27T10:51:24.997Z" },
+]
+
+[[package]]
 name = "python-slugify"
 version = "8.0.4"
 source = { registry = "https://pypi.org/simple" }
@@ -2350,6 +2359,7 @@ daemon = [
     { name = "cronsim" },
     { name = "discord-py" },
     { name = "py-vapid" },
+    { name = "python-multipart" },
     { name = "pywebpush" },
     { name = "starlette" },
     { name = "uvicorn" },
@@ -2385,6 +2395,7 @@ requires-dist = [
     { name = "prompt-toolkit", specifier = ">=3.0.43" },
     { name = "py-vapid", marker = "extra == 'daemon'", specifier = ">=1.9.0" },
     { name = "pydantic", specifier = ">=2.12.3" },
+    { name = "python-multipart", marker = "extra == 'daemon'", specifier = ">=0.0.9" },
     { name = "pywebpush", marker = "extra == 'daemon'", specifier = ">=2.0.0" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "questionary", specifier = ">=2.1.1" },

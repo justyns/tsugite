@@ -34,6 +34,7 @@ daemon = [
   "cronsim>=2.6",
   "starlette>=0.36",
   "uvicorn>=0.25",
+  "python-multipart>=0.0.9",
   "pywebpush>=2.0.0",
   "py-vapid>=1.9.0",
 ]
