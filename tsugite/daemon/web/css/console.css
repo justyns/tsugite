@@ -288,7 +288,7 @@ body.is-resizing-sidebar { cursor: col-resize; user-select: none; }
   color: var(--text); font: inherit; font-family: var(--font-mono); font-size: 12px;
 }
 .console-session .time {
-  color: var(--overlay0); font-size: 10.5px; flex-shrink: 0;
+  color: var(--subtext1); font-size: 10.5px; flex-shrink: 0;
   font-variant-numeric: tabular-nums;
 }
 .console-session .row1 .icon-btn {
@@ -325,7 +325,7 @@ body.is-resizing-sidebar { cursor: col-resize; user-select: none; }
   font-family: var(--font-mono);
 }
 .console-session .row2.dim { color: var(--overlay0); }
-.console-session .row2 .agent { color: var(--blue); }
+.console-session .row2 .agent { color: var(--lavender); }
 .console-session .row2 .sep { color: var(--surface2); }
 .console-session .row2 .preview {
   flex: 1;
@@ -738,8 +738,8 @@ body.is-resizing-sidebar { cursor: col-resize; user-select: none; }
   color: var(--subtext1);
 }
 .console-turn-gutter .role.error {
-  background: color-mix(in oklab, var(--red) 22%, transparent);
-  color: var(--red);
+  background: var(--red);
+  color: var(--crust);
 }
 .console-turn-gutter .role.info {
   background: color-mix(in oklab, var(--sky) 22%, transparent);

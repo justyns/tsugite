@@ -97,7 +97,7 @@
                      @dragleave="onPinDragLeave(s)"
                      @drop.prevent="onPinDrop(s)"
                      @dragend="onPinDragEnd()"
-                     @click="selectSession(s)" tabindex="0" role="button" @keydown.enter="selectSession(s)">
+                     @click="selectSession(s)">
                   <div class="row1">
                     <span class="drag-handle" title="Drag to reorder">≡</span>
                     <span class="dot" :class="dotClassNames(s)"></span>
@@ -108,7 +108,9 @@
                              @click.stop>
                     </template>
                     <template x-if="editingSessionId !== s.id">
-                      <span class="title" :class="{ unread: s.unread }" x-text="sessionLabel(s)"></span>
+                      <span class="title" :class="{ unread: s.unread }" x-text="sessionLabel(s)"
+                            tabindex="0" role="button" :aria-label="'Open session ' + sessionLabel(s)"
+                            @keydown.enter.stop="selectSession(s)" @keydown.space.prevent.stop="selectSession(s)"></span>
                     </template>
                     <button class="icon-btn" @click.stop="startEditTitle(s, $event)" title="Rename">✎</button>
                     <button class="icon-btn pin-on" @click.stop="togglePin(s)" title="Unpin">★</button>
@@ -165,7 +167,7 @@
               <template x-for="s in groupedSessions.active" :key="s.conversation_id || s.id">
                 <div class="console-session"
                      :class="{ focused: selectedSessionId === (s.conversation_id || s.id), live: isLive(s) }"
-                     @click="selectSession(s)" tabindex="0" role="button" @keydown.enter="selectSession(s)">
+                     @click="selectSession(s)">
                   <div class="row1">
                     <span class="dot" :class="dotClassNames(s)"></span>
                     <span class="source-icon" x-text="sourceIcon(s.source)" :title="s.source"></span>
@@ -175,7 +177,9 @@
                              @click.stop>
                     </template>
                     <template x-if="editingSessionId !== s.id">
-                      <span class="title" :class="{ unread: s.unread }" x-text="sessionLabel(s)"></span>
+                      <span class="title" :class="{ unread: s.unread }" x-text="sessionLabel(s)"
+                            tabindex="0" role="button" :aria-label="'Open session ' + sessionLabel(s)"
+                            @keydown.enter.stop="selectSession(s)" @keydown.space.prevent.stop="selectSession(s)"></span>
                     </template>
                     <button class="icon-btn" @click.stop="startEditTitle(s, $event)" title="Rename">✎</button>
                     <button class="icon-btn" @click.stop="togglePin(s)" title="Pin">☆</button>
@@ -235,7 +239,7 @@
                   <template x-for="s in bucket.items" :key="s.conversation_id || s.id">
                     <div class="console-session"
                          :class="{ focused: selectedSessionId === (s.conversation_id || s.id) }"
-                         @click="selectSession(s)" tabindex="0" role="button" @keydown.enter="selectSession(s)">
+                         @click="selectSession(s)">
                       <div class="row1">
                         <span class="dot" :class="dotClassNames(s)"></span>
                         <span class="source-icon" x-text="sourceIcon(s.source)" :title="s.source"></span>
@@ -245,7 +249,9 @@
                                  @click.stop>
                         </template>
                         <template x-if="editingSessionId !== s.id">
-                          <span class="title" :class="{ unread: s.unread }" x-text="sessionLabel(s)"></span>
+                          <span class="title" :class="{ unread: s.unread }" x-text="sessionLabel(s)"
+                                tabindex="0" role="button" :aria-label="'Open session ' + sessionLabel(s)"
+                                @keydown.enter.stop="selectSession(s)" @keydown.space.prevent.stop="selectSession(s)"></span>
                         </template>
                         <button class="icon-btn" @click.stop="startEditTitle(s, $event)" title="Rename">✎</button>
                         <button class="icon-btn" @click.stop="togglePin(s)" title="Pin">☆</button>
@@ -1365,7 +1371,7 @@
         </template>
 
         <template x-if="!loading && schedules.length > 0">
-          <div class="console-table-wrap">
+          <div class="console-table-wrap" tabindex="0">
             <table class="console-table">
               <thead><tr><th>id</th><th>agent / cmd</th><th>type</th><th>status</th><th>next run</th><th>last run</th><th></th></tr></thead>
               <tbody>
@@ -1489,7 +1495,7 @@
           <div class="console-empty">no webhooks configured</div>
         </template>
         <template x-if="!loading && webhooks.length > 0">
-          <div class="console-table-wrap">
+          <div class="console-table-wrap" tabindex="0">
             <table class="console-table">
               <thead><tr><th>source</th><th>agent</th><th>url</th><th>token</th><th></th></tr></thead>
               <tbody>
@@ -1523,13 +1529,13 @@
           <div class="row top">
             <span class="path"><span class="seg cur">usage</span></span>
             <span class="grow"></span>
-            <select x-model="sinceDays" @change="load()" class="v-select" style="color:var(--lavender)">
+            <select x-model="sinceDays" @change="load()" class="v-select" style="color:var(--lavender)" aria-label="Time range">
               <option value="7">7 days</option>
               <option value="30">30 days</option>
               <option value="90">90 days</option>
               <option value="365">1 year</option>
             </select>
-            <select x-model="period" @change="load()" class="v-select" style="color:var(--blue)">
+            <select x-model="period" @change="load()" class="v-select" style="color:var(--blue)" aria-label="Bucket size">
               <option value="day">daily</option>
               <option value="week">weekly</option>
               <option value="month">monthly</option>
@@ -1550,7 +1556,7 @@
           </div>
         </div>
 
-        <div class="console-table-wrap">
+        <div class="console-table-wrap" tabindex="0">
           <template x-if="loading">
             <div class="console-empty"><span class="spinner"></span> loading usage…</div>
           </template>

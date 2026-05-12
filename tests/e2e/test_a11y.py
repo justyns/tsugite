@@ -2,16 +2,10 @@
 
 Loads axe-core in the page via CDN (same pattern as Alpine — these tests
 already require internet) and asserts that the major Console views have no
-NEW serious or critical violations beyond a known baseline. The baseline
-documents pre-existing issues so this test acts as a ratchet: any new rule
-hit fails the build immediately, but day-one shipping issues don't.
-
-Documented baseline (fix these and tighten the allowlist as they get
-addressed):
-- color-contrast (all views): theme colors below 4.5:1 in some places
-- nested-interactive (conversations): a button nests another interactive element
-- scrollable-region-focusable (usage view): one keyboard-inaccessible region
-- select-name (usage view): two unlabelled <select> elements
+serious or critical violations. Add a rule id to `BASELINE[view]` when
+intentionally introducing a known issue; remove the entry when you fix it.
+The empty baseline is intentional: we got here by clearing real violations,
+not by allowlisting them.
 """
 
 import json
@@ -27,14 +21,14 @@ from .helpers import CONV_VIEW, open_conversations, reload_conversations_view
 AXE_CDN = "https://cdnjs.cloudflare.com/ajax/libs/axe-core/4.10.2/axe.min.js"
 BLOCKING = {"serious", "critical"}
 
-# Per-view allowlist of rule IDs that currently fail but predate this test.
-# Remove entries as they get fixed in the templates.
-BASELINE = {
-    "conversations": {"color-contrast", "nested-interactive"},
-    "workspace": {"color-contrast"},
-    "schedules": {"color-contrast"},
-    "webhooks": {"color-contrast"},
-    "usage": {"color-contrast", "scrollable-region-focusable", "select-name"},
+# Per-view allowlist of rule IDs that are intentionally not fixed.
+# Empty = the suite expects zero serious/critical violations.
+BASELINE: dict[str, set[str]] = {
+    "conversations": set(),
+    "workspace": set(),
+    "schedules": set(),
+    "webhooks": set(),
+    "usage": set(),
 }
 
 
