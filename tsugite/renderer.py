@@ -9,6 +9,13 @@ from typing import Any, Dict, Optional
 from jinja2 import DictLoader, Environment, StrictUndefined
 
 
+class _CallableEnv(dict):
+    """dict of env vars that also supports env('KEY', 'default') call syntax."""
+
+    def __call__(self, key: str, default: str = "") -> str:
+        return self.get(key, default)
+
+
 @lru_cache(maxsize=1)
 def local_tz():
     """Return the system local tzinfo, falling back to UTC if tzlocal can't resolve it.
@@ -278,7 +285,7 @@ class AgentRenderer:
                 "is_file": is_file,
                 "is_dir": is_dir,
                 "read_text": read_text,
-                "env": dict(os.environ),
+                "env": _CallableEnv(os.environ),
                 "cwd": cwd,
                 "tmux_sessions": _tmux_sessions,
             }

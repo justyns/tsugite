@@ -76,10 +76,11 @@ Injected via `AgentRenderer.env.globals`:
   ```
 
 ### Environment Access
-- `env` → Dictionary of environment variables (`os.environ`)
+- `env` → Dictionary of environment variables (`os.environ`). Also callable as `env(key, default)`.
   ```jinja2
   Debug mode: {{ env.get("DEBUG", "false") }}
   API endpoint: {{ env["API_URL"] }}
+  With default: {{ env("DEBUG", "false") }}
   ```
 
 ## Control Patterns

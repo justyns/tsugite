@@ -1,7 +1,6 @@
 """Skill loading tools for Tsugite agents."""
 
 import logging
-import os
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -173,7 +172,6 @@ class SkillManager:
                 "user_prompt": "",
                 "today": renderer.today,
                 "now": renderer.now,
-                "env": os.environ,
             }
             rendered_body = agent_renderer.render(content, context)
             resources = _enumerate_bundled_resources(skill.directory)

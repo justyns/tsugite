@@ -1,5 +1,6 @@
 """Tests for the Jinja2 template renderer."""
 
+import os
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
@@ -242,6 +243,24 @@ Custom: {{ env.get('CUSTOM_VAR', 'not_set') }}
     assert "Home:" in result  # Just check that HOME is rendered
     assert "Path exists: True" in result
     assert "Custom: not_set" in result
+
+
+def test_renderer_environment_call_syntax():
+    """env supports call-style access: env('KEY', 'default')."""
+    content = """
+Set: {{ env("MY_VAR", "fallback") }}
+Unset with default: {{ env("DEFINITELY_NOT_SET", "fallback") }}
+Unset no default: '{{ env("DEFINITELY_NOT_SET") }}'
+""".strip()
+
+    with patch.dict("os.environ", {"MY_VAR": "hello"}, clear=False):
+        os.environ.pop("DEFINITELY_NOT_SET", None)
+        renderer = AgentRenderer()
+        result = renderer.render(content)
+
+    assert "Set: hello" in result
+    assert "Unset with default: fallback" in result
+    assert "Unset no default: ''" in result
 
 
 def test_humanize_relative_buckets():
