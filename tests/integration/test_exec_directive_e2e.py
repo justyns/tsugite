@@ -27,7 +27,7 @@ out
 
 The dispatch step found these targets: {{ targets }}.
 
-Echo the source field of each target back via final_answer as a comma-separated list.
+Echo the source field of each target back via return_value as a comma-separated list.
 """
     agent = agent_file(name="dispatcher", body=body)
     result = run_integration_agent(agent_path=agent, prompt="enumerate the inbox")
