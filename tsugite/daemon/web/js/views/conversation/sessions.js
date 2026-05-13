@@ -1,4 +1,5 @@
 import { get, post, patch, del } from '../../api.js';
+import { formatDate } from '../../utils.js';
 import { REPLAY_SKIP_EVENTS, progressFromPayload } from './event_types.js';
 
 export const sessionsMixin = {
@@ -257,16 +258,35 @@ export const sessionsMixin = {
   sessionLabel(s) {
     if (!s) return 'unknown';
     if (s.title) return s.title;
-    if (this._isMyInteractive(s)) {
-      return s.label || s.agent || 'Interactive';
-    }
     if (s.id && s.id.startsWith('sched_')) {
       const parts = s.id.replace(/^sched_/, '').split('_');
       const dateIdx = parts.findIndex(p => /^\d{8}$/.test(p));
       const name = dateIdx > 0 ? parts.slice(0, dateIdx).join('-') : parts[0];
       return name || s.id;
     }
-    return s.label || s.conversation_id || s.id || 'unknown';
+    // Fallback priority is date > prompt > short id > username/label so a sidebar
+    // full of untitled sessions stays distinguishable instead of repeating the
+    // same username or "Web: web-…" prefix once per row.
+    const dated = this._sessionDateLabel(s);
+    if (dated) return dated;
+    const prompt = (s.prompt || '').trim();
+    if (prompt) return prompt.length > 50 ? prompt.slice(0, 50).trimEnd() + '…' : prompt;
+    if (s.id) return s.id.length > 14 ? s.id.slice(0, 12) + '…' : s.id;
+    return s.label || s.conversation_id || 'unknown';
+  },
+
+  _sessionDateLabel(s) {
+    const iso = s.created_at || s.last_active;
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    const now = new Date();
+    const sameDay = d.getFullYear() === now.getFullYear()
+      && d.getMonth() === now.getMonth()
+      && d.getDate() === now.getDate();
+    return sameDay
+      ? formatDate(iso)
+      : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
   },
 
   startEditTitle(s, event, { blank = false } = {}) {
