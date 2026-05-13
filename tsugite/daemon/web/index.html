@@ -1750,7 +1750,7 @@
       <template x-if="'serviceWorker' in navigator && 'PushManager' in window">
         <div class="row"><label>push</label>
           <button class="head-btn" :disabled="pushLoading"
-                  @click="pushLoading = true; (pushSubscribed ? window.tsugiteUnsubscribePush() : window.tsugiteSubscribePush()).then(() => { pushSubscribed = !pushSubscribed; }).catch(e => console.error('Push toggle failed:', e)).finally(() => { pushLoading = false; })"
+                  @click="pushLoading = true; window.tsugiteTogglePush(pushSubscribed).then(s => { pushSubscribed = s; }).catch(() => {}).finally(() => { pushLoading = false; })"
                   x-text="pushLoading ? 'working…' : (pushSubscribed ? 'disable notifications' : 'enable notifications')"
                   style="background:var(--surface0);border:1px solid var(--surface1);color:var(--text);padding:4px 10px;border-radius:3px;font-family:var(--font-mono);font-size:11px;cursor:pointer"></button>
         </div>

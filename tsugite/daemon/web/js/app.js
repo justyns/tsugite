@@ -6,6 +6,7 @@ import webhookView from './views/webhooks.js';
 import fileEditorView from './views/file-editor.js';
 import workspaceView from './views/workspace.js';
 import usageView from './views/usage.js';
+import { toast } from './utils.js';
 
 window.Alpine = Alpine;
 window.tsugiteApi = { get, post, patch };
@@ -250,5 +251,27 @@ window.tsugiteUnsubscribePush = async function() {
     const endpoint = sub.endpoint;
     await sub.unsubscribe();
     await post('/api/push/unsubscribe', { endpoint });
+  }
+};
+
+// Toggle a push subscription with a hard timeout so the UI can never get
+// stuck on "working…" if `serviceWorker.ready` or `pushManager.subscribe`
+// silently stalls (eg. SW failed to install, permission prompt orphaned).
+// Returns the new subscribed state (boolean). Surfaces failures via toast.
+window.tsugiteTogglePush = async function(currentlySubscribed) {
+  const op = currentlySubscribed ? window.tsugiteUnsubscribePush() : window.tsugiteSubscribePush();
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error('timed out after 10s - check browser notifications permission and service worker state')), 10000);
+  });
+  try {
+    await Promise.race([op, timeout]);
+    return !currentlySubscribed;
+  } catch (e) {
+    console.error('Push toggle failed:', e);
+    toast('Push toggle failed: ' + (e?.message || e), 'error');
+    throw e;
+  } finally {
+    clearTimeout(timer);
   }
 };
