@@ -135,7 +135,12 @@ export default () => ({
       const d = ev.data || {};
 
       if (ev.type === 'history_update' && d.agent === this.$store.app.selectedAgent) {
-        if (this.isActiveSession) this._debouncedLoadHistory();
+        // Per-chat streaming reader is authoritative mid-turn; reloading
+        // races its final_result push. Reconciliation happens via the next
+        // reload once sendingBySession clears.
+        if (this.isActiveSession && !this.sendingBySession[this.selectedSessionId]) {
+          this._debouncedLoadHistory();
+        }
       }
       if (ev.type === 'session_update') {
         if (d.action === 'titled' && d.title) {
