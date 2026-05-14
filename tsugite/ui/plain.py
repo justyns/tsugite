@@ -30,16 +30,20 @@ MAX_REASONING_DISPLAY_LENGTH = 2000  # Limit reasoning content to keep output ma
 class PlainUIHandler(CustomUIHandler):
     """Plain text UI handler without colors, panels, animations, or emojis."""
 
-    def __init__(self):
-        """Initialize plain UI handler with no-color console."""
+    def __init__(self, show_reasoning: bool = False):
+        """Initialize plain UI handler with no-color console.
+
+        Args:
+            show_reasoning: When True, render LLM reasoning/messages blocks. Matches
+                the CLI's --show-reasoning flag, off by default to keep plain output quiet.
+        """
         no_color_console = get_stderr_console(no_color=True)
 
-        # Initialize parent with panels disabled
         super().__init__(
             console=no_color_console,
             show_code=True,
             show_observations=True,
-            show_llm_messages=False,
+            show_llm_messages=show_reasoning,
             show_panels=False,
         )
 

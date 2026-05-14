@@ -11,6 +11,7 @@ class UIOptions:
 
     plain: bool = False
     headless: bool = False
+    live: bool = False
     no_color: bool = False
     final_only: bool = False
     verbose: bool = False

@@ -1,6 +1,5 @@
 """CLI run command - execute agents."""
 
-import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -97,16 +96,18 @@ def _resolve_ui_mode(ui_mode: Optional[str], ui_opts: UIOptions, console: Consol
         console.print("[red]Error: --ui cannot be used with --plain or --headless[/red]")
         raise typer.Exit(1)
 
-    ui_modes = {"plain", "headless"}
+    ui_modes = {"plain", "headless", "live"}
     ui_lower = ui_mode.lower()
     if ui_lower not in ui_modes:
-        console.print(f"[red]Error: Invalid UI mode '{ui_mode}'. Choose from: {', '.join(ui_modes)}[/red]")
+        console.print(f"[red]Error: Invalid UI mode '{ui_mode}'. Choose from: {', '.join(sorted(ui_modes))}[/red]")
         raise typer.Exit(1)
 
     if ui_lower == "plain":
         ui_opts.plain = True
     elif ui_lower == "headless":
         ui_opts.headless = True
+    elif ui_lower == "live":
+        ui_opts.live = True
 
     return ui_opts
 
@@ -169,7 +170,14 @@ def _execute_agent_with_ui(
     use_plain_output: bool,
     console: Console,
 ):
-    """Execute agent with appropriate UI mode."""
+    """Execute agent with appropriate UI mode.
+
+    Dispatch order:
+      1. --headless / --final-only -> custom_agent_ui with silent progress
+      2. --ui live (on a real TTY) -> three-region LiveUIHandler
+      3. fall-through default -> plain logger (covers no flags, --plain, piped/NO_COLOR,
+         and --ui live degraded to plain by should_use_plain_output)
+    """
     from tsugite.ui import create_plain_logger, custom_agent_ui
 
     if ui_opts.headless or ui_opts.final_only:
@@ -188,22 +196,16 @@ def _execute_agent_with_ui(
             executor_kwargs["custom_logger"] = custom_logger
             return executor(**executor_kwargs)
 
-    if use_plain_output:
-        custom_logger = create_plain_logger()
-        with custom_logger.ui_handler.progress_context():
+    if ui_opts.live and not use_plain_output:
+        from tsugite.ui import create_live_logger
+
+        custom_logger = create_live_logger(show_reasoning=ui_opts.show_reasoning)
+        with custom_logger.ui_handler.live_context():
             executor_kwargs["custom_logger"] = custom_logger
             return executor(**executor_kwargs)
 
-    default_console = Console(file=sys.stderr, force_terminal=True, no_color=ui_opts.no_color)
-    with custom_agent_ui(
-        console=default_console,
-        show_code=not ui_opts.non_interactive,
-        show_observations=not ui_opts.non_interactive,
-        show_progress=not ui_opts.no_color,
-        show_llm_messages=ui_opts.show_reasoning,
-        show_panels=False,
-        show_debug_messages=ui_opts.verbose,
-    ) as custom_logger:
+    custom_logger = create_plain_logger(show_reasoning=ui_opts.show_reasoning)
+    with custom_logger.ui_handler.progress_context():
         executor_kwargs["custom_logger"] = custom_logger
         return executor(**executor_kwargs)
 
@@ -246,7 +248,11 @@ def run(
     ),
     root: Optional[str] = typer.Option(None, "--root", help="Working directory"),
     model: Optional[str] = typer.Option(None, "--model", "-m", help="Override agent model"),
-    ui: Optional[str] = typer.Option(None, "--ui", help="UI mode: plain, headless, or live (default: minimal)"),
+    ui: Optional[str] = typer.Option(
+        None,
+        "--ui",
+        help="UI mode: plain, headless, or live. Default: plain (auto-degrades when piped or NO_COLOR is set)",
+    ),
     non_interactive: bool = typer.Option(False, "--non-interactive", help="Run without interactive prompts"),
     history_dir: Optional[str] = typer.Option(None, "--history-dir", help="Directory to store history files"),
     no_color: bool = typer.Option(False, "--no-color", help="Disable ANSI colors"),
@@ -407,8 +413,8 @@ def run(
     import os
 
     if subagent_mode:
-        if ui_opts.plain or ui_opts.headless:
-            console.print("[red]Error: --subagent-mode cannot be combined with --plain or --headless[/red]")
+        if ui_opts.plain or ui_opts.headless or ui_opts.live:
+            console.print("[red]Error: --subagent-mode cannot be combined with --plain, --headless, or --ui live[/red]")
             raise typer.Exit(1)
 
         ui_opts.non_interactive = True

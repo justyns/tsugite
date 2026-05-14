@@ -57,7 +57,7 @@ def custom_agent_ui(
         clear_ui_context()
 
 
-def create_plain_logger() -> CustomUILogger:
+def create_plain_logger(show_reasoning: bool = False) -> CustomUILogger:
     """Create a plain text logger for copy-paste friendly output.
 
     Returns a logger using PlainUIHandler with no colors, panels, or emojis.
@@ -67,8 +67,31 @@ def create_plain_logger() -> CustomUILogger:
     - Screen readers
     - Logs and automation
 
+    Args:
+        show_reasoning: When True, render LLM reasoning blocks (mirrors --show-reasoning).
+
     Returns:
         CustomUILogger with PlainUIHandler
     """
-    plain_handler = PlainUIHandler()
+    plain_handler = PlainUIHandler(show_reasoning=show_reasoning)
     return CustomUILogger(plain_handler, plain_handler.console)
+
+
+def create_live_logger(show_reasoning: bool = False) -> CustomUILogger:
+    """Create a three-region live logger: scrollback above, persistent status footer.
+
+    Wraps :class:`LiveUIHandler`, which inherits PlainUIHandler's scrollback formatting
+    and adds a 1-3 line status panel pinned at the bottom showing turn, current tool,
+    cumulative tokens/cost, and elapsed time.
+
+    Args:
+        show_reasoning: When True, render LLM reasoning blocks in the scrollback.
+
+    Returns:
+        CustomUILogger with LiveUIHandler; caller is expected to enter
+        ``custom_logger.ui_handler.live_context()``.
+    """
+    from tsugite.ui.live import LiveUIHandler
+
+    live_handler = LiveUIHandler(show_reasoning=show_reasoning)
+    return CustomUILogger(live_handler, live_handler.console)

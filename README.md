@@ -67,6 +67,18 @@ tsu run my-agent.md "do the thing"
 tsu daemon
 ```
 
+### Output modes
+
+`tsu run` keeps its terminal output plain by default so logs are copy-pasteable and behave
+in nested tmux / non-Rich-friendly shells. Pick a richer or quieter mode when you need it:
+
+| Mode | When to use |
+| --- | --- |
+| **Default (plain)** | Everyday interactive runs and piped output (`tsu run ... \| less`). |
+| `--ui live` | Long-running interactive runs where a persistent footer showing turn / current tool / tokens / cost / elapsed time is useful. Falls back to plain if stdout is not a TTY or `NO_COLOR` is set. |
+| `--headless` | CI/scripts: result on stdout, no progress chrome. Combine with `--verbose` for stderr trace. |
+| `--plain` | Force plain explicitly (same as the default; useful when overriding configs/aliases). |
+
 ## Features
 
 - **Multi-step workflows** with `<!-- tsu:step -->` to chain steps and pass data between them

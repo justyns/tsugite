@@ -12,9 +12,11 @@ Use the helper functions to create loggers:
 from tsugite.ui.base import CustomUIHandler, CustomUILogger, UIState
 from tsugite.ui.chat import ChatManager, ChatTurn
 from tsugite.ui.helpers import (
+    create_live_logger,
     create_plain_logger,
     custom_agent_ui,
 )
+from tsugite.ui.live import LiveUIHandler
 from tsugite.ui.plain import PlainUIHandler
 
 __all__ = [
@@ -24,10 +26,12 @@ __all__ = [
     # UI Handlers
     "CustomUIHandler",
     "PlainUIHandler",
+    "LiveUIHandler",
     # Chat functionality
     "ChatManager",
     "ChatTurn",
     # Helper functions
     "custom_agent_ui",
     "create_plain_logger",
+    "create_live_logger",
 ]

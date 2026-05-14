@@ -120,38 +120,33 @@ def test_run_command_json_logging(cli_runner, sample_agent_file, mock_agent_exec
 
 
 @patch("tsugite.utils.should_use_plain_output", return_value=False)
-@patch("tsugite.ui.custom_agent_ui")
-def test_show_reasoning_flag(mock_custom_ui, mock_plain_output, cli_runner, sample_agent_file, mock_agent_execution):
-    """Test --show-reasoning and --no-show-reasoning flags."""
-    mock_custom_ui.return_value.__enter__ = MagicMock(return_value=MagicMock())
-    mock_custom_ui.return_value.__exit__ = MagicMock(return_value=None)
+@patch("tsugite.ui.create_plain_logger")
+def test_show_reasoning_flag(mock_plain, mock_plain_output, cli_runner, sample_agent_file, mock_agent_execution):
+    """--show-reasoning / --no-show-reasoning propagates to the plain default logger."""
+    logger = MagicMock()
+    cm = MagicMock()
+    cm.__enter__ = MagicMock(return_value=None)
+    cm.__exit__ = MagicMock(return_value=None)
+    logger.ui_handler.progress_context.return_value = cm
+    mock_plain.return_value = logger
 
-    # Test default (should enable show_llm_messages)
     result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt"])
     assert result.exit_code == 0
-    mock_custom_ui.assert_called()
-    call_kwargs = mock_custom_ui.call_args.kwargs
-    assert call_kwargs["show_llm_messages"] is True
+    assert mock_plain.call_args.kwargs["show_reasoning"] is True
 
-    # Reset mock
-    mock_custom_ui.reset_mock()
+    mock_plain.reset_mock()
+    mock_plain.return_value = logger
 
-    # Test --show-reasoning (explicit enable)
     result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--show-reasoning"])
     assert result.exit_code == 0
-    mock_custom_ui.assert_called()
-    call_kwargs = mock_custom_ui.call_args.kwargs
-    assert call_kwargs["show_llm_messages"] is True
+    assert mock_plain.call_args.kwargs["show_reasoning"] is True
 
-    # Reset mock
-    mock_custom_ui.reset_mock()
+    mock_plain.reset_mock()
+    mock_plain.return_value = logger
 
-    # Test --no-show-reasoning (disable)
     result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--no-show-reasoning"])
     assert result.exit_code == 0
-    mock_custom_ui.assert_called()
-    call_kwargs = mock_custom_ui.call_args.kwargs
-    assert call_kwargs["show_llm_messages"] is False
+    assert mock_plain.call_args.kwargs["show_reasoning"] is False
 
 
 def test_run_command_custom_history_dir(cli_runner, sample_agent_file, temp_dir, mock_agent_execution):
@@ -300,110 +295,191 @@ tools: []
     assert result.exit_code == 0
 
 
-class TestAnimationCLIIntegration:
-    """Test animation integration with CLI commands via custom_agent_ui."""
+class TestUIDefault:
+    """Default UI selection: plain on TTY, --ui live for the three-region status UI."""
 
-    @pytest.mark.parametrize(
-        "extra_flags,expected_progress",
-        [
-            ([], True),  # No flags - progress enabled
-            (["--non-interactive"], True),  # Non-interactive doesn't affect progress
-            (["--no-color"], False),  # No color disables progress
-            (["--non-interactive", "--no-color"], False),  # Both flags - no-color disables progress
-        ],
-    )
+    @staticmethod
+    def _make_logger_mock():
+        logger = MagicMock()
+        logger.ui_handler = MagicMock()
+        cm = MagicMock()
+        cm.__enter__ = MagicMock(return_value=None)
+        cm.__exit__ = MagicMock(return_value=None)
+        logger.ui_handler.progress_context.return_value = cm
+        logger.ui_handler.live_context.return_value = cm
+        return logger
+
     @patch("tsugite.utils.should_use_plain_output", return_value=False)
+    @patch("tsugite.ui.create_plain_logger")
     @patch("tsugite.ui.custom_agent_ui")
-    def test_animation_flags(
+    def test_default_ui_on_tty_is_plain(
         self,
         mock_custom_ui,
-        mock_plain_output,
+        mock_plain,
+        mock_should_plain,
         cli_runner,
         sample_agent_file,
         mock_agent_execution,
-        extra_flags,
-        expected_progress,
     ):
-        """Test that animation is enabled/disabled via show_progress based on CLI flags."""
-        mock_custom_ui.return_value.__enter__ = MagicMock(return_value=MagicMock())
-        mock_custom_ui.return_value.__exit__ = MagicMock(return_value=None)
-
-        cmd = ["run", str(sample_agent_file), "test prompt"] + extra_flags
-        result = cli_runner.invoke(app, cmd)
-
-        assert result.exit_code == 0
-        mock_custom_ui.assert_called_once()
-        call_args = mock_custom_ui.call_args
-        assert call_args.kwargs["show_progress"] is expected_progress
-        # Verify default UI flags are properly set
-        assert call_args.kwargs["show_panels"] is False
-
-    @patch("tsugite.utils.should_use_plain_output", return_value=False)
-    @patch("tsugite.ui.custom_agent_ui")
-    @patch("tsugite.agent_runner.run_agent")
-    def test_animation_context_manager_usage(
-        self, mock_run_agent, mock_custom_ui, mock_plain_output, cli_runner, sample_agent_file
-    ):
-        """Test that custom_agent_ui context manager is properly used around run_agent in default UI."""
-        mock_run_agent.return_value = "Test completion"
-        mock_context = MagicMock()
-        mock_custom_ui.return_value = mock_context
-
-        with patch("tsugite.md_agents.validate_agent_execution") as mock_validate:
-            mock_validate.return_value = (True, "Agent is valid")
-
-            result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt"])
-
-        assert result.exit_code == 0
-        # Verify context manager was used
-        mock_context.__enter__.assert_called_once()
-        mock_context.__exit__.assert_called_once()
-        # Verify run_agent was called
-        mock_run_agent.assert_called_once()
-
-    @patch("tsugite.utils.should_use_plain_output", return_value=False)
-    @patch("tsugite.ui.custom_agent_ui")
-    def test_animation_with_agent_execution_error(
-        self, mock_custom_ui, mock_plain_output, cli_runner, sample_agent_file
-    ):
-        """Test animation cleanup when agent execution fails in default UI."""
-        mock_context = MagicMock()
-        mock_custom_ui.return_value = mock_context
-
-        with (
-            patch("tsugite.agent_runner.run_agent") as mock_run_agent,
-            patch("tsugite.md_agents.validate_agent_execution") as mock_validate,
-        ):
-            mock_validate.return_value = (True, "Agent is valid")
-            mock_run_agent.side_effect = RuntimeError("Agent execution failed")
-
-            result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt"])
-
-        assert result.exit_code == 1
-        # Verify context manager was still properly used despite error
-        mock_context.__enter__.assert_called_once()
-        mock_context.__exit__.assert_called_once()
-
-    @patch("tsugite.utils.should_use_plain_output", return_value=False)
-    @patch("tsugite.ui.custom_agent_ui")
-    def test_animation_console_parameter(
-        self, mock_custom_ui, mock_plain_output, cli_runner, sample_agent_file, mock_agent_execution
-    ):
-        """Test that correct console instance is passed to custom_agent_ui in default UI."""
-        mock_custom_ui.return_value.__enter__ = MagicMock(return_value=MagicMock())
-        mock_custom_ui.return_value.__exit__ = MagicMock(return_value=None)
+        """No flags + TTY -> plain logger fires, custom_agent_ui does not."""
+        mock_plain.return_value = self._make_logger_mock()
 
         result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt"])
 
         assert result.exit_code == 0
-        # Verify console parameter was passed
+        mock_plain.assert_called_once()
+        mock_custom_ui.assert_not_called()
+
+    @patch("tsugite.utils.should_use_plain_output", return_value=False)
+    @patch("tsugite.ui.create_live_logger")
+    @patch("tsugite.ui.create_plain_logger")
+    @patch("tsugite.ui.custom_agent_ui")
+    def test_ui_live_flag_uses_live_handler_on_tty(
+        self,
+        mock_custom_ui,
+        mock_plain,
+        mock_live,
+        mock_should_plain,
+        cli_runner,
+        sample_agent_file,
+        mock_agent_execution,
+    ):
+        """--ui live + TTY -> create_live_logger fires, others do not."""
+        mock_live.return_value = self._make_logger_mock()
+
+        result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--ui", "live"])
+
+        assert result.exit_code == 0
+        mock_live.assert_called_once()
+        mock_plain.assert_not_called()
+        mock_custom_ui.assert_not_called()
+
+    @patch("tsugite.utils.should_use_plain_output", return_value=True)
+    @patch("tsugite.ui.create_live_logger")
+    @patch("tsugite.ui.create_plain_logger")
+    @patch("tsugite.ui.custom_agent_ui")
+    def test_ui_live_piped_falls_back_to_plain(
+        self,
+        mock_custom_ui,
+        mock_plain,
+        mock_live,
+        mock_should_plain,
+        cli_runner,
+        sample_agent_file,
+        mock_agent_execution,
+    ):
+        """--ui live when stdout is not a TTY (or NO_COLOR) -> silently degrade to plain."""
+        mock_plain.return_value = self._make_logger_mock()
+
+        result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--ui", "live"])
+
+        assert result.exit_code == 0
+        mock_plain.assert_called_once()
+        mock_live.assert_not_called()
+        mock_custom_ui.assert_not_called()
+
+    @patch("tsugite.utils.should_use_plain_output", return_value=False)
+    @patch("tsugite.ui.create_plain_logger")
+    @patch("tsugite.ui.custom_agent_ui")
+    def test_ui_plain_explicit_still_plain(
+        self,
+        mock_custom_ui,
+        mock_plain,
+        mock_should_plain,
+        cli_runner,
+        sample_agent_file,
+        mock_agent_execution,
+    ):
+        """--ui plain or --plain explicitly -> plain logger."""
+        mock_plain.return_value = self._make_logger_mock()
+
+        result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--plain"])
+        assert result.exit_code == 0
+        mock_plain.assert_called_once()
+        mock_custom_ui.assert_not_called()
+
+        mock_plain.reset_mock()
+        mock_custom_ui.reset_mock()
+
+        result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--ui", "plain"])
+        assert result.exit_code == 0
+        mock_plain.assert_called_once()
+        mock_custom_ui.assert_not_called()
+
+    @patch("tsugite.utils.should_use_plain_output", return_value=False)
+    @patch("tsugite.ui.create_plain_logger")
+    @patch("tsugite.ui.custom_agent_ui")
+    def test_headless_still_uses_custom_agent_ui(
+        self,
+        mock_custom_ui,
+        mock_plain,
+        mock_should_plain,
+        cli_runner,
+        sample_agent_file,
+        mock_agent_execution,
+    ):
+        """--headless dispatch is unchanged: still custom_agent_ui with show_progress=False."""
+        mock_custom_ui.return_value.__enter__ = MagicMock(return_value=MagicMock())
+        mock_custom_ui.return_value.__exit__ = MagicMock(return_value=None)
+
+        result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--headless"])
+
+        assert result.exit_code == 0
         mock_custom_ui.assert_called_once()
-        call_args = mock_custom_ui.call_args
-        # Console should be passed as keyword argument
-        assert "console" in call_args.kwargs
-        console_arg = call_args.kwargs["console"]
-        assert console_arg is not None
-        assert hasattr(console_arg, "print")
+        mock_plain.assert_not_called()
+
+    @patch("tsugite.utils.should_use_plain_output", return_value=True)
+    @patch("tsugite.ui.create_plain_logger")
+    @patch("tsugite.ui.custom_agent_ui")
+    def test_non_tty_no_flag_auto_plain(
+        self,
+        mock_custom_ui,
+        mock_plain,
+        mock_should_plain,
+        cli_runner,
+        sample_agent_file,
+        mock_agent_execution,
+    ):
+        """No flags + non-TTY (piped/NO_COLOR) -> plain (regression guard)."""
+        mock_plain.return_value = self._make_logger_mock()
+
+        result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt"])
+
+        assert result.exit_code == 0
+        mock_plain.assert_called_once()
+        mock_custom_ui.assert_not_called()
+
+    def test_subagent_mode_rejects_ui_live(self, cli_runner, sample_agent_file):
+        """--subagent-mode + --ui live errors out (subagents must emit JSONL)."""
+        result = cli_runner.invoke(
+            app, ["run", str(sample_agent_file), "test prompt", "--subagent-mode", "--ui", "live"]
+        )
+        assert result.exit_code == 1
+        combined = (result.stdout or "") + (result.stderr or "")
+        assert "subagent-mode" in combined.lower() or "live" in combined.lower()
+
+
+class TestPipeRegression:
+    """Default and --ui live must not leak ANSI panel/box chars when stdout is not a TTY."""
+
+    PANEL_CHARS = ["╭", "╮", "╰", "╯", "│", "┌", "┐", "└", "┘", "├", "┤"]
+
+    def _assert_clean(self, output: str) -> None:
+        assert "\x1b[" not in output, f"ANSI escape detected: {output!r}"
+        for ch in self.PANEL_CHARS:
+            assert ch not in output, f"Panel char {ch!r} leaked into piped stdout"
+
+    def test_default_pipe_has_no_ansi_panels(self, cli_runner, sample_agent_file, mock_agent_execution):
+        """No flags + CliRunner (non-TTY) -> plain output, no escapes or box chars."""
+        result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt"])
+        assert result.exit_code == 0
+        self._assert_clean(result.stdout)
+
+    def test_ui_live_piped_degrades_clean(self, cli_runner, sample_agent_file, mock_agent_execution):
+        """--ui live + non-TTY -> degrades to plain (no escapes, no panel chars)."""
+        result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--ui", "live"])
+        assert result.exit_code == 0
+        self._assert_clean(result.stdout)
 
 
 class TestHeadlessMode:
