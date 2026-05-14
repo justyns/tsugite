@@ -24,6 +24,26 @@ export const sessionsMixin = {
     this._debounceTimer = setTimeout(() => this.loadSessions(), 200);
   },
 
+  _selectedSessionStorageKey() {
+    const agent = this.$store.app.selectedAgent;
+    return agent ? `tsugite_selected_session_${agent}` : null;
+  },
+
+  _loadPersistedSessionId() {
+    const key = this._selectedSessionStorageKey();
+    if (!key) return null;
+    try { return localStorage.getItem(key); } catch { return null; }
+  },
+
+  _persistSelectedSession(convId) {
+    const key = this._selectedSessionStorageKey();
+    if (!key) return;
+    try {
+      if (convId) localStorage.setItem(key, convId);
+      else localStorage.removeItem(key);
+    } catch { /* quota or disabled */ }
+  },
+
   async loadSessions() {
     const agent = this.$store.app.selectedAgent;
     if (!agent) { this.loading = false; return; }
@@ -112,6 +132,7 @@ export const sessionsMixin = {
     const convId = session.conversation_id || session.id;
     this.selectedSessionId = convId;
     this.selectedSessionMeta = session;
+    this._persistSelectedSession(convId);
     const isFirstVisit = !this.messagesBySession[convId] || this.messagesBySession[convId].length === 0;
     if (!this.messagesBySession[convId]) this.messagesBySession[convId] = [];
     this.messages = this.messagesBySession[convId];
@@ -188,6 +209,7 @@ export const sessionsMixin = {
     this.messages = [];
     this.resetHistory();
     this.isActiveSession = true;
+    this._persistSelectedSession(null);
   },
 
   async newSession() {

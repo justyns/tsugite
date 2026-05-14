@@ -242,7 +242,17 @@ export default () => ({
         this.selectSession({ conversation_id: targetId, agent: this.$store.app.selectedAgent });
       }
     } else {
-      this.autoSelectInteractive();
+      // PWA cold-restart at start_url drops the URL hash; restore the user's
+      // last selection from localStorage before falling back to autoSelect.
+      // selectSession already chases superseded_by, so a stale persisted ID for
+      // a now-compacted session lands on the live successor automatically.
+      const persisted = this._loadPersistedSessionId();
+      const restored = persisted ? this.findSession(persisted) : null;
+      if (restored) {
+        this.selectSession(restored);
+      } else {
+        this.autoSelectInteractive();
+      }
     }
     this._prefetchTopSessions();
   },
