@@ -14,6 +14,7 @@ import os
 import socket
 import threading
 import time
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -25,21 +26,32 @@ from tsugite.daemon.config import AgentConfig, HTTPConfig
 from tsugite.daemon.session_store import SessionStore
 from tsugite.daemon.webhook_store import WebhookStore
 
-
 _REQUIRED_KEYS = ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY")
 
 
+_OWN_DIR = Path(__file__).parent
+
+
 def pytest_collection_modifyitems(config, items):
-    """Skip the entire directory unless TSUGITE_E2E_REAL_LLM=1 + a provider key."""
-    if not os.environ.get("TSUGITE_E2E_REAL_LLM"):
-        skip = pytest.mark.skip(reason="TSUGITE_E2E_REAL_LLM=1 not set; real-LLM smoke tier is opt-in")
-        for item in items:
-            item.add_marker(skip)
-        return
-    if not any(os.environ.get(k) for k in _REQUIRED_KEYS):
-        skip = pytest.mark.skip(reason=f"No provider key set; one of {_REQUIRED_KEYS} required")
-        for item in items:
-            item.add_marker(skip)
+    """Skip THIS directory unless TSUGITE_E2E_REAL_LLM=1 + a provider key.
+
+    pytest hooks defined in a subdir conftest still receive the full session
+    `items` list, so filter to items under this directory before marking -
+    otherwise every test in the repo gets skipped.
+    """
+    if os.environ.get("TSUGITE_E2E_REAL_LLM"):
+        if any(os.environ.get(k) for k in _REQUIRED_KEYS):
+            return
+        reason = f"No provider key set; one of {_REQUIRED_KEYS} required"
+    else:
+        reason = "TSUGITE_E2E_REAL_LLM=1 not set; real-LLM smoke tier is opt-in"
+    skip = pytest.mark.skip(reason=reason)
+    for item in items:
+        try:
+            item.path.relative_to(_OWN_DIR)
+        except ValueError:
+            continue
+        item.add_marker(skip)
 
 
 def _free_port():
