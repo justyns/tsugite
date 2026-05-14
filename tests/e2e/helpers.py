@@ -10,10 +10,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-
-ALPINE_READY = (
-    "typeof Alpine !== 'undefined' && Alpine.store('app') && !Alpine.store('app').authRequired"
-)
+ALPINE_READY = "typeof Alpine !== 'undefined' && Alpine.store('app') && !Alpine.store('app').authRequired"
 CONV_VIEW = "[x-data*=conversationsView]"
 
 
@@ -57,8 +54,7 @@ def wait_for_session_in_list(page, session_id: str, timeout: int = 5000) -> None
 def select_session_in_view(page, session_id: str, timeout: int = 3000) -> None:
     """Programmatically select a session and wait for it to take effect."""
     page.evaluate(
-        f"Alpine.$data(document.querySelector({CONV_VIEW!r}))"
-        f".selectSessionById({session_id!r}, {{follow: false}})"
+        f"Alpine.$data(document.querySelector({CONV_VIEW!r})).selectSessionById({session_id!r}, {{follow: false}})"
     )
     page.wait_for_function(
         f"Alpine.$data(document.querySelector({CONV_VIEW!r})).selectedSessionId === {session_id!r}",

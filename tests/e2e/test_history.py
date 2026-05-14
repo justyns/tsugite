@@ -107,9 +107,7 @@ def test_compaction_banner_displayed(authenticated_page, e2e_adapter, e2e_tmp):
     page = authenticated_page
     user_id = page.evaluate("Alpine.store('app').userId")
 
-    history_dir, session = _seed_history(
-        e2e_adapter, e2e_tmp, user_id, turns=[("after compaction", "response")]
-    )
+    history_dir, session = _seed_history(e2e_adapter, e2e_tmp, user_id, turns=[("after compaction", "response")])
 
     actual_path = history_dir / f"{session.id}.jsonl"
     with open(actual_path, "r") as f:

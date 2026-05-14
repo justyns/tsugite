@@ -77,9 +77,7 @@ def test_titleless_interactive_session_falls_back_to_date(authenticated_page, e2
     assert "Apr" in label, f"expected date-style label, got {label!r}"
 
 
-def test_titleless_session_with_prompt_prefers_prompt_when_date_missing(
-    authenticated_page, e2e_session_store
-):
+def test_titleless_session_with_prompt_prefers_prompt_when_date_missing(authenticated_page, e2e_session_store):
     """When a prompt exists but date doesn't, use truncated prompt over username."""
     page = authenticated_page
 

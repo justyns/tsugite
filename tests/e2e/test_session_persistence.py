@@ -33,9 +33,7 @@ def _make_session(store, user_id, last_active):
     return s
 
 
-def test_selected_session_restored_after_pwa_cold_restart(
-    authenticated_page, e2e_session_store, base_url
-):
+def test_selected_session_restored_after_pwa_cold_restart(authenticated_page, e2e_session_store, base_url):
     """A user-selected session survives a PWA cold restart at start_url="/".
 
     Repro: select a session that is NOT the auto-pick, then navigate to bare
@@ -69,9 +67,7 @@ def test_selected_session_restored_after_pwa_cold_restart(
 
     page.screenshot(path="/tmp/tsugite-issue-state.png", full_page=True)
 
-    selected = page.evaluate(
-        f"Alpine.$data(document.querySelector({CONV_VIEW!r})).selectedSessionId"
-    )
+    selected = page.evaluate(f"Alpine.$data(document.querySelector({CONV_VIEW!r})).selectedSessionId")
     assert selected == user_pick.id, (
         f"expected user-selected session {user_pick.id} to be restored after cold restart, "
         f"got {selected} (likely auto_pick={auto_pick.id})"
@@ -118,9 +114,7 @@ def test_persisted_session_id_for_superseded_session_chases_to_successor(
     )
     e2e_session_store.create_session(predecessor)
 
-    page.evaluate(
-        f"localStorage.setItem('tsugite_selected_session_test-agent', {predecessor_id!r})"
-    )
+    page.evaluate(f"localStorage.setItem('tsugite_selected_session_test-agent', {predecessor_id!r})")
 
     page.goto(base_url + "/")
     wait_for_alpine_ready(page)

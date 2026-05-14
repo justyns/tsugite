@@ -32,13 +32,13 @@ def _setup_session(page, sid, *, sending, user_msg=None):
 
 def _fire_history_update(page, agent="test-agent"):
     page.evaluate(
-        f"""(agent) => {{
-            Alpine.store('app').lastEvent = {{
+        """(agent) => {
+            Alpine.store('app').lastEvent = {
                 type: 'history_update',
-                data: {{agent}},
+                data: {agent},
                 _ts: Date.now(),
-            }};
-        }}""",
+            };
+        }""",
         agent,
     )
 

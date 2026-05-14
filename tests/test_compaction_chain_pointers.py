@@ -82,9 +82,9 @@ async def test_old_session_gets_compacted_into_terminal_event(workspace_dir, his
 
     assert new_session is not None
     old_events = SessionStorage.load(history_dir / f"{conv_id}.jsonl").load_events()
-    assert (
-        old_events[-1].type == "compacted_into"
-    ), f"expected last event to be 'compacted_into', got {old_events[-1].type}"
+    assert old_events[-1].type == "compacted_into", (
+        f"expected last event to be 'compacted_into', got {old_events[-1].type}"
+    )
     payload = old_events[-1].data
     assert payload["new_session_id"] == new_session.id
     assert payload["reason"] == "manual"
@@ -128,6 +128,6 @@ async def test_compacted_into_not_written_when_nothing_to_compact(workspace_dir,
 
     assert result is None
     old_events = SessionStorage.load(history_dir / f"{conv_id}.jsonl").load_events()
-    assert all(
-        e.type != "compacted_into" for e in old_events
-    ), "early-exit must not write a forward pointer when no rotation happened"
+    assert all(e.type != "compacted_into" for e in old_events), (
+        "early-exit must not write a forward pointer when no rotation happened"
+    )

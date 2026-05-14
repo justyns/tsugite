@@ -509,11 +509,18 @@ class SessionStore:
         """Canonical lookup for where a default request should land."""
         return self.find_primary_session(user_id, agent)
 
-    def _demote_primaries_locked(self, user_id: str, agent: str, *, except_id: Optional[str] = None) -> Optional[Session]:
+    def _demote_primaries_locked(
+        self, user_id: str, agent: str, *, except_id: Optional[str] = None
+    ) -> Optional[Session]:
         """Clear primary flag from all (user, agent) sessions except `except_id`. Returns the last one cleared."""
         cleared: Optional[Session] = None
         for s in self._sessions.values():
-            if s.user_id == user_id and s.agent == agent and s.id != except_id and s.metadata.get(METADATA_PRIMARY_FLAG):
+            if (
+                s.user_id == user_id
+                and s.agent == agent
+                and s.id != except_id
+                and s.metadata.get(METADATA_PRIMARY_FLAG)
+            ):
                 s.metadata.pop(METADATA_PRIMARY_FLAG, None)
                 cleared = s
         return cleared

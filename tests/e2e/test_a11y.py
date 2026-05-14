@@ -15,8 +15,7 @@ import pytest
 from tsugite.daemon.session_store import Session, SessionSource
 from tsugite.history.storage import generate_session_id
 
-from .helpers import CONV_VIEW, open_conversations, reload_conversations_view
-
+from .helpers import open_conversations, reload_conversations_view
 
 AXE_CDN = "https://cdnjs.cloudflare.com/ajax/libs/axe-core/4.10.2/axe.min.js"
 BLOCKING = {"serious", "critical"}
@@ -59,9 +58,7 @@ def _run_axe(page) -> dict:
 
 def _blocking_violations(report: dict, allowed_rule_ids: set[str]) -> list[dict]:
     return [
-        v
-        for v in report.get("violations", [])
-        if v.get("impact") in BLOCKING and v.get("id") not in allowed_rule_ids
+        v for v in report.get("violations", []) if v.get("impact") in BLOCKING and v.get("id") not in allowed_rule_ids
     ]
 
 
@@ -84,8 +81,7 @@ def test_a11y_no_new_serious_or_critical_violations(authenticated_page, view, e2
 
     if new_violations:
         summary = "\n".join(
-            f"  [{v['impact']}] {v['id']}: {v['help']} ({len(v['nodes'])} node(s))"
-            for v in new_violations
+            f"  [{v['impact']}] {v['id']}: {v['help']} ({len(v['nodes'])} node(s))" for v in new_violations
         )
         pytest.fail(
             f"NEW accessibility violations on {view!r} view (not in baseline):\n{summary}\n"

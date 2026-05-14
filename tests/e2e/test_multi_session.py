@@ -31,8 +31,7 @@ def test_switching_sessions_preserves_per_session_messages(authenticated_page, e
 
     def select(sid):
         page.evaluate(
-            f"Alpine.$data(document.querySelector({CONV_VIEW!r}))"
-            f".selectSessionById({sid!r}, {{follow: false}})"
+            f"Alpine.$data(document.querySelector({CONV_VIEW!r})).selectSessionById({sid!r}, {{follow: false}})"
         )
         page.wait_for_function(
             f"Alpine.$data(document.querySelector({CONV_VIEW!r})).selectedSessionId === {sid!r}",
@@ -92,18 +91,14 @@ def test_compaction_event_auto_follows_active_tab_to_successor(authenticated_pag
             user_id=user_id,
         )
     )
-    e2e_session_store.update_session(
-        predecessor.id, status=SessionStatus.COMPLETED.value, superseded_by=successor.id
-    )
+    e2e_session_store.update_session(predecessor.id, status=SessionStatus.COMPLETED.value, superseded_by=successor.id)
 
     page.goto(base_url + f"#conversations?session={predecessor.id}")
     page.wait_for_function("Alpine.store('app').view === 'conversations'", timeout=3000)
     reload_conversations_view(page)
     # Simulate the stale-tab case: force selection on the predecessor even
     # though selectSession() would normally chase superseded_by forward.
-    page.evaluate(
-        f"Alpine.$data(document.querySelector({CONV_VIEW!r})).selectedSessionId = {predecessor.id!r};"
-    )
+    page.evaluate(f"Alpine.$data(document.querySelector({CONV_VIEW!r})).selectedSessionId = {predecessor.id!r};")
 
     page.evaluate(
         f"""
@@ -124,7 +119,9 @@ def test_compaction_event_auto_follows_active_tab_to_successor(authenticated_pag
     )
 
 
-def test_two_pages_see_same_session_state_after_external_event(authenticated_page, e2e_session_store, base_url, e2e_auth_token):
+def test_two_pages_see_same_session_state_after_external_event(
+    authenticated_page, e2e_session_store, base_url, e2e_auth_token
+):
     """Two browser contexts on the same session both react to a session_update event.
 
     The conversationsView in each tab subscribes to the same SSE feed; an

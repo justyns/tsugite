@@ -108,8 +108,7 @@ def test_drafts_isolated_between_sessions(authenticated_page, e2e_session_store)
 
     def _select(sid):
         page.evaluate(
-            f"Alpine.$data(document.querySelector({CONV_VIEW!r}))"
-            f".selectSessionById({sid!r}, {{follow: false}})"
+            f"Alpine.$data(document.querySelector({CONV_VIEW!r})).selectSessionById({sid!r}, {{follow: false}})"
         )
         page.wait_for_function(
             f"Alpine.$data(document.querySelector({CONV_VIEW!r})).selectedSessionId === {sid!r}",
@@ -133,14 +132,14 @@ def test_drafts_isolated_between_sessions(authenticated_page, e2e_session_store)
 
     _select(s1.id)
     page.wait_for_function(
-        f"document.getElementById('message-input').value === 'draft for session 1'",
+        "document.getElementById('message-input').value === 'draft for session 1'",
         timeout=2000,
     )
     assert page.locator("#message-input").input_value() == "draft for session 1"
 
     _select(s2.id)
     page.wait_for_function(
-        f"document.getElementById('message-input').value === 'draft for session 2'",
+        "document.getElementById('message-input').value === 'draft for session 2'",
         timeout=2000,
     )
     assert page.locator("#message-input").input_value() == "draft for session 2"

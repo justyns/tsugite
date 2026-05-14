@@ -127,16 +127,22 @@ def test_history_content_block_renders_with_model_response(authenticated_page, e
         assert "A reply content block." in pre_text
 
 
-@pytest.mark.skip(reason="Tests pre-redesign <tsugite_execution_result> XML envelope, which the event model replaced; rewrite needs current format-error event semantics")
+@pytest.mark.skip(
+    reason="Tests pre-redesign <tsugite_execution_result> XML envelope, which the event model replaced; rewrite needs current format-error event semantics"
+)
 def test_history_tool_result_unescapes_xml_entities(authenticated_page, e2e_adapter, e2e_tmp):
     pass
 
 
-@pytest.mark.skip(reason="Tests pre-redesign prose-only-as-thought sub-turn semantics; needs new format_error/model_response event-flow contract")
+@pytest.mark.skip(
+    reason="Tests pre-redesign prose-only-as-thought sub-turn semantics; needs new format_error/model_response event-flow contract"
+)
 def test_history_prose_only_assistant_message_renders(authenticated_page, e2e_adapter, e2e_tmp):
     pass
 
 
-@pytest.mark.skip(reason="Original test asserted content-block ordering against pre-redesign step interleaving; needs rewrite once code_execution+model_response interleave behavior is pinned")
+@pytest.mark.skip(
+    reason="Original test asserted content-block ordering against pre-redesign step interleaving; needs rewrite once code_execution+model_response interleave behavior is pinned"
+)
 def test_history_content_block_survives_no_code_turn(authenticated_page, e2e_adapter, e2e_tmp):
     pass

@@ -144,9 +144,7 @@ class TestChatEndpoint:
         )
         assert resp.status_code == 400
 
-    def test_chat_with_compacted_session_id_routes_to_successor(
-        self, client, server, mock_adapter, test_token
-    ):
+    def test_chat_with_compacted_session_id_routes_to_successor(self, client, server, mock_adapter, test_token):
         """POST with a compacted predecessor's session_id must transparently route to its successor, not 409."""
         from tsugite.daemon.session_store import Session, SessionSource, SessionStatus
 

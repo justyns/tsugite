@@ -13,7 +13,6 @@ from tsugite.history.storage import generate_session_id
 
 from .helpers import CONV_VIEW, open_conversations, reload_conversations_view
 
-
 MOBILE_VIEWPORT = {"width": 375, "height": 800}
 
 
@@ -42,9 +41,7 @@ def test_mobile_collapses_to_sidebar_when_no_session_selected(mobile_page, e2e_s
     reload_conversations_view(page)
     # autoSelectInteractive on reload picks a session, so clear it to test the
     # no-selection state directly.
-    page.evaluate(
-        f"Alpine.$data(document.querySelector({CONV_VIEW!r})).selectedSessionId = null;"
-    )
+    page.evaluate(f"Alpine.$data(document.querySelector({CONV_VIEW!r})).selectedSessionId = null;")
     page.wait_for_function(
         f"Alpine.$data(document.querySelector({CONV_VIEW!r})).selectedSessionId === null",
         timeout=2000,
@@ -66,8 +63,7 @@ def test_mobile_selecting_session_shows_thread_and_hides_sidebar(mobile_page, e2
     open_conversations(page)
     reload_conversations_view(page)
     page.evaluate(
-        f"Alpine.$data(document.querySelector({CONV_VIEW!r}))"
-        f".selectSessionById({session.id!r}, {{follow: false}})"
+        f"Alpine.$data(document.querySelector({CONV_VIEW!r})).selectSessionById({session.id!r}, {{follow: false}})"
     )
     page.wait_for_function(
         f"Alpine.$data(document.querySelector({CONV_VIEW!r})).selectedSessionId === {session.id!r}",
@@ -91,8 +87,7 @@ def test_mobile_back_button_returns_to_sidebar(mobile_page, e2e_session_store):
     open_conversations(page)
     reload_conversations_view(page)
     page.evaluate(
-        f"Alpine.$data(document.querySelector({CONV_VIEW!r}))"
-        f".selectSessionById({session.id!r}, {{follow: false}})"
+        f"Alpine.$data(document.querySelector({CONV_VIEW!r})).selectSessionById({session.id!r}, {{follow: false}})"
     )
     page.wait_for_function(
         f"Alpine.$data(document.querySelector({CONV_VIEW!r})).selectedSessionId === {session.id!r}",
@@ -116,4 +111,6 @@ def test_mobile_tab_bar_scrolls_horizontally(mobile_page):
     page = mobile_page
     tab_bar = page.locator(".console-tabs").first
     overflow_x = tab_bar.evaluate("el => getComputedStyle(el).overflowX")
-    assert overflow_x in ("auto", "scroll"), f"console-tabs should scroll horizontally at narrow widths; got {overflow_x}"
+    assert overflow_x in ("auto", "scroll"), (
+        f"console-tabs should scroll horizontally at narrow widths; got {overflow_x}"
+    )

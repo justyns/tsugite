@@ -16,7 +16,6 @@ from tsugite.daemon.session_store import SessionStore
 from tsugite.daemon.webhook_store import WebhookStore
 
 from .helpers import (
-    ALPINE_READY,
     open_conversations,
     reload_conversations_view,
     select_session_in_view,
