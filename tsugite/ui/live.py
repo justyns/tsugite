@@ -29,9 +29,11 @@ from tsugite.ui.plain import PlainUIHandler
 
 @dataclass
 class _StatusState:
-    """Mutable state rendered into the persistent footer."""
+    """Mutable state rendered into the persistent footer.
 
-    turn: int = 0
+    Turn number lives on the inherited ``UIState.current_step`` and is not duplicated here.
+    """
+
     current_tool: Optional[str] = None
     short_desc: str = ""
     tokens: int = 0
@@ -52,16 +54,13 @@ class LiveUIHandler(PlainUIHandler):
         self.console = get_stderr_console(no_color=False)
         self._clock = clock or time.monotonic
         self._status = _StatusState(start_time=self._clock())
-        self._live: Optional[Live] = None
 
     def handle_event(self, event: BaseEvent) -> None:
         super().handle_event(event)
         self._update_status_state(event)
-        self._refresh_live()
 
     def _update_status_state(self, event: BaseEvent) -> None:
         if isinstance(event, StepStartEvent):
-            self._status.turn = event.step
             self._status.wait_elapsed = None
         elif isinstance(event, ToolCallEvent):
             self._status.current_tool = event.tool_name
@@ -110,7 +109,7 @@ class LiveUIHandler(PlainUIHandler):
             action = "idle"
 
         parts = [
-            f"Turn {self._status.turn}",
+            f"Turn {self.state.current_step}",
             action,
             self._format_tokens(self._status.tokens),
             f"${self._status.cost:.2f}",
@@ -122,20 +121,15 @@ class LiveUIHandler(PlainUIHandler):
         return text
 
     def _render_status_panel(self) -> Panel:
-        try:
-            height = self.console.size.height
-        except Exception:
-            height = 24
+        height = getattr(self.console.size, "height", 24)
+        width = getattr(self.console.size, "width", None)
         compact = height < 10
-        body = Text(self._render_status_text(width=self.console.size.width), style="dim")
+        body = Text(self._render_status_text(width=width), style="dim")
         return Panel(body, padding=(0, 1), height=1 if compact else 3, border_style="dim")
 
-    def _refresh_live(self) -> None:
-        if self._live is not None:
-            try:
-                self._live.update(self._render_status_panel())
-            except Exception:
-                pass
+    def __rich__(self) -> Panel:
+        """Rich render hook: called by ``Live`` on every auto-refresh tick."""
+        return self._render_status_panel()
 
     @contextmanager
     def progress_context(self) -> Generator[None, None, None]:
@@ -145,16 +139,12 @@ class LiveUIHandler(PlainUIHandler):
 
     @contextmanager
     def live_context(self) -> Generator[None, None, None]:
-        """Open the persistent status footer. Scrollback log lines scroll above it."""
+        """Open the persistent status footer. Scrollback log lines scroll above it.
+
+        ``Live`` calls ``self.__rich__`` on each auto-refresh tick (default 4Hz),
+        so state mutations from ``handle_event`` surface within ~250ms without
+        per-event manual updates.
+        """
         self._status.start_time = self._clock()
-        with Live(
-            self._render_status_panel(),
-            console=self.console,
-            refresh_per_second=4,
-            transient=True,
-        ) as live:
-            self._live = live
-            try:
-                yield
-            finally:
-                self._live = None
+        with Live(self, console=self.console, refresh_per_second=4, transient=True):
+            yield

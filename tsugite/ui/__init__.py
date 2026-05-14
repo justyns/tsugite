@@ -16,7 +16,6 @@ from tsugite.ui.helpers import (
     create_plain_logger,
     custom_agent_ui,
 )
-from tsugite.ui.live import LiveUIHandler
 from tsugite.ui.plain import PlainUIHandler
 
 __all__ = [
@@ -35,3 +34,11 @@ __all__ = [
     "create_plain_logger",
     "create_live_logger",
 ]
+
+
+def __getattr__(name: str):
+    if name == "LiveUIHandler":
+        from tsugite.ui.live import LiveUIHandler as _LiveUIHandler
+
+        return _LiveUIHandler
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

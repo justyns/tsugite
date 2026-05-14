@@ -459,14 +459,15 @@ class TestUIDefault:
         assert "subagent-mode" in combined.lower() or "live" in combined.lower()
 
 
+PANEL_BORDER_CHARS = ["╭", "╮", "╰", "╯", "│", "─", "┌", "┐", "└", "┘", "├", "┤"]
+
+
 class TestPipeRegression:
     """Default and --ui live must not leak ANSI panel/box chars when stdout is not a TTY."""
 
-    PANEL_CHARS = ["╭", "╮", "╰", "╯", "│", "┌", "┐", "└", "┘", "├", "┤"]
-
     def _assert_clean(self, output: str) -> None:
         assert "\x1b[" not in output, f"ANSI escape detected: {output!r}"
-        for ch in self.PANEL_CHARS:
+        for ch in PANEL_BORDER_CHARS:
             assert ch not in output, f"Panel char {ch!r} leaked into piped stdout"
 
     def test_default_pipe_has_no_ansi_panels(self, cli_runner, sample_agent_file, mock_agent_execution):
@@ -513,9 +514,7 @@ class TestHeadlessMode:
         result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--headless"])
 
         assert result.exit_code == 0
-        # Check for Rich panel box drawing characters (should not be present)
-        panel_chars = ["╭", "╮", "╰", "╯", "│", "─", "┌", "┐", "└", "┘", "├", "┤"]
-        for char in panel_chars:
+        for char in PANEL_BORDER_CHARS:
             assert char not in result.stdout, f"Found panel border character '{char}' in headless output"
 
     def test_headless_mode_with_verbose(self, cli_runner, sample_agent_file, mock_agent_execution):
