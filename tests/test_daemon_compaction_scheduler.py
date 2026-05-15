@@ -105,7 +105,7 @@ class TestCompactionScheduler:
         scheduler, agent_config = _make_scheduler(tmp_path, adapter, store, min_turns=5)
 
         # message_count is 0, min_turns is 5 → should skip
-        asyncio.get_event_loop().run_until_complete(scheduler._check_agent("test-agent", agent_config))
+        asyncio.run(scheduler._check_agent("test-agent", agent_config))
         adapter._compact_session.assert_not_called()
 
     def test_check_agent_compacts_when_enough_turns(self, tmp_path):
@@ -118,7 +118,7 @@ class TestCompactionScheduler:
         adapter = _make_adapter()
         scheduler, agent_config = _make_scheduler(tmp_path, adapter, store)
 
-        asyncio.get_event_loop().run_until_complete(scheduler._check_agent("test-agent", agent_config))
+        asyncio.run(scheduler._check_agent("test-agent", agent_config))
         adapter._compact_session.assert_called_once_with(session.id, reason="scheduled")
 
     def test_check_agent_skips_if_already_compacting(self, tmp_path):
@@ -131,7 +131,7 @@ class TestCompactionScheduler:
         adapter = _make_adapter()
         scheduler, agent_config = _make_scheduler(tmp_path, adapter, store)
 
-        asyncio.get_event_loop().run_until_complete(scheduler._check_agent("test-agent", agent_config))
+        asyncio.run(scheduler._check_agent("test-agent", agent_config))
         adapter._compact_session.assert_not_called()
 
         store.end_compaction("user1", "test-agent")
@@ -141,7 +141,7 @@ class TestCompactionScheduler:
         adapter = _make_adapter()
         scheduler, agent_config = _make_scheduler(tmp_path, adapter, store)
 
-        asyncio.get_event_loop().run_until_complete(scheduler._check_agent("test-agent", agent_config))
+        asyncio.run(scheduler._check_agent("test-agent", agent_config))
         adapter._compact_session.assert_not_called()
 
     def test_check_agent_no_adapter(self, tmp_path):
@@ -157,7 +157,7 @@ class TestCompactionScheduler:
         )
         scheduler = CompactionScheduler({"test-agent": agent_config}, store, {})
 
-        asyncio.get_event_loop().run_until_complete(scheduler._check_agent("test-agent", agent_config))
+        asyncio.run(scheduler._check_agent("test-agent", agent_config))
 
     def test_compaction_failure_handled(self, tmp_path):
         store = _make_session_store(tmp_path)
@@ -169,7 +169,7 @@ class TestCompactionScheduler:
         adapter._compact_session.side_effect = RuntimeError("boom")
         scheduler, agent_config = _make_scheduler(tmp_path, adapter, store)
 
-        asyncio.get_event_loop().run_until_complete(scheduler._check_agent("test-agent", agent_config))
+        asyncio.run(scheduler._check_agent("test-agent", agent_config))
 
         assert not store.is_compacting("user1", "test-agent")
 

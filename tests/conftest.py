@@ -14,33 +14,22 @@ warnings.filterwarnings("ignore", message="coroutine.*was never awaited")
 
 @pytest.fixture(autouse=True)
 def event_loop_policy():
-    """Ensure clean event loop for each test.
+    """Clear any closed event loop left over by `asyncio.run()` inside sync
+    wrappers (e.g. `run_multistep_agent`). Otherwise pytest-asyncio's next test
+    picks up the dead loop and raises `Event loop is closed`.
 
-    This fixture prevents 'Event loop is closed' errors that can occur when
-    run_multistep_agent() (and other sync wrappers) use asyncio.run() internally.
-    asyncio.run() creates and closes its own event loop, which can interfere with
-    pytest-asyncio's event loop management in strict mode.
+    Avoids `asyncio.get_event_loop_policy()` / `DefaultEventLoopPolicy` -
+    deprecated in 3.12 and they raise outright in 3.14.
     """
-    # Get current policy or create new one
-    policy = asyncio.get_event_loop_policy()
-
     yield
-
-    # Clean up: close any lingering loops and reset policy
-    try:
-        # Suppress deprecation warning for get_event_loop() in cleanup context
-        # This is safe here because we're only closing existing loops, not creating new ones
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            loop = policy.get_event_loop()
-        if loop and not loop.is_closed():
-            loop.close()
-    except RuntimeError:
-        # No current event loop, which is fine
-        pass
-
-    # Reset to ensure fresh state for next test
-    asyncio.set_event_loop_policy(asyncio.DefaultEventLoopPolicy())
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            return
+        if loop and loop.is_closed():
+            asyncio.set_event_loop(None)
 
 
 @pytest.fixture(autouse=True)
