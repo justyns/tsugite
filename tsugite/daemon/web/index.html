@@ -331,7 +331,7 @@
                   <button class="hbtn" @click="open = !open" title="More actions">⋯</button>
                   <div class="setting-pop" x-show="open" x-cloak x-transition.opacity style="right:0;left:auto">
                     <div class="setting-pop-head">actions</div>
-                    <button type="button" class="setting-pop-row" @click="open = false; compactSession()" :disabled="compacting || sendingBySession[selectedSessionId]">
+                    <button type="button" class="setting-pop-row" @click="open = false; compactSession()" :disabled="compacting || sending">
                       <span class="pop-mark">⚙</span><span class="pop-val">compact session</span>
                     </button>
                     <template x-if="canCancel(selectedSessionMeta)">
@@ -580,7 +580,7 @@
             <div id="messages" class="console-thread" x-ref="messages"
                  @scroll.passive="onMessagesScroll()"
                  @click="handleMessagesClick($event)">
-              <template x-if="historyLoadingBySession[selectedSessionId] && messages.length === 0">
+              <template x-if="historyLoading && messages.length === 0">
                 <div class="console-thread-loading">
                   <span class="spinner"></span>
                   <span>loading conversation…</span>
@@ -911,10 +911,10 @@
                       <span class="pop-mark">○</span><span class="pop-val">⤢ expand editor</span>
                     </button>
                   </div>
-                  <template x-if="!sendingBySession[selectedSessionId]">
+                  <template x-if="!sending">
                     <button class="console-send-btn" @click="sendMessage()">send <kbd>⌘↩</kbd></button>
                   </template>
-                  <template x-if="sendingBySession[selectedSessionId]">
+                  <template x-if="sending">
                     <button class="console-stop-btn" @click="cancelChat()">stop</button>
                   </template>
                 </div>

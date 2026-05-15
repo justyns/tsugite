@@ -87,7 +87,7 @@ def test_send_message_uploads_attached_file(composer_page, e2e_workspace, mock_c
     page.locator(".console-send-btn").click()
 
     page.wait_for_function(
-        f"!Alpine.$data(document.querySelector('{CONV}')).sendingBySession['{session.id}']",
+        f"!Alpine.$data(document.querySelector('{CONV}')).sessionsState['{session.id}']?.sending",
         timeout=15000,
     )
 
@@ -170,7 +170,7 @@ def test_large_paste_then_send_uploads_file(composer_page, e2e_workspace, mock_c
     page.locator(".console-send-btn").click()
 
     page.wait_for_function(
-        f"!Alpine.$data(document.querySelector('{CONV}')).sendingBySession['{session.id}']",
+        f"!Alpine.$data(document.querySelector('{CONV}')).sessionsState['{session.id}']?.sending",
         timeout=15000,
     )
 

@@ -88,12 +88,12 @@ def test_sidebar_metadata_chips_render(authenticated_page, e2e_session_store):
 
 
 def test_sidebar_progress_label_clears_after_turn_ends(authenticated_page, e2e_session_store, base_url):
-    """A stale live-progress entry in progressCache must yield to the server's cleared progress.
+    """A stale live-progress entry on a session's state must yield to the server's cleared progress.
 
     The bug: after a turn ends, the SSE turn-end event may be missed (reconnect, race
-    with loadSessions). The cache keeps showing 'Turn N · Thinking...' indefinitely even
-    though the server's session_progress_summary correctly reports status_text=''.
-    Refreshing the page worked around it. loadSessions must reconcile.
+    with loadSessions). sessionsState[sid].progress keeps showing 'Turn N · Thinking...'
+    indefinitely even though the server's session_progress_summary correctly reports
+    status_text=''. Refreshing the page worked around it. loadSessions must reconcile.
     """
     page = authenticated_page
     user_id = page.evaluate("Alpine.store('app').userId")
@@ -115,7 +115,7 @@ def test_sidebar_progress_label_clears_after_turn_ends(authenticated_page, e2e_s
     page.evaluate(
         f"""
         const view = Alpine.$data(document.querySelector({view_selector!r}));
-        view.progressCache[{session.id!r}] = {{
+        view._sessionState({session.id!r}).progress = {{
             turnCount: 3, toolCount: 0, statusText: 'Thinking...', lastEventTime: new Date().toISOString()
         }};
         """

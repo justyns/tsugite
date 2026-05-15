@@ -347,21 +347,21 @@ export const historyMixin = {
     if (!agent) return;
     this.resetHistory();
     const sid = this.selectedSessionId;
+    const state = this._sessionState(sid);
     let usedCache = false;
     try {
       let events;
-      if (sid && this.historyEventsCache[sid]) {
-        events = this.historyEventsCache[sid];
-        delete this.historyEventsCache[sid];
+      if (state && state.prefetchedEvents) {
+        events = state.prefetchedEvents;
+        state.prefetchedEvents = null;
         usedCache = true;
       } else {
-        if (sid) this.historyLoadingBySession[sid] = true;
+        if (state) state.historyLoading = true;
         let url = `/api/agents/${agent}/history?user_id=${encodeURIComponent(this.userId)}&limit=100`;
         if (sid) url += `&session_id=${encodeURIComponent(sid)}`;
         const data = await get(url);
         events = data.events || [];
       }
-      const state = this._sessionState(sid);
       if (state) {
         // Last wins for multi-compaction chains.
         const lastCompact = events.findLast(e => e.type === 'compaction');
@@ -382,7 +382,7 @@ export const historyMixin = {
       this._showRecentHistory();
     } catch { /* ignore */ }
     finally {
-      if (sid && !usedCache) this.historyLoadingBySession[sid] = false;
+      if (state && !usedCache) state.historyLoading = false;
     }
     this.scrollMessages(true);
   },
@@ -394,18 +394,19 @@ export const historyMixin = {
     const slice = all.slice(startIdx);
     this._historyLoaded = all.length - startIdx;
     this.hasMoreHistory = startIdx > 0;
-    this.messages = [];
+    const next = [];
     if (this.hasMoreHistory) {
-      this.messages.push({ type: 'separator', text: `${startIdx} earlier messages — load more ↑` });
+      next.push({ type: 'separator', text: `${startIdx} earlier messages — load more ↑` });
     }
-    this.messages.push(...slice);
+    next.push(...slice);
     if (slice.length > 0) {
-      this.messages.push({ type: 'separator', text: `${this._historyLoaded} of ${all.length} messages loaded` });
+      next.push({ type: 'separator', text: `${this._historyLoaded} of ${all.length} messages loaded` });
     }
-    // Re-point the per-session entry so in-flight stream pushes target the rebuilt array.
-    if (this.selectedSessionId) {
-      this.messagesBySession[this.selectedSessionId] = this.messages;
-    }
+    // Mutate the session's message array in place so in-flight stream pushes
+    // (which hold a reference to the same array) target the rebuilt content.
+    const arr = this.messages;
+    arr.length = 0;
+    arr.push(...next);
   },
 
   loadMoreHistory() {

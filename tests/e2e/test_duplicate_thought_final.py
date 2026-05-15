@@ -8,7 +8,7 @@ from .helpers import CONV_VIEW
 def _wait_idle(page):
     page.wait_for_function(
         f"(() => {{ const v = Alpine.$data(document.querySelector({CONV_VIEW!r})); "
-        f"return v && !v.sendingBySession[v.selectedSessionId]; }})()",
+        f"return v && !v.sessionsState[v.selectedSessionId]?.sending; }})()",
         timeout=15000,
     )
 
@@ -18,7 +18,7 @@ def _snapshot(page):
         f"""(() => {{
             const v = Alpine.$data(document.querySelector({CONV_VIEW!r}));
             const sid = v.selectedSessionId;
-            return (v.messagesBySession[sid] || []).map(m => ({{
+            return (v.sessionsState[sid]?.messages || []).map(m => ({{
                 type: m.type,
                 text: (m.text || '').slice(0, 120),
             }}));
@@ -107,8 +107,8 @@ def test_two_turns_each_dedupe_independently(chat_page, mock_chat):
     textarea.press("Enter")
     page.wait_for_function(
         f"(() => {{ const v = Alpine.$data(document.querySelector({CONV_VIEW!r})); "
-        f"const sid = v.selectedSessionId; const msgs = v.messagesBySession[sid] || []; "
-        f"return !v.sendingBySession[sid] && msgs.some(m => m.type==='agent' && (m.text||'').includes({r2!r})); }})()",
+        f"const sid = v.selectedSessionId; const s = v.sessionsState[sid]; "
+        f"return s && !s.sending && s.messages.some(m => m.type==='agent' && (m.text||'').includes({r2!r})); }})()",
         timeout=15000,
     )
 

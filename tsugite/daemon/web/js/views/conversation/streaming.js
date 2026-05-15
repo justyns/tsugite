@@ -3,8 +3,6 @@ import { escapeHtml, formatFileSize, contentBlockHtml } from '../../utils.js';
 import { finalResultBubble, appendReasoningChunk, attachReasoningTokens } from './event_types.js';
 
 export const streamingMixin = {
-  sendingBySession: {},
-  _activeReadersBySession: {},
   _scrollTimer: null,
 
   _scrollThrottled() {
@@ -58,11 +56,13 @@ export const streamingMixin = {
     const msg = this.messageText.trim();
     const agent = this.$store.app.selectedAgent;
     const sendSessionId = this.selectedSessionId;
-    if ((!msg && !this.pendingFiles.length) || !agent || !sendSessionId || this.sendingBySession[sendSessionId]) return;
+    if ((!msg && !this.pendingFiles.length) || !agent || !sendSessionId) return;
+    const sendState = this._sessionState(sendSessionId);
+    if (sendState.sending) return;
 
     const parsed = this._parseCommand(msg);
     if (parsed && !this.pendingFiles.length) {
-      this.sendingBySession[sendSessionId] = true;
+      sendState.sending = true;
       this.messageText = '';
       this._clearDraft();
       this._resetInputHeight();
@@ -75,19 +75,19 @@ export const streamingMixin = {
       } catch (e) {
         this.messages.push({ type: 'error', text: `Command error: ${e.message}` });
       } finally {
-        delete this.sendingBySession[sendSessionId];
+        sendState.sending = false;
         this.scrollMessages(true);
       }
       return;
     }
 
-    this.sendingBySession[sendSessionId] = true;
+    sendState.sending = true;
     this.messageText = '';
     this._clearDraft();
     this._resetInputHeight();
 
     // Re-resolve each call: loadHistory() may swap the array reference mid-stream.
-    const sessMessages = () => (this.messagesBySession[sendSessionId] ||= []);
+    const sessMessages = () => this._sessionState(sendSessionId).messages;
 
     let uploadedFiles = [];
     const fileNames = this.pendingFiles.map(f => f.name);
@@ -99,7 +99,7 @@ export const streamingMixin = {
         uploadedFiles = data.files || [];
       } catch (e) {
         this.messages.push({ type: 'error', text: `Upload failed: ${e.message}` });
-        delete this.sendingBySession[sendSessionId];
+        sendState.sending = false;
         return;
       }
     }
@@ -121,7 +121,7 @@ export const streamingMixin = {
       if (uploadedFiles.length) chatBody.uploaded_files = uploadedFiles;
       const resp = await streamPost(`/api/agents/${agent}/chat`, chatBody);
       const reader = resp.body.getReader();
-      this._activeReadersBySession[sendSessionId] = reader;
+      sendState.reader = reader;
       let gotResult = false;
 
       for await (const event of parseSSE(reader)) {
@@ -171,7 +171,7 @@ export const streamingMixin = {
             const bubble = finalResultBubble(event);
             if (bubble) this._pushFinalAgentBubble(arr, bubble);
           } else if (event.type === 'session_info') {
-            if (sendSessionId === this.selectedSessionId) this.updateStatusFromEvent(event);
+            this.updateStatusFromEvent(event, sendSessionId);
           } else {
             this._handleProgressEvent(event, sendSessionId);
           }
@@ -198,8 +198,8 @@ export const streamingMixin = {
       if (prog && prog.steps.length === 0) arr.pop();
       arr.push({ type: 'error', text: `Connection error: ${e.message}` });
     } finally {
-      delete this._activeReadersBySession[sendSessionId];
-      delete this.sendingBySession[sendSessionId];
+      sendState.reader = null;
+      sendState.sending = false;
       this.scrollMessages();
     }
   },
@@ -223,7 +223,7 @@ export const streamingMixin = {
   },
 
   _handleProgressEvent(event, sessionId = this.selectedSessionId) {
-    const arr = (this.messagesBySession[sessionId] ||= []);
+    const arr = this._sessionState(sessionId).messages;
 
     if (event.type === 'reasoning_content') {
       this._finalizeLiveProgress(arr);
@@ -341,11 +341,12 @@ export const streamingMixin = {
   async cancelChat() {
     const agent = this.$store.app.selectedAgent;
     const sid = this.selectedSessionId;
-    if (!agent || !sid || !this.sendingBySession[sid]) return;
+    if (!agent || !sid) return;
+    const state = this._sessionState(sid);
+    if (!state.sending) return;
     try {
       await post(`/api/agents/${agent}/chat/cancel`, { user_id: this.userId, session_id: sid });
     } catch (e) { /* best effort */ }
-    const reader = this._activeReadersBySession[sid];
-    if (reader) reader.cancel().catch(() => {});
+    if (state.reader) state.reader.cancel().catch(() => {});
   },
 };
