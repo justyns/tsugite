@@ -741,6 +741,31 @@ class SessionStore:
             self._save()
             return session
 
+    def _purge_session_state(self, session_id: str) -> None:
+        """Remove every per-session entry across all maps for `session_id`.
+
+        Caller must hold `self._lock` for the dict mutations; `_cache_lock`
+        is acquired briefly inside for the hot caches. Single point of cleanup
+        for session removal so a future per-session map can't be added without
+        teaching this method about it (matches the `SessionRouting.detach`
+        intent in the parent issue).
+        """
+        self._sessions.pop(session_id, None)
+        self._sticky_skills.pop(session_id, None)
+        self._suppressed_skills.pop(session_id, None)
+        self._reasoning_effort.pop(session_id, None)
+        self._model_overrides.pop(session_id, None)
+        self._compacting_session_ids.discard(session_id)
+        for tid, sid in list(self._thread_index.items()):
+            if sid == session_id:
+                del self._thread_index[tid]
+        for key, sid in list(self._channel_index.items()):
+            if sid == session_id:
+                del self._channel_index[key]
+        with self._cache_lock:
+            self._progress_cache.pop(session_id, None)
+            self._event_count_cache.pop(session_id, None)
+
     def _prune_schedule_sessions(self, parent_id: str) -> None:
         """Remove oldest completed schedule sessions beyond MAX_SCHEDULE_SESSIONS. Must hold lock."""
         children = [
@@ -751,7 +776,7 @@ class SessionStore:
         children.sort(key=lambda s: s.created_at)
         for s in children[: len(children) - self.MAX_SCHEDULE_SESSIONS]:
             if s.status in (SessionStatus.COMPLETED.value, SessionStatus.FAILED.value):
-                del self._sessions[s.id]
+                self._purge_session_state(s.id)
 
     def _prune_background_sessions(self, agent: str) -> None:
         """Remove oldest completed background/spawned sessions beyond MAX_BACKGROUND_SESSIONS. Must hold lock."""
@@ -766,7 +791,7 @@ class SessionStore:
             return
         children.sort(key=lambda s: s.created_at)
         for s in children[: len(children) - self.MAX_BACKGROUND_SESSIONS]:
-            del self._sessions[s.id]
+            self._purge_session_state(s.id)
 
     def get_session(self, session_id: str) -> Session:
         with self._lock:
