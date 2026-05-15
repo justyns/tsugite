@@ -51,12 +51,12 @@ class TestGetRunningIds:
         entry = ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="* * * * *")
         scheduler.add(entry)
 
-        lock = scheduler._entry_locks.setdefault("job1", asyncio.Lock())
-        await lock.acquire()
+        entry = scheduler.get("job1")
+        await entry.lock.acquire()
         try:
             assert scheduler.get_running_ids() == ["job1"]
         finally:
-            lock.release()
+            entry.lock.release()
 
         assert scheduler.get_running_ids() == []
 

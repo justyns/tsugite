@@ -7,7 +7,8 @@ import asyncio
 import json
 import logging
 import os
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
+from dataclasses import fields as dataclass_fields
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Coroutine
@@ -73,6 +74,16 @@ class ScheduleEntry:
     #   "<sid>"      -> bare session id
     target_session: str | None = None
 
+    # Concurrency lock for this entry's runs. Per-entry so two fires of the
+    # same schedule can't overlap; per-instance (not persisted) so the lock
+    # belongs to the entry it gates and disappears with it.
+    lock: asyncio.Lock = field(
+        default_factory=asyncio.Lock,
+        repr=False,
+        compare=False,
+        metadata={"persist": False},
+    )
+
     def __post_init__(self):
         if not self.created_at:
             self.created_at = datetime.now(timezone.utc).isoformat()
@@ -86,6 +97,16 @@ class ScheduleEntry:
             raise ValueError(f"execution_type must be 'agent' or 'script', got '{self.execution_type}'")
         if self.execution_type == "script" and not self.command:
             raise ValueError("command required for script execution type")
+
+
+_PERSISTED_FIELDS = frozenset(
+    f.name for f in dataclass_fields(ScheduleEntry) if f.metadata.get("persist", True)
+)
+
+
+def _entry_to_dict(entry: "ScheduleEntry") -> dict:
+    """Serialize a ScheduleEntry, skipping fields marked metadata.persist=False."""
+    return {name: getattr(entry, name) for name in _PERSISTED_FIELDS}
 
 
 @dataclass
@@ -106,7 +127,6 @@ class Scheduler:
         self._wakeup = asyncio.Event()
         self._running = False
         self._active_tasks: set[asyncio.Task] = set()
-        self._entry_locks: dict[str, asyncio.Lock] = {}
 
     async def start(self):
         self._load()
@@ -219,12 +239,11 @@ class Scheduler:
     async def _fire_schedule(self, entry: ScheduleEntry):
         from tsugite.agent_runner.models import AgentSkippedError
 
-        lock = self._entry_locks.setdefault(entry.id, asyncio.Lock())
-        if lock.locked():
+        if entry.lock.locked():
             logger.info("Schedule '%s' still running, skipping", entry.id)
             return
 
-        async with lock:
+        async with entry.lock:
             logger.info("Firing schedule '%s' (type=%s, agent=%s)", entry.id, entry.execution_type, entry.agent)
             run_conv_id = None
             try:
@@ -261,7 +280,6 @@ class Scheduler:
 
             if entry.schedule_type == "once":
                 self._schedules.pop(entry.id, None)
-                self._entry_locks.pop(entry.id, None)
             self._save()
 
     def _compute_next_run_iso(self, entry: ScheduleEntry) -> str | None:
@@ -311,7 +329,6 @@ class Scheduler:
         if schedule_id not in self._schedules:
             raise ValueError(f"Schedule '{schedule_id}' not found")
         del self._schedules[schedule_id]
-        self._entry_locks.pop(schedule_id, None)
         self._save()
         self._wakeup.set()
         logger.info("Removed schedule '%s'", schedule_id)
@@ -330,7 +347,7 @@ class Scheduler:
         self._save()
 
     def get_running_ids(self) -> list[str]:
-        return [sid for sid, lock in self._entry_locks.items() if lock.locked()]
+        return [sid for sid, entry in self._schedules.items() if entry.lock.locked()]
 
     def list(self) -> list[ScheduleEntry]:
         return list(self._schedules.values())
@@ -390,7 +407,6 @@ class Scheduler:
         ]
         for sid in to_remove:
             del self._schedules[sid]
-            self._entry_locks.pop(sid, None)
         if to_remove:
             self._save()
             logger.info("Cleaned up %d orphaned schedule(s)", len(to_remove))
@@ -466,15 +482,16 @@ class Scheduler:
             return
         try:
             data = json.loads(self._path.read_text())
+            valid_fields = _PERSISTED_FIELDS
             for sid, entry_data in data.get("schedules", {}).items():
-                self._schedules[sid] = ScheduleEntry(**entry_data)
+                self._schedules[sid] = ScheduleEntry(**{k: v for k, v in entry_data.items() if k in valid_fields})
         except (json.JSONDecodeError, TypeError, KeyError) as e:
             logger.error("Failed to load schedules from %s: %s", self._path, e)
             self._schedules = {}
 
     def _save(self):
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        data = {"schedules": {sid: asdict(entry) for sid, entry in self._schedules.items()}}
+        data = {"schedules": {sid: _entry_to_dict(entry) for sid, entry in self._schedules.items()}}
         tmp = self._path.with_suffix(".tmp")
         tmp.write_text(json.dumps(data, indent=2))
         os.replace(str(tmp), str(self._path))
