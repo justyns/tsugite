@@ -22,15 +22,14 @@ footer = ""
 
 [git]
 conventional_commits = true
-filter_unconventional = false
+filter_unconventional = true
 split_commits = false
 commit_parsers = [
     { message = "^feat", group = "Features" },
     { message = "^fix", group = "Bug Fixes" },
     { message = "^perf", group = "Performance" },
     { message = "^refactor", group = "Refactor" },
-    # docs / test / ci / chore are skipped from the changelog - users care about
-    # behavior changes, not internal hygiene. Audit trail still lives in git log.
+    # Skip noisier things
     { message = "^docs", skip = true },
     { message = "^test", skip = true },
     { message = "^ci", skip = true },
