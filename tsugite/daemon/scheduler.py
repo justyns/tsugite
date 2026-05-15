@@ -99,9 +99,7 @@ class ScheduleEntry:
             raise ValueError("command required for script execution type")
 
 
-_PERSISTED_FIELDS = frozenset(
-    f.name for f in dataclass_fields(ScheduleEntry) if f.metadata.get("persist", True)
-)
+_PERSISTED_FIELDS = frozenset(f.name for f in dataclass_fields(ScheduleEntry) if f.metadata.get("persist", True))
 
 
 def _entry_to_dict(entry: "ScheduleEntry") -> dict:

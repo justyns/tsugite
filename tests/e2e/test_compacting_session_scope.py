@@ -23,9 +23,7 @@ def _make_session(store, user_id):
 
 
 def _select(page, sid: str) -> None:
-    page.evaluate(
-        f"Alpine.$data(document.querySelector({CONV_VIEW!r})).selectSessionById({sid!r}, {{follow: false}})"
-    )
+    page.evaluate(f"Alpine.$data(document.querySelector({CONV_VIEW!r})).selectSessionById({sid!r}, {{follow: false}})")
     page.wait_for_function(
         f"Alpine.$data(document.querySelector({CONV_VIEW!r})).selectedSessionId === {sid!r}",
         timeout=3000,
@@ -71,12 +69,8 @@ def test_compacting_indicator_does_not_bleed_across_sessions(authenticated_page,
 
     page.screenshot(path="/tmp/tsugite-issue-state.png", full_page=True)
 
-    is_compacting_b = page.evaluate(
-        f"Alpine.$data(document.querySelector({CONV_VIEW!r})).compacting"
-    )
-    assert is_compacting_b is False, (
-        "session B saw 'compacting' flag flip even though session A is the one compacting"
-    )
+    is_compacting_b = page.evaluate(f"Alpine.$data(document.querySelector({CONV_VIEW!r})).compacting")
+    assert is_compacting_b is False, "session B saw 'compacting' flag flip even though session A is the one compacting"
 
     banner_count = page.locator(".console-composer .console-compaction-banner").count()
     assert banner_count == 0, "composer banner appeared on a non-compacting session"
@@ -121,9 +115,7 @@ def test_compaction_lifecycle_for_other_session_does_not_touch_viewer(authentica
             aCompacting: Alpine.$data(document.querySelector({CONV_VIEW!r})).sessionsState[{a.id!r}]?.compacting || false,
         }})"""
     )
-    assert state_during_a["compacting"] is False, (
-        "B's compacting flag flipped while A was being compacted"
-    )
+    assert state_during_a["compacting"] is False, "B's compacting flag flipped while A was being compacted"
     assert state_during_a["counts"] is None, "B's compactingCounts is non-null during A's compaction"
     assert state_during_a["phase"] is None, "B's compactingPhase is non-null during A's compaction"
     assert state_during_a["aCompacting"] is True, "A's compacting flag was not set"

@@ -24,9 +24,7 @@ def _make_session(store, user_id):
 
 
 def _select(page, sid: str) -> None:
-    page.evaluate(
-        f"Alpine.$data(document.querySelector({CONV_VIEW!r})).selectSessionById({sid!r}, {{follow: false}})"
-    )
+    page.evaluate(f"Alpine.$data(document.querySelector({CONV_VIEW!r})).selectSessionById({sid!r}, {{follow: false}})")
     page.wait_for_function(
         f"Alpine.$data(document.querySelector({CONV_VIEW!r})).selectedSessionId === {sid!r}",
         timeout=3000,
@@ -102,12 +100,12 @@ def test_per_session_state_does_not_bleed_across_sessions(authenticated_page, e2
     # B's loadStatus call on select repopulates statusInfo from the API; the assertion
     # is that A's specific marker value didn't bleed across (A had 42 messages).
     assert b_view["statusInfo"].get("message_count") != 42, f"B saw A's statusInfo: {b_view['statusInfo']}"
-    assert b_view["statusInfo"].get("model") != "gpt-a-only", f"B saw A's model in statusInfo"
+    assert b_view["statusInfo"].get("model") != "gpt-a-only", "B saw A's model in statusInfo"
     assert b_view["effort"] == "", f"B saw A's effort: {b_view['effort']!r}"
     assert b_view["model"] == "", f"B saw A's model: {b_view['model']!r}"
     assert b_view["summary"] is None, f"B saw A's compactionSummary: {b_view['summary']!r}"
-    assert b_view["compactedInto"] is None, f"B saw A's compactedIntoEvent"
-    assert b_view["liveProgress"] is None, f"B saw A's liveProgress"
+    assert b_view["compactedInto"] is None, "B saw A's compactedIntoEvent"
+    assert b_view["liveProgress"] is None, "B saw A's liveProgress"
     assert b_view["loadedSkills"] == [], f"B saw A's loadedSkills: {b_view['loadedSkills']}"
     assert b_view["compacting"] is False, "B saw A's compacting flag"
 
@@ -152,10 +150,6 @@ def test_session_state_is_single_object_not_parallel_maps(authenticated_page, e2
             return {forbidden_names!r}.filter(n => v[n] !== undefined);
         }})()"""
     )
-    assert leaked == [], (
-        f"Per-session state still exposed as parallel BySession maps: {leaked}"
-    )
-    has_state = page.evaluate(
-        f"typeof Alpine.$data(document.querySelector({CONV_VIEW!r})).sessionsState === 'object'"
-    )
+    assert leaked == [], f"Per-session state still exposed as parallel BySession maps: {leaked}"
+    has_state = page.evaluate(f"typeof Alpine.$data(document.querySelector({CONV_VIEW!r})).sessionsState === 'object'")
     assert has_state, "Consolidated sessionsState container is missing"

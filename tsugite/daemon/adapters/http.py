@@ -7,7 +7,7 @@ import mimetypes
 import re
 import shutil
 import threading
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from dataclasses import fields as dataclass_fields
 from datetime import datetime, timezone
 from pathlib import Path
@@ -401,6 +401,7 @@ class ActiveChat:
     so adding a fourth piece of per-chat state doesn't mean adding a fourth map
     and remembering to keep their lifecycles in sync.
     """
+
     backend: HTTPInteractionBackend
     progress: SSEProgressHandler
     task: Optional[asyncio.Task] = None

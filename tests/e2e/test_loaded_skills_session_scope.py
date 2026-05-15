@@ -22,9 +22,7 @@ def _make_session(store, user_id):
 
 
 def _select(page, sid: str) -> None:
-    page.evaluate(
-        f"Alpine.$data(document.querySelector({CONV_VIEW!r})).selectSessionById({sid!r}, {{follow: false}})"
-    )
+    page.evaluate(f"Alpine.$data(document.querySelector({CONV_VIEW!r})).selectSessionById({sid!r}, {{follow: false}})")
     page.wait_for_function(
         f"Alpine.$data(document.querySelector({CONV_VIEW!r})).selectedSessionId === {sid!r}",
         timeout=3000,
@@ -52,18 +50,12 @@ def test_loaded_skills_do_not_bleed_across_sessions(authenticated_page, e2e_sess
         """
     )
 
-    a_skills = page.evaluate(
-        f"Alpine.$data(document.querySelector({CONV_VIEW!r})).loadedSkills"
-    )
-    assert any(s.get("name") == "skill-a-only" for s in a_skills), (
-        "Session A should see its own loaded skill"
-    )
+    a_skills = page.evaluate(f"Alpine.$data(document.querySelector({CONV_VIEW!r})).loadedSkills")
+    assert any(s.get("name") == "skill-a-only" for s in a_skills), "Session A should see its own loaded skill"
 
     _select(page, b.id)
 
-    b_skills = page.evaluate(
-        f"Alpine.$data(document.querySelector({CONV_VIEW!r})).loadedSkills"
-    )
+    b_skills = page.evaluate(f"Alpine.$data(document.querySelector({CONV_VIEW!r})).loadedSkills")
     assert not any(s.get("name") == "skill-a-only" for s in b_skills), (
         f"Session B saw session A's loaded skill: {b_skills}"
     )
