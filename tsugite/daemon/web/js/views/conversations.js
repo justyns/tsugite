@@ -38,20 +38,16 @@ export default () => ({
   historyLoadingBySession: {},
   _prefetchInFlight: new Set(),
   loading: true,
-  compactingBySession: {},
-  compactingCountsBySession: {},
-  compactingPhaseBySession: {},
-  statusInfo: {},
+  // session_id -> per-session UI state. Single source of truth so every per-session
+  // field is added/cleared in one place instead of spread across parallel maps.
+  sessionsState: {},
   showAttachments: false,
   attachments: [],
   inputMenuOpen: false,
   showSkills: false,
-  loadedSkillsBySession: {},
   inspectingSnapshot: null,
   piExpanded: null,
   effortLevels: [],
-  sessionEffort: '',
-  sessionModel: '',
   availableModels: null,
   // session_id -> { turnCount, toolCount, statusText, lastEventTime }
   progressCache: {},
@@ -60,17 +56,55 @@ export default () => ({
     return this.$store.app.userId;
   },
 
+  _sessionState(sid) {
+    if (!sid) return null;
+    return (this.sessionsState[sid] ||= {
+      compacting: false,
+      compactingCounts: null,
+      compactingPhase: null,
+      loadedSkills: [],
+      statusInfo: {},
+      effort: '',
+      model: '',
+      compactionSummary: null,
+      compactedIntoEvent: null,
+      liveProgress: null,
+    });
+  },
+
   get compacting() {
-    return !!this.compactingBySession[this.selectedSessionId];
+    return !!this.sessionsState[this.selectedSessionId]?.compacting;
   },
   get compactingCounts() {
-    return this.compactingCountsBySession[this.selectedSessionId] || null;
+    return this.sessionsState[this.selectedSessionId]?.compactingCounts || null;
   },
   get compactingPhase() {
-    return this.compactingPhaseBySession[this.selectedSessionId] || null;
+    return this.sessionsState[this.selectedSessionId]?.compactingPhase || null;
   },
   get loadedSkills() {
-    return this.loadedSkillsBySession[this.selectedSessionId] || [];
+    return this.sessionsState[this.selectedSessionId]?.loadedSkills || [];
+  },
+  get statusInfo() {
+    return this.sessionsState[this.selectedSessionId]?.statusInfo || {};
+  },
+  get sessionEffort() {
+    return this.sessionsState[this.selectedSessionId]?.effort || '';
+  },
+  get sessionModel() {
+    return this.sessionsState[this.selectedSessionId]?.model || '';
+  },
+  get compactionSummary() {
+    return this.sessionsState[this.selectedSessionId]?.compactionSummary || null;
+  },
+  get compactedIntoEvent() {
+    return this.sessionsState[this.selectedSessionId]?.compactedIntoEvent || null;
+  },
+  get _sessionProgress() {
+    return this.sessionsState[this.selectedSessionId]?.liveProgress || null;
+  },
+  set _sessionProgress(v) {
+    const s = this._sessionState(this.selectedSessionId);
+    if (s) s.liveProgress = v;
   },
 
   get filteredCommands() {
@@ -183,21 +217,24 @@ export default () => ({
         this._handleSessionEvent(d);
       }
       if (ev.type === 'compaction_started' && d.agent === this.$store.app.selectedAgent && d.session_id) {
-        this.compactingBySession[d.session_id] = true;
-        delete this.compactingCountsBySession[d.session_id];
-        delete this.compactingPhaseBySession[d.session_id];
+        const s = this._sessionState(d.session_id);
+        s.compacting = true;
+        s.compactingCounts = null;
+        s.compactingPhase = null;
       }
       if (ev.type === 'compaction_progress' && d.agent === this.$store.app.selectedAgent && d.session_id) {
+        const s = this._sessionState(d.session_id);
         if (d.phase === 'starting') {
-          this.compactingCountsBySession[d.session_id] = { replaced_count: d.replaced_count || 0, retained_count: d.retained_count || 0 };
+          s.compactingCounts = { replaced_count: d.replaced_count || 0, retained_count: d.retained_count || 0 };
         } else {
-          this.compactingPhaseBySession[d.session_id] = d;
+          s.compactingPhase = d;
         }
       }
       if (ev.type === 'compaction_finished' && d.agent === this.$store.app.selectedAgent && d.session_id) {
-        delete this.compactingBySession[d.session_id];
-        delete this.compactingCountsBySession[d.session_id];
-        delete this.compactingPhaseBySession[d.session_id];
+        const s = this._sessionState(d.session_id);
+        s.compacting = false;
+        s.compactingCounts = null;
+        s.compactingPhase = null;
         if (this.isActiveSession && d.session_id === this.selectedSessionId) this.reload();
       }
       if (ev.type === 'reconnect' && this.$store.app.selectedAgent) {
@@ -238,10 +275,8 @@ export default () => ({
   async reload() {
     this.messages = [];
     this.resetHistory();
-    this.statusInfo = {};
-    this.loadedSkillsBySession = {};
+    this.sessionsState = {};
     this.selectedSessionMeta = null;
-    this.sessionEffort = '';
     await this.loadSessions();
     await this.loadEffortLevels();
 
@@ -314,22 +349,25 @@ export default () => ({
   },
 
   async loadSessionEffort() {
-    if (!this.selectedSessionId) { this.sessionEffort = ''; this.sessionModel = ''; return; }
+    const sid = this.selectedSessionId;
+    if (!sid) return;
+    const state = this._sessionState(sid);
     try {
-      const data = await get(`/api/sessions/${this.selectedSessionId}/settings`);
-      this.sessionEffort = data.reasoning_effort || '';
-      this.sessionModel = data.model || '';
+      const data = await get(`/api/sessions/${sid}/settings`);
+      state.effort = data.reasoning_effort || '';
+      state.model = data.model || '';
     } catch {
-      this.sessionEffort = '';
-      this.sessionModel = '';
+      state.effort = '';
+      state.model = '';
     }
   },
 
   async setSessionEffort(value) {
-    this.sessionEffort = value || '';
-    if (!this.selectedSessionId) return;
+    const sid = this.selectedSessionId;
+    if (!sid) return;
+    this._sessionState(sid).effort = value || '';
     try {
-      await patch(`/api/sessions/${this.selectedSessionId}/settings`, { reasoning_effort: value || null });
+      await patch(`/api/sessions/${sid}/settings`, { reasoning_effort: value || null });
     } catch (e) {
       console.warn('Failed to save reasoning_effort', e);
     }
@@ -349,12 +387,13 @@ export default () => ({
   },
 
   async setSessionModel(value) {
+    const sid = this.selectedSessionId;
+    if (!sid) return;
     const next = value || '';
     if (next === this.sessionModel) return;
-    this.sessionModel = next;
-    if (!this.selectedSessionId) return;
+    this._sessionState(sid).model = next;
     try {
-      await patch(`/api/sessions/${this.selectedSessionId}/settings`, { model: value || null });
+      await patch(`/api/sessions/${sid}/settings`, { model: value || null });
     } catch (e) {
       console.warn('Failed to save model override', e);
       toast(`model change failed: ${e.message || 'unknown'}`, 'error');
@@ -388,15 +427,12 @@ export default () => ({
     const agent = this.$store.app.selectedAgent;
     if (!agent) return;
     const sid = this.selectedSessionId;
+    if (!sid) return;
+    const state = this._sessionState(sid);
     try {
-      let statusUrl = `/api/agents/${agent}/status?user_id=${encodeURIComponent(this.userId)}`;
-      if (sid) statusUrl += `&session_id=${encodeURIComponent(sid)}`;
-      const data = await get(statusUrl);
-      this.statusInfo = data;
-      if (data.compacting !== undefined && sid) {
-        if (data.compacting) this.compactingBySession[sid] = true;
-        else delete this.compactingBySession[sid];
-      }
+      const data = await get(`/api/agents/${agent}/status?user_id=${encodeURIComponent(this.userId)}&session_id=${encodeURIComponent(sid)}`);
+      state.statusInfo = data;
+      if (data.compacting !== undefined) state.compacting = !!data.compacting;
       if (data.busy && data.pending_message && !this.sendingBySession[sid] &&
           !this.messages.some(m => m.type === 'user' && m.text === data.pending_message)) {
         this.messages.push({ type: 'user', text: data.pending_message });
@@ -406,8 +442,10 @@ export default () => ({
     } catch { /* ignore */ }
   },
 
-  updateStatusFromEvent(event) {
-    this.statusInfo = {
+  updateStatusFromEvent(event, sessionId) {
+    const sid = sessionId || this.selectedSessionId;
+    if (!sid) return;
+    this._sessionState(sid).statusInfo = {
       model: event.model,
       tokens: event.tokens,
       context_limit: event.context_limit,
@@ -445,8 +483,8 @@ export default () => ({
     if (!agent || !sid) return;
     try {
       await post(`/api/agents/${agent}/unload-skill`, { user_id: this.userId, name });
-      const current = this.loadedSkillsBySession[sid] || [];
-      this.loadedSkillsBySession[sid] = current.filter(s => s.name !== name);
+      const state = this._sessionState(sid);
+      state.loadedSkills = state.loadedSkills.filter(s => s.name !== name);
     } catch (e) {
       this.messages.push({ type: 'error', text: `Remove skill failed: ${e.message}` });
     }
@@ -477,8 +515,10 @@ export default () => ({
   async compactSession(retryMsg = null) {
     const agent = this.$store.app.selectedAgent;
     const sid = this.selectedSessionId;
-    if (!agent || !sid || this.sendingBySession[sid] || this.compactingBySession[sid]) return;
-    this.compactingBySession[sid] = true;
+    if (!agent || !sid || this.sendingBySession[sid]) return;
+    const state = this._sessionState(sid);
+    if (state.compacting) return;
+    state.compacting = true;
     try {
       await post(`/api/agents/${agent}/compact`, { user_id: this.userId, session_id: sid });
       await this.loadHistory();
@@ -489,7 +529,7 @@ export default () => ({
     } catch (e) {
       this.messages.push({ type: 'error', text: `Compact failed: ${e.message}` });
     } finally {
-      delete this.compactingBySession[sid];
+      state.compacting = false;
     }
   },
 
@@ -547,8 +587,6 @@ export default () => ({
       if (force || this.isAtBottom) scrollToBottom(el);
     });
   },
-
-  _sessionProgress: null,
 
   _updateProgressCache(d) {
     const id = d.session_id;

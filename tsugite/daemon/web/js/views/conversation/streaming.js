@@ -132,19 +132,17 @@ export const streamingMixin = {
             sessMessages().push({ type: 'info', text: 'Generation stopped.' });
             break;
           } else if (event.type === 'compacting') {
-            this.compactingBySession[sendSessionId] = true;
+            this._sessionState(sendSessionId).compacting = true;
           } else if (event.type === 'compacted') {
-            delete this.compactingBySession[sendSessionId];
+            this._sessionState(sendSessionId).compacting = false;
           } else if (event.type === 'skill_loaded') {
-            const list = (this.loadedSkillsBySession[sendSessionId] ||= []);
-            if (!list.some(s => s.name === event.name)) {
-              list.push({ name: event.name, description: event.description || '' });
+            const state = this._sessionState(sendSessionId);
+            if (!state.loadedSkills.some(s => s.name === event.name)) {
+              state.loadedSkills.push({ name: event.name, description: event.description || '' });
             }
           } else if (event.type === 'skill_unloaded') {
-            const list = this.loadedSkillsBySession[sendSessionId];
-            if (list) {
-              this.loadedSkillsBySession[sendSessionId] = list.filter(s => s.name !== event.name);
-            }
+            const state = this._sessionState(sendSessionId);
+            state.loadedSkills = state.loadedSkills.filter(s => s.name !== event.name);
           } else if (event.type === 'ask_user') {
             this._finalizeLiveProgress(sessMessages());
             sessMessages().push({
@@ -279,8 +277,9 @@ export const streamingMixin = {
       }
     } else if (event.type === 'init') {
       prog.statusText = `Agent: ${event.agent}`;
-      if (event.model && sessionId === this.selectedSessionId) {
-        this.statusInfo = { ...this.statusInfo, model: event.model };
+      if (event.model) {
+        const state = this._sessionState(sessionId);
+        if (state) state.statusInfo = { ...state.statusInfo, model: event.model };
       }
     } else if (event.type === 'content_block') {
       prog.steps.push({ html: contentBlockHtml(event.name, event.content || '') });
