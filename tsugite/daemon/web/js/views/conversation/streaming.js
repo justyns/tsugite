@@ -132,9 +132,9 @@ export const streamingMixin = {
             sessMessages().push({ type: 'info', text: 'Generation stopped.' });
             break;
           } else if (event.type === 'compacting') {
-            this.compacting = true;
+            this.compactingBySession[sendSessionId] = true;
           } else if (event.type === 'compacted') {
-            this.compacting = false;
+            delete this.compactingBySession[sendSessionId];
           } else if (event.type === 'skill_loaded') {
             if (!this.loadedSkills.some(s => s.name === event.name)) {
               this.loadedSkills.push({ name: event.name, description: event.description || '' });

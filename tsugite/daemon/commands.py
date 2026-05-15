@@ -110,19 +110,19 @@ async def cmd_compact(adapter: BaseAdapter, user_id: str, message: str | None = 
     if session is None or session.message_count == 0:
         return "No conversation to compact."
 
-    if not adapter.session_store.begin_compaction(user_id, adapter.agent_name):
+    old_id = session.id
+    if not adapter.session_store.begin_compaction(user_id, adapter.agent_name, session_id=old_id):
         return "Compaction already in progress."
 
-    old_id = session.id
-    adapter._broadcast_compaction("compaction_started", adapter.agent_name)
+    adapter._broadcast_compaction("compaction_started", adapter.agent_name, old_id)
     new_session = None
     try:
         new_session = await adapter._compact_session(session.id, instructions=message, reason="manual")
     except Exception as e:
         return f"Compaction failed: {e}"
     finally:
-        adapter.session_store.end_compaction(user_id, adapter.agent_name)
-        adapter._broadcast_compaction("compaction_finished", adapter.agent_name)
+        adapter.session_store.end_compaction(user_id, adapter.agent_name, session_id=old_id)
+        adapter._broadcast_compaction("compaction_finished", adapter.agent_name, old_id)
 
     if new_session is None:
         return f"Nothing to compact (id: {old_id[:12]})"

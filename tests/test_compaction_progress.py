@@ -116,6 +116,15 @@ async def test_run_compaction_broadcasts_counts_and_phase(workspace_dir, tmp_pat
     for p in progress_payloads:
         assert p["agent"] == "test-agent"
 
+    # Every compaction event must carry session_id so the UI can scope the
+    # spinner to the actual compacting session (bug 297). Without it, all
+    # sessions in the agent see the indicator.
+    for event_type, payload in bus.events:
+        if event_type.startswith("compaction_"):
+            assert payload.get("session_id") == conv_id, (
+                f"{event_type} broadcast missing session_id for cross-session scoping"
+            )
+
 
 @pytest.mark.asyncio
 async def test_run_compaction_finishes_even_with_no_event_bus(workspace_dir, tmp_path):

@@ -38,9 +38,9 @@ export default () => ({
   historyLoadingBySession: {},
   _prefetchInFlight: new Set(),
   loading: true,
-  compacting: false,
-  compactingCounts: null,
-  compactingPhase: null,
+  compactingBySession: {},
+  compactingCountsBySession: {},
+  compactingPhaseBySession: {},
   statusInfo: {},
   showAttachments: false,
   attachments: [],
@@ -58,6 +58,16 @@ export default () => ({
   // Getters must stay here — spread loses get descriptors
   get userId() {
     return this.$store.app.userId;
+  },
+
+  get compacting() {
+    return !!this.compactingBySession[this.selectedSessionId];
+  },
+  get compactingCounts() {
+    return this.compactingCountsBySession[this.selectedSessionId] || null;
+  },
+  get compactingPhase() {
+    return this.compactingPhaseBySession[this.selectedSessionId] || null;
   },
 
   get filteredCommands() {
@@ -169,23 +179,23 @@ export default () => ({
         this._updateProgressCache(d);
         this._handleSessionEvent(d);
       }
-      if (ev.type === 'compaction_started' && d.agent === this.$store.app.selectedAgent) {
-        this.compacting = true;
-        this.compactingCounts = null;
-        this.compactingPhase = null;
+      if (ev.type === 'compaction_started' && d.agent === this.$store.app.selectedAgent && d.session_id) {
+        this.compactingBySession[d.session_id] = true;
+        delete this.compactingCountsBySession[d.session_id];
+        delete this.compactingPhaseBySession[d.session_id];
       }
-      if (ev.type === 'compaction_progress' && d.agent === this.$store.app.selectedAgent) {
+      if (ev.type === 'compaction_progress' && d.agent === this.$store.app.selectedAgent && d.session_id) {
         if (d.phase === 'starting') {
-          this.compactingCounts = { replaced_count: d.replaced_count || 0, retained_count: d.retained_count || 0 };
+          this.compactingCountsBySession[d.session_id] = { replaced_count: d.replaced_count || 0, retained_count: d.retained_count || 0 };
         } else {
-          this.compactingPhase = d;
+          this.compactingPhaseBySession[d.session_id] = d;
         }
       }
-      if (ev.type === 'compaction_finished' && d.agent === this.$store.app.selectedAgent) {
-        this.compacting = false;
-        this.compactingCounts = null;
-        this.compactingPhase = null;
-        if (this.isActiveSession) this.reload();
+      if (ev.type === 'compaction_finished' && d.agent === this.$store.app.selectedAgent && d.session_id) {
+        delete this.compactingBySession[d.session_id];
+        delete this.compactingCountsBySession[d.session_id];
+        delete this.compactingPhaseBySession[d.session_id];
+        if (this.isActiveSession && d.session_id === this.selectedSessionId) this.reload();
       }
       if (ev.type === 'reconnect' && this.$store.app.selectedAgent) {
         this.reload();
@@ -374,13 +384,17 @@ export default () => ({
   async loadStatus() {
     const agent = this.$store.app.selectedAgent;
     if (!agent) return;
+    const sid = this.selectedSessionId;
     try {
       let statusUrl = `/api/agents/${agent}/status?user_id=${encodeURIComponent(this.userId)}`;
-      if (this.selectedSessionId) statusUrl += `&session_id=${encodeURIComponent(this.selectedSessionId)}`;
+      if (sid) statusUrl += `&session_id=${encodeURIComponent(sid)}`;
       const data = await get(statusUrl);
       this.statusInfo = data;
-      if (data.compacting !== undefined) this.compacting = data.compacting;
-      if (data.busy && data.pending_message && !this.sendingBySession[this.selectedSessionId] &&
+      if (data.compacting !== undefined && sid) {
+        if (data.compacting) this.compactingBySession[sid] = true;
+        else delete this.compactingBySession[sid];
+      }
+      if (data.busy && data.pending_message && !this.sendingBySession[sid] &&
           !this.messages.some(m => m.type === 'user' && m.text === data.pending_message)) {
         this.messages.push({ type: 'user', text: data.pending_message });
         this.messages.push({ type: 'progress', steps: [], statusText: 'Working...', turnCount: 0, toolCount: 0 });
@@ -457,10 +471,11 @@ export default () => ({
 
   async compactSession(retryMsg = null) {
     const agent = this.$store.app.selectedAgent;
-    if (!agent || this.sendingBySession[this.selectedSessionId] || this.compacting) return;
-    this.compacting = true;
+    const sid = this.selectedSessionId;
+    if (!agent || !sid || this.sendingBySession[sid] || this.compactingBySession[sid]) return;
+    this.compactingBySession[sid] = true;
     try {
-      await post(`/api/agents/${agent}/compact`, { user_id: this.userId, session_id: this.selectedSessionId });
+      await post(`/api/agents/${agent}/compact`, { user_id: this.userId, session_id: sid });
       await this.loadHistory();
       if (retryMsg) {
         this.messageText = retryMsg;
@@ -469,7 +484,7 @@ export default () => ({
     } catch (e) {
       this.messages.push({ type: 'error', text: `Compact failed: ${e.message}` });
     } finally {
-      this.compacting = false;
+      delete this.compactingBySession[sid];
     }
   },
 

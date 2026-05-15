@@ -355,12 +355,17 @@ class BaseAdapter(ABC):
         if custom_logger and hasattr(custom_logger, "ui_handler"):
             custom_logger.ui_handler._emit(event_type, {})
 
-    def _broadcast_compaction(self, event_type: str, agent: str, **payload: Any) -> None:
-        """Broadcast a compaction lifecycle/progress event to SSE subscribers."""
+    def _broadcast_compaction(self, event_type: str, agent: str, session_id: str, **payload: Any) -> None:
+        """Broadcast a compaction lifecycle/progress event to SSE subscribers.
+
+        session_id is required so per-session UI state (the "compacting…"
+        spinner, composer-disabled flag) can scope itself to the actual
+        compacting session instead of bleeding to every session in the agent.
+        """
         if not self.event_bus:
             return
         try:
-            self.event_bus.emit(event_type, {"agent": agent, **payload})
+            self.event_bus.emit(event_type, {"agent": agent, "session_id": session_id, **payload})
         except Exception:
             logger.debug("Failed to broadcast %s", event_type)
 
@@ -740,18 +745,18 @@ class BaseAdapter(ABC):
         for non-default or non-interactive sources.
         """
         new_session: Optional[Session] = None
-        if self.session_store.begin_compaction(user_id, self.agent_name):
+        if self.session_store.begin_compaction(user_id, self.agent_name, session_id=conv_id):
             self._emit_ui(custom_logger, "compacting")
-            self._broadcast_compaction("compaction_started", self.agent_name)
+            self._broadcast_compaction("compaction_started", self.agent_name, conv_id)
 
             def progress_cb(payload: Dict[str, Any]) -> None:
-                self._broadcast_compaction("compaction_progress", self.agent_name, **payload)
+                self._broadcast_compaction("compaction_progress", self.agent_name, conv_id, **payload)
 
             try:
                 new_session = await self._compact_session(conv_id, reason=reason, progress_callback=progress_cb)
             finally:
-                self.session_store.end_compaction(user_id, self.agent_name)
-                self._broadcast_compaction("compaction_finished", self.agent_name)
+                self.session_store.end_compaction(user_id, self.agent_name, session_id=conv_id)
+                self._broadcast_compaction("compaction_finished", self.agent_name, conv_id)
         else:
             self._emit_ui(custom_logger, "compacting_waiting")
             done = await asyncio.to_thread(self.session_store.wait_for_compaction, user_id, self.agent_name)

@@ -802,7 +802,9 @@ class HTTPServer:
                 "context_limit": adapter.session_store.get_context_limit(adapter.agent_name),
                 "threshold": adapter.session_store.get_compaction_threshold(adapter.agent_name),
                 "message_count": message_count,
-                "compacting": adapter.session_store.is_compacting(user_id, adapter.agent_name),
+                "compacting": adapter.session_store.is_compacting(
+                    user_id, adapter.agent_name, session_id=session.id if session else None
+                ),
                 "metadata": session_metadata,
                 "busy": backend is not None,
                 "pending_message": backend.pending_message if backend else None,
@@ -993,10 +995,10 @@ class HTTPServer:
         agent_name = request.path_params["agent"]
         old_conv_id = session.id
 
-        if not adapter.session_store.begin_compaction(user_id, adapter.agent_name):
+        if not adapter.session_store.begin_compaction(user_id, adapter.agent_name, session_id=old_conv_id):
             return JSONResponse({"error": "compaction already in progress"}, status_code=409)
 
-        adapter._broadcast_compaction("compaction_started", agent_name)
+        adapter._broadcast_compaction("compaction_started", agent_name, old_conv_id)
         new_session = None
         try:
             instructions = body.get("instructions")
@@ -1006,8 +1008,8 @@ class HTTPServer:
             logger.exception("Compaction failed for agent %s", adapter.agent_name)
             return JSONResponse({"error": f"compaction failed: {msg}"}, status_code=500)
         finally:
-            adapter.session_store.end_compaction(user_id, adapter.agent_name)
-            adapter._broadcast_compaction("compaction_finished", agent_name)
+            adapter.session_store.end_compaction(user_id, adapter.agent_name, session_id=old_conv_id)
+            adapter._broadcast_compaction("compaction_finished", agent_name, old_conv_id)
 
         self.event_bus.emit("agent_status", {"agent": agent_name})
         if new_session:
