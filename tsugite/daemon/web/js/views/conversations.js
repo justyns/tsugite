@@ -46,7 +46,7 @@ export default () => ({
   attachments: [],
   inputMenuOpen: false,
   showSkills: false,
-  loadedSkills: [],
+  loadedSkillsBySession: {},
   inspectingSnapshot: null,
   piExpanded: null,
   effortLevels: [],
@@ -68,6 +68,9 @@ export default () => ({
   },
   get compactingPhase() {
     return this.compactingPhaseBySession[this.selectedSessionId] || null;
+  },
+  get loadedSkills() {
+    return this.loadedSkillsBySession[this.selectedSessionId] || [];
   },
 
   get filteredCommands() {
@@ -236,7 +239,7 @@ export default () => ({
     this.messages = [];
     this.resetHistory();
     this.statusInfo = {};
-    this.loadedSkills = [];
+    this.loadedSkillsBySession = {};
     this.selectedSessionMeta = null;
     this.sessionEffort = '';
     await this.loadSessions();
@@ -438,10 +441,12 @@ export default () => ({
 
   async removeLoadedSkill(name) {
     const agent = this.$store.app.selectedAgent;
-    if (!agent) return;
+    const sid = this.selectedSessionId;
+    if (!agent || !sid) return;
     try {
       await post(`/api/agents/${agent}/unload-skill`, { user_id: this.userId, name });
-      this.loadedSkills = this.loadedSkills.filter(s => s.name !== name);
+      const current = this.loadedSkillsBySession[sid] || [];
+      this.loadedSkillsBySession[sid] = current.filter(s => s.name !== name);
     } catch (e) {
       this.messages.push({ type: 'error', text: `Remove skill failed: ${e.message}` });
     }
