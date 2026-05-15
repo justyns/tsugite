@@ -5,8 +5,8 @@ agent erroneously also shows the indicator because the client tracks compaction
 state as a single global flag and the server-side SSE event doesn't carry
 session_id.
 
-The fix threads session_id through the SSE payload and converts the client
-to a per-session map (mirroring sendingBySession / messagesBySession).
+The fix threads session_id through the SSE payload and routes per-session
+state through the consolidated `sessionsState[sid]` container.
 """
 
 from tsugite.daemon.session_store import Session, SessionSource
@@ -118,7 +118,7 @@ def test_compaction_lifecycle_for_other_session_does_not_touch_viewer(authentica
             compacting: Alpine.$data(document.querySelector({CONV_VIEW!r})).compacting,
             counts: Alpine.$data(document.querySelector({CONV_VIEW!r})).compactingCounts,
             phase: Alpine.$data(document.querySelector({CONV_VIEW!r})).compactingPhase,
-            byA: Alpine.$data(document.querySelector({CONV_VIEW!r})).compactingBySession[{a.id!r}],
+            aCompacting: Alpine.$data(document.querySelector({CONV_VIEW!r})).sessionsState[{a.id!r}]?.compacting || false,
         }})"""
     )
     assert state_during_a["compacting"] is False, (
@@ -126,7 +126,7 @@ def test_compaction_lifecycle_for_other_session_does_not_touch_viewer(authentica
     )
     assert state_during_a["counts"] is None, "B's compactingCounts is non-null during A's compaction"
     assert state_during_a["phase"] is None, "B's compactingPhase is non-null during A's compaction"
-    assert state_during_a["byA"] is True, "A's entry in the map was not set"
+    assert state_during_a["aCompacting"] is True, "A's compacting flag was not set"
 
     page.evaluate(
         f"""
@@ -142,8 +142,8 @@ def test_compaction_lifecycle_for_other_session_does_not_touch_viewer(authentica
     state_after = page.evaluate(
         f"""({{
             compacting: Alpine.$data(document.querySelector({CONV_VIEW!r})).compacting,
-            byA: Alpine.$data(document.querySelector({CONV_VIEW!r})).compactingBySession[{a.id!r}] || false,
+            aCompacting: Alpine.$data(document.querySelector({CONV_VIEW!r})).sessionsState[{a.id!r}]?.compacting || false,
         }})"""
     )
-    assert state_after["byA"] is False, "A's entry was not cleared after compaction_finished"
+    assert state_after["aCompacting"] is False, "A's compacting flag was not cleared after compaction_finished"
     assert state_after["compacting"] is False, "B's view shows compacting after A's compaction finished"

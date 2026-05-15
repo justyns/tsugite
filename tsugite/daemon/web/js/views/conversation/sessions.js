@@ -136,15 +136,13 @@ export const sessionsMixin = {
     const isFirstVisit = !this.messagesBySession[convId] || this.messagesBySession[convId].length === 0;
     if (!this.messagesBySession[convId]) this.messagesBySession[convId] = [];
     this.messages = this.messagesBySession[convId];
-    if (isFirstVisit) this.statusInfo = {};
+    this._sessionState(convId);  // ensure defaults are initialized for this session
     this.resetHistory();
 
     const hash = `conversations?session=${encodeURIComponent(convId)}`;
     if (location.hash.slice(1) !== hash) location.hash = hash;
 
     this.isActiveSession = this._isMyInteractive(session);
-
-    if (isFirstVisit) this._sessionProgress = null;
     // Interactive sessions stay state='active' between turns, so state alone
     // isn't a "turn in flight" signal. status_text is non-empty only mid-turn.
     // lastEventTime gates against the never-started case where the server
@@ -205,7 +203,6 @@ export const sessionsMixin = {
     this._saveDraftNow();
     this.selectedSessionId = null;
     this.selectedSessionMeta = null;
-    this._sessionProgress = null;
     this.messages = [];
     this.resetHistory();
     this.isActiveSession = true;

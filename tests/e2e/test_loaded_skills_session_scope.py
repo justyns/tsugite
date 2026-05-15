@@ -46,7 +46,7 @@ def test_loaded_skills_do_not_bleed_across_sessions(authenticated_page, e2e_sess
     page.evaluate(
         f"""
         const v = Alpine.$data(document.querySelector({CONV_VIEW!r}));
-        (v.loadedSkillsBySession ||= {{}})[{a.id!r}] = [
+        v._sessionState({a.id!r}).loadedSkills = [
             {{ name: 'skill-a-only', description: 'streamed in session A' }}
         ];
         """
