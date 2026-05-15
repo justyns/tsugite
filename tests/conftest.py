@@ -33,6 +33,31 @@ def event_loop_policy():
 
 
 @pytest.fixture(autouse=True)
+def no_nest_asyncio_in_tests():
+    """Prevent interactive tools from applying nest_asyncio during tests.
+
+    `nest_asyncio.apply()` monkey-patches asyncio internals globally, and on
+    Python 3.14 those patches leave `asyncio.current_task()` returning None for
+    subsequent tests — which then breaks `asyncio.wait_for` / `asyncio.Timeout`
+    in unrelated tests run later in the same worker. Tests already mock the
+    questionary calls that need nest_asyncio in real interactive use, so the
+    patch is unnecessary here. Pin the flag to True and replace the function
+    with a no-op for the duration of the test.
+    """
+    import tsugite.tools.interactive as interactive_mod
+
+    original_applied = interactive_mod._nest_asyncio_applied
+    original_fn = interactive_mod._ensure_nest_asyncio
+    interactive_mod._nest_asyncio_applied = True
+    interactive_mod._ensure_nest_asyncio = lambda: None
+    try:
+        yield
+    finally:
+        interactive_mod._nest_asyncio_applied = original_applied
+        interactive_mod._ensure_nest_asyncio = original_fn
+
+
+@pytest.fixture(autouse=True)
 def clear_agent_context():
     """Clear agent context state between tests.
 
