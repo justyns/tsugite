@@ -145,9 +145,7 @@ def _reset_daemon_state(e2e_session_store, e2e_server):
         e2e_session_store._thread_index.clear()
         e2e_session_store._channel_index.clear()
         e2e_session_store._suppressed_skills.clear()
-    server._active_backends.clear()
-    server._active_progress.clear()
-    server._active_chat_tasks.clear()
+    server._active_chats.clear()
     yield
 
 
