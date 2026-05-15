@@ -516,7 +516,10 @@ class BaseAdapter(ABC):
         if not self.event_bus:
             return
         try:
-            self.event_bus.emit("history_update", {"agent": self.agent_name})
+            payload: Dict[str, Any] = {"agent": self.agent_name}
+            if conv_id:
+                payload["session_id"] = conv_id
+            self.event_bus.emit("history_update", payload)
             if conv_id:
                 self.event_bus.emit("session_update", {"action": "updated", "id": conv_id})
         except Exception as e:
@@ -841,7 +844,7 @@ class BaseAdapter(ABC):
                     self.session_store.drop_sticky(conv_id, name)
                     if self.event_bus:
                         try:
-                            self.event_bus.emit(SkillUnloadedEvent(skill_name=name))
+                            self.event_bus.emit(SkillUnloadedEvent(skill_name=name, session_id=conv_id))
                         except Exception:
                             logger.debug("Failed to emit SkillUnloadedEvent for %s", name, exc_info=True)
         except Exception:
