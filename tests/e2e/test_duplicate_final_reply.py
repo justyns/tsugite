@@ -20,11 +20,10 @@ def _setup_session(page, sid, *, sending, user_msg=None):
         f"""({{sid, userMsg, sending}}) => {{
             const v = Alpine.$data(document.querySelector({CONV_VIEW!r}));
             v.selectedSessionId = sid;
-            v.messages = [];
-            v.messagesBySession[sid] = v.messages;
-            if (sending) v.sendingBySession[sid] = true;
-            else delete v.sendingBySession[sid];
-            if (userMsg) v.messagesBySession[sid].push({{type: 'user', text: userMsg}});
+            const s = v._sessionState(sid);
+            s.messages.length = 0;
+            s.sending = !!sending;
+            if (userMsg) s.messages.push({{type: 'user', text: userMsg}});
         }}""",
         {"sid": sid, "userMsg": user_msg, "sending": sending},
     )
@@ -47,7 +46,7 @@ def _snapshot_messages(page, sid):
     return page.evaluate(
         f"""(sid) => {{
             const v = Alpine.$data(document.querySelector({CONV_VIEW!r}));
-            return (v.messagesBySession[sid] || []).map(m => ({{type: m.type, text: (m.text || '').slice(0, 60)}}));
+            return (v.sessionsState[sid]?.messages || []).map(m => ({{type: m.type, text: (m.text || '').slice(0, 60)}}));
         }}""",
         sid,
     )
@@ -80,7 +79,7 @@ def test_history_update_during_send_does_not_duplicate_streamed_bubble(chat_page
         page.evaluate(
             f"""({{sid, response}}) => {{
                 const v = Alpine.$data(document.querySelector({CONV_VIEW!r}));
-                (v.messagesBySession[sid] ||= []).push({{type: 'agent', text: response}});
+                v._sessionState(sid).messages.push({{type: 'agent', text: response}});
             }}""",
             {"sid": session.id, "response": response_text},
         )
@@ -127,7 +126,7 @@ def test_history_update_after_send_completes_reloads(chat_page, e2e_adapter, e2e
         page.evaluate(
             f"""(sid) => {{
                 const v = Alpine.$data(document.querySelector({CONV_VIEW!r}));
-                delete v.sendingBySession[sid];
+                v._sessionState(sid).sending = false;
             }}""",
             session.id,
         )

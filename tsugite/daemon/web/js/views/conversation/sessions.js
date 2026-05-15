@@ -69,15 +69,16 @@ export const sessionsMixin = {
       for (const s of this.allSessions) {
         if (s.state !== 'running' && s.state !== 'active') continue;
         liveIds.add(s.id);
+        const state = this._sessionState(s.id);
         // Server clears status_text on turn-end; reconcile so a missed SSE can't keep a stale cache alive.
         if (s.progress?.status_text === '') {
-          delete this.progressCache[s.id];
-        } else if (s.progress && !this.progressCache[s.id]) {
-          this.progressCache[s.id] = progressFromPayload(s.progress);
+          state.progress = null;
+        } else if (s.progress && !state.progress) {
+          state.progress = progressFromPayload(s.progress);
         }
       }
-      for (const id of Object.keys(this.progressCache)) {
-        if (!liveIds.has(id)) delete this.progressCache[id];
+      for (const [id, st] of Object.entries(this.sessionsState)) {
+        if (st.progress && !liveIds.has(id)) st.progress = null;
       }
       try { localStorage.setItem(cacheKey, JSON.stringify(this.allSessions)); } catch { /* quota or disabled */ }
     } catch {
@@ -133,10 +134,8 @@ export const sessionsMixin = {
     this.selectedSessionId = convId;
     this.selectedSessionMeta = session;
     this._persistSelectedSession(convId);
-    const isFirstVisit = !this.messagesBySession[convId] || this.messagesBySession[convId].length === 0;
-    if (!this.messagesBySession[convId]) this.messagesBySession[convId] = [];
-    this.messages = this.messagesBySession[convId];
-    this._sessionState(convId);  // ensure defaults are initialized for this session
+    const state = this._sessionState(convId);
+    const isFirstVisit = state.messages.length === 0;
     this.resetHistory();
 
     const hash = `conversations?session=${encodeURIComponent(convId)}`;
@@ -147,7 +146,7 @@ export const sessionsMixin = {
     // isn't a "turn in flight" signal. status_text is non-empty only mid-turn.
     // lastEventTime gates against the never-started case where the server
     // returns its default "Starting..." for sessions with zero events.
-    const cached = this.progressCache[session.id] || progressFromPayload(session.progress);
+    const cached = state.progress || progressFromPayload(session.progress);
     const liveTurn = !!cached?.statusText && !!cached?.lastEventTime;
     this.loadStatus();
     // On revisit, the in-memory bubbles (including a streaming progress trace)
@@ -157,7 +156,7 @@ export const sessionsMixin = {
     this.loadSessionEffort();
     this._restoreDraft();
     this._markSessionViewed(session);
-    if (isFirstVisit && !this.sendingBySession[convId] && liveTurn) {
+    if (isFirstVisit && !state.sending && liveTurn) {
       await historyPromise;
       if (this.selectedSessionId !== convId) return;
       this._rehydrateProgressFromEvents(convId);
@@ -203,7 +202,6 @@ export const sessionsMixin = {
     this._saveDraftNow();
     this.selectedSessionId = null;
     this.selectedSessionMeta = null;
-    this.messages = [];
     this.resetHistory();
     this.isActiveSession = true;
     this._persistSelectedSession(null);
@@ -419,7 +417,7 @@ export const sessionsMixin = {
     if (!s) return '';
     const running = s.state === 'running' || s.state === 'active';
     if (!running) return '';
-    const cached = this.progressCache[s.id] || progressFromPayload(s.progress);
+    const cached = this.sessionsState[s.id]?.progress || progressFromPayload(s.progress);
     if (!cached) return 'Starting...';
     const parts = [];
     if (cached.turnCount) parts.push(`Turn ${cached.turnCount}`);
@@ -434,7 +432,7 @@ export const sessionsMixin = {
   isSessionProgressFresh(s) {
     if (!s) return false;
     if (s.state !== 'running' && s.state !== 'active') return false;
-    const cached = this.progressCache[s.id];
+    const cached = this.sessionsState[s.id]?.progress;
     // Mid-turn entries carry a non-empty statusText ('Starting...', 'Turn N...',
     // 'Tool: bash', 'Waiting on LLM (12s)', etc); turn_end resets it to ''. So
     // statusText is the truthy "in flight" signal even during long silent tools

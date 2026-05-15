@@ -28,15 +28,6 @@ export default () => ({
   ...streamingMixin,
   ...inputMixin,
 
-  // Data owned by orchestrator
-  messages: [],
-  // session_id -> bubbles. Stream pushes target the original session even after the user switches.
-  messagesBySession: {},
-  // session_id -> raw history events, populated by boot prefetch and consumed (single-use) by loadHistory.
-  historyEventsCache: {},
-  // session_id -> bool. Drives the spinner in the conversation pane during a real network fetch.
-  historyLoadingBySession: {},
-  _prefetchInFlight: new Set(),
   loading: true,
   // session_id -> per-session UI state. Single source of truth so every per-session
   // field is added/cleared in one place instead of spread across parallel maps.
@@ -49,8 +40,6 @@ export default () => ({
   piExpanded: null,
   effortLevels: [],
   availableModels: null,
-  // session_id -> { turnCount, toolCount, statusText, lastEventTime }
-  progressCache: {},
   // Getters must stay here — spread loses get descriptors
   get userId() {
     return this.$store.app.userId;
@@ -59,6 +48,13 @@ export default () => ({
   _sessionState(sid) {
     if (!sid) return null;
     return (this.sessionsState[sid] ||= {
+      messages: [],
+      sending: false,
+      reader: null,
+      historyLoading: false,
+      prefetchedEvents: null,
+      prefetching: false,
+      progress: null,
       compacting: false,
       compactingCounts: null,
       compactingPhase: null,
@@ -72,6 +68,20 @@ export default () => ({
     });
   },
 
+  get messages() {
+    const s = this._sessionState(this.selectedSessionId);
+    return s ? s.messages : [];
+  },
+  set messages(v) {
+    const s = this._sessionState(this.selectedSessionId);
+    if (s) s.messages = v;
+  },
+  get sending() {
+    return !!this.sessionsState[this.selectedSessionId]?.sending;
+  },
+  get historyLoading() {
+    return !!this.sessionsState[this.selectedSessionId]?.historyLoading;
+  },
   get compacting() {
     return !!this.sessionsState[this.selectedSessionId]?.compacting;
   },
@@ -184,8 +194,8 @@ export default () => ({
       if (ev.type === 'history_update' && d.agent === this.$store.app.selectedAgent) {
         // Per-chat streaming reader is authoritative mid-turn; reloading
         // races its final_result push. Reconciliation happens via the next
-        // reload once sendingBySession clears.
-        if (this.isActiveSession && !this.sendingBySession[this.selectedSessionId]) {
+        // reload once the session's `sending` flag clears.
+        if (this.isActiveSession && !this.sending) {
           this._debouncedLoadHistory();
         }
       }
@@ -268,12 +278,11 @@ export default () => ({
     if (this._historyDebounceTimer) clearTimeout(this._historyDebounceTimer);
     if (this._relTimeTimer) clearInterval(this._relTimeTimer);
     if (this._onVisibilityChange) document.removeEventListener('visibilitychange', this._onVisibilityChange);
-    Object.values(this._activeReadersBySession).forEach(r => r.cancel().catch(() => {}));
+    Object.values(this.sessionsState).forEach(s => { if (s.reader) s.reader.cancel().catch(() => {}); });
     this.pendingFiles.forEach(f => { if (f.previewUrl) URL.revokeObjectURL(f.previewUrl); });
   },
 
   async reload() {
-    this.messages = [];
     this.resetHistory();
     this.sessionsState = {};
     this.selectedSessionMeta = null;
@@ -323,18 +332,17 @@ export default () => ({
 
   async _prefetchHistory(sessionId) {
     if (!sessionId) return;
-    if (this.historyEventsCache[sessionId]) return;
-    if (this.messagesBySession[sessionId]?.length) return;
-    if (this._prefetchInFlight.has(sessionId)) return;
+    const state = this._sessionState(sessionId);
+    if (state.prefetchedEvents || state.messages.length || state.prefetching) return;
     const agent = this.$store.app.selectedAgent;
     if (!agent) return;
-    this._prefetchInFlight.add(sessionId);
+    state.prefetching = true;
     try {
       const url = `/api/agents/${agent}/history?user_id=${encodeURIComponent(this.userId)}&limit=100&session_id=${encodeURIComponent(sessionId)}`;
       const data = await get(url);
-      this.historyEventsCache[sessionId] = data.events || [];
+      state.prefetchedEvents = data.events || [];
     } catch { /* non-fatal */ }
-    this._prefetchInFlight.delete(sessionId);
+    state.prefetching = false;
   },
 
   async loadEffortLevels() {
@@ -433,7 +441,7 @@ export default () => ({
       const data = await get(`/api/agents/${agent}/status?user_id=${encodeURIComponent(this.userId)}&session_id=${encodeURIComponent(sid)}`);
       state.statusInfo = data;
       if (data.compacting !== undefined) state.compacting = !!data.compacting;
-      if (data.busy && data.pending_message && !this.sendingBySession[sid] &&
+      if (data.busy && data.pending_message && !state.sending &&
           !this.messages.some(m => m.type === 'user' && m.text === data.pending_message)) {
         this.messages.push({ type: 'user', text: data.pending_message });
         this.messages.push({ type: 'progress', steps: [], statusText: 'Working...', turnCount: 0, toolCount: 0 });
@@ -515,9 +523,9 @@ export default () => ({
   async compactSession(retryMsg = null) {
     const agent = this.$store.app.selectedAgent;
     const sid = this.selectedSessionId;
-    if (!agent || !sid || this.sendingBySession[sid]) return;
+    if (!agent || !sid) return;
     const state = this._sessionState(sid);
-    if (state.compacting) return;
+    if (state.sending || state.compacting) return;
     state.compacting = true;
     try {
       await post(`/api/agents/${agent}/compact`, { user_id: this.userId, session_id: sid });
@@ -591,27 +599,28 @@ export default () => ({
   _updateProgressCache(d) {
     const id = d.session_id;
     if (!id) return;
+    const state = this._sessionState(id);
     const evType = d.event_type;
     if (SESSION_END_EVENTS.has(evType)) {
-      delete this.progressCache[id];
+      state.progress = null;
       return;
     }
     const now = d.timestamp || new Date().toISOString();
     if (TURN_END_EVENTS.has(evType)) {
       // Keep lastEventTime so sessionProgressLabel knows we're between turns
       // (otherwise it falls back to "Starting...").
-      const entry = this.progressCache[id];
+      const entry = state.progress;
       if (entry && !entry.turnCount && !entry.toolCount && !entry.statusText) {
         entry.lastEventTime = now;
       } else {
-        this.progressCache[id] = { turnCount: 0, toolCount: 0, statusText: '', lastEventTime: now };
+        state.progress = { turnCount: 0, toolCount: 0, statusText: '', lastEventTime: now };
       }
       return;
     }
-    let entry = this.progressCache[id];
+    let entry = state.progress;
     if (!entry) {
       entry = { turnCount: 0, toolCount: 0, statusText: 'Starting...', lastEventTime: now };
-      this.progressCache[id] = entry;
+      state.progress = entry;
     }
     let { turnCount, toolCount, statusText } = entry;
     if (evType === 'turn_start' && typeof d.turn === 'number' && d.turn > turnCount) turnCount = d.turn;
@@ -620,7 +629,7 @@ export default () => ({
     if (label) statusText = label;
     const derivedChanged = turnCount !== entry.turnCount || toolCount !== entry.toolCount || statusText !== entry.statusText;
     if (derivedChanged) {
-      this.progressCache[id] = { turnCount, toolCount, statusText, lastEventTime: now };
+      state.progress = { turnCount, toolCount, statusText, lastEventTime: now };
     } else if (entry.lastEventTime !== now) {
       entry.lastEventTime = now;
     }
@@ -633,13 +642,13 @@ export default () => ({
     // progress bubble while it's running; bail to avoid double-rendering.
     // Once it finishes (or after a reload), this session's sending flag is
     // cleared and the global SSE feed becomes the source of in-flight progress.
-    if (this.sendingBySession[d.session_id]) return;
+    if (this.sessionsState[d.session_id]?.sending) return;
 
     const evType = d.event_type;
     // Defense-in-depth: even if a future adapter broadcasts turn-end events,
     // loadHistory (fired by the paired history_update) reconciles them from
-    // JSONL. Pushing here would race the per-chat reader's clear of
-    // sendingBySession and produce duplicate bubbles.
+    // JSONL. Pushing here would race the per-chat reader's clear of the
+    // session's `sending` flag and produce duplicate bubbles.
     if (TURN_END_EVENTS.has(evType)) return;
 
     if (!this._sessionProgress) {

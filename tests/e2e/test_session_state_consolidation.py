@@ -138,6 +138,13 @@ def test_session_state_is_single_object_not_parallel_maps(authenticated_page, e2
         "sessionModelBySession",
         "compactionSummaryBySession",
         "compactedIntoEventBySession",
+        "messagesBySession",
+        "sendingBySession",
+        "_activeReadersBySession",
+        "historyEventsCache",
+        "historyLoadingBySession",
+        "progressCache",
+        "_prefetchInFlight",
     ]
     leaked = page.evaluate(
         f"""(() => {{
