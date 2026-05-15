@@ -211,6 +211,15 @@ class Session:
     last_viewed_at: str = ""
     superseded_by: Optional[str] = None
 
+    # Per-session UI / runtime state. Used to live in parallel maps on
+    # SessionStore; consolidated here so cleanup is automatic and the values
+    # survive daemon restart.
+    sticky_skills: dict[str, int] = field(default_factory=dict)
+    suppressed_skills: list[str] = field(default_factory=list)
+    reasoning_effort: Optional[str] = None
+    model_override: Optional[str] = None
+    compacting: bool = False
+
     @property
     def is_primary(self) -> bool:
         return bool(self.metadata.get(METADATA_PRIMARY_FLAG))
@@ -257,29 +266,11 @@ class SessionStore:
         # Index: (channel_id, agent) -> session_id for channel session lookup
         self._channel_index: dict[tuple[str, str], str] = {}
 
-        # Per-session compaction locks: (user_id, agent) -> Event
-        # Event is unset while compaction is in progress, set when done.
+        # Per-(user_id, agent) compaction synchronization. Event is unset while
+        # compaction is in progress, set when done. Per-session compacting state
+        # is stored on Session itself (Session.compacting); this map only gates
+        # concurrent begin_compaction calls.
         self._compaction_events: dict[tuple[str, str], threading.Event] = {}
-
-        # Session ids currently being compacted. Maintained alongside
-        # _compaction_events so `is_compacting(session_id=...)` can answer the
-        # per-session question the UI needs to scope the "compacting…"
-        # indicator. The (user, agent) lock semantics are unchanged.
-        self._compacting_session_ids: set[str] = set()
-
-        # Per-session set of skill names that should not be (re)loaded for the
-        # rest of this session's lifetime. In-memory only; resets on daemon restart.
-        self._suppressed_skills: dict[str, set[str]] = {}
-
-        # Per-session sticky skills with TTL counters: session_id -> name -> turns_unused.
-        # A trigger-matched or load_skill()-loaded skill becomes sticky so it persists
-        # across user messages. The counter increments each turn the skill isn't
-        # referenced; when it exceeds the skill's TTL the skill is dropped from the set.
-        # In-memory only; resets on daemon restart.
-        self._sticky_skills: dict[str, dict[str, int]] = {}
-
-        self._reasoning_effort: dict[str, str] = {}
-        self._model_overrides: dict[str, str] = {}
 
         # Hot caches keyed by session_id, populated lazily on first read and
         # then updated incrementally inside `append_event`. Without these,
@@ -313,7 +304,7 @@ class SessionStore:
 
         If another caller is already compacting this session, returns False.
         Pass session_id so per-session UI state (e.g. the "compacting…" chip)
-        can be scoped via `is_compacting(session_id=...)`.
+        is also scoped via Session.compacting.
         """
         with self._lock:
             key = (user_id, agent)
@@ -321,7 +312,10 @@ class SessionStore:
                 return False
             self._compaction_events[key] = threading.Event()
             if session_id:
-                self._compacting_session_ids.add(session_id)
+                session = self._sessions.get(session_id)
+                if session:
+                    session.compacting = True
+                    self._mark_dirty()
             return True
 
     def end_compaction(self, user_id: str, agent: str, session_id: str | None = None) -> None:
@@ -330,7 +324,10 @@ class SessionStore:
             key = (user_id, agent)
             event = self._compaction_events.pop(key, None)
             if session_id:
-                self._compacting_session_ids.discard(session_id)
+                session = self._sessions.get(session_id)
+                if session:
+                    session.compacting = False
+                    self._mark_dirty()
         if event:
             event.set()
 
@@ -345,41 +342,42 @@ class SessionStore:
     def is_compacting(self, user_id: str, agent: str, session_id: str | None = None) -> bool:
         """Check if a session is currently being compacted.
 
-        With session_id: per-session answer (use this from the UI status API).
-        Without: the legacy per-(user, agent) answer.
+        With session_id: per-session answer from Session.compacting.
+        Without: per-(user, agent) lock state.
         """
         with self._lock:
             if session_id is not None:
-                return session_id in self._compacting_session_ids
+                session = self._sessions.get(session_id)
+                return bool(session and session.compacting)
             return (user_id, agent) in self._compaction_events
 
-    # ── Skill suppression (non-persisted) ──
+    # ── Per-session skill / model / effort state (lives on Session) ──
 
     def suppress_skill(self, session_id: str, skill_name: str) -> None:
         """Mark a skill as suppressed for the given session.
 
         AgentPreparer will skip this skill on subsequent turns so it does not
-        reload from auto_load_skills or trigger matches. Cleared on daemon
-        restart by design.
+        reload from auto_load_skills or trigger matches.
         """
         with self._lock:
-            self._suppressed_skills.setdefault(session_id, set()).add(skill_name)
+            session = self._sessions.get(session_id)
+            if session and skill_name not in session.suppressed_skills:
+                session.suppressed_skills.append(skill_name)
+                self._mark_dirty()
 
     def unsuppress_skill(self, session_id: str, skill_name: str) -> None:
         """Remove a skill from the session's suppression set."""
         with self._lock:
-            skills = self._suppressed_skills.get(session_id)
-            if skills:
-                skills.discard(skill_name)
-                if not skills:
-                    self._suppressed_skills.pop(session_id, None)
+            session = self._sessions.get(session_id)
+            if session and skill_name in session.suppressed_skills:
+                session.suppressed_skills.remove(skill_name)
+                self._mark_dirty()
 
     def get_suppressed_skills(self, session_id: str) -> set[str]:
         """Return a copy of the session's suppressed skill names."""
         with self._lock:
-            return set(self._suppressed_skills.get(session_id, ()))
-
-    # ── Sticky skills (non-persisted TTL state) ──
+            session = self._sessions.get(session_id)
+            return set(session.suppressed_skills) if session else set()
 
     def mark_sticky(self, session_id: str, skill_name: str) -> None:
         """Mark a skill as sticky for the session and reset its unused-turn counter.
@@ -388,43 +386,48 @@ class SessionStore:
         again any time it's referenced (so the counter restarts at 0).
         """
         with self._lock:
-            self._sticky_skills.setdefault(session_id, {})[skill_name] = 0
+            session = self._sessions.get(session_id)
+            if session:
+                session.sticky_skills[skill_name] = 0
+                self._mark_dirty()
 
     def drop_sticky(self, session_id: str, skill_name: str) -> None:
         """Remove a skill from the sticky set."""
         with self._lock:
-            bucket = self._sticky_skills.get(session_id)
-            if bucket:
-                bucket.pop(skill_name, None)
-                if not bucket:
-                    self._sticky_skills.pop(session_id, None)
+            session = self._sessions.get(session_id)
+            if session and skill_name in session.sticky_skills:
+                del session.sticky_skills[skill_name]
+                self._mark_dirty()
 
     def get_sticky_skills(self, session_id: str) -> dict[str, int]:
         """Return a copy of the session's sticky skill counters."""
         with self._lock:
-            return dict(self._sticky_skills.get(session_id, ()))
+            session = self._sessions.get(session_id)
+            return dict(session.sticky_skills) if session else {}
 
     def set_reasoning_effort(self, session_id: str, value: str | None) -> None:
         with self._lock:
-            if value:
-                self._reasoning_effort[session_id] = value
-            else:
-                self._reasoning_effort.pop(session_id, None)
+            session = self._sessions.get(session_id)
+            if session:
+                session.reasoning_effort = value or None
+                self._mark_dirty()
 
     def get_reasoning_effort(self, session_id: str) -> str | None:
         with self._lock:
-            return self._reasoning_effort.get(session_id)
+            session = self._sessions.get(session_id)
+            return session.reasoning_effort if session else None
 
     def set_model_override(self, session_id: str, value: str | None) -> None:
         with self._lock:
-            if value:
-                self._model_overrides[session_id] = value
-            else:
-                self._model_overrides.pop(session_id, None)
+            session = self._sessions.get(session_id)
+            if session:
+                session.model_override = value or None
+                self._mark_dirty()
 
     def get_model_override(self, session_id: str) -> str | None:
         with self._lock:
-            return self._model_overrides.get(session_id)
+            session = self._sessions.get(session_id)
+            return session.model_override if session else None
 
     def set_agent_override(self, session_id: str, value: str | None) -> None:
         """Update the agent associated with a session.
@@ -455,14 +458,15 @@ class SessionStore:
         TTL here — that's a frontmatter/config concern).
         """
         with self._lock:
-            bucket = self._sticky_skills.get(session_id)
-            if not bucket:
+            session = self._sessions.get(session_id)
+            if not session or not session.sticky_skills:
                 return
-            for name in list(bucket):
+            for name in list(session.sticky_skills):
                 if name in referenced:
-                    bucket[name] = 0
+                    session.sticky_skills[name] = 0
                 else:
-                    bucket[name] += 1
+                    session.sticky_skills[name] += 1
+            self._mark_dirty()
 
     # ── Interactive session management ──
 
@@ -635,6 +639,13 @@ class SessionStore:
                 title=old_session.title,
                 pinned=old_session.pinned,
                 pin_position=old_session.pin_position,
+                # Carry per-session UI/runtime state forward — compaction is "same
+                # conversation" from the user's POV, so suppressions, sticky-skill
+                # TTL counters, and effort/model overrides should follow the rotation.
+                sticky_skills=dict(old_session.sticky_skills),
+                suppressed_skills=list(old_session.suppressed_skills),
+                reasoning_effort=old_session.reasoning_effort,
+                model_override=old_session.model_override,
             )
             # Preserve original conversation start so <session_started> in the
             # message context reflects the user's perceived session age, not
@@ -649,33 +660,19 @@ class SessionStore:
             if thread_id:
                 self._thread_index[thread_id] = new_id
 
-            # Carry skill suppressions forward so a user's "remove this skill" intent
-            # persists across compaction, and drop the old entry so the dict doesn't
-            # accumulate orphans.
-            suppressed = self._suppressed_skills.pop(session_id, None)
-            if suppressed:
-                self._suppressed_skills[new_id] = suppressed
-
-            # Sticky skill counters carry forward too — compaction is "same conversation"
-            # from the user's POV, so an already-loaded sticky skill should keep its TTL.
-            sticky = self._sticky_skills.pop(session_id, None)
-            if sticky:
-                self._sticky_skills[new_id] = sticky
-
-            effort = self._reasoning_effort.pop(session_id, None)
-            if effort:
-                self._reasoning_effort[new_id] = effort
-
-            model = self._model_overrides.pop(session_id, None)
-            if model:
-                self._model_overrides[new_id] = model
-
             # Mark old session as completed and superseded so it stops appearing in
             # the default sidebar list (the new session is the live continuation).
             old_session.status = SessionStatus.COMPLETED.value
             old_session.superseded_by = new_id
             old_session.pinned = False
             old_session.pin_position = None
+            # The new session owns the per-session UI/runtime state now; clear
+            # the old's so superseded sessions don't carry orphan state.
+            old_session.sticky_skills = {}
+            old_session.suppressed_skills = []
+            old_session.reasoning_effort = None
+            old_session.model_override = None
+            old_session.compacting = False
 
             self._save()
         self._evict_progress_cache(session_id)
@@ -742,20 +739,16 @@ class SessionStore:
             return session
 
     def _purge_session_state(self, session_id: str) -> None:
-        """Remove every per-session entry across all maps for `session_id`.
+        """Remove a session plus its derived indexes and hot caches.
 
-        Caller must hold `self._lock` for the dict mutations; `_cache_lock`
-        is acquired briefly inside for the hot caches. Single point of cleanup
-        for session removal so a future per-session map can't be added without
-        teaching this method about it (matches the `SessionRouting.detach`
-        intent in the parent issue).
+        Per-session runtime state lives on the Session itself (sticky_skills,
+        suppressed_skills, reasoning_effort, model_override, compacting) so it
+        drops with the session. What still needs explicit cleanup: the reverse
+        lookup indexes (thread_id / channel_id → session_id) and the hot caches
+        keyed by session_id. Caller holds `self._lock`; `_cache_lock` is taken
+        briefly inside.
         """
         self._sessions.pop(session_id, None)
-        self._sticky_skills.pop(session_id, None)
-        self._suppressed_skills.pop(session_id, None)
-        self._reasoning_effort.pop(session_id, None)
-        self._model_overrides.pop(session_id, None)
-        self._compacting_session_ids.discard(session_id)
         for tid, sid in list(self._thread_index.items()):
             if sid == session_id:
                 del self._thread_index[tid]
@@ -1253,6 +1246,12 @@ class SessionStore:
                 session.status = SessionStatus.FAILED.value
                 session.error = "Daemon restarted while session was active"
                 session.last_active = datetime.now(timezone.utc).isoformat()
+                changed = True
+            # A session that was mid-compaction at restart can't still be — the
+            # in-memory lock didn't survive. Clear the flag so the UI doesn't
+            # show a stuck "compacting…" indicator.
+            if session.compacting:
+                session.compacting = False
                 changed = True
         if changed:
             self._save()

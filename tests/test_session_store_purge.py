@@ -1,13 +1,10 @@
-"""Tests for parallel-map cleanup on session removal (umbrella #299).
+"""Tests for `_purge_session_state` after the parallel-map consolidation (#299).
 
-`_prune_schedule_sessions` and `_prune_background_sessions` currently delete
-the session from `_sessions` but leave entries in the parallel maps
-(`_thread_index`, `_channel_index`, `_sticky_skills`, `_suppressed_skills`,
-`_reasoning_effort`, `_model_overrides`, `_compacting_session_ids`, hot
-caches) — a slow leak over the daemon's uptime.
-
-The fix consolidates cleanup into a single `_purge_session_state(session_id)`
-helper so every removal path can call one method and not forget a map.
+Per-session UI/runtime state (sticky_skills, suppressed_skills, reasoning_effort,
+model_override, compacting) now lives on Session itself, so deleting the session
+takes that state with it. What `_purge_session_state` still cleans up:
+- reverse-lookup indexes (`_thread_index`, `_channel_index` entries pointing here)
+- hot caches keyed by session_id (`_progress_cache`, `_event_count_cache`)
 """
 
 import pytest
@@ -32,8 +29,8 @@ def _make_session(store, *, sid, agent="test-agent", source=SessionSource.BACKGR
     return session
 
 
-def _populate_parallel_state(store, sid):
-    """Set every per-session map for `sid` so the cleanup assertions cover them all."""
+def _populate_state(store, sid):
+    """Seed every per-session field plus an index and cache entry for `sid`."""
     store.mark_sticky(sid, "skill-a")
     store.suppress_skill(sid, "skill-b")
     store.set_reasoning_effort(sid, "high")
@@ -44,40 +41,54 @@ def _populate_parallel_state(store, sid):
 
 
 def _assert_clean(store, sid):
+    """After purge, neither the session nor any derived index/cache reference it."""
     assert sid not in store._sessions
-    assert sid not in store._sticky_skills
-    assert sid not in store._suppressed_skills
-    assert sid not in store._reasoning_effort
-    assert sid not in store._model_overrides
-    assert sid not in store._compacting_session_ids
-    assert sid not in store._progress_cache
-    assert sid not in store._event_count_cache
     assert sid not in store._thread_index.values()
     assert not any(v == sid for v in store._channel_index.values())
+    assert sid not in store._progress_cache
+    assert sid not in store._event_count_cache
 
 
-def test_purge_session_state_clears_every_parallel_map(store):
-    """Direct unit test for the purge helper."""
+def test_purge_session_state_removes_session_and_derived_indexes(store):
     session = _make_session(store, sid="bg-1", metadata={"thread_id": "thread-1"})
-    _populate_parallel_state(store, session.id)
+    _populate_state(store, session.id)
 
-    assert session.id in store._sticky_skills  # sanity: populated
-    assert session.id in store._compacting_session_ids
     assert store._thread_index.get("thread-1") == session.id
+    assert session.id in store._event_count_cache
 
     store._purge_session_state(session.id)
     _assert_clean(store, session.id)
 
 
-def test_prune_background_purges_parallel_maps(store):
-    """Pruning a background session must not leak its routing/state entries."""
+def test_per_session_state_lives_on_session_and_drops_with_it(store):
+    """Sticky/suppressed/effort/model/compacting are now Session fields, so
+    deleting the session takes them along — no parallel maps to clean."""
+    session = _make_session(store, sid="bg-2")
+    _populate_state(store, session.id)
+
+    assert session.sticky_skills == {"skill-a": 0}
+    assert session.suppressed_skills == ["skill-b"]
+    assert session.reasoning_effort == "high"
+    assert session.model_override == "openai:gpt-4o-mini"
+    assert session.compacting is True
+
+    store._purge_session_state(session.id)
+    # State is gone with the session — accessors return defaults.
+    assert store.get_sticky_skills(session.id) == {}
+    assert store.get_suppressed_skills(session.id) == set()
+    assert store.get_reasoning_effort(session.id) is None
+    assert store.get_model_override(session.id) is None
+    assert store.is_compacting("user1", "test-agent", session_id=session.id) is False
+
+
+def test_prune_background_purges_derived_indexes(store):
+    """Pruning a background session must also drop its thread/channel index entries."""
     keep_ids = [f"bg-keep-{i}" for i in range(store.MAX_BACKGROUND_SESSIONS)]
     for sid in keep_ids:
         _make_session(store, sid=sid)
 
     leaked = _make_session(store, sid="bg-old", metadata={"thread_id": "leaked-thread"})
-    _populate_parallel_state(store, leaked.id)
-    # Create_session bumps last_active; force this one to look like the oldest.
+    _populate_state(store, leaked.id)
     leaked.created_at = "2020-01-01T00:00:00+00:00"
 
     _make_session(store, sid="bg-new")
@@ -85,8 +96,7 @@ def test_prune_background_purges_parallel_maps(store):
     _assert_clean(store, leaked.id)
 
 
-def test_prune_schedule_purges_parallel_maps(store):
-    """Pruning a schedule child session must purge too."""
+def test_prune_schedule_purges_derived_indexes(store):
     parent = _make_session(store, sid="parent-1", source=SessionSource.INTERACTIVE.value)
     keep_ids = [f"sched-keep-{i}" for i in range(store.MAX_SCHEDULE_SESSIONS)]
     for sid in keep_ids:
@@ -108,7 +118,7 @@ def test_prune_schedule_purges_parallel_maps(store):
         metadata={"thread_id": "leaked-sched-thread"},
     )
     store.create_session(leaked)
-    _populate_parallel_state(store, leaked.id)
+    _populate_state(store, leaked.id)
     leaked.created_at = "2020-01-01T00:00:00+00:00"
 
     overflow = Session(
@@ -121,3 +131,17 @@ def test_prune_schedule_purges_parallel_maps(store):
     store.create_session(overflow)
 
     _assert_clean(store, leaked.id)
+
+
+def test_recover_stale_sessions_clears_compacting_on_restart(tmp_path):
+    """Persisted compacting=True from a crashed daemon must reset on reload —
+    the in-memory lock didn't survive, so the flag would otherwise stick forever."""
+    path = tmp_path / "session_store.json"
+    first = SessionStore(path)
+    session = first.get_or_create_interactive("alice", "test-agent")
+    first.begin_compaction("alice", "test-agent", session_id=session.id)
+    first.flush()
+    assert first.get_session(session.id).compacting is True
+
+    second = SessionStore(path)
+    assert second.get_session(session.id).compacting is False
