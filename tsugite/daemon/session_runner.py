@@ -327,7 +327,7 @@ class SessionRunner:
 
         self._store.update_session(session_id, last_active=datetime.now(timezone.utc).isoformat())
         if self._event_bus:
-            self._event_bus.emit("history_update", {"agent": session.agent})
+            self._event_bus.emit("history_update", {"agent": session.agent, "session_id": session_id})
         return result
 
     def get_active_sessions(self) -> list[Session]:

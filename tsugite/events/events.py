@@ -77,6 +77,7 @@ class SkillLoadedEvent(BaseEvent):
     event_type: EventType = Field(default=EventType.SKILL_LOADED, frozen=True)
     skill_name: str
     description: Optional[str] = None
+    session_id: Optional[str] = None
 
 
 class SkillUnloadedEvent(BaseEvent):
@@ -84,6 +85,7 @@ class SkillUnloadedEvent(BaseEvent):
 
     event_type: EventType = Field(default=EventType.SKILL_UNLOADED, frozen=True)
     skill_name: str
+    session_id: Optional[str] = None
 
 
 class SkillLoadFailedEvent(BaseEvent):

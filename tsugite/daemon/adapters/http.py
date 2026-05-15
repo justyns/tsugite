@@ -1440,7 +1440,7 @@ class HTTPServer:
                     progress._emit("final_result", {"result": response})
 
                 self.event_bus.emit("agent_status", {"agent": agent_name})
-                self.event_bus.emit("history_update", {"agent": agent_name})
+                self.event_bus.emit("history_update", {"agent": agent_name, "session_id": target_session_id})
 
                 try:
                     refreshed = adapter.session_store.get_session(target_session_id)

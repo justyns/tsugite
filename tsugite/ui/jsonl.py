@@ -136,13 +136,19 @@ class JSONLUIHandler:
         self._emit("error", {"error": event.error, "step": event.step})
 
     def _handle_skill_loaded(self, event: SkillLoadedEvent) -> None:
-        self._emit("skill_loaded", {"name": event.skill_name, "description": event.description or ""})
+        payload = {"name": event.skill_name, "description": event.description or ""}
+        if event.session_id:
+            payload["session_id"] = event.session_id
+        self._emit("skill_loaded", payload)
 
     def _handle_skill_load_failed(self, event: SkillLoadFailedEvent) -> None:
         self._emit("warning", {"message": f"Failed to load skill '{event.skill_name}': {event.error_message}"})
 
     def _handle_skill_unloaded(self, event: SkillUnloadedEvent) -> None:
-        self._emit("skill_unloaded", {"name": event.skill_name})
+        payload = {"name": event.skill_name}
+        if event.session_id:
+            payload["session_id"] = event.session_id
+        self._emit("skill_unloaded", payload)
 
     def _handle_file_io(self, event) -> None:
         self._emit(

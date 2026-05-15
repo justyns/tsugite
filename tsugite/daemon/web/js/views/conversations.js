@@ -192,10 +192,16 @@ export default () => ({
       const d = ev.data || {};
 
       if (ev.type === 'history_update' && d.agent === this.$store.app.selectedAgent) {
-        // Per-chat streaming reader is authoritative mid-turn; reloading
-        // races its final_result push. Reconciliation happens via the next
-        // reload once the session's `sending` flag clears.
-        if (this.isActiveSession && !this.sending) {
+        // If the event carries a session_id, only reload when it matches the
+        // viewed session — avoids waking every tab on the agent when one
+        // session's turn completes. Falls back to the legacy agent-scope path
+        // for events that predate the session_id plumbing.
+        if (d.session_id && d.session_id !== this.selectedSessionId) {
+          // no-op: turn completed in some other session this tab isn't viewing
+        } else if (this.isActiveSession && !this.sending) {
+          // Per-chat streaming reader is authoritative mid-turn; reloading
+          // races its final_result push. Reconciliation happens via the next
+          // reload once the session's `sending` flag clears.
           this._debouncedLoadHistory();
         }
       }
