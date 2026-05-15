@@ -9,7 +9,13 @@ import pytest
 
 from tsugite.daemon.adapters.base import BaseAdapter, ChannelContext
 from tsugite.daemon.config import AgentConfig, DaemonConfig
-from tsugite.daemon.session_store import SessionStore
+from tsugite.daemon.session_store import Session, SessionSource, SessionStore
+
+
+def _seed_session(store, sid="session-1", agent="test-agent"):
+    """Insert a minimal Session record so per-session state has somewhere to live."""
+    store.create_session(Session(id=sid, agent=agent, source=SessionSource.INTERACTIVE.value))
+    return sid
 
 
 class _StubAdapter(BaseAdapter):
@@ -148,7 +154,7 @@ class TestSessionStoreInteractive:
 
 
 class TestSessionStoreSkillSuppression:
-    """Per-session skill suppression tracked on SessionStore."""
+    """Per-session skill suppression stored on Session.suppressed_skills."""
 
     def test_default_empty(self, tmp_path):
         store = SessionStore(tmp_path / "session_store.json")
@@ -156,23 +162,28 @@ class TestSessionStoreSkillSuppression:
 
     def test_suppress_adds_to_set(self, tmp_path):
         store = SessionStore(tmp_path / "session_store.json")
+        _seed_session(store)
         store.suppress_skill("session-1", "skill-a")
         store.suppress_skill("session-1", "skill-b")
         assert store.get_suppressed_skills("session-1") == {"skill-a", "skill-b"}
 
     def test_suppression_isolated_per_session(self, tmp_path):
         store = SessionStore(tmp_path / "session_store.json")
+        _seed_session(store, "session-1")
+        _seed_session(store, "session-2")
         store.suppress_skill("session-1", "skill-a")
         assert store.get_suppressed_skills("session-2") == set()
 
     def test_unsuppress_removes(self, tmp_path):
         store = SessionStore(tmp_path / "session_store.json")
+        _seed_session(store)
         store.suppress_skill("session-1", "skill-a")
         store.unsuppress_skill("session-1", "skill-a")
         assert store.get_suppressed_skills("session-1") == set()
 
     def test_get_returns_copy(self, tmp_path):
         store = SessionStore(tmp_path / "session_store.json")
+        _seed_session(store)
         store.suppress_skill("session-1", "skill-a")
         snapshot = store.get_suppressed_skills("session-1")
         snapshot.add("skill-b")
@@ -180,40 +191,36 @@ class TestSessionStoreSkillSuppression:
 
     def test_suppress_same_skill_is_idempotent(self, tmp_path):
         store = SessionStore(tmp_path / "session_store.json")
+        _seed_session(store)
         store.suppress_skill("session-1", "skill-a")
         store.suppress_skill("session-1", "skill-a")
         assert store.get_suppressed_skills("session-1") == {"skill-a"}
 
     def test_unsuppress_unknown_is_noop(self, tmp_path):
         store = SessionStore(tmp_path / "session_store.json")
-        # unsuppress on a session with no entry at all
+        # unsuppress on a session that doesn't exist is a no-op
         store.unsuppress_skill("ghost-session", "skill-a")
         assert store.get_suppressed_skills("ghost-session") == set()
-        # unsuppress on a session with a different entry
+        # unsuppress a skill that isn't suppressed leaves the set unchanged
+        _seed_session(store)
         store.suppress_skill("session-1", "skill-a")
         store.unsuppress_skill("session-1", "skill-b")
         assert store.get_suppressed_skills("session-1") == {"skill-a"}
 
-    def test_unsuppress_cleans_empty_session_entry(self, tmp_path):
-        """Empty-set entries shouldn't accumulate across many sessions."""
-        store = SessionStore(tmp_path / "session_store.json")
-        store.suppress_skill("session-1", "skill-a")
-        store.unsuppress_skill("session-1", "skill-a")
-        assert "session-1" not in store._suppressed_skills
-
-    def test_suppression_is_not_persisted_across_reload(self, tmp_path):
-        """In-memory only: a fresh SessionStore loses prior suppression."""
+    def test_suppression_survives_reload_after_save(self, tmp_path):
+        """Suppressed-skills now live on Session and persist across daemon restart."""
         path = tmp_path / "session_store.json"
         first = SessionStore(path)
+        _seed_session(first)
         first.suppress_skill("session-1", "skill-a")
-        assert first.get_suppressed_skills("session-1") == {"skill-a"}
+        first.flush()
 
         second = SessionStore(path)
-        assert second.get_suppressed_skills("session-1") == set()
+        assert second.get_suppressed_skills("session-1") == {"skill-a"}
 
     def test_suppression_carries_through_compaction(self, tmp_path):
         """Compacting a session migrates suppressions to the new session_id and
-        drops the old entry so the dict doesn't leak orphaned keys."""
+        clears them off the predecessor so it doesn't carry orphan state."""
         store = SessionStore(tmp_path / "session_store.json")
         session = store.get_or_create_interactive("alice", "test-agent")
         store.suppress_skill(session.id, "skill-a")
@@ -223,22 +230,21 @@ class TestSessionStoreSkillSuppression:
 
         assert new_session.id != session.id
         assert store.get_suppressed_skills(new_session.id) == {"skill-a", "skill-b"}
-        assert session.id not in store._suppressed_skills
+        assert store.get_suppressed_skills(session.id) == set()
 
     def test_compaction_without_suppression_is_noop(self, tmp_path):
-        """Compacting a session that never had suppressions leaves the dict empty."""
         store = SessionStore(tmp_path / "session_store.json")
         session = store.get_or_create_interactive("alice", "test-agent")
         new_session = store.compact_session(session.id)
 
         assert store.get_suppressed_skills(new_session.id) == set()
-        assert new_session.id not in store._suppressed_skills
 
     def test_suppress_is_thread_safe(self, tmp_path):
         """Concurrent suppress calls converge without lost updates."""
         import threading
 
         store = SessionStore(tmp_path / "session_store.json")
+        _seed_session(store)
         names = [f"skill-{i}" for i in range(40)]
 
         def worker(subset):
@@ -257,7 +263,7 @@ class TestSessionStoreSkillSuppression:
 
 
 class TestSessionStoreStickySkills:
-    """Per-session sticky skills + TTL counter state on SessionStore."""
+    """Per-session sticky skills + TTL counter state on Session.sticky_skills."""
 
     def test_default_empty(self, tmp_path):
         store = SessionStore(tmp_path / "session_store.json")
@@ -265,11 +271,13 @@ class TestSessionStoreStickySkills:
 
     def test_mark_sticky_creates_entry_with_zero_counter(self, tmp_path):
         store = SessionStore(tmp_path / "session_store.json")
+        _seed_session(store)
         store.mark_sticky("session-1", "skill-a")
         assert store.get_sticky_skills("session-1") == {"skill-a": 0}
 
     def test_mark_sticky_resets_counter(self, tmp_path):
         store = SessionStore(tmp_path / "session_store.json")
+        _seed_session(store)
         store.mark_sticky("session-1", "skill-a")
         store.bump_unused_counters("session-1", referenced=set())
         assert store.get_sticky_skills("session-1") == {"skill-a": 1}
@@ -278,6 +286,7 @@ class TestSessionStoreStickySkills:
 
     def test_bump_increments_unreferenced_resets_referenced(self, tmp_path):
         store = SessionStore(tmp_path / "session_store.json")
+        _seed_session(store)
         store.mark_sticky("session-1", "stale")
         store.mark_sticky("session-1", "fresh")
         store.bump_unused_counters("session-1", referenced={"fresh"})
@@ -285,30 +294,35 @@ class TestSessionStoreStickySkills:
 
     def test_bump_with_no_sticky_is_noop(self, tmp_path):
         store = SessionStore(tmp_path / "session_store.json")
+        _seed_session(store)
         store.bump_unused_counters("session-1", referenced={"anything"})
         assert store.get_sticky_skills("session-1") == {}
 
     def test_drop_sticky(self, tmp_path):
         store = SessionStore(tmp_path / "session_store.json")
+        _seed_session(store)
         store.mark_sticky("session-1", "skill-a")
         store.drop_sticky("session-1", "skill-a")
         assert store.get_sticky_skills("session-1") == {}
-        assert "session-1" not in store._sticky_skills
 
     def test_drop_sticky_unknown_is_noop(self, tmp_path):
         store = SessionStore(tmp_path / "session_store.json")
         store.drop_sticky("ghost", "skill-a")
+        _seed_session(store)
         store.mark_sticky("session-1", "skill-a")
         store.drop_sticky("session-1", "skill-b")
         assert store.get_sticky_skills("session-1") == {"skill-a": 0}
 
     def test_isolated_per_session(self, tmp_path):
         store = SessionStore(tmp_path / "session_store.json")
+        _seed_session(store, "session-1")
+        _seed_session(store, "session-2")
         store.mark_sticky("session-1", "skill-a")
         assert store.get_sticky_skills("session-2") == {}
 
     def test_get_returns_copy(self, tmp_path):
         store = SessionStore(tmp_path / "session_store.json")
+        _seed_session(store)
         store.mark_sticky("session-1", "skill-a")
         snapshot = store.get_sticky_skills("session-1")
         snapshot["skill-b"] = 9
@@ -324,14 +338,18 @@ class TestSessionStoreStickySkills:
 
         assert new_session.id != session.id
         assert store.get_sticky_skills(new_session.id) == {"skill-a": 1}
-        assert session.id not in store._sticky_skills
+        assert store.get_sticky_skills(session.id) == {}
 
-    def test_sticky_not_persisted_across_reload(self, tmp_path):
+    def test_sticky_survives_reload_after_save(self, tmp_path):
+        """Sticky counters live on Session and persist across daemon restart."""
         path = tmp_path / "session_store.json"
         first = SessionStore(path)
+        _seed_session(first)
         first.mark_sticky("session-1", "skill-a")
+        first.flush()
+
         second = SessionStore(path)
-        assert second.get_sticky_skills("session-1") == {}
+        assert second.get_sticky_skills("session-1") == {"skill-a": 0}
 
 
 class TestSessionStoreThreadSafety:
