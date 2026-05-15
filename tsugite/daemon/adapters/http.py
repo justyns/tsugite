@@ -243,9 +243,9 @@ async def sse_stream(queue: asyncio.Queue, keepalive_interval: float = 15.0):
 # fires history_update on the global event bus after the turn settles, which
 # triggers loadHistory() in those tabs and rebuilds the message list from JSONL.
 # Broadcasting turn-end events too would race the active tab's per-chat reader
-# (sendingBySession is cleared in streaming.js's finally block, leaving a window
-# where late-arriving session_event(final_result) bypasses the dedup guard and
-# pushes a duplicate bubble until the next reload).
+# (the session's `sending` flag in sessionsState is cleared in streaming.js's
+# finally block, leaving a window where late-arriving session_event(final_result)
+# bypasses the dedup guard and pushes a duplicate bubble until the next reload).
 _BROADCAST_SKIP_EVENTS = frozenset(
     {
         "stream_chunk",
