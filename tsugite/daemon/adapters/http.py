@@ -7,7 +7,7 @@ import mimetypes
 import re
 import shutil
 import threading
-from dataclasses import asdict
+from dataclasses import asdict, dataclass, field
 from dataclasses import fields as dataclass_fields
 from datetime import datetime, timezone
 from pathlib import Path
@@ -393,6 +393,19 @@ class HTTPAgentAdapter(BaseAdapter):
         pass
 
 
+@dataclass
+class ActiveChat:
+    """In-flight chat interaction. One per (agent, user, session_id) triple.
+
+    Consolidates what used to be three parallel maps keyed by the same triple
+    so adding a fourth piece of per-chat state doesn't mean adding a fourth map
+    and remembering to keep their lifecycles in sync.
+    """
+    backend: HTTPInteractionBackend
+    progress: SSEProgressHandler
+    task: Optional[asyncio.Task] = None
+
+
 class HTTPServer:
     """Runs a Starlette ASGI app with uvicorn for the HTTP API."""
 
@@ -416,9 +429,7 @@ class HTTPServer:
         self.session_runner = None  # Set by Gateway after SessionRunner is created
         self.push_store = None  # Set by Gateway if web-push is configured
         self.vapid_public_key = None  # Set by Gateway if web-push is configured
-        self._active_backends: dict[tuple[str, str, str], HTTPInteractionBackend] = {}
-        self._active_chat_tasks: dict[tuple[str, str, str], asyncio.Task] = {}
-        self._active_progress: dict[tuple[str, str, str], SSEProgressHandler] = {}
+        self._active_chats: dict[tuple[str, str, str], ActiveChat] = {}
         self.event_bus = SSEBroadcaster()
         self.app = self._build_app()
 
@@ -650,7 +661,7 @@ class HTTPServer:
         if err := self._check_auth(request):
             return err
         running_by_agent: dict[str, set[str]] = {}
-        for agent_name, _user_id, session_id in self._active_backends:
+        for agent_name, _user_id, session_id in self._active_chats:
             running_by_agent.setdefault(agent_name, set()).add(session_id)
         agents = [
             {
@@ -790,7 +801,8 @@ class HTTPServer:
             tokens = session.cumulative_tokens
             message_count = session.message_count
             session_metadata = session.metadata or {}
-            backend = self._active_backends.get((adapter.agent_name, user_id, session.id))
+            chat = self._active_chats.get((adapter.agent_name, user_id, session.id))
+            backend = chat.backend if chat else None
         else:
             tokens, message_count, session_metadata, backend = 0, 0, {}, None
 
@@ -952,7 +964,8 @@ class HTTPServer:
         breakdown = snapshots[-1].get("token_breakdown", {}) if snapshots else {}
 
         backend_key = (agent_name, user_id, session_id)
-        live_progress = self._active_progress.get(backend_key)
+        chat = self._active_chats.get(backend_key)
+        live_progress = chat.progress if chat else None
         if live_progress and live_progress.latest_prompt_messages:
             return JSONResponse(
                 {
@@ -1222,11 +1235,11 @@ class HTTPServer:
         logger.info("[%s] respond from user_id=%s session_id=%s", agent_name, user_id, session_id)
 
         key = (agent_name, user_id, session_id)
-        backend = self._active_backends.get(key)
-        if not backend:
+        chat = self._active_chats.get(key)
+        if not chat:
             return JSONResponse({"error": "no pending question for this session"}, status_code=404)
 
-        backend.submit_response(response)
+        chat.backend.submit_response(response)
         return JSONResponse({"status": "ok"})
 
     async def _upload(self, request: Request) -> JSONResponse:
@@ -1372,7 +1385,8 @@ class HTTPServer:
         target_session_id = target_session.id
 
         backend_key = (agent_name, user_id, target_session_id)
-        existing_task = self._active_chat_tasks.get(backend_key)
+        existing_chat = self._active_chats.get(backend_key)
+        existing_task = existing_chat.task if existing_chat else None
         if existing_task is not None and not existing_task.done():
             return JSONResponse(
                 {"error": "a turn is already running for this session"},
@@ -1404,8 +1418,8 @@ class HTTPServer:
 
         interaction_backend = HTTPInteractionBackend(progress)
         interaction_backend.pending_message = message
-        self._active_backends[backend_key] = interaction_backend
-        self._active_progress[backend_key] = progress
+        chat_state = ActiveChat(backend=interaction_backend, progress=progress)
+        self._active_chats[backend_key] = chat_state
 
         async def run_agent():
             from tsugite.interaction import set_interaction_backend
@@ -1452,13 +1466,11 @@ class HTTPServer:
                 logger.exception("[%s] Chat error", adapter.agent_name)
                 progress._emit("error", {"error": str(e)})
             finally:
-                self._active_backends.pop(backend_key, None)
-                self._active_chat_tasks.pop(backend_key, None)
-                self._active_progress.pop(backend_key, None)
+                self._active_chats.pop(backend_key, None)
                 progress.signal_done()
 
         task = asyncio.create_task(run_agent())
-        self._active_chat_tasks[backend_key] = task
+        chat_state.task = task
 
         return StreamingResponse(
             progress.event_generator(),
@@ -1485,9 +1497,9 @@ class HTTPServer:
         if not session_id:
             return JSONResponse({"error": "session_id is required"}, status_code=400)
         backend_key = (request.path_params["agent"], user_id, session_id)
-        task = self._active_chat_tasks.get(backend_key)
-        if task and not task.done():
-            task.cancel()
+        chat = self._active_chats.get(backend_key)
+        if chat and chat.task and not chat.task.done():
+            chat.task.cancel()
             return JSONResponse({"status": "cancelled"})
         return JSONResponse({"error": "no active chat"}, status_code=404)
 

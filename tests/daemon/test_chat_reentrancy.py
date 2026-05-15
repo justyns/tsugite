@@ -335,10 +335,12 @@ def test_respond_routes_by_session(client, mock_adapter, test_token, server):
 
         resolved_user = mock_adapter.resolve_http_user("alice")
         agent_name = mock_adapter.agent_name
-        backend_a = server._active_backends.get((agent_name, resolved_user, "sess-A"))
-        backend_b = server._active_backends.get((agent_name, resolved_user, "sess-B"))
-        assert backend_a is not None, "backend for sess-A should be registered"
-        assert backend_b is not None, "backend for sess-B should be registered"
+        chat_a = server._active_chats.get((agent_name, resolved_user, "sess-A"))
+        chat_b = server._active_chats.get((agent_name, resolved_user, "sess-B"))
+        assert chat_a is not None, "chat state for sess-A should be registered"
+        assert chat_b is not None, "chat state for sess-B should be registered"
+        backend_a = chat_a.backend
+        backend_b = chat_b.backend
 
         resp = client.post(
             "/api/agents/test-agent/respond",
