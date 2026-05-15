@@ -167,7 +167,7 @@ export const streamingMixin = {
             const arr = sessMessages();
             this._finalizeLiveProgress(arr);
             const bubble = finalResultBubble(event);
-            if (bubble) arr.push(bubble);
+            if (bubble) this._pushFinalAgentBubble(arr, bubble);
           } else if (event.type === 'session_info') {
             if (sendSessionId === this.selectedSessionId) this.updateStatusFromEvent(event);
           } else {
@@ -200,6 +200,24 @@ export const streamingMixin = {
       delete this.sendingBySession[sendSessionId];
       this.scrollMessages();
     }
+  },
+
+  // For a turn whose final answer is prose, the `thought` event handler has
+  // already pushed the same text as an agent bubble (agent.py emits
+  // LLMMessageEvent for parsed.thought before returning the result). Replace
+  // in-place instead of pushing a duplicate. Mirrors `sawInlineAgent` in
+  // history.js's eventsToBubbles.
+  _pushFinalAgentBubble(arr, bubble) {
+    const last = arr[arr.length - 1];
+    if (
+      bubble.type === 'agent' &&
+      last?.type === 'agent' &&
+      (last.text || '').trim() === (bubble.text || '').trim()
+    ) {
+      arr.splice(arr.length - 1, 1, bubble);
+      return;
+    }
+    arr.push(bubble);
   },
 
   _handleProgressEvent(event, sessionId = this.selectedSessionId) {
