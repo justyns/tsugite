@@ -29,11 +29,12 @@ commit_parsers = [
     { message = "^fix", group = "Bug Fixes" },
     { message = "^perf", group = "Performance" },
     { message = "^refactor", group = "Refactor" },
-    { message = "^docs", group = "Documentation" },
-    { message = "^test", group = "Tests" },
-    { message = "^ci", group = "CI" },
-    { message = "^chore\\(release\\)", skip = true },
-    { message = "^chore", group = "Maintenance" },
+    # docs / test / ci / chore are skipped from the changelog - users care about
+    # behavior changes, not internal hygiene. Audit trail still lives in git log.
+    { message = "^docs", skip = true },
+    { message = "^test", skip = true },
+    { message = "^ci", skip = true },
+    { message = "^chore", skip = true },
     { message = "^revert", group = "Reverts" },
     { message = ".*", group = "Other" },
 ]
