@@ -112,7 +112,8 @@ class CompactionScheduler:
                 continue
 
             user_id = session.user_id or ""
-            if not self._session_store.begin_compaction(user_id, agent_name):
+            sid = session.id
+            if not self._session_store.begin_compaction(user_id, agent_name, session_id=sid):
                 logger.debug("[%s] Compaction already in progress, skipping", agent_name)
                 continue
 
@@ -123,17 +124,17 @@ class CompactionScheduler:
             )
 
             try:
-                new_session = await adapter._compact_session(session.id, reason="scheduled")
+                new_session = await adapter._compact_session(sid, reason="scheduled")
                 if new_session is None:
                     logger.info("[%s] Scheduled compaction skipped (nothing to compact)", agent_name)
                 else:
                     logger.info(
                         "[%s] Scheduled compaction completed (old=%s new=%s)",
                         agent_name,
-                        session.id,
+                        sid,
                         new_session.id,
                     )
             except Exception:
                 logger.exception("[%s] Scheduled compaction failed", agent_name)
             finally:
-                self._session_store.end_compaction(user_id, agent_name)
+                self._session_store.end_compaction(user_id, agent_name, session_id=sid)

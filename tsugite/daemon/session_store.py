@@ -261,6 +261,12 @@ class SessionStore:
         # Event is unset while compaction is in progress, set when done.
         self._compaction_events: dict[tuple[str, str], threading.Event] = {}
 
+        # Session ids currently being compacted. Maintained alongside
+        # _compaction_events so `is_compacting(session_id=...)` can answer the
+        # per-session question the UI needs to scope the "compacting…"
+        # indicator. The (user, agent) lock semantics are unchanged.
+        self._compacting_session_ids: set[str] = set()
+
         # Per-session set of skill names that should not be (re)loaded for the
         # rest of this session's lifetime. In-memory only; resets on daemon restart.
         self._suppressed_skills: dict[str, set[str]] = {}
@@ -302,23 +308,29 @@ class SessionStore:
 
     # ── Compaction locking ──
 
-    def begin_compaction(self, user_id: str, agent: str) -> bool:
+    def begin_compaction(self, user_id: str, agent: str, session_id: str | None = None) -> bool:
         """Try to start compaction. Returns True if this caller should compact.
 
         If another caller is already compacting this session, returns False.
+        Pass session_id so per-session UI state (e.g. the "compacting…" chip)
+        can be scoped via `is_compacting(session_id=...)`.
         """
         with self._lock:
             key = (user_id, agent)
             if key in self._compaction_events:
                 return False
             self._compaction_events[key] = threading.Event()
+            if session_id:
+                self._compacting_session_ids.add(session_id)
             return True
 
-    def end_compaction(self, user_id: str, agent: str) -> None:
+    def end_compaction(self, user_id: str, agent: str, session_id: str | None = None) -> None:
         """Signal that compaction is complete. Wakes all waiters."""
         with self._lock:
             key = (user_id, agent)
             event = self._compaction_events.pop(key, None)
+            if session_id:
+                self._compacting_session_ids.discard(session_id)
         if event:
             event.set()
 
@@ -330,9 +342,15 @@ class SessionStore:
             return True
         return event.wait(timeout=timeout)
 
-    def is_compacting(self, user_id: str, agent: str) -> bool:
-        """Check if a session is currently being compacted."""
+    def is_compacting(self, user_id: str, agent: str, session_id: str | None = None) -> bool:
+        """Check if a session is currently being compacted.
+
+        With session_id: per-session answer (use this from the UI status API).
+        Without: the legacy per-(user, agent) answer.
+        """
         with self._lock:
+            if session_id is not None:
+                return session_id in self._compacting_session_ids
             return (user_id, agent) in self._compaction_events
 
     # ── Skill suppression (non-persisted) ──
