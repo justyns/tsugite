@@ -136,11 +136,15 @@ export const streamingMixin = {
           } else if (event.type === 'compacted') {
             delete this.compactingBySession[sendSessionId];
           } else if (event.type === 'skill_loaded') {
-            if (!this.loadedSkills.some(s => s.name === event.name)) {
-              this.loadedSkills.push({ name: event.name, description: event.description || '' });
+            const list = (this.loadedSkillsBySession[sendSessionId] ||= []);
+            if (!list.some(s => s.name === event.name)) {
+              list.push({ name: event.name, description: event.description || '' });
             }
           } else if (event.type === 'skill_unloaded') {
-            this.loadedSkills = this.loadedSkills.filter(s => s.name !== event.name);
+            const list = this.loadedSkillsBySession[sendSessionId];
+            if (list) {
+              this.loadedSkillsBySession[sendSessionId] = list.filter(s => s.name !== event.name);
+            }
           } else if (event.type === 'ask_user') {
             this._finalizeLiveProgress(sessMessages());
             sessMessages().push({
