@@ -26,7 +26,7 @@ from starlette.staticfiles import StaticFiles
 from tsugite.agent_inheritance import get_builtin_agents_path, get_global_agents_paths
 from tsugite.attachments.base import AttachmentContentType
 from tsugite.attachments.file import FileHandler
-from tsugite.daemon.adapters.base import BaseAdapter, ChannelContext
+from tsugite.daemon.adapters.base import _PERSIST_EVENT_TYPES, BaseAdapter, ChannelContext
 from tsugite.daemon.config import AgentConfig, HTTPConfig
 from tsugite.daemon.scheduler import ScheduleEntry
 from tsugite.daemon.webhook_store import WebhookStore
@@ -336,7 +336,7 @@ class SSEProgressHandler(JSONLUIHandler):
         else:
             self.queue.put_nowait(payload)
 
-        if event_type in ("prompt_snapshot", "reaction", "final_result", "error", "cancelled") and self._persist_event:
+        if event_type in _PERSIST_EVENT_TYPES and self._persist_event:
             self._persist_event(payload)
 
         if self._broadcaster and self._session_id and event_type not in _BROADCAST_SKIP_EVENTS:

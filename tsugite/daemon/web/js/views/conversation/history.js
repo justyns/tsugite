@@ -242,6 +242,13 @@ export function eventsToBubbles(events, { dropTrailing = false } = {}) {
       continue;
     }
 
+    if (type === 'info') {
+      if (!data.message) continue;
+      pushProgressIfHasSteps();
+      bubbles.push({ type: 'info', text: data.message });
+      continue;
+    }
+
     if (type === 'final_result') {
       const bubble = finalResultBubble(data);
       if (bubble?.type === 'return_value') {

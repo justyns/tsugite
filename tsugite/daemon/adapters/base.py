@@ -83,7 +83,7 @@ _BROADCAST_SKIP_EVENTS = frozenset({"stream_chunk", "stream_complete", "prompt_s
 
 # Event types persisted to the session JSONL by the SSE handler so the web UI
 # can replay them after a reload (the agent already records execution events).
-_PERSIST_EVENT_TYPES = frozenset({"prompt_snapshot", "reaction", "final_result", "error", "cancelled"})
+_PERSIST_EVENT_TYPES = frozenset({"prompt_snapshot", "reaction", "final_result", "error", "cancelled", "info"})
 
 
 class SSEBroadcastHandler(JSONLUIHandler):

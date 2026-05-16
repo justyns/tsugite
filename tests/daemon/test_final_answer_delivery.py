@@ -41,9 +41,9 @@ class TestFinalResultPersistence:
 
         handler.handle_event(ErrorEvent(error="boom", step=1))
 
-        assert persister.called, (
-            "error was emitted but _persist_event was not called — UI has no way to show the failure after a reconnect"
-        )
+        assert (
+            persister.called
+        ), "error was emitted but _persist_event was not called — UI has no way to show the failure after a reconnect"
         payload = persister.call_args[0][0]
         assert payload["type"] == "error"
         assert payload["error"] == "boom"
@@ -61,15 +61,15 @@ class TestFinalResultPersistence:
         payload = persister.call_args[0][0]
         assert payload["type"] == "reaction"
 
-    def test_transient_events_are_not_persisted(self):
-        """Progress-only events (thought, code, tool_result, info) are high-volume
-        and should stay out of the event log."""
+    def test_info_event_is_persisted(self):
+        """InfoEvent must be persisted so send_message bubbles survive history replay."""
         handler = SSEProgressHandler()
         persister = MagicMock()
         handler.set_event_persister(persister)
 
         handler.handle_event(InfoEvent(message="working on it"))
 
-        assert not persister.called, (
-            "transient info events must not be persisted — they would bloat the event log with progress chatter"
-        )
+        assert persister.called, "info events must be persisted so send_message bubbles survive loadHistory"
+        payload = persister.call_args[0][0]
+        assert payload["type"] == "info"
+        assert payload["message"] == "working on it"
