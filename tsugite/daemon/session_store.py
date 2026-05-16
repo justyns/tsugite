@@ -211,9 +211,7 @@ class Session:
     last_viewed_at: str = ""
     superseded_by: Optional[str] = None
 
-    # Per-session UI / runtime state. Used to live in parallel maps on
-    # SessionStore; consolidated here so cleanup is automatic and the values
-    # survive daemon restart.
+    # Per-session UI / runtime state. Persisted so values survive daemon restart.
     sticky_skills: dict[str, int] = field(default_factory=dict)
     suppressed_skills: list[str] = field(default_factory=list)
     reasoning_effort: Optional[str] = None
@@ -482,7 +480,7 @@ class SessionStore:
                 for s in self._sessions.values()
                 if s.agent == agent
                 and s.user_id
-                and s.metadata.get(METADATA_PRIMARY_FLAG)
+                and s.is_primary
                 and s.superseded_by is None
                 and s.status not in FINISHED_STATUSES
             }
@@ -516,7 +514,7 @@ class SessionStore:
             and s.agent == agent
             and s.superseded_by is None
             and s.status not in FINISHED_STATUSES
-            and s.metadata.get(METADATA_PRIMARY_FLAG)
+            and s.is_primary
         ]
         if not candidates:
             return None
@@ -537,12 +535,7 @@ class SessionStore:
         """Clear primary flag from all (user, agent) sessions except `except_id`. Returns the last one cleared."""
         cleared: Optional[Session] = None
         for s in self._sessions.values():
-            if (
-                s.user_id == user_id
-                and s.agent == agent
-                and s.id != except_id
-                and s.metadata.get(METADATA_PRIMARY_FLAG)
-            ):
+            if s.user_id == user_id and s.agent == agent and s.id != except_id and s.is_primary:
                 s.metadata.pop(METADATA_PRIMARY_FLAG, None)
                 cleared = s
         return cleared
@@ -1182,7 +1175,7 @@ class SessionStore:
                     and session.status not in FINISHED_STATUSES
                 ):
                     key = (session.user_id, session.agent)
-                    if session.metadata.get(METADATA_PRIMARY_FLAG):
+                    if session.is_primary:
                         already_primary_keys.add(key)
                     existing_id = primary_candidates.get(key)
                     if not existing_id or session.last_active > self._sessions[existing_id].last_active:

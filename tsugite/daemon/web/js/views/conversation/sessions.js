@@ -151,7 +151,7 @@ export const sessionsMixin = {
     this.loadStatus();
     // On revisit, the in-memory bubbles (including a streaming progress trace)
     // are already authoritative; loadHistory would clobber them. The history_update
-    // SSE event (conversations.js:133) refreshes from the server when needed.
+    // SSE handler in conversations.js refreshes from the server when needed.
     const historyPromise = isFirstVisit ? this.loadHistory({ dropTrailing: liveTurn }) : Promise.resolve();
     this.loadSessionEffort();
     this._restoreDraft();
