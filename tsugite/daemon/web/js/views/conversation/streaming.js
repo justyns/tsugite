@@ -201,6 +201,11 @@ export const streamingMixin = {
       sendState.reader = null;
       sendState.sending = false;
       this.scrollMessages();
+      // Stream-end mark-viewed: selectSession/visibilitychange both miss the "already-here, agent just replied" case.
+      if (sendSessionId === this.selectedSessionId && document.visibilityState === 'visible') {
+        const s = this.allSessions.find(x => (x.conversation_id || x.id) === sendSessionId);
+        if (s?.unread) this._markSessionViewed(s);
+      }
     }
   },
 
