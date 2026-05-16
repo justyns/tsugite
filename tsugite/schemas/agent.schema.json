@@ -162,6 +162,18 @@
       "title": "Auto Load Skills",
       "type": "array"
     },
+    "auto_load_agent_list": {
+      "default": false,
+      "title": "Auto Load Agent List",
+      "type": "boolean"
+    },
+    "auto_load_agents": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Auto Load Agents",
+      "type": "array"
+    },
     "skill_paths": {
       "items": {
         "type": "string"

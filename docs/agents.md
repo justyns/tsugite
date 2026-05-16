@@ -160,19 +160,34 @@ Run tools before execution and make the results available in templates:
 ---
 name: agent
 prefetch:
-  - tool: list_agents
-    args: {}
-    assign: available_agents
   - tool: list_files
     args: { path: "." }
     assign: project_files
 ---
 
-Available agents: {{ available_agents }}
 Files in project: {{ project_files }}
 ```
 
 Failures are silent (the variable gets `None`).
+
+## Listing Available Sub-Agents
+
+By default, the `<available_agents>` block is suppressed and agents discover
+sub-agents on demand by calling `list_available_agents()`. Two opt-in
+frontmatter fields restore the always-on listing when you actually need it:
+
+```yaml
+# Inject the full agent list every turn (for orchestrator-style agents):
+auto_load_agent_list: true
+
+# Or inject only a named subset:
+auto_load_agents:
+  - research-deep-dive
+  - code-reviewer
+```
+
+When either field is set, `available_agents` is bound to a markdown bullet list
+that the default template renders inside an `<available_agents>` block.
 
 ## Attachments
 

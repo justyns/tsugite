@@ -92,6 +92,8 @@ class AgentConfig(BaseModel):
     prefetch: List[Dict[str, Any]] = Field(default_factory=list)
     attachments: List[Union[str, AttachmentSpec]] = Field(default_factory=list)
     auto_load_skills: List[str] = Field(default_factory=list)
+    auto_load_agent_list: bool = False
+    auto_load_agents: List[str] = Field(default_factory=list)
     skill_paths: List[str] = Field(default_factory=list)
     instructions: str = ""
     extends: Optional[str] = None

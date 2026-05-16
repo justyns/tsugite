@@ -175,49 +175,31 @@ class TestBuiltinDefaultIntegration:
     """Test default agent with real prefetch."""
 
     def test_builtin_default_prefetch_integration(self, tmp_path, monkeypatch):
-        """Test that default's prefetch config works."""
+        """Default's prefetch covers skills; agents come on-demand via tool."""
         from tsugite.agent_inheritance import get_builtin_agents_path
         from tsugite.md_agents import parse_agent_file
 
         monkeypatch.chdir(tmp_path)
 
-        # Create a test agent
-        agents_dir = tmp_path / "agents"
-        agents_dir.mkdir()
-        test_agent = agents_dir / "helper.md"
-        test_agent.write_text("""---
-name: helper
-description: Helps with tasks
----
-""")
-
-        # Get default agent
         default_path = get_builtin_agents_path() / "default.md"
         agent = parse_agent_file(default_path)
 
-        # Execute its prefetch
         context = execute_prefetch(agent.config.prefetch)
 
-        # Should have available_agents
-        assert "available_agents" in context
-
-        # Should include our test agent
-        if context["available_agents"]:  # Only if agents found
-            assert "helper" in context["available_agents"]
+        # Skill discovery still runs through prefetch.
+        assert "available_skills" in context
+        # Agent listing is no longer pre-injected; agents call list_available_agents() instead.
+        assert "available_agents" not in context
 
     @patch("tsugite.agent_runner.runner.TsugiteAgent")
     @patch("tsugite.core.tools.create_tool_from_tsugite")
     def test_builtin_default_has_delegation_tools(self, mock_create_tool, mock_agent):
-        """Test that default provides delegation tools."""
+        """Default exposes both spawn_agent and the on-demand list_available_agents tool."""
         from tsugite.agent_inheritance import get_builtin_agents_path
         from tsugite.md_agents import parse_agent_file
 
         default_path = get_builtin_agents_path() / "default.md"
         agent = parse_agent_file(default_path)
 
-        # Should have spawn_agent in tools
         assert "spawn_agent" in agent.config.tools
-
-        # Prefetch should be configured
-        assert agent.config.prefetch
-        assert any(p.get("tool") == "list_agents" for p in agent.config.prefetch)
+        assert "list_available_agents" in agent.config.tools

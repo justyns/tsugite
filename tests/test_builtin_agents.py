@@ -151,26 +151,24 @@ class TestBuiltinDefaultAutoDiscovery:
         assert "spawn_agent" in agent.config.tools
 
     def test_builtin_default_has_prefetch(self):
-        """Test that default has prefetch configured."""
+        """Test that default has prefetch configured (skills, not agents)."""
         builtin_path = get_builtin_agents_path() / "default.md"
         agent = parse_agent_file(builtin_path)
 
         assert agent.config.prefetch is not None
         assert len(agent.config.prefetch) > 0
 
-        # Check that list_agents is in prefetch
         prefetch_tools = [p.get("tool") for p in agent.config.prefetch]
-        assert "list_agents" in prefetch_tools
+        assert "get_skills_for_template" in prefetch_tools
+        # list_agents was removed: agents now discover via list_available_agents() on demand.
+        assert "list_agents" not in prefetch_tools
 
-    def test_builtin_default_prefetch_assigns_variable(self):
-        """Test that prefetch assigns to available_agents variable."""
+    def test_builtin_default_exposes_list_available_agents_tool(self):
+        """Default agents discover sub-agents on demand via list_available_agents()."""
         builtin_path = get_builtin_agents_path() / "default.md"
         agent = parse_agent_file(builtin_path)
 
-        list_agents_prefetch = next((p for p in agent.config.prefetch if p.get("tool") == "list_agents"), None)
-
-        assert list_agents_prefetch is not None
-        assert list_agents_prefetch.get("assign") == "available_agents"
+        assert "list_available_agents" in agent.config.tools
 
     def test_builtin_default_content_structure(self):
         """Test that default has delegation instructions."""

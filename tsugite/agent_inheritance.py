@@ -281,6 +281,7 @@ def merge_scalar_fields(parent, child) -> Dict[str, Any]:
         "model": child.model if child.model else parent.model,
         "max_turns": child.max_turns if child.max_turns != 5 else parent.max_turns,
         "reasoning_effort": child.reasoning_effort if child.reasoning_effort else parent.reasoning_effort,
+        "auto_load_agent_list": child.auto_load_agent_list or parent.auto_load_agent_list,
     }
 
 
@@ -321,6 +322,7 @@ def merge_list_fields(parent, child) -> Dict[str, List]:
     merged_tools = _merge_dedup(parent.tools, child.tools)
     merged_attachments = _merge_attachments(parent.attachments, child.attachments)
     merged_skills = _merge_dedup(parent.auto_load_skills, child.auto_load_skills)
+    merged_auto_load_agents = _merge_dedup(parent.auto_load_agents, child.auto_load_agents)
 
     # Custom tools - deduplicate by "name" field (child overrides parent)
     custom_tool_dict = {}
@@ -333,6 +335,7 @@ def merge_list_fields(parent, child) -> Dict[str, List]:
         "prefetch": (parent.prefetch or []) + (child.prefetch or []),
         "custom_tools": list(custom_tool_dict.values()),
         "auto_load_skills": merged_skills,
+        "auto_load_agents": merged_auto_load_agents,
     }
 
 

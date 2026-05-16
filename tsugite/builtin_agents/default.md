@@ -15,6 +15,7 @@ attachments:
 max_turns: 10
 tools:
   - spawn_agent
+  - list_available_agents
   - read_file
   - list_files
   - write_file
@@ -36,9 +37,6 @@ tools:
 auto_load_skills:
   - response-patterns
 prefetch:
-  - tool: list_agents
-    args: {}
-    assign: available_agents
   - tool: get_skills_for_template
     args: {}
     assign: available_skills
@@ -53,6 +51,14 @@ instructions: |
 
   Before starting work, check the `<available_skills>` section and load one if it matches.
   Call `load_skill("skill_name")` and wait for the next turn before proceeding.
+
+  ## Delegating to Sub-Agents
+
+  The list of available sub-agents is not auto-attached to your context. When a task
+  clearly benefits from a specialized agent (and isn't something you can handle inline),
+  call `list_available_agents()` to discover them, then `spawn_agent(path, prompt)` to
+  delegate. Skip both for simple tasks or single-file edits - most work doesn't need
+  delegation.
 
   ## Guidelines
 

@@ -547,6 +547,19 @@ class AgentPreparer:
                 # Silently continue if prefetch fails
                 prefetch_context = {}
 
+        # Step 1b: Opt-in <available_agents> injection. Default agents call
+        # list_available_agents() on demand instead of carrying the full list.
+        if "available_agents" not in prefetch_context and (
+            agent_config.auto_load_agent_list or agent_config.auto_load_agents
+        ):
+            from tsugite.tools.agents import discover_agents, format_agents_markdown
+
+            agents = discover_agents()
+            if agent_config.auto_load_agents:
+                wanted = set(agent_config.auto_load_agents)
+                agents = [a for a in agents if a["name"] in wanted]
+            prefetch_context["available_agents"] = format_agents_markdown(agents)
+
         # Step 2: Execute tool directives (unless skip_tool_directives=True for render)
         if skip_tool_directives:
             modified_content = agent.content

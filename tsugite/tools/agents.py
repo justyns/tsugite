@@ -268,6 +268,74 @@ def _show_progress(message: str):
     emit_info_event(f"[Subagent] {message}")
 
 
+def discover_agents() -> List[Dict[str, str]]:
+    """Discover available agents across standard agent directories.
+
+    Returns a structured list (used by `list_agents` for markdown formatting and
+    by `list_available_agents` as the on-demand discovery tool). Excludes the
+    currently running agent.
+    """
+    from ..agent_inheritance import get_builtin_agents_path, get_global_agents_paths
+    from ..agent_runner import get_current_agent
+
+    agents_info: List[Dict[str, str]] = []
+    seen_names: set = set()
+    current_agent_name = get_current_agent()
+
+    effective_cwd = _effective_cwd()
+    builtin_path = get_builtin_agents_path()
+    search_paths = [
+        effective_cwd / ".tsugite" / "agents",
+        effective_cwd / "agents",
+        builtin_path,
+        *get_global_agents_paths(),
+    ]
+
+    for search_dir in search_paths:
+        if not search_dir.exists() or not search_dir.is_dir():
+            continue
+
+        is_builtin_dir = search_dir == builtin_path
+
+        for agent_file in search_dir.glob("*.md"):
+            if agent_file.stem in seen_names:
+                continue
+            try:
+                content = agent_file.read_text(encoding="utf-8")
+                frontmatter, _ = parse_yaml_frontmatter(content, str(agent_file))
+
+                name = frontmatter.get("name", agent_file.stem)
+                description = frontmatter.get("description", "No description")
+
+                if current_agent_name and name == current_agent_name:
+                    continue
+
+                if is_builtin_dir:
+                    display_path = name
+                else:
+                    try:
+                        display_path = str(agent_file.relative_to(effective_cwd))
+                    except ValueError:
+                        display_path = str(agent_file)
+
+                if is_builtin_dir:
+                    description = f"{description} (built-in)"
+
+                agents_info.append({"name": name, "description": description, "path": display_path})
+                seen_names.add(agent_file.stem)
+            except Exception:
+                continue
+
+    return agents_info
+
+
+def format_agents_markdown(agents: List[Dict[str, str]]) -> str:
+    """Format the structured agent list as the markdown bullet list templates expect."""
+    if not agents:
+        return ""
+    return "\n".join(f"- **{a['name']}** (`{a['path']}`): {a['description']}" for a in agents)
+
+
 @tool
 def list_agents() -> str:
     """List all available agents for delegation.
@@ -280,83 +348,16 @@ def list_agents() -> str:
         Formatted list of available agents with their descriptions.
         Returns empty string if no agents are found.
     """
-    from ..agent_inheritance import get_builtin_agents_path, get_global_agents_paths
-    from ..agent_runner import get_current_agent
+    return format_agents_markdown(discover_agents())
 
-    agents_info: List[Dict[str, str]] = []
-    seen_names = set()
 
-    # Get current agent name to exclude it from the list
-    current_agent_name = get_current_agent()
+@tool
+def list_available_agents() -> List[Dict[str, str]]:
+    """Discover sub-agents that can be delegated to via spawn_agent().
 
-    # Define search paths in priority order
-    effective_cwd = _effective_cwd()
-    search_paths = [
-        effective_cwd / ".tsugite" / "agents",
-        effective_cwd / "agents",
-    ]
-
-    # Add built-in agents directory
-    builtin_path = get_builtin_agents_path()
-    search_paths.append(builtin_path)
-
-    # Add global paths
-    search_paths.extend(get_global_agents_paths())
-
-    # Scan each directory for agent files
-    for search_dir in search_paths:
-        if not search_dir.exists() or not search_dir.is_dir():
-            continue
-
-        is_builtin_dir = search_dir == builtin_path
-
-        for agent_file in search_dir.glob("*.md"):
-            # Skip if we've already seen this agent name (higher priority paths win)
-            if agent_file.stem in seen_names:
-                continue
-
-            try:
-                content = agent_file.read_text(encoding="utf-8")
-                frontmatter, _ = parse_yaml_frontmatter(content, str(agent_file))
-
-                name = frontmatter.get("name", agent_file.stem)
-                description = frontmatter.get("description", "No description")
-
-                # Skip the currently running agent to prevent self-spawning
-                if current_agent_name and name == current_agent_name:
-                    continue
-
-                # Store relative path from cwd if possible, otherwise use name for built-ins
-                if is_builtin_dir:
-                    display_path = name
-                else:
-                    try:
-                        display_path = str(agent_file.relative_to(effective_cwd))
-                    except ValueError:
-                        display_path = str(agent_file)
-
-                # Add marker for built-in agents
-                description_with_marker = f"{description} (built-in)" if is_builtin_dir else description
-
-                agents_info.append(
-                    {
-                        "name": name,
-                        "description": description_with_marker,
-                        "path": display_path,
-                    }
-                )
-
-                seen_names.add(agent_file.stem)
-            except Exception:
-                # Skip files that can't be parsed
-                continue
-
-    if not agents_info:
-        return ""
-
-    # Format as a simple markdown list
-    lines = []
-    for agent in agents_info:
-        lines.append(f"- **{agent['name']}** (`{agent['path']}`): {agent['description']}")
-
-    return "\n".join(lines)
+    Call this on demand when you need to delegate; the result is intentionally
+    not always present in your context. Returns one dict per agent with `name`,
+    `path`, and `description` keys. The currently running agent is excluded so
+    you cannot spawn yourself.
+    """
+    return discover_agents()
