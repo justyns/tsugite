@@ -705,13 +705,15 @@ class SessionStore:
         """Set cumulative_tokens without bumping message_count or last_active.
 
         Used to seed a fresh post-compaction session with an estimate of its
-        carried-over context size. Real exchanges go through update_token_count.
+        carried-over context size, and to sync from prompt_snapshot totals so
+        the UI badge matches the inspector. Real exchanges go through
+        update_token_count.
         """
         if tokens <= 0:
             return
         with self._lock:
             session = self._sessions.get(session_id)
-            if session:
+            if session and session.cumulative_tokens != tokens:
                 session.cumulative_tokens = tokens
                 self._mark_dirty()
 

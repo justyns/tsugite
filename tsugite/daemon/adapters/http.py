@@ -12,7 +12,10 @@ from dataclasses import fields as dataclass_fields
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
+
+if TYPE_CHECKING:
+    from tsugite.daemon.session_store import SessionStore
 
 from starlette.applications import Starlette
 from starlette.requests import Request
@@ -34,6 +37,27 @@ from tsugite.ui.jsonl import JSONLUIHandler
 from tsugite.utils import parse_yaml_frontmatter
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
+
+
+def build_session_event_persister(session_store: "SessionStore", session_id: str) -> Callable:
+    """Persist selected agent events to the per-session JSONL, and sync
+    `Session.cumulative_tokens` to `prompt_snapshot.token_breakdown.total` so
+    the UI badge matches the prompt inspector. See `tests/test_displayed_token_count.py`
+    for the failure modes this addresses.
+    """
+
+    def _persist(payload: dict[str, Any]) -> None:
+        session_store.append_event(
+            session_id,
+            {**payload, "timestamp": datetime.now(timezone.utc).isoformat()},
+        )
+        if payload.get("type") != "prompt_snapshot":
+            return
+        total = (payload.get("token_breakdown") or {}).get("total")
+        if isinstance(total, int) and total > 0:
+            session_store.set_cumulative_tokens(session_id, total)
+
+    return _persist
 
 
 def _resolve_full_model_id(model: str) -> str:
@@ -1406,15 +1430,7 @@ class HTTPServer:
         progress.set_loop(asyncio.get_running_loop())
         progress.set_session_id(target_session_id)
         progress.set_broadcaster(self.event_bus)
-        progress.set_event_persister(
-            lambda payload: adapter.session_store.append_event(
-                target_session_id,
-                {
-                    **payload,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                },
-            )
-        )
+        progress.set_event_persister(build_session_event_persister(adapter.session_store, target_session_id))
         custom_logger = SimpleNamespace(ui_handler=progress)
 
         interaction_backend = HTTPInteractionBackend(progress)
