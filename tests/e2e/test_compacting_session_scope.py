@@ -139,3 +139,85 @@ def test_compaction_lifecycle_for_other_session_does_not_touch_viewer(authentica
     )
     assert state_after["aCompacting"] is False, "A's compacting flag was not cleared after compaction_finished"
     assert state_after["compacting"] is False, "B's view shows compacting after A's compaction finished"
+
+
+def test_sidebar_surfaces_compacting_state(authenticated_page, e2e_session_store):
+    """When a session is compacting, the sidebar item for it must show a 'Compacting…' indicator.
+
+    Until this exists, only the selected session's composer banner / chat area
+    surfaces compaction; an unselected session compacting in the background is
+    invisible from the sidebar. Useful when an auto-compact fires on a session
+    the user isn't currently viewing.
+    """
+    page = authenticated_page
+    user_id = page.evaluate("Alpine.store('app').userId")
+    a = _make_session(e2e_session_store, user_id)
+    b = _make_session(e2e_session_store, user_id)
+
+    open_conversations(page)
+    reload_conversations_view(page)
+    _select(page, b.id)
+
+    label_before = page.evaluate(
+        f"Alpine.$data(document.querySelector({CONV_VIEW!r})).sessionCompactingLabel("
+        f"Alpine.$data(document.querySelector({CONV_VIEW!r})).findSession({a.id!r}))"
+    )
+    assert label_before == "", f"expected no compacting label before event, got {label_before!r}"
+
+    _fire_compaction_started(page, "test-agent", a.id)
+    page.evaluate(
+        f"""
+        Alpine.store('app').lastEvent = {{
+            type: 'compaction_progress',
+            data: {{ agent: 'test-agent', session_id: {a.id!r}, phase: 'starting',
+                     replaced_count: 5, retained_count: 2 }},
+            _ts: Date.now()
+        }};
+        """
+    )
+    page.wait_for_function(
+        f"(() => {{ const v = Alpine.$data(document.querySelector({CONV_VIEW!r})); "
+        f"return v.sessionCompactingLabel(v.findSession({a.id!r})) !== ''; }})()",
+        timeout=3000,
+    )
+
+    label_a = page.evaluate(
+        f"Alpine.$data(document.querySelector({CONV_VIEW!r})).sessionCompactingLabel("
+        f"Alpine.$data(document.querySelector({CONV_VIEW!r})).findSession({a.id!r}))"
+    )
+    assert "compact" in label_a.lower() or "summariz" in label_a.lower(), (
+        f"expected sidebar to show compacting label for session A, got {label_a!r}"
+    )
+
+    progress_label_a = page.evaluate(
+        f"Alpine.$data(document.querySelector({CONV_VIEW!r})).sessionProgressLabel("
+        f"Alpine.$data(document.querySelector({CONV_VIEW!r})).findSession({a.id!r}))"
+    )
+    assert progress_label_a == label_a, (
+        f"sessionProgressLabel must surface compacting state in the sidebar, got {progress_label_a!r} vs {label_a!r}"
+    )
+
+    page.screenshot(path="/tmp/tsugite-issue-state.png", full_page=True)
+    rendered = page.locator(".console-session .live-label", has_text=label_a)
+    assert rendered.count() >= 1, f"sidebar item for A did not render compacting label {label_a!r}"
+
+    label_b = page.evaluate(
+        f"Alpine.$data(document.querySelector({CONV_VIEW!r})).sessionCompactingLabel("
+        f"Alpine.$data(document.querySelector({CONV_VIEW!r})).findSession({b.id!r}))"
+    )
+    assert label_b == "", f"expected no compacting label for B, got {label_b!r}"
+
+    page.evaluate(
+        f"""
+        Alpine.store('app').lastEvent = {{
+            type: 'compaction_finished',
+            data: {{ agent: 'test-agent', session_id: {a.id!r} }},
+            _ts: Date.now()
+        }};
+        """
+    )
+    page.wait_for_function(
+        f"(() => {{ const v = Alpine.$data(document.querySelector({CONV_VIEW!r})); "
+        f"return v.sessionCompactingLabel(v.findSession({a.id!r})) === ''; }})()",
+        timeout=3000,
+    )

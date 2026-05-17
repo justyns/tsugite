@@ -505,25 +505,7 @@ export default () => ({
   },
 
   get compactingLabel() {
-    if (!this.compacting) return '';
-    const c = this.compactingCounts;
-    const phase = this.compactingPhase;
-    let base;
-    if (c && c.replaced_count) {
-      const n = c.replaced_count;
-      base = `summarizing ${n} turn${n === 1 ? '' : 's'}`;
-      if (c.retained_count) base += `, keeping ${c.retained_count}`;
-    } else {
-      base = 'compacting';
-    }
-    if (phase && phase.phase === 'summarizing' && phase.chunk_total > 1) {
-      base += ` (chunk ${phase.chunk_index}/${phase.chunk_total})`;
-    } else if (phase && phase.phase === 'combining') {
-      base = 'combining summary';
-    } else if (phase && phase.phase === 'chunking') {
-      base += ' (preparing chunks)';
-    }
-    return base + '…';
+    return this.sessionCompactingLabel(this.selectedSessionMeta);
   },
 
   async compactSession(retryMsg = null) {

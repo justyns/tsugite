@@ -415,6 +415,8 @@ export const sessionsMixin = {
 
   sessionProgressLabel(s) {
     if (!s) return '';
+    const compacting = this.sessionCompactingLabel(s);
+    if (compacting) return compacting;
     const running = s.state === 'running' || s.state === 'active';
     if (!running) return '';
     const cached = this.sessionsState[s.id]?.progress || progressFromPayload(s.progress);
@@ -427,6 +429,30 @@ export const sessionsMixin = {
     // lastEventTime distinguishes "between turns" (events seen, none active) from
     // "session never started" so the idle state doesn't fall back to "Starting...".
     return cached.lastEventTime ? '' : 'Starting...';
+  },
+
+  sessionCompactingLabel(s) {
+    if (!s) return '';
+    const st = this.sessionsState[s.id];
+    if (!st?.compacting) return '';
+    const c = st.compactingCounts;
+    const phase = st.compactingPhase;
+    let base;
+    if (c && c.replaced_count) {
+      const n = c.replaced_count;
+      base = `summarizing ${n} turn${n === 1 ? '' : 's'}`;
+      if (c.retained_count) base += `, keeping ${c.retained_count}`;
+    } else {
+      base = 'compacting';
+    }
+    if (phase && phase.phase === 'summarizing' && phase.chunk_total > 1) {
+      base += ` (chunk ${phase.chunk_index}/${phase.chunk_total})`;
+    } else if (phase && phase.phase === 'combining') {
+      base = 'combining summary';
+    } else if (phase && phase.phase === 'chunking') {
+      base += ' (preparing chunks)';
+    }
+    return base + '…';
   },
 
   isSessionProgressFresh(s) {
