@@ -102,7 +102,7 @@ class ScheduleEntry:
 _PERSISTED_FIELDS = frozenset(f.name for f in dataclass_fields(ScheduleEntry) if f.metadata.get("persist", True))
 
 
-def _entry_to_dict(entry: "ScheduleEntry") -> dict:
+def entry_to_dict(entry: "ScheduleEntry") -> dict:
     """Serialize a ScheduleEntry, skipping fields marked metadata.persist=False."""
     return {name: getattr(entry, name) for name in _PERSISTED_FIELDS}
 
@@ -489,7 +489,7 @@ class Scheduler:
 
     def _save(self):
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        data = {"schedules": {sid: _entry_to_dict(entry) for sid, entry in self._schedules.items()}}
+        data = {"schedules": {sid: entry_to_dict(entry) for sid, entry in self._schedules.items()}}
         tmp = self._path.with_suffix(".tmp")
         tmp.write_text(json.dumps(data, indent=2))
         os.replace(str(tmp), str(self._path))

@@ -8,6 +8,7 @@ from starlette.testclient import TestClient
 
 from tsugite.daemon.adapters.http import HTTPAgentAdapter, HTTPServer, SSEProgressHandler
 from tsugite.daemon.config import AgentConfig, HTTPConfig
+from tsugite.daemon.scheduler import RunResult, ScheduleEntry, Scheduler
 from tsugite.daemon.webhook_store import WebhookStore
 
 
@@ -834,6 +835,64 @@ class TestSkillIssuesEndpoint:
         assert bad_trig["severity"] == "warning"
         assert bad_trig["source"] == "scan"
         assert "trigger" in bad_trig["message"].lower()
+
+
+class TestSchedulesEndpoint:
+    """Regression coverage for the `/api/schedules` JSON serialization paths.
+
+    ScheduleEntry carries a non-persisted `asyncio.Lock` field (metadata={"persist": False}).
+    All four endpoints must skip it — otherwise responses 500 with
+    "Object of type Lock is not JSON serializable".
+    """
+
+    @pytest.fixture
+    def scheduler_client(self, server, tmp_path):
+        run_cb = AsyncMock(return_value=RunResult(output="ok"))
+        sched = Scheduler(tmp_path / "schedules.json", run_cb)
+        sched.add(
+            ScheduleEntry(
+                id="job1",
+                agent="test-agent",
+                prompt="hi",
+                schedule_type="cron",
+                cron_expr="0 9 * * *",
+            )
+        )
+        server.scheduler = sched
+        return TestClient(server.app)
+
+    @pytest.mark.parametrize(
+        "method, url, payload, expected_status, body_key",
+        [
+            ("GET", "/api/schedules", None, 200, "schedules"),
+            ("GET", "/api/schedules/job1", None, 200, None),
+            (
+                "POST",
+                "/api/schedules",
+                {
+                    "id": "job2",
+                    "agent": "test-agent",
+                    "prompt": "hello",
+                    "schedule_type": "cron",
+                    "cron_expr": "0 10 * * *",
+                },
+                201,
+                None,
+            ),
+            ("PATCH", "/api/schedules/job1", {"prompt": "updated"}, 200, None),
+        ],
+        ids=["list", "get", "create", "update"],
+    )
+    def test_serializes_without_lock(
+        self, scheduler_client, test_token, method, url, payload, expected_status, body_key
+    ):
+        resp = scheduler_client.request(
+            method, url, json=payload, headers={"Authorization": f"Bearer {test_token}"}
+        )
+        assert resp.status_code == expected_status, f"got {resp.status_code}: {resp.text!r}"
+        body = resp.json()
+        entry = body[body_key][0] if body_key else body
+        assert "lock" not in entry
 
 
 class TestHTTPConfig:

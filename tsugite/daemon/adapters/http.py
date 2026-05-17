@@ -7,7 +7,7 @@ import mimetypes
 import re
 import shutil
 import threading
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from dataclasses import fields as dataclass_fields
 from datetime import datetime, timezone
 from pathlib import Path
@@ -28,7 +28,7 @@ from tsugite.attachments.base import AttachmentContentType
 from tsugite.attachments.file import FileHandler
 from tsugite.daemon.adapters.base import _PERSIST_EVENT_TYPES, BaseAdapter, ChannelContext
 from tsugite.daemon.config import AgentConfig, HTTPConfig
-from tsugite.daemon.scheduler import ScheduleEntry
+from tsugite.daemon.scheduler import ScheduleEntry, entry_to_dict
 from tsugite.daemon.webhook_store import WebhookStore
 from tsugite.events.base import BaseEvent
 from tsugite.history.storage import get_history_dir
@@ -1541,7 +1541,7 @@ class HTTPServer:
     async def _list_schedules(self, request: Request) -> JSONResponse:
         if err := self._require_auth_and_scheduler(request):
             return err
-        return JSONResponse({"schedules": [asdict(e) for e in self.scheduler.list()]})
+        return JSONResponse({"schedules": [entry_to_dict(e) for e in self.scheduler.list()]})
 
     async def _create_schedule(self, request: Request) -> JSONResponse:
         if err := self._require_auth_and_scheduler(request):
@@ -1565,7 +1565,7 @@ class HTTPServer:
             return JSONResponse({"error": str(e)}, status_code=400)
 
         self.event_bus.emit("schedule_update", {"action": "created", "id": entry.id})
-        return JSONResponse(asdict(entry), status_code=201)
+        return JSONResponse(entry_to_dict(entry), status_code=201)
 
     async def _get_schedule(self, request: Request) -> JSONResponse:
         if err := self._require_auth_and_scheduler(request):
@@ -1574,7 +1574,7 @@ class HTTPServer:
             entry = self.scheduler.get(request.path_params["schedule_id"])
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=404)
-        return JSONResponse(asdict(entry))
+        return JSONResponse(entry_to_dict(entry))
 
     async def _update_schedule(self, request: Request) -> JSONResponse:
         if err := self._require_auth_and_scheduler(request):
@@ -1609,7 +1609,7 @@ class HTTPServer:
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         self.event_bus.emit("schedule_update", {"action": "updated", "id": schedule_id})
-        return JSONResponse(asdict(entry))
+        return JSONResponse(entry_to_dict(entry))
 
     async def _delete_schedule(self, request: Request) -> JSONResponse:
         if err := self._require_auth_and_scheduler(request):
