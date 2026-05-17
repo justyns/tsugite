@@ -50,7 +50,7 @@ class TestSearchTools:
         result = run_integration_agent(
             agent,
             "Write a file test.py containing 'def greet(): pass', then use shell grep to search "
-            "for 'def greet' in the current directory, and return the matches via return_value.",
+            "for 'def greet' in test.py, and return the matches via return_value.",
         )
 
         assert "greet" in result
@@ -75,7 +75,7 @@ class TestReasoning:
     def test_multi_turn_calculation(self, agent_file):
         agent = agent_file(name="reasoning", tools=["run"], max_turns=10)
         result = run_integration_agent(
-            agent, "Calculate the factorial of 6 step by step, then call return_value with the number."
+            agent, "Compute the factorial of 6 in Python and call return_value with the result."
         )
 
         assert "720" in result

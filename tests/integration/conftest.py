@@ -125,10 +125,14 @@ def agent_file(tmp_path):
 
     def _create(name="test", tools=None, max_turns=5, extra_frontmatter="", body=None):
         tools = tools or ["read_file", "write_file", "list_files", "run"]
+        # The body forces gpt-4o-mini to emit a code block instead of narrating the plan
+        # and ending the turn. Without this, the model occasionally responds with prose
+        # like "I'll first write the file, then..." and never executes anything.
         body = body or (
             "You are working in directory: {{ cwd() }}\n\n"
             "Task: {{ user_prompt }}\n\n"
-            "Complete the task using available tools. Call return_value() with your result."
+            "Emit a single Python code block using the available tools to complete the task. "
+            "Do not narrate the plan. Call return_value() with your final answer."
         )
         content = f"""---
 name: {name}

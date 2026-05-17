@@ -32,12 +32,12 @@ class TestHistoryRoundTrip:
 
     def test_continuation(self, agent_file):
         agent = agent_file(name="hist_cont", tools=[])
-        result1 = run_integration_agent(agent, "Call return_value with 'first run'.")
+        result1 = run_integration_agent(agent, "Call return_value with the string 'first run'.")
 
         session_id = save_run_to_history(
             agent_path=agent,
             agent_name="hist_cont",
-            prompt="Call return_value with 'first run'.",
+            prompt="Call return_value with the string 'first run'.",
             result=result1,
             model=INTEGRATION_MODEL,
         )
@@ -45,7 +45,7 @@ class TestHistoryRoundTrip:
 
         result2 = run_integration_agent(
             agent,
-            "What did I say in the previous message? Call return_value with your answer.",
+            "Look at the previous turn's return_value. Call return_value again with that exact same string.",
             continue_conversation_id=session_id,
         )
 
