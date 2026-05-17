@@ -1,5 +1,9 @@
 """Tests for code execution backends."""
 
+import asyncio
+import os
+from pathlib import Path
+
 import pytest
 
 from tsugite.core.executor import ExecutionResult, LocalExecutor, _summarize_variable
@@ -666,3 +670,112 @@ async def test_local_executor_xml_with_final_answer():
     xml = result.to_xml()
 
     assert "<return_value>completed!</return_value>" in xml
+
+
+@pytest.mark.asyncio
+async def test_local_executor_chdir_to_workspace(tmp_path):
+    """LocalExecutor must chdir to workspace_dir so raw Python file APIs (os.getcwd,
+    open, Path.cwd) resolve against the workspace, not the daemon's launch dir."""
+    workspace = (tmp_path / "ws").resolve()
+    workspace.mkdir()
+    (workspace / "marker.txt").write_text("hi")
+
+    original_cwd = os.getcwd()
+    try:
+        executor = LocalExecutor(workspace_dir=workspace)
+        result = await executor.execute(
+            "import os\n"
+            "from pathlib import Path\n"
+            "print('cwd:', os.getcwd())\n"
+            "print('exists:', os.path.exists('marker.txt'))\n"
+            "print('pathcwd:', Path.cwd())\n"
+        )
+
+        assert result.error is None, result.error
+        assert f"cwd: {workspace}" in result.output, result.output
+        assert "exists: True" in result.output, result.output
+        assert f"pathcwd: {workspace}" in result.output, result.output
+    finally:
+        if Path.cwd() != Path(original_cwd):
+            os.chdir(original_cwd)
+
+
+@pytest.mark.asyncio
+async def test_local_executor_restores_cwd_after_execute(tmp_path):
+    """CWD must be restored after execute() returns, even on success."""
+    workspace = (tmp_path / "ws").resolve()
+    workspace.mkdir()
+
+    original_cwd = Path.cwd().resolve()
+    try:
+        executor = LocalExecutor(workspace_dir=workspace)
+        await executor.execute("import os; print(os.getcwd())")
+        assert Path.cwd().resolve() == original_cwd, (
+            f"CWD not restored: now {Path.cwd()}, expected {original_cwd}"
+        )
+    finally:
+        if Path.cwd().resolve() != original_cwd:
+            os.chdir(original_cwd)
+
+
+@pytest.mark.asyncio
+async def test_local_executor_restores_cwd_on_exception(tmp_path):
+    """CWD must be restored even when the agent code raises."""
+    workspace = (tmp_path / "ws").resolve()
+    workspace.mkdir()
+
+    original_cwd = Path.cwd().resolve()
+    try:
+        executor = LocalExecutor(workspace_dir=workspace)
+        result = await executor.execute("raise RuntimeError('boom')")
+        assert result.error is not None and "boom" in result.error
+        assert Path.cwd().resolve() == original_cwd, (
+            f"CWD not restored after exception: now {Path.cwd()}, expected {original_cwd}"
+        )
+    finally:
+        if Path.cwd().resolve() != original_cwd:
+            os.chdir(original_cwd)
+
+
+@pytest.mark.asyncio
+async def test_local_executor_no_workspace_keeps_cwd(tmp_path, monkeypatch):
+    """Without workspace_dir, execute() leaves CWD untouched (legacy CLI behaviour)."""
+    monkeypatch.chdir(tmp_path)
+    before = Path.cwd().resolve()
+
+    executor = LocalExecutor()
+    result = await executor.execute("import os; print(os.getcwd())")
+
+    assert result.error is None, result.error
+    assert str(before) in result.output, result.output
+    assert Path.cwd().resolve() == before
+
+
+@pytest.mark.asyncio
+async def test_local_executor_concurrent_executes_see_own_workspace(tmp_path):
+    """Concurrent execute() calls from different workspaces must each see their own
+    workspace as CWD - the chdir lock must serialize them.
+
+    Uses return_value() instead of stdout to avoid the pre-existing sys.stdout
+    swap race between concurrent LocalExecutor.execute() calls."""
+    ws_a = (tmp_path / "ws_a").resolve()
+    ws_b = (tmp_path / "ws_b").resolve()
+    ws_a.mkdir()
+    ws_b.mkdir()
+
+    executor_a = LocalExecutor(workspace_dir=ws_a)
+    executor_b = LocalExecutor(workspace_dir=ws_b)
+
+    code = "import os, time; time.sleep(0.05); return_value(os.getcwd())"
+
+    original_cwd = Path.cwd().resolve()
+    try:
+        result_a, result_b = await asyncio.gather(
+            asyncio.to_thread(asyncio.run, executor_a.execute(code)),
+            asyncio.to_thread(asyncio.run, executor_b.execute(code)),
+        )
+        assert result_a.return_value == str(ws_a), (result_a.return_value, str(ws_a))
+        assert result_b.return_value == str(ws_b), (result_b.return_value, str(ws_b))
+    finally:
+        if Path.cwd().resolve() != original_cwd:
+            os.chdir(original_cwd)

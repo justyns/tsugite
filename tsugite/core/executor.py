@@ -8,17 +8,46 @@ injected `state` object persist across turns.
 """
 
 import ast
+import contextlib
 import io
+import os
 import pprint
 import sys
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, Iterator, List, Optional
 
 from tsugite.core.state import load_state, save_state
 from tsugite.exceptions import StateSerializationError
 
 PPRINT_WIDTH = 100
+
+# CWD is process-global. Concurrent execute() calls in different threads must
+# serialize their chdir+exec+restore window; the lock is held across the whole
+# user-code exec(), so heavy parallel LocalExecutor turns serialize end-to-end.
+# Accepted trade-off: silent disagreement between raw `os.getcwd()` and tool
+# path resolution is worse than the serialization. `spawn_session` returns
+# immediately so a parent holding the lock doesn't starve a nested child.
+_chdir_lock = threading.Lock()
+
+
+@contextlib.contextmanager
+def _locked_chdir(target: Optional[Path]) -> Iterator[None]:
+    """chdir to target under `_chdir_lock`; restore CWD and release on exit.
+
+    No-op when target is None.
+    """
+    if target is None:
+        yield
+        return
+    with _chdir_lock:
+        previous = os.getcwd()
+        os.chdir(str(target))
+        try:
+            yield
+        finally:
+            os.chdir(previous)
 
 
 def _looks_html_escaped(source: str) -> bool:
@@ -203,6 +232,11 @@ class LocalExecutor:
         self._sticky_injections: Dict[str, Any] = {}
         self._content_blocks: Dict[str, str] = {}
 
+        target = workspace_dir
+        if target is None and path_context is not None:
+            target = path_context.effective_cwd or path_context.workspace_dir
+        self._chdir_target_resolved: Optional[Path] = Path(target).resolve() if target is not None else None
+
         self.namespace: Dict[str, Any] = self._build_turn_namespace()
 
     def _build_turn_namespace(self) -> Dict[str, Any]:
@@ -317,11 +351,24 @@ class LocalExecutor:
             return pprint.pformat(value, width=PPRINT_WIDTH, compact=False)
         return repr(value)
 
+    def _workspace_chdir_target(self) -> Optional[Path]:
+        """Target for the per-execute chdir, or None if CWD already matches (or no workspace)."""
+        target = self._chdir_target_resolved
+        if target is None:
+            return None
+        try:
+            if target == Path.cwd().resolve():
+                return None
+        except FileNotFoundError:
+            pass
+        return target
+
     async def execute(self, code: str) -> ExecutionResult:
         """Execute code using exec().
 
         Automatically displays the value of the last expression (REPL-like behavior).
-        CWD is managed at CLI level - no directory changes here.
+        When a workspace is bound, chdir to it under a process-wide lock so raw
+        Python file APIs (os.getcwd, open, Path.cwd) resolve against the workspace.
 
         Args:
             code: Python code to execute
@@ -367,19 +414,20 @@ class LocalExecutor:
             sys.stdout = stdout_capture
             sys.stderr = stderr_capture
 
-            setup_code, last_expr = self._split_code_for_last_expr(code)
+            with _locked_chdir(self._workspace_chdir_target()):
+                setup_code, last_expr = self._split_code_for_last_expr(code)
 
-            if last_expr:
-                if setup_code.strip():
-                    exec(setup_code, self.namespace)
+                if last_expr:
+                    if setup_code.strip():
+                        exec(setup_code, self.namespace)
 
-                result = eval(last_expr, self.namespace)
+                    result = eval(last_expr, self.namespace)
 
-                if result is not None:
-                    formatted = self._format_value(result)
-                    print(formatted)
-            else:
-                exec(code, self.namespace)
+                    if result is not None:
+                        formatted = self._format_value(result)
+                        print(formatted)
+                else:
+                    exec(code, self.namespace)
 
         except Exception as e:
             exec_error = f"{type(e).__name__}: {str(e)}"
