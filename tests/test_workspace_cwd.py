@@ -347,24 +347,28 @@ class TestExecutorPathVariables:
         assert executor.namespace["INVOKED_FROM"] is None
 
     @pytest.mark.asyncio
-    async def test_executor_path_variables_accessible_in_code(self):
+    async def test_executor_path_variables_accessible_in_code(self, tmp_path):
         """Test that path variables can be accessed in executed code."""
         from tsugite.cli.helpers import PathContext
         from tsugite.core.executor import LocalExecutor
 
+        workspace = tmp_path / "workspace"
+        invoked_from = tmp_path / "projects"
+        workspace.mkdir()
+        invoked_from.mkdir()
+
         path_context = PathContext(
-            invoked_from=Path("/home/user/projects"),
-            workspace_dir=Path("/home/user/workspace"),
-            effective_cwd=Path("/home/user/workspace"),
+            invoked_from=invoked_from,
+            workspace_dir=workspace,
+            effective_cwd=workspace,
         )
 
         executor = LocalExecutor(path_context=path_context)
 
-        # Execute code that accesses the variables
         result = await executor.execute("print(f'Workspace: {WORKSPACE_DIR}')")
         assert result.error is None
-        assert "Workspace: /home/user/workspace" in result.stdout
+        assert f"Workspace: {workspace}" in result.stdout
 
         result = await executor.execute("print(f'Invoked from: {INVOKED_FROM}')")
         assert result.error is None
-        assert "Invoked from: /home/user/projects" in result.stdout
+        assert f"Invoked from: {invoked_from}" in result.stdout
