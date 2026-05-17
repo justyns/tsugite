@@ -72,10 +72,7 @@ def test_unread_badge_stays_when_tab_hidden_during_stream_end(chat_page, mock_ch
     _force_unread(page, sid)
 
     # Override the visibility API for the rest of the page lifetime.
-    page.evaluate(
-        "Object.defineProperty(document, 'visibilityState', "
-        "{ configurable: true, get: () => 'hidden' });"
-    )
+    page.evaluate("Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });")
 
     textarea = page.locator("textarea#message-input")
     textarea.fill("Hello agent")

@@ -710,9 +710,7 @@ async def test_local_executor_restores_cwd_after_execute(tmp_path):
     try:
         executor = LocalExecutor(workspace_dir=workspace)
         await executor.execute("import os; print(os.getcwd())")
-        assert Path.cwd().resolve() == original_cwd, (
-            f"CWD not restored: now {Path.cwd()}, expected {original_cwd}"
-        )
+        assert Path.cwd().resolve() == original_cwd, f"CWD not restored: now {Path.cwd()}, expected {original_cwd}"
     finally:
         if Path.cwd().resolve() != original_cwd:
             os.chdir(original_cwd)

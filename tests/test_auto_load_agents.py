@@ -57,9 +57,9 @@ class TestDefaultAgentNoLongerPrefetchesAgentList:
         agent = parse_agent_file(builtin_path)
 
         prefetch_tools = [p.get("tool") for p in (agent.config.prefetch or [])]
-        assert (
-            "list_agents" not in prefetch_tools
-        ), "default.md still has list_agents in prefetch; the always-on agent listing was removed"
+        assert "list_agents" not in prefetch_tools, (
+            "default.md still has list_agents in prefetch; the always-on agent listing was removed"
+        )
 
 
 class TestAutoLoadAgentListFlag:
@@ -73,13 +73,7 @@ class TestAutoLoadAgentListFlag:
 
         agent_file = tmp_path / "orchestrator.md"
         agent_file.write_text(
-            "---\n"
-            "name: orchestrator\n"
-            "extends: none\n"
-            "auto_load_agent_list: true\n"
-            "tools: []\n"
-            "---\n\n"
-            "{{ user_prompt }}\n"
+            "---\nname: orchestrator\nextends: none\nauto_load_agent_list: true\ntools: []\n---\n\n{{ user_prompt }}\n"
         )
 
         agent = parse_agent_file(agent_file)
@@ -96,7 +90,7 @@ class TestAutoLoadAgentListFlag:
         (agents_dir / "helper.md").write_text("---\nname: helper\ndescription: Helps with stuff\n---\n")
 
         agent_file = tmp_path / "frugal.md"
-        agent_file.write_text("---\n" "name: frugal\n" "extends: none\n" "tools: []\n" "---\n\n" "{{ user_prompt }}\n")
+        agent_file.write_text("---\nname: frugal\nextends: none\ntools: []\n---\n\n{{ user_prompt }}\n")
 
         agent = parse_agent_file(agent_file)
         prepared = AgentPreparer().prepare(agent=agent, prompt="go")
