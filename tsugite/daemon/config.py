@@ -39,8 +39,9 @@ class DiscordBotConfig(BaseModel):
     """Configuration for a single Discord bot."""
 
     name: str
-    token: str
     agent: str  # References agents key
+    token_secret: Optional[str] = None  # Resolved via tsugite.secrets.get_backend().get()
+    token_file: Optional[Path] = None  # File path containing the token
     command_prefix: str = "!"
     guild_id: Optional[str] = None  # Sync app commands to this guild only (instant; good for dev)
     dm_policy: Literal["allowlist", "open"] = "allowlist"
@@ -50,6 +51,35 @@ class DiscordBotConfig(BaseModel):
     # keep their existing shared-team-session behavior. The name is preserved across compaction.
     # Set to "" to fall back to the user's default-interactive session.
     session_name: str = "discord"
+
+    @model_validator(mode="after")
+    def _validate_token_source(self):
+        has_secret = self.token_secret is not None
+        has_file = self.token_file is not None
+        if has_secret == has_file:
+            raise ValueError(
+                f"DiscordBotConfig {self.name!r}: must set exactly one of token_secret, token_file"
+            )
+        return self
+
+    def resolve_token(self) -> str:
+        """Resolve the bot token from its configured source.
+
+        Called by the Discord adapter at bot start, after the secrets backend
+        has been configured by `configure_from_daemon()`.
+        """
+        if self.token_secret is not None:
+            from tsugite.secrets import get_backend
+
+            value = get_backend().get(self.token_secret)
+            if value is None:
+                raise RuntimeError(
+                    f"Discord bot {self.name!r}: secret {self.token_secret!r} not found in secrets backend"
+                )
+            return value
+        if self.token_file is not None:
+            return self.token_file.expanduser().read_text(encoding="utf-8").strip()
+        raise RuntimeError(f"Discord bot {self.name!r}: no token source configured")
 
 
 class NotificationChannelConfig(BaseModel):
@@ -139,7 +169,15 @@ def load_daemon_config(path: Optional[Path] = None) -> DaemonConfig:
         data = yaml.safe_load(f)
 
     for bot in data.get("discord_bots", []):
-        _expand_env_vars(bot, "token")
+        if "token" in bot:
+            raise ValueError(
+                f"Discord bot {bot.get('name', '?')!r}: plaintext 'token:' is no longer supported. "
+                "Use 'token_secret: <name>' (resolved via tsugite secrets store) "
+                "or 'token_file: <path>' instead. "
+                "Migrate with: tsu secrets set <name> (then update daemon.yaml)."
+            )
+        _expand_env_vars(bot, "token_file")
+        _expand_paths(bot, "token_file")
 
     for agent_data in data.get("agents", {}).values():
         if "workspace_dir" in agent_data:

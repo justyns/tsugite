@@ -44,13 +44,14 @@ def _prompt_bot_name(style) -> str:
     ).ask()
 
 
-def _prompt_token_env_var(style) -> str:
-    """Prompt for token environment variable name."""
+def _prompt_token_file_path(style, bot_name: str) -> str:
+    """Prompt for the file path that holds the Discord token."""
     import questionary
 
+    default_path = f"~/.config/tsugite/discord-{bot_name}.token"
     return questionary.text(
-        "Environment variable name for Discord token:",
-        default="DISCORD_BOT_TOKEN",
+        "Path to file containing Discord token:",
+        default=default_path,
         style=style,
     ).ask()
 
@@ -200,7 +201,8 @@ def _config_to_dict(config) -> dict:
         "discord_bots": [
             {
                 "name": bot.name,
-                "token": bot.token,
+                **({"token_secret": bot.token_secret} if bot.token_secret else {}),
+                **({"token_file": str(bot.token_file)} if bot.token_file else {}),
                 "agent": bot.agent,
                 "command_prefix": bot.command_prefix,
                 "dm_policy": bot.dm_policy,
@@ -220,14 +222,15 @@ def _show_generated_config(config_data: dict):
     console.print(Panel(config_yaml, border_style="cyan"))
 
 
-def _show_next_steps(token_env_var: str, bot_name: str):
+def _show_next_steps(token_file: str, bot_name: str):
     """Display next steps for the user."""
     console.print("\n" + "=" * 60)
     console.print("[bold green]Setup Complete![/bold green]")
     console.print("=" * 60)
 
     console.print("\n[bold]Next Steps:[/bold]")
-    console.print(f'  1. Set your Discord token: [cyan]export {token_env_var}="your-token"[/cyan]')
+    console.print(f"  1. Save your Discord token to: [cyan]{token_file}[/cyan]")
+    console.print(f'     [dim]mkdir -p $(dirname {token_file}) && echo "your-token" > {token_file} && chmod 600 {token_file}[/dim]')
     console.print("  2. Start the daemon: [cyan]tsugite daemon[/cyan]")
     console.print("  3. DM your bot with: [cyan]!hello[/cyan]")
 
@@ -295,8 +298,8 @@ def init_daemon(
     if not bot_name:
         raise typer.Exit(1)
 
-    token_env_var = _prompt_token_env_var(style)
-    if not token_env_var:
+    token_file = _prompt_token_file_path(style, bot_name)
+    if not token_file:
         raise typer.Exit(1)
 
     command_prefix = _prompt_command_prefix(style)
@@ -335,7 +338,7 @@ def init_daemon(
 
     bot_config = {
         "name": bot_name,
-        "token": f"${{{token_env_var}}}",
+        "token_file": token_file,
         "agent": agent_config_name,
         "command_prefix": command_prefix,
         "dm_policy": dm_policy,
@@ -357,7 +360,7 @@ def init_daemon(
 
     console.print(f"[green]✓[/green] Configuration saved to: {config_path}")
 
-    _show_next_steps(token_env_var, bot_name)
+    _show_next_steps(token_file, bot_name)
 
 
 def _daemon_request(method: str, host: str, port: int, path: str, token: Optional[str] = None, **kwargs):

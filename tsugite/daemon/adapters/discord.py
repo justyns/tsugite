@@ -892,7 +892,7 @@ class DiscordAdapter(BaseAdapter):
         backoff = 5
         for attempt in range(max_retries):
             try:
-                await self.bot.start(self.bot_config.token)
+                await self.bot.start(self.bot_config.resolve_token())
                 break
             except (discord.errors.DiscordServerError, OSError) as e:
                 if attempt < max_retries - 1:
