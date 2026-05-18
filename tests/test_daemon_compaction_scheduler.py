@@ -108,6 +108,24 @@ class TestCompactionScheduler:
         asyncio.run(scheduler._check_agent("test-agent", agent_config))
         adapter._compact_session.assert_not_called()
 
+    def test_check_agent_compacts_large_session_with_few_turns(self, tmp_path):
+        """A session above the retention budget should be compacted on schedule
+        even when message_count < min_turns. Real-world case: post-compaction
+        sessions retain 15% of context (~150K on a 1M model) but only count
+        *new* turns toward min_turns, so a 700K session with 2 new turns
+        otherwise gets skipped daily until token_threshold kicks in."""
+        store = _make_session_store(tmp_path)
+        session = store.get_or_create_interactive("user1", "test-agent")
+        # context_limit defaults to 128000 in _make_session_store; retention budget
+        # = 128000 * 0.15 = 19200. Park well above that with no new turns.
+        store.set_cumulative_tokens(session.id, 50_000)
+
+        adapter = _make_adapter()
+        scheduler, agent_config = _make_scheduler(tmp_path, adapter, store, min_turns=5)
+
+        asyncio.run(scheduler._check_agent("test-agent", agent_config))
+        adapter._compact_session.assert_called_once_with(session.id, reason="scheduled")
+
     def test_check_agent_compacts_when_enough_turns(self, tmp_path):
         store = _make_session_store(tmp_path)
         session = store.get_or_create_interactive("user1", "test-agent")

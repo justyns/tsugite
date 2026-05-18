@@ -101,13 +101,26 @@ class CompactionScheduler:
             logger.warning("No adapter found for agent '%s', skipping scheduled compaction", agent_name)
             return
 
+        # A session that's idle but already loaded with retained context (e.g. carried
+        # over from a previous compaction) should still be compacted on schedule.
+        # `min_turns` alone undercounts because retained events from prior compactions
+        # don't bump message_count.
+        from tsugite.daemon.memory import RETENTION_BUDGET_RATIO
+
+        context_limit = self._session_store.get_context_limit(agent_name)
+        retention_budget = int(context_limit * RETENTION_BUDGET_RATIO)
+
         for session in sessions:
-            if session.message_count < auto_compact.min_turns:
+            few_turns = session.message_count < auto_compact.min_turns
+            small_context = session.cumulative_tokens < retention_budget
+            if few_turns and small_context:
                 logger.debug(
-                    "[%s] Skipping scheduled compaction: %d turns < min_turns %d",
+                    "[%s] Skipping scheduled compaction: %d turns < %d and %d tokens < retention budget %d",
                     agent_name,
                     session.message_count,
                     auto_compact.min_turns,
+                    session.cumulative_tokens,
+                    retention_budget,
                 )
                 continue
 
