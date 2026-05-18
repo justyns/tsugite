@@ -1044,7 +1044,14 @@ class BaseAdapter(ABC):
             source_session_id=old_conv_id,
         )
         for event in recent_events:
-            new_storage.record(event.type, **event.data)
+            data = event.data
+            if event.type == "model_response" and "state_delta" in data:
+                # state_delta holds provider-specific runtime IDs (e.g. claude_code
+                # session_id, compaction flags) tied to the pre-compaction session.
+                # Carrying them forward causes the next turn to resume the old
+                # Claude Code session and bypass compaction entirely.
+                data = {k: v for k, v in data.items() if k != "state_delta"}
+            new_storage.record(event.type, **data)
 
         post_compact_execs = await fire_compact_hooks(
             self.agent_config.workspace_dir,

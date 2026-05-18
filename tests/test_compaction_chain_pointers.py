@@ -131,3 +131,76 @@ async def test_compacted_into_not_written_when_nothing_to_compact(workspace_dir,
     assert all(e.type != "compacted_into" for e in old_events), (
         "early-exit must not write a forward pointer when no rotation happened"
     )
+
+
+@pytest.mark.asyncio
+async def test_retained_model_response_loses_provider_session_id(workspace_dir, history_dir, tmp_path):
+    """Retained `model_response` events must not carry their `state_delta.session_id`
+    forward into the new post-compaction JSONL.
+
+    Otherwise `get_claude_code_session_info` (which scans backward for the last
+    model_response with a session_id, skipping only events before the compaction
+    marker by file index) will find the stale id and the next turn resumes the
+    pre-compaction Claude Code session — defeating the point of compaction since
+    Claude Code keeps the full server-side conversation history on resume.
+    """
+    from datetime import datetime, timezone
+    from unittest.mock import AsyncMock, patch
+
+    from tsugite.agent_runner.history_integration import get_claude_code_session_info
+    from tsugite.history.models import Event
+
+    store = SessionStore(tmp_path / "session_store.json", context_limits={"test-agent": 1_000_000})
+    session = store.get_or_create_interactive("test-user", "test-agent")
+    conv_id = session.id
+
+    _seed_session_events(history_dir / f"{conv_id}.jsonl")
+
+    old_events = [Event(type="user_input", ts=datetime.now(timezone.utc), data={"text": "old"})]
+    recent_events = [
+        Event(type="user_input", ts=datetime.now(timezone.utc), data={"text": "recent"}),
+        Event(
+            type="model_response",
+            ts=datetime.now(timezone.utc),
+            data={
+                "raw_content": "reply",
+                "state_delta": {
+                    "session_id": "pre-compaction-claude-code-id",
+                    "compacted": False,
+                    "context_window": 1_000_000,
+                },
+            },
+        ),
+    ]
+
+    async def fake_summarize(messages, model=None, max_context_tokens=None, progress_callback=None):
+        return "Summary"
+
+    agent_config = AgentConfig(workspace_dir=workspace_dir, agent_file="default")
+    agent_config.context_limit = 1_000_000
+    adapter = _StubAdapter("test-agent", agent_config, store)
+
+    with (
+        patch("tsugite.daemon.memory.get_context_limit", return_value=1_000_000),
+        patch("tsugite.daemon.memory.infer_compaction_model", return_value="anthropic:claude-3-haiku-20240307"),
+        patch("tsugite.daemon.memory.split_events_for_compaction", return_value=(old_events, recent_events)),
+        patch("tsugite.daemon.memory.summarize_session", new=fake_summarize),
+        patch("tsugite.history.get_history_dir", return_value=history_dir),
+        patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
+        patch("tsugite.history.storage.get_machine_name", return_value="test"),
+        patch("tsugite.hooks.fire_compact_hooks", new_callable=AsyncMock, return_value=[]),
+    ):
+        new_session = await adapter._compact_session(conv_id, reason="manual")
+
+    assert new_session is not None
+    new_events = SessionStorage.load(history_dir / f"{new_session.id}.jsonl").load_events()
+    model_responses = [e for e in new_events if e.type == "model_response"]
+    assert len(model_responses) == 1
+    state_delta = model_responses[0].data.get("state_delta") or {}
+    assert "session_id" not in state_delta, (
+        f"Retained model_response leaked pre-compaction session_id: {state_delta}"
+    )
+
+    with patch("tsugite.agent_runner.history_integration.get_history_dir", return_value=history_dir):
+        info = get_claude_code_session_info(new_session.id)
+    assert info is None, f"Expected no resume target post-compaction, got {info}"
