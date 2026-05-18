@@ -3,7 +3,8 @@
 import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import Dict
+from typing import Dict, Optional
+from zoneinfo import ZoneInfo
 
 from cronsim import CronSim
 
@@ -41,6 +42,23 @@ class CompactionScheduler:
         self._running = False
         self._wakeup.set()
 
+    def _compute_next_fire_time(self, agent_config: AgentConfig, now_utc: datetime) -> Optional[datetime]:
+        """Next scheduled fire time for an agent's auto-compact cron, in UTC.
+
+        Cron expressions are interpreted in the agent's configured timezone
+        (`agent_config.timezone`, IANA name). Empty timezone falls back to UTC.
+        """
+        schedule = agent_config.auto_compact and agent_config.auto_compact.schedule
+        if not schedule:
+            return None
+        tz = ZoneInfo(agent_config.timezone) if agent_config.timezone else timezone.utc
+        now_local = now_utc.astimezone(tz)
+        try:
+            next_local = next(CronSim(schedule, now_local))
+        except StopIteration:
+            return None
+        return next_local.astimezone(timezone.utc)
+
     async def _main_loop(self):
         while self._running:
             now = datetime.now(timezone.utc)
@@ -49,16 +67,12 @@ class CompactionScheduler:
             agent_fire_times: dict[str, datetime] = {}
             earliest = None
             for agent_name, agent_config in self._agents.items():
-                schedule = agent_config.auto_compact and agent_config.auto_compact.schedule
-                if not schedule:
+                agent_next = self._compute_next_fire_time(agent_config, now)
+                if agent_next is None:
                     continue
-                try:
-                    agent_next = next(CronSim(schedule, now))
-                    agent_fire_times[agent_name] = agent_next
-                    if earliest is None or agent_next < earliest:
-                        earliest = agent_next
-                except StopIteration:
-                    continue
+                agent_fire_times[agent_name] = agent_next
+                if earliest is None or agent_next < earliest:
+                    earliest = agent_next
 
             if earliest is None:
                 self._wakeup.clear()

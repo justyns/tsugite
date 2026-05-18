@@ -192,6 +192,47 @@ class TestCompactionScheduler:
         assert not store.is_compacting("user1", "test-agent")
 
 
+class TestCompactionSchedulerTimezone:
+    def test_compute_next_fire_time_uses_agent_timezone(self, tmp_path):
+        """`0 6 * * *` with agent timezone America/Chicago should fire at 06:00
+        local (11:00 UTC during CDT), not 06:00 UTC."""
+        from datetime import datetime, timezone
+        from zoneinfo import ZoneInfo
+
+        agent_config = AgentConfig(
+            workspace_dir=tmp_path,
+            agent_file="default",
+            timezone="America/Chicago",
+            auto_compact=AutoCompactConfig(schedule="0 6 * * *"),
+        )
+        store = _make_session_store(tmp_path)
+        scheduler = CompactionScheduler({"test-agent": agent_config}, store, {})
+
+        # 2026-05-18 03:00 UTC = 2026-05-17 22:00 Chicago (CDT, UTC-5).
+        # Next "0 6 * * *" in Chicago = 2026-05-18 06:00 Chicago = 11:00 UTC.
+        now = datetime(2026, 5, 18, 3, 0, tzinfo=timezone.utc)
+        fire = scheduler._compute_next_fire_time(agent_config, now)
+        assert fire is not None
+        assert fire == datetime(2026, 5, 18, 11, 0, tzinfo=timezone.utc)
+        assert fire.astimezone(ZoneInfo("America/Chicago")).hour == 6
+
+    def test_compute_next_fire_time_defaults_to_utc(self, tmp_path):
+        """Empty `timezone` falls back to UTC for backward compat."""
+        from datetime import datetime, timezone
+
+        agent_config = AgentConfig(
+            workspace_dir=tmp_path,
+            agent_file="default",
+            auto_compact=AutoCompactConfig(schedule="0 6 * * *"),
+        )
+        store = _make_session_store(tmp_path)
+        scheduler = CompactionScheduler({"test-agent": agent_config}, store, {})
+
+        now = datetime(2026, 5, 18, 3, 0, tzinfo=timezone.utc)
+        fire = scheduler._compute_next_fire_time(agent_config, now)
+        assert fire == datetime(2026, 5, 18, 6, 0, tzinfo=timezone.utc)
+
+
 class TestSessionStoreListInteractive:
     def test_list_interactive_by_agent(self, tmp_path):
         store = _make_session_store(tmp_path)
