@@ -57,9 +57,7 @@ class DiscordBotConfig(BaseModel):
         has_secret = self.token_secret is not None
         has_file = self.token_file is not None
         if has_secret == has_file:
-            raise ValueError(
-                f"DiscordBotConfig {self.name!r}: must set exactly one of token_secret, token_file"
-            )
+            raise ValueError(f"DiscordBotConfig {self.name!r}: must set exactly one of token_secret, token_file")
         return self
 
     def resolve_token(self) -> str:

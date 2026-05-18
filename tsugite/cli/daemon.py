@@ -230,7 +230,9 @@ def _show_next_steps(token_file: str, bot_name: str):
 
     console.print("\n[bold]Next Steps:[/bold]")
     console.print(f"  1. Save your Discord token to: [cyan]{token_file}[/cyan]")
-    console.print(f'     [dim]mkdir -p $(dirname {token_file}) && echo "your-token" > {token_file} && chmod 600 {token_file}[/dim]')
+    console.print(
+        f'     [dim]mkdir -p $(dirname {token_file}) && echo "your-token" > {token_file} && chmod 600 {token_file}[/dim]'
+    )
     console.print("  2. Start the daemon: [cyan]tsugite daemon[/cyan]")
     console.print("  3. DM your bot with: [cyan]!hello[/cyan]")
 

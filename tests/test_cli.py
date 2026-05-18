@@ -64,9 +64,7 @@ def test_run_command_non_markdown_file(cli_runner, temp_dir):
 
 def test_run_command_arg_validation_error_to_stderr(cli_runner, sample_agent_file):
     """`Cannot use --new-session with --continue` (and similar arg errors) land on stderr."""
-    result = cli_runner.invoke(
-        app, ["run", str(sample_agent_file), "test prompt", "--new-session", "--continue"]
-    )
+    result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--new-session", "--continue"])
 
     assert result.exit_code == 1
     assert "Cannot use --new-session with --continue" in result.stderr

@@ -320,12 +320,12 @@ def run(
         tsu run --daemon odyn "follow up message"  # Join daemon session for agent 'odyn'
     """
     from tsugite.agent_runner import get_agent_info, run_agent
+    from tsugite.console import get_stderr_console
     from tsugite.md_agents import validate_agent_execution
     from tsugite.secrets import init_cli as init_secrets
     from tsugite.utils import should_use_plain_output
 
     from . import console
-    from tsugite.console import get_stderr_console
 
     stderr_console = get_stderr_console(no_color=no_color)
 

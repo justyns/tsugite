@@ -886,9 +886,7 @@ class TestSchedulesEndpoint:
     def test_serializes_without_lock(
         self, scheduler_client, test_token, method, url, payload, expected_status, body_key
     ):
-        resp = scheduler_client.request(
-            method, url, json=payload, headers={"Authorization": f"Bearer {test_token}"}
-        )
+        resp = scheduler_client.request(method, url, json=payload, headers={"Authorization": f"Bearer {test_token}"})
         assert resp.status_code == expected_status, f"got {resp.status_code}: {resp.text!r}"
         body = resp.json()
         entry = body[body_key][0] if body_key else body
