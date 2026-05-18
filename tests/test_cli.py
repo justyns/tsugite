@@ -72,6 +72,18 @@ def test_run_command_valid_file(cli_runner, sample_agent_file, mock_agent_execut
     assert "Test agent execution completed" in result.stdout
 
 
+def test_continue_message_goes_to_stderr(cli_runner, sample_agent_file, mock_agent_execution):
+    """`Continuing conversation: <id>` status line must land on stderr, not stdout."""
+    result = cli_runner.invoke(
+        app,
+        ["run", str(sample_agent_file), "test prompt", "--continue", "--conversation-id", "abc123"],
+    )
+
+    assert result.exit_code == 0
+    assert "Continuing conversation: abc123" in result.stderr
+    assert "Continuing conversation: abc123" not in result.stdout
+
+
 def test_run_command_with_options(cli_runner, sample_agent_file, temp_dir, mock_agent_execution):
     """Test run command with various options."""
     # Test with --root option

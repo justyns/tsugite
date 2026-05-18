@@ -142,7 +142,7 @@ def _build_executor_kwargs(
 
 
 def _resolve_conversation_continuation(
-    continue_conversation: bool, conversation_id: Optional[str], console: Console
+    continue_conversation: bool, conversation_id: Optional[str], stderr_console: Console
 ) -> Optional[str]:
     """Resolve which conversation to continue."""
     if not continue_conversation:
@@ -151,15 +151,15 @@ def _resolve_conversation_continuation(
     from tsugite.agent_runner.history_integration import get_latest_conversation
 
     if conversation_id:
-        console.print(f"[cyan]Continuing conversation: {conversation_id}[/cyan]")
+        stderr_console.print(f"[cyan]Continuing conversation: {conversation_id}[/cyan]")
         return conversation_id
 
     continue_conversation_id = get_latest_conversation()
     if not continue_conversation_id:
-        console.print("[red]No conversations found to resume[/red]")
+        stderr_console.print("[red]No conversations found to resume[/red]")
         raise typer.Exit(1)
 
-    console.print(f"[cyan]Continuing latest conversation: {continue_conversation_id}[/cyan]")
+    stderr_console.print(f"[cyan]Continuing latest conversation: {continue_conversation_id}[/cyan]")
     return continue_conversation_id
 
 
@@ -409,6 +409,10 @@ def run(
     # Resolve UI mode to update ui_opts
     ui_opts = _resolve_ui_mode(ui, ui_opts, console)
 
+    from tsugite.console import get_stderr_console
+
+    stderr_console = get_stderr_console(no_color=ui_opts.no_color)
+
     # Handle subagent mode and daemon mode (both need os)
     import os
 
@@ -489,9 +493,9 @@ def run(
 
     # Handle conversation continuation - check before parsing args
     if continue_conversation and not history_opts.continue_id:
-        history_opts.continue_id = _resolve_conversation_continuation(True, None, console)
+        history_opts.continue_id = _resolve_conversation_continuation(True, None, stderr_console)
     elif history_opts.continue_id:
-        console.print(f"[cyan]Continuing conversation: {history_opts.continue_id}[/cyan]")
+        stderr_console.print(f"[cyan]Continuing conversation: {history_opts.continue_id}[/cyan]")
 
     # Parse CLI arguments into agents and prompt (allow empty agents when continuing)
     try:
@@ -553,10 +557,6 @@ def run(
             raise typer.Exit(1)
 
         use_plain_output = ui_opts.plain or should_use_plain_output()
-
-        from tsugite.console import get_stderr_console
-
-        stderr_console = get_stderr_console(no_color=ui_opts.no_color)
 
         # Print deferred workspace status messages
         if not ui_opts.headless and not ui_opts.final_only:
