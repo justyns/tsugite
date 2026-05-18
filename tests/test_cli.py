@@ -46,7 +46,8 @@ def test_run_command_nonexistent_file(cli_runner, temp_dir):
     result = cli_runner.invoke(app, ["run", str(nonexistent), "test prompt"])
 
     assert result.exit_code == 1
-    assert "Agent file not found" in result.stdout
+    assert "Agent file not found" in result.stderr
+    assert "Agent file not found" not in result.stdout
 
 
 def test_run_command_non_markdown_file(cli_runner, temp_dir):
@@ -57,7 +58,19 @@ def test_run_command_non_markdown_file(cli_runner, temp_dir):
     result = cli_runner.invoke(app, ["run", str(text_file), "test prompt"])
 
     assert result.exit_code == 1
-    assert "must be a .md file" in result.stdout
+    assert "must be a .md file" in result.stderr
+    assert "must be a .md file" not in result.stdout
+
+
+def test_run_command_arg_validation_error_to_stderr(cli_runner, sample_agent_file):
+    """`Cannot use --new-session with --continue` (and similar arg errors) land on stderr."""
+    result = cli_runner.invoke(
+        app, ["run", str(sample_agent_file), "test prompt", "--new-session", "--continue"]
+    )
+
+    assert result.exit_code == 1
+    assert "Cannot use --new-session with --continue" in result.stderr
+    assert "Cannot use --new-session with --continue" not in result.stdout
 
 
 def test_run_command_valid_file(cli_runner, sample_agent_file, mock_agent_execution):

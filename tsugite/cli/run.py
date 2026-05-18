@@ -87,19 +87,21 @@ def _check_and_run_onboarding(
     return workspace
 
 
-def _resolve_ui_mode(ui_mode: Optional[str], ui_opts: UIOptions, console: Console) -> UIOptions:
+def _resolve_ui_mode(ui_mode: Optional[str], ui_opts: UIOptions, stderr_console: Console) -> UIOptions:
     """Resolve UI mode flag and return updated UIOptions."""
     if not ui_mode:
         return ui_opts
 
     if ui_opts.plain or ui_opts.headless:
-        console.print("[red]Error: --ui cannot be used with --plain or --headless[/red]")
+        stderr_console.print("[red]Error: --ui cannot be used with --plain or --headless[/red]")
         raise typer.Exit(1)
 
     ui_modes = {"plain", "headless", "live"}
     ui_lower = ui_mode.lower()
     if ui_lower not in ui_modes:
-        console.print(f"[red]Error: Invalid UI mode '{ui_mode}'. Choose from: {', '.join(sorted(ui_modes))}[/red]")
+        stderr_console.print(
+            f"[red]Error: Invalid UI mode '{ui_mode}'. Choose from: {', '.join(sorted(ui_modes))}[/red]"
+        )
         raise typer.Exit(1)
 
     if ui_lower == "plain":
@@ -323,16 +325,19 @@ def run(
     from tsugite.utils import should_use_plain_output
 
     from . import console
+    from tsugite.console import get_stderr_console
+
+    stderr_console = get_stderr_console(no_color=no_color)
 
     init_secrets(no_secrets)
 
     # Validate flag combinations
     if new_session and continue_conversation:
-        console.print("[red]Error: Cannot use --new-session with --continue[/red]")
+        stderr_console.print("[red]Error: Cannot use --new-session with --continue[/red]")
         raise typer.Exit(1)
 
     if workspace and no_workspace:
-        console.print("[red]Error: Cannot use --workspace with --no-workspace[/red]")
+        stderr_console.print("[red]Error: Cannot use --workspace with --no-workspace[/red]")
         raise typer.Exit(1)
 
     ui_opts = UIOptions(
@@ -349,7 +354,7 @@ def run(
     workspace_to_use, resolved_workspace = _resolve_effective_workspace(workspace, no_workspace)
 
     if new_session and not workspace_to_use:
-        console.print("[yellow]Warning: --new-session has no effect without a workspace[/yellow]")
+        stderr_console.print("[yellow]Warning: --new-session has no effect without a workspace[/yellow]")
     exec_opts = ExecutionOptions.from_cli(
         model=model,
         debug=debug,
@@ -367,7 +372,7 @@ def run(
         history_dir=history_dir,
     )
     if workspace_to_use and not resolved_workspace:
-        console.print(f"[yellow]Warning: Workspace '{workspace_to_use}' not found[/yellow]")
+        stderr_console.print(f"[yellow]Warning: Workspace '{workspace_to_use}' not found[/yellow]")
 
     # Auto-continue workspace session unless explicitly overridden
     workspace_session_continued = False
@@ -407,18 +412,16 @@ def run(
         console.no_color = True
 
     # Resolve UI mode to update ui_opts
-    ui_opts = _resolve_ui_mode(ui, ui_opts, console)
-
-    from tsugite.console import get_stderr_console
-
-    stderr_console = get_stderr_console(no_color=ui_opts.no_color)
+    ui_opts = _resolve_ui_mode(ui, ui_opts, stderr_console)
 
     # Handle subagent mode and daemon mode (both need os)
     import os
 
     if subagent_mode:
         if ui_opts.plain or ui_opts.headless or ui_opts.live:
-            console.print("[red]Error: --subagent-mode cannot be combined with --plain, --headless, or --ui live[/red]")
+            stderr_console.print(
+                "[red]Error: --subagent-mode cannot be combined with --plain, --headless, or --ui live[/red]"
+            )
             raise typer.Exit(1)
 
         ui_opts.non_interactive = True
@@ -434,14 +437,14 @@ def run(
 
             daemon_config = load_daemon_config()
             if daemon_agent not in daemon_config.agents:
-                console.print(f"[red]Agent '{daemon_agent}' not found in daemon config[/red]")
+                stderr_console.print(f"[red]Agent '{daemon_agent}' not found in daemon config[/red]")
                 raise typer.Exit(1)
 
             agent_config = daemon_config.agents[daemon_agent]
 
         except ValueError as e:
-            console.print(f"[red]Daemon config not found: {e}[/red]")
-            console.print("[dim]Run 'tsugite daemon' to start daemon first[/dim]")
+            stderr_console.print(f"[red]Daemon config not found: {e}[/red]")
+            stderr_console.print("[dim]Run 'tsugite daemon' to start daemon first[/dim]")
             raise typer.Exit(1)
 
         # Find latest session for this agent
@@ -459,11 +462,11 @@ def run(
                 continue
 
         if latest_conv_id:
-            console.print(f"[cyan]Joining daemon session: {latest_conv_id}[/cyan]")
+            stderr_console.print(f"[cyan]Joining daemon session: {latest_conv_id}[/cyan]")
             history_opts.continue_id = latest_conv_id
         else:
-            console.print(f"[yellow]No active daemon session found for '{daemon_agent}'[/yellow]")
-            console.print("[dim]Creating new daemon-managed session...[/dim]")
+            stderr_console.print(f"[yellow]No active daemon session found for '{daemon_agent}'[/yellow]")
+            stderr_console.print("[dim]Creating new daemon-managed session...[/dim]")
 
         # Override agent with daemon agent
         args = [f"+{daemon_agent}"] + args
@@ -505,10 +508,10 @@ def run(
             args, allow_empty_agents=continue_conversation, check_stdin=not continue_conversation
         )
     except ValueError as e:
-        console.print(f"[red]Error: {e}[/red]")
+        stderr_console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1)
 
-    with workspace_directory_context(resolved_workspace, root, console) as path_context:
+    with workspace_directory_context(resolved_workspace, root, stderr_console) as path_context:
         try:
             base_dir = Path.cwd()
 
@@ -522,15 +525,17 @@ def run(
                     if not agent_name:
                         raise ValueError("agent name missing from session_start")
                 except Exception:
-                    console.print(f"[red]Could not load metadata for conversation: {history_opts.continue_id}[/red]")
+                    stderr_console.print(
+                        f"[red]Could not load metadata for conversation: {history_opts.continue_id}[/red]"
+                    )
                     raise typer.Exit(1)
 
-                console.print(f"[cyan]Auto-detected agent from conversation: {agent_name}[/cyan]")
+                stderr_console.print(f"[cyan]Auto-detected agent from conversation: {agent_name}[/cyan]")
                 agent_refs = [f"+{agent_name}"]
 
             # Handle multi-agent mode: first agent is primary, rest are allowed to spawn
             if not agent_refs:
-                console.print("[red]Error: No agent specified[/red]")
+                stderr_console.print("[red]Error: No agent specified[/red]")
                 raise typer.Exit(1)
 
             from tsugite.agent_runner.helpers import set_allowed_agents
@@ -541,19 +546,19 @@ def run(
             if len(agent_refs) > 1:
                 allowed_agent_names = []
                 for allowed_ref in agent_refs[1:]:
-                    _, allowed_file, _ = load_and_validate_agent(allowed_ref, console)
+                    _, allowed_file, _ = load_and_validate_agent(allowed_ref, stderr_console)
                     allowed_agent = parse_agent_file(allowed_file)
                     allowed_agent_names.append(allowed_agent.config.name)
 
                 set_allowed_agents(allowed_agent_names)
-                console.print(f"[cyan]Allowed agents to spawn: {', '.join(allowed_agent_names)}[/cyan]")
+                stderr_console.print(f"[cyan]Allowed agents to spawn: {', '.join(allowed_agent_names)}[/cyan]")
             else:
                 set_allowed_agents(None)
 
-            _, agent_file, _ = load_and_validate_agent(primary_agent_ref, console)
+            _, agent_file, _ = load_and_validate_agent(primary_agent_ref, stderr_console)
 
         except ValueError as e:
-            console.print(f"[red]Error: {e}[/red]")
+            stderr_console.print(f"[red]Error: {e}[/red]")
             raise typer.Exit(1)
 
         use_plain_output = ui_opts.plain or should_use_plain_output()
@@ -591,7 +596,7 @@ def run(
             cli_attachments=attach_opts.sources,
             base_dir=base_dir,
             refresh_cache=attach_opts.refresh_cache,
-            console=console,
+            console=stderr_console,
             stdin_attachment=stdin_attachment,
         )
 
@@ -624,7 +629,7 @@ def run(
 
         is_valid, error_msg = validate_agent_execution(agent_file)
         if not is_valid:
-            get_error_console(ui_opts.headless, console).print(f"[red]Agent validation failed: {error_msg}[/red]")
+            stderr_console.print(f"[red]Agent validation failed: {error_msg}[/red]")
             raise typer.Exit(1)
 
         from tsugite.agent_runner import preview_multistep_agent, run_multistep_agent
@@ -638,11 +643,11 @@ def run(
                 preview_multistep_agent(
                     agent_path=agent_file,
                     prompt=prompt,
-                    console=console,
+                    console=stderr_console,
                 )
             else:
-                console.print("[yellow]Dry-run mode is for multi-step agents only.[/yellow]")
-                console.print("[dim]This is a single-step agent. Use --debug to see the rendered prompt.[/dim]")
+                stderr_console.print("[yellow]Dry-run mode is for multi-step agents only.[/yellow]")
+                stderr_console.print("[dim]This is a single-step agent. Use --debug to see the rendered prompt.[/dim]")
             return
 
         executor = run_multistep_agent if is_multistep else run_agent
@@ -708,7 +713,7 @@ def run(
                 executor_kwargs,
                 ui_opts,
                 use_plain_output,
-                console,
+                stderr_console,
             )
 
             (
@@ -734,20 +739,19 @@ def run(
 
         except ValueError as e:
             _save_history(status="error", error_message=str(e))
-            get_error_console(ui_opts.headless, console).print(f"[red]Configuration error: {e}[/red]")
+            stderr_console.print(f"[red]Configuration error: {e}[/red]")
             raise typer.Exit(1)
         except RuntimeError as e:
             _save_history(status="error", error_message=str(e))
-            get_error_console(ui_opts.headless, console).print(f"[red]Execution error: {e}[/red]")
+            stderr_console.print(f"[red]Execution error: {e}[/red]")
             raise typer.Exit(1)
         except KeyboardInterrupt:
             _save_history(status="interrupted")
-            get_error_console(ui_opts.headless, console).print("\n[yellow]Agent execution interrupted by user[/yellow]")
+            stderr_console.print("\n[yellow]Agent execution interrupted by user[/yellow]")
             raise typer.Exit(130)
         except Exception as e:
             _save_history(status="error", error_message=str(e))
-            err_console = get_error_console(ui_opts.headless, console)
-            err_console.print(f"[red]Unexpected error: {e}[/red]")
+            stderr_console.print(f"[red]Unexpected error: {e}[/red]")
             if not ui_opts.log_json:
-                err_console.print("\n[dim]Use --log-json for machine-readable output[/dim]")
+                stderr_console.print("\n[dim]Use --log-json for machine-readable output[/dim]")
             raise typer.Exit(1)
