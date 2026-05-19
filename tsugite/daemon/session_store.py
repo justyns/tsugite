@@ -444,6 +444,30 @@ class SessionStore:
             session = self._sessions.get(session_id)
             return session.reasoning_effort if session else None
 
+    def freeze_session_models_to_current(self, agent: str, current_model: str | None) -> None:
+        """Pin every active, non-superseded session for `agent` that doesn't
+        already have a `model_override` to `current_model`. Used when the agent
+        default model is about to change, so existing sessions stay on whatever
+        model they were resolving to instead of silently switching on their
+        next turn.
+
+        No-op when `current_model` is falsy (nothing to pin to).
+        """
+        if not current_model:
+            return
+        with self._lock:
+            for session in self._sessions.values():
+                if session.agent != agent:
+                    continue
+                if session.status in FINISHED_STATUSES:
+                    continue
+                if session.superseded_by:
+                    continue
+                if session.model_override:
+                    continue
+                session.model_override = current_model
+            self._mark_dirty()
+
     def set_model_override(self, session_id: str, value: str | None) -> None:
         with self._lock:
             session = self._sessions.get(session_id)

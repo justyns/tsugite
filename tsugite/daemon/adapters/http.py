@@ -868,6 +868,10 @@ class HTTPServer:
 
         if "model" in body:
             new_model = body["model"].strip() if body["model"] else None
+            # Pin existing sessions to the current model before mutating the
+            # agent default so they don't silently switch on their next turn.
+            # The default change should only affect sessions created after it.
+            adapter.session_store.freeze_session_models_to_current(adapter.agent_name, agent_config.model)
             agent_config.model = new_model
 
             from tsugite.daemon.memory import DEFAULT_CONTEXT_LIMIT, get_context_limit
