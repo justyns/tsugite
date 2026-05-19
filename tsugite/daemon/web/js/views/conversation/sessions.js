@@ -438,12 +438,16 @@ export const sessionsMixin = {
     const c = st.compactingCounts;
     const phase = st.compactingPhase;
     let base;
-    if (c && c.replaced_count) {
+    if (c && c.replaced_count != null) {
+      // != null catches valid replaced_count=0 (rare but real for sessions
+      // compacted again after barely any new content), which strict truthy
+      // would route to the same plain "compacting" string the pre-counts
+      // window uses, so the two states became indistinguishable.
       const n = c.replaced_count;
       base = `summarizing ${n} turn${n === 1 ? '' : 's'}`;
       if (c.retained_count) base += `, keeping ${c.retained_count}`;
     } else {
-      base = 'compacting';
+      base = 'preparing to compact';
     }
     if (phase && phase.phase === 'summarizing' && phase.chunk_total > 1) {
       base += ` (chunk ${phase.chunk_index}/${phase.chunk_total})`;
