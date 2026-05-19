@@ -684,8 +684,11 @@ class BaseAdapter(ABC):
 
         ps = getattr(result, "provider_state", None) or {}
         if ps.get("context_window"):
-            self.session_store.update_context_limit(self.agent_name, ps["context_window"])
-            self.agent_config.context_limit = ps["context_window"]
+            # Per-session storage: this turn's reported window applies to THIS
+            # session only. Storing it on a shared agent-wide scalar caused
+            # cross-session bleed (#315) and made compaction-flow side effects
+            # capable of clobbering the displayed limit.
+            self.session_store.update_session_context_limit(conv_id, ps["context_window"])
 
         last_input = getattr(result, "last_input_tokens", None)
         context_tokens = last_input if isinstance(last_input, int) and last_input > 0 else (result.token_count or 0)
@@ -914,7 +917,12 @@ class BaseAdapter(ABC):
             None,
         )
 
-        context_limit = get_context_limit(model, fallback=self.agent_config.context_limit)
+        # Fallback to the session's tracked window (set from the main model's
+        # last reported context_window) rather than the agent-wide scalar so
+        # sessions with different model overrides compute their own correct
+        # retention budget.
+        session_limit_fallback = self.session_store.get_session_context_limit(session_id)
+        context_limit = get_context_limit(model, fallback=session_limit_fallback)
         retention_budget = int(context_limit * RETENTION_BUDGET_RATIO)
 
         old_events, recent_events = split_events_for_compaction(all_events, model, retention_budget)
@@ -1026,7 +1034,7 @@ class BaseAdapter(ABC):
             summary = await summarize_session(
                 old_messages,
                 model=model,
-                max_context_tokens=self.agent_config.context_limit,
+                max_context_tokens=session_limit_fallback,
                 progress_callback=progress_callback,
             )
         except Exception:

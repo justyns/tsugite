@@ -836,8 +836,16 @@ class HTTPServer:
                 "model": model,
                 "resolved_model": resolved_model if resolved_model != model else None,
                 "tokens": tokens,
-                "context_limit": adapter.session_store.get_context_limit(adapter.agent_name),
-                "threshold": adapter.session_store.get_compaction_threshold(adapter.agent_name),
+                "context_limit": (
+                    adapter.session_store.get_session_context_limit(session.id)
+                    if session
+                    else adapter.session_store.get_context_limit(adapter.agent_name)
+                ),
+                "threshold": (
+                    adapter.session_store.get_session_compaction_threshold(session.id)
+                    if session
+                    else adapter.session_store.get_compaction_threshold(adapter.agent_name)
+                ),
                 "message_count": message_count,
                 "compacting": adapter.session_store.is_compacting(
                     user_id, adapter.agent_name, session_id=session.id if session else None
@@ -1469,8 +1477,8 @@ class HTTPServer:
                         {
                             "session_id": target_session_id,
                             "tokens": refreshed.cumulative_tokens,
-                            "context_limit": adapter.session_store.get_context_limit(adapter.agent_name),
-                            "threshold": adapter.session_store.get_compaction_threshold(adapter.agent_name),
+                            "context_limit": adapter.session_store.get_session_context_limit(target_session_id),
+                            "threshold": adapter.session_store.get_session_compaction_threshold(target_session_id),
                             "message_count": refreshed.message_count,
                             "model": adapter.resolve_model(),
                             "attachments": [a.name for a in adapter._get_all_attachments()],

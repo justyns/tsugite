@@ -217,6 +217,12 @@ class Session:
     reasoning_effort: Optional[str] = None
     model_override: Optional[str] = None
     compacting: bool = False
+    # Provider-reported context window for this session's model. None until the
+    # first turn reports it; consumers fall back to the agent-wide default via
+    # SessionStore.get_session_context_limit. Per-session so a compact-model
+    # call (or any other secondary-model side effect) can't clobber the value
+    # other sessions are reading.
+    context_limit: Optional[int] = None
 
     @property
     def is_primary(self) -> bool:
@@ -294,6 +300,29 @@ class SessionStore:
 
     def update_context_limit(self, agent: str, limit: int) -> None:
         self._context_limits[agent] = limit
+
+    def get_session_context_limit(self, session_id: str) -> int:
+        """Return the session's tracked context window, falling back to the
+        agent-wide default when the session hasn't completed a turn yet.
+        """
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if session is None:
+                return 128000
+            if session.context_limit is not None:
+                return session.context_limit
+            return self._context_limits.get(session.agent, 128000)
+
+    def update_session_context_limit(self, session_id: str, limit: int) -> None:
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if session is None:
+                return
+            session.context_limit = limit
+            self._mark_dirty()
+
+    def get_session_compaction_threshold(self, session_id: str) -> int:
+        return int(self.get_session_context_limit(session_id) * 0.8)
 
     # ── Compaction locking ──
 
@@ -607,12 +636,10 @@ class SessionStore:
             return session
 
     def needs_compaction(self, session_id: str) -> bool:
-        with self._lock:
-            session = self._sessions.get(session_id)
-            if not session:
-                return False
-            threshold = self.get_compaction_threshold(session.agent)
-            return session.cumulative_tokens >= threshold
+        session = self._sessions.get(session_id)
+        if not session:
+            return False
+        return session.cumulative_tokens >= self.get_session_compaction_threshold(session_id)
 
     def compact_session(self, session_id: str) -> Session:
         with self._lock:
@@ -639,6 +666,7 @@ class SessionStore:
                 suppressed_skills=list(old_session.suppressed_skills),
                 reasoning_effort=old_session.reasoning_effort,
                 model_override=old_session.model_override,
+                context_limit=old_session.context_limit,
             )
             # Preserve original conversation start so <session_started> in the
             # message context reflects the user's perceived session age, not
