@@ -32,6 +32,11 @@ export default () => ({
   // session_id -> per-session UI state. Single source of truth so every per-session
   // field is added/cleared in one place instead of spread across parallel maps.
   sessionsState: {},
+  // OLD -> NEW redirect map. Compaction rotates the session id, but the
+  // streaming.js closure captured sendSessionId = OLD; walking the chain in
+  // _sessionState routes every closure-captured write to the live successor's
+  // state object so in-flight progress shows up on the session the user now sees.
+  _supersededMap: {},
   showAttachments: false,
   attachments: [],
   inputMenuOpen: false,
@@ -45,8 +50,19 @@ export default () => ({
     return this.$store.app.userId;
   },
 
+  _resolveSessionId(sid) {
+    if (!sid) return sid;
+    // Path compression in _registerSupersession keeps chains at depth 1, so this
+    // is normally a single lookup. The hop cap is a paranoid stop in case a
+    // pathological SSE stream introduces a cycle.
+    const map = this._supersededMap;
+    for (let hops = 0; map[sid] && hops < 32; hops++) sid = map[sid];
+    return sid;
+  },
+
   _sessionState(sid) {
     if (!sid) return null;
+    sid = this._resolveSessionId(sid);
     return (this.sessionsState[sid] ||= {
       messages: [],
       sending: false,
@@ -66,6 +82,38 @@ export default () => ({
       compactedIntoEvent: null,
       liveProgress: null,
     });
+  },
+
+  _registerSupersession(oldId, newId) {
+    if (!oldId || !newId || oldId === newId) return;
+    const map = this._supersededMap;
+    map[oldId] = newId;
+    // Path-compress any existing entries that pointed at oldId so subsequent
+    // _resolveSessionId calls land on newId in a single hop instead of walking
+    // a growing chain after multiple compactions of the same session.
+    for (const k in map) if (map[k] === oldId) map[k] = newId;
+    const oldState = this.sessionsState[oldId];
+    if (!oldState) return;
+    const newState = this.sessionsState[newId];
+    if (!newState) {
+      this.sessionsState[newId] = oldState;
+    } else {
+      // NEW may already have its own state (loadSessions pre-creates one). Carry
+      // OLD's mid-stream messages to the tail since they happened most recently;
+      // OR-merge flags so a flipped-on `sending` from the in-flight closure isn't
+      // dropped; only overwrite skills/statusInfo if NEW hasn't seen its own yet.
+      newState.messages.push(...oldState.messages);
+      newState.sending = newState.sending || oldState.sending;
+      newState.reader = newState.reader || oldState.reader;
+      newState.liveProgress = newState.liveProgress || oldState.liveProgress;
+      if (oldState.loadedSkills?.length && !newState.loadedSkills.length) {
+        newState.loadedSkills = oldState.loadedSkills;
+      }
+      const newEmpty = newState.statusInfo && !Object.keys(newState.statusInfo).length;
+      const oldFilled = oldState.statusInfo && Object.keys(oldState.statusInfo).length;
+      if (newEmpty && oldFilled) newState.statusInfo = oldState.statusInfo;
+    }
+    delete this.sessionsState[oldId];
   },
 
   get messages() {
@@ -220,11 +268,14 @@ export default () => ({
             return;
           }
         }
-        if (d.action === 'compacted' && d.successor_id && this.selectedSessionId === d.id) {
-          // The session the user is looking at just compacted; follow the chain forward
-          // so the next message doesn't post to a now-completed predecessor.
-          this.loadSessions().then(() => this.selectSessionById(d.successor_id));
-          return;
+        if (d.action === 'compacted' && d.successor_id) {
+          this._registerSupersession(d.id, d.successor_id);
+          if (this.selectedSessionId === d.id) {
+            // The session the user is looking at just compacted; follow the chain forward
+            // so the next message doesn't post to a now-completed predecessor.
+            this.loadSessions().then(() => this.selectSessionById(d.successor_id));
+            return;
+          }
         }
         this._debouncedLoadSessions();
       }
