@@ -176,6 +176,80 @@ async def test_compact_session_preserves_context_limit(workspace_dir, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_compact_session_restores_when_mutation_happens_after_summarize(workspace_dir, tmp_path):
+    """Pollution outside the inner summarize_session call must also be rolled back.
+
+    Issue #315: the existing snapshot/restore only wraps `summarize_session`, but
+    the agent-wide context_limit drops to the compaction model's limit even when
+    the leak happens later in the compaction flow (post-summarize hooks, the
+    post-create token estimate, etc.). The snapshot must cover the whole
+    `_compact_session` body so any path that mutates context_limit is restored.
+    """
+    from tsugite.history import SessionStorage
+
+    history_dir = tmp_path / "history"
+    history_dir.mkdir()
+
+    initial_limit = 1_000_000
+
+    store = SessionStore(tmp_path / "session_store.json", context_limits={"test-agent": initial_limit})
+    session = store.get_or_create_interactive("test-user", "test-agent")
+    conv_id = session.id
+
+    session_path = history_dir / f"{conv_id}.jsonl"
+    storage = SessionStorage.create(
+        agent_name="test-agent",
+        model="anthropic:claude-sonnet-4-5",
+        session_path=session_path,
+    )
+    for i in range(6):
+        storage.record("user_input", text=f"message {i}")
+        storage.record("model_response", raw_content=f"reply {i}")
+
+    agent_config = AgentConfig(workspace_dir=workspace_dir, agent_file="default")
+    agent_config.context_limit = initial_limit
+    adapter = _StubAdapter("test-agent", agent_config, store)
+
+    old_events = [Event(type="user_input", ts=datetime.now(timezone.utc), data={"text": f"old {i}"}) for i in range(4)]
+    recent_events = [
+        Event(type="user_input", ts=datetime.now(timezone.utc), data={"text": f"recent {i}"}) for i in range(2)
+    ]
+
+    async def clean_summarize(messages, model=None, max_context_tokens=None, progress_callback=None):
+        return "Summary"
+
+    async def post_summarize_pollution(*args, **kwargs):
+        # Simulate the issue: something between summarize_session's restore and
+        # _compact_session's return clobbers the agent-wide limit. Post-compact
+        # hooks, _count_tokens, or any future bookkeeping call could trigger it.
+        store.update_context_limit("test-agent", 200_000)
+        agent_config.context_limit = 200_000
+        return []
+
+    with (
+        patch("tsugite.daemon.memory.get_context_limit", return_value=200_000),
+        patch("tsugite.daemon.memory.infer_compaction_model", return_value="anthropic:claude-3-haiku-20240307"),
+        patch(
+            "tsugite.daemon.memory.split_events_for_compaction",
+            return_value=(old_events, recent_events),
+        ),
+        patch("tsugite.daemon.memory.summarize_session", new=clean_summarize),
+        patch("tsugite.history.get_history_dir", return_value=history_dir),
+        patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
+        patch("tsugite.history.storage.get_machine_name", return_value="test"),
+        patch("tsugite.hooks.fire_compact_hooks", new=post_summarize_pollution),
+    ):
+        await adapter._compact_session(conv_id)
+
+    assert store.get_context_limit("test-agent") == initial_limit, (
+        "session_store context_limit was polluted by a post-summarize compaction step"
+    )
+    assert agent_config.context_limit == initial_limit, (
+        "agent_config context_limit was polluted by a post-summarize compaction step"
+    )
+
+
+@pytest.mark.asyncio
 async def test_compact_session_restores_even_on_summarize_failure(workspace_dir, tmp_path):
     """If summarization raises, context_limit must still be restored."""
     from tsugite.history import SessionStorage

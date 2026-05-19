@@ -866,7 +866,27 @@ class BaseAdapter(ABC):
         use the returned session for downstream id-keyed work; rediscovering
         via `find_default_session` is unreliable for non-default or
         non-interactive sessions.
+
+        Wraps the implementation in a snapshot/restore of the agent-wide context
+        limit so pollution from any compaction-flow LLM call (the compact-model
+        summarize, post-compact hooks, background bookkeeping) can't leave the
+        UI showing the compact-model's smaller window after the rotation.
         """
+        saved_session_store_limit = self.session_store.get_context_limit(self.agent_name)
+        saved_agent_config_limit = self.agent_config.context_limit
+        try:
+            return await self._compact_session_inner(session_id, instructions, reason, progress_callback)
+        finally:
+            self.session_store.update_context_limit(self.agent_name, saved_session_store_limit)
+            self.agent_config.context_limit = saved_agent_config_limit
+
+    async def _compact_session_inner(
+        self,
+        session_id: str,
+        instructions: str | None,
+        reason: str | None,
+        progress_callback: Optional[Callable[[Dict[str, Any]], None]],
+    ) -> Optional[Session]:
         if instructions is None:
             instructions = self._DEFAULT_COMPACT_INSTRUCTIONS
         from tsugite.daemon.memory import (
@@ -1002,12 +1022,6 @@ class BaseAdapter(ABC):
 
         old_messages = sanitize_for_summary(old_messages, model=model, attachment_basenames=attachment_basenames)
 
-        # Snapshot the agent's tracked context limit before summarization so
-        # that any mutation during the call (e.g. provider state leakage from
-        # a smaller compact model) doesn't corrupt the displayed value or
-        # the next compaction-threshold computation.
-        saved_session_store_limit = self.session_store.get_context_limit(self.agent_name)
-        saved_agent_config_limit = self.agent_config.context_limit
         try:
             summary = await summarize_session(
                 old_messages,
@@ -1018,9 +1032,6 @@ class BaseAdapter(ABC):
         except Exception:
             logger.exception("[%s] Compaction summarization failed", self.agent_name)
             raise
-        finally:
-            self.session_store.update_context_limit(self.agent_name, saved_session_store_limit)
-            self.agent_config.context_limit = saved_agent_config_limit
 
         new_session = self.session_store.compact_session(session_id)
         new_session_path = get_history_dir() / f"{new_session.id}.jsonl"
