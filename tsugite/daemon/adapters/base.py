@@ -431,6 +431,7 @@ class BaseAdapter(ABC):
             scheduled_xml = render_iso_element("scheduled_for", meta.get("scheduled_for"), tz, tz_label, now)
             actual_xml = render_iso_element("actual_fire_time", meta.get("actual_fire_time"), tz, tz_label, now)
             scheduler_timing_xml = scheduled_xml + actual_xml
+        context_limit_for_render = self.session_store.get_context_limit(self.agent_name)
         try:
             conv_id_override = (channel_context.metadata or {}).get("conv_id_override")
             if conv_id_override:
@@ -440,6 +441,7 @@ class BaseAdapter(ABC):
             if session is None:
                 raise ValueError("no default session yet")
             tokens_used = session.cumulative_tokens
+            context_limit_for_render = self.session_store.get_session_context_limit(session.id)
             session_started_xml = render_iso_element("session_started", session.created_at, tz, tz_label, now)
             last_active_xml = render_iso_element("last_active", session.last_active, tz, tz_label, now)
             if session.metadata:
@@ -465,7 +467,7 @@ class BaseAdapter(ABC):
   <source>{channel_context.source}</source>
   <user_id>{channel_context.user_id}</user_id>
   <context_tokens_used>{tokens_used}</context_tokens_used>
-  <context_limit>{self.agent_config.context_limit}</context_limit>{session_topic_xml}{session_meta_xml}{scratchpad_xml}
+  <context_limit>{context_limit_for_render}</context_limit>{session_topic_xml}{session_meta_xml}{scratchpad_xml}
 </message_context>
 
 {message}"""
