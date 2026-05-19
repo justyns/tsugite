@@ -1063,7 +1063,13 @@ class SessionStore:
         return self.set_metadata_bulk(session_id, {key: value})
 
     def set_metadata_bulk(self, session_id: str, updates: dict) -> Session:
-        """Set multiple metadata keys. Rejects entire batch if any key is read-only."""
+        """Set multiple metadata keys. Rejects entire batch if any key is read-only.
+
+        Does not bump `last_active`: metadata is housekeeping (status_text,
+        topic, task, etc.), not new message activity the user hasn't seen. Bumping
+        it here clobbers the post-`mark-viewed` clear because the unread flag is
+        derived as `last_active > last_viewed_at`.
+        """
         read_only = READ_ONLY_METADATA_KEYS & updates.keys()
         if read_only:
             raise ValueError(f"Cannot set read-only metadata key(s): {', '.join(sorted(read_only))}")
@@ -1078,12 +1084,14 @@ class SessionStore:
                 raise ValueError(f"Session '{session_id}' not found")
             session = self._sessions[session_id]
             session.metadata.update(updates)
-            session.last_active = datetime.now(timezone.utc).isoformat()
             self._mark_dirty()
             return session
 
     def delete_metadata(self, session_id: str, key: str) -> Session:
-        """Delete a metadata key. Raises ValueError for read-only or missing keys."""
+        """Delete a metadata key. Raises ValueError for read-only or missing keys.
+
+        See `set_metadata_bulk` for why this doesn't bump `last_active`.
+        """
         if key in READ_ONLY_METADATA_KEYS:
             raise ValueError(f"Cannot delete read-only metadata key: {key}")
         with self._lock:
@@ -1093,7 +1101,6 @@ class SessionStore:
             if key not in session.metadata:
                 raise ValueError(f"Key '{key}' not found in metadata")
             del session.metadata[key]
-            session.last_active = datetime.now(timezone.utc).isoformat()
             self._mark_dirty()
             return session
 
