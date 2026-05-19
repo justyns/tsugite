@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Optional
 from uuid import uuid4
 
+from tsugite.daemon.memory import DEFAULT_CONTEXT_LIMIT
 from tsugite.history import SessionStorage, generate_session_id, get_history_dir
 
 
@@ -293,7 +294,7 @@ class SessionStore:
     # ── Context limit management ──
 
     def get_context_limit(self, agent: str) -> int:
-        return self._context_limits.get(agent, 128000)
+        return self._context_limits.get(agent, DEFAULT_CONTEXT_LIMIT)
 
     def get_compaction_threshold(self, agent: str) -> int:
         return int(self.get_context_limit(agent) * 0.8)
@@ -308,15 +309,19 @@ class SessionStore:
         with self._lock:
             session = self._sessions.get(session_id)
             if session is None:
-                return 128000
+                return DEFAULT_CONTEXT_LIMIT
             if session.context_limit is not None:
                 return session.context_limit
-            return self._context_limits.get(session.agent, 128000)
+            return self._context_limits.get(session.agent, DEFAULT_CONTEXT_LIMIT)
 
     def update_session_context_limit(self, session_id: str, limit: int) -> None:
         with self._lock:
             session = self._sessions.get(session_id)
-            if session is None:
+            if session is None or session.context_limit == limit:
+                # Guard against write amplification: providers report a static
+                # context_window per model, so every turn after the first writes
+                # the same value. Without this, _mark_dirty triggers a JSON
+                # rewrite on every turn for no reason.
                 return
             session.context_limit = limit
             self._mark_dirty()

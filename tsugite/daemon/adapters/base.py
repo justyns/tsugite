@@ -687,9 +687,8 @@ class BaseAdapter(ABC):
         ps = getattr(result, "provider_state", None) or {}
         if ps.get("context_window"):
             # Per-session storage: this turn's reported window applies to THIS
-            # session only. Storing it on a shared agent-wide scalar caused
-            # cross-session bleed (#315) and made compaction-flow side effects
-            # capable of clobbering the displayed limit.
+            # session only. An agent-wide scalar would let any other turn (or a
+            # secondary model call) clobber the displayed limit.
             self.session_store.update_session_context_limit(conv_id, ps["context_window"])
 
         last_input = getattr(result, "last_input_tokens", None)
@@ -872,10 +871,10 @@ class BaseAdapter(ABC):
         via `find_default_session` is unreliable for non-default or
         non-interactive sessions.
 
-        Wraps the implementation in a snapshot/restore of the agent-wide context
-        limit so pollution from any compaction-flow LLM call (the compact-model
-        summarize, post-compact hooks, background bookkeeping) can't leave the
-        UI showing the compact-model's smaller window after the rotation.
+        Defensive snapshot/restore of the agent-wide context-limit fallback. The
+        primary per-session limit lives on `Session.context_limit` and isn't
+        touched here; this guard catches any future code path that mutates the
+        agent-wide default during the compaction flow.
         """
         saved_session_store_limit = self.session_store.get_context_limit(self.agent_name)
         saved_agent_config_limit = self.agent_config.context_limit
