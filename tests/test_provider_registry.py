@@ -51,3 +51,39 @@ class TestProviderCaching:
         # Other instance should be unaffected
         assert p2._session_id is None
         assert p2._turn_count == 0
+
+    def test_concurrent_sessions_isolate_all_claude_code_state(self):
+        """Issue #321: two daemon sessions on the same agent must each get an
+        independent provider instance with no leakage of session_id, cost/cache
+        counters, context_window, or compacted flag.
+
+        Pre-1e05c67 (cacheable=False on ClaudeCodeProvider), `get_provider` returned
+        a single cached instance to every caller, so session B started a turn
+        with session A's `_session_id` still set and would `--resume` into A's
+        CLI conversation. Same for the cumulative cost / cache counters used
+        for per-turn delta math.
+        """
+        from tsugite.models import get_provider_and_model
+
+        _, prov_a, _ = get_provider_and_model("claude_code:opus")
+        _, prov_b, _ = get_provider_and_model("claude_code:opus")
+
+        assert prov_a is not prov_b, (
+            "TsugiteAgent re-uses get_provider_and_model per turn; both sessions must get fresh providers"
+        )
+
+        # Simulate session A finishing a turn (subprocess session id, cumulative
+        # cost/cache counters, context window, compaction flag all populated).
+        prov_a._session_id = "cc-sess-A"
+        prov_a._cumulative_cost = 1.50
+        prov_a._cache_creation_tokens = 1000
+        prov_a._cache_read_tokens = 500
+        prov_a._context_window = 100000
+        prov_a._compacted = True
+
+        assert prov_b._session_id is None
+        assert prov_b._cumulative_cost == 0.0
+        assert prov_b._cache_creation_tokens == 0
+        assert prov_b._cache_read_tokens == 0
+        assert prov_b._context_window is None
+        assert prov_b._compacted is False
