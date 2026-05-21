@@ -225,9 +225,9 @@ Task: {{ user_prompt }}
             result = self.runner.invoke(app, ["run", str(agent_file), "test task"])
 
             # Should pass validation (not exit due to template error)
-            # but fail at execution (expected with mock)
-            # "Starting agent execution" banner goes to stderr
-            assert "Starting agent execution" in result.stderr or "Unexpected error" in result.stdout
+            # but fail at execution (expected with mock). Both the banner and
+            # the error are stderr-routed since 9486fe1/44ff57b.
+            assert "Unexpected error" in result.stderr
 
 
 class TestComplexScenarios:
