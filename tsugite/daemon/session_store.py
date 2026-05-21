@@ -18,17 +18,7 @@ from uuid import uuid4
 
 from tsugite.daemon.memory import DEFAULT_CONTEXT_LIMIT
 from tsugite.history import SessionStorage, generate_session_id, get_history_dir
-
-
-def _parse_ts(ts: str | None) -> datetime | None:
-    """Parse an ISO timestamp string to datetime, handling Z and +00:00 formats."""
-    if not ts:
-        return None
-    try:
-        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
-    except (ValueError, TypeError):
-        return None
-
+from tsugite.renderer import parse_iso_utc as _parse_ts
 
 logger = logging.getLogger(__name__)
 

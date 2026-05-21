@@ -325,7 +325,7 @@ class SessionRunner:
             channel_context=channel_context,
         )
 
-        self._store.update_session(session_id, last_active=datetime.now(timezone.utc).isoformat())
+        self._store.update_session(session_id)
         if self._event_bus:
             self._event_bus.emit("history_update", {"agent": session.agent, "session_id": session_id})
         return result
