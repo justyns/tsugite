@@ -197,9 +197,7 @@ async def test_retained_model_response_loses_provider_session_id(workspace_dir, 
     model_responses = [e for e in new_events if e.type == "model_response"]
     assert len(model_responses) == 1
     state_delta = model_responses[0].data.get("state_delta") or {}
-    assert "session_id" not in state_delta, (
-        f"Retained model_response leaked pre-compaction session_id: {state_delta}"
-    )
+    assert "session_id" not in state_delta, f"Retained model_response leaked pre-compaction session_id: {state_delta}"
 
     with patch("tsugite.agent_runner.history_integration.get_history_dir", return_value=history_dir):
         info = get_claude_code_session_info(new_session.id)

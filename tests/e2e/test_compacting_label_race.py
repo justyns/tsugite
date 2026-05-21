@@ -84,6 +84,8 @@ def test_label_distinguishes_preparing_from_active_compacting(authenticated_page
     )
 
     label = _label(page, a.id)
-    assert "summariz" in label.lower(), f"label should switch to 'summarizing N turns…' once counts arrive, got {label!r}"
+    assert "summariz" in label.lower(), (
+        f"label should switch to 'summarizing N turns…' once counts arrive, got {label!r}"
+    )
     assert "3 turn" in label, f"label should show replaced_count, got {label!r}"
     assert "keeping 1" in label, f"label should show retained_count, got {label!r}"

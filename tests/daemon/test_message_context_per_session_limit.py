@@ -9,7 +9,7 @@ import pytest
 
 from tsugite.daemon.adapters.base import BaseAdapter, ChannelContext
 from tsugite.daemon.config import AgentConfig
-from tsugite.daemon.session_store import Session, SessionSource, SessionStore
+from tsugite.daemon.session_store import SessionStore
 
 
 class _StubAdapter(BaseAdapter):
