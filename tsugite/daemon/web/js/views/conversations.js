@@ -607,6 +607,8 @@ export default () => ({
   // User-initiated copy of a message's raw markdown
   copyMessage(text) { copyText(text); },
 
+  copySessionId() { copyText(this.selectedSessionId); },
+
   // Delegated click handler on #messages — catches .copy-code buttons
   // injected by renderMarkdown (Alpine can't bind handlers to x-html content).
   handleMessagesClick(e) {

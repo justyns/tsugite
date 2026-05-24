@@ -311,7 +311,10 @@
                   <span class="slash">/</span>
                   <span class="seg" x-text="(selectedSessionMeta?.state) || 'session'"></span>
                   <span class="slash">/</span>
-                  <span class="seg cur" x-text="(selectedSessionId || '').slice(0, 8)"></span>
+                  <button type="button" class="seg cur seg-copy"
+                          @click="copySessionId()"
+                          :title="`Click to copy session ID: ${selectedSessionId}`"
+                          x-text="(selectedSessionId || '').slice(0, 8)"></button>
                 </span>
                 <span class="grow"></span>
                 <button class="hbtn pin"

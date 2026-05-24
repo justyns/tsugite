@@ -435,6 +435,16 @@ body.is-resizing-sidebar { cursor: col-resize; user-select: none; }
 .console-thread-header .path .seg { color: var(--overlay1); }
 .console-thread-header .path .seg.cur { color: var(--lavender); font-weight: 600; }
 .console-thread-header .path .slash { color: var(--surface2); }
+.console-thread-header .path .seg-copy {
+  background: none; border: 1px solid transparent; padding: 0 3px; border-radius: 3px;
+  font: inherit; cursor: pointer;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+.console-thread-header .path .seg-copy:hover {
+  border-color: var(--surface2);
+  background: color-mix(in oklab, var(--surface0) 60%, transparent);
+}
+.console-thread-header .path .seg-copy:active { background: var(--surface1); }
 .console-thread-header .grow { flex: 1; }
 
 .console-thread-header .hbtn {
