@@ -2,7 +2,7 @@
 
 import pytest
 
-from tsugite.providers import clear_cache, get_provider
+from tsugite.providers import clear_cache, get_provider, list_all_providers
 
 
 @pytest.fixture(autouse=True)
@@ -17,6 +17,11 @@ class TestProviderCaching:
         p1 = get_provider("anthropic")
         p2 = get_provider("anthropic")
         assert p1 is p2
+
+    def test_codex_cli_plugin_discovered_via_entry_points(self):
+        assert "codex_cli" in list_all_providers()
+        provider = get_provider("codex_cli")
+        assert provider.name == "codex_cli"
 
     def test_stateful_provider_not_cached(self):
         p1 = get_provider("claude_code")

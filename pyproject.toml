@@ -1,6 +1,6 @@
 [project]
 name = "tsugite-cli"
-version = "0.14.3"
+version = "0.15.0"
 description = "Micro-agent runner for task automation using markdown definitions"
 authors = [{ name = "Justyn Shull" }]
 requires-python = ">=3.11"
@@ -67,6 +67,7 @@ members = ["plugins/*"]
 tsugite-cli = { workspace = true }
 tsugite-tmux = { workspace = true }
 tsugite-acp = { workspace = true }
+tsugite-codex-cli = { workspace = true }
 
 [tool.ruff]
 target-version = "py311"
@@ -142,4 +143,5 @@ dev = [
   "vulture>=2.14",
   "tsugite-tmux",
   "tsugite-acp",
+  "tsugite-codex-cli",
 ]

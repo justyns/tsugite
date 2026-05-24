@@ -15,6 +15,7 @@ exclude-newer-span = "P10D"
 members = [
     "tsugite-acp",
     "tsugite-cli",
+    "tsugite-codex-cli",
     "tsugite-tmux",
 ]
 
@@ -2376,6 +2377,7 @@ dev = [
     { name = "pytest-xdist" },
     { name = "ruff" },
     { name = "tsugite-acp" },
+    { name = "tsugite-codex-cli" },
     { name = "tsugite-tmux" },
     { name = "vulture" },
 ]
@@ -2421,9 +2423,21 @@ dev = [
     { name = "pytest-xdist", specifier = ">=3.5.0" },
     { name = "ruff", specifier = ">=0.1" },
     { name = "tsugite-acp", editable = "plugins/tsugite-acp" },
+    { name = "tsugite-codex-cli", editable = "plugins/tsugite-codex-cli" },
     { name = "tsugite-tmux", editable = "plugins/tsugite-tmux" },
     { name = "vulture", specifier = ">=2.14" },
 ]
+
+[[package]]
+name = "tsugite-codex-cli"
+version = "0.14.3"
+source = { editable = "plugins/tsugite-codex-cli" }
+dependencies = [
+    { name = "tsugite-cli" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "tsugite-cli", editable = "." }]
 
 [[package]]
 name = "tsugite-tmux"

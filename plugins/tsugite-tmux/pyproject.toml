@@ -1,9 +1,9 @@
 [project]
 name = "tsugite-tmux"
-version = "0.14.3"
+version = "0.15.0"
 description = "Tsugite plugin: tmux session management tools with automatic output logging"
 requires-python = ">=3.11"
-dependencies = ["tsugite-cli==0.14.3"]
+dependencies = ["tsugite-cli==0.15.0"]
 
 [project.entry-points."tsugite.plugins"]
 tmux = "tsugite_tmux"
