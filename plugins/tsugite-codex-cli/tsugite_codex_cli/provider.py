@@ -19,9 +19,11 @@ logger = logging.getLogger(__name__)
 
 API_BASE = "https://chatgpt.com/backend-api/codex"
 _REASONING_LEVELS = ["low", "medium", "high"]
+# gpt-5.5 added xhigh; older codex models don't accept it.
+_REASONING_LEVELS_V5_5 = ["low", "medium", "high", "xhigh"]
 
 
-def _codex_model_info(max_input_tokens: int) -> ModelInfo:
+def _codex_model_info(max_input_tokens: int, effort_levels: list[str] = _REASONING_LEVELS) -> ModelInfo:
     # Subscription billing means per-token cost is not surfaced here.
     return ModelInfo(
         max_input_tokens=max_input_tokens,
@@ -30,11 +32,12 @@ def _codex_model_info(max_input_tokens: int) -> ModelInfo:
         output_cost_per_million=0.0,
         supports_vision=True,
         supports_reasoning=True,
-        supported_effort_levels=_REASONING_LEVELS,
+        supported_effort_levels=effort_levels,
     )
 
 
 _CODEX_CLI_MODELS: dict[str, ModelInfo] = {
+    "codex_cli/gpt-5.5": _codex_model_info(1_050_000, effort_levels=_REASONING_LEVELS_V5_5),
     "codex_cli/gpt-5.4": _codex_model_info(1_050_000),
     "codex_cli/gpt-5.4-mini": _codex_model_info(272_000),
     "codex_cli/gpt-5.4-nano": _codex_model_info(272_000),

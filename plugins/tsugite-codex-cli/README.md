@@ -44,13 +44,13 @@ Override the location with `CODEX_HOME=/some/other/dir`.
 Pick the provider via the model string:
 
 ```bash
-uv run tsu run examples/simple_variable_injection.md "say hi" --model codex_cli:gpt-5.4
+uv run tsu run examples/simple_variable_injection.md "say hi" --model codex_cli:gpt-5.5
 ```
 
-Available models: `codex_cli:gpt-5.4`, `codex_cli:gpt-5.4-mini`,
+Available models: `codex_cli:gpt-5.5`, `codex_cli:gpt-5.4`, `codex_cli:gpt-5.4-mini`,
 `codex_cli:gpt-5.4-nano`. Use `provider.list_models()` to discover what your
 ChatGPT plan currently exposes; the plugin queries the Codex `/models` endpoint
-and falls back to the three above if that call fails.
+and falls back to the four above if that call fails.
 
 ## Token-sink caveat
 

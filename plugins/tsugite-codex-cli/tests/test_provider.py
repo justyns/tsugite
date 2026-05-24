@@ -369,7 +369,7 @@ async def test_list_models_falls_back_on_auth_error():
     provider = CodexCliProvider()
     with _patched_auth_error(provider):
         models = await provider.list_models()
-    assert models == ["gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"]
+    assert models == ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"]
 
 
 @pytest.mark.asyncio
@@ -382,7 +382,7 @@ async def test_list_models_falls_back_on_network_error():
     with _patched_auth(provider), patch.object(httpx.AsyncClient, "get", new=AsyncMock(side_effect=boom)):
         models = await provider.list_models()
 
-    assert models == ["gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"]
+    assert models == ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"]
 
 
 # ── Fix #2: stop() must not break the shared client when concurrent agents share it ──
