@@ -68,9 +68,7 @@ class CodexAuthStore:
 
     def _sync_get_or_refresh(self) -> tuple[str, str]:
         if not self._auth_path.exists():
-            raise CodexAuthError(
-                f"No Codex auth file at {self._auth_path}. Run `codex login` first."
-            )
+            raise CodexAuthError(f"No Codex auth file at {self._auth_path}. Run `codex login` first.")
 
         # Lock the sidecar, not auth.json itself: os.replace unlinks the inode and
         # any waiter blocked on the original file descriptor would never wake.
@@ -100,9 +98,7 @@ class CodexAuthStore:
         refresh_token = tokens.get("refresh_token")
         account_id = tokens.get("account_id")
         if not access_token or not refresh_token or not account_id:
-            raise CodexAuthError(
-                f"Codex auth file at {self._auth_path} is missing tokens. Run `codex login`."
-            )
+            raise CodexAuthError(f"Codex auth file at {self._auth_path} is missing tokens. Run `codex login`.")
 
         exp = _decode_jwt_exp(access_token)
         now = int(time.time())
@@ -144,12 +140,8 @@ class CodexAuthStore:
                 pass
             err = body.get("error", "")
             if err in _RE_LOGIN_ERRORS:
-                raise CodexAuthError(
-                    f"Codex refresh token rejected ({err}). Run `codex login` to sign in again."
-                )
-            raise CodexAuthError(
-                f"OAuth refresh returned HTTP {resp.status_code}: {body or resp.text}"
-            )
+                raise CodexAuthError(f"Codex refresh token rejected ({err}). Run `codex login` to sign in again.")
+            raise CodexAuthError(f"OAuth refresh returned HTTP {resp.status_code}: {body or resp.text}")
 
         try:
             body = resp.json()

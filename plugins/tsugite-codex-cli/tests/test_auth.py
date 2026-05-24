@@ -27,7 +27,9 @@ def _fake_jwt(exp_seconds_from_now: int) -> str:
     return f"{header}.{payload}.{sig}"
 
 
-def _write_auth(tmp_path: Path, *, auth_mode: str = "chatgpt", access_exp: int = 3600, extras: dict | None = None) -> Path:
+def _write_auth(
+    tmp_path: Path, *, auth_mode: str = "chatgpt", access_exp: int = 3600, extras: dict | None = None
+) -> Path:
     """Write a minimal auth.json into tmp_path and return its path."""
     payload = {
         "OPENAI_API_KEY": None,
@@ -120,9 +122,11 @@ async def test_near_expiry_refreshes_atomically_and_preserves_unknown_fields(cod
         seen_modes.append(mode)
         return real_chmod(path, mode)
 
-    with patch("httpx.post", return_value=FakeResp()) as mock_post, \
-         patch("tsugite_codex_cli.auth.os.replace", side_effect=spy_replace), \
-         patch("tsugite_codex_cli.auth.os.chmod", side_effect=spy_chmod):
+    with (
+        patch("httpx.post", return_value=FakeResp()) as mock_post,
+        patch("tsugite_codex_cli.auth.os.replace", side_effect=spy_replace),
+        patch("tsugite_codex_cli.auth.os.chmod", side_effect=spy_chmod),
+    ):
         store = CodexAuthStore()
         tok, account = await store.get_access_token()
 

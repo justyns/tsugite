@@ -54,8 +54,9 @@ class _FakeStreamCtx:
     until aread() has been awaited.
     """
 
-    def __init__(self, *, status_code: int = 200, events: list[str] | None = None,
-                 json_body: Any = None, text: str = ""):
+    def __init__(
+        self, *, status_code: int = 200, events: list[str] | None = None, json_body: Any = None, text: str = ""
+    ):
         self.status_code = status_code
         self._events = events or []
         self._json = json_body
@@ -178,9 +179,7 @@ async def test_request_body_sets_instructions_when_no_system_message():
     captured: dict = {}
 
     with _patched_auth(provider), _stream_patch(captured):
-        await provider.acompletion(
-            messages=[{"role": "user", "content": "hi"}], model="gpt-5.4"
-        )
+        await provider.acompletion(messages=[{"role": "user", "content": "hi"}], model="gpt-5.4")
 
     assert "instructions" in captured["json"]
     assert captured["json"]["instructions"] == ""
@@ -234,11 +233,8 @@ async def test_non_stream_call_internally_streams_and_collects():
         captured["json"] = json
         return _FakeStream()
 
-    with _patched_auth(provider), \
-         patch.object(httpx.AsyncClient, "stream", new=fake_stream):
-        resp = await provider.acompletion(
-            messages=[{"role": "user", "content": "hi"}], model="gpt-5.4", stream=False
-        )
+    with _patched_auth(provider), patch.object(httpx.AsyncClient, "stream", new=fake_stream):
+        resp = await provider.acompletion(messages=[{"role": "user", "content": "hi"}], model="gpt-5.4", stream=False)
 
     assert captured["json"]["stream"] is True  # backend always sees stream=true
     # But the caller (stream=False) gets a CompletionResponse, not an async iterator
@@ -283,8 +279,7 @@ async def test_collected_response_usage_and_total_tokens(usage_in, expected_tota
     def fake_stream(self_, method, url, **kwargs):
         return _FakeStream()
 
-    with _patched_auth(provider), \
-         patch.object(httpx.AsyncClient, "stream", new=fake_stream):
+    with _patched_auth(provider), patch.object(httpx.AsyncClient, "stream", new=fake_stream):
         resp = await provider.acompletion(messages=[{"role": "user", "content": "hi"}], model="gpt-5.4")
 
     assert resp.content == "Hello, world."
@@ -327,12 +322,9 @@ async def test_streaming_accumulates_deltas_and_emits_final_usage():
     def fake_stream(self_, method, url, **kwargs):
         return _FakeStream()
 
-    with _patched_auth(provider), \
-         patch.object(httpx.AsyncClient, "stream", new=fake_stream):
+    with _patched_auth(provider), patch.object(httpx.AsyncClient, "stream", new=fake_stream):
         chunks = []
-        result = await provider.acompletion(
-            messages=[{"role": "user", "content": "hi"}], model="gpt-5.4", stream=True
-        )
+        result = await provider.acompletion(messages=[{"role": "user", "content": "hi"}], model="gpt-5.4", stream=True)
         async for chunk in result:
             chunks.append(chunk)
 
@@ -361,8 +353,7 @@ async def test_error_response_with_json_body_raises_typed_error():
 @pytest.mark.asyncio
 async def test_error_response_with_plain_text_body_raises_typed_error():
     provider = CodexCliProvider()
-    with _patched_auth(provider), \
-         _stream_patch(status_code=503, json_body=None, text="upstream gateway error"):
+    with _patched_auth(provider), _stream_patch(status_code=503, json_body=None, text="upstream gateway error"):
         with pytest.raises(CodexResponsesError) as exc:
             await provider.acompletion(messages=[{"role": "user", "content": "x"}], model="gpt-5.4")
 
@@ -388,8 +379,7 @@ async def test_list_models_falls_back_on_network_error():
     async def boom(*a, **k):
         raise httpx.ConnectError("nope")
 
-    with _patched_auth(provider), \
-         patch.object(httpx.AsyncClient, "get", new=AsyncMock(side_effect=boom)):
+    with _patched_auth(provider), patch.object(httpx.AsyncClient, "get", new=AsyncMock(side_effect=boom)):
         models = await provider.list_models()
 
     assert models == ["gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"]
@@ -460,9 +450,7 @@ async def test_reasoning_content_streams_as_chunks():
         'data: {"type":"response.completed","response":{"usage":{"input_tokens":1,"output_tokens":1}}}',
     ]
     with _patched_auth(provider), _stream_patch(events=events):
-        result = await provider.acompletion(
-            messages=[{"role": "user", "content": "x"}], model="gpt-5.4", stream=True
-        )
+        result = await provider.acompletion(messages=[{"role": "user", "content": "x"}], model="gpt-5.4", stream=True)
         reasoning_seen, content_seen = [], []
         async for chunk in result:
             if chunk.reasoning_content:
