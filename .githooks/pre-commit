@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Lint + format Python on commit. Install once:
+#   git config core.hooksPath .githooks
+set -e
+
+# Skip when no Python is staged (docs/config-only commits stay fast).
+staged_py=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.py$' || true)
+if [ -z "$staged_py" ]; then
+  exit 0
+fi
+
+uv run ruff check --fix --show-fixes
+uv run ruff format
+
+# Re-stage any of the originally-staged Python files ruff just rewrote.
+echo "$staged_py" | xargs -r git add

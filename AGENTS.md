@@ -24,6 +24,9 @@ uv run pytest --cov=tsugite --cov-report=html
 uv run black .
 uv run ruff check .
 uv run pylint tsugite
+
+# One-time: enable repo pre-commit hook (lint + format on commit)
+git config core.hooksPath .githooks
 ```
 
 ### Testing Agents
