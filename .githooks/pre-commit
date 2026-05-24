@@ -9,8 +9,9 @@ if [ -z "$staged_py" ]; then
   exit 0
 fi
 
-uv run ruff check --fix --show-fixes
-uv run ruff format
+# Scope to staged files only so pre-existing issues elsewhere don't block commits.
+echo "$staged_py" | xargs uv run ruff format
+echo "$staged_py" | xargs uv run ruff check --fix --show-fixes
 
 # Re-stage any of the originally-staged Python files ruff just rewrote.
 echo "$staged_py" | xargs -r git add
