@@ -275,12 +275,18 @@ def merge_scalar_fields(parent, child) -> Dict[str, Any]:
     Returns:
         Dict of merged scalar fields
     """
+    # model_kwargs: shallow-merge parent + child so a base agent can declare
+    # provider defaults and a child can add/override individual keys.
+    parent_kwargs = getattr(parent, "model_kwargs", None) or {}
+    child_kwargs = getattr(child, "model_kwargs", None) or {}
+    merged_kwargs = {**parent_kwargs, **child_kwargs}
     return {
         "name": child.name if child.name else parent.name,
         "description": child.description if child.description else parent.description,
         "model": child.model if child.model else parent.model,
         "max_turns": child.max_turns if child.max_turns != 5 else parent.max_turns,
         "reasoning_effort": child.reasoning_effort if child.reasoning_effort else parent.reasoning_effort,
+        "model_kwargs": merged_kwargs,
         "auto_load_agent_list": child.auto_load_agent_list or parent.auto_load_agent_list,
     }
 

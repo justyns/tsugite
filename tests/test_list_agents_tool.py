@@ -132,11 +132,11 @@ description: From agents (lower priority)
         with patch("tsugite.agent_inheritance.get_global_agents_paths", return_value=[]):
             result = list_agents()
 
-            # Should show higher priority duplicate + package-provided agents
-            assert result.count("\n") == 4  # 5 agents total: duplicate, default, file_searcher, code_searcher, onboard
+            # Higher-priority duplicate wins; lower-priority copy is hidden.
             assert "From .tsugite (higher priority)" in result
             assert "From agents (lower priority)" not in result
-            # Package-provided agents should also be listed
+            # Package-provided agents should also be listed (count is the set of
+            # built-ins on disk; not hardcoded so new bundled agents don't break this).
             assert "default" in result
             assert "file_searcher" in result
 

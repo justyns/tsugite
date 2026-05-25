@@ -283,6 +283,9 @@ export default () => ({
         this._updateProgressCache(d);
         this._handleSessionEvent(d);
       }
+      if (ev.type === 'job_update') {
+        this._handleJobUpdate(d);
+      }
       if (ev.type === 'compaction_started' && d.agent === this.$store.app.selectedAgent && d.session_id) {
         const s = this._sessionState(d.session_id);
         s.compacting = true;
@@ -716,6 +719,24 @@ export default () => ({
     if (progressIdx >= 0) {
       const { session_id, event_type, ...rest } = d;
       this._handleProgressEvent(progressIdx, { type: evType, ...rest });
+      this._scrollThrottled();
+    }
+  },
+
+  _handleJobUpdate(d) {
+    if (!this.selectedSessionId) return;
+    if (d.parent_session_id !== this.selectedSessionId) return;
+    const existing = this.messages.find(m => m.type === 'job_status' && m.job_id === d.job_id);
+    // Drop undefined fields so an emit without `error` (e.g. a RUNNING tick after
+    // a STUCK terminal) doesn't wipe a previously-set error from the tile.
+    const fields = {};
+    for (const k of ['state', 'prompt', 'worker_session_id', 'verify_attempts', 'error']) {
+      if (d[k] !== undefined) fields[k] = d[k];
+    }
+    if (existing) {
+      Object.assign(existing, fields);
+    } else {
+      this.messages.push({ type: 'job_status', job_id: d.job_id, ...fields });
       this._scrollThrottled();
     }
   },

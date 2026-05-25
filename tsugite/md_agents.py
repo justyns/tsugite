@@ -98,6 +98,7 @@ class AgentConfig(BaseModel):
     instructions: str = ""
     extends: Optional[str] = None
     reasoning_effort: Optional[str] = None  # For reasoning models (low, medium, high)
+    model_kwargs: Dict[str, Any] = Field(default_factory=dict)  # Provider-passthrough kwargs (e.g. response_format)
     custom_tools: List[Dict[str, Any]] = Field(default_factory=list)  # Per-agent shell tools
     disable_history: bool = False  # Disable conversation history persistence for this agent
     auto_context: Optional[bool] = None  # Auto-load context files (None = use config default)

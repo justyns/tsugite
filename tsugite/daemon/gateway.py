@@ -298,7 +298,10 @@ class Gateway:
             logger.info("Scheduler enabled (schedules: %s)", schedules_path)
 
             # Start session runner (uses the unified session store)
+            from tsugite.daemon.job_store import JobStore
+            from tsugite.daemon.jobs_orchestrator import JobsOrchestrator
             from tsugite.daemon.session_runner import SessionRunner
+            from tsugite.tools.jobs import set_jobs_orchestrator
             from tsugite.tools.sessions import set_session_runner
 
             event_bus = self._http_server.event_bus if self._http_server else None
@@ -310,9 +313,18 @@ class Gateway:
             if self._http_server:
                 self._http_server.session_runner = self._session_runner
             set_session_runner(self._session_runner, asyncio.get_running_loop())
+
+            self._job_store = JobStore(self.config.state_dir / "jobs.json")
+            self._jobs_orchestrator = JobsOrchestrator(self._job_store, self._session_runner, event_bus=event_bus)
+            self._jobs_orchestrator.attach()
+            set_jobs_orchestrator(self._jobs_orchestrator, asyncio.get_running_loop())
+            if self._http_server:
+                self._http_server.jobs_orchestrator = self._jobs_orchestrator
+                self._http_server.job_store = self._job_store
+
             if self._scheduler_adapter:
                 self._scheduler_adapter.set_session_runner(self._session_runner)
-            logger.info("Session runner enabled")
+            logger.info("Session runner + Jobs orchestrator enabled")
 
         # Start compaction scheduler for agents with auto_compact config
         agents_with_auto_compact = {

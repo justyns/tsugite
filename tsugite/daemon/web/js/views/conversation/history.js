@@ -249,6 +249,28 @@ export function eventsToBubbles(events, { dropTrailing = false } = {}) {
       continue;
     }
 
+    if (type === 'job_status') {
+      if (!data.job_id) continue;
+      pushProgressIfHasSteps();
+      // Each job emits multiple state-transition events; collapse to the
+      // latest state per job by updating the existing tile in place. The
+      // first event for a job_id sets the bubble's position in the timeline.
+      const existing = bubbles.find(b => b.type === 'job_status' && b.job_id === data.job_id);
+      // Drop undefined fields so a later event without `error` (e.g. an early
+      // RUNNING event replayed after a terminal STUCK event) doesn't wipe a
+      // previously-set error from the collapsed tile.
+      const fields = { job_id: data.job_id };
+      for (const k of ['state', 'prompt', 'worker_session_id', 'verify_attempts', 'error']) {
+        if (data[k] !== undefined) fields[k] = data[k];
+      }
+      if (existing) {
+        Object.assign(existing, fields);
+      } else {
+        bubbles.push({ type: 'job_status', ...fields });
+      }
+      continue;
+    }
+
     if (type === 'final_result') {
       const bubble = finalResultBubble(data);
       if (bubble?.type === 'return_value') {

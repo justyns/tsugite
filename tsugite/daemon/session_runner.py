@@ -183,11 +183,16 @@ class SessionRunner:
                     logger.warning("Failed to notify parent session '%s': %s", session.parent_id, e)
 
         except asyncio.CancelledError:
-            self._store.update_session(session.id, status=SessionStatus.CANCELLED.value)
+            updated = self._store.update_session(session.id, status=SessionStatus.CANCELLED.value)
             progress._emit("session_cancelled", {})
             if self._event_bus:
                 self._event_bus.emit("session_update", {"action": "cancelled", "id": session.id})
             logger.info("Session '%s' cancelled", session.id)
+            if self._notify_callback:
+                try:
+                    await self._notify_callback(updated, "CANCELLED")
+                except Exception as notify_err:
+                    logger.error("Session '%s' cancel notify callback failed: %s", session.id, notify_err)
             if session.parent_id:
                 try:
                     await self.reply_to_session(

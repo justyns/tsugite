@@ -95,6 +95,87 @@ async def cmd_bg(adapter: BaseAdapter, prompt: str, agent: str | None = None) ->
 
 
 @adapter_command(
+    name="job",
+    description="Spawn a background Job with optional acceptance criteria, verified by a sub-agent on completion",
+    params=[
+        CommandParam("user_id", str, "User in whose chat this Job is anchored"),
+        CommandParam("prompt", str, "The task to run as a Job"),
+        CommandParam(
+            "acceptance_criteria",
+            str,
+            "Pipe-separated free-text criteria the verifier grades against (e.g. 'tests pass|PR open'). Or a JSON array.",
+            required=False,
+        ),
+        CommandParam("repo", str, "Workspace-relative repo path (persisted; enforcement deferred)", required=False),
+        CommandParam("model", str, "Model override; defaults to workspace default", required=False),
+        CommandParam("timeout_minutes", int, "Wall-clock timeout for the worker (default 30)", required=False),
+        CommandParam("agent", str, "Worker agent file (default job_worker)", required=False),
+    ],
+)
+async def cmd_job(
+    adapter: BaseAdapter,
+    user_id: str,
+    prompt: str,
+    acceptance_criteria: str | list[str] | None = None,
+    repo: str | None = None,
+    model: str | None = None,
+    timeout_minutes: int | None = None,
+    agent: str | None = None,
+) -> str:
+    """Create a Job, spawn a worker session, and return the Job + worker IDs."""
+    from tsugite.tools.jobs import _jobs_orchestrator
+
+    if _jobs_orchestrator is None:
+        return "Jobs require the daemon session runner + orchestrator to be enabled."
+
+    parent = adapter.session_store.find_default_session(user_id, adapter.agent_name)
+    if parent is None:
+        return "No parent session found — send a message in this chat first, then run /job."
+
+    ac_list = _parse_acceptance_criteria(acceptance_criteria)
+
+    try:
+        job, started = _jobs_orchestrator.create_and_start_job(
+            parent_session_id=parent.id,
+            prompt=prompt,
+            acceptance_criteria=ac_list,
+            repo=repo,
+            model=model,
+            agent=agent,
+            timeout_minutes=timeout_minutes or 30,
+            spawned_by="user-slash",
+        )
+    except Exception as e:
+        return f"Failed to spawn job worker: {e}"
+
+    return f"Job {job.id} spawned (worker session: {started.id})"
+
+
+def _parse_acceptance_criteria(raw: str | list[str] | None) -> list[str]:
+    """Normalise the slash-command AC param into a list of strings.
+
+    Accepts: None, an existing list (callers via Python API), JSON-array string,
+    or pipe-separated string. Pipe is chosen over comma so AC texts can contain
+    commas naturally.
+    """
+    if not raw:
+        return []
+    if isinstance(raw, list):
+        return [str(item).strip() for item in raw if str(item).strip()]
+    text = raw.strip()
+    if text.startswith("["):
+        try:
+            import json
+
+            parsed = json.loads(text)
+            if isinstance(parsed, list):
+                return [str(item).strip() for item in parsed if str(item).strip()]
+        except json.JSONDecodeError:
+            pass
+    return [part.strip() for part in text.split("|") if part.strip()]
+
+
+@adapter_command(
     name="compact",
     description="Compact the conversation. Optional: add instructions to shape the summary",
     params=[

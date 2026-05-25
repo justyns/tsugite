@@ -491,13 +491,27 @@ async def _execute_agent_with_prompt(
     # Get model string
     model_string = _get_model_string(exec_options.model_override, agent_config)
 
-    # Merge reasoning_effort. Resolution order: explicit kwargs > override > agent config.
-    final_model_kwargs = dict(model_kwargs or {})
+    # Merge model_kwargs from the agent frontmatter first (lowest precedence), then
+    # explicit caller kwargs override. This lets agents declare e.g.
+    # `model_kwargs: {response_format: {type: json_object}}` once and have every
+    # invocation get structured output without each caller threading it through.
+    final_model_kwargs = {}
+    if hasattr(agent_config, "model_kwargs") and agent_config.model_kwargs:
+        final_model_kwargs.update(agent_config.model_kwargs)
+    final_model_kwargs.update(model_kwargs or {})
+
+    # Resolve reasoning_effort. Precedence (highest wins): exec_options override >
+    # caller-supplied model_kwargs > agent.model_kwargs > agent.reasoning_effort field.
+    # The override is a user-facing CLI/daemon knob — it MUST beat any agent default,
+    # including one baked into agent.model_kwargs (which would otherwise shadow it).
     effort_override = getattr(exec_options, "reasoning_effort_override", None)
-    if "reasoning_effort" not in final_model_kwargs:
-        if effort_override:
-            final_model_kwargs["reasoning_effort"] = effort_override
-        elif hasattr(agent_config, "reasoning_effort") and agent_config.reasoning_effort:
+    caller_effort = (model_kwargs or {}).get("reasoning_effort")
+    if effort_override:
+        final_model_kwargs["reasoning_effort"] = effort_override
+    elif caller_effort is not None:
+        final_model_kwargs["reasoning_effort"] = caller_effort
+    elif "reasoning_effort" not in final_model_kwargs:
+        if hasattr(agent_config, "reasoning_effort") and agent_config.reasoning_effort:
             final_model_kwargs["reasoning_effort"] = agent_config.reasoning_effort
 
     from tsugite.models import resolve_reasoning_effort

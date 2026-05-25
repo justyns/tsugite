@@ -338,6 +338,7 @@ def _ensure_tools_loaded():
     from . import history as history  # noqa: E402, F401
     from . import http as http  # noqa: E402, F401
     from . import interactive as interactive  # noqa: E402, F401
+    from . import jobs as jobs  # noqa: E402, F401
     from . import notify as notify  # noqa: E402, F401
     from . import schedule as schedule  # noqa: E402, F401
     from . import scratchpad as scratchpad  # noqa: E402, F401

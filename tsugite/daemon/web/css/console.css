@@ -885,6 +885,22 @@ body.is-resizing-sidebar { cursor: col-resize; user-select: none; }
 .console-turn-bubble th { color: var(--overlay1); font-weight: 600; }
 .console-turn-bubble hr { border: none; border-top: 1px dashed var(--surface1); margin: 10px 0; }
 
+.console-turn-bubble.job-status {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  border-left: 3px solid var(--surface2);
+  padding-left: 10px;
+}
+.console-turn-bubble.job-status .job-tag { font-size: 10.5px; color: var(--overlay1); letter-spacing: 0.04em; }
+.console-turn-bubble.job-status .job-state { text-transform: uppercase; letter-spacing: 0.06em; }
+.console-turn-bubble.job-status .job-prompt { color: var(--text); font-size: 12.5px; }
+.console-turn-bubble.job-status.job-state-running,
+.console-turn-bubble.job-status.job-state-verifying { border-left-color: var(--lavender); }
+.console-turn-bubble.job-status.job-state-done { border-left-color: var(--green); }
+.console-turn-bubble.job-status.job-state-stuck,
+.console-turn-bubble.job-status.job-state-errored { border-left-color: var(--red); }
+.console-turn-bubble.job-status.job-state-cancelled { border-left-color: var(--surface2); }
+.console-turn-bubble.job-status:hover { background: color-mix(in oklab, var(--surface0) 60%, transparent); }
+
 .console-turn-bubble .copy-btn {
   position: absolute; top: 6px; right: 6px;
   background: var(--surface0); border: 1px solid var(--surface1);

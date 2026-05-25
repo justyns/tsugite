@@ -123,10 +123,12 @@ def test_list_local_agents_empty(tmp_path):
     """Test listing agents in empty directory."""
     result = list_local_agents(tmp_path)
 
-    # Should have built-in agents even in empty directory
+    # Should have built-in agents even in empty directory.
     assert len(result) == 1
     assert "Built-in" in result
-    assert len(result["Built-in"]) == 4  # default, file_searcher, code_searcher, onboard
+    # Don't hardcode the count — new bundled agents shouldn't break this test.
+    builtin_names = {p.stem for p in result["Built-in"]}
+    assert {"default", "file_searcher", "code_searcher", "onboard"}.issubset(builtin_names)
 
 
 def test_list_local_agents_current_dir(tmp_path):
