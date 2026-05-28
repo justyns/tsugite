@@ -83,6 +83,10 @@ class Job:
     # Most recent verifier session id — set by orchestrator when verifier spawns
     # so a hung verifier can be cancelled from _on_timeout.
     verifier_session_id: Optional[str] = None
+    # Absolute path of the provisioned git worktree (set when --repo was given);
+    # workers run inside this directory. Orchestrator prunes it on DONE/CANCELLED
+    # and keeps it on STUCK/ERRORED so the user can inspect what the worker did.
+    worktree_path: Optional[str] = None
 
     def __post_init__(self):
         if not self.id:
@@ -146,6 +150,14 @@ class JobStore:
             job = self._jobs.get(job_id)
             if job is None:
                 raise KeyError(f"Unknown job: {job_id}")
+            if "state" in fields:
+                # Some orchestrator escape hatches (mark_done_manual, retry_with_hint)
+                # set state via update() to bypass _VALID_TRANSITIONS. That's by design,
+                # but the value must still be a real JobState — typos would silently
+                # land an unrecoverable state on disk.
+                valid = {s.value for s in JobState}
+                if fields["state"] not in valid:
+                    raise ValueError(f"Invalid Job state value: {fields['state']!r}; expected one of {sorted(valid)}")
             for key, value in fields.items():
                 if not hasattr(job, key):
                     raise ValueError(f"Unknown Job field: {key}")

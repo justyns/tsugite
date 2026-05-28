@@ -207,6 +207,9 @@ class Session:
     suppressed_skills: list[str] = field(default_factory=list)
     reasoning_effort: Optional[str] = None
     model_override: Optional[str] = None
+    # Per-session working directory override (used by Jobs feature so a worker
+    # session runs inside its provisioned git worktree, not the adapter's default).
+    workspace_override: Optional[str] = None
     compacting: bool = False
     # Provider-reported context window for this session's model. None until the
     # first turn reports it; consumers fall back to the agent-wide default via
@@ -685,6 +688,7 @@ class SessionStore:
                 suppressed_skills=list(old_session.suppressed_skills),
                 reasoning_effort=old_session.reasoning_effort,
                 model_override=old_session.model_override,
+                workspace_override=old_session.workspace_override,
                 context_limit=old_session.context_limit,
             )
             # Preserve original conversation start so <session_started> in the

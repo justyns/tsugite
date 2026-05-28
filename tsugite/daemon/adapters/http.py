@@ -452,6 +452,8 @@ class HTTPServer:
         self._server = None
         self.scheduler = None  # Set by Gateway after SchedulerAdapter is created
         self.session_runner = None  # Set by Gateway after SessionRunner is created
+        self.jobs_orchestrator = None  # Set by Gateway after JobsOrchestrator is created
+        self.job_store = None  # Set by Gateway alongside jobs_orchestrator
         self.push_store = None  # Set by Gateway if web-push is configured
         self.vapid_public_key = None  # Set by Gateway if web-push is configured
         self._active_chats: dict[tuple[str, str, str], ActiveChat] = {}
@@ -530,6 +532,9 @@ class HTTPServer:
             Route("/api/sessions/{session_id}", self._api_get_session, methods=["GET"]),
             Route("/api/sessions/{session_id}", self._api_update_session, methods=["PATCH"]),
             Route("/api/sessions/{session_id}/cancel", self._api_cancel_session, methods=["POST"]),
+            Route("/api/jobs/{job_id}/cancel", self._api_cancel_job, methods=["POST"]),
+            Route("/api/jobs/{job_id}/mark-done", self._api_mark_job_done, methods=["POST"]),
+            Route("/api/jobs/{job_id}/retry", self._api_retry_job, methods=["POST"]),
             Route("/api/sessions/{session_id}/restart", self._api_restart_session, methods=["POST"]),
             Route("/api/sessions/{session_id}/events", self._api_session_events, methods=["GET"]),
             Route("/api/sessions/{session_id}/pin", self._api_pin_session, methods=["POST"]),
@@ -1897,6 +1902,66 @@ class HTTPServer:
         self.event_bus.emit("session_update", {"action": "cancelled", "id": session_id})
         return JSONResponse({"status": "cancelled"})
 
+    # ── Jobs tile actions ──
+
+    def _require_auth_and_jobs(self, request: Request) -> Optional[JSONResponse]:
+        auth_err = self._check_auth(request)
+        if auth_err:
+            return auth_err
+        if not self.jobs_orchestrator:
+            return JSONResponse({"error": "jobs orchestrator not available"}, status_code=503)
+        return None
+
+    async def _api_cancel_job(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_jobs(request):
+            return err
+        job_id = request.path_params["job_id"]
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        reason = body.get("reason") or "cancelled by user"
+        try:
+            await self.jobs_orchestrator.cancel_job(job_id, reason=reason)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+        return JSONResponse({"status": "cancelled"})
+
+    async def _api_mark_job_done(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_jobs(request):
+            return err
+        job_id = request.path_params["job_id"]
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        reason = body.get("reason") or "marked done by user"
+        try:
+            await self.jobs_orchestrator.mark_done_manual(job_id, reason=reason)
+        except ValueError as e:
+            # 404 if unknown, 409 if not in STUCK state.
+            status = 404 if "Unknown job" in str(e) else 409
+            return JSONResponse({"error": str(e)}, status_code=status)
+        return JSONResponse({"status": "done"})
+
+    async def _api_retry_job(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_jobs(request):
+            return err
+        job_id = request.path_params["job_id"]
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        hint = (body.get("hint") or "").strip()
+        if not hint:
+            return JSONResponse({"error": "hint is required"}, status_code=400)
+        try:
+            await self.jobs_orchestrator.retry_with_hint(job_id, hint=hint)
+        except ValueError as e:
+            status = 404 if "Unknown job" in str(e) else 409
+            return JSONResponse({"error": str(e)}, status_code=status)
+        return JSONResponse({"status": "running"})
+
     async def _api_restart_session(self, request: Request) -> JSONResponse:
         if err := self._require_auth_and_sessions(request):
             return err
@@ -1912,6 +1977,9 @@ class HTTPServer:
         if old.status not in restartable:
             return JSONResponse({"error": f"cannot restart session in '{old.status}' state"}, status_code=400)
 
+        # Carry forward per-session overrides + metadata so a restarted worker
+        # session still runs in its provisioned worktree AND the JobsOrchestrator
+        # still recognises it via metadata.job_id.
         new_session = Session(
             id="",
             agent=old.agent,
@@ -1920,6 +1988,8 @@ class HTTPServer:
             model=old.model,
             agent_file=old.agent_file,
             notify=old.notify,
+            workspace_override=old.workspace_override,
+            metadata=dict(old.metadata or {}),
         )
         try:
             result = self.session_runner.start_session(new_session)

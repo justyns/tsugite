@@ -260,7 +260,7 @@ export function eventsToBubbles(events, { dropTrailing = false } = {}) {
       // RUNNING event replayed after a terminal STUCK event) doesn't wipe a
       // previously-set error from the collapsed tile.
       const fields = { job_id: data.job_id };
-      for (const k of ['state', 'prompt', 'worker_session_id', 'verify_attempts', 'error']) {
+      for (const k of ['state', 'prompt', 'worker_session_id', 'verifier_session_id', 'verify_attempts', 'error']) {
         if (data[k] !== undefined) fields[k] = data[k];
       }
       if (existing) {

@@ -89,6 +89,18 @@ class JobsOrchestrator:
             )
         )
 
+        # Provision a fresh git worktree if --repo was given so the worker has
+        # an isolated working tree (no clashes with the parent shell or other jobs).
+        worktree_path: Optional[str] = None
+        if repo:
+            try:
+                worktree_path = _provision_worktree(repo, job.id)
+                self._jobs.update(job.id, worktree_path=worktree_path)
+            except Exception as e:
+                logger.exception("Failed to provision worktree for job '%s': %s", job.id, e)
+                self._finalize(job, JobState.ERRORED, error=f"worktree provisioning failed: {e}")
+                raise
+
         worker_prompt = build_worker_prompt(prompt, acceptance_criteria or [], repo)
         session = Session(
             id="",
@@ -97,6 +109,7 @@ class JobsOrchestrator:
             prompt=worker_prompt,
             agent_file=worker_agent_file,
             model=model,
+            workspace_override=worktree_path,
             metadata={"job_id": job.id},
         )
         try:
@@ -119,6 +132,101 @@ class JobsOrchestrator:
             pass
         self._emit_job_event(self._jobs.get(job_id))
         self._schedule_timeout(job_id, timeout_minutes)
+
+    # ── Tile actions (called from HTTP /api/jobs/<id>/{cancel,mark-done,retry}) ──
+
+    async def cancel_job(self, job_id: str, reason: str = "cancelled by user") -> Job:
+        """User-initiated cancel from the tile. No-op on terminal Jobs."""
+        job = self._jobs.get(job_id)
+        if job is None:
+            raise ValueError(f"Unknown job: {job_id}")
+        if job.state in (JobState.DONE.value, JobState.STUCK.value, JobState.CANCELLED.value, JobState.ERRORED.value):
+            return job
+        for sid in (job.worker_session_id, job.verifier_session_id):
+            if sid and not self._session_already_terminal(sid):
+                try:
+                    self._runner.cancel_session(sid)
+                except Exception:
+                    logger.exception("cancel_job: failed to cancel session '%s'", sid)
+        self._finalize(job, JobState.CANCELLED, error=reason)
+        return self._jobs.get(job_id)
+
+    async def mark_done_manual(self, job_id: str, reason: str = "marked done by user") -> Job:
+        """Override a STUCK Job to DONE. Audit trail goes into result.manual_done_reason
+        AND result.stuck_error_at_override (the verifier's prior diagnostic)."""
+        job = self._jobs.get(job_id)
+        if job is None:
+            raise ValueError(f"Unknown job: {job_id}")
+        if job.state != JobState.STUCK.value:
+            raise ValueError(f"mark_done_manual only valid on stuck jobs (job '{job_id}' is {job.state})")
+        # Defensive: STUCK should have no pending timer (set in _finalize), but cancel
+        # to be safe in case a future code path leaves one behind.
+        self._cancel_timeout(job_id)
+        # STUCK has no outgoing transitions in _VALID_TRANSITIONS by design (terminal).
+        # The audit-stamped override deliberately goes around the state machine, so we
+        # mutate state directly via update() and emit. _finalize would be rejected.
+        result = dict(job.result or {})
+        result["manual_done_reason"] = reason
+        # Preserve the verifier's diagnostic so we don't lose the audit trail of why
+        # the job was stuck in the first place.
+        if job.error:
+            result["stuck_error_at_override"] = job.error
+        self._jobs.update(job_id, state=JobState.DONE.value, result=result, error=None, resolved_at=_iso_now())
+        if job.worktree_path:
+            _prune_worktree(job.worktree_path)
+            self._jobs.update(job_id, worktree_path=None)
+        self._emit_job_event(self._jobs.get(job_id))
+        return self._jobs.get(job_id)
+
+    async def retry_with_hint(self, job_id: str, hint: str) -> Job:
+        """Give a STUCK Job one more shot, with the user's hint as the worker prompt.
+        Does NOT reset verify_attempts — that would let users loop forever."""
+        from pathlib import Path
+
+        job = self._jobs.get(job_id)
+        if job is None:
+            raise ValueError(f"Unknown job: {job_id}")
+        if job.state != JobState.STUCK.value:
+            raise ValueError(f"retry_with_hint only valid on stuck jobs (job '{job_id}' is {job.state})")
+        # Validate the worktree still exists if the Job was configured with one. If
+        # it's been hand-deleted, refuse rather than spawn a worker into a missing dir.
+        if job.worktree_path and not Path(job.worktree_path).is_dir():
+            raise ValueError(
+                f"retry_with_hint: worktree at '{job.worktree_path}' no longer exists; "
+                f"cannot resume in a missing directory"
+            )
+        # Same out-of-band rationale as mark_done_manual: STUCK is terminal in the
+        # state machine, and that's intentional. The hint-and-retry escape hatch is
+        # explicitly out-of-band.
+        worker_agent_file = job.agent or "job_worker"
+        worker_adapter_key = self._resolve_adapter_key(job.parent_session_id)
+        worker_session = Session(
+            id="",
+            agent=worker_adapter_key,
+            source=SessionSource.SPAWNED.value,
+            prompt=_build_hint_prompt(job, hint),
+            agent_file=worker_agent_file,
+            model=job.model,
+            workspace_override=job.worktree_path,
+            metadata={"job_id": job.id, "hint_attempt": True},
+        )
+        try:
+            started = self._runner.start_session(worker_session)
+        except Exception as e:
+            logger.exception("retry_with_hint: failed to spawn worker for job '%s': %s", job_id, e)
+            raise ValueError(f"failed to spawn retry worker: {e}") from e
+        # Move out of STUCK directly (terminal → RUNNING). update() goes around the
+        # state machine but the audit is captured via the resolved_at clear + emit.
+        self._jobs.update(
+            job_id,
+            state=JobState.RUNNING.value,
+            worker_session_id=started.id,
+            resolved_at=None,
+            error=None,
+        )
+        self._emit_job_event(self._jobs.get(job_id))
+        self._schedule_timeout(job_id, job.timeout_minutes)
+        return self._jobs.get(job_id)
 
     async def on_session_complete(self, session: Session, result_str: str) -> None:
         job_id = (session.metadata or {}).get("job_id")
@@ -145,10 +253,20 @@ class JobsOrchestrator:
             await self._handle_worker_complete(job, session, result_str)
 
     async def _handle_worker_complete(self, job: Job, worker: Session, result_str: str) -> None:
+        # Guard: if the Job was already advanced out of RUNNING by a concurrent
+        # path (e.g. user cancellation, external state mutation), don't overwrite
+        # the result and don't attempt the VERIFYING transition. A late notify for
+        # a cancelled job otherwise lands a contradictory worker summary on the tile.
+        if job.state != JobState.RUNNING.value:
+            logger.warning(
+                "Worker completion for job '%s' in state '%s' (expected RUNNING) — ignoring",
+                job.id,
+                job.state,
+            )
+            return
         self._cancel_timeout(job.id)
         # Persist worker output before spawning the verifier so the verifier-pass
-        # path can echo it back into job.result, AND so the UI sees the latest
-        # payload even if the transition below is rejected.
+        # path can echo it back into job.result.
         self._jobs.update(job.id, result={"summary": result_str})
         try:
             self._jobs.update_state(job.id, JobState.VERIFYING.value)
@@ -263,6 +381,7 @@ class JobsOrchestrator:
             prompt=followup,
             agent_file=worker_agent_file,
             model=job.model,
+            workspace_override=job.worktree_path,
             # loop_attempt mirrors verify_attempts (1-indexed retry count).
             metadata={"job_id": job.id, "loop_attempt": new_attempts},
         )
@@ -283,7 +402,11 @@ class JobsOrchestrator:
         self._schedule_timeout(job.id, job.timeout_minutes)
 
     def _finalize(self, job: Job, terminal: JobState, **fields) -> None:
-        """Cancel timer, write per-terminal fields, transition, emit tile event."""
+        """Cancel timer, write per-terminal fields, transition, emit tile event.
+
+        Worktrees are pruned on DONE/CANCELLED (clean exit, no inspection value),
+        kept on STUCK/ERRORED so the user can see what the worker did wrong.
+        """
         self._cancel_timeout(job.id)
         if fields:
             self._jobs.update(job.id, **fields)
@@ -292,7 +415,12 @@ class JobsOrchestrator:
         except JobStateTransitionError as e:
             logger.warning("Cannot mark job '%s' %s: %s", job.id, terminal.value, e)
             return
-        self._emit_job_event(self._jobs.get(job.id))
+        fresh = self._jobs.get(job.id)
+        if terminal in (JobState.DONE, JobState.CANCELLED) and fresh and fresh.worktree_path:
+            _prune_worktree(fresh.worktree_path)
+            self._jobs.update(job.id, worktree_path=None)
+            fresh = self._jobs.get(job.id)
+        self._emit_job_event(fresh)
 
     def _schedule_timeout(self, job_id: str, timeout_minutes: int) -> None:
         self._cancel_timeout(job_id)
@@ -331,11 +459,16 @@ class JobsOrchestrator:
 
     def _session_already_terminal(self, session_id: str) -> bool:
         """Race guard: if the session already reached a terminal status, don't
-        overwrite it via cancel_session — the session won."""
+        overwrite it via cancel_session — the session won. Tolerates both the
+        FakeStore-style None-on-miss contract and real SessionStore's
+        ValueError-on-miss; treats either as 'session is gone, nothing to cancel'."""
         store = getattr(self._runner, "store", None)
         if store is None or not hasattr(store, "get_session"):
             return False
-        session = store.get_session(session_id)
+        try:
+            session = store.get_session(session_id)
+        except (ValueError, KeyError):
+            return True
         if session is None:
             return False
         return session.status in (
@@ -347,10 +480,14 @@ class JobsOrchestrator:
     def _resolve_adapter_key(self, parent_session_id: str) -> str:
         """Route Job spawns through the parent session's adapter so jobs stay on
         the same agent (credentials, tools, model defaults) as the chat that spawned them.
+        Tolerates real SessionStore raising ValueError on missing sessions.
         """
         store = getattr(self._runner, "store", None)
         if store is not None and hasattr(store, "get_session"):
-            parent = store.get_session(parent_session_id)
+            try:
+                parent = store.get_session(parent_session_id)
+            except (ValueError, KeyError):
+                parent = None
             if parent is not None:
                 return parent.agent
         adapters = getattr(self._runner, "_adapters", {})
@@ -365,6 +502,7 @@ class JobsOrchestrator:
             "job_id": job.id,
             "parent_session_id": job.parent_session_id,
             "worker_session_id": job.worker_session_id,
+            "verifier_session_id": job.verifier_session_id,
             "state": job.state,
             "prompt": (job.prompt or "")[:200],
             "verify_attempts": job.verify_attempts,
@@ -429,6 +567,22 @@ def _build_verifier_prompt(job: Job, worker_output: str) -> str:
     return "\n".join(parts)
 
 
+def _build_hint_prompt(job: Job, hint: str) -> str:
+    """Compose the retry-with-hint prompt for a worker resurrected from STUCK."""
+    parts = [
+        "This job previously hit the verifier's max-attempt limit. A user has provided a hint:",
+        "",
+        hint,
+        "",
+        "Address the hint and produce a new structured summary in the same shape as before.",
+        "",
+        "Acceptance criteria the verifier will check:",
+    ]
+    for i, ac in enumerate(job.acceptance_criteria, 1):
+        parts.append(f"{i}. {ac}")
+    return "\n".join(parts)
+
+
 def _build_followup_prompt(job: Job, failed_acs: list[dict]) -> str:
     parts = ["Verifier flagged the following acceptance criteria as not met:"]
     for ac in failed_acs:
@@ -454,3 +608,96 @@ def _parse_verifier_output(raw: str) -> Optional[dict]:
     except json.JSONDecodeError:
         return None
     return parsed if isinstance(parsed, dict) else None
+
+
+def _iso_now() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).isoformat()
+
+
+_WORKTREE_SUBDIR = ".tsugite-jobs"
+
+
+def _provision_worktree(repo: str, job_id: str) -> str:
+    """Add a git worktree at `<repo>/.tsugite-jobs/<job_id>` and return its absolute path.
+
+    The worktree starts from the repo's current HEAD on a detached HEAD so the job
+    can commit/branch freely without affecting the parent repo's branches.
+    """
+    import subprocess
+    from pathlib import Path
+
+    repo_path = Path(repo).expanduser().resolve()
+    if not (repo_path / ".git").exists():
+        raise ValueError(f"repo path is not a git repository: {repo_path}")
+    target = repo_path / _WORKTREE_SUBDIR / job_id
+    target.parent.mkdir(parents=True, exist_ok=True)
+    # --detach: don't create a branch; the job can branch later if it wants.
+    # HEAD: start from the repo's current commit.
+    # LC_ALL=C pins git's error messages to English so log scrapes are deterministic.
+    # GIT_TERMINAL_PROMPT=0 prevents git from blocking on credential prompts.
+    import os as _os
+
+    env = {**_os.environ, "LC_ALL": "C", "GIT_TERMINAL_PROMPT": "0"}
+    try:
+        subprocess.run(
+            ["git", "worktree", "add", "--detach", str(target), "HEAD"],
+            cwd=repo_path,
+            check=True,
+            capture_output=True,
+            env=env,
+        )
+    except subprocess.CalledProcessError as e:
+        # Surface git's actual fatal message instead of the bare exit-status string.
+        stderr_text = (e.stderr or b"").decode("utf-8", "replace").strip()
+        raise RuntimeError(f"git worktree add failed (exit {e.returncode}): {stderr_text or 'no stderr'}") from e
+    return str(target)
+
+
+def _prune_worktree(worktree_path: str) -> None:
+    """Remove a previously-provisioned worktree. Errors are logged, not raised —
+    cleanup must not fail a Job finalization.
+
+    Safety: the rmtree fallback REQUIRES the path to live under our own
+    `.tsugite-jobs/` subdir, so a corrupted or hand-edited worktree_path
+    (e.g. an absolute path pointing at the repo root) cannot rm the wrong tree.
+    """
+    import subprocess
+    from pathlib import Path
+
+    wt = Path(worktree_path)
+    if not wt.exists():
+        return
+    # `git worktree remove --force` works even if the worktree has uncommitted changes.
+    try:
+        subprocess.run(
+            ["git", "worktree", "remove", "--force", str(wt)],
+            check=True,
+            capture_output=True,
+        )
+        return
+    except Exception as e:
+        stderr = getattr(e, "stderr", b"")
+        stderr_text = (
+            stderr.decode("utf-8", "replace").strip() if isinstance(stderr, (bytes, bytearray)) else str(stderr)
+        )
+        logger.warning("git worktree remove failed for %s: %s (stderr: %s); attempting rmtree", wt, e, stderr_text)
+
+    # rmtree fallback — but ONLY if the path is structurally inside .tsugite-jobs/.
+    # Any other location indicates corruption or tampering; refuse rather than
+    # nuke an arbitrary tree.
+    resolved = wt.resolve()
+    if _WORKTREE_SUBDIR not in resolved.parts:
+        logger.error(
+            "Refusing rmtree of %s: path is not inside %s/ — corrupted Job.worktree_path?",
+            resolved,
+            _WORKTREE_SUBDIR,
+        )
+        return
+    import shutil
+
+    try:
+        shutil.rmtree(wt, ignore_errors=True)
+    except Exception:
+        logger.exception("Failed to rmtree worktree at %s", wt)

@@ -730,7 +730,7 @@ export default () => ({
     // Drop undefined fields so an emit without `error` (e.g. a RUNNING tick after
     // a STUCK terminal) doesn't wipe a previously-set error from the tile.
     const fields = {};
-    for (const k of ['state', 'prompt', 'worker_session_id', 'verify_attempts', 'error']) {
+    for (const k of ['state', 'prompt', 'worker_session_id', 'verifier_session_id', 'verify_attempts', 'error']) {
       if (d[k] !== undefined) fields[k] = d[k];
     }
     if (existing) {
@@ -738,6 +738,35 @@ export default () => ({
     } else {
       this.messages.push({ type: 'job_status', job_id: d.job_id, ...fields });
       this._scrollThrottled();
+    }
+  },
+
+  async jobCancel(jobId) {
+    if (!confirm('Cancel this job? The worker session will be stopped.')) return;
+    try {
+      await post(`/api/jobs/${jobId}/cancel`, {});
+    } catch (e) {
+      toast(`Cancel failed: ${e.message}`, 'error');
+    }
+  },
+
+  async jobMarkDone(jobId) {
+    const reason = prompt('Mark done — reason (for audit):', 'verifier was wrong, work looks fine');
+    if (reason === null) return;
+    try {
+      await post(`/api/jobs/${jobId}/mark-done`, { reason });
+    } catch (e) {
+      toast(`Mark done failed: ${e.message}`, 'error');
+    }
+  },
+
+  async jobRetryWithHint(jobId) {
+    const hint = prompt('Hint for the worker (what the verifier missed, or what to try differently):');
+    if (!hint || !hint.trim()) return;
+    try {
+      await post(`/api/jobs/${jobId}/retry`, { hint: hint.trim() });
+    } catch (e) {
+      toast(`Retry failed: ${e.message}`, 'error');
     }
   },
 

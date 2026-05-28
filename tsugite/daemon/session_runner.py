@@ -136,6 +136,8 @@ class SessionRunner:
         }
         if session.agent_file:
             metadata["agent_file_override"] = str(adapter._resolve_agent_path(session.agent_file) or session.agent_file)
+        if session.workspace_override:
+            metadata["workspace_override"] = session.workspace_override
 
         channel_context = ChannelContext(
             source="session",

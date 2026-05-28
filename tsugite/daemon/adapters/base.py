@@ -461,9 +461,13 @@ class BaseAdapter(ABC):
         except Exception:
             tokens_used = 0
 
+        # workspace_override beats agent_config.workspace_dir so the rendered cwd
+        # matches what set_workspace_dir actually puts the agent in (per-session
+        # override used by the Jobs feature for its git worktree).
+        cwd_for_render = (channel_context.metadata or {}).get("workspace_override") or self.agent_config.workspace_dir
         return f"""<message_context>
   <datetime>{timestamp}</datetime>{session_started_xml}{last_active_xml}{scheduler_timing_xml}
-  <working_directory>{self.agent_config.workspace_dir}</working_directory>
+  <working_directory>{cwd_for_render}</working_directory>
   <source>{channel_context.source}</source>
   <user_id>{channel_context.user_id}</user_id>
   <context_tokens_used>{tokens_used}</context_tokens_used>
@@ -596,7 +600,15 @@ class BaseAdapter(ABC):
 
         from tsugite.cli.helpers import PathContext, set_workspace_dir
 
-        workspace_dir = self.agent_config.workspace_dir
+        # workspace_override lets a single session run inside a different working
+        # directory than the adapter's default — used by the Jobs feature so a
+        # worker session lives in its provisioned git worktree, not the parent
+        # adapter's workspace.
+        workspace_override = (channel_context.metadata or {}).get("workspace_override")
+        if workspace_override:
+            workspace_dir = Path(workspace_override)
+        else:
+            workspace_dir = self.agent_config.workspace_dir
         path_context = PathContext(
             invoked_from=workspace_dir,
             workspace_dir=workspace_dir,
