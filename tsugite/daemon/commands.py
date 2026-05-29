@@ -99,6 +99,12 @@ async def cmd_bg(adapter: BaseAdapter, prompt: str, agent: str | None = None) ->
     description="Spawn a background Job with optional acceptance criteria, verified by a sub-agent on completion",
     params=[
         CommandParam("user_id", str, "User in whose chat this Job is anchored"),
+        CommandParam(
+            "session_id",
+            str,
+            "Active session that should host the Job tile (auto-injected by the web UI from the currently-open chat)",
+            required=False,
+        ),
         CommandParam("prompt", str, "The task to run as a Job"),
         CommandParam(
             "acceptance_criteria",
@@ -116,6 +122,7 @@ async def cmd_job(
     adapter: BaseAdapter,
     user_id: str,
     prompt: str,
+    session_id: str | None = None,
     acceptance_criteria: str | list[str] | None = None,
     repo: str | None = None,
     model: str | None = None,
@@ -128,15 +135,28 @@ async def cmd_job(
     if _jobs_orchestrator is None:
         return "Jobs require the daemon session runner + orchestrator to be enabled."
 
-    parent = adapter.session_store.find_default_session(user_id, adapter.agent_name)
-    if parent is None:
-        return "No parent session found — send a message in this chat first, then run /job."
+    # Prefer the active session the user is in (passed from the web UI); fall back
+    # to the user's primary session for that agent for non-UI callers (e.g. a
+    # script POSTing directly to the API).
+    parent_session_id: str | None = None
+    if session_id:
+        parent = (
+            adapter.session_store.get_session(session_id) if hasattr(adapter.session_store, "get_session") else None
+        )
+        if parent is None:
+            return f"Session '{session_id}' not found — cannot anchor Job."
+        parent_session_id = parent.id
+    else:
+        parent = adapter.session_store.find_default_session(user_id, adapter.agent_name)
+        if parent is None:
+            return "No parent session found — send a message in this chat first, then run /job."
+        parent_session_id = parent.id
 
     ac_list = _parse_acceptance_criteria(acceptance_criteria)
 
     try:
         job, started = _jobs_orchestrator.create_and_start_job(
-            parent_session_id=parent.id,
+            parent_session_id=parent_session_id,
             prompt=prompt,
             acceptance_criteria=ac_list,
             repo=repo,

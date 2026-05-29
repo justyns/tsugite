@@ -74,7 +74,9 @@ export const inputMixin = {
     const agent = this.$store.app.selectedAgent;
     const kwargs = {};
     const hasUserId = cmd.params.some(p => p.name === 'user_id');
-    const visibleParams = cmd.params.filter(p => p.name !== 'user_id');
+    const hasSessionId = cmd.params.some(p => p.name === 'session_id');
+    const hiddenNames = new Set(['user_id', 'session_id']);
+    const visibleParams = cmd.params.filter(p => !hiddenNames.has(p.name));
     const requiredVisible = visibleParams.filter(p => p.required);
     if (requiredVisible.length === 1 && argsText) {
       kwargs[requiredVisible[0].name] = argsText;
@@ -87,6 +89,9 @@ export const inputMixin = {
       kwargs[visibleParams[0].name] = argsText;
     }
     if (hasUserId) kwargs.user_id = this.userId;
+    // Forward the active chat's session id so commands anchor on the user's
+    // current conversation, not their default/primary session.
+    if (hasSessionId && this.selectedSessionId) kwargs.session_id = this.selectedSessionId;
     try {
       const data = await post(`/api/agents/${agent}/commands/${cmd.name}`, kwargs);
       return data.result || JSON.stringify(data);
