@@ -9,7 +9,7 @@ class TestAliases:
     def test_short_aliases_resolve(self):
         from tsugite_acp.models import resolve_model_alias
 
-        assert resolve_model_alias("opus") == "claude-opus-4-7"
+        assert resolve_model_alias("opus") == "claude-opus-4-8"
         assert resolve_model_alias("sonnet") == "claude-sonnet-4-6"
         assert resolve_model_alias("haiku") == "claude-haiku-4-5-20251001"
 

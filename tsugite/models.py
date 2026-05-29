@@ -25,7 +25,8 @@ class UnsupportedEffortError(ValueError):
 
 
 _CLAUDE_CODE_MODEL_MAP = {
-    "opus": "claude-opus-4-7",
+    "opus": "claude-opus-4-8",
+    "opus-4-8": "claude-opus-4-8",
     "opus-4-7": "claude-opus-4-7",
     "opus-4-6": "claude-opus-4-6",
     "sonnet": "claude-sonnet-4-6",

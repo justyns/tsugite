@@ -16,6 +16,9 @@ logger = logging.getLogger(__name__)
 _CLAUDE_CODE_EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"]
 
 _CLAUDE_CODE_MODELS: dict[str, ModelInfo] = {
+    "claude_code/claude-opus-4-8": ModelInfo(
+        max_input_tokens=1_000_000, supports_vision=True, supported_effort_levels=_CLAUDE_CODE_EFFORT_LEVELS
+    ),
     "claude_code/claude-opus-4-7": ModelInfo(
         max_input_tokens=1_000_000, supports_vision=True, supported_effort_levels=_CLAUDE_CODE_EFFORT_LEVELS
     ),
@@ -31,7 +34,8 @@ _CLAUDE_CODE_MODELS: dict[str, ModelInfo] = {
 }
 
 _ALIASES = {
-    "opus": "claude-opus-4-7",
+    "opus": "claude-opus-4-8",
+    "opus-4-8": "claude-opus-4-8",
     "opus-4-7": "claude-opus-4-7",
     "opus-4-6": "claude-opus-4-6",
     "sonnet": "claude-sonnet-4-6",

@@ -19,6 +19,8 @@ class TestAnthropicEffortModelInfo:
         from tsugite.providers.anthropic import _ANTHROPIC_MODELS
 
         for key in (
+            "anthropic/claude-opus-4-8",
+            "anthropic/claude-opus-4-7",
             "anthropic/claude-opus-4-6",
             "anthropic/claude-sonnet-4-6",
             "anthropic/claude-haiku-4-5",

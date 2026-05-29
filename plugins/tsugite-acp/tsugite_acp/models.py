@@ -17,6 +17,7 @@ def _model(max_input_tokens: int) -> ModelInfo:
 
 
 _ACP_MODELS: dict[str, ModelInfo] = {
+    "acp/claude-opus-4-8": _model(1_000_000),
     "acp/claude-opus-4-7": _model(1_000_000),
     "acp/claude-opus-4-6": _model(1_000_000),
     "acp/claude-sonnet-4-6": _model(1_000_000),
@@ -24,7 +25,8 @@ _ACP_MODELS: dict[str, ModelInfo] = {
 }
 
 _ALIASES: dict[str, str] = {
-    "opus": "claude-opus-4-7",
+    "opus": "claude-opus-4-8",
+    "opus-4-8": "claude-opus-4-8",
     "opus-4-7": "claude-opus-4-7",
     "opus-4-6": "claude-opus-4-6",
     "sonnet": "claude-sonnet-4-6",
