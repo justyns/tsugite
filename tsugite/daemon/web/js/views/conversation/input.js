@@ -78,15 +78,25 @@ export const inputMixin = {
     const hiddenNames = new Set(['user_id', 'session_id']);
     const visibleParams = cmd.params.filter(p => !hiddenNames.has(p.name));
     const requiredVisible = visibleParams.filter(p => p.required);
-    if (requiredVisible.length === 1 && argsText) {
-      kwargs[requiredVisible[0].name] = argsText;
+
+    // Pull `--key value` flags off the tail of argsText so commands like
+    // `/job do thing --ac "tests pass" --repo /path` route those values to
+    // the right params instead of stuffing the whole string into prompt.
+    const validFlagNames = new Set(visibleParams.map(p => p.name));
+    const { positional, flags } = this._extractFlags(argsText, validFlagNames);
+    Object.assign(kwargs, flags);
+
+    if (requiredVisible.length === 1 && positional) {
+      kwargs[requiredVisible[0].name] = positional;
     } else if (requiredVisible.length > 1) {
-      const parts = argsText.split(/\s+/);
+      const parts = positional.split(/\s+/);
       for (let i = 0; i < visibleParams.length && i < parts.length; i++) {
-        kwargs[visibleParams[i].name] = parts[i];
+        if (!(visibleParams[i].name in kwargs)) {
+          kwargs[visibleParams[i].name] = parts[i];
+        }
       }
-    } else if (visibleParams.length === 1 && !visibleParams[0].required && argsText) {
-      kwargs[visibleParams[0].name] = argsText;
+    } else if (visibleParams.length === 1 && !visibleParams[0].required && positional) {
+      kwargs[visibleParams[0].name] = positional;
     }
     if (hasUserId) kwargs.user_id = this.userId;
     // Forward the active chat's session id so commands anchor on the user's
@@ -98,6 +108,31 @@ export const inputMixin = {
     } catch (e) {
       return `Command failed: ${e.message}`;
     }
+  },
+
+  // Split argsText into a positional remainder + a flags dict. Recognises
+  // `--key value` and `--key "quoted value"` only for keys in validFlagNames;
+  // unrecognised --flags stay in the positional string so prompts can contain
+  // `--foo` text without being eaten. Repeatable flags are joined with `|`.
+  _extractFlags(argsText, validFlagNames) {
+    if (!argsText) return { positional: '', flags: {} };
+    const tokens = argsText.match(/"[^"]*"|\S+/g) || [];
+    const positionalParts = [];
+    const flags = {};
+    for (let i = 0; i < tokens.length; i++) {
+      const tok = tokens[i];
+      const flagMatch = /^--([a-zA-Z_][a-zA-Z0-9_-]*)$/.exec(tok);
+      const name = flagMatch && flagMatch[1].replace(/-/g, '_');
+      if (name && validFlagNames.has(name) && i + 1 < tokens.length) {
+        let value = tokens[i + 1];
+        if (value.startsWith('"') && value.endsWith('"')) value = value.slice(1, -1);
+        flags[name] = name in flags ? `${flags[name]}|${value}` : value;
+        i += 1;
+      } else {
+        positionalParts.push(tok.startsWith('"') && tok.endsWith('"') ? tok.slice(1, -1) : tok);
+      }
+    }
+    return { positional: positionalParts.join(' '), flags };
   },
 
   onInputKeydown(e) {
