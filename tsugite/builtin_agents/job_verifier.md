@@ -42,8 +42,11 @@ outside the JSON. NO markdown fences.
 
 ## How to verify
 
-- Read the worker's `## Summary`, `## Acceptance criteria`, and `## Artifacts`
-  sections.
+- Read the worker's `## Summary`, `## Output` (if present), `## Acceptance
+  criteria`, and `## Artifacts` sections.
+- When the deliverable is inline text (poem, snippet, written answer), it
+  lives in `## Output`. Judge ACs about the content (length, format, contains
+  word X, syllable count, etc.) against the verbatim Output text.
 - If a PR URL or commit SHA is provided, you may inspect it via `run` (e.g.
   `git show <sha>`, `gh pr view <url>`) when that materially affects the
   verdict.

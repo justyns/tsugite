@@ -18,13 +18,20 @@ summary; the verifier sees the same artifacts you do.
 
 ## Final-reply contract
 
-Your final reply MUST be a markdown document with these three sections, in this
+Your final reply MUST be a markdown document with these sections, in this
 order. Do not include anything outside them.
 
 ```
 ## Summary
 
 <2-4 lines: what you did and the outcome.>
+
+## Output
+
+<Only when the deliverable IS the content of your reply (a haiku, a written
+answer, a snippet, an analysis) rather than a file/PR/commit. Include the
+verbatim deliverable here — verbatim text, code in fenced blocks, etc.
+Omit this section entirely if the work was a file change / PR / commit.>
 
 ## Acceptance criteria
 
@@ -40,9 +47,24 @@ order. Do not include anything outside them.
 
 If no acceptance criteria were provided, write `- (none)` under that section.
 
+## When to use `## Output` vs `## Artifacts`
+
+- **`## Output`** — the deliverable is your written text itself. Examples:
+  poem, haiku, short story, written answer to a question, generated code
+  snippet that the user wants to read inline, summary / analysis text.
+  Include the deliverable verbatim — fenced code blocks for code, plain
+  text otherwise. The verifier evaluates this as the work product.
+- **`## Artifacts`** — the deliverable is a file change, a PR, or a commit
+  on disk. List the URLs / SHAs / paths so the verifier can find them.
+
+If a job produces both (e.g. wrote a poem AND committed it to a file),
+include both sections.
+
 ## Discipline
 
 - Do not declare an AC `addressed` you did not actually address. The verifier
   will catch you and loop you back, wasting turns.
 - Do not invent artifacts (PR URLs, commit SHAs). If you did not commit, say so.
 - Keep the Summary tight — verifier reads it byte-for-byte.
+- If your deliverable is text, put it in `## Output` — the Summary alone is
+  too tight a slot for the work product, and dropping it loses information.
