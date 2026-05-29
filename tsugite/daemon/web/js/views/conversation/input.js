@@ -111,19 +111,29 @@ export const inputMixin = {
   },
 
   // Split argsText into a positional remainder + a flags dict. Recognises
-  // `--key value` and `--key "quoted value"` only for keys in validFlagNames;
-  // unrecognised --flags stay in the positional string so prompts can contain
-  // `--foo` text without being eaten. Repeatable flags are joined with `|`.
+  // `--key value` and `--key "quoted value"`; `key` must either match a valid
+  // param name exactly OR be an unambiguous prefix of exactly one. So
+  // `--acceptance_criteria` and `--ac` both route to the acceptance_criteria
+  // param. Unrecognised / ambiguous --flags stay in the positional string so
+  // prompts can contain `--foo` text without being eaten. Repeatable flags
+  // are joined with `|` (which `cmd_job` already splits on for AC lists).
   _extractFlags(argsText, validFlagNames) {
     if (!argsText) return { positional: '', flags: {} };
+    const names = Array.from(validFlagNames);
+    const resolveName = (raw) => {
+      const norm = raw.replace(/-/g, '_');
+      if (validFlagNames.has(norm)) return norm;
+      const candidates = names.filter(n => n.startsWith(norm));
+      return candidates.length === 1 ? candidates[0] : null;
+    };
     const tokens = argsText.match(/"[^"]*"|\S+/g) || [];
     const positionalParts = [];
     const flags = {};
     for (let i = 0; i < tokens.length; i++) {
       const tok = tokens[i];
       const flagMatch = /^--([a-zA-Z_][a-zA-Z0-9_-]*)$/.exec(tok);
-      const name = flagMatch && flagMatch[1].replace(/-/g, '_');
-      if (name && validFlagNames.has(name) && i + 1 < tokens.length) {
+      const name = flagMatch && resolveName(flagMatch[1]);
+      if (name && i + 1 < tokens.length) {
         let value = tokens[i + 1];
         if (value.startsWith('"') && value.endsWith('"')) value = value.slice(1, -1);
         flags[name] = name in flags ? `${flags[name]}|${value}` : value;
