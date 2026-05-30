@@ -743,7 +743,7 @@
                       </div>
                       <div class="console-turn-bubble job-status" :class="'job-state-' + msg.state">
                         <div class="job-row">
-                          <span class="job-tag mono" @click.stop="msg.worker_session_id && selectSessionById(msg.worker_session_id)" :style="msg.worker_session_id ? 'cursor:pointer' : ''" :title="msg.worker_session_id ? 'Click to open worker session' : ''">[Job <span x-text="(msg.job_id || '').slice(4, 12)"></span> · <span class="job-state" x-text="msg.state"></span><template x-if="msg.verify_attempts">·&nbsp;<span x-text="'attempt ' + (msg.verify_attempts + 1)"></span></template>]</span>
+                          <span class="job-tag mono" @click.stop="msg.worker_session_id && selectSessionById(msg.worker_session_id)" :style="msg.worker_session_id ? 'cursor:pointer' : ''" :title="msg.worker_session_id ? 'Click to open worker session' : ''">[Job <span x-text="(msg.job_id || '').slice(4, 12)"></span> · <span class="job-state" x-text="msg.state"></span><template x-if="msg.verify_attempts">&nbsp;·&nbsp;<span x-text="'attempt ' + (msg.verify_attempts + 1)"></span></template>]</span>
                           <span class="job-prompt" x-text="msg.prompt || ''"></span>
                           <span class="grow"></span>
                           <template x-if="msg.state === 'running' || msg.state === 'verifying'">

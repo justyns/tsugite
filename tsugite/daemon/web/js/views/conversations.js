@@ -183,6 +183,12 @@ export default () => ({
       // Superseded sessions stay in allSessions for chase lookups but should
       // never appear in the sidebar.
       if (s.superseded_by) continue;
+      // Hide Job worker / verifier sessions from the sidebar — they're
+      // represented by the tile in the parent chat. Users navigate to them by
+      // clicking the tile (which calls selectSessionById on the id), not via
+      // the sidebar. Without this filter, every job spawns 2 extra sidebar
+      // rows that clutter the view.
+      if (s.metadata && s.metadata.job_id) continue;
       if (s.pinned) {
         pinned.push(s);
         continue;
