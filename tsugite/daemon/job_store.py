@@ -92,6 +92,14 @@ class Job:
     # and can react. Defaults: /job slash → False (human-driven, tile is enough);
     # spawn_job() agent tool → True (autonomous composition).
     notify: bool = False
+    # Append-only history of each worker round + its verifier, so retried jobs
+    # don't orphan their earlier session ids. Each entry:
+    #   {"index": int, "kind": "initial"|"retry"|"hint",
+    #    "worker_session_id": str, "verifier_session_id": str | None,
+    #    "verifier_pass": bool | None}
+    # `worker_session_id` and `verifier_session_id` on Job point at the LATEST
+    # entry; earlier entries are navigable via this list.
+    attempts: list[dict] = field(default_factory=list)
 
     def __post_init__(self):
         if not self.id:

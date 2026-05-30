@@ -746,6 +746,11 @@
                           <span class="job-tag mono" @click.stop="msg.worker_session_id && selectSessionById(msg.worker_session_id)" :style="msg.worker_session_id ? 'cursor:pointer' : ''" :title="msg.worker_session_id ? 'Click to open worker session' : ''">[Job <span x-text="(msg.job_id || '').slice(4, 12)"></span> · <span class="job-state" x-text="msg.state"></span><template x-if="msg.verify_attempts">&nbsp;·&nbsp;<span x-text="'attempt ' + (msg.verify_attempts + 1)"></span></template>]</span>
                           <span class="job-prompt" x-text="msg.prompt || ''"></span>
                           <span class="grow"></span>
+                          <template x-if="(msg.attempts || []).length > 1">
+                            <button type="button" class="job-action" @click.stop="msg._showAttempts = !msg._showAttempts" :title="msg._showAttempts ? 'Hide previous attempts' : 'Show previous attempts'">
+                              <span x-text="msg._showAttempts ? '▾' : '▸'"></span>&nbsp;<span x-text="msg.attempts.length"></span> attempts
+                            </button>
+                          </template>
                           <template x-if="msg.state === 'running' || msg.state === 'verifying'">
                             <button type="button" class="job-action" @click.stop="jobCancel(msg.job_id)" title="Cancel this job">cancel</button>
                           </template>
@@ -756,6 +761,26 @@
                             <button type="button" class="job-action" @click.stop="jobRetryWithHint(msg.job_id)" title="Provide a hint and try once more">retry…</button>
                           </template>
                         </div>
+                        <template x-if="msg._showAttempts && (msg.attempts || []).length > 0">
+                          <div class="job-attempts">
+                            <template x-for="att in msg.attempts" :key="att.index">
+                              <div class="job-attempt-row">
+                                <span class="job-attempt-idx mono" x-text="'#' + (att.index + 1)"></span>
+                                <span class="job-attempt-kind" x-text="att.kind"></span>
+                                <a class="job-attempt-link mono" @click.stop="att.worker_session_id && selectSessionById(att.worker_session_id)" :style="att.worker_session_id ? 'cursor:pointer' : ''" x-text="(att.worker_session_id || '').slice(0, 16)"></a>
+                                <template x-if="att.verifier_session_id">
+                                  <span>→ <a class="job-attempt-link mono" @click.stop="selectSessionById(att.verifier_session_id)" style="cursor:pointer" x-text="att.verifier_session_id.slice(0, 16)"></a></span>
+                                </template>
+                                <template x-if="att.verifier_pass === true">
+                                  <span class="job-attempt-verdict pass">pass</span>
+                                </template>
+                                <template x-if="att.verifier_pass === false">
+                                  <span class="job-attempt-verdict fail">fail</span>
+                                </template>
+                              </div>
+                            </template>
+                          </div>
+                        </template>
                         <template x-if="msg.error">
                           <div class="job-error" x-text="msg.error" style="font-size:11px;color:var(--red);margin-top:4px;white-space:pre-wrap"></div>
                         </template>

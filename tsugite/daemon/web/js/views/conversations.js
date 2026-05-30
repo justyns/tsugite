@@ -736,7 +736,7 @@ export default () => ({
     // Drop undefined fields so an emit without `error` (e.g. a RUNNING tick after
     // a STUCK terminal) doesn't wipe a previously-set error from the tile.
     const fields = {};
-    for (const k of ['state', 'prompt', 'worker_session_id', 'verifier_session_id', 'verify_attempts', 'error']) {
+    for (const k of ['state', 'prompt', 'worker_session_id', 'verifier_session_id', 'verify_attempts', 'error', 'attempts']) {
       if (d[k] !== undefined) fields[k] = d[k];
     }
     if (existing) {

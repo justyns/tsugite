@@ -127,9 +127,50 @@ class JobsOrchestrator:
         self.register_worker(job.id, started.id, timeout_minutes=timeout_minutes)
         return job, started
 
+    def _append_attempt(self, job_id: str, *, kind: str, worker_session_id: str) -> None:
+        """Append a new worker-attempt entry to Job.attempts. Called by every
+        spawn path (initial, verifier-rejected retry, hint-retry)."""
+        job = self._jobs.get(job_id)
+        if job is None:
+            return
+        attempts = list(job.attempts or [])
+        attempts.append(
+            {
+                "index": len(attempts),
+                "kind": kind,
+                "worker_session_id": worker_session_id,
+                "verifier_session_id": None,
+                "verifier_pass": None,
+            }
+        )
+        self._jobs.update(job_id, attempts=attempts)
+
+    def _set_attempt_verifier(self, job_id: str, verifier_session_id: str) -> None:
+        """Link a verifier session to the latest attempt entry."""
+        job = self._jobs.get(job_id)
+        if job is None or not job.attempts:
+            return
+        attempts = list(job.attempts)
+        attempts[-1] = {**attempts[-1], "verifier_session_id": verifier_session_id}
+        self._jobs.update(job_id, attempts=attempts)
+
+    def _set_attempt_verdict(self, job_id: str, verifier_pass: bool) -> None:
+        """Record the verifier's pass/fail verdict on the latest attempt entry."""
+        job = self._jobs.get(job_id)
+        if job is None or not job.attempts:
+            return
+        attempts = list(job.attempts)
+        attempts[-1] = {**attempts[-1], "verifier_pass": bool(verifier_pass)}
+        self._jobs.update(job_id, attempts=attempts)
+
     def register_worker(self, job_id: str, worker_session_id: str, timeout_minutes: int) -> None:
         """Record the worker session id and schedule the wall-clock timeout."""
         self._jobs.update(job_id, worker_session_id=worker_session_id)
+        # First call to register_worker for this Job — record the initial attempt.
+        # Retry / hint paths bypass register_worker and call _append_attempt directly.
+        job = self._jobs.get(job_id)
+        if job is not None and not (job.attempts or []):
+            self._append_attempt(job_id, kind="initial", worker_session_id=worker_session_id)
         try:
             self._jobs.update_state(job_id, JobState.RUNNING.value)
         except JobStateTransitionError:
@@ -220,6 +261,7 @@ class JobsOrchestrator:
         except Exception as e:
             logger.exception("retry_with_hint: failed to spawn worker for job '%s': %s", job_id, e)
             raise ValueError(f"failed to spawn retry worker: {e}") from e
+        self._append_attempt(job_id, kind="hint", worker_session_id=started.id)
         # Move out of STUCK directly (terminal → RUNNING). update() goes around the
         # state machine but the audit is captured via the resolved_at clear + emit.
         self._jobs.update(
@@ -307,6 +349,7 @@ class JobsOrchestrator:
             return
         # Store verifier session id so _on_timeout can cancel a hung verifier.
         self._jobs.update(job.id, verifier_session_id=started_verifier.id)
+        self._set_attempt_verifier(job.id, started_verifier.id)
 
     async def _handle_worker_failed(self, job: Job, worker: Session, result_str: str) -> None:
         self._cancel_timeout(job.id)
@@ -332,6 +375,7 @@ class JobsOrchestrator:
 
         parsed = _parse_verifier_output(result_str)
         if parsed is None:
+            self._set_attempt_verdict(job.id, False)
             return await self._handle_verifier_failure(
                 job,
                 failed_acs=[{"ac_text": "(verifier output)", "pass": False, "reason": "verifier output unparseable"}],
@@ -339,11 +383,13 @@ class JobsOrchestrator:
         # Strict True: a string like "false" / "no" is truthy in Python but
         # explicitly NOT a pass. Treat anything other than literal True as failure.
         if parsed.get("overall_pass") is True:
+            self._set_attempt_verdict(job.id, True)
             fresh = self._jobs.get(job.id)
             result = dict(fresh.result or {})
             result["ac_results"] = parsed.get("ac_results", [])
             self._finalize(job, JobState.DONE, result=result)
             return
+        self._set_attempt_verdict(job.id, False)
         await self._handle_verifier_failure(
             job,
             failed_acs=_extract_failed_acs(parsed.get("ac_results", [])),
@@ -398,6 +444,7 @@ class JobsOrchestrator:
             return
 
         self._jobs.update(job.id, worker_session_id=started.id)
+        self._append_attempt(job.id, kind="retry", worker_session_id=started.id)
         try:
             self._jobs.update_state(job.id, JobState.RUNNING.value)
         except JobStateTransitionError as e:
@@ -538,6 +585,7 @@ class JobsOrchestrator:
             "prompt": (job.prompt or "")[:200],
             "verify_attempts": job.verify_attempts,
             "error": job.error,
+            "attempts": list(job.attempts or []),
         }
         # Persist into parent session JSONL so a page reload re-renders the tile.
         try:

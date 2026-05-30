@@ -906,3 +906,48 @@ def test_build_notify_message_includes_job_id_and_state():
     assert "AC1 not met" in msg
     # Prompt truncated
     assert "x" * 100 not in msg
+
+
+# ── attempt history tracking ──
+
+
+def test_create_and_start_job_records_initial_attempt(store, runner, orchestrator):
+    job, started = orchestrator.create_and_start_job(parent_session_id="parent-1", prompt="hi", acceptance_criteria=[])
+    fresh = store.get(job.id)
+    assert len(fresh.attempts) == 1
+    assert fresh.attempts[0]["kind"] == "initial"
+    assert fresh.attempts[0]["worker_session_id"] == started.id
+    assert fresh.attempts[0]["verifier_session_id"] is None
+    assert fresh.attempts[0]["verifier_pass"] is None
+
+
+@pytest.mark.asyncio
+async def test_retry_loop_appends_attempts_with_verdicts(store, runner, orchestrator):
+    job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=["x"])
+    # First worker → verifier → fail → retry; assert attempt history reflects each step.
+    await orchestrator.on_session_complete(_worker_session(job, "w1"), "out1")
+    job = store.get(job.id)
+    assert job.attempts[-1]["verifier_session_id"] is not None
+    fail = json.dumps({"ac_results": [{"ac_text": "x", "pass": False, "reason": "n"}], "overall_pass": False})
+    await orchestrator.on_session_complete(_verifier_session(job, "v1"), fail)
+    job = store.get(job.id)
+    # Now there should be 2 attempts; first one has verdict=False, second is fresh.
+    assert len(job.attempts) >= 2
+    assert job.attempts[0]["verifier_pass"] is False
+    assert job.attempts[-1]["kind"] == "retry"
+    assert job.attempts[-1]["verifier_pass"] is None
+
+
+@pytest.mark.asyncio
+async def test_retry_with_hint_appends_hint_attempt(store, runner, orchestrator):
+    job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=["x"])
+    fail = json.dumps({"ac_results": [{"ac_text": "x", "pass": False, "reason": "n"}], "overall_pass": False})
+    for i in range(MAX_VERIFY_ATTEMPTS):
+        await orchestrator.on_session_complete(_worker_session(store.get(job.id), f"w{i}"), f"w{i}")
+        await orchestrator.on_session_complete(_verifier_session(store.get(job.id), f"v{i}"), fail)
+    assert store.get(job.id).state == JobState.STUCK.value
+    pre_count = len(store.get(job.id).attempts)
+    await orchestrator.retry_with_hint(job.id, hint="the real issue is X")
+    fresh = store.get(job.id)
+    assert len(fresh.attempts) == pre_count + 1
+    assert fresh.attempts[-1]["kind"] == "hint"
