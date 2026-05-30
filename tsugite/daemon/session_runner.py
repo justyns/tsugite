@@ -326,11 +326,19 @@ class SessionRunner:
             metadata=meta,
         )
 
-        result = await adapter.handle_message(
-            user_id=f"session:{session_id}",
-            message=message,
-            channel_context=channel_context,
-        )
+        # Set the current session ContextVar so tools that fall back to
+        # get_current_session_id() (e.g. session_metadata, scratchpad,
+        # return_value) resolve correctly during the reply turn. Restore on exit
+        # so we don't bleed into the caller's context.
+        token = _current_session_id.set(session_id)
+        try:
+            result = await adapter.handle_message(
+                user_id=f"session:{session_id}",
+                message=message,
+                channel_context=channel_context,
+            )
+        finally:
+            _current_session_id.reset(token)
 
         self._store.update_session(session_id)
         if self._event_bus:
