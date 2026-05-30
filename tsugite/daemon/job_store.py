@@ -87,6 +87,11 @@ class Job:
     # workers run inside this directory. Orchestrator prunes it on DONE/CANCELLED
     # and keeps it on STUCK/ERRORED so the user can inspect what the worker did.
     worktree_path: Optional[str] = None
+    # If True, the orchestrator posts a one-line wake-up message into the parent
+    # session on terminal transition so the parent agent learns the Job finished
+    # and can react. Defaults: /job slash → False (human-driven, tile is enough);
+    # spawn_job() agent tool → True (autonomous composition).
+    notify: bool = False
 
     def __post_init__(self):
         if not self.id:

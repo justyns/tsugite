@@ -1,5 +1,6 @@
 """Tests for JobsOrchestrator: worker-done → verifier → done | looping | stuck paths."""
 
+import asyncio
 import json
 from unittest.mock import MagicMock
 
@@ -794,3 +795,114 @@ async def test_retry_with_hint_rejects_non_stuck(store, runner, orchestrator):
     job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=[])
     with pytest.raises(ValueError, match="only.*stuck"):
         await orchestrator.retry_with_hint(job.id, hint="x")
+
+
+# ── notify + context injection + new tools ──
+
+
+def test_render_jobs_context_xml_empty_for_no_jobs(store):
+    from tsugite.daemon.jobs_orchestrator import render_jobs_context_xml
+
+    assert render_jobs_context_xml(store, "parent-X") == ""
+
+
+def test_render_jobs_context_xml_lists_active_and_recent(store, runner, orchestrator, tmp_path):
+    from tsugite.daemon.jobs_orchestrator import render_jobs_context_xml
+
+    # Active job
+    active = _seed_running_job(store, orchestrator, runner, acceptance_criteria=[])
+
+    # A recently-done job
+    done_job = store.add(Job(id="", parent_session_id="parent-1", prompt="something done", acceptance_criteria=[]))
+    store.update_state(done_job.id, JobState.RUNNING.value)
+    store.update_state(done_job.id, JobState.VERIFYING.value)
+    store.update_state(done_job.id, JobState.DONE.value)
+
+    # Job for a DIFFERENT parent must NOT appear.
+    runner.store.sessions["other-parent"] = Session(id="other-parent", agent="default")
+    other = store.add(Job(id="", parent_session_id="other-parent", prompt="not mine"))
+
+    xml = render_jobs_context_xml(store, "parent-1")
+    assert "<active>" in xml
+    assert active.id in xml
+    assert "<recent>" in xml
+    assert done_job.id in xml
+    assert other.id not in xml, "context must not bleed jobs from other sessions"
+    assert "something done" in xml
+
+
+def test_render_jobs_context_xml_truncates_prompt_and_error(store):
+    long = "x" * 200
+    job = store.add(Job(id="", parent_session_id="parent-T", prompt=long))
+    store.update_state(job.id, JobState.RUNNING.value)
+    store.update_state(job.id, JobState.VERIFYING.value)
+    store.update_state(job.id, JobState.STUCK.value)
+    store.update(job.id, error=("y" * 500))
+
+    from tsugite.daemon.jobs_orchestrator import render_jobs_context_xml
+
+    xml = render_jobs_context_xml(store, "parent-T")
+    # Prompt truncated to 80 + ellipsis
+    assert "xxxxxxxx" in xml
+    assert "x" * 200 not in xml
+    # Error first-line truncated to 200
+    assert "y" * 500 not in xml
+    assert "y" * 200 in xml
+
+
+@pytest.mark.asyncio
+async def test_notify_true_fires_reply_to_session_on_terminal(store, runner, orchestrator):
+    """If job.notify=True, the orchestrator should schedule a reply_to_session
+    on terminal transition so the parent agent wakes up."""
+    sent = []
+
+    async def fake_reply(session_id, message, source="session", metadata=None):
+        sent.append((session_id, message, source, metadata))
+        return "ok"
+
+    runner.reply_to_session = fake_reply
+
+    job = store.add(Job(id="", parent_session_id="parent-1", prompt="do thing", acceptance_criteria=[], notify=True))
+    orchestrator.register_worker(job.id, "worker-1", timeout_minutes=30)
+    await orchestrator.on_session_complete(_worker_session(job), "all done")
+    # Let the scheduled task run
+    await asyncio.sleep(0)
+    assert sent, "notify=True must trigger reply_to_session on terminal"
+    assert "Job " + job.id in sent[0][1]
+    assert "get_job" in sent[0][1]
+
+
+@pytest.mark.asyncio
+async def test_notify_false_does_not_fire_reply(store, runner, orchestrator):
+    sent = []
+
+    async def fake_reply(session_id, message, source="session", metadata=None):
+        sent.append((session_id, message))
+        return "ok"
+
+    runner.reply_to_session = fake_reply
+
+    job = store.add(Job(id="", parent_session_id="parent-1", prompt="do thing", acceptance_criteria=[], notify=False))
+    orchestrator.register_worker(job.id, "worker-1", timeout_minutes=30)
+    await orchestrator.on_session_complete(_worker_session(job), "all done")
+    await asyncio.sleep(0)
+    assert sent == [], "notify=False must NOT trigger reply_to_session"
+
+
+def test_build_notify_message_includes_job_id_and_state():
+    from tsugite.daemon.jobs_orchestrator import _build_notify_message
+
+    job = Job(
+        id="job-abc",
+        parent_session_id="p",
+        prompt="implement the foo endpoint" + "x" * 100,
+        state=JobState.STUCK.value,
+        error="Verifier failed: AC1 not met\nmore detail",
+    )
+    msg = _build_notify_message(job)
+    assert "job-abc" in msg
+    assert "stuck" in msg
+    assert "get_job('job-abc')" in msg
+    assert "AC1 not met" in msg
+    # Prompt truncated
+    assert "x" * 100 not in msg

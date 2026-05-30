@@ -65,12 +65,16 @@ class JobsOrchestrator:
         agent: Optional[str] = None,
         timeout_minutes: int = 30,
         spawned_by: str = "user-slash",
+        notify: bool = False,
     ) -> tuple[Job, Session]:
         """Create a Job record + spawn the worker session in one step.
 
         Used by both the /job slash command and the spawn_job() agent tool.
         Returns (job, started_worker_session). The orchestrator's register_worker
         is called automatically so the timeout is scheduled and the tile event fires.
+
+        notify: if True, the parent session receives a one-line wake-up message on
+        terminal transition so the parent agent learns the Job finished.
         """
         worker_agent_file = agent or "job_worker"
         worker_adapter_key = self._resolve_adapter_key(parent_session_id)
@@ -86,6 +90,7 @@ class JobsOrchestrator:
                 agent=worker_agent_file,
                 timeout_minutes=timeout_minutes,
                 spawned_by=spawned_by,
+                notify=notify,
             )
         )
 
@@ -406,6 +411,7 @@ class JobsOrchestrator:
 
         Worktrees are pruned on DONE/CANCELLED (clean exit, no inspection value),
         kept on STUCK/ERRORED so the user can see what the worker did wrong.
+        If job.notify is True, also schedules a wake-up reply to the parent session.
         """
         self._cancel_timeout(job.id)
         if fields:
@@ -421,6 +427,31 @@ class JobsOrchestrator:
             self._jobs.update(job.id, worktree_path=None)
             fresh = self._jobs.get(job.id)
         self._emit_job_event(fresh)
+        if fresh and fresh.notify:
+            self._schedule_notify(fresh)
+
+    def _schedule_notify(self, job: Job) -> None:
+        """Post a one-line wake-up message into the parent session so its agent
+        learns the Job finished. Best-effort: errors are logged, not raised."""
+        message = _build_notify_message(job)
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            logger.debug("No running loop; skipping notify for job '%s'", job.id)
+            return
+
+        async def _send():
+            try:
+                await self._runner.reply_to_session(
+                    job.parent_session_id,
+                    message,
+                    source="job_complete",
+                    metadata={"job_id": job.id},
+                )
+            except Exception:
+                logger.exception("Failed to notify parent of job '%s' completion", job.id)
+
+        loop.create_task(_send())
 
     def _schedule_timeout(self, job_id: str, timeout_minutes: int) -> None:
         self._cancel_timeout(job_id)
@@ -581,6 +612,89 @@ def _build_hint_prompt(job: Job, hint: str) -> str:
     for i, ac in enumerate(job.acceptance_criteria, 1):
         parts.append(f"{i}. {ac}")
     return "\n".join(parts)
+
+
+def render_jobs_context_xml(job_store: JobStore, session_id: str, recent_limit: int = 3) -> str:
+    """Render an XML block describing Jobs anchored on `session_id`, suitable for
+    inclusion in `<message_context>` so the LLM is aware of what's running and
+    what just finished without dumping full worker output into the chat.
+
+    Returns "" when there are no jobs (so the surrounding template can omit the
+    section entirely without empty whitespace).
+    """
+    if not session_id:
+        return ""
+    try:
+        jobs = job_store.list_for_parent(session_id)
+    except Exception:
+        return ""
+    if not jobs:
+        return ""
+
+    active_states = {JobState.QUEUED.value, JobState.RUNNING.value, JobState.VERIFYING.value}
+    terminal_states = {JobState.DONE.value, JobState.STUCK.value, JobState.CANCELLED.value, JobState.ERRORED.value}
+
+    active = [j for j in jobs if j.state in active_states]
+    recent = [j for j in jobs if j.state in terminal_states]
+    recent.sort(key=lambda j: j.resolved_at or j.updated_at or "", reverse=True)
+    recent = recent[: max(0, int(recent_limit))]
+
+    if not active and not recent:
+        return ""
+
+    def _attrs(job: Job, is_active: bool) -> str:
+        prompt_short = (job.prompt or "")[:80]
+        if len(job.prompt or "") > 80:
+            prompt_short += "…"
+        prompt_escaped = prompt_short.replace('"', "&quot;").replace("<", "&lt;").replace(">", "&gt;")
+        ts_key = "created_at" if is_active else "resolved_at"
+        ts_val = job.created_at if is_active else (job.resolved_at or job.updated_at)
+        parts = [
+            f'id="{job.id}"',
+            f'state="{job.state}"',
+            f'prompt="{prompt_escaped}"',
+            f'{ts_key}="{ts_val or ""}"',
+        ]
+        if job.worker_session_id:
+            parts.append(f'worker_session_id="{job.worker_session_id}"')
+        if job.verifier_session_id:
+            parts.append(f'verifier_session_id="{job.verifier_session_id}"')
+        if job.verify_attempts:
+            parts.append(f'verify_attempts="{job.verify_attempts}"')
+        if job.error and job.state in (JobState.STUCK.value, JobState.ERRORED.value):
+            err_short = job.error.splitlines()[0][:200].replace('"', "&quot;").replace("<", "&lt;").replace(">", "&gt;")
+            parts.append(f'error="{err_short}"')
+        return " ".join(parts)
+
+    lines = ["  <jobs>"]
+    if active:
+        lines.append("    <active>")
+        for j in active:
+            lines.append(f"      <job {_attrs(j, is_active=True)} />")
+        lines.append("    </active>")
+    if recent:
+        lines.append("    <recent>")
+        for j in recent:
+            lines.append(f"      <job {_attrs(j, is_active=False)} />")
+        lines.append("    </recent>")
+    lines.append("  </jobs>")
+    return "\n".join(lines)
+
+
+def _build_notify_message(job: Job) -> str:
+    """One-line wake-up message posted to the parent session on terminal transition.
+    Brief by design — the parent agent should call get_job(job_id) for details."""
+    prompt_short = (job.prompt or "")[:80]
+    if len(job.prompt or "") > 80:
+        prompt_short += "…"
+    base = f"Job {job.id} finished with state '{job.state}': {prompt_short}"
+    if job.state in (JobState.STUCK.value, JobState.ERRORED.value) and job.error:
+        first_line = job.error.splitlines()[0][:200]
+        base += f" — error: {first_line}"
+    elif job.state == JobState.CANCELLED.value and job.error:
+        base += f" — {job.error[:120]}"
+    base += f". Use get_job('{job.id}') for details."
+    return base
 
 
 def _build_followup_prompt(job: Job, failed_acs: list[dict]) -> str:

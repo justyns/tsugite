@@ -116,6 +116,12 @@ async def cmd_bg(adapter: BaseAdapter, prompt: str, agent: str | None = None) ->
         CommandParam("model", str, "Model override; defaults to workspace default", required=False),
         CommandParam("timeout_minutes", int, "Wall-clock timeout for the worker (default 30)", required=False),
         CommandParam("agent", str, "Worker agent file (default job_worker)", required=False),
+        CommandParam(
+            "notify",
+            bool,
+            "Wake the parent agent with a one-line message when the Job ends (default false; tile flips either way)",
+            required=False,
+        ),
     ],
 )
 async def cmd_job(
@@ -128,6 +134,7 @@ async def cmd_job(
     model: str | None = None,
     timeout_minutes: int | None = None,
     agent: str | None = None,
+    notify: bool = False,
 ) -> str:
     """Create a Job, spawn a worker session, and return the Job + worker IDs."""
     from tsugite.tools.jobs import _jobs_orchestrator
@@ -164,6 +171,7 @@ async def cmd_job(
             agent=agent,
             timeout_minutes=timeout_minutes or 30,
             spawned_by="user-slash",
+            notify=bool(notify),
         )
     except Exception as e:
         return f"Failed to spawn job worker: {e}"

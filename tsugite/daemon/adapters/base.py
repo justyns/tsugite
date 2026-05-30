@@ -465,13 +465,29 @@ class BaseAdapter(ABC):
         # matches what set_workspace_dir actually puts the agent in (per-session
         # override used by the Jobs feature for its git worktree).
         cwd_for_render = (channel_context.metadata or {}).get("workspace_override") or self.agent_config.workspace_dir
+
+        # Jobs anchored on this session — surface active + last 3 terminal so the
+        # LLM can answer "what's happening with my job?" without dumping the full
+        # worker output into the chat.
+        jobs_xml = ""
+        try:
+            from tsugite.daemon.jobs_orchestrator import render_jobs_context_xml
+            from tsugite.tools.jobs import _jobs_orchestrator as _jobs_orch
+
+            if _jobs_orch is not None and session is not None:
+                rendered = render_jobs_context_xml(_jobs_orch._jobs, session.id)
+                if rendered:
+                    jobs_xml = "\n" + rendered
+        except Exception:
+            pass
+
         return f"""<message_context>
   <datetime>{timestamp}</datetime>{session_started_xml}{last_active_xml}{scheduler_timing_xml}
   <working_directory>{cwd_for_render}</working_directory>
   <source>{channel_context.source}</source>
   <user_id>{channel_context.user_id}</user_id>
   <context_tokens_used>{tokens_used}</context_tokens_used>
-  <context_limit>{context_limit_for_render}</context_limit>{session_topic_xml}{session_meta_xml}{scratchpad_xml}
+  <context_limit>{context_limit_for_render}</context_limit>{session_topic_xml}{session_meta_xml}{scratchpad_xml}{jobs_xml}
 </message_context>
 
 {message}"""
