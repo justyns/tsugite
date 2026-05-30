@@ -50,6 +50,24 @@ export default () => ({
     return this.$store.app.userId;
   },
 
+  // Which "kind" of thing is selected in the sidebar — drives the main pane.
+  // chat (the default) vs terminal (the /run sub-session, including the
+  // empty-state placeholder). Used by index.html to pick between the chat
+  // thread view and the full-session terminal view.
+  get selectedKind() {
+    const t = this.$store.terminals;
+    if (t?.selectedId || t?.showEmpty) return 'terminal';
+    return 'chat';
+  },
+
+  // Clear any chat selection then hand off to the terminals store. Called
+  // from the sidebar terminal-section row click handler so the two selection
+  // surfaces stay mutually exclusive.
+  selectTerminal(terminalId) {
+    if (this.selectedSessionId) this.backToSessions();
+    this.$store.terminals?.selectTerminal(terminalId);
+  },
+
   _resolveSessionId(sid) {
     if (!sid) return sid;
     // Path compression in _registerSupersession keeps chains at depth 1, so this

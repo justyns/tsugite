@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="/static/css/theme.css">
 <link rel="stylesheet" href="/static/css/console.css">
 <link rel="stylesheet" href="/static/css/styles.css">
+<link rel="stylesheet" href="/static/css/terminal.css">
 <link rel="stylesheet" href="/static/css/responsive.css">
 <link rel="manifest" href="/static/manifest.json">
 <meta name="theme-color" content="#232634">
@@ -284,6 +285,29 @@
                 </div>
               </template>
             </details>
+          </template>
+
+          <!-- Terminal sessions (/run) -->
+          <div class="console-section-head term" @click="$store.terminals.showEmptyState(); selectedSessionId && backToSessions()">
+            <span class="label">❯ terminal · /run</span>
+            <span class="count" x-text="$store.terminals.terminals.length"></span>
+          </div>
+          <template x-for="t in $store.terminals.terminals" :key="t.id">
+            <div class="console-session"
+                 :class="{ focused: $store.terminals.selectedId === t.id, live: $store.terminals.isRunningTerminal(t) }"
+                 @click="selectTerminal(t.id)">
+              <div class="row1">
+                <span class="dot" :class="$store.terminals.stateDotClass(t.state)"></span>
+                <span class="title">
+                  <span class="tglyph">❯</span><span x-text="t.cmd"></span>
+                </span>
+                <span class="time" x-text="$store.terminals.elapsedFor(t)"></span>
+              </div>
+              <div class="row2">
+                <span class="lastline" :class="{ fail: $store.terminals.isFailedExit(t) }"
+                      x-text="t.last_line || 'no output yet'"></span>
+              </div>
+            </div>
           </template>
         </div>
         <div class="sidebar-resizer" x-data="sidebarResizer()" @pointerdown="onDown($event)" @dblclick="onReset()"></div>
