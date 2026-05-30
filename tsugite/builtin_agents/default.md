@@ -33,6 +33,7 @@ tools:
   - "@schedule"
   - "@scratchpad"
   - "@sessions"
+  - "@jobs"
   - "@tmux"
 auto_load_skills:
   - response-patterns
