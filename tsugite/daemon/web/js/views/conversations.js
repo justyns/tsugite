@@ -188,7 +188,13 @@ export default () => ({
     if (!text.startsWith('/')) return [];
     const query = text.slice(1).split(/\s/)[0].toLowerCase();
     if (text.includes(' ')) return [];
-    return this.availableCommands.filter(c => c.name.startsWith(query));
+    // /run is wired client-side (input.js) and isn't in the server-side
+    // adapter command registry, so synthesise it into the suggestion list.
+    const RUN_VIRTUAL = { name: 'run', description: 'open a PTY-backed terminal session', plugin: '' };
+    const all = this.availableCommands.some(c => c.name === 'run')
+      ? this.availableCommands
+      : [...this.availableCommands, RUN_VIRTUAL];
+    return all.filter(c => c.name.startsWith(query));
   },
 
   get groupedSessions() {

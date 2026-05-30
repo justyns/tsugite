@@ -65,12 +65,31 @@ export const inputMixin = {
     if (!match) return null;
     const name = match[1];
     const rest = match[2].trim();
+    // /run is wired directly to the terminals API rather than the adapter
+    // command registry — it spawns a PTY-backed sub-session in the sidebar,
+    // not an agent reply. We synthesise a virtual command so the existing
+    // sendMessage path dispatches it without changes elsewhere.
+    if (name === 'run') {
+      return { command: { name: 'run', _terminal: true, params: [] }, args: rest };
+    }
     const cmd = this.availableCommands.find(c => c.name === name);
     if (!cmd) return null;
     return { command: cmd, args: rest };
   },
 
   async _runCommand(cmd, argsText) {
+    // /run synthesised by _parseCommand bypasses the agent command registry —
+    // POST straight to /api/terminals and auto-select the new PTY in the
+    // sidebar. Failures fall back to a string the chat thread shows verbatim.
+    if (cmd && cmd._terminal) {
+      const command = (argsText || '').trim();
+      if (!command) return 'Usage: /run <command>';
+      const newId = await this.$store.terminals?.runTerminal(command);
+      if (newId) {
+        return `Terminal session started — see “${command}” in the sidebar.`;
+      }
+      return 'Failed to start terminal — see toast.';
+    }
     const agent = this.$store.app.selectedAgent;
     const kwargs = {};
     const hasUserId = cmd.params.some(p => p.name === 'user_id');
