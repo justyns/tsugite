@@ -16,7 +16,8 @@
    xterm-loader.js. */
 
 import { get, post } from '../api.js';
-import { toast } from '../utils.js';
+import { toast, copyText } from '../utils.js';
+import { createTerminalRenderer } from '../utils/xterm-loader.js';
 
 const LINE_CAP = 5000;
 
@@ -439,4 +440,87 @@ export default () => ({
     return rec && rec.state === 'stream_lost';
   },
 });
+
+/* terminalSessionView — Alpine x-data factory that owns the xterm instance
+   inside the main pane's full-session block. Mounted via `x-init="bind($el)"`
+   on the `.tv-fs` container. Each time the user picks a different terminal,
+   Alpine tears down + re-creates this scope, so we get a fresh renderer
+   without manual cleanup. */
+export function terminalSessionView() {
+  return {
+    _renderer: null,
+    _terminalId: null,
+    _resizeObs: null,
+    _outputHandler: null,
+    _clearHandler: null,
+    _jumpHandler: null,
+
+    async bind(root) {
+      this._terminalId = this.$store.terminals?.selectedId;
+      if (!this._terminalId) return;
+      const host = root.querySelector('[data-xterm-host]');
+      if (!host) return;
+
+      const renderer = await createTerminalRenderer(host, {
+        cursorBlink: true,
+        disableStdin: true,  // backend wires stdin later (out of scope for v1)
+        scrollback: 5000,
+        onScrollState: (atBottom) => {
+          this.$store.terminals?.setFollow(this._terminalId, atBottom);
+        },
+      });
+      this._renderer = renderer;
+
+      // Replay any chunks the store buffered while we were loading xterm.
+      const buf = this.$store.terminals?.buffers[this._terminalId];
+      if (buf && buf.text) renderer.write(buf.text);
+
+      // Wire SSE chunks → xterm.
+      this._outputHandler = (ev) => {
+        if (ev.detail?.id !== this._terminalId) return;
+        renderer.write(ev.detail.chunk);
+      };
+      this._clearHandler = (ev) => {
+        if (ev.detail?.id !== this._terminalId) return;
+        try { renderer.term.clear(); } catch { /* non-fatal */ }
+      };
+      this._jumpHandler = (ev) => {
+        if (ev.detail?.id !== this._terminalId) return;
+        renderer.jumpToBottom();
+      };
+      window.addEventListener('tsugite:terminal-output', this._outputHandler);
+      window.addEventListener('tsugite:terminal-clear', this._clearHandler);
+      window.addEventListener('tsugite:terminal-jump', this._jumpHandler);
+
+      // Keep xterm sized to its pane on layout changes (sidebar resize,
+      // viewport rotation, mobile keyboard).
+      try {
+        this._resizeObs = new ResizeObserver(() => {
+          requestAnimationFrame(() => renderer.fitNow());
+        });
+        this._resizeObs.observe(host);
+      } catch { /* ResizeObserver missing — non-fatal */ }
+    },
+
+    destroy() {
+      if (this._outputHandler) window.removeEventListener('tsugite:terminal-output', this._outputHandler);
+      if (this._clearHandler) window.removeEventListener('tsugite:terminal-clear', this._clearHandler);
+      if (this._jumpHandler) window.removeEventListener('tsugite:terminal-jump', this._jumpHandler);
+      if (this._resizeObs) try { this._resizeObs.disconnect(); } catch { /* non-fatal */ }
+      if (this._renderer) try { this._renderer.dispose(); } catch { /* non-fatal */ }
+      this._renderer = null;
+    },
+
+    async copyOutput() {
+      const buf = this.$store.terminals?.buffers[this._terminalId];
+      if (!buf?.text) {
+        toast('No output to copy', 'info');
+        return;
+      }
+      // Strip ANSI escapes — copy-with-ansi is in the deferred list.
+      const stripped = buf.text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+      await copyText(stripped);
+    },
+  };
+}
 

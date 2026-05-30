@@ -6,7 +6,7 @@ import webhookView from './views/webhooks.js';
 import fileEditorView from './views/file-editor.js';
 import workspaceView from './views/workspace.js';
 import usageView from './views/usage.js';
-import terminalsView from './views/terminals.js';
+import terminalsView, { terminalSessionView } from './views/terminals.js';
 import { toast } from './utils.js';
 
 window.Alpine = Alpine;
@@ -70,6 +70,10 @@ Alpine.data('usageView', usageView);
 // full-session block (sibling to the chat thread) can share one piece of
 // state without a parent x-data scope they can both reach.
 Alpine.store('terminals', terminalsView());
+// terminalSessionView wraps an xterm renderer mounted in the main pane.
+// Registered as Alpine.data so x-init can spin it up each time a different
+// terminal is selected (Alpine destroys + re-creates the x-data scope).
+Alpine.data('terminalSessionView', terminalSessionView);
 
 Alpine.data('sidebarResizer', () => ({
   onDown(e) {
