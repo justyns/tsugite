@@ -23,7 +23,6 @@ import signal
 import subprocess
 import threading
 import time
-from collections import deque
 from typing import Callable, Optional
 
 logger = logging.getLogger(__name__)
@@ -59,8 +58,10 @@ class PtyProcess:
         self.lines_out = 0
         self.last_line = ""
         self.truncated = False
+        self.killed = False  # True once kill() has been called at least once
         self.exit_code: Optional[int] = None
         self._subscribers: list[Callable[[bytes], None]] = []
+        self._exit_callbacks: list[Callable[["PtyProcess"], None]] = []
         self._subscribers_lock = threading.Lock()
         self._buffer_lock = threading.Lock()
         self._closed = threading.Event()
@@ -138,6 +139,25 @@ class PtyProcess:
 
         return _unsubscribe
 
+    def on_exit(self, callback: Callable[["PtyProcess"], None]) -> None:
+        """Register a callback fired once the PTY exits and exit_code is set.
+
+        If the process has already exited by the time on_exit is called, the
+        callback fires synchronously — callers can register late without racing
+        the reader thread's exit cleanup.
+        """
+        with self._subscribers_lock:
+            if self.exit_code is not None:
+                fire_now = True
+            else:
+                self._exit_callbacks.append(callback)
+                fire_now = False
+        if fire_now:
+            try:
+                callback(self)
+            except Exception:
+                logger.exception("PtyProcess on_exit callback failed (late registration)")
+
     def write_stdin(self, data: bytes) -> int:
         """Write bytes to the PTY master. Returns count written. No-op after exit."""
         if self.exit_code is not None:
@@ -171,6 +191,7 @@ class PtyProcess:
             sig = signal.SIGKILL
         else:
             sig = signal.SIGKILL  # explicit second call = escalate immediately
+        self.killed = True
         try:
             os.killpg(pgid, sig)
         except OSError as e:
@@ -214,6 +235,14 @@ class PtyProcess:
                 os.close(self._master_fd)
             except OSError:
                 pass
+            with self._subscribers_lock:
+                callbacks = list(self._exit_callbacks)
+                self._exit_callbacks.clear()
+            for cb in callbacks:
+                try:
+                    cb(self)
+                except Exception:
+                    logger.exception("PtyProcess on_exit callback failed")
             self._closed.set()
 
     def _append(self, chunk: bytes) -> None:

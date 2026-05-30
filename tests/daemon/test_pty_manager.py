@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import os
 import sys
-import threading
 import time
 
 import pytest
@@ -15,10 +13,7 @@ from tsugite.daemon.pty_manager import (
     PtyProcess,
 )
 
-
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32", reason="PTY support is POSIX-only"
-)
+pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="PTY support is POSIX-only")
 
 
 # ── PtyProcess ──
