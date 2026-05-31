@@ -1,0 +1,205 @@
+/* ============================================================================
+   Jobs surface — in-thread job tile (Direction B, developed).
+   Ported from /tmp/tsugite-job-flows-design/jobs-design/project/css/jobs.css.
+   State color is passed per-tile via --st (set inline). Every state also
+   carries a glyph + word so meaning is never color-only.
+   ============================================================================ */
+
+/* generic state-colored pulse ring (console pulse is hard-coded green) */
+@keyframes jt-pulse {
+  0%   { box-shadow: 0 0 0 0 color-mix(in oklab, var(--st) 55%, transparent); }
+  100% { box-shadow: 0 0 0 7px transparent; }
+}
+@keyframes jt-spin { to { transform: rotate(360deg); } }
+
+/* ---- shared atoms ------------------------------------------------------- */
+.jt-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--st); flex-shrink: 0; }
+.jt-dot.live { animation: jt-pulse 1.6s ease-out infinite; }
+
+.jt-spin { width: 11px; height: 11px; border-radius: 50%; flex-shrink: 0;
+  border: 1.5px solid color-mix(in oklab, var(--st) 30%, transparent);
+  border-top-color: var(--st); animation: jt-spin 0.8s linear infinite; }
+
+.jt-state { display: inline-flex; align-items: center; gap: 6px; color: var(--st);
+  font-family: var(--font-mono); font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.06em; font-size: 10px; flex-shrink: 0; white-space: nowrap; }
+.jt-state .g { font-size: 11px; line-height: 1; }
+
+.jt-id { font-family: var(--font-mono); font-size: 10px; color: var(--overlay0); }
+.jt-id b { color: var(--subtext0); font-weight: 600; }
+.jt-meta { font-family: var(--font-mono); font-size: 10.5px; color: var(--overlay1);
+  font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* acceptance-criteria chips */
+.jt-acs { display: flex; flex-wrap: wrap; gap: 5px; }
+.jt-ac { display: inline-flex; align-items: center; gap: 5px; font-family: var(--font-mono);
+  font-size: 10.5px; padding: 2px 7px 2px 6px; border-radius: 3px;
+  border: 1px solid var(--surface1); color: var(--subtext0); background: var(--crust);
+  max-width: 100%; }
+.jt-ac .mk { font-size: 10px; line-height: 1; flex-shrink: 0; }
+.jt-ac .tp { font-size: 9px; letter-spacing: 0.06em; color: var(--overlay0);
+  border: 1px solid var(--surface1); border-radius: 2px; padding: 0 3px; text-transform: uppercase; }
+.jt-ac.pass { color: var(--green); border-color: color-mix(in oklab, var(--green) 38%, var(--surface1));
+  background: color-mix(in oklab, var(--green) 9%, var(--crust)); }
+.jt-ac.pass .mk { color: var(--green); }
+.jt-ac.fail { color: var(--red); border-color: color-mix(in oklab, var(--red) 38%, var(--surface1));
+  background: color-mix(in oklab, var(--red) 9%, var(--crust)); }
+.jt-ac.fail .mk { color: var(--red); }
+.jt-ac.pending .mk { color: var(--overlay0); }
+.jt-ac.active { color: var(--lavender); border-color: color-mix(in oklab, var(--lavender) 38%, var(--surface1)); }
+.jt-ac.active .mk { color: var(--lavender); }
+
+/* result / deliverable inset (codeblock DNA) */
+.jt-result { border: 1px solid var(--surface0); border-radius: 5px;
+  background: var(--crust); overflow: hidden; }
+.jt-result .rh { display: flex; align-items: center; gap: 8px; padding: 4px 10px;
+  background: var(--mantle); border-bottom: 1px solid var(--surface0);
+  font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--overlay1); }
+.jt-result .rh .teal { color: var(--teal); }
+.jt-result .rh .grow { flex: 1; }
+.jt-result pre { margin: 0; padding: 9px 13px; font-family: var(--font-mono);
+  font-size: 12px; line-height: 1.55; color: var(--text); white-space: pre-wrap; word-break: break-word; }
+
+/* attempts stack */
+.jt-attempts { display: flex; flex-direction: column; gap: 4px; }
+.jt-attempt { display: flex; align-items: center; gap: 9px; padding: 5px 9px;
+  background: var(--crust); border: 1px solid var(--surface0); border-radius: 3px;
+  font-family: var(--font-mono); font-size: 11px; color: var(--subtext0); }
+.jt-attempt .n { color: var(--overlay0); width: 44px; flex-shrink: 0; }
+.jt-attempt .n b { color: var(--subtext1); font-weight: 600; }
+.jt-attempt .why { flex: 1; color: var(--overlay1); white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; font-size: 10.5px; min-width: 0; }
+.jt-attempt .vd { font-weight: 700; text-transform: uppercase; font-size: 9.5px;
+  letter-spacing: 0.06em; flex-shrink: 0; }
+.jt-attempt .vd.fail { color: var(--red); }
+.jt-attempt .vd.pass { color: var(--green); }
+.jt-attempt .open { color: var(--overlay0); flex-shrink: 0; }
+.jt-attempt:hover .open { color: var(--blue); }
+.jt-attempt.cur { border-color: color-mix(in oklab, var(--st) 40%, var(--surface1)); }
+
+/* buttons */
+.jt-btn { background: var(--surface0); border: 1px solid var(--surface1); color: var(--subtext1);
+  font-family: var(--font-mono); font-size: 11px; padding: 4px 10px; border-radius: 3px;
+  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; cursor: pointer;
+  transition: color .1s, border-color .1s, background .1s; }
+.jt-btn:hover { color: var(--text); border-color: var(--lavender); }
+.jt-btn:active { background: var(--surface1); }
+.jt-btn .k { font-size: 12px; line-height: 1; }
+.jt-btn.primary { background: var(--lavender); color: var(--crust); border-color: var(--lavender); font-weight: 700; }
+.jt-btn.primary:hover { background: var(--blue); border-color: var(--blue); color: var(--crust); }
+.jt-btn.danger:hover { color: var(--red); border-color: var(--red); }
+.jt-btn.ghost { background: none; }
+.jt-btn.ghost:hover { background: var(--surface0); }
+
+/* =========================================================================
+   THE TILE (.jx) — direction B, collapsible, conditional xterm.
+   State color injected via --st inline. State legend:
+     running/done = green · verifying = yellow · stuck = peach (issue) ·
+     errored = red · queued/cancelled = overlay grey.
+   ========================================================================= */
+.jx { --st: var(--green);
+  border: 1px solid color-mix(in oklab, var(--st) 24%, var(--surface0));
+  border-left: 3px solid var(--st);
+  border-radius: 6px;
+  background: color-mix(in oklab, var(--st) 7%, var(--mantle));
+  overflow: hidden; display: flex; flex-direction: column; }
+.jx + .jx { margin-top: 8px; }
+
+/* state-colored --st applied via data-state= so we don't need inline styles */
+.jx[data-state="queued"] { --st: var(--overlay0); }
+.jx[data-state="running"] { --st: var(--green); }
+.jx[data-state="verifying"] { --st: var(--yellow); }
+.jx[data-state="done"] { --st: var(--green); }
+.jx[data-state="stuck"] { --st: var(--peach); }
+.jx[data-state="errored"] { --st: var(--red); }
+.jx[data-state="cancelled"] { --st: var(--overlay0); }
+
+/* head — the whole bar is the collapse toggle */
+.jx-head { display: flex; align-items: center; gap: 10px; width: 100%; box-sizing: border-box;
+  padding: 8px 11px; background: none; border: none; text-align: left; cursor: pointer;
+  font-family: var(--font-mono); color: var(--text); }
+.jx-head:hover { background: color-mix(in oklab, var(--st) 6%, transparent); }
+.jx-caret { color: var(--overlay1); font-size: 9px; width: 9px; flex-shrink: 0; }
+.jx-head .jt-id { flex-shrink: 0; }
+.jx-head .grow { flex: 1; min-width: 0; }
+/* inline title only shown while collapsed */
+.jx-head .inline-title { flex: 1; min-width: 0; font-family: var(--font-sans); font-size: 12.5px;
+  color: var(--subtext1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.jx-head .jt-meta { flex-shrink: 0; }
+.jx-menu { width: 24px; height: 22px; display: inline-flex; align-items: center; justify-content: center;
+  background: none; border: 1px solid transparent; color: var(--overlay1); border-radius: 3px;
+  font-size: 13px; flex-shrink: 0; cursor: pointer; }
+.jx-menu:hover { color: var(--text); border-color: var(--surface1); background: var(--surface0); }
+
+/* body */
+.jx-body { padding: 2px 12px 12px; display: flex; flex-direction: column; gap: 11px; }
+.jx-title { font-family: var(--font-sans); font-size: 14px; line-height: 1.4; color: var(--text); text-wrap: pretty; }
+.jx-lbl { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--overlay0); display: flex; align-items: center; gap: 8px; }
+.jx-lbl .ln { flex: 1; height: 1px; background: var(--surface0); }
+
+/* activity line (llm-only running / streaming, no terminal) */
+.jx-activity { display: flex; align-items: center; gap: 9px; font-family: var(--font-mono);
+  font-size: 11.5px; color: var(--subtext0); }
+.jx-activity .live-tool { color: var(--peach); }
+.jx-activity .think { color: var(--yellow); }
+
+/* xterm host */
+.jx-term { border: 1px solid var(--surface0); border-radius: 5px; background: var(--crust); overflow: hidden; }
+.jx-term-head { display: flex; align-items: center; gap: 8px; padding: 5px 10px; background: var(--mantle);
+  border-bottom: 1px solid var(--surface0); font-family: var(--font-mono); font-size: 10px;
+  color: var(--overlay1); letter-spacing: 0.04em; }
+.jx-term-head .tlabel { color: var(--peach); }
+.jx-term-head .grow { flex: 1; }
+.jx-term-head .live { color: var(--green); }
+.jx-xterm { padding: 6px 4px 6px 8px; min-height: 176px; }
+.jx-xterm .xterm { height: 100%; }
+.jx-xterm .xterm-viewport { background: transparent !important; }
+.jx-xterm .xterm-viewport::-webkit-scrollbar { width: 7px; }
+.jx-xterm .xterm-viewport::-webkit-scrollbar-thumb { background: var(--surface1); border-radius: 4px; }
+
+/* error block (infra/system failure) */
+.jx-err { display: flex; gap: 9px; padding: 9px 11px; border-radius: 3px;
+  background: color-mix(in oklab, var(--red) 9%, var(--crust));
+  border: 1px solid color-mix(in oklab, var(--red) 28%, var(--surface0));
+  font-family: var(--font-mono); font-size: 11.5px; line-height: 1.55; color: var(--subtext1);
+  white-space: pre-wrap; word-break: break-word; }
+.jx-err .mk { color: var(--red); flex-shrink: 0; }
+.jx-err b { color: var(--red); font-weight: 600; }
+.jx-err code { color: var(--maroon); }
+
+/* issue / stuck note (peach — idiomatic issue card accent) */
+.jx-issue { display: flex; gap: 9px; padding: 9px 11px; border-radius: 3px;
+  background: color-mix(in oklab, var(--peach) 9%, var(--crust));
+  border: 1px solid color-mix(in oklab, var(--peach) 28%, var(--surface0));
+  font-family: var(--font-sans); font-size: 12px; line-height: 1.55; color: var(--subtext1);
+  white-space: pre-wrap; word-break: break-word; }
+.jx-issue .mk { color: var(--peach); font-family: var(--font-mono); flex-shrink: 0; }
+.jx-issue b { color: var(--peach); font-weight: 600; }
+.jx-issue code { font-family: var(--font-mono); color: var(--peach); font-size: 11px; }
+
+/* queue position line */
+.jx-queue { display: flex; align-items: center; gap: 8px; font-family: var(--font-mono);
+  font-size: 11.5px; color: var(--overlay1); }
+.jx-queue b { color: var(--subtext1); font-weight: 600; }
+
+/* footer action bar */
+.jx-foot { display: flex; align-items: center; gap: 7px; padding: 9px 12px; flex-wrap: wrap;
+  border-top: 1px solid color-mix(in oklab, var(--st) 14%, var(--surface0));
+  background: color-mix(in oklab, var(--st) 3%, var(--crust)); }
+.jx-foot .grow { flex: 1; }
+.jx-verdict { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono);
+  font-size: 10.5px; color: var(--overlay1); }
+.jx-verdict .v { color: var(--green); }
+.jx-verdict .x { color: var(--peach); }
+
+/* mobile: tighten + let chips/foot wrap naturally */
+@media (max-width: 460px) {
+  .jx-head { padding: 8px 9px; gap: 8px; }
+  .jx-body { padding: 2px 10px 11px; }
+  .jx-title { font-size: 13.5px; }
+  .jx-foot { padding: 9px 10px; }
+  .jx-foot .jt-btn { flex: 1 1 auto; justify-content: center; }
+  .jx-foot .grow { flex-basis: 100%; height: 0; }
+}
