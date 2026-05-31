@@ -1,0 +1,337 @@
+/* ============================================================================
+   Terminal viewer — ported from the design's terminal-frames.css.
+   In-Console view (Direction A) only. The job-tile (.jt-*), mobile (.tvm-*),
+   inline-in-chat (.tv-inline-*), Direction B (.tv-b-*) and Direction C
+   (.tv-c-*) variants are intentionally deferred to v2.
+   All colors/spacing reference the existing --* tokens from theme.css.
+   ============================================================================ */
+
+/* ── shared bits ──────────────────────────────────────────────────────── */
+.tv {
+  font-family: var(--font-mono);
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--crust);
+  overflow: hidden;
+}
+
+.tv-cmd {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.tv-cmd .lead { color: var(--green); margin-right: 6px; }
+
+.tv-meta {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--overlay1);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* ── state pill ────────────────────────────────────────────────────────── */
+.tv-state {
+  font: 600 9.5px var(--font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 2px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.tv-state .sd { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+.tv-state.failed     { color: var(--red);      background: color-mix(in oklab, var(--red) 16%, transparent); }
+.tv-state.succeeded  { color: var(--green);    background: color-mix(in oklab, var(--green) 16%, transparent); }
+.tv-state.running    { color: var(--green);    background: color-mix(in oklab, var(--green) 14%, transparent); }
+.tv-state.cancelled  { color: var(--overlay1); background: color-mix(in oklab, var(--overlay1) 18%, transparent); }
+.tv-state.timed_out  { color: var(--peach);    background: color-mix(in oklab, var(--peach) 16%, transparent); }
+.tv-state.timeout    { color: var(--peach);    background: color-mix(in oklab, var(--peach) 16%, transparent); }
+.tv-state.starting   { color: var(--sky);      background: color-mix(in oklab, var(--sky) 14%, transparent); }
+.tv-state.paused-follow,
+.tv-state.paused     { color: var(--yellow);   background: color-mix(in oklab, var(--yellow) 16%, transparent); }
+.tv-state.stream_lost,
+.tv-state.lost       { color: var(--red);      background: color-mix(in oklab, var(--red) 16%, transparent); }
+.tv-state.running .sd { animation: tv-pulse 1.6s ease-out infinite; }
+@keyframes tv-pulse {
+  0%   { box-shadow: 0 0 0 0 color-mix(in oklab, var(--green) 60%, transparent); }
+  100% { box-shadow: 0 0 0 6px transparent; }
+}
+
+/* ── icon buttons (header) ─────────────────────────────────────────────── */
+.tv-btn {
+  width: 26px; height: 24px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--surface1); background: var(--mantle); color: var(--subtext0);
+  border-radius: 3px; font-size: 12.5px; line-height: 1; flex-shrink: 0;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  transition: color .1s ease, border-color .1s ease, background .1s ease;
+}
+.tv-btn:hover { color: var(--text); border-color: var(--lavender); }
+.tv-btn:focus-visible {
+  outline: none;
+  border-color: var(--lavender);
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--lavender) 35%, transparent);
+}
+.tv-btn.on {
+  color: var(--lavender);
+  border-color: color-mix(in oklab, var(--lavender) 50%, var(--surface1));
+  background: color-mix(in oklab, var(--lavender) 14%, var(--mantle));
+}
+.tv-btn.kill:hover { color: var(--red); border-color: var(--red); }
+.tv-btn.kill.armed { color: var(--red); border-color: var(--red); background: color-mix(in oklab, var(--red) 14%, var(--mantle)); }
+.tv-btn:active { transform: translateY(0.5px); }
+.tv-btn:disabled { opacity: 0.38; cursor: not-allowed; }
+.tv-btn:disabled:hover { color: var(--subtext0); border-color: var(--surface1); }
+
+/* ── follow-tail pill (floats over body bottom) ────────────────────────── */
+.tv-followpill {
+  position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%);
+  display: inline-flex; align-items: center; gap: 7px;
+  background: color-mix(in oklab, var(--lavender) 22%, var(--crust));
+  border: 1px solid color-mix(in oklab, var(--lavender) 45%, var(--surface1));
+  color: var(--text);
+  font: 600 10.5px var(--font-mono);
+  padding: 4px 10px; border-radius: 999px;
+  box-shadow: 0 2px 8px rgba(0,0,0,.3);
+  cursor: pointer; z-index: 4; white-space: nowrap;
+}
+.tv-followpill .n { color: var(--lavender); }
+.tv-followpill:hover { border-color: var(--lavender); }
+.tv-followpill .arr { font-size: 11px; }
+
+/* ── sidebar: terminal-section header + terminal-session rows ──────────── */
+.console-section-head.term .label { color: var(--peach); }
+.console-session .tglyph {
+  color: var(--lavender); font-weight: 700; opacity: 0.85;
+  margin-right: 1px; font-size: 11px;
+}
+.console-session .row2 .lastline {
+  flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  color: var(--overlay1);
+}
+.console-session .row2 .lastline.fail {
+  color: color-mix(in oklab, var(--red) 70%, var(--overlay1));
+}
+
+/* ── full-session view (the /run primary surface) ──────────────────────── */
+.tv-fs {
+  display: flex; flex-direction: column;
+  height: 100%; min-height: 0;
+  background: var(--crust);
+}
+.tv-fs-head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 14px;
+  background: var(--mantle);
+  border-bottom: 1px solid var(--surface0);
+  flex-shrink: 0;
+  min-width: 0;
+}
+.tv-fs-head .statusdot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  background: var(--overlay0);
+}
+.tv-fs-head .statusdot.running    { background: var(--green); animation: tv-pulse 1.6s ease-out infinite; }
+.tv-fs-head .statusdot.starting   { background: var(--sky); }
+.tv-fs-head .statusdot.failed     { background: var(--red); }
+.tv-fs-head .statusdot.succeeded  { background: var(--green); }
+.tv-fs-head .statusdot.cancelled  { background: var(--overlay0); }
+.tv-fs-head .statusdot.timed_out  { background: var(--peach); }
+.tv-fs-head .statusdot.stream_lost { background: var(--overlay0); }
+.tv-fs-head .statusdot.paused-follow { background: var(--yellow); }
+.tv-fs-head .tv-cmd { font-size: 13px; flex: 0 1 auto; min-width: 0; }
+.tv-fs-head .grow { flex: 1 1 auto; }
+.tv-fs-head .tv-meta { flex-shrink: 0; }
+.tv-fs-head .btns { display: flex; align-items: center; gap: 5px; flex-shrink: 0; }
+
+.tv-fs-search {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 14px;
+  flex-shrink: 0;
+  background: var(--crust);
+  border-bottom: 1px solid var(--surface0);
+}
+.tv-fs-search .prompt { color: var(--lavender); font-weight: 700; }
+.tv-fs-search input {
+  flex: 1; background: none; border: none; outline: none;
+  color: var(--text); font: 12.5px var(--font-mono); min-width: 0;
+}
+.tv-fs-search input::placeholder { color: var(--overlay0); }
+.tv-fs-search .count {
+  color: var(--overlay1); font-size: 10.5px;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.tv-fs-search .sbtn {
+  background: none; border: none; color: var(--overlay1);
+  font-size: 13px; padding: 0 3px; cursor: pointer;
+}
+.tv-fs-search .sbtn:hover { color: var(--text); }
+.tv-fs-search .sclose {
+  background: none; border: none; color: var(--overlay1);
+  font-size: 15px; padding: 0 2px; cursor: pointer;
+}
+
+.tv-fs-body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  background: var(--crust);
+  padding: 8px 6px 8px 12px;
+  overflow: hidden;
+}
+.tv-fs-body .xterm { height: 100%; }
+/* on-brand scrollbar so scroll is discoverable in the full view */
+.tv-fs-body .xterm-viewport {
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface1) transparent;
+}
+.tv-fs-body .xterm-viewport::-webkit-scrollbar { width: 11px; }
+.tv-fs-body .xterm-viewport::-webkit-scrollbar-thumb {
+  background: var(--surface1); border-radius: 6px; border: 3px solid var(--crust);
+}
+.tv-fs-body .xterm-viewport::-webkit-scrollbar-thumb:hover { background: var(--surface2); }
+
+.tv-fs-foot {
+  flex-shrink: 0;
+  background: var(--mantle);
+  border-top: 1px solid var(--surface0);
+}
+.tv-fs-metarow {
+  display: flex; align-items: center; gap: 14px;
+  padding: 6px 14px;
+  font-size: 10px; color: var(--overlay1);
+  font-variant-numeric: tabular-nums;
+}
+.tv-fs-metarow .fkv { display: inline-flex; align-items: baseline; gap: 5px; }
+.tv-fs-metarow .fkv .k {
+  color: var(--overlay0); text-transform: uppercase;
+  letter-spacing: 0.08em; font-size: 9px;
+}
+.tv-fs-metarow .fkv .v { color: var(--subtext0); }
+.tv-fs-metarow .grow { flex: 1; }
+.tv-fs-metarow .trunc { color: var(--peach); }
+.tv-fs-metarow .armed-warn { color: var(--red); }
+.tv-fs-metarow .replay-note { color: var(--overlay1); }
+
+/* stream-lost banner sits inside the body, pinned bottom */
+.tv-lostbanner {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 12px;
+  background: color-mix(in oklab, var(--red) 16%, var(--crust));
+  border-top: 1px solid color-mix(in oklab, var(--red) 34%, var(--surface0));
+  color: var(--red);
+  font: 11px var(--font-mono);
+  z-index: 5;
+}
+.tv-lostbanner .ddot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--red); flex-shrink: 0;
+}
+.tv-lostbanner .grow { flex: 1; }
+.tv-lostbanner button {
+  background: none; border: 1px solid currentColor; color: inherit;
+  border-radius: 3px;
+  padding: 2px 9px;
+  font: 10.5px var(--font-mono);
+  display: inline-flex; align-items: center; gap: 5px;
+  cursor: pointer;
+}
+.tv-lostbanner button:hover { background: color-mix(in oklab, var(--red) 18%, transparent); }
+
+/* spinner used in starting state placeholder */
+@keyframes tv-spin { to { transform: rotate(360deg); } }
+.tv-spinner {
+  width: 11px; height: 11px;
+  border: 1.6px solid var(--surface2);
+  border-top-color: var(--sky);
+  border-radius: 50%; display: inline-block;
+  animation: tv-spin .8s linear infinite;
+  flex-shrink: 0;
+}
+
+.tv-starting {
+  flex: 1; display: grid; place-items: center;
+  background: var(--crust); min-height: 0;
+}
+.tv-starting .inner {
+  display: flex; align-items: center; gap: 10px;
+  color: var(--overlay0); font: 12px var(--font-mono);
+}
+.tv-starting .tv-spinner { width: 14px; height: 14px; }
+
+/* ── empty state (fresh dedicated session, no command yet) ─────────────── */
+.tv-empty {
+  flex: 1; display: grid; place-items: center;
+  background: var(--crust); padding: 24px;
+}
+.tv-empty .inner { max-width: 420px; text-align: center; }
+.tv-empty .mark {
+  font: 700 30px var(--font-mono);
+  color: var(--lavender);
+  letter-spacing: -0.02em;
+}
+.tv-empty .mark .blink { animation: tv-blink 1s step-end infinite; }
+@keyframes tv-blink { 50% { opacity: 0; } }
+.tv-empty h2 {
+  font: 600 14px var(--font-mono);
+  color: var(--text);
+  margin: 14px 0 6px;
+}
+.tv-empty p {
+  font: 12px var(--font-sans);
+  color: var(--overlay1);
+  line-height: 1.55;
+  margin: 0 0 16px;
+}
+.tv-empty .examples {
+  display: flex; flex-direction: column; gap: 6px; text-align: left;
+}
+.tv-empty .ex {
+  display: flex; align-items: center; gap: 9px; white-space: nowrap;
+  background: var(--mantle);
+  border: 1px solid var(--surface0);
+  border-radius: 3px;
+  padding: 7px 11px;
+  font: 12px var(--font-mono);
+  color: var(--subtext0);
+  cursor: pointer;
+  transition: border-color .1s, color .1s;
+}
+.tv-empty .ex:hover { border-color: var(--lavender); color: var(--text); }
+.tv-empty .ex .run { color: var(--lavender); flex-shrink: 0; }
+.tv-empty .ex .cmd {
+  flex: 1 1 auto; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis;
+  text-align: left;
+}
+.tv-empty .ex .desc {
+  color: var(--overlay0);
+  font-family: var(--font-sans); font-size: 11px;
+  flex-shrink: 0;
+}
+
+/* ── mobile: keep desktop view from breaking on small screens ─────────── */
+@media (max-width: 640px) {
+  .tv-fs-head { padding: 7px 10px; gap: 7px; flex-wrap: wrap; }
+  .tv-fs-head .tv-cmd { font-size: 12px; }
+  .tv-fs-head .btns { gap: 4px; }
+  .tv-fs-body { padding: 6px 4px 6px 8px; }
+  .tv-fs-metarow { padding: 6px 10px; gap: 10px; font-size: 9.5px; flex-wrap: wrap; }
+  .tv-empty { padding: 16px; }
+}

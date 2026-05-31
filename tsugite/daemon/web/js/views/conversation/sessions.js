@@ -112,6 +112,9 @@ export const sessionsMixin = {
   },
 
   async selectSession(session, opts = {}) {
+    // Selecting a chat clears any terminal selection so the two sidebar
+    // surfaces stay mutually exclusive in the main pane.
+    this.$store.terminals?.deselectTerminal();
     // Compaction marks the old session completed and stamps superseded_by on it.
     // The localStorage sidebar cache may still show the old one as pinned on
     // cold load, so chase the chain to land on the live continuation. Pass

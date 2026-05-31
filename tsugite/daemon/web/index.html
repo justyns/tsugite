@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="/static/css/theme.css">
 <link rel="stylesheet" href="/static/css/console.css">
 <link rel="stylesheet" href="/static/css/styles.css">
+<link rel="stylesheet" href="/static/css/terminal.css">
 <link rel="stylesheet" href="/static/css/responsive.css">
 <link rel="manifest" href="/static/manifest.json">
 <meta name="theme-color" content="#232634">
@@ -285,13 +286,36 @@
               </template>
             </details>
           </template>
+
+          <!-- Terminal sessions (/run) -->
+          <div class="console-section-head term" @click="$store.terminals.showEmptyState(); selectedSessionId && backToSessions()">
+            <span class="label">❯ terminal · /run</span>
+            <span class="count" x-text="$store.terminals.terminals.length"></span>
+          </div>
+          <template x-for="t in $store.terminals.terminals" :key="t.id">
+            <div class="console-session"
+                 :class="{ focused: $store.terminals.selectedId === t.id, live: $store.terminals.isRunningTerminal(t) }"
+                 @click="selectTerminal(t.id)">
+              <div class="row1">
+                <span class="dot" :class="$store.terminals.stateDotClass(t.state)"></span>
+                <span class="title">
+                  <span class="tglyph">❯</span><span x-text="t.cmd"></span>
+                </span>
+                <span class="time" x-text="$store.terminals.elapsedFor(t)"></span>
+              </div>
+              <div class="row2">
+                <span class="lastline" :class="{ fail: $store.terminals.isFailedExit(t) }"
+                      x-text="t.last_line || 'no output yet'"></span>
+              </div>
+            </div>
+          </template>
         </div>
         <div class="sidebar-resizer" x-data="sidebarResizer()" @pointerdown="onDown($event)" @dblclick="onReset()"></div>
       </aside>
 
       <!-- Main pane -->
-      <main class="console-main" :class="{ 'mobile-hidden': !selectedSessionId }">
-        <template x-if="!selectedSessionId">
+      <main class="console-main" :class="{ 'mobile-hidden': !selectedSessionId && selectedKind !== 'terminal' }">
+        <template x-if="!selectedSessionId && selectedKind !== 'terminal'">
           <div class="console-empty" style="display:flex;align-items:center;justify-content:center;flex:1;font-family:var(--font-mono);font-size:13px">
             <div style="text-align:center">
               <div>›_ Select a session, or</div>
@@ -300,7 +324,129 @@
           </div>
         </template>
 
-        <template x-if="selectedSessionId">
+        <!-- Terminal empty-state (no terminal selected, user opened the section) -->
+        <template x-if="selectedKind === 'terminal' && !$store.terminals.selectedId">
+          <div class="tv-empty">
+            <div class="inner">
+              <div class="mark">›_<span class="blink">▌</span></div>
+              <h2>new terminal session</h2>
+              <p>This surface holds PTY-backed sessions. Type <code>/run &lt;command&gt;</code> in any chat to spawn one — output streams here live, with scrollback and a 5,000-line buffer.</p>
+              <div class="examples">
+                <button class="ex" type="button" @click="messageText = '/run npm run dev'; $refs.messageInput?.focus()">
+                  <span class="run">/run</span><span class="cmd">npm run dev</span><span class="desc">dev server</span>
+                </button>
+                <button class="ex" type="button" @click="messageText = '/run pytest tests/ -x'; $refs.messageInput?.focus()">
+                  <span class="run">/run</span><span class="cmd">pytest tests/ -x</span><span class="desc">test run</span>
+                </button>
+                <button class="ex" type="button" @click="messageText = '/run top'; $refs.messageInput?.focus()">
+                  <span class="run">/run</span><span class="cmd">top</span><span class="desc">interactive</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <!-- Terminal full-session view (the /run primary surface) -->
+        <template x-if="selectedKind === 'terminal' && $store.terminals.selectedId">
+          <div class="tv-fs" x-data="terminalSessionView()" x-init="bind($el)">
+            <div class="tv-fs-head">
+              <button class="hbtn mobile-back" @click="$store.terminals.deselectTerminal()" title="Back to sessions">‹</button>
+              <span class="statusdot" :class="$store.terminals.selected?.state"></span>
+              <span class="tv-cmd"><span class="lead">$</span><span x-text="$store.terminals.selected?.cmd || ''"></span></span>
+              <span class="tv-state" :class="$store.terminals.selected?.state">
+                <span class="sd"></span>
+                <span x-text="(($store.terminals.selected?.state || '') + '').replace('_', ' ')"></span>
+              </span>
+              <span class="grow"></span>
+              <span class="tv-meta">
+                <span>↻</span><span x-text="$store.terminals.elapsedFor($store.terminals.selected)"></span>
+              </span>
+              <div class="btns">
+                <button class="tv-btn"
+                        :class="{ on: $store.terminals.selectedBuffer?.follow }"
+                        @click="$store.terminals.toggleFollow($store.terminals.selectedId)"
+                        title="Follow tail">↓</button>
+                <button class="tv-btn" @click="copyOutput()" title="Copy output">⎘</button>
+                <button class="tv-btn"
+                        @click="$store.terminals.restartTerminal($store.terminals.selectedId)"
+                        :disabled="$store.terminals.isRunningTerminal($store.terminals.selected)"
+                        title="Restart">↻</button>
+                <button class="tv-btn kill"
+                        :class="{ armed: $store.terminals.isKillArmed($store.terminals.selectedId) }"
+                        @click="$store.terminals.killTerminal($store.terminals.selectedId)"
+                        :disabled="!$store.terminals.isRunningTerminal($store.terminals.selected)"
+                        :title="$store.terminals.isKillArmed($store.terminals.selectedId) ? 'click again — SIGKILL' : 'kill (SIGTERM)'">✕</button>
+              </div>
+            </div>
+
+            <template x-if="$store.terminals.selected?.state === 'starting' && !$store.terminals.selectedBuffer?.text">
+              <div class="tv-starting">
+                <div class="inner">
+                  <span class="tv-spinner"></span>
+                  <span>starting — pty allocated, waiting for first output…</span>
+                </div>
+              </div>
+            </template>
+
+            <div class="tv-fs-body" x-ref="termEl" data-xterm-host>
+              <template x-if="!$store.terminals.selectedBuffer?.follow">
+                <button class="tv-followpill"
+                        @click="$store.terminals.jumpToTail($store.terminals.selectedId)">
+                  <span class="arr">↓</span>
+                  <template x-if="$store.terminals.newLinesFor($store.terminals.selectedId) > 0">
+                    <span>
+                      <span class="n" x-text="$store.terminals.newLinesFor($store.terminals.selectedId)"></span>
+                      <span x-text="$store.terminals.newLinesFor($store.terminals.selectedId) === 1 ? ' new line' : ' new lines'"></span>
+                    </span>
+                  </template>
+                  <template x-if="$store.terminals.newLinesFor($store.terminals.selectedId) === 0">
+                    <span class="n">jump to latest</span>
+                  </template>
+                </button>
+              </template>
+              <template x-if="$store.terminals.isLost($store.terminals.selected)">
+                <div class="tv-lostbanner">
+                  <span class="ddot"></span>
+                  <span>stream lost — output stopped tailing</span>
+                  <span class="grow"></span>
+                  <button @click="location.reload()">↻ reconnect</button>
+                </div>
+              </template>
+            </div>
+
+            <div class="tv-fs-foot">
+              <div class="tv-fs-metarow">
+                <template x-if="$store.terminals.selected?.pid != null">
+                  <span class="fkv"><span class="k">pid</span><span class="v" x-text="$store.terminals.selected.pid"></span></span>
+                </template>
+                <span class="fkv"><span class="k">out</span><span class="v" x-text="$store.terminals.fmtBytes($store.terminals.selected?.bytes_out || 0)"></span></span>
+                <span class="fkv"><span class="k">lines</span><span class="v" x-text="$store.terminals.selected?.lines_out || 0"></span></span>
+                <template x-if="$store.terminals.isExited($store.terminals.selected)">
+                  <span class="fkv">
+                    <span class="k">exit</span>
+                    <span class="v" :style="'color:' + $store.terminals.exitCodeColor($store.terminals.selected)"
+                          x-text="$store.terminals.exitCodeLabel($store.terminals.selected) || '—'"></span>
+                  </span>
+                </template>
+                <span class="grow"></span>
+                <template x-if="$store.terminals.selectedBuffer?.truncated">
+                  <span class="trunc">scroll up — older output truncated</span>
+                </template>
+                <template x-if="$store.terminals.isKillArmed($store.terminals.selectedId)">
+                  <span class="armed-warn">SIGTERM armed · click kill again to force SIGKILL</span>
+                </template>
+                <template x-if="$store.terminals.isExited($store.terminals.selected) && !$store.terminals.isKillArmed($store.terminals.selectedId)">
+                  <span class="replay-note">session retained · output replayable</span>
+                </template>
+                <template x-if="$store.terminals.isRunningTerminal($store.terminals.selected) && !$store.terminals.isKillArmed($store.terminals.selectedId)">
+                  <span class="fkv"><span class="k">buffer</span><span class="v">5,000 lines</span></span>
+                </template>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <template x-if="selectedSessionId && selectedKind === 'chat'">
           <div class="console-pane-col" style="position:relative">
             <!-- Thread header -->
             <div class="console-thread-header" x-show="selectedSessionMeta" x-cloak>

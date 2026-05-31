@@ -313,3 +313,44 @@ async def cmd_sessions(adapter: BaseAdapter, status: str | None = None) -> str:
     if len(sessions) > 10:
         lines.append(f"... and {len(sessions) - 10} more")
     return "\n".join(lines)
+
+
+@adapter_command(
+    name="run",
+    description="Spawn a terminal session running the given command",
+    params=[
+        CommandParam("cmd", str, "Command to run in the terminal"),
+        CommandParam("cwd", str, "Working directory", required=False),
+        CommandParam("parent_session_id", str, "Chat session that spawned this terminal", required=False),
+    ],
+)
+async def cmd_run(
+    adapter: BaseAdapter,
+    cmd: str,
+    cwd: str | None = None,
+    parent_session_id: str | None = None,
+) -> str:
+    """Spawn a PTY-backed terminal session. Returns the terminal id for the
+    frontend to navigate to and stream output from."""
+    from tsugite.daemon.terminal_runtime import spawn_terminal
+
+    terminal_store = getattr(adapter, "terminal_store", None)
+    pty_manager = getattr(adapter, "pty_manager", None)
+    if terminal_store is None or pty_manager is None:
+        return "Terminal sessions require the daemon terminal runtime to be enabled."
+
+    on_state_change = getattr(adapter, "terminal_state_change_callback", None)
+    try:
+        terminal = spawn_terminal(
+            store=terminal_store,
+            manager=pty_manager,
+            cmd=cmd,
+            cwd=cwd,
+            parent_session_id=parent_session_id,
+            on_state_change=on_state_change,
+        )
+    except ValueError as e:
+        return f"Invalid command: {e}"
+    except Exception as e:
+        return f"Failed to spawn terminal: {e}"
+    return f"Terminal started (id: {terminal.id}, state: {terminal.state})"
