@@ -534,6 +534,7 @@ class HTTPServer:
             Route("/api/sessions/{session_id}", self._api_get_session, methods=["GET"]),
             Route("/api/sessions/{session_id}", self._api_update_session, methods=["PATCH"]),
             Route("/api/sessions/{session_id}/cancel", self._api_cancel_session, methods=["POST"]),
+            Route("/api/jobs", self._api_list_jobs, methods=["GET"]),
             Route("/api/jobs/{job_id}/cancel", self._api_cancel_job, methods=["POST"]),
             Route("/api/jobs/{job_id}/mark-done", self._api_mark_job_done, methods=["POST"]),
             Route("/api/jobs/{job_id}/retry", self._api_retry_job, methods=["POST"]),
@@ -1920,6 +1921,53 @@ class HTTPServer:
         if not self.jobs_orchestrator:
             return JSONResponse({"error": "jobs orchestrator not available"}, status_code=503)
         return None
+
+    async def _api_list_jobs(self, request: Request) -> JSONResponse:
+        """Return every Job for the Jobs tab. Optional ?state=<state> filter accepts
+        a real Job state, the alias 'stuck' (= stuck + errored), or 'active'
+        (= running + verifying). Optional ?limit=N caps the response."""
+        if err := self._check_auth(request):
+            return err
+        if not self.job_store:
+            return JSONResponse({"error": "jobs orchestrator not available"}, status_code=503)
+        jobs = self.job_store.list_all()
+        state_filter = request.query_params.get("state")
+        if state_filter:
+            alias = {
+                "stuck": frozenset({"stuck", "errored"}),
+                "active": frozenset({"running", "verifying"}),
+                "resolved": frozenset({"done", "cancelled"}),
+            }
+            allowed = alias.get(state_filter, frozenset({state_filter}))
+            jobs = [j for j in jobs if j.state in allowed]
+        try:
+            limit = int(request.query_params.get("limit", "0"))
+        except ValueError:
+            limit = 0
+        if limit > 0:
+            jobs = jobs[:limit]
+        payload = [
+            {
+                "job_id": j.id,
+                "parent_session_id": j.parent_session_id,
+                "worker_session_id": j.worker_session_id,
+                "verifier_session_id": j.verifier_session_id,
+                "state": j.state,
+                "prompt": (j.prompt or "")[:200],
+                "verify_attempts": j.verify_attempts,
+                "error": j.error,
+                "attempts": list(j.attempts or []),
+                "acceptance_criteria": list(j.acceptance_criteria or []),
+                "agent": j.agent,
+                "model": j.model,
+                "created_at": j.created_at,
+                "updated_at": j.updated_at,
+                "resolved_at": j.resolved_at,
+                "spawned_by": j.spawned_by,
+            }
+            for j in jobs
+        ]
+        return JSONResponse({"jobs": payload})
 
     async def _api_cancel_job(self, request: Request) -> JSONResponse:
         if err := self._require_auth_and_jobs(request):
