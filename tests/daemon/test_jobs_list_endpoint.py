@@ -73,9 +73,7 @@ def job_store(tmp_path):
     store.add(Job(id="job-s1", parent_session_id="parent-1", prompt="stuck task", state="stuck", agent="odyn"))
     store.add(Job(id="job-e1", parent_session_id="parent-1", prompt="errored", state="errored", agent="odyn"))
     store.add(Job(id="job-d1", parent_session_id="parent-1", prompt="done!", state="done", agent="assistant"))
-    store.add(
-        Job(id="job-c1", parent_session_id="parent-1", prompt="cancelled", state="cancelled", agent="assistant")
-    )
+    store.add(Job(id="job-c1", parent_session_id="parent-1", prompt="cancelled", state="cancelled", agent="assistant"))
     return store
 
 
@@ -155,33 +153,25 @@ class TestListJobsEndpoint:
         assert job["agent"] == "odyn"
 
     def test_state_filter_exact_match(self, client, test_token):
-        resp = client.get(
-            "/api/jobs?state=queued", headers={"Authorization": f"Bearer {test_token}"}
-        )
+        resp = client.get("/api/jobs?state=queued", headers={"Authorization": f"Bearer {test_token}"})
         assert resp.status_code == 200
         jobs = resp.json()["jobs"]
         assert {j["job_id"] for j in jobs} == {"job-q1"}
 
     def test_state_alias_stuck_includes_errored(self, client, test_token):
-        resp = client.get(
-            "/api/jobs?state=stuck", headers={"Authorization": f"Bearer {test_token}"}
-        )
+        resp = client.get("/api/jobs?state=stuck", headers={"Authorization": f"Bearer {test_token}"})
         assert resp.status_code == 200
         ids = {j["job_id"] for j in resp.json()["jobs"]}
         assert ids == {"job-s1", "job-e1"}
 
     def test_state_alias_active_includes_running_and_verifying(self, client, test_token):
-        resp = client.get(
-            "/api/jobs?state=active", headers={"Authorization": f"Bearer {test_token}"}
-        )
+        resp = client.get("/api/jobs?state=active", headers={"Authorization": f"Bearer {test_token}"})
         assert resp.status_code == 200
         ids = {j["job_id"] for j in resp.json()["jobs"]}
         assert ids == {"job-r1", "job-v1"}
 
     def test_state_alias_resolved_includes_done_and_cancelled(self, client, test_token):
-        resp = client.get(
-            "/api/jobs?state=resolved", headers={"Authorization": f"Bearer {test_token}"}
-        )
+        resp = client.get("/api/jobs?state=resolved", headers={"Authorization": f"Bearer {test_token}"})
         assert resp.status_code == 200
         ids = {j["job_id"] for j in resp.json()["jobs"]}
         assert ids == {"job-d1", "job-c1"}

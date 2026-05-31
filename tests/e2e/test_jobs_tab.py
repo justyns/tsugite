@@ -194,8 +194,7 @@ def _open_jobs_tab(page):
         timeout=3000,
     )
     page.evaluate(
-        "(async () => { const v = Alpine.$data(document.querySelector('[x-data*=jobsView]'));"
-        " await v.load(); })()"
+        "(async () => { const v = Alpine.$data(document.querySelector('[x-data*=jobsView]')); await v.load(); })()"
     )
 
 
@@ -294,10 +293,7 @@ def test_summary_pill_click_filters_list(authenticated_page):
     page.locator(".js-pill", has_text="needs you").click()
 
     page.wait_for_function(
-        "() => {"
-        " const cards = document.querySelectorAll('.jb-board .jb-col-body .jb');"
-        " return cards.length === 2;"
-        "}",
+        "() => { const cards = document.querySelectorAll('.jb-board .jb-col-body .jb'); return cards.length === 2;}",
         timeout=3000,
     )
 
@@ -391,9 +387,7 @@ def test_mobile_board_collapses_to_single_column(authenticated_page):
     page.set_viewport_size({"width": 390, "height": 800})
 
     # The grid-template-columns on .jb-board switches to '1fr' at the mobile breakpoint.
-    template = page.evaluate(
-        "() => getComputedStyle(document.querySelector('.jb-board')).gridTemplateColumns"
-    )
+    template = page.evaluate("() => getComputedStyle(document.querySelector('.jb-board')).gridTemplateColumns")
     # In single-column mode the value should be just one length token, not four.
     parts = (template or "").split()
     assert len(parts) == 1, f"expected single column on mobile, got grid-template-columns={template!r}"

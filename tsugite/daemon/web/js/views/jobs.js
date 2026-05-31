@@ -11,12 +11,18 @@ const STATE_META = {
   cancelled: { color: 'var(--overlay0)', word: 'cancelled' },
 };
 
-const COLUMNS = [
-  { key: 'active', label: 'active',    color: 'var(--green)',    states: ['running', 'verifying'] },
-  { key: 'queued', label: 'queued',    color: 'var(--overlay0)', states: ['queued'] },
-  { key: 'needs',  label: 'needs you', color: 'var(--peach)',    states: ['stuck', 'errored'] },
-  { key: 'done',   label: 'resolved',  color: 'var(--green)',    states: ['done', 'cancelled'] },
+// Group definitions shared by the board columns, the summary pills, and the
+// pill-driven filter. Each entry's `key` is the pill id; `states` is the set
+// of Job.state values that belong to the group. The 'all' pill is implicit
+// (no filter, total count).
+const GROUPS = [
+  { key: 'running', label: 'active',    color: 'var(--green)',    states: ['running', 'verifying'] },
+  { key: 'queued',  label: 'queued',    color: 'var(--overlay0)', states: ['queued'] },
+  { key: 'needs',   label: 'needs you', color: 'var(--peach)',    states: ['stuck', 'errored'] },
+  { key: 'done',    label: 'resolved',  color: 'var(--green)',    states: ['done', 'cancelled'] },
 ];
+const GROUPS_BY_KEY = Object.fromEntries(GROUPS.map((g) => [g.key, g]));
+const STUCK_STATES = GROUPS_BY_KEY.needs.states;
 
 const AC_KINDS = ['test', 'ui', 'cmd', 'llm'];
 
@@ -125,7 +131,6 @@ export default () => ({
   newForm: emptyNewJobForm(),
   newError: null,
   submitting: false,
-  COLUMNS,
   STATE_META,
   AC_KINDS,
 
@@ -160,8 +165,7 @@ export default () => ({
   },
 
   syncBadge() {
-    const stuck = this.jobs.filter((j) => j.state === 'stuck' || j.state === 'errored').length;
-    this.$store.app.jobsNeedsYou = stuck;
+    this.$store.app.jobsNeedsYou = this.needsYouCount;
   },
 
   setLayout(layout) {
@@ -180,11 +184,8 @@ export default () => ({
   // ---- derived filtering ------------------------------------------------
   filterJobsByPill(rows) {
     if (this.activeFilter === 'all') return rows;
-    if (this.activeFilter === 'running') return rows.filter((j) => j.state === 'running' || j.state === 'verifying');
-    if (this.activeFilter === 'queued') return rows.filter((j) => j.state === 'queued');
-    if (this.activeFilter === 'needs') return rows.filter((j) => j.state === 'stuck' || j.state === 'errored');
-    if (this.activeFilter === 'done') return rows.filter((j) => j.state === 'done' || j.state === 'cancelled');
-    return rows;
+    const group = GROUPS_BY_KEY[this.activeFilter];
+    return group ? rows.filter((j) => group.states.includes(j.state)) : rows;
   },
 
   filterJobsByText(rows) {
@@ -211,20 +212,17 @@ export default () => ({
   },
 
   get boardColumns() {
-    return COLUMNS.map((col) => ({
-      ...col,
-      items: this.filteredJobs.filter((j) => col.states.includes(j.state)),
+    return GROUPS.map((group) => ({
+      ...group,
+      items: this.filteredJobs.filter((j) => group.states.includes(j.state)),
     }));
   },
 
   get summaryPills() {
-    const n = (pred) => this.jobs.filter(pred).length;
+    const countIn = (states) => this.jobs.filter((j) => states.includes(j.state)).length;
     return [
       { k: 'all', label: 'all', color: null, count: this.jobs.length },
-      { k: 'running', label: 'active', color: 'var(--green)', count: n((j) => j.state === 'running' || j.state === 'verifying') },
-      { k: 'queued', label: 'queued', color: 'var(--overlay0)', count: n((j) => j.state === 'queued') },
-      { k: 'needs', label: 'needs you', color: 'var(--peach)', count: n((j) => j.state === 'stuck' || j.state === 'errored') },
-      { k: 'done', label: 'resolved', color: 'var(--green)', count: n((j) => j.state === 'done' || j.state === 'cancelled') },
+      ...GROUPS.map((g) => ({ k: g.key, label: g.label, color: g.color, count: countIn(g.states) })),
     ];
   },
 
@@ -233,7 +231,7 @@ export default () => ({
   },
 
   get needsYouCount() {
-    return this.jobs.filter((j) => j.state === 'stuck' || j.state === 'errored').length;
+    return this.jobs.filter((j) => STUCK_STATES.includes(j.state)).length;
   },
 
   // ---- per-job render helpers -------------------------------------------
