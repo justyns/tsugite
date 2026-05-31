@@ -34,7 +34,7 @@
 .jn-outcome .x { color: var(--peach); }
 
 /* small result preview inside a done notify (codeblock DNA, reused look) */
-.jn-mini { border: 1px solid var(--surface0); border-radius: 5px; background: var(--crust); overflow: hidden; }
+.jn-mini { border: 1px solid var(--surface0); border-radius: 4px; background: var(--crust); overflow: hidden; }
 .jn-mini .h { display: flex; gap: 8px; padding: 4px 10px; background: var(--mantle);
   border-bottom: 1px solid var(--surface0); font-family: var(--font-mono); font-size: 9.5px;
   letter-spacing: 0.1em; text-transform: uppercase; color: var(--overlay1); }
