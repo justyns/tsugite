@@ -206,32 +206,21 @@ export default () => ({
   },
 
   _connectSSE(id) {
-    // The backend emits framed SSE: `event: <name>\ndata: <json>\n\n`. The
-    // browser's EventSource is exactly the right tool here (server token auth
-    // is cookie/header, so the addAuth dance from api.js isn't needed for the
-    // tail endpoint — the backend may serve the stream without bearer auth or
-    // accept a query-string token; the adapter is being built in parallel).
+    // The backend emits framed SSE (`event: <name>\ndata: <json>\n\n`) on
+    // an endpoint that requires bearer auth. EventSource can't send custom
+    // headers, so we use fetch + a ReadableStream parser instead.
     const url = `/api/terminals/${encodeURIComponent(id)}/stream`;
-    const es = new EventSource(url, { withCredentials: false });
-    // Mark connections we've intentionally closed (terminal deselected, or
-    // restart) so the onerror handler doesn't misfire stream_lost.
+    const controller = new AbortController();
     let intentionallyClosed = false;
 
-    es.addEventListener('output', (ev) => {
-      try {
-        const data = JSON.parse(ev.data);
+    const dispatch = (eventName, dataLine) => {
+      let data;
+      try { data = JSON.parse(dataLine); } catch { return; }
+      if (eventName === 'output') {
         this._appendOutput(id, data.chunk || '');
-      } catch { /* drop malformed frame */ }
-    });
-    es.addEventListener('state', (ev) => {
-      try {
-        const data = JSON.parse(ev.data);
+      } else if (eventName === 'state') {
         this._updateState(id, data);
-      } catch { /* drop malformed frame */ }
-    });
-    es.addEventListener('exit', (ev) => {
-      try {
-        const data = JSON.parse(ev.data);
+      } else if (eventName === 'exit') {
         const term = this.terminals.find(t => t.id === id);
         if (term) {
           term.exit_code = data.code ?? null;
@@ -240,32 +229,70 @@ export default () => ({
           }
           term.updated_at = new Date().toISOString();
         }
-      } catch { /* drop malformed frame */ }
-    });
-    es.onerror = () => {
-      if (intentionallyClosed) return;
-      // EventSource fires onerror on every reconnect attempt — including
-      // the normal browser-side reconnect that follows the server cleanly
-      // closing the stream on process exit. So only flag stream_lost if
-      // the terminal is still believed to be running AND we've actually
-      // received at least one frame from this connection (proving the
-      // server reachable). For brand-new connections that never receive
-      // data (eg. a deterministic test stub that closes immediately) we
-      // close quietly and let the GET /api/terminals refresh own the state.
-      const term = this.terminals.find(t => t.id === id);
-      if (!term) return;
-      if (es.readyState === EventSource.CLOSED && isRunningState(term.state)) {
-        // Treat clean server close as ambiguous: keep the existing state,
-        // close the connection without reconnecting.
-        try { es.close(); } catch { /* non-fatal */ }
       }
     };
+
+    const token = localStorage.getItem('tsugite_token') || '';
+    const headers = token ? { Authorization: `Bearer ${token}` } : {};
+
+    (async () => {
+      try {
+        const resp = await fetch(url, { headers, signal: controller.signal });
+        if (!resp.ok || !resp.body) {
+          if (!intentionallyClosed) this._markStreamLost(id);
+          return;
+        }
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+        let pendingEvent = 'message';
+        let pendingData = '';
+        const flush = () => {
+          if (pendingData) dispatch(pendingEvent, pendingData);
+          pendingEvent = 'message';
+          pendingData = '';
+        };
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const lines = buf.split('\n');
+          buf = lines.pop();
+          for (const line of lines) {
+            if (line === '') { flush(); continue; }
+            if (line.startsWith('event: ')) pendingEvent = line.slice(7).trim();
+            else if (line.startsWith('data: ')) pendingData = line.slice(6);
+          }
+        }
+        flush();
+      } catch (e) {
+        if (intentionallyClosed) return;
+        // Network/abort errors land here. Only flag stream_lost if the
+        // terminal still believes it's running — a clean server close
+        // after the process exited is expected and silent.
+        this._maybeMarkStreamLost(id);
+      }
+    })();
+
     return {
       close() {
         intentionallyClosed = true;
-        try { es.close(); } catch { /* non-fatal */ }
+        try { controller.abort(); } catch { /* non-fatal */ }
       },
     };
+  },
+
+  _markStreamLost(id) {
+    const term = this.terminals.find(t => t.id === id);
+    if (term && isRunningState(term.state)) {
+      term.state = 'stream_lost';
+      term.updated_at = new Date().toISOString();
+    }
+  },
+
+  _maybeMarkStreamLost(id) {
+    const term = this.terminals.find(t => t.id === id);
+    if (term && isRunningState(term.state)) this._markStreamLost(id);
   },
 
   _appendOutput(id, chunk) {
