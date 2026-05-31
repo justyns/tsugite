@@ -1466,40 +1466,49 @@
     </div>
 
     <!-- Mark-done dialog (replaces browser confirm()) -->
-    <div class="modal-backdrop" :class="{ open: markDoneDialog.open }"
-         @click.self="closeMarkDoneDialog()"
-         @keydown.escape.window="if(markDoneDialog.open) closeMarkDoneDialog()">
-      <div class="modal-content dlg" role="dialog" aria-label="Mark done">
-        <h2>mark done</h2>
-        <div class="sub">
-          <span x-text="markDoneDialog.prompt"></span>
-          <span class="id"> · <span x-text="markDoneDialog.jobId"></span></span>
-        </div>
-        <div class="dlg-note warn">
-          <span class="mk">▲</span>
-          <span>This job <b>did not pass all criteria.</b> Marking it done accepts the work as-is and overrides the verifier — the conversation will show it resolved.</span>
-        </div>
-        <template x-if="markDoneDialog.criteria.length">
-          <div>
-            <label>criteria at close</label>
-            <div class="dlg-acs">
-              <template x-for="(ac, i) in markDoneDialog.criteria" :key="i">
-                <div class="dlg-ac" :class="ac.status === 'pass' ? 'pass' : 'fail'">
-                  <span class="mk" x-text="ac.status === 'pass' ? '✓' : '✗'"></span>
-                  <span x-text="ac.label"></span>
-                </div>
-              </template>
-            </div>
+    <div x-data="tsuModal('mark-done')" x-show="open" x-cloak
+         class="tsu-modal-backdrop mark-done-modal"
+         @keydown.escape.window="onEscape()" @click.self="onBackdrop()">
+      <div class="tsu-modal --md" role="dialog" aria-modal="true" aria-label="Mark done"
+           x-trap.noscroll="open">
+        <header class="tsu-modal-head">
+          <h2 class="tsu-modal-title">mark done</h2>
+          <button class="tsu-modal-x" @click="closeMarkDoneDialog()" aria-label="Close">&#x2715;</button>
+        </header>
+        <div class="tsu-modal-body">
+          <p class="tsu-modal-sub" style="margin:0">
+            <span x-text="markDoneDialog.prompt"></span>
+            <span style="font-family:var(--font-mono);color:var(--overlay1)"> · <span x-text="markDoneDialog.jobId"></span></span>
+          </p>
+          <div class="dlg-note warn">
+            <span class="mk">▲</span>
+            <span>This job <b>did not pass all criteria.</b> Marking it done accepts the work as-is and overrides the verifier — the conversation will show it resolved.</span>
           </div>
-        </template>
-        <label>reason <span style="text-transform:none;letter-spacing:0;color:var(--overlay0)">· optional, kept on the record</span></label>
-        <textarea class="mono" x-model="markDoneDialog.reason"
-                  placeholder="e.g. failing tests are unrelated flake — tracked in another ticket"
-                  rows="3"></textarea>
-        <div class="modal-actions">
-          <button class="btn-cancel" @click="closeMarkDoneDialog()">cancel</button>
-          <button class="btn-warn" @click="submitMarkDoneDialog()">⊠ mark done anyway</button>
+          <template x-if="markDoneDialog.criteria.length">
+            <div class="tsu-field">
+              <span class="tsu-label">criteria at close</span>
+              <div class="dlg-acs">
+                <template x-for="(ac, i) in markDoneDialog.criteria" :key="i">
+                  <div class="dlg-ac" :class="ac.status === 'pass' ? 'pass' : 'fail'">
+                    <span class="mk" x-text="ac.status === 'pass' ? '✓' : '✗'"></span>
+                    <span x-text="ac.label"></span>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </template>
+          <label class="tsu-field">
+            <span class="tsu-label">reason <span style="text-transform:none;letter-spacing:0;color:var(--overlay0)">· optional, kept on the record</span></span>
+            <textarea class="tsu-textarea mono" x-model="markDoneDialog.reason"
+                      placeholder="e.g. failing tests are unrelated flake — tracked in another ticket"
+                      rows="3"></textarea>
+          </label>
         </div>
+        <footer class="tsu-modal-foot">
+          <span class="spacer"></span>
+          <button class="tsu-btn" @click="closeMarkDoneDialog()">cancel</button>
+          <button class="tsu-btn --warn" @click="submitMarkDoneDialog()">⊠ mark done anyway</button>
+        </footer>
       </div>
     </div>
   </div>

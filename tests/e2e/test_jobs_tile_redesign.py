@@ -274,8 +274,8 @@ def test_mark_done_dialog_opens_and_submits(authenticated_page, e2e_adapter, e2e
         page.wait_for_selector(".jx", timeout=5000)
         # Click "mark done" button (NOT "retry with hint…").
         page.locator(".jx .jt-btn", has_text="mark done").first.click()
-        page.wait_for_selector(".modal-backdrop.open .dlg", timeout=2000)
-        dlg = page.locator(".modal-backdrop.open .dlg")
+        page.wait_for_selector(".tsu-modal-backdrop.mark-done-modal", state="visible", timeout=2000)
+        dlg = page.locator(".tsu-modal-backdrop.mark-done-modal .tsu-modal")
         # The recap lists both criteria.
         ac_rows = dlg.locator(".dlg-ac")
         assert ac_rows.count() == 2
@@ -284,8 +284,12 @@ def test_mark_done_dialog_opens_and_submits(authenticated_page, e2e_adapter, e2e
         assert dlg.locator(".dlg-ac.pass").count() == 1
         # Add a reason and submit.
         dlg.locator("textarea.mono").fill("flaky test, will fix later")
-        dlg.locator("button.btn-warn").click()
-        page.wait_for_function("!document.querySelector('.modal-backdrop.open .dlg')", timeout=2000)
+        dlg.locator("button.tsu-btn.--warn").click()
+        page.wait_for_function(
+            "() => { const el = document.querySelector('.tsu-modal-backdrop.mark-done-modal');"
+            " return !el || el.style.display === 'none'; }",
+            timeout=2000,
+        )
         assert posted["called"]
         assert (posted["body"] or {}).get("reason") == "flaky test, will fix later"
 
