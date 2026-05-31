@@ -141,6 +141,10 @@ class JobStore:
     def list_for_parent(self, parent_session_id: str) -> list[Job]:
         return [j for j in self._jobs.values() if j.parent_session_id == parent_session_id]
 
+    def list_all(self) -> list[Job]:
+        """Return every Job record, newest-first by updated_at."""
+        return sorted(self._jobs.values(), key=lambda j: j.updated_at or "", reverse=True)
+
     def update_state(self, job_id: str, new_state: str) -> Job:
         with self._lock:
             job = self._jobs.get(job_id)

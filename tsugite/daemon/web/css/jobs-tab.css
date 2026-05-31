@@ -1,0 +1,217 @@
+/* jobs-tab.css — the Jobs view: summary strip, filter bar, board + table
+   layouts, mini job card, empty state, and the new-job modal.
+   Builds on console.css + theme.css. State color via --st. */
+
+/* ---- jt-* atoms (state-tinted dots, spinner, id chip) ------------------ */
+@keyframes jt-pulse {
+  0%   { box-shadow: 0 0 0 0 color-mix(in oklab, var(--st) 55%, transparent); }
+  100% { box-shadow: 0 0 0 7px transparent; }
+}
+@keyframes jt-spin { to { transform: rotate(360deg); } }
+@keyframes jt-sheen {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(280%); }
+}
+
+.jt-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--st); flex-shrink: 0; display: inline-block; }
+.jt-dot.live { animation: jt-pulse 1.6s ease-out infinite; }
+
+.jt-spin { width: 11px; height: 11px; border-radius: 50%; flex-shrink: 0;
+  border: 1.5px solid color-mix(in oklab, var(--st) 30%, transparent);
+  border-top-color: var(--st); animation: jt-spin 0.8s linear infinite;
+  display: inline-block; }
+
+.jt-state { display: inline-flex; align-items: center; gap: 6px; color: var(--st);
+  font-family: var(--font-mono); font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.06em; font-size: 10px; flex-shrink: 0; white-space: nowrap; }
+.jt-state .g { font-size: 11px; line-height: 1; }
+
+.jt-id { font-family: var(--font-mono); font-size: 10px; color: var(--overlay0); }
+.jt-id b { color: var(--subtext0); font-weight: 600; }
+
+/* ---- jobs view header extras ------------------------------------------- */
+.jobs-newbtn { display: inline-flex; align-items: center; gap: 6px; background: var(--lavender);
+  color: var(--crust); border: 1px solid var(--lavender); border-radius: var(--r-sm); font-weight: 700;
+  font-family: var(--font-mono); font-size: 11.5px; padding: 4px 11px; cursor: pointer; }
+.jobs-newbtn:hover { background: var(--blue); border-color: var(--blue); }
+.jobs-newbtn .k { font-size: 13px; line-height: 1; }
+.jobs-layout-toggle { display: flex; gap: 0; border: 1px solid var(--surface1); border-radius: var(--r-sm); overflow: hidden; }
+.jobs-layout-toggle button { background: var(--crust); border: none; color: var(--overlay1);
+  font-family: var(--font-mono); font-size: 11px; padding: 4px 9px;
+  display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+.jobs-layout-toggle button + button { border-left: 1px solid var(--surface1); }
+.jobs-layout-toggle button.on { background: var(--surface0); color: var(--text); }
+
+/* ---- filter bar + summary ---------------------------------------------- */
+.jobs-bar { display: flex; align-items: center; gap: 12px; padding: 12px 16px 0; flex-wrap: wrap; }
+.jobs-filter { flex: 1; min-width: 220px; margin: 0; }
+.jobs-summary { display: flex; gap: 7px; flex-wrap: wrap; align-items: center; padding: 12px 16px 4px; }
+.js-pill { display: inline-flex; align-items: center; gap: 7px; padding: 4px 10px; border-radius: var(--r-sm);
+  border: 1px solid var(--surface0); background: var(--mantle); font-family: var(--font-mono); font-size: 11px;
+  color: var(--subtext0); cursor: pointer; }
+.js-pill:hover { border-color: var(--surface2); }
+.js-pill.active { border-color: var(--lavender); background: var(--surface0); color: var(--text); }
+.js-pill .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
+.js-pill .n { color: var(--text); font-weight: 700; font-variant-numeric: tabular-nums; }
+.js-pill.all { color: var(--text); }
+
+/* ---- mini job card (used in board columns) ----------------------------- */
+.jb { --st: var(--green); position: relative; display: flex; flex-direction: column; gap: 7px;
+  border: 1px solid color-mix(in oklab, var(--st) 22%, var(--surface0));
+  border-left: 3px solid var(--st);
+  border-radius: var(--r-sm); background: color-mix(in oklab, var(--st) 8%, var(--crust));
+  padding: 9px 10px; cursor: pointer; transition: border-color .1s ease; }
+.jb:hover { border-color: color-mix(in oklab, var(--st) 50%, var(--surface1)); }
+.jb-top { display: flex; align-items: center; gap: 8px; }
+.jb-top .jt-id { margin-left: auto; }
+.jb-title { font-family: var(--font-sans); font-size: 12.5px; line-height: 1.38; color: var(--text); text-wrap: pretty; }
+.jb-line { font-family: var(--font-mono); font-size: 10.5px; color: var(--overlay1); display: flex;
+  align-items: center; gap: 7px; min-width: 0; }
+.jb-line .live-tool { color: var(--peach); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.jb-line .v { color: var(--green); } .jb-line .x { color: var(--peach); }
+.jb-line .jt-spin { width: 9px; height: 9px; }
+.jb-foot { display: flex; align-items: center; gap: 8px; }
+.jb-acmini { display: inline-flex; align-items: center; gap: 3px; font-family: var(--font-mono); font-size: 11px; }
+.jb-acmini .m { font-size: 10px; }
+.jb-acmini .pass { color: var(--green); } .jb-acmini .fail { color: var(--red); }
+.jb-acmini .active { color: var(--lavender); } .jb-acmini .pending { color: var(--overlay0); }
+.jb-acmini .cnt { color: var(--overlay1); margin-left: 2px; }
+.jb-agent { font-family: var(--font-mono); font-size: 10.5px; color: var(--blue); margin-left: auto; }
+.jb-miniprog { height: 2px; background: var(--surface0); border-radius: 2px; overflow: hidden; position: relative; }
+.jb-miniprog::after { content: ""; position: absolute; inset: 0; width: 38%;
+  background: linear-gradient(90deg, transparent, var(--st), transparent); animation: jt-sheen 1.7s ease-in-out infinite; }
+
+/* ---- board layout ------------------------------------------------------- */
+.jb-board { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; align-items: start; }
+.jb-col { background: var(--mantle); border: 1px solid var(--surface0); border-radius: var(--r-md);
+  display: flex; flex-direction: column; min-height: 90px; }
+.jb-col-head { display: flex; align-items: center; gap: 8px; padding: 8px 11px; border-bottom: 1px solid var(--surface0);
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--subtext0); }
+.jb-col-head .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+.jb-col-head .n { margin-left: auto; color: var(--overlay1); font-weight: 700; }
+.jb-col-body { padding: 9px; display: flex; flex-direction: column; gap: 9px; }
+.jb-col-empty { padding: 16px 11px; font-family: var(--font-mono); font-size: 10.5px; color: var(--overlay0);
+  font-style: italic; text-align: center; }
+
+/* ---- table layout ------------------------------------------------------- */
+.jobs-table-wrap { border: 1px solid var(--surface0); border-radius: var(--r-md); overflow: hidden; }
+.jobs-table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 12px; }
+.jobs-table th { color: var(--overlay1); font-weight: 600; font-size: 10px; text-transform: uppercase;
+  letter-spacing: 0.1em; text-align: left; padding: 8px 12px; background: var(--mantle); border-bottom: 1px solid var(--surface0);
+  position: sticky; top: 0; }
+.jobs-table th.sortable { cursor: pointer; } .jobs-table th .ar { color: var(--lavender); margin-left: 3px; }
+.jobs-table th.num, .jobs-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.jobs-table td { padding: 8px 12px; border-bottom: 1px solid var(--surface0); color: var(--subtext0); vertical-align: middle; }
+.jobs-table tbody tr { cursor: pointer; }
+.jobs-table tbody tr:hover { background: var(--mantle); }
+.jobs-table tbody tr:last-child td { border-bottom: none; }
+.jobs-table td.t-state { width: 1%; white-space: nowrap; }
+.jobs-table .cellstate { display: inline-flex; align-items: center; gap: 7px; font-weight: 700; text-transform: uppercase;
+  font-size: 9.5px; letter-spacing: 0.05em; color: var(--st); }
+.jobs-table .cellstate .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--st); display: inline-block; }
+.jobs-table td.t-title { color: var(--text); font-family: var(--font-sans); font-size: 12.5px; max-width: 360px; }
+.jobs-table td.t-title .sub { display: block; font-family: var(--font-mono); font-size: 10px; color: var(--overlay0);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+.jobs-table td.t-agent { color: var(--blue); }
+.jobs-table td.t-id { color: var(--overlay0); }
+.jobs-table td.t-act { text-align: right; white-space: nowrap; }
+.jobs-table .rowbtn { background: none; border: 1px solid transparent; color: var(--overlay1); border-radius: var(--r-xs);
+  font-family: var(--font-mono); font-size: 14px; padding: 1px 5px; cursor: pointer; }
+.jobs-table tbody tr:hover .rowbtn { color: var(--subtext1); }
+.jobs-table .rowbtn:hover { color: var(--text); border-color: var(--surface1); background: var(--surface0); }
+.jobs-table .rowbtn.primary { color: var(--lavender); }
+.jobs-table .acmini-cell { color: var(--overlay1); }
+
+/* ---- empty state -------------------------------------------------------- */
+.jobs-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;
+  padding: 64px 24px; gap: 14px; font-family: var(--font-mono); }
+.jobs-empty .glyph { font-size: 34px; color: var(--surface2); line-height: 1; }
+.jobs-empty h3 { font-family: var(--font-sans); font-size: 16px; font-weight: 600; color: var(--text); margin: 0; }
+.jobs-empty p { font-size: 12px; line-height: 1.65; color: var(--overlay1); max-width: 420px; margin: 0; }
+.jobs-empty code { font-family: var(--font-mono); color: var(--lavender);
+  background: color-mix(in oklab, var(--lavender) 14%, var(--surface0));
+  padding: 1px 6px; border-radius: 3px; font-size: 11.5px; }
+.jobs-empty .ex { margin-top: 6px; display: flex; flex-direction: column; gap: 6px; align-items: center; }
+.jobs-empty .ex .row { font-size: 11px; color: var(--overlay0); }
+
+/* ---- new-job modal ------------------------------------------------------ */
+.nj-modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.62); z-index: 50;
+  display: flex; align-items: center; justify-content: center; padding: 20px; }
+.nj-modal { max-width: 580px; width: 100%; max-height: 88vh; overflow-y: auto;
+  background: var(--base); border: 1px solid var(--surface1); border-radius: var(--r-md);
+  padding: 20px 22px; font-family: var(--font-sans); color: var(--text);
+  display: flex; flex-direction: column; gap: 10px; }
+.nj-modal h2 { margin: 0 0 6px; font-size: 15px; font-family: var(--font-mono); font-weight: 700;
+  text-transform: lowercase; letter-spacing: 0.04em; color: var(--text); }
+.nj-modal label { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--overlay1); margin-bottom: 4px; display: block; }
+.nj-modal input[type="text"], .nj-modal select, .nj-modal textarea {
+  background: var(--crust); color: var(--text); border: 1px solid var(--surface1);
+  border-radius: var(--r-sm); padding: 6px 9px; font-family: var(--font-mono);
+  font-size: 12px; outline: none; box-sizing: border-box; }
+.nj-modal input[type="text"]:focus, .nj-modal select:focus, .nj-modal textarea:focus { border-color: var(--lavender); }
+.nj-modal input[type="text"]::placeholder, .nj-modal textarea::placeholder { color: var(--overlay0); }
+.nj-modal .nj-grow { width: 100%; resize: vertical; min-height: 64px;
+  font-family: var(--font-sans); font-size: 13px; line-height: 1.5; padding: 8px 10px; }
+.nj-hint { font-family: var(--font-mono); font-size: 10px; color: var(--overlay0); margin: 4px 0 0; }
+.nj-hint code { color: var(--lavender); }
+.nj-ac-list { display: flex; flex-direction: column; gap: 6px; }
+.nj-ac-row { display: flex; gap: 6px; align-items: center; }
+.nj-ac-row select { width: 84px; flex-shrink: 0; }
+.nj-ac-row input { flex: 1; }
+.nj-ac-row .rm { background: none; border: 1px solid transparent; color: var(--overlay0);
+  border-radius: var(--r-xs); font-size: 14px; padding: 2px 7px; flex-shrink: 0; cursor: pointer; }
+.nj-ac-row .rm:hover { color: var(--red); border-color: color-mix(in oklab, var(--red) 40%, var(--surface1)); }
+.nj-ac-add { background: none; border: 1px dashed var(--surface1); color: var(--subtext0);
+  border-radius: var(--r-sm); font-family: var(--font-mono); font-size: 11px;
+  padding: 5px 10px; align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.nj-ac-add:hover { border-color: var(--lavender); color: var(--text); }
+.nj-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.nj-step { display: flex; align-items: center; gap: 0; border: 1px solid var(--surface1);
+  border-radius: var(--r-sm); overflow: hidden; width: fit-content; }
+.nj-step button { background: var(--crust); border: none; color: var(--subtext0);
+  font-family: var(--font-mono); font-size: 13px; padding: 5px 11px; cursor: pointer; }
+.nj-step button:hover { background: var(--surface0); color: var(--text); }
+.nj-step .val { min-width: 30px; text-align: center; color: var(--text);
+  font-family: var(--font-mono); font-size: 12px;
+  border-left: 1px solid var(--surface1); border-right: 1px solid var(--surface1); padding: 5px 0; }
+.nj-seg { display: flex; border: 1px solid var(--surface1); border-radius: var(--r-sm); overflow: hidden; width: fit-content; }
+.nj-seg button { background: var(--crust); border: none; color: var(--subtext0);
+  font-family: var(--font-mono); font-size: 11px; padding: 4px 11px; cursor: pointer; }
+.nj-seg button + button { border-left: 1px solid var(--surface1); }
+.nj-seg button.on { background: var(--surface0); color: var(--text); }
+.nj-cmd { margin-top: 14px; border: 1px solid var(--surface0); border-radius: var(--r-md);
+  background: var(--crust); overflow: hidden; }
+.nj-cmd .h { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--overlay0); padding: 5px 11px; background: var(--mantle); border-bottom: 1px solid var(--surface0); }
+.nj-cmd pre { margin: 0; padding: 9px 11px; font-family: var(--font-mono); font-size: 11px; line-height: 1.6;
+  color: var(--subtext1); white-space: pre-wrap; word-break: break-word; }
+.nj-cmd pre .cmd { color: var(--green); }
+.nj-cmd pre .flag { color: var(--lavender); }
+.nj-cmd pre .str { color: var(--peach); }
+.nj-error { font-family: var(--font-mono); font-size: 11px; color: var(--red);
+  background: color-mix(in oklab, var(--red) 10%, var(--crust));
+  border: 1px solid color-mix(in oklab, var(--red) 35%, var(--surface1));
+  border-radius: var(--r-sm); padding: 6px 10px; }
+.nj-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+.nj-actions button { background: var(--crust); border: 1px solid var(--surface1); color: var(--subtext1);
+  font-family: var(--font-mono); font-size: 11.5px; padding: 5px 14px; border-radius: var(--r-sm); cursor: pointer; }
+.nj-actions button:hover { background: var(--surface0); color: var(--text); }
+.nj-actions button.primary { background: var(--lavender); border-color: var(--lavender); color: var(--crust); font-weight: 700; }
+.nj-actions button.primary:hover { background: var(--blue); border-color: var(--blue); }
+.nj-actions button.primary:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* ---- mobile ------------------------------------------------------------- */
+@media (max-width: 640px) {
+  .jb-board { grid-template-columns: 1fr; }
+  .jobs-bar { padding: 10px 12px 0; flex-direction: column; align-items: stretch; gap: 8px; }
+  .jobs-filter { min-width: 0; }
+  .jobs-layout-toggle { width: 100%; }
+  .jobs-layout-toggle button { flex: 1; justify-content: center; }
+  .jobs-newbtn { justify-content: center; }
+  .jobs-summary { padding: 10px 12px 2px; flex-wrap: nowrap; overflow-x: auto;
+    -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .jobs-summary::-webkit-scrollbar { display: none; }
+  .nj-row2 { grid-template-columns: 1fr; }
+  .nj-modal { max-height: 92vh; padding: 16px; }
+}

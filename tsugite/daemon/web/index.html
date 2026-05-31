@@ -10,6 +10,7 @@
 <link rel="stylesheet" href="/static/css/terminal.css">
 <link rel="stylesheet" href="/static/css/jobs.css">
 <link rel="stylesheet" href="/static/css/job-flows.css">
+<link rel="stylesheet" href="/static/css/jobs-tab.css">
 <link rel="stylesheet" href="/static/css/responsive.css">
 <link rel="manifest" href="/static/manifest.json">
 <meta name="theme-color" content="#232634">
@@ -36,6 +37,11 @@
         <span class="badge"
               :title="$store.app.skillIssues.length + ' skill issue' + ($store.app.skillIssues.length === 1 ? '' : 's')"
               x-text="$store.app.skillIssues.length"></span>
+      </template>
+      <template x-if="tab === 'jobs' && $store.app.jobsNeedsYou > 0">
+        <span class="badge"
+              :title="$store.app.jobsNeedsYou + ' job' + ($store.app.jobsNeedsYou === 1 ? '' : 's') + ' need you'"
+              x-text="$store.app.jobsNeedsYou"></span>
       </template>
     </button>
   </template>
@@ -2111,6 +2117,296 @@
             </div>
           </template>
         </div>
+      </main>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       JOBS
+       ============================================================ -->
+  <div class="view" x-show="$store.app.view === 'jobs'" x-data="jobsView" x-cloak>
+    <div class="console-app no-sidebar">
+      <main class="console-main">
+        <div class="console-thread-header">
+          <div class="row top">
+            <span class="path"><span class="seg cur">jobs</span></span>
+            <span class="grow"></span>
+            <span class="count" style="font-family:var(--font-mono);font-size:10.5px;color:var(--overlay1)">
+              <span x-text="jobs.length"></span> jobs
+              <template x-if="needsYouCount > 0">
+                <span> · <b style="color:var(--peach);font-weight:600" x-text="needsYouCount + ' need you'"></b></span>
+              </template>
+            </span>
+          </div>
+        </div>
+
+        <template x-if="error">
+          <div class="console-turn error standalone">
+            <div class="console-turn-gutter"><span class="role error">err</span></div>
+            <div class="console-turn-bubble" x-text="error"></div>
+          </div>
+        </template>
+
+        <template x-if="loading">
+          <div class="console-empty"><span class="spinner"></span> loading jobs…</div>
+        </template>
+
+        <template x-if="!loading && !hasAnyJobs">
+          <div>
+            <div class="jobs-bar">
+              <div class="console-filter jobs-filter">
+                <span class="prompt">›</span>
+                <input type="text" x-model="filterText" placeholder="filter agent:odyn state:running #job-id">
+                <kbd>f</kbd>
+              </div>
+              <div class="jobs-layout-toggle">
+                <button :class="layout === 'board' ? 'on' : ''" @click="setLayout('board')">▦ board</button>
+                <button :class="layout === 'table' ? 'on' : ''" @click="setLayout('table')">≡ table</button>
+              </div>
+              <button class="jobs-newbtn" @click="openNewJob()"><span class="k">＋</span> new job</button>
+            </div>
+            <div class="jobs-empty">
+              <div class="glyph">⊟</div>
+              <h3>No jobs running</h3>
+              <p>A job is a background task an agent works against
+                <em style="color:var(--subtext1);font-style:normal">acceptance criteria</em>
+                — it keeps trying and self-verifying until the criteria pass, then reports back here.
+                Nothing is queued right now.</p>
+              <div class="ex">
+                <button class="jobs-newbtn" @click="openNewJob()"><span class="k">＋</span> new job</button>
+                <div class="row">or start one inline with <code>/job</code> in any conversation</div>
+              </div>
+              <div class="ex">
+                <div class="row"><code>/job --agent odyn --ac "tests pass" "fix the flaky webhook test"</code></div>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <template x-if="!loading && hasAnyJobs">
+          <div>
+            <div class="jobs-bar">
+              <div class="console-filter jobs-filter">
+                <span class="prompt">›</span>
+                <input type="text" x-model="filterText" placeholder="filter agent:odyn state:running #job-id">
+                <kbd>f</kbd>
+              </div>
+              <div class="jobs-layout-toggle">
+                <button :class="layout === 'board' ? 'on' : ''" @click="setLayout('board')">▦ board</button>
+                <button :class="layout === 'table' ? 'on' : ''" @click="setLayout('table')">≡ table</button>
+              </div>
+              <button class="jobs-newbtn" @click="openNewJob()"><span class="k">＋</span> new job</button>
+            </div>
+
+            <div class="jobs-summary">
+              <template x-for="pill in summaryPills" :key="pill.k">
+                <button class="js-pill"
+                        :class="{ active: activeFilter === pill.k, all: pill.k === 'all' }"
+                        @click="setActiveFilter(pill.k)">
+                  <template x-if="pill.color">
+                    <span class="dot" :style="'background:' + pill.color"></span>
+                  </template>
+                  <span x-text="pill.label"></span>
+                  <span class="n" x-text="pill.count"></span>
+                </button>
+              </template>
+            </div>
+
+            <div class="view-pad" style="padding:8px 16px 16px">
+
+              <!-- Board layout -->
+              <template x-if="layout === 'board'">
+                <div class="jb-board">
+                  <template x-for="col in boardColumns" :key="col.key">
+                    <div class="jb-col">
+                      <div class="jb-col-head">
+                        <span class="dot" :style="'background:' + col.color"></span>
+                        <span x-text="col.label"></span>
+                        <span class="n" x-text="col.items.length"></span>
+                      </div>
+                      <div class="jb-col-body">
+                        <template x-if="col.items.length === 0">
+                          <div class="jb-col-empty">— empty —</div>
+                        </template>
+                        <template x-for="job in col.items" :key="job.job_id">
+                          <div class="jb"
+                               :style="'--st:' + stateMeta(job.state).color"
+                               @click="openJobOriginSession(job)">
+                            <div class="jb-top">
+                              <span class="jt-state" x-text="stateMeta(job.state).word"></span>
+                              <span class="jt-id"><b x-text="job.job_id"></b></span>
+                            </div>
+                            <div class="jb-title" x-text="jobTitle(job)"></div>
+                            <template x-if="job.state === 'running'">
+                              <div class="jb-miniprog"></div>
+                            </template>
+                            <div class="jb-line">
+                              <span x-text="defaultLine(job).text"></span>
+                            </div>
+                            <div class="jb-foot">
+                              <span class="jb-acmini">
+                                <template x-for="(s, i) in acStatesFor(job)" :key="i">
+                                  <span class="m" :class="s" x-text="acMark(s)"></span>
+                                </template>
+                                <template x-if="(job.acceptance_criteria || []).length">
+                                  <span class="cnt"
+                                        x-text="acPassCount(acStatesFor(job)) + '/' + (job.acceptance_criteria || []).length"></span>
+                                </template>
+                              </span>
+                              <span class="jb-agent" x-text="'@' + (job.agent || 'agent')"></span>
+                            </div>
+                          </div>
+                        </template>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+              </template>
+
+              <!-- Table layout -->
+              <template x-if="layout === 'table'">
+                <div class="jobs-table-wrap" tabindex="0">
+                  <table class="jobs-table">
+                    <thead>
+                      <tr>
+                        <th class="t-state">state</th>
+                        <th>job</th>
+                        <th>agent</th>
+                        <th class="num">att</th>
+                        <th>criteria</th>
+                        <th class="num">updated</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <template x-if="filteredJobs.length === 0">
+                        <tr><td colspan="7" style="text-align:center;color:var(--overlay1);font-style:italic;padding:20px">no jobs match this filter</td></tr>
+                      </template>
+                      <template x-for="job in filteredJobs" :key="job.job_id">
+                        <tr @click="openJobOriginSession(job)">
+                          <td class="t-state" :style="'--st:' + stateMeta(job.state).color">
+                            <span class="cellstate">
+                              <span class="dot"></span>
+                              <span x-text="stateMeta(job.state).word"></span>
+                            </span>
+                          </td>
+                          <td class="t-title">
+                            <span x-text="jobTitle(job)"></span>
+                            <span class="sub" x-text="job.job_id + ' · ' + jobConv(job)"></span>
+                          </td>
+                          <td class="t-agent" x-text="job.agent || '—'"></td>
+                          <td class="num" x-text="jobAttempts(job) || '—'"></td>
+                          <td class="acmini-cell">
+                            <span class="jb-acmini">
+                              <template x-for="(s, i) in acStatesFor(job)" :key="i">
+                                <span class="m" :class="s" x-text="acMark(s)"></span>
+                              </template>
+                              <template x-if="(job.acceptance_criteria || []).length">
+                                <span class="cnt"
+                                      x-text="acPassCount(acStatesFor(job)) + '/' + (job.acceptance_criteria || []).length"></span>
+                              </template>
+                            </span>
+                          </td>
+                          <td class="num" x-text="relativeTime(job.updated_at)"></td>
+                          <td class="t-act" @click.stop>
+                            <template x-for="action in rowActionsFor(job)" :key="action.key">
+                              <button class="rowbtn"
+                                      :class="{ primary: action.primary }"
+                                      :title="action.title"
+                                      @click="invokeRowAction(job, action.key)"
+                                      x-text="action.glyph"></button>
+                            </template>
+                          </td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </div>
+              </template>
+
+            </div>
+          </div>
+        </template>
+
+        <!-- New-job modal -->
+        <template x-if="showNew">
+          <div class="nj-modal-backdrop" @click.self="closeNewJob()" @keydown.escape.window="closeNewJob()">
+            <div class="nj-modal" role="dialog" aria-label="New job">
+              <h2>new job</h2>
+
+              <label>task</label>
+              <textarea class="nj-grow" x-model="newForm.prompt"
+                        placeholder="describe the task · / commands · @ agent · # file"></textarea>
+              <p class="nj-hint">the agent works until the criteria below pass — be specific about “done”.</p>
+
+              <label>acceptance criteria</label>
+              <div class="nj-ac-list">
+                <template x-for="(ac, i) in newForm.acs" :key="i">
+                  <div class="nj-ac-row">
+                    <select x-model="ac.kind">
+                      <template x-for="k in AC_KINDS" :key="k">
+                        <option :value="k" x-text="k"></option>
+                      </template>
+                    </select>
+                    <input type="text" x-model="ac.text" placeholder="criterion the verifier checks…">
+                    <button class="rm" title="remove" @click="removeAc(i)">×</button>
+                  </div>
+                </template>
+                <button class="nj-ac-add" @click="addAc()">＋ add criterion</button>
+              </div>
+
+              <div class="nj-row2" style="margin-top:6px">
+                <div>
+                  <label>agent</label>
+                  <select x-model="newForm.agent" style="width:100%">
+                    <template x-for="a in $store.app.agents" :key="a.name">
+                      <option :value="a.name" x-text="a.name"></option>
+                    </template>
+                  </select>
+                </div>
+                <div>
+                  <label>max attempts</label>
+                  <div class="nj-step">
+                    <button type="button" @click="stepAttempts(-1)">−</button>
+                    <span class="val" x-text="newForm.maxAttempts"></span>
+                    <button type="button" @click="stepAttempts(1)">+</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="nj-row2" style="margin-top:6px">
+                <div>
+                  <label>self-verify</label>
+                  <div class="nj-seg">
+                    <button type="button" :class="newForm.verify ? 'on' : ''" @click="newForm.verify = true">on</button>
+                    <button type="button" :class="!newForm.verify ? 'on' : ''" @click="newForm.verify = false">off</button>
+                  </div>
+                </div>
+                <div>
+                  <label>run</label>
+                  <div class="nj-seg">
+                    <button type="button" :class="newForm.background ? 'on' : ''" @click="newForm.background = true">background</button>
+                    <button type="button" :class="!newForm.background ? 'on' : ''" @click="newForm.background = false">foreground</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="nj-cmd">
+                <div class="h">equivalent command</div>
+                <pre data-testid="nj-command-preview"><template x-for="(part, i) in commandPreviewParts" :key="i"><span :class="part.cls || ''" x-text="part.text"></span></template></pre>
+              </div>
+
+              <template x-if="newError">
+                <div class="nj-error" x-text="newError"></div>
+              </template>
+
+              <div class="nj-actions">
+                <button type="button" @click="closeNewJob()">cancel</button>
+                <button type="button" class="primary" :disabled="!canSubmit" @click="submitNewJob()">queue job</button>
+              </div>
+            </div>
+          </div>
+        </template>
       </main>
     </div>
   </div>
