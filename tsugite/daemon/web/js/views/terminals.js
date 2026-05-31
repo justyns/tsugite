@@ -223,9 +223,11 @@ export default () => ({
       } else if (eventName === 'exit') {
         const term = this.terminals.find(t => t.id === id);
         if (term) {
-          term.exit_code = data.code ?? null;
+          // Backend emits `exit_code`; accept `code` too for forward-compat.
+          const code = data.exit_code ?? data.code ?? null;
+          term.exit_code = code;
           if (term.state !== 'cancelled' && term.state !== 'timed_out') {
-            term.state = data.code === 0 ? 'succeeded' : 'failed';
+            term.state = code === 0 ? 'succeeded' : 'failed';
           }
           term.updated_at = new Date().toISOString();
         }
