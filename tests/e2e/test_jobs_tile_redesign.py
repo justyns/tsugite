@@ -4,7 +4,7 @@ Covers:
   - All 7 states (queued / running / verifying / done / stuck / errored / cancelled)
     render the correct accent color via data-state + state-glyph label.
   - Collapse/expand toggles the body.
-  - AC chips render with kind badges when `acceptance_criteria` is in the payload.
+  - AC chips render with per-criterion verdicts when `acceptance_criteria` is in the payload.
   - Attempts expander shows when there's > 1 attempt.
   - Retry-with-hint dialog opens, takes a hint + suggestion chip, submits a POST.
   - Mark-done dialog opens, lists criteria with pass/fail, submits a POST.
@@ -94,7 +94,7 @@ def test_tile_collapse_expand_toggle(authenticated_page, e2e_adapter, e2e_tmp):
         assert tile.locator(".jx-body").is_visible()
 
 
-def test_ac_chips_render_with_kind_badges(authenticated_page, e2e_adapter, e2e_tmp):
+def test_ac_chips_render_with_per_criterion_verdicts(authenticated_page, e2e_adapter, e2e_tmp):
     page = authenticated_page
     _open_conv(page)
     user_id = page.evaluate("Alpine.store('app').userId")
@@ -108,10 +108,10 @@ def test_ac_chips_render_with_kind_badges(authenticated_page, e2e_adapter, e2e_t
         prompt="thing with criteria",
         verify_attempts=2,
         acceptance_criteria=[
-            "All existing tests still pass",  # kind=test
-            "Snapshot at 375px viewport matches",  # kind=ui
-            "Shell command exits 0",  # kind=cmd
-            "Output is a valid haiku",  # kind=llm (default)
+            "All existing tests still pass",
+            "Snapshot at 375px viewport matches",
+            "Shell command exits 0",
+            "Output is a valid haiku",
         ],
         result={
             "ac_results": [
@@ -126,8 +126,10 @@ def test_ac_chips_render_with_kind_badges(authenticated_page, e2e_adapter, e2e_t
         page.wait_for_selector(".jx .jt-acs", timeout=5000)
         chips = page.locator(".jx .jt-ac")
         assert chips.count() == 4
-        kinds_seen = {chips.nth(i).locator(".tp").text_content() for i in range(chips.count())}
-        assert {"test", "ui", "cmd", "llm"} <= {k.lower() for k in kinds_seen if k}
+        # Chip labels show the criterion text (not "[object Object]").
+        labels = [chips.nth(i).text_content() for i in range(chips.count())]
+        assert any("All existing tests still pass" in t for t in labels)
+        assert not any("[object Object]" in t for t in labels)
         # Pass + fail markers present.
         assert page.locator(".jx .jt-ac.pass").count() == 1
         assert page.locator(".jx .jt-ac.fail").count() == 1

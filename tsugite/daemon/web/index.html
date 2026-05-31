@@ -937,7 +937,6 @@
                                     <span class="jt-ac" :class="ac.status">
                                       <span class="mk" x-text="ac.mark"></span>
                                       <span x-text="ac.label"></span>
-                                      <span class="tp" x-text="ac.kind"></span>
                                     </span>
                                   </template>
                                 </div>
@@ -1476,7 +1475,6 @@
                 <div class="dlg-ac" :class="ac.status === 'pass' ? 'pass' : 'fail'">
                   <span class="mk" x-text="ac.status === 'pass' ? '✓' : '✗'"></span>
                   <span x-text="ac.label"></span>
-                  <span class="kind" x-text="ac.kind"></span>
                 </div>
               </template>
             </div>
@@ -2348,11 +2346,6 @@
               <div class="nj-ac-list">
                 <template x-for="(ac, i) in newForm.acs" :key="i">
                   <div class="nj-ac-row">
-                    <select x-model="ac.kind">
-                      <template x-for="k in AC_KINDS" :key="k">
-                        <option :value="k" x-text="k"></option>
-                      </template>
-                    </select>
                     <input type="text" x-model="ac.text" placeholder="criterion the verifier checks…">
                     <button class="rm" title="remove" @click="removeAc(i)">×</button>
                   </div>

@@ -37,8 +37,6 @@
   border: 1px solid var(--surface1); color: var(--subtext0); background: var(--crust);
   max-width: 100%; }
 .jt-ac .mk { font-size: 10px; line-height: 1; flex-shrink: 0; }
-.jt-ac .tp { font-size: 9px; letter-spacing: 0.06em; color: var(--overlay0);
-  border: 1px solid var(--surface1); border-radius: 2px; padding: 0 3px; text-transform: uppercase; }
 .jt-ac.pass { color: var(--green); border-color: color-mix(in oklab, var(--green) 38%, var(--surface1));
   background: color-mix(in oklab, var(--green) 9%, var(--crust)); }
 .jt-ac.pass .mk { color: var(--green); }

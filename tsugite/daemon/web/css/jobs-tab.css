@@ -157,7 +157,6 @@
 .nj-hint code { color: var(--lavender); }
 .nj-ac-list { display: flex; flex-direction: column; gap: 6px; }
 .nj-ac-row { display: flex; gap: 6px; align-items: center; }
-.nj-ac-row select { width: 84px; flex-shrink: 0; }
 .nj-ac-row input { flex: 1; }
 .nj-ac-row .rm { background: none; border: 1px solid transparent; color: var(--overlay0);
   border-radius: var(--r-xs); font-size: 14px; padding: 2px 7px; flex-shrink: 0; cursor: pointer; }

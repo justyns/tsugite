@@ -827,23 +827,22 @@ export default () => ({
     return bits.join(' · ');
   },
 
-  // Per-criterion AC chip list. Reads `acceptance_criteria` from the job event
-  // (a list of strings; backend doesn't broadcast it today — when it does, this
-  // light-up). Each chip's status is derived from `result.ac_results` when
-  // available (matching by ac_text); otherwise pending. Kind is heuristic:
-  // lowercase substring match against `ui`/`test`/`cmd`, default `llm`.
+  // Per-criterion AC chip list. Reads `acceptance_criteria` (list of strings)
+  // from the job event payload. Each chip's status is derived from
+  // `result.ac_results` when available — matched first by `ac_index`, then by
+  // `ac_text` as a fallback. Otherwise pending (or `active` for the first AC
+  // while the verifier is mid-flight).
   jobCriteria(msg) {
     const acs = msg.acceptance_criteria;
     if (!Array.isArray(acs) || acs.length === 0) return [];
-    const acResults = (msg.result && Array.isArray(msg.result.ac_results)) ? msg.result.ac_results : [];
-    const resultByText = {};
-    for (const r of acResults) {
-      if (r && typeof r === 'object' && r.ac_text != null) resultByText[r.ac_text] = r;
-    }
+    const acResults = (msg.result && Array.isArray(msg.result.ac_results))
+      ? msg.result.ac_results
+      : (Array.isArray(msg.ac_results) ? msg.ac_results : []);
     const out = [];
-    for (const ac of acs) {
-      const label = String(ac);
-      const r = resultByText[label];
+    for (let i = 0; i < acs.length; i++) {
+      const label = String(acs[i]);
+      const r = acResults.find((x) => x && typeof x === 'object' && x.ac_index === i)
+             || acResults.find((x) => x && typeof x === 'object' && x.ac_text === label);
       let status = 'pending', mark = '○';
       if (r) {
         if (r.pass === true) { status = 'pass'; mark = '✓'; }
@@ -851,12 +850,7 @@ export default () => ({
       } else if (msg.state === 'running' || msg.state === 'verifying') {
         status = 'active'; mark = '◔';
       }
-      let kind = 'llm';
-      const lc = label.toLowerCase();
-      if (lc.includes('test')) kind = 'test';
-      else if (lc.includes('ui') || lc.includes('snapshot') || lc.includes('render')) kind = 'ui';
-      else if (lc.includes('cmd') || lc.includes('command') || lc.includes('shell')) kind = 'cmd';
-      out.push({ label, kind, status, mark });
+      out.push({ label, status, mark });
     }
     return out;
   },

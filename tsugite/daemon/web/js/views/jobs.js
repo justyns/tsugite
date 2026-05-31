@@ -24,8 +24,6 @@ const GROUPS = [
 const GROUPS_BY_KEY = Object.fromEntries(GROUPS.map((g) => [g.key, g]));
 const STUCK_STATES = GROUPS_BY_KEY.needs.states;
 
-const AC_KINDS = ['test', 'ui', 'cmd', 'llm'];
-
 function shellQuote(text) {
   // Match the worker prompt's expected escaping — quote with " and escape
   // embedded quotes. Simple enough for the preview to read accurately.
@@ -132,7 +130,6 @@ export default () => ({
   newError: null,
   submitting: false,
   STATE_META,
-  AC_KINDS,
 
   init() {
     this.load();
@@ -305,7 +302,7 @@ export default () => ({
   },
 
   addAc() {
-    this.newForm.acs.push({ kind: 'test', text: '' });
+    this.newForm.acs.push({ text: '' });
   },
 
   removeAc(i) {

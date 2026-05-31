@@ -80,8 +80,6 @@
 .dlg-ac.pass .mk { color: var(--green); }
 .dlg-ac.fail { border-color: color-mix(in oklab, var(--red) 34%, var(--surface0)); color: var(--text); }
 .dlg-ac.fail .mk { color: var(--red); }
-.dlg-ac .kind { margin-left: auto; font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase;
-  color: var(--overlay0); border: 1px solid var(--surface1); border-radius: 2px; padding: 0 4px; }
 
 .dlg textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 58px;
   background: var(--crust); color: var(--text); border: 1px solid var(--surface1); border-radius: 3px;
