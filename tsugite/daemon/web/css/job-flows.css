@@ -55,11 +55,10 @@
 .console-turn-gutter .role.job.cancelled { background: color-mix(in oklab, var(--overlay0) 22%, transparent);
   color: var(--overlay1); }
 
-/* ---- dialogs: shared extras over the modal base (styles.css) ------------ */
-.dlg { max-width: 520px; }
-.dlg .sub { font-family: var(--font-sans); font-size: 13px; line-height: 1.4; color: var(--text);
-  margin: -6px 0 4px; text-wrap: pretty; }
-.dlg .sub .id { font-family: var(--font-mono); font-size: 11px; color: var(--overlay1); }
+/* ---- dialog-specific bits rendered inside tsu-modal bodies -------------- */
+/* The modal shell, base button styling, and form primitives live in
+   tsu-modal.css. These rules add the retry/mark-done specific callouts and
+   chip rows that are unique to those dialogs. */
 
 /* context / verdict callout */
 .dlg-note { display: flex; gap: 9px; padding: 9px 11px; border-radius: 3px; margin: 10px 0 2px;
@@ -81,38 +80,12 @@
 .dlg-ac.fail { border-color: color-mix(in oklab, var(--red) 34%, var(--surface0)); color: var(--text); }
 .dlg-ac.fail .mk { color: var(--red); }
 
-.dlg textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 58px;
-  background: var(--crust); color: var(--text); border: 1px solid var(--surface1); border-radius: 3px;
-  padding: 8px 10px; font-family: var(--font-sans); font-size: 13px; line-height: 1.5; outline: none; }
-.dlg textarea:focus { border-color: var(--lavender); }
-.dlg textarea::placeholder { color: var(--overlay0); }
-.dlg textarea.mono { font-family: var(--font-mono); font-size: 12px; }
+/* mark-done textarea wants mono + smaller type than the default tsu-textarea */
+.tsu-textarea.mono { font-family: var(--font-mono); font-size: 12px; }
 
-/* example hint chips (quick-fill) */
+/* example hint chips (quick-fill, retry dialog) */
 .dlg-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .dlg-chip { background: var(--surface0); border: 1px solid var(--surface1); color: var(--subtext0);
   font-family: var(--font-mono); font-size: 10.5px; padding: 3px 8px; border-radius: 3px;
   cursor: pointer; }
 .dlg-chip:hover { border-color: var(--lavender); color: var(--text); }
-
-/* segmented toggle (attempt counter / workspace choice) */
-.dlg-seg { display: inline-flex; border: 1px solid var(--surface1); border-radius: 3px;
-  overflow: hidden; margin-top: 2px; }
-.dlg-seg button { background: var(--crust); color: var(--subtext0); border: none;
-  font-family: var(--font-mono); font-size: 11px; padding: 4px 10px; cursor: pointer;
-  border-right: 1px solid var(--surface1); }
-.dlg-seg button:last-child { border-right: none; }
-.dlg-seg button.on { background: var(--surface1); color: var(--text); }
-.dlg-seg button:hover:not(.on) { color: var(--text); }
-
-.dlg-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-@media (max-width: 460px) {
-  .dlg-row2 { grid-template-columns: 1fr; }
-}
-
-.btn-warn,
-.modal-actions button.btn-warn { background: var(--peach); color: var(--crust);
-  border-color: var(--peach); font-weight: 700; }
-.btn-warn:hover,
-.modal-actions button.btn-warn:hover { background: color-mix(in oklab, var(--peach) 84%, var(--crust));
-  border-color: var(--peach); color: var(--crust); }

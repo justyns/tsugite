@@ -134,51 +134,17 @@
 .jobs-empty .ex { margin-top: 6px; display: flex; flex-direction: column; gap: 6px; align-items: center; }
 .jobs-empty .ex .row { font-size: 11px; color: var(--overlay0); }
 
-/* ---- new-job modal ------------------------------------------------------ */
-.nj-modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.62); z-index: 50;
-  display: flex; align-items: center; justify-content: center; padding: 20px; }
-.nj-modal { max-width: 580px; width: 100%; max-height: 88vh; overflow-y: auto;
-  background: var(--base); border: 1px solid var(--surface1); border-radius: var(--r-md);
-  padding: 20px 22px; font-family: var(--font-sans); color: var(--text);
-  display: flex; flex-direction: column; gap: 10px; }
-.nj-modal h2 { margin: 0 0 6px; font-size: 15px; font-family: var(--font-mono); font-weight: 700;
-  text-transform: lowercase; letter-spacing: 0.04em; color: var(--text); }
-.nj-modal label { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.12em;
-  text-transform: uppercase; color: var(--overlay1); margin-bottom: 4px; display: block; }
-.nj-modal input[type="text"], .nj-modal select, .nj-modal textarea {
-  background: var(--crust); color: var(--text); border: 1px solid var(--surface1);
-  border-radius: var(--r-sm); padding: 6px 9px; font-family: var(--font-mono);
-  font-size: 12px; outline: none; box-sizing: border-box; }
-.nj-modal input[type="text"]:focus, .nj-modal select:focus, .nj-modal textarea:focus { border-color: var(--lavender); }
-.nj-modal input[type="text"]::placeholder, .nj-modal textarea::placeholder { color: var(--overlay0); }
-.nj-modal .nj-grow { width: 100%; resize: vertical; min-height: 64px;
-  font-family: var(--font-sans); font-size: 13px; line-height: 1.5; padding: 8px 10px; }
-.nj-hint { font-family: var(--font-mono); font-size: 10px; color: var(--overlay0); margin: 4px 0 0; }
-.nj-hint code { color: var(--lavender); }
+/* ---- new-job modal content ---------------------------------------------- */
+/* Modal shell + form chrome live in tsu-modal.css; these rules are the
+   new-job-specific bits: prompt textarea sizing, the AC list, command preview. */
+.new-job-modal .nj-grow { min-height: 64px; line-height: 1.5; }
 .nj-ac-list { display: flex; flex-direction: column; gap: 6px; }
 .nj-ac-row { display: flex; gap: 6px; align-items: center; }
-.nj-ac-row input { flex: 1; }
+.nj-ac-row .tsu-input { flex: 1; }
 .nj-ac-row .rm { background: none; border: 1px solid transparent; color: var(--overlay0);
   border-radius: var(--r-xs); font-size: 14px; padding: 2px 7px; flex-shrink: 0; cursor: pointer; }
 .nj-ac-row .rm:hover { color: var(--red); border-color: color-mix(in oklab, var(--red) 40%, var(--surface1)); }
-.nj-ac-add { background: none; border: 1px dashed var(--surface1); color: var(--subtext0);
-  border-radius: var(--r-sm); font-family: var(--font-mono); font-size: 11px;
-  padding: 5px 10px; align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
-.nj-ac-add:hover { border-color: var(--lavender); color: var(--text); }
-.nj-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.nj-step { display: flex; align-items: center; gap: 0; border: 1px solid var(--surface1);
-  border-radius: var(--r-sm); overflow: hidden; width: fit-content; }
-.nj-step button { background: var(--crust); border: none; color: var(--subtext0);
-  font-family: var(--font-mono); font-size: 13px; padding: 5px 11px; cursor: pointer; }
-.nj-step button:hover { background: var(--surface0); color: var(--text); }
-.nj-step .val { min-width: 30px; text-align: center; color: var(--text);
-  font-family: var(--font-mono); font-size: 12px;
-  border-left: 1px solid var(--surface1); border-right: 1px solid var(--surface1); padding: 5px 0; }
-.nj-seg { display: flex; border: 1px solid var(--surface1); border-radius: var(--r-sm); overflow: hidden; width: fit-content; }
-.nj-seg button { background: var(--crust); border: none; color: var(--subtext0);
-  font-family: var(--font-mono); font-size: 11px; padding: 4px 11px; cursor: pointer; }
-.nj-seg button + button { border-left: 1px solid var(--surface1); }
-.nj-seg button.on { background: var(--surface0); color: var(--text); }
+.nj-ac-add { align-self: flex-start; margin-top: 6px; }
 .nj-cmd { margin-top: 14px; border: 1px solid var(--surface0); border-radius: var(--r-md);
   background: var(--crust); overflow: hidden; }
 .nj-cmd .h { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase;
@@ -192,13 +158,6 @@
   background: color-mix(in oklab, var(--red) 10%, var(--crust));
   border: 1px solid color-mix(in oklab, var(--red) 35%, var(--surface1));
   border-radius: var(--r-sm); padding: 6px 10px; }
-.nj-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
-.nj-actions button { background: var(--crust); border: 1px solid var(--surface1); color: var(--subtext1);
-  font-family: var(--font-mono); font-size: 11.5px; padding: 5px 14px; border-radius: var(--r-sm); cursor: pointer; }
-.nj-actions button:hover { background: var(--surface0); color: var(--text); }
-.nj-actions button.primary { background: var(--lavender); border-color: var(--lavender); color: var(--crust); font-weight: 700; }
-.nj-actions button.primary:hover { background: var(--blue); border-color: var(--blue); }
-.nj-actions button.primary:disabled { opacity: 0.55; cursor: not-allowed; }
 
 /* ---- mobile ------------------------------------------------------------- */
 @media (max-width: 640px) {
@@ -211,6 +170,4 @@
   .jobs-summary { padding: 10px 12px 2px; flex-wrap: nowrap; overflow-x: auto;
     -webkit-overflow-scrolling: touch; scrollbar-width: none; }
   .jobs-summary::-webkit-scrollbar { display: none; }
-  .nj-row2 { grid-template-columns: 1fr; }
-  .nj-modal { max-height: 92vh; padding: 16px; }
 }
