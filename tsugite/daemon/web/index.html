@@ -1407,51 +1407,61 @@
     </div>
 
     <!-- Retry-with-hint dialog (replaces browser prompt()) -->
-    <div class="modal-backdrop" :class="{ open: retryDialog.open }"
-         @click.self="closeRetryDialog()"
-         @keydown.escape.window="if(retryDialog.open) closeRetryDialog()">
-      <div class="modal-content dlg" role="dialog" aria-label="Retry with hint">
-        <h2>retry with hint</h2>
-        <div class="sub">
-          <span x-text="retryDialog.prompt"></span>
-          <span class="id"> · <span x-text="retryDialog.jobId"></span></span>
-        </div>
-        <template x-if="retryDialog.lastVerdict">
-          <div class="dlg-note warn">
-            <span class="mk">▲</span>
-            <span>last verdict — <b x-text="retryDialog.lastVerdict"></b>. Your hint is added to the next attempt's prompt.</span>
-          </div>
-        </template>
-        <label for="retry-hint-text">hint for the next attempt</label>
-        <textarea id="retry-hint-text" x-ref="retryHintText"
-                  x-model="retryDialog.hint"
-                  placeholder="tell the worker what to do differently this time…"
-                  rows="3"></textarea>
-        <div class="dlg-chips">
-          <template x-for="(tip, i) in retryDialog.suggestions" :key="i">
-            <button type="button" class="dlg-chip" @click="retryDialog.hint = tip" x-text="tip.length > 42 ? tip.slice(0, 42) + '…' : tip"></button>
+    <div x-data="tsuModal('retry-hint')" x-show="open" x-cloak
+         class="tsu-modal-backdrop retry-hint-modal"
+         @keydown.escape.window="onEscape()" @click.self="onBackdrop()">
+      <div class="tsu-modal --lg" role="dialog" aria-modal="true" aria-label="Retry with hint"
+           x-trap.noscroll="open">
+        <header class="tsu-modal-head">
+          <h2 class="tsu-modal-title">retry with hint</h2>
+          <button class="tsu-modal-x" @click="closeRetryDialog()" aria-label="Close">&#x2715;</button>
+        </header>
+        <div class="tsu-modal-body">
+          <p class="tsu-modal-sub" style="margin:0">
+            <span x-text="retryDialog.prompt"></span>
+            <span style="font-family:var(--font-mono);color:var(--overlay1)"> · <span x-text="retryDialog.jobId"></span></span>
+          </p>
+          <template x-if="retryDialog.lastVerdict">
+            <div class="dlg-note warn">
+              <span class="mk">▲</span>
+              <span>last verdict — <b x-text="retryDialog.lastVerdict"></b>. Your hint is added to the next attempt's prompt.</span>
+            </div>
           </template>
-        </div>
-        <div class="dlg-row2" style="margin-top:14px">
-          <div>
-            <label>attempt counter</label>
-            <div class="dlg-seg">
-              <button type="button" :class="retryDialog.resetCounter ? 'on' : ''" @click="retryDialog.resetCounter = true">reset to 1</button>
-              <button type="button" :class="!retryDialog.resetCounter ? 'on' : ''" @click="retryDialog.resetCounter = false">continue (4+)</button>
+          <label class="tsu-field" for="retry-hint-text">
+            <span class="tsu-label">hint for the next attempt</span>
+            <textarea id="retry-hint-text" x-ref="retryHintText"
+                      class="tsu-textarea"
+                      x-model="retryDialog.hint"
+                      placeholder="tell the worker what to do differently this time…"
+                      rows="3"></textarea>
+          </label>
+          <div class="dlg-chips">
+            <template x-for="(tip, i) in retryDialog.suggestions" :key="i">
+              <button type="button" class="dlg-chip" @click="retryDialog.hint = tip" x-text="tip.length > 42 ? tip.slice(0, 42) + '…' : tip"></button>
+            </template>
+          </div>
+          <div class="tsu-grid-2">
+            <div class="tsu-field">
+              <span class="tsu-label">attempt counter</span>
+              <div class="tsu-seg">
+                <button type="button" :class="retryDialog.resetCounter ? 'on' : ''" :aria-pressed="retryDialog.resetCounter" @click="retryDialog.resetCounter = true">reset to 1</button>
+                <button type="button" :class="!retryDialog.resetCounter ? 'on' : ''" :aria-pressed="!retryDialog.resetCounter" @click="retryDialog.resetCounter = false">continue (4+)</button>
+              </div>
+            </div>
+            <div class="tsu-field">
+              <span class="tsu-label">workspace</span>
+              <div class="tsu-seg">
+                <button type="button" :class="retryDialog.workspace === 'keep' ? 'on' : ''" :aria-pressed="retryDialog.workspace === 'keep'" @click="retryDialog.workspace = 'keep'">keep last</button>
+                <button type="button" :class="retryDialog.workspace === 'fresh' ? 'on' : ''" :aria-pressed="retryDialog.workspace === 'fresh'" @click="retryDialog.workspace = 'fresh'">fresh checkout</button>
+              </div>
             </div>
           </div>
-          <div>
-            <label>workspace</label>
-            <div class="dlg-seg">
-              <button type="button" :class="retryDialog.workspace === 'keep' ? 'on' : ''" @click="retryDialog.workspace = 'keep'">keep last</button>
-              <button type="button" :class="retryDialog.workspace === 'fresh' ? 'on' : ''" @click="retryDialog.workspace = 'fresh'">fresh checkout</button>
-            </div>
-          </div>
         </div>
-        <div class="modal-actions">
-          <button class="btn-cancel" @click="closeRetryDialog()">cancel</button>
-          <button class="btn-primary" @click="submitRetryDialog()" :disabled="!retryDialog.hint.trim()">↻ retry with hint</button>
-        </div>
+        <footer class="tsu-modal-foot">
+          <span class="spacer"></span>
+          <button class="tsu-btn" @click="closeRetryDialog()">cancel</button>
+          <button class="tsu-btn --primary" @click="submitRetryDialog()" :disabled="!retryDialog.hint.trim()">↻ retry with hint</button>
+        </footer>
       </div>
     </div>
 
