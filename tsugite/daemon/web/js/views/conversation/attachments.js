@@ -3,7 +3,6 @@ export const attachmentsMixin = {
   isDragging: false,
   showPasteBanner: false,
   pendingPasteText: '',
-  showPasteModal: false,
   pasteModalText: '',
   pasteModalFilename: '',
 
@@ -52,7 +51,7 @@ export const attachmentsMixin = {
 
   _resetPasteState() {
     this.showPasteBanner = false;
-    this.showPasteModal = false;
+    this.$store.tsu.close('paste');
     this.pendingPasteText = '';
     this.pasteModalText = '';
     this.pasteModalFilename = '';
@@ -79,7 +78,7 @@ export const attachmentsMixin = {
   openPasteModal() {
     this._resetPasteState();
     this.pasteModalFilename = `pasted-${this._pasteTimestamp()}.txt`;
-    this.showPasteModal = true;
+    this.$store.tsu.open('paste');
     this.$nextTick(() => this.$refs.pasteModalText?.focus());
   },
 

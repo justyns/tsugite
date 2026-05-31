@@ -3,7 +3,6 @@ import { get, post } from '../../api.js';
 export const inputMixin = {
   _mobileQuery: null,
   _draftTimer: null,
-  showExpandModal: false,
   expandModalText: '',
   messageText: '',
   availableCommands: [],
@@ -219,19 +218,19 @@ export const inputMixin = {
 
   openExpandModal() {
     this.expandModalText = this.messageText;
-    this.showExpandModal = true;
+    this.$store.tsu.open('expand');
     this.$nextTick(() => this.$refs.expandModalText?.focus());
   },
 
   closeExpandModal() {
-    this.showExpandModal = false;
+    this.$store.tsu.close('expand');
     this.expandModalText = '';
   },
 
   confirmExpandModal() {
     this.messageText = this.expandModalText;
     this.expandModalText = '';
-    this.showExpandModal = false;
+    this.$store.tsu.close('expand');
     this._saveDraft();
     this.$nextTick(() => {
       const ta = this.$refs.messageInput;

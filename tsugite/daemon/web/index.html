@@ -645,7 +645,7 @@
                   </span>
                 </template>
                 <template x-if="loadedSkills.length">
-                  <span class="kv" style="cursor:pointer" @click="showSkills = true">
+                  <span class="kv" style="cursor:pointer" @click="$store.tsu.open('skills')">
                     <span class="k">skills</span>
                     <span class="v" x-text="loadedSkills.length"></span>
                   </span>
@@ -1341,68 +1341,112 @@
     </div>
 
     <!-- Hidden / modal surfaces preserved from previous UI -->
-    <div class="modal-backdrop paste-modal" :class="{ open: showPasteModal }" @click.self="closePasteModal()" @keydown.escape.window="if(showPasteModal) closePasteModal()">
-      <div class="modal-content">
-        <h2>Paste text as attachment</h2>
-        <label for="paste-modal-filename">Filename</label>
-        <input id="paste-modal-filename" type="text" x-model="pasteModalFilename" placeholder="pasted-text.txt">
-        <label for="paste-modal-text">Content</label>
-        <textarea id="paste-modal-text" x-ref="pasteModalText" class="paste-modal-text" x-model="pasteModalText" rows="10" placeholder="Paste or type text here..."></textarea>
-        <div class="modal-actions">
-          <button class="btn-cancel" @click="closePasteModal()">Cancel</button>
-          <button class="btn-primary" @click="confirmPasteModal()" :disabled="!pasteModalText.trim()">Attach</button>
+    <div x-data="tsuModal('paste')" x-show="open" x-cloak
+         class="tsu-modal-backdrop paste-modal"
+         @keydown.escape.window="onEscape()" @click.self="onBackdrop()">
+      <div class="tsu-modal --lg" role="dialog" aria-modal="true" aria-label="Paste text as attachment"
+           x-trap.noscroll="open">
+        <header class="tsu-modal-head">
+          <h2 class="tsu-modal-title">Paste text as attachment</h2>
+          <button class="tsu-modal-x" @click="closePasteModal()" aria-label="Close">&#x2715;</button>
+        </header>
+        <div class="tsu-modal-body">
+          <label class="tsu-field" for="paste-modal-filename">
+            <span class="tsu-label">Filename</span>
+            <input id="paste-modal-filename" class="tsu-input" type="text" x-model="pasteModalFilename" placeholder="pasted-text.txt">
+          </label>
+          <label class="tsu-field" for="paste-modal-text">
+            <span class="tsu-label">Content</span>
+            <textarea id="paste-modal-text" x-ref="pasteModalText" class="tsu-textarea paste-modal-text" x-model="pasteModalText" rows="10" placeholder="Paste or type text here..."></textarea>
+          </label>
         </div>
+        <footer class="tsu-modal-foot">
+          <span class="spacer"></span>
+          <button class="tsu-btn" @click="closePasteModal()">Cancel</button>
+          <button class="tsu-btn --primary" @click="confirmPasteModal()" :disabled="!pasteModalText.trim()">Attach</button>
+        </footer>
       </div>
     </div>
-    <div class="modal-backdrop expand-modal" :class="{ open: showExpandModal }" @click.self="closeExpandModal()" @keydown.escape.window="if(showExpandModal) closeExpandModal()">
-      <div class="modal-content">
-        <h2>Edit message</h2>
-        <textarea x-ref="expandModalText" class="expand-modal-text" x-model="expandModalText" rows="10" placeholder="Type your message..."></textarea>
-        <div class="modal-actions">
-          <button class="btn-cancel" @click="closeExpandModal()">Cancel</button>
-          <button class="btn-primary" @click="confirmExpandModal()">Done</button>
+    <div x-data="tsuModal('expand')" x-show="open" x-cloak
+         class="tsu-modal-backdrop expand-modal"
+         @keydown.escape.window="onEscape()" @click.self="onBackdrop()">
+      <div class="tsu-modal --lg" role="dialog" aria-modal="true" aria-label="Edit message"
+           x-trap.noscroll="open">
+        <header class="tsu-modal-head">
+          <h2 class="tsu-modal-title">Edit message</h2>
+          <button class="tsu-modal-x" @click="closeExpandModal()" aria-label="Close">&#x2715;</button>
+        </header>
+        <div class="tsu-modal-body">
+          <textarea x-ref="expandModalText" class="tsu-textarea expand-modal-text" x-model="expandModalText" rows="10" placeholder="Type your message..."></textarea>
         </div>
+        <footer class="tsu-modal-foot">
+          <span class="spacer"></span>
+          <button class="tsu-btn" @click="closeExpandModal()">Cancel</button>
+          <button class="tsu-btn --primary" @click="confirmExpandModal()">Done</button>
+        </footer>
       </div>
     </div>
-    <div class="modal-backdrop att-modal" :class="{ open: showAttachments }" @click.self="showAttachments = false">
-      <div class="modal-content">
-        <h2>Attachments</h2>
-        <template x-if="attachments.length === 0">
-          <p style="color:var(--muted);font-size:13px">No attachments</p>
-        </template>
-        <template x-for="(att, i) in attachments" :key="i">
-          <div class="att-item" x-data="{ open: false }">
-            <div class="att-header" @click="open = !open">
-              <span class="att-name" x-text="att.name"></span>
-              <span class="att-type" x-text="att.content_type + ' · ' + att.mime_type"></span>
+    <div x-data="tsuModal('attachments')" x-show="open" x-cloak
+         class="tsu-modal-backdrop attachments-modal"
+         @keydown.escape.window="onEscape()" @click.self="onBackdrop()">
+      <div class="tsu-modal --xl" role="dialog" aria-modal="true" aria-label="Attachments"
+           x-trap.noscroll="open">
+        <header class="tsu-modal-head">
+          <h2 class="tsu-modal-title">Attachments</h2>
+          <button class="tsu-modal-x" @click="close()" aria-label="Close">&#x2715;</button>
+        </header>
+        <div class="tsu-modal-body">
+          <template x-if="attachments.length === 0">
+            <p>No attachments</p>
+          </template>
+          <template x-for="(att, i) in attachments" :key="i">
+            <div class="att-item" x-data="{ open: false }">
+              <div class="att-header" @click="open = !open">
+                <span class="att-name" x-text="att.name"></span>
+                <span class="att-type" x-text="att.content_type + ' · ' + att.mime_type"></span>
+              </div>
+              <div class="att-body" x-show="open">
+                <template x-if="att.content != null"><pre x-text="att.content"></pre></template>
+                <template x-if="att.content == null">
+                  <span style="color:var(--muted)" x-text="att.size_bytes != null ? att.size_bytes + ' bytes (binary)' : 'No content preview'"></span>
+                </template>
+              </div>
             </div>
-            <div class="att-body" x-show="open">
-              <template x-if="att.content != null"><pre x-text="att.content"></pre></template>
-              <template x-if="att.content == null">
-                <span style="color:var(--muted)" x-text="att.size_bytes != null ? att.size_bytes + ' bytes (binary)' : 'No content preview'"></span>
-              </template>
-            </div>
-          </div>
-        </template>
-        <div class="modal-actions"><button class="btn-cancel" @click="showAttachments = false">Close</button></div>
+          </template>
+        </div>
+        <footer class="tsu-modal-foot">
+          <span class="spacer"></span>
+          <button class="tsu-btn" @click="close()">Close</button>
+        </footer>
       </div>
     </div>
-    <div class="modal-backdrop att-modal" :class="{ open: showSkills }" @click.self="showSkills = false">
-      <div class="modal-content">
-        <h2>Loaded Skills</h2>
-        <template x-if="loadedSkills.length === 0">
-          <p style="color:var(--muted);font-size:13px">No skills loaded</p>
-        </template>
-        <template x-for="skill in loadedSkills" :key="skill.name">
-          <div class="att-item">
-            <div class="att-header">
-              <span class="att-name" x-text="skill.name"></span>
-              <span class="att-type" x-text="skill.description"></span>
-              <button class="att-remove" title="Remove from list" @click.stop="removeLoadedSkill(skill.name)">&times;</button>
+    <div x-data="tsuModal('skills')" x-show="open" x-cloak
+         class="tsu-modal-backdrop skills-modal"
+         @keydown.escape.window="onEscape()" @click.self="onBackdrop()">
+      <div class="tsu-modal --xl" role="dialog" aria-modal="true" aria-label="Loaded Skills"
+           x-trap.noscroll="open">
+        <header class="tsu-modal-head">
+          <h2 class="tsu-modal-title">Loaded Skills</h2>
+          <button class="tsu-modal-x" @click="close()" aria-label="Close">&#x2715;</button>
+        </header>
+        <div class="tsu-modal-body">
+          <template x-if="loadedSkills.length === 0">
+            <p>No skills loaded</p>
+          </template>
+          <template x-for="skill in loadedSkills" :key="skill.name">
+            <div class="att-item">
+              <div class="att-header">
+                <span class="att-name" x-text="skill.name"></span>
+                <span class="att-type" x-text="skill.description"></span>
+                <button class="att-remove" title="Remove from list" @click.stop="removeLoadedSkill(skill.name)">&times;</button>
+              </div>
             </div>
-          </div>
-        </template>
-        <div class="modal-actions"><button class="btn-cancel" @click="showSkills = false">Close</button></div>
+          </template>
+        </div>
+        <footer class="tsu-modal-foot">
+          <span class="spacer"></span>
+          <button class="tsu-btn" @click="close()">Close</button>
+        </footer>
       </div>
     </div>
 

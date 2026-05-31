@@ -37,10 +37,8 @@ export default () => ({
   // _sessionState routes every closure-captured write to the live successor's
   // state object so in-flight progress shows up on the session the user now sees.
   _supersededMap: {},
-  showAttachments: false,
   attachments: [],
   inputMenuOpen: false,
-  showSkills: false,
   // Retry-with-hint and mark-done dialogs replace the browser prompt()/confirm()
   // formerly used in jobRetryWithHint/jobMarkDone. Open via _openRetryDialog /
   // _openMarkDoneDialog; submit posts to the same /api/jobs/{id}/... endpoints.
@@ -589,7 +587,7 @@ export default () => ({
   async openAttachments() {
     const agent = this.$store.app.selectedAgent;
     if (!agent) return;
-    this.showAttachments = true;
+    this.$store.tsu.open('attachments');
     this.attachments = [];
     try {
       const data = await get(`/api/agents/${agent}/attachments`);
