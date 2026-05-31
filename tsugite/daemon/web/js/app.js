@@ -48,7 +48,6 @@ Alpine.store('app', {
   theme: localStorage.getItem('tsugite_theme') || 'frappe',
   userId: localStorage.getItem('tsugite_user_id') || 'web-user-1',
   authRequired: !localStorage.getItem('tsugite_token'),
-  showSettings: false,
   menuOpen: false,
   lastEvent: null,
   viewSessionId: initialParsed.sessionId || null,

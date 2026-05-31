@@ -9,7 +9,7 @@ recovery. The fix must give the user a way out (timeout + surfaced error).
 
 
 def _wait_for_settings(page):
-    page.wait_for_selector(".console-modal-overlay", state="visible", timeout=5000)
+    page.wait_for_selector(".tsu-modal-backdrop.settings-modal", state="visible", timeout=5000)
 
 
 def test_push_toggle_recovers_when_subscribe_hangs(page, base_url, e2e_auth_token):
@@ -48,12 +48,12 @@ def test_push_toggle_recovers_when_subscribe_hangs(page, base_url, e2e_auth_toke
 
     # Open settings via the store (more reliable than clicking the tab action
     # since the action is in two places — header and mobile menu).
-    page.evaluate("Alpine.store('app').showSettings = true")
+    page.evaluate("Alpine.store('tsu').open('settings')")
     _wait_for_settings(page)
 
     # Find the push toggle button. The settings modal only renders it when
     # the browser exposes PushManager — Playwright Chromium does.
-    btn = page.locator(".console-modal-overlay button", has_text="enable notifications")
+    btn = page.locator(".tsu-modal-backdrop.settings-modal button", has_text="enable notifications")
     btn.wait_for(state="visible", timeout=5000)
     btn.click()
 
@@ -62,7 +62,7 @@ def test_push_toggle_recovers_when_subscribe_hangs(page, base_url, e2e_auth_toke
     # an error / reset the button.
     page.wait_for_function(
         "() => {"
-        " const b = [...document.querySelectorAll('.console-modal-overlay button')]"
+        " const b = [...document.querySelectorAll('.tsu-modal-backdrop.settings-modal button')]"
         "  .find(b => /working/i.test(b.textContent));"
         " return b !== undefined;"
         "}",
@@ -78,7 +78,7 @@ def test_push_toggle_recovers_when_subscribe_hangs(page, base_url, e2e_auth_toke
     # subscribe and pushLoading is reset within ~10s. We give it 12s headroom.
     page.wait_for_function(
         "() => {"
-        " const b = [...document.querySelectorAll('.console-modal-overlay button')]"
+        " const b = [...document.querySelectorAll('.tsu-modal-backdrop.settings-modal button')]"
         "  .find(b => /enable notifications|disable notifications/i.test(b.textContent));"
         " return b !== undefined && !b.disabled;"
         "}",
@@ -128,23 +128,23 @@ def test_push_toggle_recovers_when_unsubscribe_hangs(page, base_url, e2e_auth_to
 
     # Open settings and force pushSubscribed=true so the button reads as
     # "disable notifications" and the click hits the unsubscribe branch.
-    page.evaluate("Alpine.store('app').showSettings = true")
+    page.evaluate("Alpine.store('tsu').open('settings')")
     _wait_for_settings(page)
     page.evaluate(
         "(() => {"
-        "  const overlay = document.querySelector('.console-modal-overlay');"
-        "  const data = Alpine.$data(overlay);"
+        "  const panel = document.querySelector('.tsu-modal-backdrop.settings-modal .tsu-modal');"
+        "  const data = Alpine.$data(panel);"
         "  data.pushSubscribed = true;"
         "})()"
     )
 
-    btn = page.locator(".console-modal-overlay button", has_text="disable notifications")
+    btn = page.locator(".tsu-modal-backdrop.settings-modal button", has_text="disable notifications")
     btn.wait_for(state="visible", timeout=5000)
     btn.click()
 
     page.wait_for_function(
         "() => {"
-        " const b = [...document.querySelectorAll('.console-modal-overlay button')]"
+        " const b = [...document.querySelectorAll('.tsu-modal-backdrop.settings-modal button')]"
         "  .find(b => /enable notifications|disable notifications/i.test(b.textContent));"
         " return b !== undefined && !b.disabled;"
         "}",

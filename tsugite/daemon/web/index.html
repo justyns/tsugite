@@ -53,7 +53,7 @@
           title="Command palette">
     <kbd>⌘K</kbd>
   </button>
-  <button class="console-tab-action" @click="$store.app.showSettings = true" title="Settings">settings</button>
+  <button class="console-tab-action" @click="$store.tsu.open('settings')" title="Settings">settings</button>
 </div>
 
 <!-- Mobile menu drawer (collapses tab bar at narrow widths) -->
@@ -65,7 +65,7 @@
               @click="$store.app.view = tab; location.hash = tab; $store.app.menuOpen = false"
               x-text="tab"></button>
     </template>
-    <button class="console-tab-action" @click="$store.app.showSettings = true; $store.app.menuOpen = false">settings</button>
+    <button class="console-tab-action" @click="$store.tsu.open('settings'); $store.app.menuOpen = false">settings</button>
   </div>
 </div>
 
@@ -2465,35 +2465,46 @@
 </div>
 
 <!-- Settings modal -->
-<div class="console-modal-overlay" x-show="$store.app.showSettings" @click.self="$store.app.showSettings = false"
-     x-data="{ token: '', userId: '', tempTheme: '', tempModel: '', loadedModel: '', resolvedModel: '', models: [], pushSubscribed: false, pushLoading: false }"
-     x-effect="if ($store.app.showSettings) { token = localStorage.getItem('tsugite_token') || ''; userId = $store.app.userId; tempTheme = $store.app.theme; let agent = $store.app.selectedAgent; if (agent) { window.tsugiteApi.get('/api/agents/' + agent + '/status').then(d => { tempModel = d.model || ''; loadedModel = d.model || ''; resolvedModel = d.resolved_model || ''; }).catch(() => {}); } if (!models.length) { window.tsugiteApi.get('/api/models').then(d => { models = d.models || []; }).catch(() => {}); } if ('serviceWorker' in navigator && 'PushManager' in window) { navigator.serviceWorker.ready.then(r => r.pushManager.getSubscription()).then(s => { pushSubscribed = !!s; }).catch(() => {}); } }">
-  <div class="console-modal">
-    <h2>settings</h2>
-    <div class="body">
-      <div class="row"><label>api token</label>
-        <input type="password" x-model="token" @input="token = token.trim()" placeholder="tsu_…">
-      </div>
-      <div class="row"><label>user id</label>
-        <input type="text" x-model="userId" placeholder="web-user-1">
-      </div>
-      <div class="row"><label>theme</label>
-        <select x-model="tempTheme" @change="$store.app.theme = tempTheme">
+<div x-data="tsuModal('settings')" x-show="open" x-cloak
+     class="tsu-modal-backdrop settings-modal"
+     @keydown.escape.window="onEscape()" @click.self="onBackdrop()">
+  <div class="tsu-modal --sm" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title"
+       x-trap.noscroll="open"
+       x-data="{ token: '', userId: '', tempTheme: '', tempModel: '', loadedModel: '', resolvedModel: '', models: [], pushSubscribed: false, pushLoading: false }"
+       x-effect="if (open) { token = localStorage.getItem('tsugite_token') || ''; userId = $store.app.userId; tempTheme = $store.app.theme; let agent = $store.app.selectedAgent; if (agent) { window.tsugiteApi.get('/api/agents/' + agent + '/status').then(d => { tempModel = d.model || ''; loadedModel = d.model || ''; resolvedModel = d.resolved_model || ''; }).catch(() => {}); } if (!models.length) { window.tsugiteApi.get('/api/models').then(d => { models = d.models || []; }).catch(() => {}); } if ('serviceWorker' in navigator && 'PushManager' in window) { navigator.serviceWorker.ready.then(r => r.pushManager.getSubscription()).then(s => { pushSubscribed = !!s; }).catch(() => {}); } }">
+    <header class="tsu-modal-head">
+      <h2 class="tsu-modal-title" id="settings-modal-title">settings</h2>
+      <button class="tsu-modal-x" @click="close()" aria-label="Close">&#x2715;</button>
+    </header>
+    <div class="tsu-modal-body">
+      <label class="tsu-field">
+        <span class="tsu-label">api token</span>
+        <input class="tsu-input" type="password" x-model="token" @input="token = token.trim()" placeholder="tsu_…">
+      </label>
+      <label class="tsu-field">
+        <span class="tsu-label">user id</span>
+        <input class="tsu-input" type="text" x-model="userId" placeholder="web-user-1">
+      </label>
+      <label class="tsu-field">
+        <span class="tsu-label">theme</span>
+        <select class="tsu-select" x-model="tempTheme" @change="$store.app.theme = tempTheme">
           <option value="latte">latte</option>
           <option value="frappe">frappé</option>
           <option value="macchiato">macchiato</option>
           <option value="mocha">mocha</option>
         </select>
-      </div>
-      <div class="row"><label>agent</label>
-        <select x-model="$store.app.selectedAgent">
+      </label>
+      <label class="tsu-field">
+        <span class="tsu-label">agent</span>
+        <select class="tsu-select" x-model="$store.app.selectedAgent">
           <template x-for="a in $store.app.agents" :key="a.name">
             <option :value="a.name" x-text="a.name"></option>
           </template>
         </select>
-      </div>
-      <div class="row"><label>model override</label>
-        <select x-model="tempModel">
+      </label>
+      <label class="tsu-field">
+        <span class="tsu-label">model override</span>
+        <select class="tsu-select" x-model="tempModel">
           <option value="">— agent default</option>
           <template x-if="tempModel && !models.find(m => m.id === tempModel)">
             <option :value="tempModel" x-text="tempModel + '  (custom)'"></option>
@@ -2502,28 +2513,28 @@
             <option :value="m.id" x-text="m.context_window ? m.id + '  · ' + (m.context_window/1000).toFixed(0) + 'k ctx' : m.id"></option>
           </template>
         </select>
-      </div>
-      <div x-show="resolvedModel" style="font-size:10.5px;color:var(--overlay1);padding-left:96px;margin-top:-4px">
-        resolves to <code x-text="resolvedModel"></code>
-      </div>
-      <div class="row" style="align-items:flex-start"><label>options</label>
-        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-family:var(--font-mono);font-size:11.5px;color:var(--text);text-transform:none;letter-spacing:normal">
+        <p class="tsu-hint" x-show="resolvedModel">resolves to <code x-text="resolvedModel"></code></p>
+      </label>
+      <div class="tsu-field">
+        <span class="tsu-label">options</span>
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-family:var(--font-mono);font-size:11.5px;color:var(--text)">
           <input type="checkbox" :checked="$store.app.autoFollow" @change="$store.app.autoFollow = $el.checked; localStorage.setItem('tsugite_auto_follow', $el.checked)">
           auto-follow turn details
         </label>
       </div>
       <template x-if="'serviceWorker' in navigator && 'PushManager' in window">
-        <div class="row"><label>push</label>
-          <button class="head-btn" :disabled="pushLoading"
+        <div class="tsu-field">
+          <span class="tsu-label">push</span>
+          <button class="tsu-btn" :disabled="pushLoading"
                   @click="pushLoading = true; window.tsugiteTogglePush(pushSubscribed).then(s => { pushSubscribed = s; }).catch(() => {}).finally(() => { pushLoading = false; })"
-                  x-text="pushLoading ? 'working…' : (pushSubscribed ? 'disable notifications' : 'enable notifications')"
-                  style="background:var(--surface0);border:1px solid var(--surface1);color:var(--text);padding:4px 10px;border-radius:3px;font-family:var(--font-mono);font-size:11px;cursor:pointer"></button>
+                  x-text="pushLoading ? 'working…' : (pushSubscribed ? 'disable notifications' : 'enable notifications')"></button>
         </div>
       </template>
     </div>
-    <div class="foot">
-      <button @click="$store.app.theme = localStorage.getItem('tsugite_theme') || 'frappe'; $store.app.showSettings = false">cancel</button>
-      <button class="primary" @click="
+    <footer class="tsu-modal-foot">
+      <span class="spacer"></span>
+      <button class="tsu-btn" @click="$store.app.theme = localStorage.getItem('tsugite_theme') || 'frappe'; close()">cancel</button>
+      <button class="tsu-btn --primary" @click="
         if (token.trim()) localStorage.setItem('tsugite_token', token.trim()); else localStorage.removeItem('tsugite_token');
         $store.app.userId = userId.trim() || 'web-user-1';
         localStorage.setItem('tsugite_user_id', $store.app.userId);
@@ -2532,9 +2543,9 @@
         if (tempModel !== loadedModel) {
           window.tsugiteApi.patch('/api/agents/' + $store.app.selectedAgent + '/config', { model: tempModel || null }).catch(() => {});
         }
-        $store.app.showSettings = false;
+        close();
       ">save</button>
-    </div>
+    </footer>
   </div>
 </div>
 
