@@ -386,7 +386,7 @@ class BaseAdapter(ABC):
         ctx["session_id"] = meta.get("session_id", "") if ctx["is_session"] else ""
         ctx["is_channel_session"] = bool(meta.get("channel_session"))
         ctx["can_spawn_sessions"] = True  # Always true in daemon mode
-        ctx["can_spawn_jobs"] = "@jobs" in (channel_context.agent.tools or []) or "spawn_job" in (channel_context.agent.tools or [])
+        ctx["can_spawn_jobs"] = True  # Always true in daemon mode; guidance is a no-op if @jobs isn't in the agent's tools
 
         window_minutes = meta.get("heartbeat_window", 10)
         since = (datetime.now(timezone.utc) - timedelta(minutes=window_minutes)).isoformat()
