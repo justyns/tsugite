@@ -98,14 +98,11 @@
   .console-keystrip kbd { font-size: 9px; }
 }
 
-/* Paste / expand legacy modals shrink on small viewports (kept lifted from prior responsive.css) */
+/* Paste / expand modals on mobile: stretch textarea, stack footer buttons.
+   The shell's mobile breakpoint already pins the panel to the bottom of the
+   viewport via tsu-modal.css; this just relaxes the textarea height limits. */
 @media (max-width: 600px) {
-  .paste-modal .modal-content,
-  .expand-modal .modal-content {
-    width: 100%; max-width: none; height: 100%; max-height: none;
-    border-radius: 0; display: flex; flex-direction: column;
-  }
-  .paste-modal textarea, .expand-modal textarea { flex: 1; min-height: 0; }
-  .paste-modal .modal-actions, .expand-modal .modal-actions { flex-direction: column; }
-  .paste-modal .modal-actions button, .expand-modal .modal-actions button { width: 100%; }
+  .paste-modal .tsu-textarea, .expand-modal .tsu-textarea { flex: 1; min-height: 0; }
+  .paste-modal .tsu-modal-foot, .expand-modal .tsu-modal-foot { flex-direction: column; align-items: stretch; }
+  .paste-modal .tsu-modal-foot .tsu-btn, .expand-modal .tsu-modal-foot .tsu-btn { width: 100%; justify-content: center; }
 }

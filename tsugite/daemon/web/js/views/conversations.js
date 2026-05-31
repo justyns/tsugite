@@ -37,15 +37,12 @@ export default () => ({
   // _sessionState routes every closure-captured write to the live successor's
   // state object so in-flight progress shows up on the session the user now sees.
   _supersededMap: {},
-  showAttachments: false,
   attachments: [],
   inputMenuOpen: false,
-  showSkills: false,
   // Retry-with-hint and mark-done dialogs replace the browser prompt()/confirm()
   // formerly used in jobRetryWithHint/jobMarkDone. Open via _openRetryDialog /
   // _openMarkDoneDialog; submit posts to the same /api/jobs/{id}/... endpoints.
   retryDialog: {
-    open: false,
     jobId: '',
     prompt: '',
     lastVerdict: '',
@@ -59,7 +56,6 @@ export default () => ({
     ],
   },
   markDoneDialog: {
-    open: false,
     jobId: '',
     prompt: '',
     criteria: [],
@@ -591,7 +587,7 @@ export default () => ({
   async openAttachments() {
     const agent = this.$store.app.selectedAgent;
     if (!agent) return;
-    this.showAttachments = true;
+    this.$store.tsu.open('attachments');
     this.attachments = [];
     try {
       const data = await get(`/api/agents/${agent}/attachments`);
@@ -884,20 +880,20 @@ export default () => ({
     const criteria = msg ? this.jobCriteria(msg) : [];
     const failed = criteria.filter(c => c.status === 'fail');
     const passed = criteria.filter(c => c.status === 'pass');
-    this.markDoneDialog.open = true;
     this.markDoneDialog.jobId = jobId;
     this.markDoneDialog.prompt = msg?.prompt || '';
     this.markDoneDialog.criteria = [...failed, ...passed];  // failed first, design's recap order
     this.markDoneDialog.reason = '';
+    this.$store.tsu.open('mark-done');
   },
 
   closeMarkDoneDialog() {
-    this.markDoneDialog.open = false;
+    this.$store.tsu.close('mark-done');
   },
 
   async submitMarkDoneDialog() {
     const { jobId, reason } = this.markDoneDialog;
-    this.markDoneDialog.open = false;
+    this.$store.tsu.close('mark-done');
     try {
       await post(`/api/jobs/${jobId}/mark-done`, { reason: reason.trim() || 'marked done by user' });
     } catch (e) {
@@ -915,27 +911,27 @@ export default () => ({
       if (firstFail) lastVerdict = firstFail.reason || firstFail.ac_text || '';
     }
     if (!lastVerdict && msg?.error) lastVerdict = String(msg.error).split('\n')[0].slice(0, 200);
-    this.retryDialog.open = true;
     this.retryDialog.jobId = jobId;
     this.retryDialog.prompt = msg?.prompt || '';
     this.retryDialog.lastVerdict = lastVerdict;
     this.retryDialog.hint = '';
     this.retryDialog.resetCounter = true;
     this.retryDialog.workspace = 'keep';
+    this.$store.tsu.open('retry-hint');
     this.$nextTick(() => {
       try { this.$refs.retryHintText?.focus(); } catch { /* non-fatal */ }
     });
   },
 
   closeRetryDialog() {
-    this.retryDialog.open = false;
+    this.$store.tsu.close('retry-hint');
   },
 
   async submitRetryDialog() {
     const hint = (this.retryDialog.hint || '').trim();
     if (!hint) return;
     const jobId = this.retryDialog.jobId;
-    this.retryDialog.open = false;
+    this.$store.tsu.close('retry-hint');
     try {
       // resetCounter/workspace toggles aren't surfaced by the backend yet — the
       // POST shape stays a single `hint` field. The toggles are tracked locally

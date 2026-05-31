@@ -125,7 +125,6 @@ export default () => ({
   layout: localStorage.getItem('tsugite-jobs-layout') || 'board',
   activeFilter: 'all',
   filterText: '',
-  showNew: false,
   newForm: emptyNewJobForm(),
   newError: null,
   submitting: false,
@@ -294,11 +293,11 @@ export default () => ({
       this.newForm.agent = sel || (first && first.name) || '';
     }
     this.newError = null;
-    this.showNew = true;
+    this.$store.tsu.open('new-job');
   },
 
   closeNewJob() {
-    this.showNew = false;
+    this.$store.tsu.close('new-job');
   },
 
   addAc() {
@@ -358,7 +357,7 @@ export default () => ({
     if (activeSession) body.session_id = activeSession;
     try {
       const data = await post(`/api/agents/${encodeURIComponent(f.agent)}/commands/job`, body);
-      this.showNew = false;
+      this.$store.tsu.close('new-job');
       toast(data.result || 'job spawned', 'success');
       await this.load();
     } catch (e) {

@@ -1,4 +1,5 @@
 import Alpine from 'https://cdn.jsdelivr.net/npm/alpinejs@3/dist/module.esm.js';
+import focus from 'https://cdn.jsdelivr.net/npm/@alpinejs/focus@3/dist/module.esm.js';
 import { get, post, patch, connectEvents, onAuthRequired } from './api.js';
 import conversationsView from './views/conversations.js';
 import scheduleView from './views/schedules.js';
@@ -8,10 +9,12 @@ import workspaceView from './views/workspace.js';
 import usageView from './views/usage.js';
 import terminalsView, { terminalSessionView, jobTerminalView } from './views/terminals.js';
 import jobsView from './views/jobs.js';
+import { tsuStore, tsuModal, installWindowHandle } from './utils/tsu-modal.js';
 import { toast } from './utils.js';
 
 window.Alpine = Alpine;
 window.tsugiteApi = { get, post, patch };
+Alpine.plugin(focus);
 
 // Restore persisted sidebar width before Alpine paints, so the layout doesn't flash.
 const SIDEBAR_W_KEY = 'tsugite-sidebar-width';
@@ -45,7 +48,6 @@ Alpine.store('app', {
   theme: localStorage.getItem('tsugite_theme') || 'frappe',
   userId: localStorage.getItem('tsugite_user_id') || 'web-user-1',
   authRequired: !localStorage.getItem('tsugite_token'),
-  showSettings: false,
   menuOpen: false,
   lastEvent: null,
   viewSessionId: initialParsed.sessionId || null,
@@ -71,6 +73,11 @@ Alpine.data('skillFileView', fileEditorView('skills', 'skill-files'));
 Alpine.data('workspaceView', workspaceView);
 Alpine.data('usageView', usageView);
 Alpine.data('jobsView', jobsView);
+Alpine.data('tsuModal', tsuModal);
+Alpine.store('tsu', tsuStore);
+installWindowHandle();
+document.addEventListener('tsu:open', (e) => Alpine.store('tsu').open(e.detail));
+document.addEventListener('tsu:close', (e) => Alpine.store('tsu').close(e.detail));
 // terminalsView is exposed via Alpine.store('terminals') so the sidebar
 // section (rendered inside conversationsView's wrapper) and the main pane's
 // full-session block (sibling to the chat thread) can share one piece of

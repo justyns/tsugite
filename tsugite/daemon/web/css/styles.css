@@ -49,55 +49,9 @@
 .auth-footer { font-size: 12px; color: var(--muted); margin-top: 20px; opacity: 0.6; }
 .auth-footer code { font-size: 11px; background: var(--surface); padding: 2px 6px; border-radius: 4px; }
 
-/* Modals (paste / expand / attachments / skills) */
-/* Modals (paste / expand / attachments / skills) — Console-styled.
-   Visual depth: backdrop = transparent crust, panel = mantle, inner cards = crust.
-   This matches the rest of the Console where mantle sits above crust above base. */
-.modal-backdrop {
-  display: none;
-  position: fixed; inset: 0;
-  background: color-mix(in oklab, var(--crust) 70%, transparent);
-  z-index: 10;
-  align-items: center; justify-content: center;
-}
-.modal-backdrop.open { display: flex; }
-.modal-content {
-  background: var(--mantle);
-  border: 1px solid var(--surface1);
-  border-radius: 6px;
-  padding: 18px 20px;
-  width: 90%; max-width: 420px;
-  font-family: var(--font-mono);
-  color: var(--text);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
-}
-.modal-content h2 {
-  margin: 0 0 14px;
-  font: inherit; font-family: var(--font-mono);
-  font-size: 11px; font-weight: 600;
-  letter-spacing: 0.16em; text-transform: uppercase;
-  color: var(--lavender);
-}
-.modal-content label {
-  display: block;
-  font-family: var(--font-mono);
-  font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
-  color: var(--overlay1);
-  margin: 10px 0 4px;
-}
-.modal-content input,
-.modal-content select {
-  width: 100%;
-  background: var(--crust);
-  color: var(--text);
-  border: 1px solid var(--surface1);
-  border-radius: 3px;
-  padding: 6px 10px;
-  font: inherit; font-family: var(--font-mono); font-size: 12px;
-  margin-bottom: 4px;
-}
-.modal-content input:focus,
-.modal-content select:focus { outline: none; border-color: var(--lavender); }
+/* Form action row + matching button tones — used by inline schedule/webhook
+   forms. The modal shell itself lives in tsu-modal.css; these rules survive
+   only so non-modal forms keep their primary/cancel button styling. */
 .modal-actions {
   display: flex; gap: 6px; justify-content: flex-end;
   margin-top: 16px;
@@ -122,28 +76,12 @@
 .btn-primary:hover { background: var(--blue); border-color: var(--blue); color: var(--crust); }
 .btn-cancel { color: var(--subtext0); }
 
-/* Paste / expand modal extras */
-.paste-modal .modal-content,
-.expand-modal .modal-content { max-width: 600px; }
-.paste-modal-text,
-.expand-modal-text {
-  width: 100%;
-  background: var(--crust);
-  color: var(--text);
-  border: 1px solid var(--surface1);
-  border-radius: 3px;
-  padding: 8px 10px;
-  font: inherit; font-family: var(--font-mono); font-size: 12.5px;
-  resize: vertical;
-  margin-bottom: 4px;
-}
+/* Paste / expand textarea sizing overrides — the tsu-modal shell provides the
+   chrome; these add the modal-specific min-heights the design called for. */
 .paste-modal-text { min-height: 150px; }
 .expand-modal-text { min-height: 200px; }
-.paste-modal-text:focus,
-.expand-modal-text:focus { outline: none; border-color: var(--lavender); }
 
-/* Attachments + Skills modals */
-.att-modal .modal-content { max-width: 700px; max-height: 80vh; overflow-y: auto; }
+/* Attachments + Skills item rows — rendered inside the tsu-modal body. */
 .att-item {
   border: 1px solid var(--surface0);
   border-radius: 4px;
