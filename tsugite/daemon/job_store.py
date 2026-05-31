@@ -61,6 +61,37 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+_VALID_AC_KINDS = frozenset({"ui", "test", "cmd", "llm"})
+
+
+def normalize_ac(ac) -> dict:
+    """Normalise a single acceptance-criterion entry to the dict shape.
+
+    Accepts a plain string (legacy) → {text, kind:"llm"}, or a dict with
+    `text` and optional `kind`. Unknown kinds fall back to "llm" so a typo
+    on disk doesn't crash the orchestrator.
+    """
+    if isinstance(ac, dict):
+        text = str(ac.get("text", "")).strip()
+        kind = ac.get("kind") or "llm"
+        if kind not in _VALID_AC_KINDS:
+            kind = "llm"
+        return {"text": text, "kind": kind}
+    return {"text": str(ac).strip(), "kind": "llm"}
+
+
+def normalize_acs(items) -> list[dict]:
+    """Normalise an AC list to dicts, dropping empty entries."""
+    if not items:
+        return []
+    out: list[dict] = []
+    for item in items:
+        entry = normalize_ac(item)
+        if entry["text"]:
+            out.append(entry)
+    return out
+
+
 @dataclass
 class Job:
     id: str
@@ -68,7 +99,9 @@ class Job:
     prompt: str
     state: str = JobState.QUEUED.value
     worker_session_id: Optional[str] = None
-    acceptance_criteria: list[str] = field(default_factory=list)
+    # Stored as list[dict] ({text, kind}); legacy list[str] payloads are coerced
+    # on construction and reload. See normalize_acs / normalize_ac.
+    acceptance_criteria: list = field(default_factory=list)
     repo: Optional[str] = None
     model: Optional[str] = None
     agent: Optional[str] = None
@@ -109,6 +142,9 @@ class Job:
             self.created_at = now
         if not self.updated_at:
             self.updated_at = now
+        # Always normalise AC to the dict shape so downstream code (verifier
+        # prompt, slash command preview, tile event payload) sees one shape.
+        self.acceptance_criteria = normalize_acs(self.acceptance_criteria)
 
 
 class JobStore:
@@ -178,6 +214,8 @@ class JobStore:
             for key, value in fields.items():
                 if not hasattr(job, key):
                     raise ValueError(f"Unknown Job field: {key}")
+                if key == "acceptance_criteria":
+                    value = normalize_acs(value)
                 setattr(job, key, value)
             job.updated_at = _now_iso()
             self._save()
