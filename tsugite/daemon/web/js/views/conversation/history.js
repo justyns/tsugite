@@ -53,6 +53,41 @@ function _splitUserInput(raw) {
   return { text: body.trim(), folded };
 }
 
+// Detect the job-finished wake-up message that the JobsOrchestrator posts into
+// the parent session via reply_to_session(). The format comes from
+// _build_notify_message() in jobs_orchestrator.py:
+//   Job job-XXXXXXXX finished with state 'STATE': PROMPT[ — error: ERR]. Use get_job('job-XXXXXXXX') for details.
+// Frontend-only detection by text match — channel_metadata isn't currently
+// piped into the user_input event, so the backend "kind" tag isn't visible.
+// This is flagged in the redesign report as a backend gap (jobs_orchestrator
+// could mark the user_input event with {kind: 'job_notify'} so the frontend
+// doesn't need to pattern-match).
+// The job id uses [\w-] (not just [0-9a-f]) so synthetic test ids and any
+// future id format extension don't break detection.
+const _JOB_NOTIFY_RE = /^Job\s+(job-[\w-]+)\s+finished with state '(\w+)':\s*([\s\S]*?)\.\s*Use get_job\([^)]+\)\s*for details\.\s*$/;
+
+function _parseJobNotify(text) {
+  if (!text) return null;
+  const trimmed = text.trim();
+  const m = trimmed.match(_JOB_NOTIFY_RE);
+  if (!m) return null;
+  const jobId = m[1];
+  const state = m[2];
+  let body = m[3].trim();
+  let errPart = '';
+  const errSplit = body.match(/^(.+?)\s+—\s+(?:error:|)(.*)$/);
+  if (errSplit) {
+    body = errSplit[1].trim();
+    errPart = errSplit[2].trim();
+  }
+  return {
+    jobId,
+    state,
+    prompt: body,
+    body: errPart,
+  };
+}
+
 /**
  * Walk the event log and build display bubbles. One progress bubble spans
  * `user_input → next user_input` (with the final agent text peeled off as a
@@ -117,6 +152,24 @@ export function eventsToBubbles(events, { dropTrailing = false } = {}) {
     if (type === 'user_input') {
       flushBubble();
       const split = _splitUserInput(data.text || '');
+      // Job-finished wake-up messages render as their own turn type with a
+      // job-tinted gutter chip and outcome-specific actions, instead of as a
+      // plain user bubble. Detection is text-based (see _parseJobNotify).
+      const notify = _parseJobNotify(split.text);
+      if (notify) {
+        bubbles.push({
+          type: 'job_notify',
+          notify_job_id: notify.jobId,
+          notify_state: notify.state,
+          notify_prompt: notify.prompt,
+          notify_body: notify.body,
+          text: split.text,  // kept so plain-text fallback paths still work
+        });
+        currentSteps = [];
+        for (const h of pendingHooks) currentSteps.push(_hookStep(h));
+        pendingHooks = [];
+        continue;
+      }
       currentUserBubble = { type: 'user', text: split.text };
       if (split.folded.length) {
         currentUserBubble.context = split.folded;
@@ -259,8 +312,10 @@ export function eventsToBubbles(events, { dropTrailing = false } = {}) {
       // Drop undefined fields so a later event without `error` (e.g. an early
       // RUNNING event replayed after a terminal STUCK event) doesn't wipe a
       // previously-set error from the collapsed tile.
+      // acceptance_criteria/result land on the bubble when present; backend
+      // doesn't broadcast them today, but the tile is forward-compatible.
       const fields = { job_id: data.job_id };
-      for (const k of ['state', 'prompt', 'worker_session_id', 'verifier_session_id', 'verify_attempts', 'error', 'attempts']) {
+      for (const k of ['state', 'prompt', 'worker_session_id', 'verifier_session_id', 'verify_attempts', 'error', 'attempts', 'acceptance_criteria', 'result']) {
         if (data[k] !== undefined) fields[k] = data[k];
       }
       if (existing) {
