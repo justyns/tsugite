@@ -119,7 +119,19 @@ async def cmd_bg(adapter: BaseAdapter, prompt: str, agent: str | None = None) ->
         CommandParam(
             "notify",
             bool,
-            "Wake the parent agent with a one-line message when the Job ends (default false; tile flips either way)",
+            "Deprecated: maps to --notify-when=terminal. Prefer --notify-when.",
+            required=False,
+        ),
+        CommandParam(
+            "max_attempts",
+            int,
+            "Max verifier rounds before stuck (default 3)",
+            required=False,
+        ),
+        CommandParam(
+            "notify_when",
+            str,
+            "When to wake the parent: done|stuck|errored|terminal|never (default never)",
             required=False,
         ),
     ],
@@ -135,6 +147,8 @@ async def cmd_job(
     timeout_minutes: int | None = None,
     agent: str | None = None,
     notify: bool = False,
+    max_attempts: int | None = None,
+    notify_when: str | None = None,
 ) -> str:
     """Create a Job, spawn a worker session, and return the Job + worker IDs."""
     from tsugite.tools.jobs import _jobs_orchestrator
@@ -161,6 +175,13 @@ async def cmd_job(
 
     ac_list = _parse_acceptance_criteria(acceptance_criteria)
 
+    # Deprecation: --notify (bool) was the original wake-up flag. The new
+    # --notify-when supersedes it. If a caller still passes --notify=true
+    # without --notify-when, alias it to "terminal" so behaviour is identical.
+    if notify and not notify_when:
+        logger.warning("/job --notify is deprecated; use --notify-when=terminal instead")  # DeprecationWarning
+        notify_when = "terminal"
+
     try:
         job, started = _jobs_orchestrator.create_and_start_job(
             parent_session_id=parent_session_id,
@@ -172,6 +193,8 @@ async def cmd_job(
             timeout_minutes=timeout_minutes or 30,
             spawned_by="user-slash",
             notify=bool(notify),
+            max_attempts=max_attempts,
+            notify_when=notify_when,
         )
     except Exception as e:
         return f"Failed to spawn job worker: {e}"
@@ -179,17 +202,22 @@ async def cmd_job(
     return f"Job {job.id} spawned (worker session: {started.id})"
 
 
-def _parse_acceptance_criteria(raw: str | list[str] | None) -> list[str]:
-    """Normalise the slash-command AC param into a list of strings.
+def _parse_acceptance_criteria(raw: str | list | None) -> list[dict]:
+    """Normalise the slash-command AC param into a list of {text, kind} dicts.
 
-    Accepts: None, an existing list (callers via Python API), JSON-array string,
-    or pipe-separated string. Pipe is chosen over comma so AC texts can contain
-    commas naturally.
+    Accepts: None, an existing list (strings, dicts, or mixed), JSON-array
+    string, or pipe-separated string. Pipe is chosen over comma so AC texts
+    can contain commas naturally.
+
+    A `text::kind` suffix on any string entry sets the kind (e.g. `tests pass::test`).
+    Recognised kinds: ui, test, cmd, llm. Anything else falls back to `llm`.
     """
+    from tsugite.daemon.job_store import normalize_acs
+
     if not raw:
         return []
     if isinstance(raw, list):
-        return [str(item).strip() for item in raw if str(item).strip()]
+        return normalize_acs([_split_kind_suffix(item) for item in raw])
     text = raw.strip()
     if text.startswith("["):
         try:
@@ -197,10 +225,21 @@ def _parse_acceptance_criteria(raw: str | list[str] | None) -> list[str]:
 
             parsed = json.loads(text)
             if isinstance(parsed, list):
-                return [str(item).strip() for item in parsed if str(item).strip()]
+                return normalize_acs([_split_kind_suffix(item) for item in parsed])
         except json.JSONDecodeError:
             pass
-    return [part.strip() for part in text.split("|") if part.strip()]
+    return normalize_acs([_split_kind_suffix(part) for part in text.split("|") if part.strip()])
+
+
+def _split_kind_suffix(entry):
+    """Promote a `text::kind` string to a dict; pass dicts through untouched."""
+    if isinstance(entry, dict):
+        return entry
+    s = str(entry).strip()
+    if "::" in s:
+        text_part, _, kind_part = s.rpartition("::")
+        return {"text": text_part.strip(), "kind": kind_part.strip()}
+    return s
 
 
 @adapter_command(

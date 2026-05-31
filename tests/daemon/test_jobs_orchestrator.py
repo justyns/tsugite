@@ -951,3 +951,404 @@ async def test_retry_with_hint_appends_hint_attempt(store, runner, orchestrator)
     fresh = store.get(job.id)
     assert len(fresh.attempts) == pre_count + 1
     assert fresh.attempts[-1]["kind"] == "hint"
+
+
+# ── Gap 1: AC kind metadata ──
+
+
+def test_emit_job_event_normalizes_ac_to_dicts(store, runner, orchestrator):
+    """Legacy plain-string AC must still round-trip into the tile event payload
+    as dicts, so the frontend gets a single shape regardless of disk format."""
+    job = store.add(
+        Job(id="", parent_session_id="parent-1", prompt="x", acceptance_criteria=["plain text", "another"])
+    )
+    orchestrator._emit_job_event(store.get(job.id))
+    emitted = [call.args[1] for call in orchestrator._event_bus.emit.call_args_list if call.args[0] == "job_update"]
+    assert emitted, "expected a job_update emit"
+    payload = emitted[-1]
+    assert payload["acceptance_criteria"] == [
+        {"text": "plain text", "kind": "llm"},
+        {"text": "another", "kind": "llm"},
+    ]
+
+
+def test_emit_job_event_preserves_explicit_ac_kind(store, runner, orchestrator):
+    job = store.add(
+        Job(
+            id="",
+            parent_session_id="parent-1",
+            prompt="x",
+            acceptance_criteria=[{"text": "endpoint returns 200", "kind": "cmd"}],
+        )
+    )
+    orchestrator._emit_job_event(store.get(job.id))
+    emitted = [call.args[1] for call in orchestrator._event_bus.emit.call_args_list if call.args[0] == "job_update"]
+    payload = emitted[-1]
+    assert payload["acceptance_criteria"] == [{"text": "endpoint returns 200", "kind": "cmd"}]
+
+
+# ── Gap 2: retry_with_hint reset_counter + fresh_workspace ──
+
+
+@pytest.mark.asyncio
+async def test_retry_with_hint_reset_counter_zeroes_verify_attempts(store, runner, orchestrator):
+    """When reset_counter=True, verify_attempts must be zeroed so the retry gets
+    a full budget of verifier rounds again."""
+    job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=["x"])
+    fail = json.dumps({"ac_results": [{"ac_text": "x", "pass": False, "reason": "n"}], "overall_pass": False})
+    for i in range(MAX_VERIFY_ATTEMPTS):
+        await orchestrator.on_session_complete(_worker_session(store.get(job.id), f"w{i}"), f"w{i}")
+        await orchestrator.on_session_complete(_verifier_session(store.get(job.id), f"v{i}"), fail)
+    assert store.get(job.id).state == JobState.STUCK.value
+    assert store.get(job.id).verify_attempts == MAX_VERIFY_ATTEMPTS
+
+    await orchestrator.retry_with_hint(job.id, hint="try Y", reset_counter=True)
+    refreshed = store.get(job.id)
+    assert refreshed.verify_attempts == 0, "reset_counter=True must zero verify_attempts"
+    assert refreshed.state == JobState.RUNNING.value
+
+
+@pytest.mark.asyncio
+async def test_retry_with_hint_fresh_workspace_no_op_when_no_repo(store, runner, orchestrator):
+    """A Job with no `repo` (and no worktree) must treat fresh_workspace=True as
+    a no-op rather than crashing."""
+    job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=["x"])
+    fail = json.dumps({"ac_results": [{"ac_text": "x", "pass": False, "reason": "n"}], "overall_pass": False})
+    for i in range(MAX_VERIFY_ATTEMPTS):
+        await orchestrator.on_session_complete(_worker_session(store.get(job.id), f"w{i}"), f"w{i}")
+        await orchestrator.on_session_complete(_verifier_session(store.get(job.id), f"v{i}"), fail)
+    assert store.get(job.id).state == JobState.STUCK.value
+    # Should not raise.
+    await orchestrator.retry_with_hint(job.id, hint="x", fresh_workspace=True)
+    assert store.get(job.id).state == JobState.RUNNING.value
+
+
+# ── Gap 3: max_attempts + notify_when ──
+
+
+@pytest.mark.asyncio
+async def test_max_attempts_respected_by_verifier_loop(store, runner, orchestrator):
+    """A Job with max_attempts=2 must transition to STUCK after 2 failed verifier
+    rounds, even though the module default is 3."""
+    job = store.add(
+        Job(
+            id="",
+            parent_session_id="parent-1",
+            prompt="x",
+            acceptance_criteria=["x"],
+            max_attempts=2,
+        )
+    )
+    orchestrator.register_worker(job.id, "w0", timeout_minutes=30)
+    fail = json.dumps({"ac_results": [{"ac_text": "x", "pass": False, "reason": "n"}], "overall_pass": False})
+    # Round 0: worker → verifier → loop (still under cap of 2).
+    await orchestrator.on_session_complete(_worker_session(store.get(job.id), "w0"), "w0")
+    await orchestrator.on_session_complete(_verifier_session(store.get(job.id), "v0"), fail)
+    assert store.get(job.id).state == JobState.RUNNING.value
+    # Round 1: worker → verifier → STUCK (hit cap of 2).
+    await orchestrator.on_session_complete(_worker_session(store.get(job.id), "w1"), "w1")
+    await orchestrator.on_session_complete(_verifier_session(store.get(job.id), "v1"), fail)
+    assert store.get(job.id).state == JobState.STUCK.value
+    assert store.get(job.id).verify_attempts == 2
+
+
+@pytest.mark.asyncio
+async def test_max_attempts_higher_than_default_allows_more_rounds(store, runner, orchestrator):
+    """max_attempts=5 must allow up to 5 verifier rounds before stuck."""
+    job = store.add(
+        Job(
+            id="",
+            parent_session_id="parent-1",
+            prompt="x",
+            acceptance_criteria=["x"],
+            max_attempts=5,
+        )
+    )
+    orchestrator.register_worker(job.id, "w0", timeout_minutes=30)
+    fail = json.dumps({"ac_results": [{"ac_text": "x", "pass": False, "reason": "n"}], "overall_pass": False})
+    # 5 rounds: rounds 1..4 should loop, round 5 should stick.
+    for i in range(4):
+        await orchestrator.on_session_complete(_worker_session(store.get(job.id), f"w{i}"), f"w{i}")
+        await orchestrator.on_session_complete(_verifier_session(store.get(job.id), f"v{i}"), fail)
+        assert store.get(job.id).state == JobState.RUNNING.value, f"round {i} should still loop"
+    await orchestrator.on_session_complete(_worker_session(store.get(job.id), "w4"), "w4")
+    await orchestrator.on_session_complete(_verifier_session(store.get(job.id), "v4"), fail)
+    assert store.get(job.id).state == JobState.STUCK.value
+
+
+@pytest.mark.asyncio
+async def test_notify_when_done_fires_only_on_done(store, runner, orchestrator):
+    """notify_when='done' must wake the parent on DONE but NOT on STUCK/CANCELLED."""
+    sent: list = []
+
+    async def fake_reply(session_id, message, source="session", metadata=None):
+        sent.append((session_id, message))
+        return "ok"
+
+    runner.reply_to_session = fake_reply
+    job = store.add(
+        Job(
+            id="",
+            parent_session_id="parent-1",
+            prompt="x",
+            acceptance_criteria=[],
+            notify_when="done",
+        )
+    )
+    orchestrator.register_worker(job.id, "w0", timeout_minutes=30)
+    await orchestrator.on_session_complete(_worker_session(store.get(job.id)), "all done")
+    await asyncio.sleep(0)
+    assert sent, "notify_when=done must fire on DONE"
+
+    sent.clear()
+    job2 = _seed_running_job(store, orchestrator, runner, acceptance_criteria=["x"])
+    # Carry notify_when=done onto job2 via update
+    store.update(job2.id, notify_when="done")
+    cancelled = _worker_session(job2, status=SessionStatus.CANCELLED.value)
+    await orchestrator.on_session_complete(cancelled, "")
+    await asyncio.sleep(0)
+    assert sent == [], "notify_when=done must NOT fire on CANCELLED"
+
+
+@pytest.mark.asyncio
+async def test_notify_when_terminal_fires_on_any_terminal_state(store, runner, orchestrator):
+    """notify_when='terminal' fires on done, stuck, errored, and cancelled."""
+    sent: list = []
+
+    async def fake_reply(session_id, message, source="session", metadata=None):
+        sent.append((session_id, message))
+        return "ok"
+
+    runner.reply_to_session = fake_reply
+
+    # Make a CANCELLED Job with notify_when=terminal.
+    job = store.add(
+        Job(
+            id="",
+            parent_session_id="parent-1",
+            prompt="x",
+            acceptance_criteria=["x"],
+            notify_when="terminal",
+        )
+    )
+    orchestrator.register_worker(job.id, "w0", timeout_minutes=30)
+    cancelled = _worker_session(job, status=SessionStatus.CANCELLED.value)
+    await orchestrator.on_session_complete(cancelled, "")
+    await asyncio.sleep(0)
+    assert sent, "notify_when=terminal must fire on CANCELLED"
+
+
+@pytest.mark.asyncio
+async def test_notify_legacy_bool_maps_to_notify_when_terminal(store, runner, orchestrator):
+    """A Job constructed with `notify=True` (legacy) must behave identically to
+    notify_when='terminal' — wake on any terminal state."""
+    sent: list = []
+
+    async def fake_reply(session_id, message, source="session", metadata=None):
+        sent.append((session_id, message))
+        return "ok"
+
+    runner.reply_to_session = fake_reply
+    job = store.add(
+        Job(
+            id="",
+            parent_session_id="parent-1",
+            prompt="x",
+            acceptance_criteria=[],
+            notify=True,
+        )
+    )
+    # __post_init__ should have promoted notify=True to notify_when="terminal".
+    assert store.get(job.id).notify_when == "terminal"
+    orchestrator.register_worker(job.id, "w0", timeout_minutes=30)
+    await orchestrator.on_session_complete(_worker_session(store.get(job.id)), "ok")
+    await asyncio.sleep(0)
+    assert sent, "legacy notify=True must still wake the parent on terminal transition"
+
+
+@pytest.mark.asyncio
+async def test_notify_when_never_fires_no_notify(store, runner, orchestrator):
+    sent: list = []
+
+    async def fake_reply(session_id, message, source="session", metadata=None):
+        sent.append((session_id, message))
+        return "ok"
+
+    runner.reply_to_session = fake_reply
+    job = store.add(
+        Job(
+            id="",
+            parent_session_id="parent-1",
+            prompt="x",
+            acceptance_criteria=[],
+            notify_when="never",
+        )
+    )
+    orchestrator.register_worker(job.id, "w0", timeout_minutes=30)
+    await orchestrator.on_session_complete(_worker_session(store.get(job.id)), "ok")
+    await asyncio.sleep(0)
+    assert sent == []
+
+
+def test_create_and_start_job_threads_max_attempts(store, runner, orchestrator):
+    job, _ = orchestrator.create_and_start_job(
+        parent_session_id="parent-1",
+        prompt="x",
+        acceptance_criteria=[],
+        max_attempts=7,
+        notify_when="stuck",
+    )
+    fresh = store.get(job.id)
+    assert fresh.max_attempts == 7
+    assert fresh.notify_when == "stuck"
+
+
+# ── Gap 4: per-criterion ac_results ──
+
+
+@pytest.mark.asyncio
+async def test_verifier_result_stored_per_criterion(store, runner, orchestrator):
+    """When the verifier completes, each AC verdict must land on Job.ac_results
+    with ac_index, ac_text, pass, reason, and attempt fields."""
+    job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=["a", "b"])
+    await orchestrator.on_session_complete(_worker_session(job), "w1")
+    job = store.get(job.id)
+    verifier_json = json.dumps(
+        {
+            "ac_results": [
+                {"ac_text": "a", "pass": True, "reason": "yes"},
+                {"ac_text": "b", "pass": False, "reason": "missing X"},
+            ],
+            "overall_pass": False,
+        }
+    )
+    await orchestrator.on_session_complete(_verifier_session(job, "v1"), verifier_json)
+    fresh = store.get(job.id)
+    assert fresh.ac_results is not None
+    assert len(fresh.ac_results) == 2
+    a = next(r for r in fresh.ac_results if r["ac_text"] == "a")
+    b = next(r for r in fresh.ac_results if r["ac_text"] == "b")
+    assert a == {"ac_index": 0, "ac_text": "a", "pass": True, "reason": "yes", "attempt": 1}
+    assert b == {"ac_index": 1, "ac_text": "b", "pass": False, "reason": "missing X", "attempt": 1}
+
+
+@pytest.mark.asyncio
+async def test_ac_results_accumulate_across_attempts(store, runner, orchestrator):
+    """Each attempt appends one batch of N entries (N = #AC). Across two failed
+    attempts the array should hold 2N entries tagged by attempt."""
+    job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=["a"])
+    fail = json.dumps({"ac_results": [{"ac_text": "a", "pass": False, "reason": "n"}], "overall_pass": False})
+    # Round 1
+    await orchestrator.on_session_complete(_worker_session(store.get(job.id), "w1"), "w1")
+    await orchestrator.on_session_complete(_verifier_session(store.get(job.id), "v1"), fail)
+    # Round 2
+    await orchestrator.on_session_complete(_worker_session(store.get(job.id), "w2"), "w2")
+    await orchestrator.on_session_complete(_verifier_session(store.get(job.id), "v2"), fail)
+    fresh = store.get(job.id)
+    attempts_recorded = sorted({e["attempt"] for e in fresh.ac_results})
+    assert attempts_recorded == [1, 2], f"expected attempts 1 and 2 in ac_results, got {attempts_recorded}"
+    assert len(fresh.ac_results) == 2, "two attempts × one AC = two entries"
+
+
+def test_emit_job_event_includes_ac_results(store, runner, orchestrator):
+    """The tile event payload must carry ac_results so the frontend can render
+    per-AC verdicts instead of synthesising state from Job.state."""
+    job = store.add(
+        Job(
+            id="",
+            parent_session_id="parent-1",
+            prompt="x",
+            acceptance_criteria=["a"],
+            ac_results=[{"ac_index": 0, "ac_text": "a", "pass": True, "reason": None, "attempt": 1}],
+        )
+    )
+    orchestrator._emit_job_event(store.get(job.id))
+    emitted = [call.args[1] for call in orchestrator._event_bus.emit.call_args_list if call.args[0] == "job_update"]
+    payload = emitted[-1]
+    assert payload["ac_results"] == [
+        {"ac_index": 0, "ac_text": "a", "pass": True, "reason": None, "attempt": 1}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_ac_results_recorded_on_unparseable_verifier_output(store, runner, orchestrator):
+    """Even when the verifier output is unparseable, a synthetic ac_result entry
+    must land so the UI can show 'verifier output unparseable' rather than empty."""
+    job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=["x"])
+    await orchestrator.on_session_complete(_worker_session(job), "w1")
+    job = store.get(job.id)
+    await orchestrator.on_session_complete(_verifier_session(job, "v1"), "definitely not json")
+    fresh = store.get(job.id)
+    assert fresh.ac_results, "unparseable verifier output must still produce an ac_results entry"
+    assert fresh.ac_results[0]["pass"] is False
+    assert "unparseable" in (fresh.ac_results[0].get("reason") or "").lower()
+
+
+# ── Gap 5: notify metadata threading ──
+
+
+@pytest.mark.asyncio
+async def test_schedule_notify_passes_kind_job_notify(store, runner, orchestrator):
+    """The notify dispatch must include kind='job_notify' in the metadata so the
+    parent session's user_input event carries channel.kind for the frontend to
+    detect notify messages without text-regexing the body."""
+    sent: list[tuple] = []
+
+    async def fake_reply(session_id, message, source="session", metadata=None):
+        sent.append((session_id, message, source, metadata))
+        return "ok"
+
+    runner.reply_to_session = fake_reply
+
+    job = store.add(
+        Job(id="", parent_session_id="parent-1", prompt="do x", acceptance_criteria=[], notify_when="terminal")
+    )
+    orchestrator.register_worker(job.id, "w0", timeout_minutes=30)
+    await orchestrator.on_session_complete(_worker_session(store.get(job.id)), "done")
+    await asyncio.sleep(0)
+    assert sent, "notify must fire"
+    _, _, source, metadata = sent[-1]
+    assert source == "job_complete"
+    assert metadata is not None
+    assert metadata.get("job_id") == job.id
+    assert metadata.get("kind") == "job_notify", (
+        f"notify metadata must carry kind='job_notify' so the frontend can flag it; got {metadata!r}"
+    )
+
+
+def test_retry_with_hint_fresh_workspace_prunes_and_recreates_worktree(store, runner, orchestrator, tmp_path):
+    """fresh_workspace=True on a Job with a repo must prune the existing worktree
+    and recreate a new one from HEAD before spawning the retry worker."""
+    repo = tmp_path / "repo"
+    _make_git_repo(repo)
+    job, _ = orchestrator.create_and_start_job(
+        parent_session_id="parent-1",
+        prompt="do",
+        acceptance_criteria=["x"],
+        repo=str(repo),
+    )
+    fail = json.dumps({"ac_results": [{"ac_text": "x", "pass": False, "reason": "n"}], "overall_pass": False})
+    import asyncio
+
+    for i in range(MAX_VERIFY_ATTEMPTS):
+        asyncio.run(orchestrator.on_session_complete(_worker_session(store.get(job.id), f"w{i}"), f"w{i}"))
+        asyncio.run(orchestrator.on_session_complete(_verifier_session(store.get(job.id), f"v{i}"), fail))
+    assert store.get(job.id).state == JobState.STUCK.value
+
+    from pathlib import Path
+
+    original_wt = store.get(job.id).worktree_path
+    assert original_wt and Path(original_wt).exists()
+
+    # Drop a sentinel file inside the worktree to detect the recreate.
+    sentinel = Path(original_wt) / "sentinel.txt"
+    sentinel.write_text("worker noodled here")
+    assert sentinel.exists()
+
+    asyncio.run(orchestrator.retry_with_hint(job.id, hint="reset env", fresh_workspace=True))
+    fresh_wt = store.get(job.id).worktree_path
+    assert fresh_wt and Path(fresh_wt).exists()
+    # Sentinel must be gone — the worktree was recreated from HEAD.
+    assert not (Path(fresh_wt) / "sentinel.txt").exists(), (
+        "fresh_workspace=True must wipe the worker's stale changes by recreating the worktree"
+    )

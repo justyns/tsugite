@@ -59,13 +59,15 @@ class JobsOrchestrator:
         *,
         parent_session_id: str,
         prompt: str,
-        acceptance_criteria: Optional[list[str]] = None,
+        acceptance_criteria: Optional[list] = None,
         repo: Optional[str] = None,
         model: Optional[str] = None,
         agent: Optional[str] = None,
         timeout_minutes: int = 30,
         spawned_by: str = "user-slash",
         notify: bool = False,
+        max_attempts: Optional[int] = None,
+        notify_when: Optional[str] = None,
     ) -> tuple[Job, Session]:
         """Create a Job record + spawn the worker session in one step.
 
@@ -73,11 +75,17 @@ class JobsOrchestrator:
         Returns (job, started_worker_session). The orchestrator's register_worker
         is called automatically so the timeout is scheduled and the tile event fires.
 
-        notify: if True, the parent session receives a one-line wake-up message on
-        terminal transition so the parent agent learns the Job finished.
+        notify: legacy bool; True maps to notify_when="terminal". Prefer notify_when.
+        notify_when: one of "done", "stuck", "errored", "terminal", "never" (default).
+        max_attempts: verifier-loop cap. Defaults to 3 when omitted.
         """
         worker_agent_file = agent or "job_worker"
         worker_adapter_key = self._resolve_adapter_key(parent_session_id)
+        job_kwargs: dict = {}
+        if max_attempts is not None:
+            job_kwargs["max_attempts"] = max_attempts
+        if notify_when:
+            job_kwargs["notify_when"] = notify_when
 
         job = self._jobs.add(
             Job(
@@ -91,6 +99,7 @@ class JobsOrchestrator:
                 timeout_minutes=timeout_minutes,
                 spawned_by=spawned_by,
                 notify=notify,
+                **job_kwargs,
             )
         )
 
@@ -163,6 +172,44 @@ class JobsOrchestrator:
         attempts[-1] = {**attempts[-1], "verifier_pass": bool(verifier_pass)}
         self._jobs.update(job_id, attempts=attempts)
 
+    def _record_ac_results(self, job_id: str, raw_ac_results, attempt_num: int) -> None:
+        """Append per-criterion verdicts for one verifier round to Job.ac_results.
+
+        Replaces any prior entries tagged with the same attempt_num (defensive in
+        case a verifier completion is delivered twice). The list itself grows by
+        one batch per attempt so the UI can render historical verdicts.
+        """
+        job = self._jobs.get(job_id)
+        if job is None:
+            return
+        prior = [e for e in (job.ac_results or []) if e.get("attempt") != attempt_num]
+        new_entries: list[dict] = []
+        if isinstance(raw_ac_results, list):
+            for i, item in enumerate(raw_ac_results):
+                if isinstance(item, dict):
+                    new_entries.append(
+                        {
+                            "ac_index": i,
+                            "ac_text": item.get("ac_text", ""),
+                            "pass": bool(item.get("pass")),
+                            "reason": item.get("reason"),
+                            "attempt": attempt_num,
+                        }
+                    )
+                else:
+                    # Malformed verifier output (string, None, etc) — keep a
+                    # placeholder so the UI still shows something.
+                    new_entries.append(
+                        {
+                            "ac_index": i,
+                            "ac_text": "(malformed verifier output)",
+                            "pass": False,
+                            "reason": repr(item),
+                            "attempt": attempt_num,
+                        }
+                    )
+        self._jobs.update(job_id, ac_results=prior + new_entries)
+
     def register_worker(self, job_id: str, worker_session_id: str, timeout_minutes: int) -> None:
         """Record the worker session id and schedule the wall-clock timeout."""
         self._jobs.update(job_id, worker_session_id=worker_session_id)
@@ -224,9 +271,26 @@ class JobsOrchestrator:
         self._emit_job_event(self._jobs.get(job_id))
         return self._jobs.get(job_id)
 
-    async def retry_with_hint(self, job_id: str, hint: str) -> Job:
+    async def retry_with_hint(
+        self,
+        job_id: str,
+        hint: str,
+        *,
+        reset_counter: bool = False,
+        fresh_workspace: bool = False,
+    ) -> Job:
         """Give a STUCK Job one more shot, with the user's hint as the worker prompt.
-        Does NOT reset verify_attempts — that would let users loop forever."""
+
+        Args:
+            job_id: STUCK job to resurrect.
+            hint: Free-text guidance for the new worker.
+            reset_counter: Zero out `verify_attempts` so the retry gets a full new
+                budget of verifier rounds (the UI exposes this as "reset to 1").
+                Defaults False to preserve the historical no-infinite-loops guard.
+            fresh_workspace: When the job has a `repo` worktree, prune the existing
+                tree and recreate it from HEAD before spawning. No-op when the Job
+                was created without `repo`.
+        """
         from pathlib import Path
 
         job = self._jobs.get(job_id)
@@ -234,13 +298,29 @@ class JobsOrchestrator:
             raise ValueError(f"Unknown job: {job_id}")
         if job.state != JobState.STUCK.value:
             raise ValueError(f"retry_with_hint only valid on stuck jobs (job '{job_id}' is {job.state})")
-        # Validate the worktree still exists if the Job was configured with one. If
-        # it's been hand-deleted, refuse rather than spawn a worker into a missing dir.
-        if job.worktree_path and not Path(job.worktree_path).is_dir():
+
+        worktree_path = job.worktree_path
+        if fresh_workspace and job.repo:
+            try:
+                if worktree_path and Path(worktree_path).exists():
+                    _prune_worktree(worktree_path)
+                worktree_path = _provision_worktree(job.repo, job.id)
+                self._jobs.update(job_id, worktree_path=worktree_path)
+            except Exception as e:
+                logger.exception("retry_with_hint: fresh_workspace failed for job '%s': %s", job_id, e)
+                raise ValueError(f"failed to recreate worktree: {e}") from e
+        elif worktree_path and not Path(worktree_path).is_dir():
+            # Worktree was hand-deleted between STUCK and retry — refuse rather
+            # than spawn a worker into a missing directory.
             raise ValueError(
-                f"retry_with_hint: worktree at '{job.worktree_path}' no longer exists; "
+                f"retry_with_hint: worktree at '{worktree_path}' no longer exists; "
                 f"cannot resume in a missing directory"
             )
+
+        if reset_counter:
+            self._jobs.update(job_id, verify_attempts=0)
+            job = self._jobs.get(job_id)
+
         # Same out-of-band rationale as mark_done_manual: STUCK is terminal in the
         # state machine, and that's intentional. The hint-and-retry escape hatch is
         # explicitly out-of-band.
@@ -253,7 +333,7 @@ class JobsOrchestrator:
             prompt=_build_hint_prompt(job, hint),
             agent_file=worker_agent_file,
             model=job.model,
-            workspace_override=job.worktree_path,
+            workspace_override=worktree_path,
             metadata={"job_id": job.id, "hint_attempt": True},
         )
         try:
@@ -373,26 +453,38 @@ class JobsOrchestrator:
             )
             return
 
+        # Attempt counter is 1-indexed (matches the UX of "attempt #N"). Captured
+        # before _handle_verifier_failure bumps job.verify_attempts.
+        attempt_num = job.verify_attempts + 1
+
         parsed = _parse_verifier_output(result_str)
         if parsed is None:
             self._set_attempt_verdict(job.id, False)
+            # Synthetic one-entry batch so the UI sees *something* for this attempt.
+            self._record_ac_results(
+                job.id,
+                [{"ac_text": "(verifier output)", "pass": False, "reason": "verifier output unparseable"}],
+                attempt_num,
+            )
             return await self._handle_verifier_failure(
                 job,
                 failed_acs=[{"ac_text": "(verifier output)", "pass": False, "reason": "verifier output unparseable"}],
             )
         # Strict True: a string like "false" / "no" is truthy in Python but
         # explicitly NOT a pass. Treat anything other than literal True as failure.
+        ac_results_raw = parsed.get("ac_results", [])
+        self._record_ac_results(job.id, ac_results_raw, attempt_num)
         if parsed.get("overall_pass") is True:
             self._set_attempt_verdict(job.id, True)
             fresh = self._jobs.get(job.id)
             result = dict(fresh.result or {})
-            result["ac_results"] = parsed.get("ac_results", [])
+            result["ac_results"] = ac_results_raw
             self._finalize(job, JobState.DONE, result=result)
             return
         self._set_attempt_verdict(job.id, False)
         await self._handle_verifier_failure(
             job,
-            failed_acs=_extract_failed_acs(parsed.get("ac_results", [])),
+            failed_acs=_extract_failed_acs(ac_results_raw),
         )
 
     async def _handle_verifier_failure(self, job: Job, failed_acs: list[dict]) -> None:
@@ -407,7 +499,11 @@ class JobsOrchestrator:
                 }
             ]
         new_attempts = job.verify_attempts + 1
-        if new_attempts >= MAX_VERIFY_ATTEMPTS:
+        # `MAX_VERIFY_ATTEMPTS` stays the module default (and the legacy contract
+        # for older jobs without an explicit field); per-job override comes from
+        # Job.max_attempts so the new-job modal's --max-attempts flag wins.
+        cap = job.max_attempts if getattr(job, "max_attempts", None) else MAX_VERIFY_ATTEMPTS
+        if new_attempts >= cap:
             error_lines = ["Verifier failed after max attempts:"]
             for ac in failed_acs:
                 error_lines.append(f"- {ac.get('ac_text', '?')}: {ac.get('reason', '?')}")
@@ -474,7 +570,7 @@ class JobsOrchestrator:
             self._jobs.update(job.id, worktree_path=None)
             fresh = self._jobs.get(job.id)
         self._emit_job_event(fresh)
-        if fresh and fresh.notify:
+        if fresh and _should_notify(fresh, terminal):
             self._schedule_notify(fresh)
 
     def _schedule_notify(self, job: Job) -> None:
@@ -493,7 +589,7 @@ class JobsOrchestrator:
                     job.parent_session_id,
                     message,
                     source="job_complete",
-                    metadata={"job_id": job.id},
+                    metadata={"job_id": job.id, "kind": "job_notify"},
                 )
             except Exception:
                 logger.exception("Failed to notify parent of job '%s' completion", job.id)
@@ -584,9 +680,12 @@ class JobsOrchestrator:
             "state": job.state,
             "prompt": (job.prompt or "")[:200],
             "verify_attempts": job.verify_attempts,
+            "max_attempts": getattr(job, "max_attempts", 3),
+            "notify_when": getattr(job, "notify_when", "never"),
             "error": job.error,
             "attempts": list(job.attempts or []),
             "acceptance_criteria": list(job.acceptance_criteria or []),
+            "ac_results": list(getattr(job, "ac_results", None) or []),
             "result": job.result,
         }
         # Persist into parent session JSONL so a page reload re-renders the tile.
@@ -601,14 +700,40 @@ class JobsOrchestrator:
                 logger.exception("Failed to broadcast job_update for job '%s'", job.id)
 
 
-def build_worker_prompt(prompt: str, acceptance_criteria: list[str], repo: Optional[str]) -> str:
-    """Compose the worker's initial user_prompt with AC and repo context inlined."""
+_TERMINAL_JOB_STATES = frozenset(
+    {JobState.DONE.value, JobState.STUCK.value, JobState.CANCELLED.value, JobState.ERRORED.value}
+)
+
+
+def _should_notify(job: Job, terminal: JobState) -> bool:
+    """Decide whether to wake the parent based on Job.notify_when.
+
+    Recognised values: "done", "stuck", "errored", "terminal" (any terminal state),
+    "never" (no-op). Anything else is treated as "never" (defensive — a typo on
+    disk shouldn't spam the parent agent).
+    """
+    notify_when = getattr(job, "notify_when", None) or ("terminal" if getattr(job, "notify", False) else "never")
+    state = terminal.value if isinstance(terminal, JobState) else terminal
+    if notify_when == "never":
+        return False
+    if notify_when == "terminal":
+        return state in _TERMINAL_JOB_STATES
+    return notify_when == state
+
+
+def build_worker_prompt(prompt: str, acceptance_criteria: list, repo: Optional[str]) -> str:
+    """Compose the worker's initial user_prompt with AC and repo context inlined.
+
+    Accepts AC as either legacy list[str] or normalised list[dict]; the worker
+    prompt only needs the text, so both shapes render the same.
+    """
     parts = [prompt]
     if acceptance_criteria:
         parts.append("")
         parts.append("Acceptance criteria (the verifier will grade your work against these):")
         for i, ac in enumerate(acceptance_criteria, 1):
-            parts.append(f"{i}. {ac}")
+            text = ac.get("text", "") if isinstance(ac, dict) else ac
+            parts.append(f"{i}. {text}")
     if repo:
         parts.append("")
         parts.append(f"Working in repo: {repo}")
@@ -634,10 +759,15 @@ def _extract_failed_acs(ac_results) -> list[dict]:
     return out
 
 
+def _ac_text(ac) -> str:
+    """Extract the human-readable text from an AC entry of either shape."""
+    return ac.get("text", "") if isinstance(ac, dict) else str(ac)
+
+
 def _build_verifier_prompt(job: Job, worker_output: str) -> str:
     parts = ["Acceptance criteria:"]
     for i, ac in enumerate(job.acceptance_criteria, 1):
-        parts.append(f"{i}. {ac}")
+        parts.append(f"{i}. {_ac_text(ac)}")
     parts.append("")
     parts.append("Worker output:")
     parts.append(worker_output.strip() or "(empty)")
@@ -660,7 +790,7 @@ def _build_hint_prompt(job: Job, hint: str) -> str:
         "Acceptance criteria the verifier will check:",
     ]
     for i, ac in enumerate(job.acceptance_criteria, 1):
-        parts.append(f"{i}. {ac}")
+        parts.append(f"{i}. {_ac_text(ac)}")
     return "\n".join(parts)
 
 
@@ -826,6 +956,13 @@ def _prune_worktree(worktree_path: str) -> None:
     Safety: the rmtree fallback REQUIRES the path to live under our own
     `.tsugite-jobs/` subdir, so a corrupted or hand-edited worktree_path
     (e.g. an absolute path pointing at the repo root) cannot rm the wrong tree.
+
+    `git worktree remove` needs to run inside a git repo, otherwise it errors with
+    "not a git repository". `<repo>/.tsugite-jobs/<job_id>` is the layout so the
+    parent's parent is the repo root — feed that as cwd. If the rmtree fallback
+    fires, also run `git worktree prune` to clear the stale metadata so the next
+    `worktree add` at the same path doesn't see a "missing but already registered"
+    record.
     """
     import subprocess
     from pathlib import Path
@@ -833,12 +970,15 @@ def _prune_worktree(worktree_path: str) -> None:
     wt = Path(worktree_path)
     if not wt.exists():
         return
+    # The worktree path is `<repo>/.tsugite-jobs/<job_id>` — walk up two levels for the repo.
+    repo_root = wt.parent.parent if wt.parent.name == _WORKTREE_SUBDIR else None
     # `git worktree remove --force` works even if the worktree has uncommitted changes.
     try:
         subprocess.run(
             ["git", "worktree", "remove", "--force", str(wt)],
             check=True,
             capture_output=True,
+            cwd=str(repo_root) if repo_root else None,
         )
         return
     except Exception as e:
@@ -865,3 +1005,16 @@ def _prune_worktree(worktree_path: str) -> None:
         shutil.rmtree(wt, ignore_errors=True)
     except Exception:
         logger.exception("Failed to rmtree worktree at %s", wt)
+
+    # Tell git the worktree is gone so a subsequent `worktree add` at the same path
+    # doesn't trip on a stale registration.
+    if repo_root and repo_root.exists():
+        try:
+            subprocess.run(
+                ["git", "worktree", "prune"],
+                check=False,
+                capture_output=True,
+                cwd=str(repo_root),
+            )
+        except Exception:
+            logger.debug("git worktree prune fallback failed for %s", repo_root)

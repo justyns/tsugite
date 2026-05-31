@@ -61,6 +61,37 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+_VALID_AC_KINDS = frozenset({"ui", "test", "cmd", "llm"})
+
+
+def normalize_ac(ac) -> dict:
+    """Normalise a single acceptance-criterion entry to the dict shape.
+
+    Accepts a plain string (legacy) → {text, kind:"llm"}, or a dict with
+    `text` and optional `kind`. Unknown kinds fall back to "llm" so a typo
+    on disk doesn't crash the orchestrator.
+    """
+    if isinstance(ac, dict):
+        text = str(ac.get("text", "")).strip()
+        kind = ac.get("kind") or "llm"
+        if kind not in _VALID_AC_KINDS:
+            kind = "llm"
+        return {"text": text, "kind": kind}
+    return {"text": str(ac).strip(), "kind": "llm"}
+
+
+def normalize_acs(items) -> list[dict]:
+    """Normalise an AC list to dicts, dropping empty entries."""
+    if not items:
+        return []
+    out: list[dict] = []
+    for item in items:
+        entry = normalize_ac(item)
+        if entry["text"]:
+            out.append(entry)
+    return out
+
+
 @dataclass
 class Job:
     id: str
@@ -68,7 +99,9 @@ class Job:
     prompt: str
     state: str = JobState.QUEUED.value
     worker_session_id: Optional[str] = None
-    acceptance_criteria: list[str] = field(default_factory=list)
+    # Stored as list[dict] ({text, kind}); legacy list[str] payloads are coerced
+    # on construction and reload. See normalize_acs / normalize_ac.
+    acceptance_criteria: list = field(default_factory=list)
     repo: Optional[str] = None
     model: Optional[str] = None
     agent: Optional[str] = None
@@ -91,7 +124,19 @@ class Job:
     # session on terminal transition so the parent agent learns the Job finished
     # and can react. Defaults: /job slash → False (human-driven, tile is enough);
     # spawn_job() agent tool → True (autonomous composition).
+    #
+    # Legacy field — see `notify_when` for the granular replacement. `notify=True`
+    # is normalised to `notify_when="terminal"` on construction so old persisted
+    # jobs and old callers behave identically.
     notify: bool = False
+    # When to fire the wake-up message: one of "done", "stuck", "errored",
+    # "terminal" (any terminal state), or "never" (default). Replaces the binary
+    # `notify` field for finer control from the new-job modal / slash command.
+    notify_when: str = "never"
+    # Maximum verifier rounds before the Job goes stuck. Defaults to 3 to match
+    # the pre-feature constant; overridable per-job via /job --max-attempts or
+    # the spawn_job() tool.
+    max_attempts: int = 3
     # Append-only history of each worker round + its verifier, so retried jobs
     # don't orphan their earlier session ids. Each entry:
     #   {"index": int, "kind": "initial"|"retry"|"hint",
@@ -100,6 +145,11 @@ class Job:
     # `worker_session_id` and `verifier_session_id` on Job point at the LATEST
     # entry; earlier entries are navigable via this list.
     attempts: list[dict] = field(default_factory=list)
+    # Per-criterion verifier verdicts, one entry per AC per attempt. Each entry:
+    #   {ac_index, ac_text, pass, reason, attempt}
+    # Accumulates across retry attempts (the orchestrator replaces only the current
+    # attempt's entries when the verifier responds). None when no verifier has run.
+    ac_results: Optional[list] = None
 
     def __post_init__(self):
         if not self.id:
@@ -109,6 +159,18 @@ class Job:
             self.created_at = now
         if not self.updated_at:
             self.updated_at = now
+        # Always normalise AC to the dict shape so downstream code (verifier
+        # prompt, slash command preview, tile event payload) sees one shape.
+        self.acceptance_criteria = normalize_acs(self.acceptance_criteria)
+        # Legacy `notify=True` → notify_when="terminal" if notify_when wasn't set
+        # explicitly. Preserves behaviour for callers / persisted jobs that
+        # predate notify_when.
+        if self.notify and self.notify_when in ("", "never", None):
+            self.notify_when = "terminal"
+        if not self.notify_when:
+            self.notify_when = "never"
+        if self.max_attempts is None or self.max_attempts <= 0:
+            self.max_attempts = 3
 
 
 class JobStore:
@@ -178,6 +240,8 @@ class JobStore:
             for key, value in fields.items():
                 if not hasattr(job, key):
                     raise ValueError(f"Unknown Job field: {key}")
+                if key == "acceptance_criteria":
+                    value = normalize_acs(value)
                 setattr(job, key, value)
             job.updated_at = _now_iso()
             self._save()

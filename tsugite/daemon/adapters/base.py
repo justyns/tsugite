@@ -658,6 +658,7 @@ class BaseAdapter(ABC):
                 custom_logger=custom_logger,
                 context=agent_context,
                 user_input_for_history=message,
+                channel_metadata=metadata,
             )
 
         code_events_before = self.session_store.count_events_by_type(conv_id, "code_execution")
