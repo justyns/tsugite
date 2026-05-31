@@ -316,12 +316,12 @@ def test_new_job_modal_opens_and_shows_command_preview(authenticated_page):
     page.wait_for_selector(".jobs-newbtn", timeout=5000)
 
     page.locator(".jobs-newbtn").first.click()
-    page.wait_for_selector(".nj-modal", timeout=3000)
+    page.wait_for_selector(".tsu-modal-backdrop.new-job-modal", state="visible", timeout=3000)
 
     # Type a task + an acceptance criterion; the preview must update reactively.
-    page.locator(".nj-modal textarea.nj-grow").fill("implement the dark-mode toggle")
-    page.locator(".nj-modal .nj-ac-add").click()
-    page.locator(".nj-modal .nj-ac-row input[type='text']").last.fill("toggle persists")
+    page.locator(".new-job-modal textarea.nj-grow").fill("implement the dark-mode toggle")
+    page.locator(".new-job-modal .nj-ac-add").click()
+    page.locator(".new-job-modal .nj-ac-row input[type='text']").last.fill("toggle persists")
 
     preview = page.locator('[data-testid="nj-command-preview"]')
     preview_text = preview.text_content() or ""
@@ -354,17 +354,18 @@ def test_new_job_modal_submits_to_command_endpoint(authenticated_page):
     _open_jobs_tab(page)
     page.wait_for_selector(".jobs-newbtn", timeout=5000)
     page.locator(".jobs-newbtn").first.click()
-    page.wait_for_selector(".nj-modal", timeout=3000)
+    page.wait_for_selector(".tsu-modal-backdrop.new-job-modal", state="visible", timeout=3000)
 
-    page.locator(".nj-modal textarea.nj-grow").fill("draft release notes")
-    page.locator(".nj-modal .nj-ac-add").click()
-    page.locator(".nj-modal .nj-ac-row input[type='text']").last.fill("groups by heading")
+    page.locator(".new-job-modal textarea.nj-grow").fill("draft release notes")
+    page.locator(".new-job-modal .nj-ac-add").click()
+    page.locator(".new-job-modal .nj-ac-row input[type='text']").last.fill("groups by heading")
 
-    page.locator(".nj-modal .nj-actions button.primary").click()
+    page.locator(".new-job-modal button.tsu-btn.--primary").click()
 
     page.wait_for_function("(() => true)()", timeout=2000)
     page.wait_for_function(
-        "() => document.querySelectorAll('.nj-modal').length === 0",
+        "() => { const el = document.querySelector('.tsu-modal-backdrop.new-job-modal');"
+        " return !el || el.style.display === 'none'; }",
         timeout=3000,
     )
 

@@ -2353,59 +2353,68 @@
         </template>
 
         <!-- New-job modal -->
-        <template x-if="showNew">
-          <div class="nj-modal-backdrop" @click.self="closeNewJob()" @keydown.escape.window="closeNewJob()">
-            <div class="nj-modal" role="dialog" aria-label="New job">
-              <h2>new job</h2>
+        <div x-data="tsuModal('new-job')" x-show="open" x-cloak
+             class="tsu-modal-backdrop new-job-modal"
+             @keydown.escape.window="onEscape()" @click.self="onBackdrop()">
+          <div class="tsu-modal --lg" role="dialog" aria-modal="true" aria-label="New job"
+               x-trap.noscroll="open">
+            <header class="tsu-modal-head">
+              <h2 class="tsu-modal-title">new job</h2>
+              <button class="tsu-modal-x" @click="closeNewJob()" aria-label="Close">&#x2715;</button>
+            </header>
+            <div class="tsu-modal-body">
+              <label class="tsu-field">
+                <span class="tsu-label">task</span>
+                <textarea class="tsu-textarea nj-grow" x-model="newForm.prompt"
+                          placeholder="describe the task · / commands · @ agent · # file"></textarea>
+                <p class="tsu-hint">the agent works until the criteria below pass — be specific about &ldquo;done&rdquo;.</p>
+              </label>
 
-              <label>task</label>
-              <textarea class="nj-grow" x-model="newForm.prompt"
-                        placeholder="describe the task · / commands · @ agent · # file"></textarea>
-              <p class="nj-hint">the agent works until the criteria below pass — be specific about “done”.</p>
-
-              <label>acceptance criteria</label>
-              <div class="nj-ac-list">
-                <template x-for="(ac, i) in newForm.acs" :key="i">
-                  <div class="nj-ac-row">
-                    <input type="text" x-model="ac.text" placeholder="criterion the verifier checks…">
-                    <button class="rm" title="remove" @click="removeAc(i)">×</button>
-                  </div>
-                </template>
-                <button class="nj-ac-add" @click="addAc()">＋ add criterion</button>
+              <div class="tsu-field">
+                <span class="tsu-label">acceptance criteria</span>
+                <div class="nj-ac-list">
+                  <template x-for="(ac, i) in newForm.acs" :key="i">
+                    <div class="nj-ac-row">
+                      <input type="text" class="tsu-input" x-model="ac.text" placeholder="criterion the verifier checks…">
+                      <button class="rm" title="remove" @click="removeAc(i)">&times;</button>
+                    </div>
+                  </template>
+                  <button class="nj-ac-add tsu-add" @click="addAc()">&#xff0b; add criterion</button>
+                </div>
               </div>
 
-              <div class="nj-row2" style="margin-top:6px">
-                <div>
-                  <label>agent</label>
-                  <select x-model="newForm.agent" style="width:100%">
+              <div class="tsu-grid-2">
+                <label class="tsu-field">
+                  <span class="tsu-label">agent</span>
+                  <select class="tsu-select" x-model="newForm.agent">
                     <template x-for="a in $store.app.agents" :key="a.name">
                       <option :value="a.name" x-text="a.name"></option>
                     </template>
                   </select>
-                </div>
-                <div>
-                  <label>max attempts</label>
-                  <div class="nj-step">
-                    <button type="button" @click="stepAttempts(-1)">−</button>
+                </label>
+                <div class="tsu-field">
+                  <span class="tsu-label">max attempts</span>
+                  <div class="tsu-stepper">
+                    <button type="button" @click="stepAttempts(-1)">&minus;</button>
                     <span class="val" x-text="newForm.maxAttempts"></span>
                     <button type="button" @click="stepAttempts(1)">+</button>
                   </div>
                 </div>
               </div>
 
-              <div class="nj-row2" style="margin-top:6px">
-                <div>
-                  <label>self-verify</label>
-                  <div class="nj-seg">
-                    <button type="button" :class="newForm.verify ? 'on' : ''" @click="newForm.verify = true">on</button>
-                    <button type="button" :class="!newForm.verify ? 'on' : ''" @click="newForm.verify = false">off</button>
+              <div class="tsu-grid-2">
+                <div class="tsu-field">
+                  <span class="tsu-label">self-verify</span>
+                  <div class="tsu-seg">
+                    <button type="button" :class="newForm.verify ? 'on' : ''" :aria-pressed="newForm.verify" @click="newForm.verify = true">on</button>
+                    <button type="button" :class="!newForm.verify ? 'on' : ''" :aria-pressed="!newForm.verify" @click="newForm.verify = false">off</button>
                   </div>
                 </div>
-                <div>
-                  <label>run</label>
-                  <div class="nj-seg">
-                    <button type="button" :class="newForm.background ? 'on' : ''" @click="newForm.background = true">background</button>
-                    <button type="button" :class="!newForm.background ? 'on' : ''" @click="newForm.background = false">foreground</button>
+                <div class="tsu-field">
+                  <span class="tsu-label">run</span>
+                  <div class="tsu-seg">
+                    <button type="button" :class="newForm.background ? 'on' : ''" :aria-pressed="newForm.background" @click="newForm.background = true">background</button>
+                    <button type="button" :class="!newForm.background ? 'on' : ''" :aria-pressed="!newForm.background" @click="newForm.background = false">foreground</button>
                   </div>
                 </div>
               </div>
@@ -2418,14 +2427,14 @@
               <template x-if="newError">
                 <div class="nj-error" x-text="newError"></div>
               </template>
-
-              <div class="nj-actions">
-                <button type="button" @click="closeNewJob()">cancel</button>
-                <button type="button" class="primary" :disabled="!canSubmit" @click="submitNewJob()">queue job</button>
-              </div>
             </div>
+            <footer class="tsu-modal-foot">
+              <span class="spacer"></span>
+              <button class="tsu-btn" type="button" @click="closeNewJob()">cancel</button>
+              <button class="tsu-btn --primary" type="button" :disabled="!canSubmit" @click="submitNewJob()">queue job</button>
+            </footer>
           </div>
-        </template>
+        </div>
       </main>
     </div>
   </div>
