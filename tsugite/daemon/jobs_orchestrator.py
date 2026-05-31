@@ -589,7 +589,7 @@ class JobsOrchestrator:
                     job.parent_session_id,
                     message,
                     source="job_complete",
-                    metadata={"job_id": job.id},
+                    metadata={"job_id": job.id, "kind": "job_notify"},
                 )
             except Exception:
                 logger.exception("Failed to notify parent of job '%s' completion", job.id)

@@ -1284,6 +1284,38 @@ async def test_ac_results_recorded_on_unparseable_verifier_output(store, runner,
     assert "unparseable" in (fresh.ac_results[0].get("reason") or "").lower()
 
 
+# ── Gap 5: notify metadata threading ──
+
+
+@pytest.mark.asyncio
+async def test_schedule_notify_passes_kind_job_notify(store, runner, orchestrator):
+    """The notify dispatch must include kind='job_notify' in the metadata so the
+    parent session's user_input event carries channel.kind for the frontend to
+    detect notify messages without text-regexing the body."""
+    sent: list[tuple] = []
+
+    async def fake_reply(session_id, message, source="session", metadata=None):
+        sent.append((session_id, message, source, metadata))
+        return "ok"
+
+    runner.reply_to_session = fake_reply
+
+    job = store.add(
+        Job(id="", parent_session_id="parent-1", prompt="do x", acceptance_criteria=[], notify_when="terminal")
+    )
+    orchestrator.register_worker(job.id, "w0", timeout_minutes=30)
+    await orchestrator.on_session_complete(_worker_session(store.get(job.id)), "done")
+    await asyncio.sleep(0)
+    assert sent, "notify must fire"
+    _, _, source, metadata = sent[-1]
+    assert source == "job_complete"
+    assert metadata is not None
+    assert metadata.get("job_id") == job.id
+    assert metadata.get("kind") == "job_notify", (
+        f"notify metadata must carry kind='job_notify' so the frontend can flag it; got {metadata!r}"
+    )
+
+
 def test_retry_with_hint_fresh_workspace_prunes_and_recreates_worktree(store, runner, orchestrator, tmp_path):
     """fresh_workspace=True on a Job with a repo must prune the existing worktree
     and recreate a new one from HEAD before spawning the retry worker."""

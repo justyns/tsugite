@@ -411,6 +411,7 @@ async def _execute_agent_with_prompt(
     hook_vars: Optional[Dict[str, str]] = None,
     continue_conversation_id: Optional[str] = None,
     user_input_for_history: Optional[str] = None,
+    channel_metadata: Optional[Dict[str, Any]] = None,
 ) -> str | AgentExecutionResult:
     """Execute agent with a prepared agent.
 
@@ -587,7 +588,12 @@ async def _execute_agent_with_prompt(
             # model_request event; replaying the whole thing here would clog the
             # chat bubble with noise the user never wrote.
             display_prompt = user_input_for_history or prepared.original_prompt or prepared.rendered_prompt
-            record_user_input(session_storage, display_prompt, attachments=prepared.attachments)
+            record_user_input(
+                session_storage,
+                display_prompt,
+                attachments=prepared.attachments,
+                channel_metadata=channel_metadata,
+            )
     except Exception as e:
         logger.debug("Could not open session storage for live event recording: %s", e)
         session_storage = None
@@ -757,6 +763,7 @@ def run_agent(
     attachments: Optional[List[Any]] = None,
     path_context: Optional[Any] = None,
     user_input_for_history: Optional[str] = None,
+    channel_metadata: Optional[Dict[str, Any]] = None,
 ) -> str | AgentExecutionResult:
     """Run a Tsugite agent (sync wrapper around run_agent_async).
 
@@ -807,6 +814,7 @@ def run_agent(
             attachments=attachments,
             path_context=path_context,
             user_input_for_history=user_input_for_history,
+            channel_metadata=channel_metadata,
         )
     )
 
@@ -990,6 +998,7 @@ async def run_agent_async(
                 hook_vars=hook_vars,
                 continue_conversation_id=continue_conversation_id,
                 user_input_for_history=user_input_for_history,
+                channel_metadata=channel_metadata,
             )
         except (RuntimeError, AgentExecutionError) as e:
             err_str = str(e).lower()
@@ -1015,6 +1024,7 @@ async def run_agent_async(
                     hook_vars=hook_vars,
                     continue_conversation_id=continue_conversation_id,
                     user_input_for_history=user_input_for_history,
+                    channel_metadata=channel_metadata,
                 )
             raise
     finally:
