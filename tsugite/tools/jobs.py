@@ -57,10 +57,9 @@ def spawn_job(
 
     Args:
         prompt: Task instruction for the spawned Job.
-        acceptance_criteria: List of criteria the verifier grades against. Each
-            entry may be a plain string, a `text::kind` string (where kind is
-            ui|test|cmd|llm), or a dict `{text, kind}`. Empty list short-circuits
-            verification (Job goes straight to done).
+        acceptance_criteria: List of criterion strings the verifier grades
+            against. Empty list short-circuits verification (Job goes straight
+            to done).
         repo: Workspace-relative repo path. Accepted and persisted; enforcement
             (chroot/worktree) is deferred — for now this is informational.
         model: Optional model override; defaults to the workspace default.

@@ -202,22 +202,18 @@ async def cmd_job(
     return f"Job {job.id} spawned (worker session: {started.id})"
 
 
-def _parse_acceptance_criteria(raw: str | list | None) -> list[dict]:
-    """Normalise the slash-command AC param into a list of {text, kind} dicts.
+def _parse_acceptance_criteria(raw: str | list | None) -> list[str]:
+    """Normalise the slash-command AC param into a plain list of strings.
 
-    Accepts: None, an existing list (strings, dicts, or mixed), JSON-array
-    string, or pipe-separated string. Pipe is chosen over comma so AC texts
-    can contain commas naturally.
-
-    A `text::kind` suffix on any string entry sets the kind (e.g. `tests pass::test`).
-    Recognised kinds: ui, test, cmd, llm. Anything else falls back to `llm`.
+    Accepts: None, an existing list, JSON-array string, or pipe-separated
+    string. Pipe is chosen over comma so AC texts can contain commas naturally.
     """
-    from tsugite.daemon.job_store import normalize_acs
+    from tsugite.daemon.job_store import _coerce_ac_list
 
     if not raw:
         return []
     if isinstance(raw, list):
-        return normalize_acs([_split_kind_suffix(item) for item in raw])
+        return _coerce_ac_list(raw)
     text = raw.strip()
     if text.startswith("["):
         try:
@@ -225,21 +221,10 @@ def _parse_acceptance_criteria(raw: str | list | None) -> list[dict]:
 
             parsed = json.loads(text)
             if isinstance(parsed, list):
-                return normalize_acs([_split_kind_suffix(item) for item in parsed])
+                return _coerce_ac_list(parsed)
         except json.JSONDecodeError:
             pass
-    return normalize_acs([_split_kind_suffix(part) for part in text.split("|") if part.strip()])
-
-
-def _split_kind_suffix(entry):
-    """Promote a `text::kind` string to a dict; pass dicts through untouched."""
-    if isinstance(entry, dict):
-        return entry
-    s = str(entry).strip()
-    if "::" in s:
-        text_part, _, kind_part = s.rpartition("::")
-        return {"text": text_part.strip(), "kind": kind_part.strip()}
-    return s
+    return _coerce_ac_list([part for part in text.split("|") if part.strip()])
 
 
 @adapter_command(

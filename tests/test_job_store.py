@@ -215,16 +215,14 @@ def test_load_migrates_legacy_looping_to_running(store_path, tmp_path):
     )
 
 
-def test_acceptance_criteria_legacy_string_format_loads(store_path):
-    """Legacy jobs.json stored AC as a list of plain strings. On load each entry
-    must be normalised to {text, kind:"llm"} so downstream code can rely on the
-    dict shape uniformly."""
+def test_acceptance_criteria_loads_plain_strings(store_path):
+    """jobs.json stores AC as a list of plain strings; round-trips on load."""
     import json
 
-    legacy = {
+    saved = {
         "jobs": [
             {
-                "id": "job-legacy-ac",
+                "id": "job-ac1",
                 "parent_session_id": "p1",
                 "prompt": "x",
                 "state": "queued",
@@ -232,67 +230,51 @@ def test_acceptance_criteria_legacy_string_format_loads(store_path):
             }
         ]
     }
+    store_path.write_text(json.dumps(saved))
+    store = JobStore(store_path)
+    job = store.get("job-ac1")
+    assert job is not None
+    assert job.acceptance_criteria == ["tests pass", "PR open"]
+
+
+def test_acceptance_criteria_legacy_dict_shape_coerced_to_strings(store_path):
+    """Old daemon versions persisted AC as `{text, kind}` dicts. On load, drop
+    `kind` and keep only the text string so downstream code sees one shape."""
+    import json
+
+    legacy = {
+        "jobs": [
+            {
+                "id": "job-legacy-dict",
+                "parent_session_id": "p1",
+                "prompt": "x",
+                "state": "queued",
+                "acceptance_criteria": [
+                    {"text": "tests pass", "kind": "test"},
+                    {"text": "PR open", "kind": "llm"},
+                ],
+            }
+        ]
+    }
     store_path.write_text(json.dumps(legacy))
     store = JobStore(store_path)
-    job = store.get("job-legacy-ac")
+    job = store.get("job-legacy-dict")
     assert job is not None
-    assert job.acceptance_criteria == [
-        {"text": "tests pass", "kind": "llm"},
-        {"text": "PR open", "kind": "llm"},
-    ]
+    assert job.acceptance_criteria == ["tests pass", "PR open"]
 
 
-def test_acceptance_criteria_new_dict_format_round_trips(store_path):
-    """New dict-shaped AC must round-trip through save/reload unchanged."""
-    s1 = JobStore(store_path)
-    job = s1.add(
-        Job(
-            id="",
-            parent_session_id="p1",
-            prompt="x",
-            acceptance_criteria=[
-                {"text": "tests pass", "kind": "test"},
-                {"text": "endpoint returns 200", "kind": "cmd"},
-            ],
-        )
-    )
-    s2 = JobStore(store_path)
-    reloaded = s2.get(job.id)
-    assert reloaded.acceptance_criteria == [
-        {"text": "tests pass", "kind": "test"},
-        {"text": "endpoint returns 200", "kind": "cmd"},
-    ]
-
-
-def test_acceptance_criteria_mixed_input_normalises_on_add(store_path):
-    """Passing a mix of strings and dicts (e.g. from the slash command parser) must
-    normalise to dicts at construction time."""
+def test_acceptance_criteria_mixed_input_coerced_to_strings(store_path):
+    """A mix of strings and legacy dicts at construction coerces to strings."""
     s = JobStore(store_path)
     job = s.add(
         Job(
             id="",
             parent_session_id="p1",
             prompt="x",
-            acceptance_criteria=["plain text", {"text": "typed", "kind": "ui"}],
+            acceptance_criteria=["plain text", {"text": "from old caller"}],
         )
     )
-    assert job.acceptance_criteria == [
-        {"text": "plain text", "kind": "llm"},
-        {"text": "typed", "kind": "ui"},
-    ]
-
-
-def test_acceptance_criteria_dict_without_kind_defaults_to_llm(store_path):
-    s = JobStore(store_path)
-    job = s.add(
-        Job(
-            id="",
-            parent_session_id="p1",
-            prompt="x",
-            acceptance_criteria=[{"text": "no kind"}],
-        )
-    )
-    assert job.acceptance_criteria == [{"text": "no kind", "kind": "llm"}]
+    assert job.acceptance_criteria == ["plain text", "from old caller"]
 
 
 def test_legacy_job_without_max_attempts_loads_with_default(store_path):

@@ -759,15 +759,10 @@ def _extract_failed_acs(ac_results) -> list[dict]:
     return out
 
 
-def _ac_text(ac) -> str:
-    """Extract the human-readable text from an AC entry of either shape."""
-    return ac.get("text", "") if isinstance(ac, dict) else str(ac)
-
-
 def _build_verifier_prompt(job: Job, worker_output: str) -> str:
     parts = ["Acceptance criteria:"]
     for i, ac in enumerate(job.acceptance_criteria, 1):
-        parts.append(f"{i}. {_ac_text(ac)}")
+        parts.append(f"{i}. {ac}")
     parts.append("")
     parts.append("Worker output:")
     parts.append(worker_output.strip() or "(empty)")
@@ -790,7 +785,7 @@ def _build_hint_prompt(job: Job, hint: str) -> str:
         "Acceptance criteria the verifier will check:",
     ]
     for i, ac in enumerate(job.acceptance_criteria, 1):
-        parts.append(f"{i}. {_ac_text(ac)}")
+        parts.append(f"{i}. {ac}")
     return "\n".join(parts)
 
 

@@ -956,35 +956,15 @@ async def test_retry_with_hint_appends_hint_attempt(store, runner, orchestrator)
 # ── Gap 1: AC kind metadata ──
 
 
-def test_emit_job_event_normalizes_ac_to_dicts(store, runner, orchestrator):
-    """Legacy plain-string AC must still round-trip into the tile event payload
-    as dicts, so the frontend gets a single shape regardless of disk format."""
+def test_emit_job_event_includes_acceptance_criteria(store, runner, orchestrator):
+    """AC strings flow through the tile event payload unchanged."""
     job = store.add(
         Job(id="", parent_session_id="parent-1", prompt="x", acceptance_criteria=["plain text", "another"])
     )
     orchestrator._emit_job_event(store.get(job.id))
     emitted = [call.args[1] for call in orchestrator._event_bus.emit.call_args_list if call.args[0] == "job_update"]
     assert emitted, "expected a job_update emit"
-    payload = emitted[-1]
-    assert payload["acceptance_criteria"] == [
-        {"text": "plain text", "kind": "llm"},
-        {"text": "another", "kind": "llm"},
-    ]
-
-
-def test_emit_job_event_preserves_explicit_ac_kind(store, runner, orchestrator):
-    job = store.add(
-        Job(
-            id="",
-            parent_session_id="parent-1",
-            prompt="x",
-            acceptance_criteria=[{"text": "endpoint returns 200", "kind": "cmd"}],
-        )
-    )
-    orchestrator._emit_job_event(store.get(job.id))
-    emitted = [call.args[1] for call in orchestrator._event_bus.emit.call_args_list if call.args[0] == "job_update"]
-    payload = emitted[-1]
-    assert payload["acceptance_criteria"] == [{"text": "endpoint returns 200", "kind": "cmd"}]
+    assert emitted[-1]["acceptance_criteria"] == ["plain text", "another"]
 
 
 # ── Gap 2: retry_with_hint reset_counter + fresh_workspace ──
