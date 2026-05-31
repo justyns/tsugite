@@ -134,6 +134,37 @@ Avoid prose in `status_text` - something like "topic and status now being update
 You are managing a shared channel. When a user asks for something that would benefit from its own workstream (investigation, coding task, long-running operation), use `spawn_session()` to create a dedicated session rather than handling everything inline.
 {% endif %}
 {% endif %}
+{% if can_spawn_jobs | default(false) %}
+
+**Background Jobs**: A Job is a background sub-session with a verification loop. Use it when you want the work *checked*, not just done.
+
+- `spawn_job(prompt, acceptance_criteria=[...], max_attempts=3, notify_when="never")` — Spawn a verified Job. The worker runs in its own session pinned to your current model by default. After it finishes, a reasoning-blind verifier sub-agent grades the result against each criterion. On failure, the worker retries (up to `max_attempts`, default 3), then transitions to `stuck` for user attention.
+- `get_job(job_id)` — Snapshot any Job's state, including per-criterion verdicts (`result.ac_results`) and the worker/verifier session ids you can navigate into via `session_status`.
+- `list_jobs(session_id=..., state=..., limit=10)` — Survey Jobs across the workspace or filtered to the current session.
+
+**When to use what:**
+- **Inline** — single edit, one-shot read, small calculation. Don't spawn anything.
+- **`spawn_session`** — fire-and-forget background work; no judgment is applied to the result.
+- **`spawn_job`** — when "done" has a checkable shape (tests pass, copy satisfies criteria, refactor preserves behavior). The verification loop is the value.
+
+**Acceptance criteria**: pass each criterion as a plain string. The verifier reads them verbatim and returns per-criterion pass/fail in `result.ac_results`:
+```python
+spawn_job(
+    prompt="Refactor the agent loop to handle nested tool calls",
+    acceptance_criteria=[
+        "All existing tests still pass",
+        "Adds at least 2 new tests for nested calls",
+        "No new dependencies",
+    ],
+)
+```
+
+**Notification cost**: `notify_when` defaults to `"never"`. Set it to `"stuck"` for a wake-up only when the Job needs user intervention, or `"terminal"` for any final state. Every notification adds a turn to this conversation — prefer polling `get_job` over `notify_when="terminal"` for routine tracking.
+
+**When a Job goes `stuck`** (max_attempts verifier rejections), the user can retry-with-hint or mark-done-anyway from the UI; you usually don't need to act. If asked to diagnose, `get_job(job_id)` returns the worker session id and each `ac_results[].reason` — read those, suggest a different approach, or open the worker session via `session_status` to inspect what went wrong.
+
+**A Job spawned by the user via `/job`** appears in your conversation's job list once it resolves. You don't create the Job in that case — the user did. Your role is to make use of its result when relevant.
+{% endif %}
 {% if active_sessions | default([]) %}
 
 **Active Sessions:**

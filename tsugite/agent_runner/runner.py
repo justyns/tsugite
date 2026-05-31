@@ -1050,6 +1050,7 @@ _MULTISTEP_FRAMEWORK_FLAG_DEFAULTS: Dict[str, Any] = {
     "has_notify_tool": False,
     "agent_name": "",
     "can_spawn_sessions": False,
+    "can_spawn_jobs": False,
     "is_channel_session": False,
     "active_sessions": [],
     "recent_completions": [],
