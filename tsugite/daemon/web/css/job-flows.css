@@ -1,0 +1,120 @@
+/* ============================================================================
+   In-thread job-finished notify message + retry-hint & mark-done dialogs.
+   Builds on console.css + jobs.css. State color via --st.
+   Ported from /tmp/tsugite-job-flows-design/jobs-design/project/css/job-flows.css.
+   ============================================================================ */
+
+/* ---- notify message (a job reporting back in the thread) ---------------- */
+.jn { --st: var(--green);
+  border: 1px solid color-mix(in oklab, var(--st) 24%, var(--surface0));
+  border-left: 3px solid var(--st); border-radius: 6px;
+  background: color-mix(in oklab, var(--st) 7%, var(--mantle));
+  overflow: hidden; }
+.jn[data-state="done"] { --st: var(--green); }
+.jn[data-state="stuck"] { --st: var(--peach); }
+.jn[data-state="errored"] { --st: var(--red); }
+.jn[data-state="cancelled"] { --st: var(--overlay0); }
+
+.jn-head { display: flex; align-items: center; gap: 9px; padding: 9px 12px 6px;
+  font-family: var(--font-mono); }
+.jn-head .jt-id { flex-shrink: 0; }
+.jn-head .grow { flex: 1; }
+.jn-head .jt-meta { flex-shrink: 0; }
+.jn-lead { padding: 0 12px; font-family: var(--font-sans); font-size: 13px; line-height: 1.45;
+  color: var(--text); text-wrap: pretty; }
+.jn-lead .ttl { color: var(--text); font-weight: 600; }
+.jn-body { padding: 9px 12px 10px; display: flex; flex-direction: column; gap: 9px; }
+.jn-foot { display: flex; align-items: center; gap: 7px; padding: 9px 12px; flex-wrap: wrap;
+  border-top: 1px solid color-mix(in oklab, var(--st) 14%, var(--surface0));
+  background: color-mix(in oklab, var(--st) 3%, var(--crust)); }
+.jn-foot .grow { flex: 1; }
+.jn-outcome { display: inline-flex; align-items: center; gap: 7px; font-family: var(--font-mono);
+  font-size: 10.5px; color: var(--overlay1); }
+.jn-outcome .v { color: var(--green); }
+.jn-outcome .x { color: var(--peach); }
+
+/* small result preview inside a done notify (codeblock DNA, reused look) */
+.jn-mini { border: 1px solid var(--surface0); border-radius: 5px; background: var(--crust); overflow: hidden; }
+.jn-mini .h { display: flex; gap: 8px; padding: 4px 10px; background: var(--mantle);
+  border-bottom: 1px solid var(--surface0); font-family: var(--font-mono); font-size: 9.5px;
+  letter-spacing: 0.1em; text-transform: uppercase; color: var(--overlay1); }
+.jn-mini .h .teal { color: var(--teal); }
+.jn-mini .h .grow { flex: 1; }
+.jn-mini pre { margin: 0; padding: 9px 12px; font-family: var(--font-mono); font-size: 12px;
+  line-height: 1.55; color: var(--text); white-space: pre-wrap; word-break: break-word; }
+
+/* the gutter chip color per notify state */
+.console-turn-gutter .role.job { background: color-mix(in oklab, var(--lavender) 22%, transparent);
+  color: var(--lavender); }
+.console-turn-gutter .role.job.done { background: color-mix(in oklab, var(--green) 20%, transparent);
+  color: var(--green); }
+.console-turn-gutter .role.job.stuck { background: color-mix(in oklab, var(--peach) 22%, transparent);
+  color: var(--peach); }
+.console-turn-gutter .role.job.errored { background: color-mix(in oklab, var(--red) 22%, transparent);
+  color: var(--red); }
+.console-turn-gutter .role.job.cancelled { background: color-mix(in oklab, var(--overlay0) 22%, transparent);
+  color: var(--overlay1); }
+
+/* ---- dialogs: shared extras over the modal base (styles.css) ------------ */
+.dlg { max-width: 520px; }
+.dlg .sub { font-family: var(--font-sans); font-size: 13px; line-height: 1.4; color: var(--text);
+  margin: -6px 0 4px; text-wrap: pretty; }
+.dlg .sub .id { font-family: var(--font-mono); font-size: 11px; color: var(--overlay1); }
+
+/* context / verdict callout */
+.dlg-note { display: flex; gap: 9px; padding: 9px 11px; border-radius: 3px; margin: 10px 0 2px;
+  font-family: var(--font-sans); font-size: 12px; line-height: 1.55; }
+.dlg-note.warn { background: color-mix(in oklab, var(--peach) 9%, var(--crust));
+  border: 1px solid color-mix(in oklab, var(--peach) 28%, var(--surface0)); color: var(--subtext1); }
+.dlg-note.warn .mk { color: var(--peach); font-family: var(--font-mono); flex-shrink: 0; }
+.dlg-note.warn b { color: var(--peach); font-weight: 600; }
+.dlg-note code { font-family: var(--font-mono); font-size: 11px; color: var(--peach); }
+
+/* criteria recap inside mark-done */
+.dlg-acs { display: flex; flex-direction: column; gap: 5px; margin: 4px 0 2px; }
+.dlg-ac { display: flex; align-items: center; gap: 9px; padding: 6px 10px; border-radius: 3px;
+  border: 1px solid var(--surface0); background: var(--crust); font-family: var(--font-mono);
+  font-size: 11.5px; color: var(--subtext0); }
+.dlg-ac .mk { width: 14px; text-align: center; flex-shrink: 0; }
+.dlg-ac.pass { color: var(--subtext0); }
+.dlg-ac.pass .mk { color: var(--green); }
+.dlg-ac.fail { border-color: color-mix(in oklab, var(--red) 34%, var(--surface0)); color: var(--text); }
+.dlg-ac.fail .mk { color: var(--red); }
+.dlg-ac .kind { margin-left: auto; font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--overlay0); border: 1px solid var(--surface1); border-radius: 2px; padding: 0 4px; }
+
+.dlg textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 58px;
+  background: var(--crust); color: var(--text); border: 1px solid var(--surface1); border-radius: 3px;
+  padding: 8px 10px; font-family: var(--font-sans); font-size: 13px; line-height: 1.5; outline: none; }
+.dlg textarea:focus { border-color: var(--lavender); }
+.dlg textarea::placeholder { color: var(--overlay0); }
+.dlg textarea.mono { font-family: var(--font-mono); font-size: 12px; }
+
+/* example hint chips (quick-fill) */
+.dlg-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.dlg-chip { background: var(--surface0); border: 1px solid var(--surface1); color: var(--subtext0);
+  font-family: var(--font-mono); font-size: 10.5px; padding: 3px 8px; border-radius: 3px;
+  cursor: pointer; }
+.dlg-chip:hover { border-color: var(--lavender); color: var(--text); }
+
+/* segmented toggle (attempt counter / workspace choice) */
+.dlg-seg { display: inline-flex; border: 1px solid var(--surface1); border-radius: 3px;
+  overflow: hidden; margin-top: 2px; }
+.dlg-seg button { background: var(--crust); color: var(--subtext0); border: none;
+  font-family: var(--font-mono); font-size: 11px; padding: 4px 10px; cursor: pointer;
+  border-right: 1px solid var(--surface1); }
+.dlg-seg button:last-child { border-right: none; }
+.dlg-seg button.on { background: var(--surface1); color: var(--text); }
+.dlg-seg button:hover:not(.on) { color: var(--text); }
+
+.dlg-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 460px) {
+  .dlg-row2 { grid-template-columns: 1fr; }
+}
+
+.btn-warn,
+.modal-actions button.btn-warn { background: var(--peach); color: var(--crust);
+  border-color: var(--peach); font-weight: 700; }
+.btn-warn:hover,
+.modal-actions button.btn-warn:hover { background: color-mix(in oklab, var(--peach) 84%, var(--crust));
+  border-color: var(--peach); color: var(--crust); }

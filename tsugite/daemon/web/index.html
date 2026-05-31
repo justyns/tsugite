@@ -8,6 +8,8 @@
 <link rel="stylesheet" href="/static/css/console.css">
 <link rel="stylesheet" href="/static/css/styles.css">
 <link rel="stylesheet" href="/static/css/terminal.css">
+<link rel="stylesheet" href="/static/css/jobs.css">
+<link rel="stylesheet" href="/static/css/job-flows.css">
 <link rel="stylesheet" href="/static/css/responsive.css">
 <link rel="manifest" href="/static/manifest.json">
 <meta name="theme-color" content="#232634">
@@ -883,53 +885,232 @@
                     </div>
                   </template>
                   <template x-if="msg.type === 'job_status'">
-                    <div class="console-turn info">
+                    <div class="console-turn">
                       <div class="console-turn-gutter">
-                        <span class="role info">job</span>
+                        <span class="role job" :class="msg.state"
+                              @click.stop="msg.worker_session_id && selectSessionById(msg.worker_session_id)"
+                              :style="msg.worker_session_id ? 'cursor:pointer' : ''"
+                              :title="msg.worker_session_id ? 'Open worker session' : ''">job</span>
                       </div>
-                      <div class="console-turn-bubble job-status" :class="'job-state-' + msg.state">
-                        <div class="job-row">
-                          <span class="job-tag mono" @click.stop="msg.worker_session_id && selectSessionById(msg.worker_session_id)" :style="msg.worker_session_id ? 'cursor:pointer' : ''" :title="msg.worker_session_id ? 'Click to open worker session' : ''">[Job <span x-text="(msg.job_id || '').slice(4, 12)"></span> · <span class="job-state" x-text="msg.state"></span><template x-if="msg.verify_attempts">&nbsp;·&nbsp;<span x-text="'attempt ' + (msg.verify_attempts + 1)"></span></template>]</span>
-                          <span class="job-prompt" x-text="msg.prompt || ''"></span>
-                          <span class="grow"></span>
-                          <template x-if="(msg.attempts || []).length > 1">
-                            <button type="button" class="job-action" @click.stop="msg._showAttempts = !msg._showAttempts" :title="msg._showAttempts ? 'Hide previous attempts' : 'Show previous attempts'">
-                              <span x-text="msg._showAttempts ? '▾' : '▸'"></span>&nbsp;<span x-text="msg.attempts.length"></span> attempts
-                            </button>
+                      <div style="min-width:0">
+                        <div class="jx" :class="{ open: jobTileOpen(msg) }" :data-state="msg.state" :data-job-id="msg.job_id" :data-screen-label="'job ' + msg.job_id">
+                          <button type="button" class="jx-head" @click="msg._open = !jobTileOpen(msg)">
+                            <span class="jx-caret" x-text="jobTileOpen(msg) ? '▾' : '▸'"></span>
+                            <span class="jt-state">
+                              <span style="display:inline-flex;width:12px;justify-content:center">
+                                <template x-if="msg.state === 'running'"><span class="jt-spin"></span></template>
+                                <template x-if="msg.state === 'verifying'"><span class="g" style="font-size:11px">◎</span></template>
+                                <template x-if="msg.state === 'queued'"><span class="jt-dot live"></span></template>
+                                <template x-if="msg.state === 'done'"><span class="g">✓</span></template>
+                                <template x-if="msg.state === 'stuck'"><span class="g">▲</span></template>
+                                <template x-if="msg.state === 'errored'"><span class="g">✗</span></template>
+                                <template x-if="msg.state === 'cancelled'"><span class="g">⊘</span></template>
+                              </span>
+                              <span x-text="jobStateLabel(msg.state)"></span>
+                            </span>
+                            <span class="jt-id"><b x-text="jobShortId(msg.job_id)"></b></span>
+                            <template x-if="!jobTileOpen(msg)">
+                              <span class="inline-title" x-text="msg.prompt || ''"></span>
+                            </template>
+                            <template x-if="jobTileOpen(msg)">
+                              <span class="grow"></span>
+                            </template>
+                            <span class="jt-meta" x-text="jobMetaLine(msg)"></span>
+                          </button>
+                          <template x-if="jobTileOpen(msg)">
+                            <div class="jx-body">
+                              <div class="jx-title" x-text="msg.prompt || ''"></div>
+
+                              <!-- Per-criterion AC chips. Backend doesn't emit acceptance_criteria today;
+                                   when it does, jobCriteria() returns one chip per AC with kind+status.
+                                   Kind is inferred from text (ui/test/cmd) and defaults to llm.
+                                   Status is derived from result.ac_results when available. -->
+                              <template x-if="jobCriteria(msg).length">
+                                <div class="jt-acs">
+                                  <template x-for="(ac, i) in jobCriteria(msg)" :key="i">
+                                    <span class="jt-ac" :class="ac.status">
+                                      <span class="mk" x-text="ac.mark"></span>
+                                      <span x-text="ac.label"></span>
+                                      <span class="tp" x-text="ac.kind"></span>
+                                    </span>
+                                  </template>
+                                </div>
+                              </template>
+
+                              <!-- Conditional terminal embed. The host scope drives lifecycle; the
+                                   embed only mounts when this job has a worker terminal (see jobHasTerminal).
+                                   Heuristic: a worker_session_id paired with a discovered terminal whose
+                                   parent_session_id matches. The detection happens inside jobTerminalView. -->
+                              <template x-if="msg.worker_session_id">
+                                <div class="jx-term" x-data="jobTerminalView()" x-init="bind($el, msg)"
+                                     x-show="termActive" data-job-terminal>
+                                  <div class="jx-term-head">
+                                    <span class="tlabel">worker</span>
+                                    <span style="color:var(--surface2)">·</span>
+                                    <span>pty</span>
+                                    <span class="grow"></span>
+                                    <template x-if="termLive"><span class="live">live ▌</span></template>
+                                    <template x-if="!termLive"><span>exited</span></template>
+                                  </div>
+                                  <div class="jx-xterm" data-xterm-host></div>
+                                </div>
+                              </template>
+
+                              <!-- Result inset (llm-only deliverable). Renders when result.summary present. -->
+                              <template x-if="jobResultSummary(msg)">
+                                <div class="jt-result">
+                                  <div class="rh">
+                                    <span class="teal">result</span>
+                                    <span class="grow"></span>
+                                    <span x-text="msg.worker_session_id ? '' : 'llm-only · no shell'"></span>
+                                  </div>
+                                  <pre x-text="jobResultSummary(msg)"></pre>
+                                </div>
+                              </template>
+
+                              <!-- Stuck issue / errored crash blocks. -->
+                              <template x-if="msg.state === 'stuck' && msg.error">
+                                <div class="jx-issue">
+                                  <span class="mk">▲</span>
+                                  <span x-text="msg.error"></span>
+                                </div>
+                              </template>
+                              <template x-if="msg.state === 'errored' && msg.error">
+                                <div class="jx-err">
+                                  <span class="mk">!</span>
+                                  <span x-text="msg.error"></span>
+                                </div>
+                              </template>
+
+                              <!-- Attempts stack (always rendered when count > 1). -->
+                              <template x-if="(msg.attempts || []).length > 1">
+                                <div>
+                                  <div class="jx-lbl" style="margin-bottom:7px">
+                                    attempts <span class="ln"></span> <span x-text="msg.attempts.length"></span> rounds
+                                  </div>
+                                  <div class="jt-attempts">
+                                    <template x-for="att in msg.attempts" :key="att.index">
+                                      <div class="jt-attempt" :class="att.index + 1 === msg.attempts.length ? 'cur' : ''"
+                                           @click.stop="att.worker_session_id && selectSessionById(att.worker_session_id)"
+                                           :style="att.worker_session_id ? 'cursor:pointer' : ''">
+                                        <span class="n">attempt <b x-text="att.index + 1"></b></span>
+                                        <span class="why" x-text="att.kind || 'initial'"></span>
+                                        <template x-if="att.verifier_pass === true">
+                                          <span class="vd pass">pass</span>
+                                        </template>
+                                        <template x-if="att.verifier_pass === false">
+                                          <span class="vd fail">fail</span>
+                                        </template>
+                                        <span class="open">⤢</span>
+                                      </div>
+                                    </template>
+                                  </div>
+                                </div>
+                              </template>
+                            </div>
                           </template>
-                          <template x-if="msg.state === 'running' || msg.state === 'verifying'">
-                            <button type="button" class="job-action" @click.stop="jobCancel(msg.job_id)" title="Cancel this job">cancel</button>
-                          </template>
-                          <template x-if="msg.state === 'stuck'">
-                            <button type="button" class="job-action" @click.stop="jobMarkDone(msg.job_id)" title="Override verifier and mark as done">mark done</button>
-                          </template>
-                          <template x-if="msg.state === 'stuck'">
-                            <button type="button" class="job-action" @click.stop="jobRetryWithHint(msg.job_id)" title="Provide a hint and try once more">retry…</button>
+
+                          <template x-if="jobTileOpen(msg) && jobHasFooter(msg)">
+                            <div class="jx-foot">
+                              <template x-if="msg.state === 'running' || msg.state === 'verifying'">
+                                <button type="button" class="jt-btn" @click.stop="jobCancel(msg.job_id)" title="Cancel this job">
+                                  <span class="k">⊘</span>cancel
+                                </button>
+                              </template>
+                              <template x-if="msg.state === 'stuck'">
+                                <button type="button" class="jt-btn primary" @click.stop="jobRetryWithHint(msg.job_id)" title="Provide a hint and try once more">
+                                  <span class="k">↻</span>retry with hint…
+                                </button>
+                              </template>
+                              <template x-if="msg.state === 'stuck'">
+                                <button type="button" class="jt-btn" @click.stop="jobMarkDone(msg.job_id)" title="Override verifier and mark as done">
+                                  <span class="k">⊠</span>mark done
+                                </button>
+                              </template>
+                              <template x-if="msg.state === 'errored'">
+                                <button type="button" class="jt-btn primary" @click.stop="jobRetryWithHint(msg.job_id)" title="Restart with a hint">
+                                  <span class="k">↻</span>restart…
+                                </button>
+                              </template>
+                              <span class="grow"></span>
+                              <template x-if="msg.worker_session_id">
+                                <button type="button" class="jt-btn ghost" @click.stop="selectSessionById(msg.worker_session_id)" title="Open worker session">
+                                  <span class="k">⤢</span>open worker
+                                </button>
+                              </template>
+                            </div>
                           </template>
                         </div>
-                        <template x-if="msg._showAttempts && (msg.attempts || []).length > 0">
-                          <div class="job-attempts">
-                            <template x-for="att in msg.attempts" :key="att.index">
-                              <div class="job-attempt-row">
-                                <span class="job-attempt-idx mono" x-text="'#' + (att.index + 1)"></span>
-                                <span class="job-attempt-kind" x-text="att.kind"></span>
-                                <a class="job-attempt-link mono" @click.stop="att.worker_session_id && selectSessionById(att.worker_session_id)" :style="att.worker_session_id ? 'cursor:pointer' : ''" x-text="(att.worker_session_id || '').slice(0, 16)"></a>
-                                <template x-if="att.verifier_session_id">
-                                  <span>→ <a class="job-attempt-link mono" @click.stop="selectSessionById(att.verifier_session_id)" style="cursor:pointer" x-text="att.verifier_session_id.slice(0, 16)"></a></span>
-                                </template>
-                                <template x-if="att.verifier_pass === true">
-                                  <span class="job-attempt-verdict pass">pass</span>
-                                </template>
-                                <template x-if="att.verifier_pass === false">
-                                  <span class="job-attempt-verdict fail">fail</span>
-                                </template>
-                              </div>
+                      </div>
+                    </div>
+                  </template>
+                  <template x-if="msg.type === 'job_notify'">
+                    <div class="console-turn">
+                      <div class="console-turn-gutter">
+                        <span class="role job" :class="msg.notify_state || 'done'">job</span>
+                      </div>
+                      <div style="min-width:0">
+                        <div class="jn" :data-state="msg.notify_state || 'done'" :data-job-id="msg.notify_job_id">
+                          <div class="jn-head">
+                            <span class="jt-state">
+                              <span style="display:inline-flex;width:12px;justify-content:center">
+                                <template x-if="msg.notify_state === 'done'"><span class="g">✓</span></template>
+                                <template x-if="msg.notify_state === 'stuck'"><span class="g">▲</span></template>
+                                <template x-if="msg.notify_state === 'errored'"><span class="g">✗</span></template>
+                                <template x-if="msg.notify_state === 'cancelled'"><span class="g">⊘</span></template>
+                              </span>
+                              <span x-text="jobStateLabel(msg.notify_state || 'done')"></span>
+                            </span>
+                            <span class="jt-id"><b x-text="jobShortId(msg.notify_job_id)"></b></span>
+                            <span class="grow"></span>
+                          </div>
+                          <div class="jn-lead">
+                            <span class="ttl" x-text="msg.notify_prompt || msg.text || ''"></span>
+                            <template x-if="msg.notify_state === 'done'"><span> — finished.</span></template>
+                            <template x-if="msg.notify_state === 'stuck'"><span> — needs your input.</span></template>
+                            <template x-if="msg.notify_state === 'errored'"><span> — failed.</span></template>
+                            <template x-if="msg.notify_state === 'cancelled'"><span> — cancelled.</span></template>
+                          </div>
+                          <template x-if="msg.notify_body">
+                            <div class="jn-body">
+                              <template x-if="msg.notify_state === 'done' && msg.notify_body">
+                                <div class="jn-mini">
+                                  <div class="h"><span class="teal">result</span><span class="grow"></span></div>
+                                  <pre x-text="msg.notify_body"></pre>
+                                </div>
+                              </template>
+                              <template x-if="msg.notify_state === 'stuck' && msg.notify_body">
+                                <div class="jx-issue"><span class="mk">▲</span><span x-text="msg.notify_body"></span></div>
+                              </template>
+                              <template x-if="msg.notify_state === 'errored' && msg.notify_body">
+                                <div class="jx-err"><span class="mk">!</span><span x-text="msg.notify_body"></span></div>
+                              </template>
+                            </div>
+                          </template>
+                          <div class="jn-foot">
+                            <span class="grow"></span>
+                            <template x-if="msg.notify_state === 'stuck'">
+                              <button type="button" class="jt-btn primary" @click.stop="jobRetryWithHint(msg.notify_job_id)">
+                                <span class="k">↻</span>retry with hint…
+                              </button>
+                            </template>
+                            <template x-if="msg.notify_state === 'stuck'">
+                              <button type="button" class="jt-btn" @click.stop="jobMarkDone(msg.notify_job_id)">
+                                <span class="k">⊠</span>mark done
+                              </button>
+                            </template>
+                            <template x-if="msg.notify_state === 'errored'">
+                              <button type="button" class="jt-btn primary" @click.stop="jobRetryWithHint(msg.notify_job_id)">
+                                <span class="k">↻</span>restart…
+                              </button>
+                            </template>
+                            <template x-if="msg.notify_worker_session_id">
+                              <button type="button" class="jt-btn ghost" @click.stop="selectSessionById(msg.notify_worker_session_id)">
+                                <span class="k">⤢</span>open worker
+                              </button>
                             </template>
                           </div>
-                        </template>
-                        <template x-if="msg.error">
-                          <div class="job-error" x-text="msg.error" style="font-size:11px;color:var(--red);margin-top:4px;white-space:pre-wrap"></div>
-                        </template>
+                        </div>
                       </div>
                     </div>
                   </template>
@@ -1210,6 +1391,94 @@
           </div>
         </template>
         <div class="modal-actions"><button class="btn-cancel" @click="showSkills = false">Close</button></div>
+      </div>
+    </div>
+
+    <!-- Retry-with-hint dialog (replaces browser prompt()) -->
+    <div class="modal-backdrop" :class="{ open: retryDialog.open }"
+         @click.self="closeRetryDialog()"
+         @keydown.escape.window="if(retryDialog.open) closeRetryDialog()">
+      <div class="modal-content dlg" role="dialog" aria-label="Retry with hint">
+        <h2>retry with hint</h2>
+        <div class="sub">
+          <span x-text="retryDialog.prompt"></span>
+          <span class="id"> · <span x-text="retryDialog.jobId"></span></span>
+        </div>
+        <template x-if="retryDialog.lastVerdict">
+          <div class="dlg-note warn">
+            <span class="mk">▲</span>
+            <span>last verdict — <b x-text="retryDialog.lastVerdict"></b>. Your hint is added to the next attempt's prompt.</span>
+          </div>
+        </template>
+        <label for="retry-hint-text">hint for the next attempt</label>
+        <textarea id="retry-hint-text" x-ref="retryHintText"
+                  x-model="retryDialog.hint"
+                  placeholder="tell the worker what to do differently this time…"
+                  rows="3"></textarea>
+        <div class="dlg-chips">
+          <template x-for="(tip, i) in retryDialog.suggestions" :key="i">
+            <button type="button" class="dlg-chip" @click="retryDialog.hint = tip" x-text="tip.length > 56 ? tip.slice(0, 56) + '…' : tip"></button>
+          </template>
+        </div>
+        <div class="dlg-row2" style="margin-top:14px">
+          <div>
+            <label>attempt counter</label>
+            <div class="dlg-seg">
+              <button type="button" :class="retryDialog.resetCounter ? 'on' : ''" @click="retryDialog.resetCounter = true">reset to 1</button>
+              <button type="button" :class="!retryDialog.resetCounter ? 'on' : ''" @click="retryDialog.resetCounter = false">continue</button>
+            </div>
+          </div>
+          <div>
+            <label>workspace</label>
+            <div class="dlg-seg">
+              <button type="button" :class="retryDialog.workspace === 'keep' ? 'on' : ''" @click="retryDialog.workspace = 'keep'">keep last</button>
+              <button type="button" :class="retryDialog.workspace === 'fresh' ? 'on' : ''" @click="retryDialog.workspace = 'fresh'">fresh checkout</button>
+            </div>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button class="btn-cancel" @click="closeRetryDialog()">cancel</button>
+          <button class="btn-primary" @click="submitRetryDialog()" :disabled="!retryDialog.hint.trim()">↻ retry with hint</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Mark-done dialog (replaces browser confirm()) -->
+    <div class="modal-backdrop" :class="{ open: markDoneDialog.open }"
+         @click.self="closeMarkDoneDialog()"
+         @keydown.escape.window="if(markDoneDialog.open) closeMarkDoneDialog()">
+      <div class="modal-content dlg" role="dialog" aria-label="Mark done">
+        <h2>mark done</h2>
+        <div class="sub">
+          <span x-text="markDoneDialog.prompt"></span>
+          <span class="id"> · <span x-text="markDoneDialog.jobId"></span></span>
+        </div>
+        <div class="dlg-note warn">
+          <span class="mk">▲</span>
+          <span>This job <b>did not pass all criteria.</b> Marking it done accepts the work as-is and overrides the verifier — the conversation will show it resolved.</span>
+        </div>
+        <template x-if="markDoneDialog.criteria.length">
+          <div>
+            <label>criteria at close</label>
+            <div class="dlg-acs">
+              <template x-for="(ac, i) in markDoneDialog.criteria" :key="i">
+                <div class="dlg-ac" :class="ac.status === 'pass' ? 'pass' : 'fail'">
+                  <span class="mk" x-text="ac.status === 'pass' ? '✓' : '✗'"></span>
+                  <span x-text="ac.label"></span>
+                  <span class="kind" x-text="ac.kind"></span>
+                </div>
+              </template>
+            </div>
+          </div>
+        </template>
+        <label>reason <span style="text-transform:none;letter-spacing:0;color:var(--overlay0)">· optional, kept on the record</span></label>
+        <textarea class="mono" x-model="markDoneDialog.reason"
+                  placeholder="e.g. failing tests are unrelated flake — tracked in another ticket"
+                  rows="3"></textarea>
+        <div class="modal-actions">
+          <button class="btn-cancel" @click="closeMarkDoneDialog()">cancel</button>
+          <button class="btn-warn" @click="submitMarkDoneDialog()">⊠ mark done anyway</button>
+        </div>
       </div>
     </div>
   </div>

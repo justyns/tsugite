@@ -41,6 +41,30 @@ export default () => ({
   attachments: [],
   inputMenuOpen: false,
   showSkills: false,
+  // Retry-with-hint and mark-done dialogs replace the browser prompt()/confirm()
+  // formerly used in jobRetryWithHint/jobMarkDone. Open via _openRetryDialog /
+  // _openMarkDoneDialog; submit posts to the same /api/jobs/{id}/... endpoints.
+  retryDialog: {
+    open: false,
+    jobId: '',
+    prompt: '',
+    lastVerdict: '',
+    hint: '',
+    resetCounter: true,
+    workspace: 'keep',
+    suggestions: [
+      "the failing tests are pre-existing — verify against a clean baseline first",
+      "split the change into smaller commits and re-run tests between each",
+      "check the verifier output more carefully and address each failure",
+    ],
+  },
+  markDoneDialog: {
+    open: false,
+    jobId: '',
+    prompt: '',
+    criteria: [],
+    reason: '',
+  },
   inspectingSnapshot: null,
   piExpanded: null,
   effortLevels: [],
@@ -759,8 +783,10 @@ export default () => ({
     const existing = this.messages.find(m => m.type === 'job_status' && m.job_id === d.job_id);
     // Drop undefined fields so an emit without `error` (e.g. a RUNNING tick after
     // a STUCK terminal) doesn't wipe a previously-set error from the tile.
+    // acceptance_criteria/result are consumed when present — the backend doesn't
+    // include them in _emit_job_event today, but the tile is forward-compatible.
     const fields = {};
-    for (const k of ['state', 'prompt', 'worker_session_id', 'verifier_session_id', 'verify_attempts', 'error', 'attempts']) {
+    for (const k of ['state', 'prompt', 'worker_session_id', 'verifier_session_id', 'verify_attempts', 'error', 'attempts', 'acceptance_criteria', 'result']) {
       if (d[k] !== undefined) fields[k] = d[k];
     }
     if (existing) {
@@ -771,8 +797,87 @@ export default () => ({
     }
   },
 
+  // ---------- Job tile helpers (template-side) ----------
+
+  // Default-open the tile for live/attention states; collapse done/cancelled/queued.
+  // Sticky once the user toggles, via msg._open.
+  jobTileOpen(msg) {
+    if (typeof msg._open === 'boolean') return msg._open;
+    return msg.state === 'running' || msg.state === 'verifying'
+      || msg.state === 'stuck' || msg.state === 'errored';
+  },
+
+  jobStateLabel(state) {
+    return state === 'errored' ? 'error' : (state || 'unknown');
+  },
+
+  jobShortId(jobId) {
+    if (!jobId) return '';
+    // Strip the "job-" prefix and keep the hex suffix; matches the design's
+    // "job_8e3b" style without baking in the underscore separator.
+    const cleaned = String(jobId).replace(/^job[-_]/, '');
+    return cleaned.length > 8 ? cleaned.slice(0, 8) : cleaned;
+  },
+
+  jobMetaLine(msg) {
+    const bits = [];
+    const attempts = (msg.attempts || []).length;
+    if (attempts > 1) bits.push(`${attempts} attempts`);
+    else if (msg.verify_attempts) bits.push(`attempt ${msg.verify_attempts + 1}`);
+    return bits.join(' · ');
+  },
+
+  // Per-criterion AC chip list. Reads `acceptance_criteria` from the job event
+  // (a list of strings; backend doesn't broadcast it today — when it does, this
+  // light-up). Each chip's status is derived from `result.ac_results` when
+  // available (matching by ac_text); otherwise pending. Kind is heuristic:
+  // lowercase substring match against `ui`/`test`/`cmd`, default `llm`.
+  jobCriteria(msg) {
+    const acs = msg.acceptance_criteria;
+    if (!Array.isArray(acs) || acs.length === 0) return [];
+    const acResults = (msg.result && Array.isArray(msg.result.ac_results)) ? msg.result.ac_results : [];
+    const resultByText = {};
+    for (const r of acResults) {
+      if (r && typeof r === 'object' && r.ac_text != null) resultByText[r.ac_text] = r;
+    }
+    const out = [];
+    for (const ac of acs) {
+      const label = String(ac);
+      const r = resultByText[label];
+      let status = 'pending', mark = '○';
+      if (r) {
+        if (r.pass === true) { status = 'pass'; mark = '✓'; }
+        else if (r.pass === false) { status = 'fail'; mark = '✗'; }
+      } else if (msg.state === 'running' || msg.state === 'verifying') {
+        status = 'active'; mark = '◔';
+      }
+      let kind = 'llm';
+      const lc = label.toLowerCase();
+      if (lc.includes('test')) kind = 'test';
+      else if (lc.includes('ui') || lc.includes('snapshot') || lc.includes('render')) kind = 'ui';
+      else if (lc.includes('cmd') || lc.includes('command') || lc.includes('shell')) kind = 'cmd';
+      out.push({ label, kind, status, mark });
+    }
+    return out;
+  },
+
+  jobResultSummary(msg) {
+    if (!msg.result) return '';
+    if (typeof msg.result === 'string') return msg.result;
+    return msg.result.summary || '';
+  },
+
+  jobHasFooter(msg) {
+    if (!msg) return false;
+    if (msg.state === 'running' || msg.state === 'verifying') return true;
+    if (msg.state === 'stuck' || msg.state === 'errored') return true;
+    return !!msg.worker_session_id;
+  },
+
+  // ---------- Job tile actions (dialogs) ----------
+
   async jobCancel(jobId) {
-    if (!confirm('Cancel this job? The worker session will be stopped.')) return;
+    // Cancel is reversible enough — no confirm dialog per the design.
     try {
       await post(`/api/jobs/${jobId}/cancel`, {});
     } catch (e) {
@@ -780,24 +885,76 @@ export default () => ({
     }
   },
 
-  async jobMarkDone(jobId) {
-    const reason = prompt('Mark done — reason (for audit):', 'verifier was wrong, work looks fine');
-    if (reason === null) return;
+  jobMarkDone(jobId) {
+    const msg = this._findJobMessage(jobId);
+    const criteria = msg ? this.jobCriteria(msg) : [];
+    const failed = criteria.filter(c => c.status === 'fail');
+    const passed = criteria.filter(c => c.status === 'pass');
+    this.markDoneDialog.open = true;
+    this.markDoneDialog.jobId = jobId;
+    this.markDoneDialog.prompt = msg?.prompt || '';
+    this.markDoneDialog.criteria = [...failed, ...passed];  // failed first, design's recap order
+    this.markDoneDialog.reason = '';
+  },
+
+  closeMarkDoneDialog() {
+    this.markDoneDialog.open = false;
+  },
+
+  async submitMarkDoneDialog() {
+    const { jobId, reason } = this.markDoneDialog;
+    this.markDoneDialog.open = false;
     try {
-      await post(`/api/jobs/${jobId}/mark-done`, { reason });
+      await post(`/api/jobs/${jobId}/mark-done`, { reason: reason.trim() || 'marked done by user' });
     } catch (e) {
       toast(`Mark done failed: ${e.message}`, 'error');
     }
   },
 
-  async jobRetryWithHint(jobId) {
-    const hint = prompt('Hint for the worker (what the verifier missed, or what to try differently):');
-    if (!hint || !hint.trim()) return;
+  jobRetryWithHint(jobId) {
+    const msg = this._findJobMessage(jobId);
+    // Pull the last verifier verdict from result.ac_results (first failing reason)
+    // when available; fall back to the job's error string.
+    let lastVerdict = '';
+    if (msg?.result?.ac_results && Array.isArray(msg.result.ac_results)) {
+      const firstFail = msg.result.ac_results.find(r => r && r.pass === false);
+      if (firstFail) lastVerdict = firstFail.reason || firstFail.ac_text || '';
+    }
+    if (!lastVerdict && msg?.error) lastVerdict = String(msg.error).split('\n')[0].slice(0, 200);
+    this.retryDialog.open = true;
+    this.retryDialog.jobId = jobId;
+    this.retryDialog.prompt = msg?.prompt || '';
+    this.retryDialog.lastVerdict = lastVerdict;
+    this.retryDialog.hint = '';
+    this.retryDialog.resetCounter = true;
+    this.retryDialog.workspace = 'keep';
+    this.$nextTick(() => {
+      try { this.$refs.retryHintText?.focus(); } catch { /* non-fatal */ }
+    });
+  },
+
+  closeRetryDialog() {
+    this.retryDialog.open = false;
+  },
+
+  async submitRetryDialog() {
+    const hint = (this.retryDialog.hint || '').trim();
+    if (!hint) return;
+    const jobId = this.retryDialog.jobId;
+    this.retryDialog.open = false;
     try {
-      await post(`/api/jobs/${jobId}/retry`, { hint: hint.trim() });
+      // resetCounter/workspace toggles aren't surfaced by the backend yet — the
+      // POST shape stays a single `hint` field. The toggles are tracked locally
+      // and will be wired through once the backend grows the matching params.
+      await post(`/api/jobs/${jobId}/retry`, { hint });
     } catch (e) {
       toast(`Retry failed: ${e.message}`, 'error');
     }
+  },
+
+  _findJobMessage(jobId) {
+    if (!jobId) return null;
+    return this.messages.find(m => m.type === 'job_status' && m.job_id === jobId) || null;
   },
 
   // ---------- Console helpers ----------

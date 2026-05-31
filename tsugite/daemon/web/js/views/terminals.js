@@ -21,6 +21,26 @@ import { createTerminalRenderer } from '../utils/xterm-loader.js';
 
 const LINE_CAP = 5000;
 
+/**
+ * Look up the terminal record (if any) belonging to a given parent session id.
+ *
+ * The Jobs feature spawns worker sessions that may or may not produce a PTY-
+ * backed terminal: an LLM-only job (e.g. "write me a haiku") never does, while
+ * a tool-using job (e.g. one that runs pytest) does. The frontend job tile
+ * embeds an xterm only when this lookup returns a record. Returns null on
+ * miss / network error so callers can hide the terminal pane gracefully.
+ */
+export async function findTerminalForParentSession(parentSessionId) {
+  if (!parentSessionId) return null;
+  try {
+    const data = await get(`/api/terminals?parent_session_id=${encodeURIComponent(parentSessionId)}`);
+    const terms = (data && data.terminals) || [];
+    return terms.length > 0 ? terms[0] : null;
+  } catch {
+    return null;
+  }
+}
+
 function stateDotClass(state) {
   switch (state) {
     case 'running':       return 'dot running pulse';
@@ -553,3 +573,101 @@ export function terminalSessionView() {
   };
 }
 
+/**
+ * jobTerminalView — Alpine x-data factory that drives the conditional xterm
+ * embed inside a job tile. Mounted via x-init="bind($el, msg)" on the .jx-term
+ * container; the host scope tears down + recreates when the job message
+ * changes worker session id, so each worker gets a fresh renderer.
+ *
+ * Lookup heuristic:
+ *   findTerminalForParentSession(worker_session_id) — if it returns a record,
+ *   the worker spawned a PTY and we show the embed; otherwise stay hidden so
+ *   llm-only jobs (e.g. "write me a haiku") don't get a useless terminal pane.
+ *
+ * The embed reuses the existing SSE stream (window 'tsugite:terminal-output'
+ * events) by selectTerminal()-ing on the store; that keeps the buffer + SSE
+ * machinery in one place and means the full-pane terminal view and the in-tile
+ * embed share the same backing state.
+ */
+export function jobTerminalView() {
+  return {
+    termActive: false,
+    termLive: false,
+    _renderer: null,
+    _outputHandler: null,
+    _clearHandler: null,
+    _jumpHandler: null,
+    _terminalId: null,
+    _resizeObs: null,
+
+    async bind(root, msg) {
+      const workerId = msg?.worker_session_id;
+      if (!workerId) return;
+      const term = await findTerminalForParentSession(workerId);
+      if (!term) return;  // llm-only job — no terminal embed
+      this._terminalId = term.id;
+      this.termLive = isRunningState(term.state);
+      this.termActive = true;
+
+      // Wait one frame so the x-show flip has actually painted the host.
+      await new Promise((r) => requestAnimationFrame(r));
+      const host = root.querySelector('[data-xterm-host]');
+      if (!host) return;
+
+      const renderer = await createTerminalRenderer(host, {
+        cursorBlink: this.termLive,
+        disableStdin: true,
+        scrollback: 5000,
+      });
+      this._renderer = renderer;
+
+      // Pull the cross-pane store buffer (if /api/terminals already streamed
+      // some output before the tile mounted) so the embed catches up.
+      const store = this.$store?.terminals;
+      const existingBuf = store?.buffers?.[this._terminalId];
+      if (existingBuf?.text) renderer.write(existingBuf.text);
+
+      // Reuse the cross-pane SSE: select this terminal so the store opens its
+      // stream and broadcasts 'tsugite:terminal-output' events; we mirror them
+      // into our embedded xterm. Note this also surfaces the terminal in the
+      // sidebar (intended) — same backing state as the full-pane view.
+      if (store && !store.streams?.[this._terminalId]) {
+        store.buffers[this._terminalId] = store.buffers[this._terminalId]
+          || { text: '', lines: 0, truncated: false, follow: true };
+        store._openStream(this._terminalId);
+      }
+
+      this._outputHandler = (ev) => {
+        if (ev.detail?.id !== this._terminalId) return;
+        renderer.write(ev.detail.chunk);
+      };
+      this._clearHandler = (ev) => {
+        if (ev.detail?.id !== this._terminalId) return;
+        try { renderer.term.clear(); } catch { /* non-fatal */ }
+      };
+      this._jumpHandler = (ev) => {
+        if (ev.detail?.id !== this._terminalId) return;
+        renderer.jumpToBottom();
+      };
+      window.addEventListener('tsugite:terminal-output', this._outputHandler);
+      window.addEventListener('tsugite:terminal-clear', this._clearHandler);
+      window.addEventListener('tsugite:terminal-jump', this._jumpHandler);
+
+      try {
+        this._resizeObs = new ResizeObserver(() => {
+          requestAnimationFrame(() => renderer.fitNow());
+        });
+        this._resizeObs.observe(host);
+      } catch { /* non-fatal */ }
+    },
+
+    destroy() {
+      if (this._outputHandler) window.removeEventListener('tsugite:terminal-output', this._outputHandler);
+      if (this._clearHandler) window.removeEventListener('tsugite:terminal-clear', this._clearHandler);
+      if (this._jumpHandler) window.removeEventListener('tsugite:terminal-jump', this._jumpHandler);
+      if (this._resizeObs) try { this._resizeObs.disconnect(); } catch { /* non-fatal */ }
+      if (this._renderer) try { this._renderer.dispose(); } catch { /* non-fatal */ }
+      this._renderer = null;
+    },
+  };
+}

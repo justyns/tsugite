@@ -1,4 +1,9 @@
-"""Frontend rendering of `job_status` tiles persisted in the parent session JSONL."""
+"""Frontend rendering of `job_status` tiles persisted in the parent session JSONL.
+
+Selectors target the redesigned tile (.jx) — the old `.job-status` class is
+gone. See test_jobs_tile_redesign.py for the full per-state coverage including
+collapse/expand, AC chips, attempts expander, dialogs, and the notify turn.
+"""
 
 from unittest.mock import patch
 
@@ -49,21 +54,18 @@ def test_job_status_tile_renders_latest_state(authenticated_page, e2e_adapter, e
     with patch("tsugite.daemon.adapters.http.get_history_dir", return_value=history_dir):
         page.reload()
         page.wait_for_selector(".console-turn.user", timeout=5000)
-        page.wait_for_selector(".console-turn-bubble.job-status", timeout=5000)
+        page.wait_for_selector(".jx", timeout=5000)
 
-        tiles = page.locator(".console-turn-bubble.job-status")
+        tiles = page.locator(".jx")
         assert tiles.count() == 1, (
             f"Multiple job_status events for the same job_id must coalesce into one tile, got {tiles.count()}"
         )
         tile = tiles.first
+        assert tile.get_attribute("data-state") == "done"
+        assert tile.get_attribute("data-job-id") == job_id
+        # The prompt text appears in either the inline-title (collapsed) or jx-title (expanded).
         text = tile.text_content() or ""
-        assert "done" in text.lower()
-        assert "deadbeef" in text
         assert "write a haiku" in text
-
-        # state-class drives the colour-coded border.
-        cls = tile.get_attribute("class") or ""
-        assert "job-state-done" in cls
 
 
 def test_job_status_tile_shows_error_in_stuck_state(authenticated_page, e2e_adapter, e2e_tmp):
@@ -93,7 +95,8 @@ def test_job_status_tile_shows_error_in_stuck_state(authenticated_page, e2e_adap
 
     with patch("tsugite.daemon.adapters.http.get_history_dir", return_value=history_dir):
         page.reload()
-        tile = page.wait_for_selector(".console-turn-bubble.job-status.job-state-stuck", timeout=5000)
+        # Stuck tile defaults to expanded so the issue note is visible.
+        tile = page.wait_for_selector('.jx[data-state="stuck"]', timeout=5000)
         text = tile.text_content() or ""
         assert "stuck" in text.lower()
         assert "Verifier failed" in text

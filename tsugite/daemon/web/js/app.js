@@ -6,7 +6,7 @@ import webhookView from './views/webhooks.js';
 import fileEditorView from './views/file-editor.js';
 import workspaceView from './views/workspace.js';
 import usageView from './views/usage.js';
-import terminalsView, { terminalSessionView } from './views/terminals.js';
+import terminalsView, { terminalSessionView, jobTerminalView } from './views/terminals.js';
 import { toast } from './utils.js';
 
 window.Alpine = Alpine;
@@ -74,6 +74,9 @@ Alpine.store('terminals', terminalsView());
 // Registered as Alpine.data so x-init can spin it up each time a different
 // terminal is selected (Alpine destroys + re-creates the x-data scope).
 Alpine.data('terminalSessionView', terminalSessionView);
+// jobTerminalView mounts an xterm renderer inside a job tile when the worker
+// session has a PTY-backed terminal. Looked up via /api/terminals?parent_session_id.
+Alpine.data('jobTerminalView', jobTerminalView);
 
 Alpine.data('sidebarResizer', () => ({
   onDown(e) {
