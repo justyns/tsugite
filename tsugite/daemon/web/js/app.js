@@ -7,6 +7,7 @@ import fileEditorView from './views/file-editor.js';
 import workspaceView from './views/workspace.js';
 import usageView from './views/usage.js';
 import terminalsView, { terminalSessionView } from './views/terminals.js';
+import jobsView from './views/jobs.js';
 import { toast } from './utils.js';
 
 window.Alpine = Alpine;
@@ -37,7 +38,7 @@ const initialParsed = parseHash(location.hash.slice(1));
 const initialView = legacyViews[initialParsed.view] || initialParsed.view || localStorage.getItem('tsugite-view') || 'conversations';
 
 Alpine.store('app', {
-  tabs: ['conversations','workspace','agents','skills','schedules','webhooks','usage'],
+  tabs: ['conversations','workspace','agents','skills','jobs','schedules','webhooks','usage'],
   agents: [],
   selectedAgent: localStorage.getItem('tsugite-agent') || null,
   view: initialView,
@@ -51,6 +52,10 @@ Alpine.store('app', {
   pendingWorkspaceFiles: [],
   autoFollow: localStorage.getItem('tsugite_auto_follow') !== 'false',
   skillIssues: [],
+  // Count of jobs in stuck/errored states; surfaced as a peach badge on the
+  // 'jobs' top-tab. Kept on the store so the badge stays visible even when
+  // the jobs view itself isn't mounted.
+  jobsNeedsYou: 0,
   tokensTotal: null,  // updated by usageView.load() so the keystrip shows daily token count
   version: '',
 });
@@ -65,6 +70,7 @@ Alpine.data('agentFileView', fileEditorView('agents', 'agent-files'));
 Alpine.data('skillFileView', fileEditorView('skills', 'skill-files'));
 Alpine.data('workspaceView', workspaceView);
 Alpine.data('usageView', usageView);
+Alpine.data('jobsView', jobsView);
 // terminalsView is exposed via Alpine.store('terminals') so the sidebar
 // section (rendered inside conversationsView's wrapper) and the main pane's
 // full-session block (sibling to the chat thread) can share one piece of
@@ -162,6 +168,7 @@ async function loadAgents() {
   }
   connectSSE();
   loadSkillIssues().catch(() => {});
+  loadJobsNeedsYou().catch(() => {});
 }
 window.tsugiteLoadAgents = loadAgents;
 
@@ -175,11 +182,27 @@ async function loadSkillIssues() {
 }
 window.tsugiteLoadSkillIssues = loadSkillIssues;
 
+// Refresh the 'needs you' Jobs badge from the list endpoint. Cheap, runs once
+// at boot + on every job_update SSE so the badge tracks the orchestrator without
+// requiring the user to open the Jobs tab.
+async function loadJobsNeedsYou() {
+  try {
+    const data = await get('/api/jobs?state=stuck');
+    Alpine.store('app').jobsNeedsYou = (data.jobs || []).length;
+  } catch {
+    /* keep prior count on transient failure */
+  }
+}
+window.tsugiteLoadJobsNeedsYou = loadJobsNeedsYou;
+
 function connectSSE() {
   if (_es) return;
   _es = connectEvents((event) => {
     if (event.type === 'reconnect') {
       loadAgents().catch(() => {});
+    }
+    if (event.type === 'job_update') {
+      loadJobsNeedsYou().catch(() => {});
     }
     Alpine.store('app').lastEvent = { ...event, _ts: Date.now() };
   });
