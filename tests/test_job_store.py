@@ -321,3 +321,16 @@ def test_legacy_job_with_notify_true_loads_as_notify_when_terminal(store_path):
     job = store.get("job-old2")
     assert job is not None
     assert job.notify_when == "terminal"
+
+
+def test_explicit_notify_when_never_wins_over_legacy_notify_true():
+    """Regression: spawn_job(notify_when="never") with notify defaulted to True
+    must not be silently promoted to "terminal". An explicit opt-out wins."""
+    job = Job(
+        id="",
+        parent_session_id="p1",
+        prompt="x",
+        notify=True,  # spawn_job's legacy default
+        notify_when="never",  # caller explicitly opts out
+    )
+    assert job.notify_when == "never"

@@ -119,9 +119,14 @@ class Job:
     # jobs and old callers behave identically.
     notify: bool = False
     # When to fire the wake-up message: one of "done", "stuck", "errored",
-    # "terminal" (any terminal state), or "never" (default). Replaces the binary
-    # `notify` field for finer control from the new-job modal / slash command.
-    notify_when: str = "never"
+    # "terminal" (any terminal state), or "never". Replaces the binary `notify`
+    # field for finer control from the new-job modal / slash command.
+    #
+    # Default is None so __post_init__ can tell "caller didn't specify" apart
+    # from "caller explicitly said never" — the latter must win even when the
+    # legacy `notify=True` bool is also set. Normalised to a string in
+    # __post_init__.
+    notify_when: Optional[str] = None
     # Maximum verifier rounds before the Job goes stuck. Defaults to 3 to match
     # the pre-feature constant; overridable per-job via /job --max-attempts or
     # the spawn_job() tool.
@@ -150,10 +155,11 @@ class Job:
             self.updated_at = now
         # Coerce to plain strings — tolerates legacy dict shape from older saves.
         self.acceptance_criteria = _coerce_ac_list(self.acceptance_criteria)
-        # Legacy `notify=True` → notify_when="terminal" if notify_when wasn't set
-        # explicitly. Preserves behaviour for callers / persisted jobs that
-        # predate notify_when.
-        if self.notify and self.notify_when in ("", "never", None):
+        # Legacy `notify=True` → notify_when="terminal" only when notify_when
+        # wasn't supplied at all. An explicit "never" must win — otherwise
+        # callers that opt out via notify_when get silently re-enabled by the
+        # legacy bool default on spawn_job.
+        if self.notify and self.notify_when in ("", None):
             self.notify_when = "terminal"
         if not self.notify_when:
             self.notify_when = "never"
