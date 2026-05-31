@@ -1094,7 +1094,11 @@
                             </div>
                           </template>
                           <div class="jn-foot">
-                            <span class="grow"></span>
+                            <template x-if="msg.notify_state === 'done' && msg.notify_body">
+                              <button type="button" class="jt-btn ghost" @click.stop="copyMessage(msg.notify_body)">
+                                <span class="k">⧉</span>copy
+                              </button>
+                            </template>
                             <template x-if="msg.notify_state === 'stuck'">
                               <button type="button" class="jt-btn primary" @click.stop="jobRetryWithHint(msg.notify_job_id)">
                                 <span class="k">↻</span>retry with hint…
@@ -1110,6 +1114,7 @@
                                 <span class="k">↻</span>restart…
                               </button>
                             </template>
+                            <span class="grow"></span>
                             <template x-if="msg.notify_worker_session_id">
                               <button type="button" class="jt-btn ghost" @click.stop="selectSessionById(msg.notify_worker_session_id)">
                                 <span class="k">⤢</span>open worker
@@ -1423,7 +1428,7 @@
                   rows="3"></textarea>
         <div class="dlg-chips">
           <template x-for="(tip, i) in retryDialog.suggestions" :key="i">
-            <button type="button" class="dlg-chip" @click="retryDialog.hint = tip" x-text="tip.length > 56 ? tip.slice(0, 56) + '…' : tip"></button>
+            <button type="button" class="dlg-chip" @click="retryDialog.hint = tip" x-text="tip.length > 42 ? tip.slice(0, 42) + '…' : tip"></button>
           </template>
         </div>
         <div class="dlg-row2" style="margin-top:14px">
@@ -1431,7 +1436,7 @@
             <label>attempt counter</label>
             <div class="dlg-seg">
               <button type="button" :class="retryDialog.resetCounter ? 'on' : ''" @click="retryDialog.resetCounter = true">reset to 1</button>
-              <button type="button" :class="!retryDialog.resetCounter ? 'on' : ''" @click="retryDialog.resetCounter = false">continue</button>
+              <button type="button" :class="!retryDialog.resetCounter ? 'on' : ''" @click="retryDialog.resetCounter = false">continue (4+)</button>
             </div>
           </div>
           <div>
