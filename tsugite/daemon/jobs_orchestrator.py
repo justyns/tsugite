@@ -172,6 +172,44 @@ class JobsOrchestrator:
         attempts[-1] = {**attempts[-1], "verifier_pass": bool(verifier_pass)}
         self._jobs.update(job_id, attempts=attempts)
 
+    def _record_ac_results(self, job_id: str, raw_ac_results, attempt_num: int) -> None:
+        """Append per-criterion verdicts for one verifier round to Job.ac_results.
+
+        Replaces any prior entries tagged with the same attempt_num (defensive in
+        case a verifier completion is delivered twice). The list itself grows by
+        one batch per attempt so the UI can render historical verdicts.
+        """
+        job = self._jobs.get(job_id)
+        if job is None:
+            return
+        prior = [e for e in (job.ac_results or []) if e.get("attempt") != attempt_num]
+        new_entries: list[dict] = []
+        if isinstance(raw_ac_results, list):
+            for i, item in enumerate(raw_ac_results):
+                if isinstance(item, dict):
+                    new_entries.append(
+                        {
+                            "ac_index": i,
+                            "ac_text": item.get("ac_text", ""),
+                            "pass": bool(item.get("pass")),
+                            "reason": item.get("reason"),
+                            "attempt": attempt_num,
+                        }
+                    )
+                else:
+                    # Malformed verifier output (string, None, etc) — keep a
+                    # placeholder so the UI still shows something.
+                    new_entries.append(
+                        {
+                            "ac_index": i,
+                            "ac_text": "(malformed verifier output)",
+                            "pass": False,
+                            "reason": repr(item),
+                            "attempt": attempt_num,
+                        }
+                    )
+        self._jobs.update(job_id, ac_results=prior + new_entries)
+
     def register_worker(self, job_id: str, worker_session_id: str, timeout_minutes: int) -> None:
         """Record the worker session id and schedule the wall-clock timeout."""
         self._jobs.update(job_id, worker_session_id=worker_session_id)
@@ -415,26 +453,38 @@ class JobsOrchestrator:
             )
             return
 
+        # Attempt counter is 1-indexed (matches the UX of "attempt #N"). Captured
+        # before _handle_verifier_failure bumps job.verify_attempts.
+        attempt_num = job.verify_attempts + 1
+
         parsed = _parse_verifier_output(result_str)
         if parsed is None:
             self._set_attempt_verdict(job.id, False)
+            # Synthetic one-entry batch so the UI sees *something* for this attempt.
+            self._record_ac_results(
+                job.id,
+                [{"ac_text": "(verifier output)", "pass": False, "reason": "verifier output unparseable"}],
+                attempt_num,
+            )
             return await self._handle_verifier_failure(
                 job,
                 failed_acs=[{"ac_text": "(verifier output)", "pass": False, "reason": "verifier output unparseable"}],
             )
         # Strict True: a string like "false" / "no" is truthy in Python but
         # explicitly NOT a pass. Treat anything other than literal True as failure.
+        ac_results_raw = parsed.get("ac_results", [])
+        self._record_ac_results(job.id, ac_results_raw, attempt_num)
         if parsed.get("overall_pass") is True:
             self._set_attempt_verdict(job.id, True)
             fresh = self._jobs.get(job.id)
             result = dict(fresh.result or {})
-            result["ac_results"] = parsed.get("ac_results", [])
+            result["ac_results"] = ac_results_raw
             self._finalize(job, JobState.DONE, result=result)
             return
         self._set_attempt_verdict(job.id, False)
         await self._handle_verifier_failure(
             job,
-            failed_acs=_extract_failed_acs(parsed.get("ac_results", [])),
+            failed_acs=_extract_failed_acs(ac_results_raw),
         )
 
     async def _handle_verifier_failure(self, job: Job, failed_acs: list[dict]) -> None:
@@ -635,6 +685,7 @@ class JobsOrchestrator:
             "error": job.error,
             "attempts": list(job.attempts or []),
             "acceptance_criteria": list(job.acceptance_criteria or []),
+            "ac_results": list(getattr(job, "ac_results", None) or []),
             "result": job.result,
         }
         # Persist into parent session JSONL so a page reload re-renders the tile.

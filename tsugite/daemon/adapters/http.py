@@ -1960,6 +1960,7 @@ class HTTPServer:
                 "error": j.error,
                 "attempts": list(j.attempts or []),
                 "acceptance_criteria": list(j.acceptance_criteria or []),
+                "ac_results": list(getattr(j, "ac_results", None) or []),
                 "agent": j.agent,
                 "model": j.model,
                 "created_at": j.created_at,

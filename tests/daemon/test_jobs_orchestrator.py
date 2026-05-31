@@ -1203,6 +1203,87 @@ def test_create_and_start_job_threads_max_attempts(store, runner, orchestrator):
     assert fresh.notify_when == "stuck"
 
 
+# ── Gap 4: per-criterion ac_results ──
+
+
+@pytest.mark.asyncio
+async def test_verifier_result_stored_per_criterion(store, runner, orchestrator):
+    """When the verifier completes, each AC verdict must land on Job.ac_results
+    with ac_index, ac_text, pass, reason, and attempt fields."""
+    job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=["a", "b"])
+    await orchestrator.on_session_complete(_worker_session(job), "w1")
+    job = store.get(job.id)
+    verifier_json = json.dumps(
+        {
+            "ac_results": [
+                {"ac_text": "a", "pass": True, "reason": "yes"},
+                {"ac_text": "b", "pass": False, "reason": "missing X"},
+            ],
+            "overall_pass": False,
+        }
+    )
+    await orchestrator.on_session_complete(_verifier_session(job, "v1"), verifier_json)
+    fresh = store.get(job.id)
+    assert fresh.ac_results is not None
+    assert len(fresh.ac_results) == 2
+    a = next(r for r in fresh.ac_results if r["ac_text"] == "a")
+    b = next(r for r in fresh.ac_results if r["ac_text"] == "b")
+    assert a == {"ac_index": 0, "ac_text": "a", "pass": True, "reason": "yes", "attempt": 1}
+    assert b == {"ac_index": 1, "ac_text": "b", "pass": False, "reason": "missing X", "attempt": 1}
+
+
+@pytest.mark.asyncio
+async def test_ac_results_accumulate_across_attempts(store, runner, orchestrator):
+    """Each attempt appends one batch of N entries (N = #AC). Across two failed
+    attempts the array should hold 2N entries tagged by attempt."""
+    job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=["a"])
+    fail = json.dumps({"ac_results": [{"ac_text": "a", "pass": False, "reason": "n"}], "overall_pass": False})
+    # Round 1
+    await orchestrator.on_session_complete(_worker_session(store.get(job.id), "w1"), "w1")
+    await orchestrator.on_session_complete(_verifier_session(store.get(job.id), "v1"), fail)
+    # Round 2
+    await orchestrator.on_session_complete(_worker_session(store.get(job.id), "w2"), "w2")
+    await orchestrator.on_session_complete(_verifier_session(store.get(job.id), "v2"), fail)
+    fresh = store.get(job.id)
+    attempts_recorded = sorted({e["attempt"] for e in fresh.ac_results})
+    assert attempts_recorded == [1, 2], f"expected attempts 1 and 2 in ac_results, got {attempts_recorded}"
+    assert len(fresh.ac_results) == 2, "two attempts × one AC = two entries"
+
+
+def test_emit_job_event_includes_ac_results(store, runner, orchestrator):
+    """The tile event payload must carry ac_results so the frontend can render
+    per-AC verdicts instead of synthesising state from Job.state."""
+    job = store.add(
+        Job(
+            id="",
+            parent_session_id="parent-1",
+            prompt="x",
+            acceptance_criteria=["a"],
+            ac_results=[{"ac_index": 0, "ac_text": "a", "pass": True, "reason": None, "attempt": 1}],
+        )
+    )
+    orchestrator._emit_job_event(store.get(job.id))
+    emitted = [call.args[1] for call in orchestrator._event_bus.emit.call_args_list if call.args[0] == "job_update"]
+    payload = emitted[-1]
+    assert payload["ac_results"] == [
+        {"ac_index": 0, "ac_text": "a", "pass": True, "reason": None, "attempt": 1}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_ac_results_recorded_on_unparseable_verifier_output(store, runner, orchestrator):
+    """Even when the verifier output is unparseable, a synthetic ac_result entry
+    must land so the UI can show 'verifier output unparseable' rather than empty."""
+    job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=["x"])
+    await orchestrator.on_session_complete(_worker_session(job), "w1")
+    job = store.get(job.id)
+    await orchestrator.on_session_complete(_verifier_session(job, "v1"), "definitely not json")
+    fresh = store.get(job.id)
+    assert fresh.ac_results, "unparseable verifier output must still produce an ac_results entry"
+    assert fresh.ac_results[0]["pass"] is False
+    assert "unparseable" in (fresh.ac_results[0].get("reason") or "").lower()
+
+
 def test_retry_with_hint_fresh_workspace_prunes_and_recreates_worktree(store, runner, orchestrator, tmp_path):
     """fresh_workspace=True on a Job with a repo must prune the existing worktree
     and recreate a new one from HEAD before spawning the retry worker."""

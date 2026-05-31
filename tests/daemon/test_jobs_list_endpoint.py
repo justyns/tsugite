@@ -143,6 +143,7 @@ class TestListJobsEndpoint:
             "error",
             "attempts",
             "acceptance_criteria",
+            "ac_results",
             "agent",
             "model",
             "created_at",

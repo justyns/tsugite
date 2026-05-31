@@ -145,6 +145,11 @@ class Job:
     # `worker_session_id` and `verifier_session_id` on Job point at the LATEST
     # entry; earlier entries are navigable via this list.
     attempts: list[dict] = field(default_factory=list)
+    # Per-criterion verifier verdicts, one entry per AC per attempt. Each entry:
+    #   {ac_index, ac_text, pass, reason, attempt}
+    # Accumulates across retry attempts (the orchestrator replaces only the current
+    # attempt's entries when the verifier responds). None when no verifier has run.
+    ac_results: Optional[list] = None
 
     def __post_init__(self):
         if not self.id:
