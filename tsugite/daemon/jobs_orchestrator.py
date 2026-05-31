@@ -586,6 +586,8 @@ class JobsOrchestrator:
             "verify_attempts": job.verify_attempts,
             "error": job.error,
             "attempts": list(job.attempts or []),
+            "acceptance_criteria": list(job.acceptance_criteria or []),
+            "result": job.result,
         }
         # Persist into parent session JSONL so a page reload re-renders the tile.
         try:
