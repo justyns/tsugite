@@ -59,13 +59,15 @@ class JobsOrchestrator:
         *,
         parent_session_id: str,
         prompt: str,
-        acceptance_criteria: Optional[list[str]] = None,
+        acceptance_criteria: Optional[list] = None,
         repo: Optional[str] = None,
         model: Optional[str] = None,
         agent: Optional[str] = None,
         timeout_minutes: int = 30,
         spawned_by: str = "user-slash",
         notify: bool = False,
+        max_attempts: Optional[int] = None,
+        notify_when: Optional[str] = None,
     ) -> tuple[Job, Session]:
         """Create a Job record + spawn the worker session in one step.
 
@@ -73,11 +75,17 @@ class JobsOrchestrator:
         Returns (job, started_worker_session). The orchestrator's register_worker
         is called automatically so the timeout is scheduled and the tile event fires.
 
-        notify: if True, the parent session receives a one-line wake-up message on
-        terminal transition so the parent agent learns the Job finished.
+        notify: legacy bool; True maps to notify_when="terminal". Prefer notify_when.
+        notify_when: one of "done", "stuck", "errored", "terminal", "never" (default).
+        max_attempts: verifier-loop cap. Defaults to 3 when omitted.
         """
         worker_agent_file = agent or "job_worker"
         worker_adapter_key = self._resolve_adapter_key(parent_session_id)
+        job_kwargs: dict = {}
+        if max_attempts is not None:
+            job_kwargs["max_attempts"] = max_attempts
+        if notify_when:
+            job_kwargs["notify_when"] = notify_when
 
         job = self._jobs.add(
             Job(
@@ -91,6 +99,7 @@ class JobsOrchestrator:
                 timeout_minutes=timeout_minutes,
                 spawned_by=spawned_by,
                 notify=notify,
+                **job_kwargs,
             )
         )
 
@@ -440,7 +449,11 @@ class JobsOrchestrator:
                 }
             ]
         new_attempts = job.verify_attempts + 1
-        if new_attempts >= MAX_VERIFY_ATTEMPTS:
+        # `MAX_VERIFY_ATTEMPTS` stays the module default (and the legacy contract
+        # for older jobs without an explicit field); per-job override comes from
+        # Job.max_attempts so the new-job modal's --max-attempts flag wins.
+        cap = job.max_attempts if getattr(job, "max_attempts", None) else MAX_VERIFY_ATTEMPTS
+        if new_attempts >= cap:
             error_lines = ["Verifier failed after max attempts:"]
             for ac in failed_acs:
                 error_lines.append(f"- {ac.get('ac_text', '?')}: {ac.get('reason', '?')}")
@@ -507,7 +520,7 @@ class JobsOrchestrator:
             self._jobs.update(job.id, worktree_path=None)
             fresh = self._jobs.get(job.id)
         self._emit_job_event(fresh)
-        if fresh and fresh.notify:
+        if fresh and _should_notify(fresh, terminal):
             self._schedule_notify(fresh)
 
     def _schedule_notify(self, job: Job) -> None:
@@ -617,6 +630,8 @@ class JobsOrchestrator:
             "state": job.state,
             "prompt": (job.prompt or "")[:200],
             "verify_attempts": job.verify_attempts,
+            "max_attempts": getattr(job, "max_attempts", 3),
+            "notify_when": getattr(job, "notify_when", "never"),
             "error": job.error,
             "attempts": list(job.attempts or []),
             "acceptance_criteria": list(job.acceptance_criteria or []),
@@ -632,6 +647,27 @@ class JobsOrchestrator:
                 self._event_bus.emit("job_update", payload)
             except Exception:
                 logger.exception("Failed to broadcast job_update for job '%s'", job.id)
+
+
+_TERMINAL_JOB_STATES = frozenset(
+    {JobState.DONE.value, JobState.STUCK.value, JobState.CANCELLED.value, JobState.ERRORED.value}
+)
+
+
+def _should_notify(job: Job, terminal: JobState) -> bool:
+    """Decide whether to wake the parent based on Job.notify_when.
+
+    Recognised values: "done", "stuck", "errored", "terminal" (any terminal state),
+    "never" (no-op). Anything else is treated as "never" (defensive — a typo on
+    disk shouldn't spam the parent agent).
+    """
+    notify_when = getattr(job, "notify_when", None) or ("terminal" if getattr(job, "notify", False) else "never")
+    state = terminal.value if isinstance(terminal, JobState) else terminal
+    if notify_when == "never":
+        return False
+    if notify_when == "terminal":
+        return state in _TERMINAL_JOB_STATES
+    return notify_when == state
 
 
 def build_worker_prompt(prompt: str, acceptance_criteria: list, repo: Optional[str]) -> str:

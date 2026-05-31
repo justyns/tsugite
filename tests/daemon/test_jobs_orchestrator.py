@@ -1023,6 +1023,186 @@ async def test_retry_with_hint_fresh_workspace_no_op_when_no_repo(store, runner,
     assert store.get(job.id).state == JobState.RUNNING.value
 
 
+# ── Gap 3: max_attempts + notify_when ──
+
+
+@pytest.mark.asyncio
+async def test_max_attempts_respected_by_verifier_loop(store, runner, orchestrator):
+    """A Job with max_attempts=2 must transition to STUCK after 2 failed verifier
+    rounds, even though the module default is 3."""
+    job = store.add(
+        Job(
+            id="",
+            parent_session_id="parent-1",
+            prompt="x",
+            acceptance_criteria=["x"],
+            max_attempts=2,
+        )
+    )
+    orchestrator.register_worker(job.id, "w0", timeout_minutes=30)
+    fail = json.dumps({"ac_results": [{"ac_text": "x", "pass": False, "reason": "n"}], "overall_pass": False})
+    # Round 0: worker → verifier → loop (still under cap of 2).
+    await orchestrator.on_session_complete(_worker_session(store.get(job.id), "w0"), "w0")
+    await orchestrator.on_session_complete(_verifier_session(store.get(job.id), "v0"), fail)
+    assert store.get(job.id).state == JobState.RUNNING.value
+    # Round 1: worker → verifier → STUCK (hit cap of 2).
+    await orchestrator.on_session_complete(_worker_session(store.get(job.id), "w1"), "w1")
+    await orchestrator.on_session_complete(_verifier_session(store.get(job.id), "v1"), fail)
+    assert store.get(job.id).state == JobState.STUCK.value
+    assert store.get(job.id).verify_attempts == 2
+
+
+@pytest.mark.asyncio
+async def test_max_attempts_higher_than_default_allows_more_rounds(store, runner, orchestrator):
+    """max_attempts=5 must allow up to 5 verifier rounds before stuck."""
+    job = store.add(
+        Job(
+            id="",
+            parent_session_id="parent-1",
+            prompt="x",
+            acceptance_criteria=["x"],
+            max_attempts=5,
+        )
+    )
+    orchestrator.register_worker(job.id, "w0", timeout_minutes=30)
+    fail = json.dumps({"ac_results": [{"ac_text": "x", "pass": False, "reason": "n"}], "overall_pass": False})
+    # 5 rounds: rounds 1..4 should loop, round 5 should stick.
+    for i in range(4):
+        await orchestrator.on_session_complete(_worker_session(store.get(job.id), f"w{i}"), f"w{i}")
+        await orchestrator.on_session_complete(_verifier_session(store.get(job.id), f"v{i}"), fail)
+        assert store.get(job.id).state == JobState.RUNNING.value, f"round {i} should still loop"
+    await orchestrator.on_session_complete(_worker_session(store.get(job.id), "w4"), "w4")
+    await orchestrator.on_session_complete(_verifier_session(store.get(job.id), "v4"), fail)
+    assert store.get(job.id).state == JobState.STUCK.value
+
+
+@pytest.mark.asyncio
+async def test_notify_when_done_fires_only_on_done(store, runner, orchestrator):
+    """notify_when='done' must wake the parent on DONE but NOT on STUCK/CANCELLED."""
+    sent: list = []
+
+    async def fake_reply(session_id, message, source="session", metadata=None):
+        sent.append((session_id, message))
+        return "ok"
+
+    runner.reply_to_session = fake_reply
+    job = store.add(
+        Job(
+            id="",
+            parent_session_id="parent-1",
+            prompt="x",
+            acceptance_criteria=[],
+            notify_when="done",
+        )
+    )
+    orchestrator.register_worker(job.id, "w0", timeout_minutes=30)
+    await orchestrator.on_session_complete(_worker_session(store.get(job.id)), "all done")
+    await asyncio.sleep(0)
+    assert sent, "notify_when=done must fire on DONE"
+
+    sent.clear()
+    job2 = _seed_running_job(store, orchestrator, runner, acceptance_criteria=["x"])
+    # Carry notify_when=done onto job2 via update
+    store.update(job2.id, notify_when="done")
+    cancelled = _worker_session(job2, status=SessionStatus.CANCELLED.value)
+    await orchestrator.on_session_complete(cancelled, "")
+    await asyncio.sleep(0)
+    assert sent == [], "notify_when=done must NOT fire on CANCELLED"
+
+
+@pytest.mark.asyncio
+async def test_notify_when_terminal_fires_on_any_terminal_state(store, runner, orchestrator):
+    """notify_when='terminal' fires on done, stuck, errored, and cancelled."""
+    sent: list = []
+
+    async def fake_reply(session_id, message, source="session", metadata=None):
+        sent.append((session_id, message))
+        return "ok"
+
+    runner.reply_to_session = fake_reply
+
+    # Make a CANCELLED Job with notify_when=terminal.
+    job = store.add(
+        Job(
+            id="",
+            parent_session_id="parent-1",
+            prompt="x",
+            acceptance_criteria=["x"],
+            notify_when="terminal",
+        )
+    )
+    orchestrator.register_worker(job.id, "w0", timeout_minutes=30)
+    cancelled = _worker_session(job, status=SessionStatus.CANCELLED.value)
+    await orchestrator.on_session_complete(cancelled, "")
+    await asyncio.sleep(0)
+    assert sent, "notify_when=terminal must fire on CANCELLED"
+
+
+@pytest.mark.asyncio
+async def test_notify_legacy_bool_maps_to_notify_when_terminal(store, runner, orchestrator):
+    """A Job constructed with `notify=True` (legacy) must behave identically to
+    notify_when='terminal' — wake on any terminal state."""
+    sent: list = []
+
+    async def fake_reply(session_id, message, source="session", metadata=None):
+        sent.append((session_id, message))
+        return "ok"
+
+    runner.reply_to_session = fake_reply
+    job = store.add(
+        Job(
+            id="",
+            parent_session_id="parent-1",
+            prompt="x",
+            acceptance_criteria=[],
+            notify=True,
+        )
+    )
+    # __post_init__ should have promoted notify=True to notify_when="terminal".
+    assert store.get(job.id).notify_when == "terminal"
+    orchestrator.register_worker(job.id, "w0", timeout_minutes=30)
+    await orchestrator.on_session_complete(_worker_session(store.get(job.id)), "ok")
+    await asyncio.sleep(0)
+    assert sent, "legacy notify=True must still wake the parent on terminal transition"
+
+
+@pytest.mark.asyncio
+async def test_notify_when_never_fires_no_notify(store, runner, orchestrator):
+    sent: list = []
+
+    async def fake_reply(session_id, message, source="session", metadata=None):
+        sent.append((session_id, message))
+        return "ok"
+
+    runner.reply_to_session = fake_reply
+    job = store.add(
+        Job(
+            id="",
+            parent_session_id="parent-1",
+            prompt="x",
+            acceptance_criteria=[],
+            notify_when="never",
+        )
+    )
+    orchestrator.register_worker(job.id, "w0", timeout_minutes=30)
+    await orchestrator.on_session_complete(_worker_session(store.get(job.id)), "ok")
+    await asyncio.sleep(0)
+    assert sent == []
+
+
+def test_create_and_start_job_threads_max_attempts(store, runner, orchestrator):
+    job, _ = orchestrator.create_and_start_job(
+        parent_session_id="parent-1",
+        prompt="x",
+        acceptance_criteria=[],
+        max_attempts=7,
+        notify_when="stuck",
+    )
+    fresh = store.get(job.id)
+    assert fresh.max_attempts == 7
+    assert fresh.notify_when == "stuck"
+
+
 def test_retry_with_hint_fresh_workspace_prunes_and_recreates_worktree(store, runner, orchestrator, tmp_path):
     """fresh_workspace=True on a Job with a repo must prune the existing worktree
     and recreate a new one from HEAD before spawning the retry worker."""

@@ -119,7 +119,19 @@ async def cmd_bg(adapter: BaseAdapter, prompt: str, agent: str | None = None) ->
         CommandParam(
             "notify",
             bool,
-            "Wake the parent agent with a one-line message when the Job ends (default false; tile flips either way)",
+            "Deprecated: maps to --notify-when=terminal. Prefer --notify-when.",
+            required=False,
+        ),
+        CommandParam(
+            "max_attempts",
+            int,
+            "Max verifier rounds before stuck (default 3)",
+            required=False,
+        ),
+        CommandParam(
+            "notify_when",
+            str,
+            "When to wake the parent: done|stuck|errored|terminal|never (default never)",
             required=False,
         ),
     ],
@@ -135,6 +147,8 @@ async def cmd_job(
     timeout_minutes: int | None = None,
     agent: str | None = None,
     notify: bool = False,
+    max_attempts: int | None = None,
+    notify_when: str | None = None,
 ) -> str:
     """Create a Job, spawn a worker session, and return the Job + worker IDs."""
     from tsugite.tools.jobs import _jobs_orchestrator
@@ -161,6 +175,13 @@ async def cmd_job(
 
     ac_list = _parse_acceptance_criteria(acceptance_criteria)
 
+    # Deprecation: --notify (bool) was the original wake-up flag. The new
+    # --notify-when supersedes it. If a caller still passes --notify=true
+    # without --notify-when, alias it to "terminal" so behaviour is identical.
+    if notify and not notify_when:
+        logger.warning("/job --notify is deprecated; use --notify-when=terminal instead")  # DeprecationWarning
+        notify_when = "terminal"
+
     try:
         job, started = _jobs_orchestrator.create_and_start_job(
             parent_session_id=parent_session_id,
@@ -172,6 +193,8 @@ async def cmd_job(
             timeout_minutes=timeout_minutes or 30,
             spawned_by="user-slash",
             notify=bool(notify),
+            max_attempts=max_attempts,
+            notify_when=notify_when,
         )
     except Exception as e:
         return f"Failed to spawn job worker: {e}"

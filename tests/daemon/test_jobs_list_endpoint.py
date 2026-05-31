@@ -138,6 +138,8 @@ class TestListJobsEndpoint:
             "state",
             "prompt",
             "verify_attempts",
+            "max_attempts",
+            "notify_when",
             "error",
             "attempts",
             "acceptance_criteria",
@@ -151,6 +153,8 @@ class TestListJobsEndpoint:
         assert expected_keys.issubset(set(job.keys()))
         assert job["state"] == "running"
         assert job["agent"] == "odyn"
+        assert job["max_attempts"] == 3
+        assert job["notify_when"] == "never"
 
     def test_state_filter_exact_match(self, client, test_token):
         resp = client.get("/api/jobs?state=queued", headers={"Authorization": f"Bearer {test_token}"})

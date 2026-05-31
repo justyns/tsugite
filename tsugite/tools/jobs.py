@@ -41,13 +41,16 @@ def spawn_job(
     timeout_minutes: int = 30,
     agent: Optional[str] = None,
     notify: bool = True,
+    max_attempts: Optional[int] = None,
+    notify_when: Optional[str] = None,
 ) -> dict:
     """Spawn a background Job with a verification loop.
 
     Creates a Job record + worker session pinned to the workspace default model
     (or the supplied `model`). On worker completion the orchestrator spawns a
     verifier sub-agent that judges the result against `acceptance_criteria`. If
-    verification fails, the Job loops back up to 3 times before going `stuck`.
+    verification fails, the Job loops back up to `max_attempts` times before
+    going `stuck` (default 3).
 
     Use this instead of `spawn_session` when you want structured verification
     of the work, not just a fire-and-forget background session.
@@ -64,9 +67,12 @@ def spawn_job(
         timeout_minutes: Wall-clock budget for the worker; on expiry the Job
             transitions to `stuck`.
         agent: Worker agent file. Defaults to `job_worker`.
-        notify: When True (default), the orchestrator posts a one-line wake-up
-            message into your current session on terminal transition so you can
-            react. Set False to fire-and-forget (the tile still updates).
+        notify: Deprecated. When True (default for agent tool use) maps to
+            notify_when="terminal" — the parent wakes on any terminal state.
+            Prefer notify_when for finer control.
+        max_attempts: Verifier-loop cap before stuck. Defaults to 3.
+        notify_when: When to wake the parent: done | stuck | errored | terminal |
+            never. Overrides `notify` when set.
 
     Returns:
         Dict with job_id, worker_session_id, parent_session_id, state.
@@ -90,6 +96,8 @@ def spawn_job(
         timeout_minutes=timeout_minutes,
         spawned_by="agent-tool",
         notify=notify,
+        max_attempts=max_attempts,
+        notify_when=notify_when,
     )
 
     return {

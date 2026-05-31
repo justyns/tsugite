@@ -124,7 +124,19 @@ class Job:
     # session on terminal transition so the parent agent learns the Job finished
     # and can react. Defaults: /job slash → False (human-driven, tile is enough);
     # spawn_job() agent tool → True (autonomous composition).
+    #
+    # Legacy field — see `notify_when` for the granular replacement. `notify=True`
+    # is normalised to `notify_when="terminal"` on construction so old persisted
+    # jobs and old callers behave identically.
     notify: bool = False
+    # When to fire the wake-up message: one of "done", "stuck", "errored",
+    # "terminal" (any terminal state), or "never" (default). Replaces the binary
+    # `notify` field for finer control from the new-job modal / slash command.
+    notify_when: str = "never"
+    # Maximum verifier rounds before the Job goes stuck. Defaults to 3 to match
+    # the pre-feature constant; overridable per-job via /job --max-attempts or
+    # the spawn_job() tool.
+    max_attempts: int = 3
     # Append-only history of each worker round + its verifier, so retried jobs
     # don't orphan their earlier session ids. Each entry:
     #   {"index": int, "kind": "initial"|"retry"|"hint",
@@ -145,6 +157,15 @@ class Job:
         # Always normalise AC to the dict shape so downstream code (verifier
         # prompt, slash command preview, tile event payload) sees one shape.
         self.acceptance_criteria = normalize_acs(self.acceptance_criteria)
+        # Legacy `notify=True` → notify_when="terminal" if notify_when wasn't set
+        # explicitly. Preserves behaviour for callers / persisted jobs that
+        # predate notify_when.
+        if self.notify and self.notify_when in ("", "never", None):
+            self.notify_when = "terminal"
+        if not self.notify_when:
+            self.notify_when = "never"
+        if self.max_attempts is None or self.max_attempts <= 0:
+            self.max_attempts = 3
 
 
 class JobStore:

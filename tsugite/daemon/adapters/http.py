@@ -1955,6 +1955,8 @@ class HTTPServer:
                 "state": j.state,
                 "prompt": (j.prompt or "")[:200],
                 "verify_attempts": j.verify_attempts,
+                "max_attempts": getattr(j, "max_attempts", 3),
+                "notify_when": getattr(j, "notify_when", "never"),
                 "error": j.error,
                 "attempts": list(j.attempts or []),
                 "acceptance_criteria": list(j.acceptance_criteria or []),

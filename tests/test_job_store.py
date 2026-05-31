@@ -293,3 +293,49 @@ def test_acceptance_criteria_dict_without_kind_defaults_to_llm(store_path):
         )
     )
     assert job.acceptance_criteria == [{"text": "no kind", "kind": "llm"}]
+
+
+def test_legacy_job_without_max_attempts_loads_with_default(store_path):
+    """Pre-feature jobs.json files have no max_attempts field. Load must default it
+    to 3 rather than crashing."""
+    import json
+
+    legacy = {
+        "jobs": [
+            {
+                "id": "job-old1",
+                "parent_session_id": "p1",
+                "prompt": "x",
+                "state": "queued",
+            }
+        ]
+    }
+    store_path.write_text(json.dumps(legacy))
+    store = JobStore(store_path)
+    job = store.get("job-old1")
+    assert job is not None
+    assert job.max_attempts == 3
+    assert job.notify_when == "never"
+
+
+def test_legacy_job_with_notify_true_loads_as_notify_when_terminal(store_path):
+    """Pre-feature jobs persisted notify=True but no notify_when. Load must
+    promote the legacy bool to notify_when='terminal' so behaviour is preserved."""
+    import json
+
+    legacy = {
+        "jobs": [
+            {
+                "id": "job-old2",
+                "parent_session_id": "p1",
+                "prompt": "x",
+                "state": "queued",
+                "notify": True,
+            }
+        ]
+    }
+    store_path.write_text(json.dumps(legacy))
+    store = JobStore(store_path)
+    job = store.get("job-old2")
+    assert job is not None
+    assert job.notify_when == "terminal"
