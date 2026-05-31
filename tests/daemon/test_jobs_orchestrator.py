@@ -985,3 +985,77 @@ def test_emit_job_event_preserves_explicit_ac_kind(store, runner, orchestrator):
     emitted = [call.args[1] for call in orchestrator._event_bus.emit.call_args_list if call.args[0] == "job_update"]
     payload = emitted[-1]
     assert payload["acceptance_criteria"] == [{"text": "endpoint returns 200", "kind": "cmd"}]
+
+
+# ── Gap 2: retry_with_hint reset_counter + fresh_workspace ──
+
+
+@pytest.mark.asyncio
+async def test_retry_with_hint_reset_counter_zeroes_verify_attempts(store, runner, orchestrator):
+    """When reset_counter=True, verify_attempts must be zeroed so the retry gets
+    a full budget of verifier rounds again."""
+    job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=["x"])
+    fail = json.dumps({"ac_results": [{"ac_text": "x", "pass": False, "reason": "n"}], "overall_pass": False})
+    for i in range(MAX_VERIFY_ATTEMPTS):
+        await orchestrator.on_session_complete(_worker_session(store.get(job.id), f"w{i}"), f"w{i}")
+        await orchestrator.on_session_complete(_verifier_session(store.get(job.id), f"v{i}"), fail)
+    assert store.get(job.id).state == JobState.STUCK.value
+    assert store.get(job.id).verify_attempts == MAX_VERIFY_ATTEMPTS
+
+    await orchestrator.retry_with_hint(job.id, hint="try Y", reset_counter=True)
+    refreshed = store.get(job.id)
+    assert refreshed.verify_attempts == 0, "reset_counter=True must zero verify_attempts"
+    assert refreshed.state == JobState.RUNNING.value
+
+
+@pytest.mark.asyncio
+async def test_retry_with_hint_fresh_workspace_no_op_when_no_repo(store, runner, orchestrator):
+    """A Job with no `repo` (and no worktree) must treat fresh_workspace=True as
+    a no-op rather than crashing."""
+    job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=["x"])
+    fail = json.dumps({"ac_results": [{"ac_text": "x", "pass": False, "reason": "n"}], "overall_pass": False})
+    for i in range(MAX_VERIFY_ATTEMPTS):
+        await orchestrator.on_session_complete(_worker_session(store.get(job.id), f"w{i}"), f"w{i}")
+        await orchestrator.on_session_complete(_verifier_session(store.get(job.id), f"v{i}"), fail)
+    assert store.get(job.id).state == JobState.STUCK.value
+    # Should not raise.
+    await orchestrator.retry_with_hint(job.id, hint="x", fresh_workspace=True)
+    assert store.get(job.id).state == JobState.RUNNING.value
+
+
+def test_retry_with_hint_fresh_workspace_prunes_and_recreates_worktree(store, runner, orchestrator, tmp_path):
+    """fresh_workspace=True on a Job with a repo must prune the existing worktree
+    and recreate a new one from HEAD before spawning the retry worker."""
+    repo = tmp_path / "repo"
+    _make_git_repo(repo)
+    job, _ = orchestrator.create_and_start_job(
+        parent_session_id="parent-1",
+        prompt="do",
+        acceptance_criteria=["x"],
+        repo=str(repo),
+    )
+    fail = json.dumps({"ac_results": [{"ac_text": "x", "pass": False, "reason": "n"}], "overall_pass": False})
+    import asyncio
+
+    for i in range(MAX_VERIFY_ATTEMPTS):
+        asyncio.run(orchestrator.on_session_complete(_worker_session(store.get(job.id), f"w{i}"), f"w{i}"))
+        asyncio.run(orchestrator.on_session_complete(_verifier_session(store.get(job.id), f"v{i}"), fail))
+    assert store.get(job.id).state == JobState.STUCK.value
+
+    from pathlib import Path
+
+    original_wt = store.get(job.id).worktree_path
+    assert original_wt and Path(original_wt).exists()
+
+    # Drop a sentinel file inside the worktree to detect the recreate.
+    sentinel = Path(original_wt) / "sentinel.txt"
+    sentinel.write_text("worker noodled here")
+    assert sentinel.exists()
+
+    asyncio.run(orchestrator.retry_with_hint(job.id, hint="reset env", fresh_workspace=True))
+    fresh_wt = store.get(job.id).worktree_path
+    assert fresh_wt and Path(fresh_wt).exists()
+    # Sentinel must be gone — the worktree was recreated from HEAD.
+    assert not (Path(fresh_wt) / "sentinel.txt").exists(), (
+        "fresh_workspace=True must wipe the worker's stale changes by recreating the worktree"
+    )

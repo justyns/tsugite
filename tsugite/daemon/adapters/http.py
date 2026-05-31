@@ -2012,8 +2012,15 @@ class HTTPServer:
         hint = (body.get("hint") or "").strip()
         if not hint:
             return JSONResponse({"error": "hint is required"}, status_code=400)
+        reset_counter = bool(body.get("reset_counter", False))
+        fresh_workspace = bool(body.get("fresh_workspace", False))
         try:
-            await self.jobs_orchestrator.retry_with_hint(job_id, hint=hint)
+            await self.jobs_orchestrator.retry_with_hint(
+                job_id,
+                hint=hint,
+                reset_counter=reset_counter,
+                fresh_workspace=fresh_workspace,
+            )
         except ValueError as e:
             status = 404 if "Unknown job" in str(e) else 409
             return JSONResponse({"error": str(e)}, status_code=status)

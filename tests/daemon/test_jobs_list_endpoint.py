@@ -197,3 +197,57 @@ class TestListJobsEndpoint:
         resp = c.get("/api/jobs", headers={"Authorization": f"Bearer {test_token}"})
         assert resp.status_code == 200
         assert resp.json() == {"jobs": []}
+
+
+class _RecordingOrchestrator:
+    """Stand-in for JobsOrchestrator that records retry_with_hint calls."""
+
+    def __init__(self):
+        self.calls: list[dict] = []
+
+    async def retry_with_hint(self, job_id, *, hint, reset_counter=False, fresh_workspace=False):
+        self.calls.append(
+            {
+                "job_id": job_id,
+                "hint": hint,
+                "reset_counter": reset_counter,
+                "fresh_workspace": fresh_workspace,
+            }
+        )
+
+
+class TestRetryJobEndpoint:
+    @pytest.fixture
+    def orchestrator(self, server):
+        recording = _RecordingOrchestrator()
+        server.jobs_orchestrator = recording
+        return recording
+
+    def test_retry_forwards_reset_counter_and_fresh_workspace(self, client, test_token, orchestrator):
+        resp = client.post(
+            "/api/jobs/job-s1/retry",
+            headers={"Authorization": f"Bearer {test_token}"},
+            json={"hint": "real problem is X", "reset_counter": True, "fresh_workspace": True},
+        )
+        assert resp.status_code == 200
+        assert orchestrator.calls == [
+            {"job_id": "job-s1", "hint": "real problem is X", "reset_counter": True, "fresh_workspace": True}
+        ]
+
+    def test_retry_defaults_flags_to_false_when_omitted(self, client, test_token, orchestrator):
+        resp = client.post(
+            "/api/jobs/job-s1/retry",
+            headers={"Authorization": f"Bearer {test_token}"},
+            json={"hint": "X"},
+        )
+        assert resp.status_code == 200
+        assert orchestrator.calls[-1]["reset_counter"] is False
+        assert orchestrator.calls[-1]["fresh_workspace"] is False
+
+    def test_retry_requires_hint(self, client, test_token, orchestrator):
+        resp = client.post(
+            "/api/jobs/job-s1/retry",
+            headers={"Authorization": f"Bearer {test_token}"},
+            json={"reset_counter": True},
+        )
+        assert resp.status_code == 400

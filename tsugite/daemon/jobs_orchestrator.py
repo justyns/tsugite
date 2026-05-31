@@ -224,9 +224,26 @@ class JobsOrchestrator:
         self._emit_job_event(self._jobs.get(job_id))
         return self._jobs.get(job_id)
 
-    async def retry_with_hint(self, job_id: str, hint: str) -> Job:
+    async def retry_with_hint(
+        self,
+        job_id: str,
+        hint: str,
+        *,
+        reset_counter: bool = False,
+        fresh_workspace: bool = False,
+    ) -> Job:
         """Give a STUCK Job one more shot, with the user's hint as the worker prompt.
-        Does NOT reset verify_attempts — that would let users loop forever."""
+
+        Args:
+            job_id: STUCK job to resurrect.
+            hint: Free-text guidance for the new worker.
+            reset_counter: Zero out `verify_attempts` so the retry gets a full new
+                budget of verifier rounds (the UI exposes this as "reset to 1").
+                Defaults False to preserve the historical no-infinite-loops guard.
+            fresh_workspace: When the job has a `repo` worktree, prune the existing
+                tree and recreate it from HEAD before spawning. No-op when the Job
+                was created without `repo`.
+        """
         from pathlib import Path
 
         job = self._jobs.get(job_id)
@@ -234,13 +251,29 @@ class JobsOrchestrator:
             raise ValueError(f"Unknown job: {job_id}")
         if job.state != JobState.STUCK.value:
             raise ValueError(f"retry_with_hint only valid on stuck jobs (job '{job_id}' is {job.state})")
-        # Validate the worktree still exists if the Job was configured with one. If
-        # it's been hand-deleted, refuse rather than spawn a worker into a missing dir.
-        if job.worktree_path and not Path(job.worktree_path).is_dir():
+
+        worktree_path = job.worktree_path
+        if fresh_workspace and job.repo:
+            try:
+                if worktree_path and Path(worktree_path).exists():
+                    _prune_worktree(worktree_path)
+                worktree_path = _provision_worktree(job.repo, job.id)
+                self._jobs.update(job_id, worktree_path=worktree_path)
+            except Exception as e:
+                logger.exception("retry_with_hint: fresh_workspace failed for job '%s': %s", job_id, e)
+                raise ValueError(f"failed to recreate worktree: {e}") from e
+        elif worktree_path and not Path(worktree_path).is_dir():
+            # Worktree was hand-deleted between STUCK and retry — refuse rather
+            # than spawn a worker into a missing directory.
             raise ValueError(
-                f"retry_with_hint: worktree at '{job.worktree_path}' no longer exists; "
+                f"retry_with_hint: worktree at '{worktree_path}' no longer exists; "
                 f"cannot resume in a missing directory"
             )
+
+        if reset_counter:
+            self._jobs.update(job_id, verify_attempts=0)
+            job = self._jobs.get(job_id)
+
         # Same out-of-band rationale as mark_done_manual: STUCK is terminal in the
         # state machine, and that's intentional. The hint-and-retry escape hatch is
         # explicitly out-of-band.
@@ -253,7 +286,7 @@ class JobsOrchestrator:
             prompt=_build_hint_prompt(job, hint),
             agent_file=worker_agent_file,
             model=job.model,
-            workspace_override=job.worktree_path,
+            workspace_override=worktree_path,
             metadata={"job_id": job.id, "hint_attempt": True},
         )
         try:
@@ -836,6 +869,13 @@ def _prune_worktree(worktree_path: str) -> None:
     Safety: the rmtree fallback REQUIRES the path to live under our own
     `.tsugite-jobs/` subdir, so a corrupted or hand-edited worktree_path
     (e.g. an absolute path pointing at the repo root) cannot rm the wrong tree.
+
+    `git worktree remove` needs to run inside a git repo, otherwise it errors with
+    "not a git repository". `<repo>/.tsugite-jobs/<job_id>` is the layout so the
+    parent's parent is the repo root — feed that as cwd. If the rmtree fallback
+    fires, also run `git worktree prune` to clear the stale metadata so the next
+    `worktree add` at the same path doesn't see a "missing but already registered"
+    record.
     """
     import subprocess
     from pathlib import Path
@@ -843,12 +883,15 @@ def _prune_worktree(worktree_path: str) -> None:
     wt = Path(worktree_path)
     if not wt.exists():
         return
+    # The worktree path is `<repo>/.tsugite-jobs/<job_id>` — walk up two levels for the repo.
+    repo_root = wt.parent.parent if wt.parent.name == _WORKTREE_SUBDIR else None
     # `git worktree remove --force` works even if the worktree has uncommitted changes.
     try:
         subprocess.run(
             ["git", "worktree", "remove", "--force", str(wt)],
             check=True,
             capture_output=True,
+            cwd=str(repo_root) if repo_root else None,
         )
         return
     except Exception as e:
@@ -875,3 +918,16 @@ def _prune_worktree(worktree_path: str) -> None:
         shutil.rmtree(wt, ignore_errors=True)
     except Exception:
         logger.exception("Failed to rmtree worktree at %s", wt)
+
+    # Tell git the worktree is gone so a subsequent `worktree add` at the same path
+    # doesn't trip on a stale registration.
+    if repo_root and repo_root.exists():
+        try:
+            subprocess.run(
+                ["git", "worktree", "prune"],
+                check=False,
+                capture_output=True,
+                cwd=str(repo_root),
+            )
+        except Exception:
+            logger.debug("git worktree prune fallback failed for %s", repo_root)
