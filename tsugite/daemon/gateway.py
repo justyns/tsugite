@@ -113,6 +113,8 @@ class Gateway:
         self._vapid_private_key = None
         self._vapid_claims = None
         self._compaction_scheduler = None
+        self._terminal_store = None
+        self._pty_manager = None
         self._shutting_down = False
 
     async def start(self):
@@ -322,6 +324,25 @@ class Gateway:
                 self._http_server.jobs_orchestrator = self._jobs_orchestrator
                 self._http_server.job_store = self._job_store
 
+            # Terminal viewer: PTY runtime + persistent session store. Owned by
+            # the gateway so it survives across HTTP restarts and shuts down
+            # cleanly via _shutdown() below.
+            from tsugite.daemon.pty_manager import PtyManager
+            from tsugite.daemon.terminal_store import TerminalSessionStore
+
+            self._terminal_store = TerminalSessionStore(self.config.state_dir / "terminal_sessions.json")
+            self._pty_manager = PtyManager()
+            if self._http_server:
+                self._http_server.terminal_store = self._terminal_store
+                self._http_server.pty_manager = self._pty_manager
+            # Expose to adapters so the /run slash command can reach them.
+            for adapter in http_adapters.values():
+                adapter.terminal_store = self._terminal_store
+                adapter.pty_manager = self._pty_manager
+                adapter.terminal_state_change_callback = lambda tid, state: (
+                    event_bus.emit("terminal_state", {"terminal_id": tid, "state": state}) if event_bus else None
+                )
+
             if self._scheduler_adapter:
                 self._scheduler_adapter.set_session_runner(self._session_runner)
             logger.info("Session runner + Jobs orchestrator enabled")
@@ -421,6 +442,12 @@ class Gateway:
                 self._session_store.flush()
             except Exception as e:
                 logger.error("Error flushing session store: %s", e)
+
+        if self._pty_manager:
+            try:
+                self._pty_manager.shutdown()
+            except Exception as e:
+                logger.error("Error shutting down PTY manager: %s", e)
 
 
 _LOG_FORMAT = "%(asctime)s [%(name)s] %(levelname)s: %(message)s"

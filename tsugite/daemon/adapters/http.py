@@ -454,6 +454,8 @@ class HTTPServer:
         self.session_runner = None  # Set by Gateway after SessionRunner is created
         self.jobs_orchestrator = None  # Set by Gateway after JobsOrchestrator is created
         self.job_store = None  # Set by Gateway alongside jobs_orchestrator
+        self.terminal_store = None  # Set by Gateway when terminal viewer is wired
+        self.pty_manager = None  # Set by Gateway alongside terminal_store
         self.push_store = None  # Set by Gateway if web-push is configured
         self.vapid_public_key = None  # Set by Gateway if web-push is configured
         self._active_chats: dict[tuple[str, str, str], ActiveChat] = {}
@@ -535,6 +537,13 @@ class HTTPServer:
             Route("/api/jobs/{job_id}/cancel", self._api_cancel_job, methods=["POST"]),
             Route("/api/jobs/{job_id}/mark-done", self._api_mark_job_done, methods=["POST"]),
             Route("/api/jobs/{job_id}/retry", self._api_retry_job, methods=["POST"]),
+            Route("/api/terminals", self._api_list_terminals, methods=["GET"]),
+            Route("/api/terminals", self._api_create_terminal, methods=["POST"]),
+            Route("/api/terminals/{terminal_id}", self._api_get_terminal, methods=["GET"]),
+            Route("/api/terminals/{terminal_id}/kill", self._api_kill_terminal, methods=["POST"]),
+            Route("/api/terminals/{terminal_id}/stdin", self._api_terminal_stdin, methods=["POST"]),
+            Route("/api/terminals/{terminal_id}/restart", self._api_restart_terminal, methods=["POST"]),
+            Route("/api/terminals/{terminal_id}/stream", self._api_terminal_stream, methods=["GET"]),
             Route("/api/sessions/{session_id}/restart", self._api_restart_session, methods=["POST"]),
             Route("/api/sessions/{session_id}/events", self._api_session_events, methods=["GET"]),
             Route("/api/sessions/{session_id}/pin", self._api_pin_session, methods=["POST"]),
@@ -1961,6 +1970,267 @@ class HTTPServer:
             status = 404 if "Unknown job" in str(e) else 409
             return JSONResponse({"error": str(e)}, status_code=status)
         return JSONResponse({"status": "running"})
+
+    # ── Terminal viewer API ──
+
+    def _require_auth_and_terminals(self, request: Request) -> Optional[JSONResponse]:
+        """Check auth and terminal subsystem availability."""
+        auth_err = self._check_auth(request)
+        if auth_err:
+            return auth_err
+        if self.terminal_store is None or self.pty_manager is None:
+            return JSONResponse({"error": "terminal viewer not available"}, status_code=503)
+        return None
+
+    def _terminal_to_dict(self, terminal) -> dict:
+        from dataclasses import asdict
+
+        proc = self.pty_manager.get(terminal.id) if self.pty_manager else None
+        data = asdict(terminal)
+        # Surface live runtime info even before the on_exit hook persists the
+        # final counts. Stale-on-disk wins for terminated terminals (proc dropped).
+        if proc is not None:
+            data["bytes_out"] = max(data.get("bytes_out", 0), proc.bytes_out)
+            data["lines_out"] = max(data.get("lines_out", 0), proc.lines_out)
+            data["truncated"] = proc.truncated
+            if proc.last_line:
+                data["last_line"] = proc.last_line
+        else:
+            data.setdefault("truncated", False)
+        return data
+
+    def _emit_terminal_event(self, event_type: str, payload: dict) -> None:
+        """Broadcast a terminal lifecycle event on the cross-session bus."""
+        self.event_bus.emit(event_type, payload)
+
+    async def _api_list_terminals(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_terminals(request):
+            return err
+        parent = request.query_params.get("parent_session_id")
+        if parent:
+            terminals = self.terminal_store.list_for_parent(parent)
+        else:
+            terminals = self.terminal_store.list_all()
+        return JSONResponse({"terminals": [self._terminal_to_dict(t) for t in terminals]})
+
+    async def _api_get_terminal(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_terminals(request):
+            return err
+        terminal_id = request.path_params["terminal_id"]
+        terminal = self.terminal_store.get(terminal_id)
+        if terminal is None:
+            return JSONResponse({"error": f"unknown terminal: {terminal_id}"}, status_code=404)
+        return JSONResponse(self._terminal_to_dict(terminal))
+
+    async def _api_create_terminal(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_terminals(request):
+            return err
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+        cmd = (body.get("cmd") or "").strip()
+        if not cmd:
+            return JSONResponse({"error": "cmd is required"}, status_code=400)
+        cwd = body.get("cwd")
+        parent_session_id = body.get("parent_session_id")
+        env = body.get("env") if isinstance(body.get("env"), dict) else None
+
+        from tsugite.daemon.terminal_runtime import spawn_terminal
+
+        def _on_state_change(terminal_id: str, new_state: str) -> None:
+            self._emit_terminal_event(
+                "terminal_state",
+                {"terminal_id": terminal_id, "state": new_state},
+            )
+
+        try:
+            terminal = spawn_terminal(
+                store=self.terminal_store,
+                manager=self.pty_manager,
+                cmd=cmd,
+                cwd=cwd,
+                env=env,
+                parent_session_id=parent_session_id,
+                on_state_change=_on_state_change,
+            )
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        except Exception as e:
+            logger.exception("Failed to spawn terminal")
+            return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse(self._terminal_to_dict(terminal), status_code=201)
+
+    async def _api_kill_terminal(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_terminals(request):
+            return err
+        terminal_id = request.path_params["terminal_id"]
+        terminal = self.terminal_store.get(terminal_id)
+        if terminal is None:
+            return JSONResponse({"error": f"unknown terminal: {terminal_id}"}, status_code=404)
+        self.pty_manager.kill(terminal_id)
+        return JSONResponse({"status": "killed", "terminal_id": terminal_id})
+
+    async def _api_terminal_stdin(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_terminals(request):
+            return err
+        terminal_id = request.path_params["terminal_id"]
+        terminal = self.terminal_store.get(terminal_id)
+        if terminal is None:
+            return JSONResponse({"error": f"unknown terminal: {terminal_id}"}, status_code=404)
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+        data = body.get("data", "")
+        if not isinstance(data, str):
+            return JSONResponse({"error": "data must be a string"}, status_code=400)
+        written = self.pty_manager.write_stdin(terminal_id, data.encode("utf-8", errors="replace"))
+        return JSONResponse({"status": "ok", "bytes_written": written})
+
+    async def _api_restart_terminal(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_terminals(request):
+            return err
+        terminal_id = request.path_params["terminal_id"]
+        old = self.terminal_store.get(terminal_id)
+        if old is None:
+            return JSONResponse({"error": f"unknown terminal: {terminal_id}"}, status_code=404)
+
+        from tsugite.daemon.terminal_runtime import spawn_terminal
+        from tsugite.daemon.terminal_store import TerminalState
+
+        # Refuse to restart a still-live PTY — caller should kill first to avoid
+        # leaking the original process.
+        if old.state not in (
+            TerminalState.SUCCEEDED.value,
+            TerminalState.FAILED.value,
+            TerminalState.CANCELLED.value,
+            TerminalState.TIMED_OUT.value,
+            TerminalState.STREAM_LOST.value,
+        ):
+            return JSONResponse(
+                {"error": f"cannot restart terminal in '{old.state}' state; kill it first"},
+                status_code=409,
+            )
+
+        def _on_state_change(tid: str, new_state: str) -> None:
+            self._emit_terminal_event("terminal_state", {"terminal_id": tid, "state": new_state})
+
+        try:
+            new_terminal = spawn_terminal(
+                store=self.terminal_store,
+                manager=self.pty_manager,
+                cmd=old.cmd,
+                cwd=old.cwd,
+                parent_session_id=old.parent_session_id,
+                on_state_change=_on_state_change,
+            )
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        except Exception as e:
+            logger.exception("Failed to restart terminal")
+            return JSONResponse({"error": str(e)}, status_code=500)
+
+        return JSONResponse(
+            {**self._terminal_to_dict(new_terminal), "restarted_from": terminal_id},
+            status_code=201,
+        )
+
+    async def _api_terminal_stream(self, request: Request) -> Response:
+        if err := self._require_auth_and_terminals(request):
+            return err
+        terminal_id = request.path_params["terminal_id"]
+        terminal = self.terminal_store.get(terminal_id)
+        if terminal is None:
+            return JSONResponse({"error": f"unknown terminal: {terminal_id}"}, status_code=404)
+
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue = asyncio.Queue(maxsize=512)
+
+        def _push(payload: dict) -> None:
+            try:
+                if threading.current_thread() is threading.main_thread() and loop.is_running():
+                    try:
+                        running = asyncio.get_running_loop()
+                    except RuntimeError:
+                        running = None
+                    if running is loop:
+                        queue.put_nowait(payload)
+                        return
+                loop.call_soon_threadsafe(queue.put_nowait, payload)
+            except (asyncio.QueueFull, RuntimeError):
+                pass
+
+        # Emit the current state up front so a late-connecting client doesn't
+        # need a separate fetch to know whether the terminal is still running.
+        # Pushed before any output/exit events so consumers can size their
+        # rendering up front.
+        _push({"type": "state", "state": terminal.state})
+
+        proc = self.pty_manager.get(terminal_id)
+        unsub = None
+        if proc is not None:
+            # Replay the buffer so mid-run reconnects don't lose context. The
+            # buffer is the ring-capped window (1 MB by default); anything older
+            # is gone, hence the `truncated` flag the frontend uses to render
+            # the "+N MB truncated" indicator.
+            existing = proc.buffer
+            if existing:
+                _push(
+                    {
+                        "type": "output",
+                        "chunk": existing.decode("utf-8", errors="replace"),
+                        "replay": True,
+                    }
+                )
+
+            def _on_chunk(chunk: bytes) -> None:
+                _push({"type": "output", "chunk": chunk.decode("utf-8", errors="replace")})
+
+            def _on_exit(p) -> None:
+                _push({"type": "exit", "exit_code": p.exit_code})
+                # Send a terminal sentinel so the generator wakes up to drain
+                # and the SSE response closes cleanly.
+                loop.call_soon_threadsafe(queue.put_nowait, None)
+
+            unsub = proc.subscribe(_on_chunk)
+            # on_exit fires synchronously if the process has already exited,
+            # which is fine — it just queues the exit event right after the
+            # state/replay events we already pushed.
+            proc.on_exit(_on_exit)
+        else:
+            # No live PTY (terminal is already terminal or pre-spawn failure) —
+            # emit the recorded exit_code and close. If exit_code never landed
+            # (rare crash path), `None` still terminates the stream cleanly.
+            current = self.terminal_store.get(terminal_id)
+            _push({"type": "exit", "exit_code": current.exit_code})
+            loop.call_soon_threadsafe(queue.put_nowait, None)
+
+        async def generator():
+            try:
+                while True:
+                    try:
+                        payload = await asyncio.wait_for(queue.get(), timeout=15.0)
+                    except asyncio.TimeoutError:
+                        yield ": keepalive\n\n"
+                        continue
+                    if payload is None:
+                        break
+                    event_type = payload.pop("type", "message")
+                    yield f"event: {event_type}\n"
+                    yield f"data: {json.dumps(payload)}\n\n"
+            finally:
+                if unsub is not None:
+                    try:
+                        unsub()
+                    except Exception:
+                        pass
+
+        return StreamingResponse(
+            generator(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+        )
 
     async def _api_restart_session(self, request: Request) -> JSONResponse:
         if err := self._require_auth_and_sessions(request):
