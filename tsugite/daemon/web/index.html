@@ -523,6 +523,16 @@
                   <span class="badge" title="Composer hidden because this session is finished or superseded">read-only</span>
                 </div>
               </template>
+              <!-- Backward-direction link: jump to the session this one was compacted from.
+                   Mirrors the forward "continue in live session" banner; always visible in
+                   the header so it isn't lost in the scrolled-off inline compaction separator. -->
+              <template x-if="compactionSourceId">
+                <div class="row" style="font-size:11px">
+                  <button class="hbtn" type="button"
+                          @click="selectSessionById(compactionSourceId, { follow: false })"
+                          title="View the session this was compacted from">← previous session</button>
+                </div>
+              </template>
               <div class="row title-row">
                 <template x-if="editingSessionId === selectedSessionMeta?.id">
                   <input class="title-input" type="text" x-model="editingTitle"

@@ -439,6 +439,7 @@ export const historyMixin = {
     if (state) {
       state.compactionSummary = null;
       state.compactedIntoEvent = null;
+      state.compactionSourceId = null;
     }
   },
 
@@ -469,6 +470,10 @@ export const historyMixin = {
         // Last wins for multi-compaction chains.
         const lastCompact = events.findLast(e => e.type === 'compaction');
         if (lastCompact) state.compactionSummary = lastCompact.data?.summary || null;
+        // Backward-direction pointer: the predecessor this session was compacted
+        // from. Surfaced as an always-visible header affordance so it isn't
+        // buried in the (possibly scrolled-off) inline compaction separator.
+        state.compactionSourceId = lastCompact?.data?.source_session_id || null;
         // The trailing `compacted_into` event (post-feature only) carries the
         // forward-direction banner's timestamp + counts. Legacy chains leave
         // compactedIntoEvent null; the banner falls back to bare-link rendering

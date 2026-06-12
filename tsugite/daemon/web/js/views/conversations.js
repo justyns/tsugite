@@ -118,6 +118,7 @@ export default () => ({
       model: '',
       compactionSummary: null,
       compactedIntoEvent: null,
+      compactionSourceId: null,
       liveProgress: null,
     });
   },
@@ -194,6 +195,9 @@ export default () => ({
   },
   get compactedIntoEvent() {
     return this.sessionsState[this.selectedSessionId]?.compactedIntoEvent || null;
+  },
+  get compactionSourceId() {
+    return this.sessionsState[this.selectedSessionId]?.compactionSourceId || null;
   },
   get _sessionProgress() {
     return this.sessionsState[this.selectedSessionId]?.liveProgress || null;
