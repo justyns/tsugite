@@ -86,9 +86,28 @@ class SessionRunner:
     ):
         self._store = store
         self._adapters = adapters
-        self._notify_callback = notify_callback
         self._event_bus = event_bus
         self._active_tasks: dict[str, asyncio.Task] = {}
+        # Completion listeners: async callback(session, result_str) fired when a
+        # session completes, is cancelled, or fails. The jobs orchestrator
+        # registers here via add_completion_listener.
+        self._completion_listeners: list[NotifyCallback] = []
+        if notify_callback:
+            self._completion_listeners.append(notify_callback)
+
+    def add_completion_listener(self, callback: NotifyCallback) -> None:
+        """Register a session-completion listener. Idempotent."""
+        if callback not in self._completion_listeners:
+            self._completion_listeners.append(callback)
+
+    async def _dispatch_completion(self, session: Session, result_str: str) -> None:
+        """Fan completion out to every listener; one listener's failure must not
+        starve the others."""
+        for callback in list(self._completion_listeners):
+            try:
+                await callback(session, result_str)
+            except Exception as e:
+                logger.error("Session '%s' completion listener failed: %s", session.id, e)
 
     @property
     def store(self) -> SessionStore:
@@ -136,6 +155,8 @@ class SessionRunner:
         }
         if session.agent_file:
             metadata["agent_file_override"] = str(adapter._resolve_agent_path(session.agent_file) or session.agent_file)
+        if session.workspace_override:
+            metadata["workspace_override"] = session.workspace_override
 
         channel_context = ChannelContext(
             source="session",
@@ -169,11 +190,7 @@ class SessionRunner:
                 self._event_bus.emit("agent_status", {"agent": session.agent})
             logger.info("Session '%s' completed", session.id)
 
-            if self._notify_callback:
-                try:
-                    await self._notify_callback(updated, result_str)
-                except Exception as e:
-                    logger.error("Session '%s' notify callback failed: %s", session.id, e)
+            await self._dispatch_completion(updated, result_str)
 
             if session.parent_id:
                 try:
@@ -183,11 +200,12 @@ class SessionRunner:
                     logger.warning("Failed to notify parent session '%s': %s", session.parent_id, e)
 
         except asyncio.CancelledError:
-            self._store.update_session(session.id, status=SessionStatus.CANCELLED.value)
+            updated = self._store.update_session(session.id, status=SessionStatus.CANCELLED.value)
             progress._emit("session_cancelled", {})
             if self._event_bus:
                 self._event_bus.emit("session_update", {"action": "cancelled", "id": session.id})
             logger.info("Session '%s' cancelled", session.id)
+            await self._dispatch_completion(updated, "CANCELLED")
             if session.parent_id:
                 try:
                     await self.reply_to_session(
@@ -205,11 +223,7 @@ class SessionRunner:
             if self._event_bus:
                 self._event_bus.emit("session_update", {"action": "failed", "id": session.id})
             logger.error("Session '%s' failed: %s", session.id, e)
-            if self._notify_callback:
-                try:
-                    await self._notify_callback(updated, f"FAILED: {str(e)[:500]}")
-                except Exception as notify_err:
-                    logger.error("Session '%s' failure notify callback failed: %s", session.id, notify_err)
+            await self._dispatch_completion(updated, f"FAILED: {str(e)[:500]}")
             if session.parent_id:
                 try:
                     error_summary = f"Session '{session.title or session.id}' failed: {str(e)[:500]}"
@@ -319,11 +333,19 @@ class SessionRunner:
             metadata=meta,
         )
 
-        result = await adapter.handle_message(
-            user_id=f"session:{session_id}",
-            message=message,
-            channel_context=channel_context,
-        )
+        # Set the current session ContextVar so tools that fall back to
+        # get_current_session_id() (e.g. session_metadata, scratchpad,
+        # return_value) resolve correctly during the reply turn. Restore on exit
+        # so we don't bleed into the caller's context.
+        token = _current_session_id.set(session_id)
+        try:
+            result = await adapter.handle_message(
+                user_id=f"session:{session_id}",
+                message=message,
+                channel_context=channel_context,
+            )
+        finally:
+            _current_session_id.reset(token)
 
         self._store.update_session(session_id)
         if self._event_bus:

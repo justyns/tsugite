@@ -7,7 +7,7 @@ from typing import Iterable, List
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.document import Document
 
-from tsugite.agent_inheritance import get_builtin_agents_path, get_global_agents_paths
+from tsugite.agent_inheritance import iter_agent_search_paths
 
 
 class TsugiteCompleter(Completer):
@@ -129,26 +129,11 @@ class TsugiteCompleter(Completer):
             List of agent names (without .md extension)
         """
         agents = set()
-
-        # Check current directory
-        cwd = Path.cwd()
-        for location in [cwd / ".tsugite", cwd / "agents", cwd]:
-            if location.exists() and location.is_dir():
-                for file in location.glob("*.md"):
-                    agents.add(file.stem)
-
-        # Check builtin agents
-        builtin_path = get_builtin_agents_path()
-        if builtin_path.exists():
-            for file in builtin_path.glob("*.md"):
+        for entry in iter_agent_search_paths(current_agent_dir=Path.cwd()):
+            if not entry.path.is_dir():
+                continue
+            for file in entry.path.glob("*.md"):
                 agents.add(file.stem)
-
-        # Check global agent directories
-        for global_dir in get_global_agents_paths():
-            if global_dir.exists():
-                for file in global_dir.glob("*.md"):
-                    agents.add(file.stem)
-
         return sorted(agents)
 
     def _complete_path(self, prefix: str) -> List[str]:

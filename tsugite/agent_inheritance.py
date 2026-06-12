@@ -1,10 +1,37 @@
 """Agent inheritance resolution for Tsugite."""
 
+import importlib.metadata
+import importlib.util
+import logging
 import os
+from dataclasses import dataclass
+from enum import Enum
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
 from tsugite.utils import ensure_file_exists
+
+logger = logging.getLogger(__name__)
+
+
+class AgentDirSource(Enum):
+    """Origin of an agent search directory."""
+
+    WORKSPACE = "workspace"  # caller-passed workspace agents/ (mutable)
+    PROJECT = "project"  # caller-passed project agents/ (mutable; today only http.py)
+    BUILTIN = "builtin"  # tsugite/builtin_agents/ (read-only)
+    PLUGIN = "plugin"  # plugin <pkg>/agents/ via tsugite.plugins entry-points (read-only)
+    GLOBAL = "global"  # XDG global agents/ (mutable)
+
+
+@dataclass(frozen=True)
+class AgentDir:
+    """A directory that may contain agent .md files."""
+
+    path: Path
+    source: AgentDirSource
+    readonly: bool
 
 
 def get_builtin_agents_path() -> Path:
@@ -37,6 +64,113 @@ def get_global_agents_paths() -> List[Path]:
     return paths
 
 
+@lru_cache(maxsize=1)
+def get_plugin_agents_paths() -> List[Path]:
+    """Get agent directory paths contributed by installed plugins.
+
+    Scans the ``tsugite.plugins`` entry-point group; each plugin's package
+    may ship an ``agents/`` directory next to its top-level module. Plugin
+    agent dirs are treated as read-only.
+
+    Returns:
+        List of plugin-supplied agent directories (deduped, only existing dirs)
+    """
+    from tsugite.plugins import GROUP_PLUGINS
+
+    paths: List[Path] = []
+    seen: set[Path] = set()
+    try:
+        eps = importlib.metadata.entry_points(group=GROUP_PLUGINS)
+    except Exception as e:  # pragma: no cover - defensive
+        logger.debug("Failed to scan plugin entry points: %s", e)
+        return paths
+
+    for ep in eps:
+        module_name = ep.value.split(":")[0].strip()
+        top_level = module_name.split(".")[0]
+        try:
+            spec = importlib.util.find_spec(top_level)
+        except Exception:
+            spec = None
+        if spec is None or not spec.origin:
+            continue
+        agents_dir = Path(spec.origin).parent / "agents"
+        resolved = agents_dir.resolve()
+        if resolved in seen:
+            continue
+        if not agents_dir.is_dir():
+            continue
+        seen.add(resolved)
+        paths.append(agents_dir)
+    return paths
+
+
+def iter_agent_search_paths(
+    *,
+    current_agent_dir: Optional[Path] = None,
+    workspace: Optional[Any] = None,
+    extra_project_dirs: Optional[List[Path]] = None,
+    include_local_roots: bool = True,
+) -> List[AgentDir]:
+    """Yield the canonical agent-search order, deduped by resolved path.
+
+    Order:
+
+      1. workspace.agents_dir (if workspace given)
+      2. current_agent_dir / ".tsugite"
+      3. current_agent_dir / ".tsugite" / "agents"
+      4. current_agent_dir / "agents"
+      5. current_agent_dir itself (for `<name>.md` directly in cwd)
+      6. caller-supplied extra project dirs (HTTP adapter feeds per-agent dirs here)
+      7. builtin agents
+      8. XDG global agents (user agents beat plugin agents of the same name)
+      9. plugin-supplied agents
+
+    include_local_roots: when False, skip entries 2 and 5 (the bare .tsugite/
+    and cwd roots). Name-resolution callers want them so `extends: foo` finds a
+    sibling foo.md; discovery callers that glob *.md must skip them, otherwise
+    every frontmattered note in a docs/notes workspace lists as an agent.
+
+    Callers that only care about a subset filter on ``AgentDir.source``.
+    """
+    results: List[AgentDir] = []
+    seen: set[Path] = set()
+
+    def _add(path: Path, source: AgentDirSource, readonly: bool) -> None:
+        try:
+            resolved = path.resolve()
+        except (OSError, RuntimeError):
+            return
+        if resolved in seen:
+            return
+        seen.add(resolved)
+        results.append(AgentDir(path=path, source=source, readonly=readonly))
+
+    if workspace is not None and hasattr(workspace, "agents_dir"):
+        _add(workspace.agents_dir, AgentDirSource.WORKSPACE, readonly=False)
+
+    if current_agent_dir is not None:
+        if include_local_roots:
+            _add(current_agent_dir / ".tsugite", AgentDirSource.PROJECT, readonly=False)
+        _add(current_agent_dir / ".tsugite" / "agents", AgentDirSource.PROJECT, readonly=False)
+        _add(current_agent_dir / "agents", AgentDirSource.PROJECT, readonly=False)
+        if include_local_roots:
+            _add(current_agent_dir, AgentDirSource.PROJECT, readonly=False)
+
+    for extra in extra_project_dirs or []:
+        _add(extra, AgentDirSource.PROJECT, readonly=False)
+
+    _add(get_builtin_agents_path(), AgentDirSource.BUILTIN, readonly=True)
+
+    for global_dir in get_global_agents_paths():
+        _add(global_dir, AgentDirSource.GLOBAL, readonly=False)
+
+    for plugin_path in get_plugin_agents_paths():
+        _add(plugin_path, AgentDirSource.PLUGIN, readonly=True)
+
+    return results
+
+
 def find_agent_file(
     agent_ref: str,
     current_agent_dir: Path,
@@ -52,14 +186,8 @@ def find_agent_file(
     Returns:
         Path to agent file if found, None otherwise
 
-    Search order:
-    1. If path-like (contains / or .md), resolve relative to current agent
-    2. Workspace agents directory (if workspace provided)
-    3. .tsugite/{name}.md (project-local shared)
-    4. ./agents/{name}.md (project convention)
-    5. ./{name}.md (current directory)
-    6. Built-in agents directory (tsugite/builtin_agents/)
-    7. Global agent directories (XDG order)
+    Search order matches `iter_agent_search_paths`: workspace agents,
+    project-local (.tsugite/, agents/, current dir), builtin, global, plugin.
     """
     # If it looks like a path, resolve it relative to current agent
     if "/" in agent_ref or agent_ref.endswith(".md"):
@@ -71,38 +199,12 @@ def find_agent_file(
             return abs_path.resolve()
         return None
 
-    # Ensure .md extension for name-based lookup
     agent_name = agent_ref if agent_ref.endswith(".md") else f"{agent_ref}.md"
 
-    search_paths = []
-
-    # Workspace agents directory (highest priority)
-    if workspace and hasattr(workspace, "agents_dir"):
-        workspace_agents = workspace.agents_dir
-        if workspace_agents.exists():
-            search_paths.append(workspace_agents / agent_name)
-
-    # Project-local locations
-    search_paths.extend(
-        [
-            current_agent_dir / ".tsugite" / agent_name,
-            current_agent_dir / "agents" / agent_name,
-            current_agent_dir / agent_name,
-        ]
-    )
-
-    # Built-in agents directory
-    builtin_path = get_builtin_agents_path() / agent_name
-    search_paths.append(builtin_path)
-
-    # Global locations
-    for global_dir in get_global_agents_paths():
-        search_paths.append(global_dir / agent_name)
-
-    # Return first existing path
-    for path in search_paths:
-        if path.exists():
-            return path.resolve()
+    for entry in iter_agent_search_paths(current_agent_dir=current_agent_dir, workspace=workspace):
+        candidate = entry.path / agent_name
+        if candidate.exists():
+            return candidate.resolve()
 
     return None
 

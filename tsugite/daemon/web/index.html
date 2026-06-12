@@ -5,9 +5,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>tsugite — console</title>
 <link rel="stylesheet" href="/static/css/theme.css">
+<link rel="stylesheet" href="/static/css/tsu-modal.css">
 <link rel="stylesheet" href="/static/css/console.css">
 <link rel="stylesheet" href="/static/css/styles.css">
+<link rel="stylesheet" href="/static/css/terminal.css">
+<link rel="stylesheet" href="/static/css/jobs.css">
+<link rel="stylesheet" href="/static/css/job-flows.css">
+<link rel="stylesheet" href="/static/css/jobs-tab.css">
 <link rel="stylesheet" href="/static/css/responsive.css">
+<style>[x-cloak] { display: none !important; }</style>
 <link rel="manifest" href="/static/manifest.json">
 <meta name="theme-color" content="#232634">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -34,6 +40,11 @@
               :title="$store.app.skillIssues.length + ' skill issue' + ($store.app.skillIssues.length === 1 ? '' : 's')"
               x-text="$store.app.skillIssues.length"></span>
       </template>
+      <template x-if="tab === 'jobs' && $store.app.jobsNeedsYou > 0">
+        <span class="badge"
+              :title="$store.app.jobsNeedsYou + ' job' + ($store.app.jobsNeedsYou === 1 ? '' : 's') + ' need you'"
+              x-text="$store.app.jobsNeedsYou"></span>
+      </template>
     </button>
   </template>
   <div class="console-tabs-spacer"></div>
@@ -42,7 +53,7 @@
           title="Command palette">
     <kbd>⌘K</kbd>
   </button>
-  <button class="console-tab-action" @click="$store.app.showSettings = true" title="Settings">settings</button>
+  <button class="console-tab-action" @click="$store.tsu.open('settings')" title="Settings">settings</button>
 </div>
 
 <!-- Mobile menu drawer (collapses tab bar at narrow widths) -->
@@ -54,7 +65,7 @@
               @click="$store.app.view = tab; location.hash = tab; $store.app.menuOpen = false"
               x-text="tab"></button>
     </template>
-    <button class="console-tab-action" @click="$store.app.showSettings = true; $store.app.menuOpen = false">settings</button>
+    <button class="console-tab-action" @click="$store.tsu.open('settings'); $store.app.menuOpen = false">settings</button>
   </div>
 </div>
 
@@ -285,13 +296,36 @@
               </template>
             </details>
           </template>
+
+          <!-- Terminal sessions (/run) -->
+          <div class="console-section-head term" @click="$store.terminals.showEmptyState(); selectedSessionId && backToSessions()">
+            <span class="label">❯ terminal · /run</span>
+            <span class="count" x-text="$store.terminals.terminals.length"></span>
+          </div>
+          <template x-for="t in $store.terminals.terminals" :key="t.id">
+            <div class="console-session"
+                 :class="{ focused: $store.terminals.selectedId === t.id, live: $store.terminals.isRunningTerminal(t) }"
+                 @click="selectTerminal(t.id)">
+              <div class="row1">
+                <span class="dot" :class="$store.terminals.stateDotClass(t.state)"></span>
+                <span class="title">
+                  <span class="tglyph">❯</span><span x-text="t.cmd"></span>
+                </span>
+                <span class="time" x-text="$store.terminals.elapsedFor(t)"></span>
+              </div>
+              <div class="row2">
+                <span class="lastline" :class="{ fail: $store.terminals.isFailedExit(t) }"
+                      x-text="t.last_line || 'no output yet'"></span>
+              </div>
+            </div>
+          </template>
         </div>
         <div class="sidebar-resizer" x-data="sidebarResizer()" @pointerdown="onDown($event)" @dblclick="onReset()"></div>
       </aside>
 
       <!-- Main pane -->
-      <main class="console-main" :class="{ 'mobile-hidden': !selectedSessionId }">
-        <template x-if="!selectedSessionId">
+      <main class="console-main" :class="{ 'mobile-hidden': !selectedSessionId && selectedKind !== 'terminal' }">
+        <template x-if="!selectedSessionId && selectedKind !== 'terminal'">
           <div class="console-empty" style="display:flex;align-items:center;justify-content:center;flex:1;font-family:var(--font-mono);font-size:13px">
             <div style="text-align:center">
               <div>›_ Select a session, or</div>
@@ -300,40 +334,174 @@
           </div>
         </template>
 
-        <template x-if="selectedSessionId">
+        <!-- Terminal empty-state (no terminal selected, user opened the section) -->
+        <template x-if="selectedKind === 'terminal' && !$store.terminals.selectedId">
+          <div class="tv-empty">
+            <div class="inner">
+              <div class="mark">›_<span class="blink">▌</span></div>
+              <h2>new terminal session</h2>
+              <p>This surface holds PTY-backed sessions. Type <code>/run &lt;command&gt;</code> in any chat to spawn one - output streams here live, with scrollback and a 5,000-line buffer.</p>
+              <div class="examples">
+                <button class="ex" type="button" @click="$store.terminals.runTerminal('npm run dev')">
+                  <span class="run">/run</span><span class="cmd">npm run dev</span><span class="desc">dev server</span>
+                </button>
+                <button class="ex" type="button" @click="$store.terminals.runTerminal('pytest tests/ -x')">
+                  <span class="run">/run</span><span class="cmd">pytest tests/ -x</span><span class="desc">test run</span>
+                </button>
+                <button class="ex" type="button" @click="$store.terminals.runTerminal('top')">
+                  <span class="run">/run</span><span class="cmd">top</span><span class="desc">interactive</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <!-- Terminal full-session view (the /run primary surface) -->
+        <template x-if="selectedKind === 'terminal' && $store.terminals.selectedId">
+          <div class="tv-fs" x-data="terminalSessionView()" x-init="bind($el)">
+            <div class="tv-fs-head">
+              <button class="hbtn mobile-back" @click="$store.terminals.deselectTerminal()" title="Back to sessions">‹</button>
+              <span class="statusdot" :class="$store.terminals.selected?.state"></span>
+              <span class="tv-cmd"><span class="lead">$</span><span x-text="$store.terminals.selected?.cmd || ''"></span></span>
+              <span class="tv-state" :class="$store.terminals.selected?.state">
+                <span class="sd"></span>
+                <span x-text="(($store.terminals.selected?.state || '') + '').replace('_', ' ')"></span>
+              </span>
+              <span class="grow"></span>
+              <span class="tv-meta">
+                <span>↻</span><span x-text="$store.terminals.elapsedFor($store.terminals.selected)"></span>
+              </span>
+              <div class="btns">
+                <button class="tv-btn"
+                        :class="{ on: $store.terminals.selectedBuffer?.follow }"
+                        @click="$store.terminals.toggleFollow($store.terminals.selectedId)"
+                        title="Follow tail">↓</button>
+                <button class="tv-btn" @click="copyOutput()" title="Copy output">⎘</button>
+                <button class="tv-btn"
+                        @click="$store.terminals.restartTerminal($store.terminals.selectedId)"
+                        :disabled="$store.terminals.isRunningTerminal($store.terminals.selected)"
+                        title="Restart">↻</button>
+                <button class="tv-btn kill"
+                        :class="{ armed: $store.terminals.isKillArmed($store.terminals.selectedId) }"
+                        @click="$store.terminals.killTerminal($store.terminals.selectedId)"
+                        :disabled="!$store.terminals.isRunningTerminal($store.terminals.selected)"
+                        :title="$store.terminals.isKillArmed($store.terminals.selectedId) ? 'click again - SIGKILL' : 'kill (SIGTERM)'">✕</button>
+              </div>
+            </div>
+
+            <template x-if="$store.terminals.selected?.state === 'starting' && !$store.terminals.selectedBuffer?.text">
+              <div class="tv-starting">
+                <div class="inner">
+                  <span class="tv-spinner"></span>
+                  <span>starting - pty allocated, waiting for first output…</span>
+                </div>
+              </div>
+            </template>
+
+            <div class="tv-fs-body" x-ref="termEl" data-xterm-host>
+              <template x-if="!$store.terminals.selectedBuffer?.follow">
+                <button class="tv-followpill"
+                        @click="$store.terminals.jumpToTail($store.terminals.selectedId)">
+                  <span class="arr">↓</span>
+                  <template x-if="$store.terminals.newLinesFor($store.terminals.selectedId) > 0">
+                    <span>
+                      <span class="n" x-text="$store.terminals.newLinesFor($store.terminals.selectedId)"></span>
+                      <span x-text="$store.terminals.newLinesFor($store.terminals.selectedId) === 1 ? ' new line' : ' new lines'"></span>
+                    </span>
+                  </template>
+                  <template x-if="$store.terminals.newLinesFor($store.terminals.selectedId) === 0">
+                    <span class="n">jump to latest</span>
+                  </template>
+                </button>
+              </template>
+              <template x-if="$store.terminals.isLost($store.terminals.selected)">
+                <div class="tv-lostbanner">
+                  <span class="ddot"></span>
+                  <span>stream lost - output stopped tailing</span>
+                  <span class="grow"></span>
+                  <button @click="location.reload()">↻ reconnect</button>
+                </div>
+              </template>
+            </div>
+
+            <div class="tv-fs-foot">
+              <div class="tv-fs-metarow">
+                <template x-if="$store.terminals.selected?.pid != null">
+                  <span class="fkv"><span class="k">pid</span><span class="v" x-text="$store.terminals.selected.pid"></span></span>
+                </template>
+                <span class="fkv"><span class="k">out</span><span class="v" x-text="$store.terminals.fmtBytes($store.terminals.selected?.bytes_out || 0)"></span></span>
+                <span class="fkv"><span class="k">lines</span><span class="v" x-text="$store.terminals.selected?.lines_out || 0"></span></span>
+                <template x-if="$store.terminals.isExited($store.terminals.selected)">
+                  <span class="fkv">
+                    <span class="k">exit</span>
+                    <span class="v" :style="'color:' + $store.terminals.exitCodeColor($store.terminals.selected)"
+                          x-text="$store.terminals.exitCodeLabel($store.terminals.selected) || '-'"></span>
+                  </span>
+                </template>
+                <span class="grow"></span>
+                <template x-if="$store.terminals.selectedBuffer?.truncated">
+                  <span class="trunc">scroll up - older output truncated</span>
+                </template>
+                <template x-if="$store.terminals.isKillArmed($store.terminals.selectedId)">
+                  <span class="armed-warn">SIGTERM armed · click kill again to force SIGKILL</span>
+                </template>
+                <template x-if="$store.terminals.isExited($store.terminals.selected) && !$store.terminals.isKillArmed($store.terminals.selectedId)">
+                  <span class="replay-note">exited · output preserved</span>
+                </template>
+                <template x-if="$store.terminals.isRunningTerminal($store.terminals.selected) && !$store.terminals.isKillArmed($store.terminals.selectedId)">
+                  <span class="fkv"><span class="k">buffer</span><span class="v">5,000 lines</span></span>
+                </template>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <template x-if="selectedSessionId && selectedKind === 'chat'">
           <div class="console-pane-col" style="position:relative">
             <!-- Thread header -->
             <div class="console-thread-header" x-show="selectedSessionMeta" x-cloak>
               <div class="row top">
                 <button class="hbtn mobile-back" @click="backToSessions()" title="Back to sessions">‹</button>
                 <span class="path">
-                  <span class="seg" x-text="$store.app.view"></span>
-                  <span class="slash">/</span>
-                  <span class="seg" x-text="(selectedSessionMeta?.state) || 'session'"></span>
-                  <span class="slash">/</span>
+                  <span class="seg view-seg" x-text="$store.app.view"></span>
+                  <span class="slash view-slash">/</span>
+                  <span class="seg state-seg" x-text="(selectedSessionMeta?.state) || 'session'"></span>
+                  <span class="slash state-slash">/</span>
                   <button type="button" class="seg cur seg-copy"
                           @click="copySessionId()"
                           :title="`Click to copy session ID: ${selectedSessionId}`"
                           x-text="(selectedSessionId || '').slice(0, 8)"></button>
                 </span>
                 <span class="grow"></span>
-                <button class="hbtn pin"
+                <button class="hbtn pin inline-only"
                         :class="{ on: selectedSessionMeta?.pinned }"
                         @click="togglePin(selectedSessionMeta)"
                         :title="selectedSessionMeta?.pinned ? 'Unpin' : 'Pin'"
                         x-text="selectedSessionMeta?.pinned ? '★' : '☆'"></button>
                 <template x-if="canComplete(selectedSessionMeta)">
-                  <button class="hbtn archive" @click="completeSession(selectedSessionMeta)"
+                  <button class="hbtn archive inline-only" @click="completeSession(selectedSessionMeta)"
                           title="Mark complete &amp; archive"><span class="glyph">⊠</span> mark complete</button>
                 </template>
-                <button class="hbtn" @click="startEditTitle(selectedSessionMeta, $event)">✎ rename</button>
+                <button class="hbtn inline-only" title="rename" @click="startEditTitle(selectedSessionMeta, $event)">✎ rename</button>
                 <template x-if="compacting">
                   <span style="color:var(--mauve);font-size:11px"><span class="spinner"></span> <span x-text="compactingLabel || 'compacting…'"></span></span>
                 </template>
-                <span class="kv-pop" x-data="{ open: false }" @click.outside="open = false">
+                <span class="kv-pop more-actions" x-data="{ open: false }" @click.outside="open = false">
                   <button class="hbtn" @click="open = !open" title="More actions">⋯</button>
                   <div class="setting-pop" x-show="open" x-cloak x-transition.opacity style="right:0;left:auto">
                     <div class="setting-pop-head">actions</div>
+                    <button type="button" class="setting-pop-row mobile-only" title="rename" @click="open = false; startEditTitle(selectedSessionMeta, $event)">
+                      <span class="pop-mark">✎</span><span class="pop-val">rename</span>
+                    </button>
+                    <button type="button" class="setting-pop-row mobile-only" title="pin" @click="open = false; togglePin(selectedSessionMeta)">
+                      <span class="pop-mark" x-text="selectedSessionMeta?.pinned ? '★' : '☆'" :style="selectedSessionMeta?.pinned ? 'color:var(--yellow)' : ''"></span>
+                      <span class="pop-val" x-text="selectedSessionMeta?.pinned ? 'unpin' : 'pin'"></span>
+                    </button>
+                    <template x-if="canComplete(selectedSessionMeta)">
+                      <button type="button" class="setting-pop-row mobile-only" title="mark complete" @click="open = false; completeSession(selectedSessionMeta)">
+                        <span class="pop-mark" style="color:var(--green)">⊠</span><span class="pop-val">mark complete</span>
+                      </button>
+                    </template>
                     <button type="button" class="setting-pop-row" @click="open = false; compactSession()" :disabled="compacting || sending">
                       <span class="pop-mark">⚙</span><span class="pop-val">compact session</span>
                     </button>
@@ -395,13 +563,17 @@
                         title="Click to edit topic"
                         x-text="selectedSessionMeta?.metadata?.topic || '+ add topic'"></span>
                 </template>
+                <!-- x-for clones exactly ONE root element; two sibling x-if
+                     templates here meant non-link chips never rendered. -->
                 <template x-for="chip in metadataChips(selectedSessionMeta || {}, { excludeKeys: ['topic'] })" :key="chip.label">
-                  <template x-if="chip.href">
-                    <a class="chip" :class="chip.cls" :href="chip.href" target="_blank" x-text="chip.label"></a>
-                  </template>
-                  <template x-if="!chip.href">
-                    <span class="chip" :class="chip.cls" :title="chip.title || ''" x-text="chip.label"></span>
-                  </template>
+                  <span style="display:contents">
+                    <template x-if="chip.href">
+                      <a class="chip" :class="chip.cls" :href="chip.href" target="_blank" x-text="chip.label"></a>
+                    </template>
+                    <template x-if="!chip.href">
+                      <span class="chip" :class="chip.cls" :title="chip.title || ''" x-text="chip.label"></span>
+                    </template>
+                  </span>
                 </template>
                 <span class="topic-error" x-show="topicError" x-text="topicError" x-cloak></span>
               </div>
@@ -434,7 +606,8 @@
                       x-init="$watch('open', v => { if (v) { loadModels(); q = ''; $nextTick(() => $refs.modelFilter && $refs.modelFilter.focus()); } })"
                       @click.outside="open = false">
                   <span class="k">model</span>
-                  <button type="button" class="v-btn model" :class="{ open: open }" @click="open = !open">
+                  <button type="button" class="v-btn model" :class="{ open: open }" @click="open = !open"
+                          :title="sessionModel || statusInfo?.model || 'default'">
                     <span x-text="sessionModel || statusInfo?.model || 'default'"></span>
                     <span class="caret">▾</span>
                   </button>
@@ -489,7 +662,7 @@
                   </span>
                 </template>
                 <template x-if="loadedSkills.length">
-                  <span class="kv" style="cursor:pointer" @click="showSkills = true">
+                  <span class="kv" style="cursor:pointer" @click="$store.tsu.open('skills')">
                     <span class="k">skills</span>
                     <span class="v" x-text="loadedSkills.length"></span>
                   </span>
@@ -736,6 +909,234 @@
                       </div>
                     </div>
                   </template>
+                  <template x-if="msg.type === 'job_status'">
+                    <div class="console-turn">
+                      <div class="console-turn-gutter">
+                        <span class="role job" :class="msg.state"
+                              @click.stop="msg.worker_session_id && selectSessionById(msg.worker_session_id)"
+                              :style="msg.worker_session_id ? 'cursor:pointer' : ''"
+                              :title="msg.worker_session_id ? 'Open worker session' : ''">job</span>
+                      </div>
+                      <div style="min-width:0">
+                        <div class="jx" :class="{ open: jobTileOpen(msg) }" :data-state="msg.state" :data-job-id="msg.job_id" :data-screen-label="'job ' + msg.job_id">
+                          <button type="button" class="jx-head" @click="msg._open = !jobTileOpen(msg)">
+                            <span class="jx-caret" x-text="jobTileOpen(msg) ? '▾' : '▸'"></span>
+                            <span class="jt-state">
+                              <span style="display:inline-flex;width:12px;justify-content:center">
+                                <template x-if="msg.state === 'running'"><span class="jt-spin"></span></template>
+                                <template x-if="msg.state === 'verifying'"><span class="g" style="font-size:11px">◎</span></template>
+                                <template x-if="msg.state === 'queued'"><span class="jt-dot live"></span></template>
+                                <template x-if="msg.state === 'done'"><span class="g">✓</span></template>
+                                <template x-if="msg.state === 'stuck'"><span class="g">▲</span></template>
+                                <template x-if="msg.state === 'errored'"><span class="g">✗</span></template>
+                                <template x-if="msg.state === 'cancelled'"><span class="g">⊘</span></template>
+                              </span>
+                              <span x-text="jobStateLabel(msg.state)"></span>
+                            </span>
+                            <span class="jt-id"><b x-text="jobShortId(msg.job_id)"></b></span>
+                            <template x-if="!jobTileOpen(msg)">
+                              <span class="inline-title" x-text="msg.prompt || ''"></span>
+                            </template>
+                            <template x-if="jobTileOpen(msg)">
+                              <span class="grow"></span>
+                            </template>
+                            <span class="jt-meta" x-text="jobMetaLine(msg)"></span>
+                          </button>
+                          <template x-if="jobTileOpen(msg)">
+                            <div class="jx-body">
+                              <div class="jx-title" x-text="msg.prompt || ''"></div>
+
+                              <!-- Per-criterion AC chips. Backend doesn't emit acceptance_criteria today;
+                                   when it does, jobCriteria() returns one chip per AC with kind+status.
+                                   Kind is inferred from text (ui/test/cmd) and defaults to llm.
+                                   Status is derived from result.ac_results when available. -->
+                              <template x-if="jobCriteria(msg).length">
+                                <div class="jt-acs">
+                                  <template x-for="(ac, i) in jobCriteria(msg)" :key="i">
+                                    <span class="jt-ac" :class="ac.status">
+                                      <span class="mk" x-text="ac.mark"></span>
+                                      <span x-text="ac.label"></span>
+                                    </span>
+                                  </template>
+                                </div>
+                              </template>
+
+                              <!-- Conditional terminal embed. The host scope drives lifecycle; the
+                                   embed only mounts when this job has a worker terminal (see jobHasTerminal).
+                                   Heuristic: a worker_session_id paired with a discovered terminal whose
+                                   parent_session_id matches. The detection happens inside jobTerminalView. -->
+                              <template x-if="msg.worker_session_id">
+                                <div class="jx-term" x-data="jobTerminalView()" x-init="bind($el, msg)"
+                                     x-show="termActive" data-job-terminal>
+                                  <div class="jx-term-head">
+                                    <span class="tlabel">worker</span>
+                                    <span style="color:var(--surface2)">·</span>
+                                    <span>pty</span>
+                                    <span class="grow"></span>
+                                    <template x-if="termLive"><span class="live">live ▌</span></template>
+                                    <template x-if="!termLive"><span>exited</span></template>
+                                  </div>
+                                  <div class="jx-xterm" data-xterm-host></div>
+                                </div>
+                              </template>
+
+                              <!-- Result inset (llm-only deliverable). Renders when result.summary present. -->
+                              <template x-if="jobResultSummary(msg)">
+                                <div class="jt-result">
+                                  <div class="rh">
+                                    <span class="teal">result</span>
+                                    <span class="grow"></span>
+                                    <span x-text="msg.worker_session_id ? '' : 'llm-only · no shell'"></span>
+                                  </div>
+                                  <pre x-text="jobResultSummary(msg)"></pre>
+                                </div>
+                              </template>
+
+                              <!-- Stuck issue / errored crash blocks. -->
+                              <template x-if="msg.state === 'stuck' && msg.error">
+                                <div class="jx-issue">
+                                  <span class="mk">▲</span>
+                                  <span x-text="msg.error"></span>
+                                </div>
+                              </template>
+                              <template x-if="msg.state === 'errored' && msg.error">
+                                <div class="jx-err">
+                                  <span class="mk">!</span>
+                                  <span x-text="msg.error"></span>
+                                </div>
+                              </template>
+
+                              <!-- Attempts stack (always rendered when count > 1). -->
+                              <template x-if="(msg.attempts || []).length > 1">
+                                <div>
+                                  <div class="jx-lbl" style="margin-bottom:7px">
+                                    attempts <span class="ln"></span> <span x-text="msg.attempts.length"></span> rounds
+                                  </div>
+                                  <div class="jt-attempts">
+                                    <template x-for="att in msg.attempts" :key="att.index">
+                                      <div class="jt-attempt" :class="att.index + 1 === msg.attempts.length ? 'cur' : ''"
+                                           @click.stop="att.worker_session_id && selectSessionById(att.worker_session_id)"
+                                           :style="att.worker_session_id ? 'cursor:pointer' : ''">
+                                        <span class="n">attempt <b x-text="att.index + 1"></b></span>
+                                        <span class="why" x-text="att.kind || 'initial'"></span>
+                                        <template x-if="att.verifier_pass === true">
+                                          <span class="vd pass">pass</span>
+                                        </template>
+                                        <template x-if="att.verifier_pass === false">
+                                          <span class="vd fail">fail</span>
+                                        </template>
+                                        <span class="open">⤢</span>
+                                      </div>
+                                    </template>
+                                  </div>
+                                </div>
+                              </template>
+                            </div>
+                          </template>
+
+                          <template x-if="jobTileOpen(msg) && jobHasFooter(msg)">
+                            <div class="jx-foot">
+                              <template x-if="msg.state === 'running' || msg.state === 'verifying'">
+                                <button type="button" class="jt-btn" @click.stop="jobCancel(msg.job_id)" title="Cancel this job">
+                                  <span class="k">⊘</span>cancel
+                                </button>
+                              </template>
+                              <template x-if="msg.state === 'stuck'">
+                                <button type="button" class="jt-btn primary" @click.stop="jobRetryWithHint(msg.job_id)" title="Provide a hint and try once more">
+                                  <span class="k">↻</span>retry with hint…
+                                </button>
+                              </template>
+                              <template x-if="msg.state === 'stuck'">
+                                <button type="button" class="jt-btn" @click.stop="jobMarkDone(msg.job_id)" title="Override verifier and mark as done">
+                                  <span class="k">⊠</span>mark done
+                                </button>
+                              </template>
+                              <template x-if="msg.state === 'errored'">
+                                <button type="button" class="jt-btn primary" @click.stop="jobRetryWithHint(msg.job_id)" title="Restart with a hint">
+                                  <span class="k">↻</span>restart…
+                                </button>
+                              </template>
+                              <span class="grow"></span>
+                              <template x-if="msg.worker_session_id">
+                                <button type="button" class="jt-btn ghost" @click.stop="selectSessionById(msg.worker_session_id)" title="Open worker session">
+                                  <span class="k">⤢</span>open worker
+                                </button>
+                              </template>
+                            </div>
+                          </template>
+                        </div>
+                      </div>
+                    </div>
+                  </template>
+                  <template x-if="msg.type === 'job_notify'">
+                    <div class="console-turn">
+                      <div class="console-turn-gutter">
+                        <span class="role job" :class="msg.notify_state || 'done'">job</span>
+                      </div>
+                      <div style="min-width:0">
+                        <div class="jn" :data-state="msg.notify_state || 'done'" :data-job-id="msg.notify_job_id">
+                          <div class="jn-head">
+                            <span class="jt-state">
+                              <span style="display:inline-flex;width:12px;justify-content:center">
+                                <template x-if="msg.notify_state === 'done'"><span class="g">✓</span></template>
+                                <template x-if="msg.notify_state === 'stuck'"><span class="g">▲</span></template>
+                                <template x-if="msg.notify_state === 'errored'"><span class="g">✗</span></template>
+                                <template x-if="msg.notify_state === 'cancelled'"><span class="g">⊘</span></template>
+                              </span>
+                              <span x-text="jobStateLabel(msg.notify_state || 'done')"></span>
+                            </span>
+                            <span class="jt-id"><b x-text="jobShortId(msg.notify_job_id)"></b></span>
+                            <span class="grow"></span>
+                          </div>
+                          <div class="jn-lead">
+                            <span class="ttl" x-text="msg.notify_prompt || msg.text || ''"></span>
+                            <template x-if="msg.notify_state === 'done'"><span> - finished.</span></template>
+                            <template x-if="msg.notify_state === 'stuck'"><span> - needs your input.</span></template>
+                            <template x-if="msg.notify_state === 'errored'"><span> - failed.</span></template>
+                            <template x-if="msg.notify_state === 'cancelled'"><span> - cancelled.</span></template>
+                          </div>
+                          <template x-if="msg.notify_body">
+                            <div class="jn-body">
+                              <template x-if="msg.notify_state === 'done' && msg.notify_body">
+                                <div class="jn-mini">
+                                  <div class="h"><span class="teal">result</span><span class="grow"></span></div>
+                                  <pre x-text="msg.notify_body"></pre>
+                                </div>
+                              </template>
+                              <template x-if="msg.notify_state === 'stuck' && msg.notify_body">
+                                <div class="jx-issue"><span class="mk">▲</span><span x-text="msg.notify_body"></span></div>
+                              </template>
+                              <template x-if="msg.notify_state === 'errored' && msg.notify_body">
+                                <div class="jx-err"><span class="mk">!</span><span x-text="msg.notify_body"></span></div>
+                              </template>
+                            </div>
+                          </template>
+                          <div class="jn-foot">
+                            <template x-if="msg.notify_state === 'done' && msg.notify_body">
+                              <button type="button" class="jt-btn ghost" @click.stop="copyMessage(msg.notify_body)">
+                                <span class="k">⧉</span>copy
+                              </button>
+                            </template>
+                            <template x-if="msg.notify_state === 'stuck'">
+                              <button type="button" class="jt-btn primary" @click.stop="jobRetryWithHint(msg.notify_job_id)">
+                                <span class="k">↻</span>retry with hint…
+                              </button>
+                            </template>
+                            <template x-if="msg.notify_state === 'stuck'">
+                              <button type="button" class="jt-btn" @click.stop="jobMarkDone(msg.notify_job_id)">
+                                <span class="k">⊠</span>mark done
+                              </button>
+                            </template>
+                            <template x-if="msg.notify_state === 'errored'">
+                              <button type="button" class="jt-btn primary" @click.stop="jobRetryWithHint(msg.notify_job_id)">
+                                <span class="k">↻</span>restart…
+                              </button>
+                            </template>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </template>
                   <template x-if="msg.type === 'progress' || msg.type === 'progress-done'">
                     <div class="console-turn agent">
                       <div class="console-turn-gutter">
@@ -951,68 +1352,218 @@
     </div>
 
     <!-- Hidden / modal surfaces preserved from previous UI -->
-    <div class="modal-backdrop paste-modal" :class="{ open: showPasteModal }" @click.self="closePasteModal()" @keydown.escape.window="if(showPasteModal) closePasteModal()">
-      <div class="modal-content">
-        <h2>Paste text as attachment</h2>
-        <label for="paste-modal-filename">Filename</label>
-        <input id="paste-modal-filename" type="text" x-model="pasteModalFilename" placeholder="pasted-text.txt">
-        <label for="paste-modal-text">Content</label>
-        <textarea id="paste-modal-text" x-ref="pasteModalText" class="paste-modal-text" x-model="pasteModalText" rows="10" placeholder="Paste or type text here..."></textarea>
-        <div class="modal-actions">
-          <button class="btn-cancel" @click="closePasteModal()">Cancel</button>
-          <button class="btn-primary" @click="confirmPasteModal()" :disabled="!pasteModalText.trim()">Attach</button>
+    <div x-data="tsuModal('paste')" x-show="open" x-cloak
+         class="tsu-modal-backdrop paste-modal"
+         @keydown.escape.window="onEscape()" @click.self="onBackdrop()">
+      <div class="tsu-modal --lg" role="dialog" aria-modal="true" aria-label="Paste text as attachment"
+           x-trap.noscroll="open">
+        <header class="tsu-modal-head">
+          <h2 class="tsu-modal-title">Paste text as attachment</h2>
+          <button class="tsu-modal-x" @click="closePasteModal()" aria-label="Close">&#x2715;</button>
+        </header>
+        <div class="tsu-modal-body">
+          <label class="tsu-field" for="paste-modal-filename">
+            <span class="tsu-label">Filename</span>
+            <input id="paste-modal-filename" class="tsu-input" type="text" x-model="pasteModalFilename" placeholder="pasted-text.txt">
+          </label>
+          <label class="tsu-field" for="paste-modal-text">
+            <span class="tsu-label">Content</span>
+            <textarea id="paste-modal-text" x-ref="pasteModalText" class="tsu-textarea paste-modal-text" x-model="pasteModalText" rows="10" placeholder="Paste or type text here..."></textarea>
+          </label>
         </div>
+        <footer class="tsu-modal-foot">
+          <span class="spacer"></span>
+          <button class="tsu-btn" @click="closePasteModal()">Cancel</button>
+          <button class="tsu-btn --primary" @click="confirmPasteModal()" :disabled="!pasteModalText.trim()">Attach</button>
+        </footer>
       </div>
     </div>
-    <div class="modal-backdrop expand-modal" :class="{ open: showExpandModal }" @click.self="closeExpandModal()" @keydown.escape.window="if(showExpandModal) closeExpandModal()">
-      <div class="modal-content">
-        <h2>Edit message</h2>
-        <textarea x-ref="expandModalText" class="expand-modal-text" x-model="expandModalText" rows="10" placeholder="Type your message..."></textarea>
-        <div class="modal-actions">
-          <button class="btn-cancel" @click="closeExpandModal()">Cancel</button>
-          <button class="btn-primary" @click="confirmExpandModal()">Done</button>
+    <div x-data="tsuModal('expand')" x-show="open" x-cloak
+         class="tsu-modal-backdrop expand-modal"
+         @keydown.escape.window="onEscape()" @click.self="onBackdrop()">
+      <div class="tsu-modal --lg" role="dialog" aria-modal="true" aria-label="Edit message"
+           x-trap.noscroll="open">
+        <header class="tsu-modal-head">
+          <h2 class="tsu-modal-title">Edit message</h2>
+          <button class="tsu-modal-x" @click="closeExpandModal()" aria-label="Close">&#x2715;</button>
+        </header>
+        <div class="tsu-modal-body">
+          <textarea x-ref="expandModalText" class="tsu-textarea expand-modal-text" x-model="expandModalText" rows="10" placeholder="Type your message..."></textarea>
         </div>
+        <footer class="tsu-modal-foot">
+          <span class="spacer"></span>
+          <button class="tsu-btn" @click="closeExpandModal()">Cancel</button>
+          <button class="tsu-btn --primary" @click="confirmExpandModal()">Done</button>
+        </footer>
       </div>
     </div>
-    <div class="modal-backdrop att-modal" :class="{ open: showAttachments }" @click.self="showAttachments = false">
-      <div class="modal-content">
-        <h2>Attachments</h2>
-        <template x-if="attachments.length === 0">
-          <p style="color:var(--muted);font-size:13px">No attachments</p>
-        </template>
-        <template x-for="(att, i) in attachments" :key="i">
-          <div class="att-item" x-data="{ open: false }">
-            <div class="att-header" @click="open = !open">
-              <span class="att-name" x-text="att.name"></span>
-              <span class="att-type" x-text="att.content_type + ' · ' + att.mime_type"></span>
+    <div x-data="tsuModal('attachments')" x-show="open" x-cloak
+         class="tsu-modal-backdrop attachments-modal"
+         @keydown.escape.window="onEscape()" @click.self="onBackdrop()">
+      <div class="tsu-modal --xl" role="dialog" aria-modal="true" aria-label="Attachments"
+           x-trap.noscroll="open">
+        <header class="tsu-modal-head">
+          <h2 class="tsu-modal-title">Attachments</h2>
+          <button class="tsu-modal-x" @click="close()" aria-label="Close">&#x2715;</button>
+        </header>
+        <div class="tsu-modal-body">
+          <template x-if="attachments.length === 0">
+            <p>No attachments</p>
+          </template>
+          <template x-for="(att, i) in attachments" :key="i">
+            <div class="att-item" x-data="{ open: false }">
+              <div class="att-header" @click="open = !open">
+                <span class="att-name" x-text="att.name"></span>
+                <span class="att-type" x-text="att.content_type + ' · ' + att.mime_type"></span>
+              </div>
+              <div class="att-body" x-show="open">
+                <template x-if="att.content != null"><pre x-text="att.content"></pre></template>
+                <template x-if="att.content == null">
+                  <span style="color:var(--muted)" x-text="att.size_bytes != null ? att.size_bytes + ' bytes (binary)' : 'No content preview'"></span>
+                </template>
+              </div>
             </div>
-            <div class="att-body" x-show="open">
-              <template x-if="att.content != null"><pre x-text="att.content"></pre></template>
-              <template x-if="att.content == null">
-                <span style="color:var(--muted)" x-text="att.size_bytes != null ? att.size_bytes + ' bytes (binary)' : 'No content preview'"></span>
-              </template>
+          </template>
+        </div>
+        <footer class="tsu-modal-foot">
+          <span class="spacer"></span>
+          <button class="tsu-btn" @click="close()">Close</button>
+        </footer>
+      </div>
+    </div>
+    <div x-data="tsuModal('skills')" x-show="open" x-cloak
+         class="tsu-modal-backdrop skills-modal"
+         @keydown.escape.window="onEscape()" @click.self="onBackdrop()">
+      <div class="tsu-modal --xl" role="dialog" aria-modal="true" aria-label="Loaded Skills"
+           x-trap.noscroll="open">
+        <header class="tsu-modal-head">
+          <h2 class="tsu-modal-title">Loaded Skills</h2>
+          <button class="tsu-modal-x" @click="close()" aria-label="Close">&#x2715;</button>
+        </header>
+        <div class="tsu-modal-body">
+          <template x-if="loadedSkills.length === 0">
+            <p>No skills loaded</p>
+          </template>
+          <template x-for="skill in loadedSkills" :key="skill.name">
+            <div class="att-item">
+              <div class="att-header">
+                <span class="att-name" x-text="skill.name"></span>
+                <span class="att-type" x-text="skill.description"></span>
+                <button class="att-remove" title="Remove from list" @click.stop="removeLoadedSkill(skill.name)">&times;</button>
+              </div>
+            </div>
+          </template>
+        </div>
+        <footer class="tsu-modal-foot">
+          <span class="spacer"></span>
+          <button class="tsu-btn" @click="close()">Close</button>
+        </footer>
+      </div>
+    </div>
+
+    <!-- Retry-with-hint dialog (replaces browser prompt()) -->
+    <div x-data="tsuModal('retry-hint')" x-show="open" x-cloak
+         class="tsu-modal-backdrop retry-hint-modal"
+         @keydown.escape.window="onEscape()" @click.self="onBackdrop()">
+      <div class="tsu-modal --lg" role="dialog" aria-modal="true" aria-label="Retry with hint"
+           x-trap.noscroll="open">
+        <header class="tsu-modal-head">
+          <h2 class="tsu-modal-title">retry with hint</h2>
+          <button class="tsu-modal-x" @click="closeRetryDialog()" aria-label="Close">&#x2715;</button>
+        </header>
+        <div class="tsu-modal-body">
+          <p class="tsu-modal-sub" style="margin:0">
+            <span x-text="retryDialog.prompt"></span>
+            <span style="font-family:var(--font-mono);color:var(--overlay1)"> · <span x-text="retryDialog.jobId"></span></span>
+          </p>
+          <template x-if="retryDialog.lastVerdict">
+            <div class="dlg-note warn">
+              <span class="mk">▲</span>
+              <span>last verdict - <b x-text="retryDialog.lastVerdict"></b>. Your hint is added to the next attempt's prompt.</span>
+            </div>
+          </template>
+          <label class="tsu-field" for="retry-hint-text">
+            <span class="tsu-label">hint for the next attempt</span>
+            <textarea id="retry-hint-text" x-ref="retryHintText"
+                      class="tsu-textarea"
+                      x-model="retryDialog.hint"
+                      placeholder="tell the worker what to do differently this time…"
+                      rows="3"></textarea>
+          </label>
+          <div class="dlg-chips">
+            <template x-for="(tip, i) in retryDialog.suggestions" :key="i">
+              <button type="button" class="dlg-chip" @click="retryDialog.hint = tip" x-text="tip.length > 42 ? tip.slice(0, 42) + '…' : tip"></button>
+            </template>
+          </div>
+          <div class="tsu-grid-2">
+            <div class="tsu-field">
+              <span class="tsu-label">attempt counter</span>
+              <div class="tsu-seg">
+                <button type="button" :class="retryDialog.resetCounter ? 'on' : ''" :aria-pressed="retryDialog.resetCounter" @click="retryDialog.resetCounter = true">reset to 1</button>
+                <button type="button" :class="!retryDialog.resetCounter ? 'on' : ''" :aria-pressed="!retryDialog.resetCounter" @click="retryDialog.resetCounter = false">continue (4+)</button>
+              </div>
+            </div>
+            <div class="tsu-field">
+              <span class="tsu-label">workspace</span>
+              <div class="tsu-seg">
+                <button type="button" :class="retryDialog.workspace === 'keep' ? 'on' : ''" :aria-pressed="retryDialog.workspace === 'keep'" @click="retryDialog.workspace = 'keep'">keep last</button>
+                <button type="button" :class="retryDialog.workspace === 'fresh' ? 'on' : ''" :aria-pressed="retryDialog.workspace === 'fresh'" @click="retryDialog.workspace = 'fresh'">fresh checkout</button>
+              </div>
             </div>
           </div>
-        </template>
-        <div class="modal-actions"><button class="btn-cancel" @click="showAttachments = false">Close</button></div>
+        </div>
+        <footer class="tsu-modal-foot">
+          <span class="spacer"></span>
+          <button class="tsu-btn" @click="closeRetryDialog()">cancel</button>
+          <button class="tsu-btn --primary" @click="submitRetryDialog()" :disabled="!retryDialog.hint.trim()">↻ retry with hint</button>
+        </footer>
       </div>
     </div>
-    <div class="modal-backdrop att-modal" :class="{ open: showSkills }" @click.self="showSkills = false">
-      <div class="modal-content">
-        <h2>Loaded Skills</h2>
-        <template x-if="loadedSkills.length === 0">
-          <p style="color:var(--muted);font-size:13px">No skills loaded</p>
-        </template>
-        <template x-for="skill in loadedSkills" :key="skill.name">
-          <div class="att-item">
-            <div class="att-header">
-              <span class="att-name" x-text="skill.name"></span>
-              <span class="att-type" x-text="skill.description"></span>
-              <button class="att-remove" title="Remove from list" @click.stop="removeLoadedSkill(skill.name)">&times;</button>
-            </div>
+
+    <!-- Mark-done dialog (replaces browser confirm()) -->
+    <div x-data="tsuModal('mark-done')" x-show="open" x-cloak
+         class="tsu-modal-backdrop mark-done-modal"
+         @keydown.escape.window="onEscape()" @click.self="onBackdrop()">
+      <div class="tsu-modal --md" role="dialog" aria-modal="true" aria-label="Mark done"
+           x-trap.noscroll="open">
+        <header class="tsu-modal-head">
+          <h2 class="tsu-modal-title">mark done</h2>
+          <button class="tsu-modal-x" @click="closeMarkDoneDialog()" aria-label="Close">&#x2715;</button>
+        </header>
+        <div class="tsu-modal-body">
+          <p class="tsu-modal-sub" style="margin:0">
+            <span x-text="markDoneDialog.prompt"></span>
+            <span style="font-family:var(--font-mono);color:var(--overlay1)"> · <span x-text="markDoneDialog.jobId"></span></span>
+          </p>
+          <div class="dlg-note warn">
+            <span class="mk">▲</span>
+            <span>This job <b>did not pass all criteria.</b> Marking it done accepts the work as-is and overrides the verifier - the conversation will show it resolved.</span>
           </div>
-        </template>
-        <div class="modal-actions"><button class="btn-cancel" @click="showSkills = false">Close</button></div>
+          <template x-if="markDoneDialog.criteria.length">
+            <div class="tsu-field">
+              <span class="tsu-label">criteria at close</span>
+              <div class="dlg-acs">
+                <template x-for="(ac, i) in markDoneDialog.criteria" :key="i">
+                  <div class="dlg-ac" :class="ac.status === 'pass' ? 'pass' : 'fail'">
+                    <span class="mk" x-text="ac.status === 'pass' ? '✓' : '✗'"></span>
+                    <span x-text="ac.label"></span>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </template>
+          <label class="tsu-field">
+            <span class="tsu-label">reason <span style="text-transform:none;letter-spacing:0;color:var(--overlay0)">· optional, kept on the record</span></span>
+            <textarea class="tsu-textarea mono" x-model="markDoneDialog.reason"
+                      placeholder="e.g. failing tests are unrelated flake - tracked in another ticket"
+                      rows="3"></textarea>
+          </label>
+        </div>
+        <footer class="tsu-modal-foot">
+          <span class="spacer"></span>
+          <button class="tsu-btn" @click="closeMarkDoneDialog()">cancel</button>
+          <button class="tsu-btn --warn" @click="submitMarkDoneDialog()">⊠ mark done anyway</button>
+        </footer>
       </div>
     </div>
   </div>
@@ -1649,6 +2200,285 @@
     </div>
   </div>
 
+  <!-- ============================================================
+       JOBS
+       ============================================================ -->
+  <div class="view" x-show="$store.app.view === 'jobs'" x-data="jobsView" x-cloak>
+    <div class="console-app no-sidebar">
+      <main class="console-main">
+        <div class="console-thread-header">
+          <div class="row top">
+            <span class="path"><span class="seg cur">jobs</span></span>
+            <span class="grow"></span>
+            <span class="count" style="font-family:var(--font-mono);font-size:10.5px;color:var(--overlay1)">
+              <span x-text="jobs.length"></span> jobs
+              <template x-if="needsYouCount > 0">
+                <span> · <b style="color:var(--peach);font-weight:600" x-text="needsYouCount + ' need you'"></b></span>
+              </template>
+            </span>
+          </div>
+        </div>
+
+        <template x-if="error">
+          <div class="console-turn error standalone">
+            <div class="console-turn-gutter"><span class="role error">err</span></div>
+            <div class="console-turn-bubble" x-text="error"></div>
+          </div>
+        </template>
+
+        <template x-if="loading">
+          <div class="console-empty"><span class="spinner"></span> loading jobs…</div>
+        </template>
+
+        <template x-if="!loading && !hasAnyJobs">
+          <div>
+            <div class="jobs-bar">
+              <div class="console-filter jobs-filter">
+                <span class="prompt">›</span>
+                <input type="text" x-model="filterText" placeholder="filter agent:odyn state:running #job-id">
+                <kbd>f</kbd>
+              </div>
+              <div class="jobs-layout-toggle">
+                <button :class="layout === 'board' ? 'on' : ''" @click="setLayout('board')">▦ board</button>
+                <button :class="layout === 'table' ? 'on' : ''" @click="setLayout('table')">≡ table</button>
+              </div>
+              <button class="jobs-newbtn" @click="openNewJob()"><span class="k">＋</span> new job</button>
+            </div>
+            <div class="jobs-empty">
+              <div class="glyph">⊟</div>
+              <h3>No jobs running</h3>
+              <p>A job is a background task an agent works against
+                <em style="color:var(--subtext1);font-style:normal">acceptance criteria</em>
+                - it keeps trying and self-verifying until the criteria pass, then reports back here.
+                Nothing is queued right now.</p>
+              <div class="ex">
+                <button class="jobs-newbtn" @click="openNewJob()"><span class="k">＋</span> new job</button>
+                <div class="row">or start one inline with <code>/job</code> in any conversation</div>
+              </div>
+              <div class="ex">
+                <div class="row"><code>/job --agent odyn --ac "tests pass" "fix the flaky webhook test"</code></div>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <template x-if="!loading && hasAnyJobs">
+          <div class="jobs-scroll">
+            <div class="jobs-bar">
+              <div class="console-filter jobs-filter">
+                <span class="prompt">›</span>
+                <input type="text" x-model="filterText" placeholder="filter agent:odyn state:running #job-id">
+                <kbd>f</kbd>
+              </div>
+              <div class="jobs-layout-toggle">
+                <button :class="layout === 'board' ? 'on' : ''" @click="setLayout('board')">▦ board</button>
+                <button :class="layout === 'table' ? 'on' : ''" @click="setLayout('table')">≡ table</button>
+              </div>
+              <button class="jobs-newbtn" @click="openNewJob()"><span class="k">＋</span> new job</button>
+            </div>
+
+            <div class="jobs-summary">
+              <template x-for="pill in summaryPills" :key="pill.k">
+                <button class="js-pill"
+                        :class="{ active: activeFilter === pill.k, all: pill.k === 'all' }"
+                        @click="setActiveFilter(pill.k)">
+                  <template x-if="pill.color">
+                    <span class="dot" :style="'background:' + pill.color"></span>
+                  </template>
+                  <span x-text="pill.label"></span>
+                  <span class="n" x-text="pill.count"></span>
+                </button>
+              </template>
+            </div>
+
+            <div class="view-pad" style="padding:8px 16px 16px">
+
+              <!-- Board layout -->
+              <template x-if="layout === 'board'">
+                <div class="jb-board">
+                  <template x-for="col in boardColumns" :key="col.key">
+                    <div class="jb-col">
+                      <div class="jb-col-head">
+                        <span class="dot" :style="'background:' + col.color"></span>
+                        <span x-text="col.label"></span>
+                        <span class="n" x-text="col.items.length"></span>
+                      </div>
+                      <div class="jb-col-body">
+                        <template x-if="col.items.length === 0">
+                          <div class="jb-col-empty">- empty -</div>
+                        </template>
+                        <template x-for="job in col.items" :key="job.job_id">
+                          <div class="jb"
+                               :style="'--st:' + stateMeta(job.state).color"
+                               @click="openJobOriginSession(job)">
+                            <div class="jb-top">
+                              <span class="jt-state" x-text="stateMeta(job.state).word"></span>
+                              <span class="jt-id"><b x-text="job.job_id"></b></span>
+                            </div>
+                            <div class="jb-title" x-text="jobTitle(job)"></div>
+                            <template x-if="job.state === 'running'">
+                              <div class="jb-miniprog"></div>
+                            </template>
+                            <div class="jb-line">
+                              <span x-text="defaultLine(job).text"></span>
+                            </div>
+                            <div class="jb-foot">
+                              <span class="jb-acmini">
+                                <template x-for="(s, i) in acStatesFor(job)" :key="i">
+                                  <span class="m" :class="s" x-text="acMark(s)"></span>
+                                </template>
+                                <template x-if="(job.acceptance_criteria || []).length">
+                                  <span class="cnt"
+                                        x-text="acPassCount(acStatesFor(job)) + '/' + (job.acceptance_criteria || []).length"></span>
+                                </template>
+                              </span>
+                              <span class="jb-agent" x-text="'@' + (job.agent || 'agent')"></span>
+                            </div>
+                          </div>
+                        </template>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+              </template>
+
+              <!-- Table layout -->
+              <template x-if="layout === 'table'">
+                <div class="jobs-table-wrap" tabindex="0">
+                  <table class="jobs-table">
+                    <thead>
+                      <tr>
+                        <th class="t-state">state</th>
+                        <th>job</th>
+                        <th>agent</th>
+                        <th class="num">att</th>
+                        <th>criteria</th>
+                        <th class="num">updated</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <template x-if="filteredJobs.length === 0">
+                        <tr><td colspan="7" style="text-align:center;color:var(--overlay1);font-style:italic;padding:20px">no jobs match this filter</td></tr>
+                      </template>
+                      <template x-for="job in filteredJobs" :key="job.job_id">
+                        <tr @click="openJobOriginSession(job)">
+                          <td class="t-state" :style="'--st:' + stateMeta(job.state).color">
+                            <span class="cellstate">
+                              <span class="dot"></span>
+                              <span x-text="stateMeta(job.state).word"></span>
+                            </span>
+                          </td>
+                          <td class="t-title">
+                            <span x-text="jobTitle(job)"></span>
+                            <span class="sub" x-text="job.job_id + ' · ' + jobConv(job)"></span>
+                          </td>
+                          <td class="t-agent" x-text="job.agent || '-'"></td>
+                          <td class="num" x-text="jobAttempts(job) || '-'"></td>
+                          <td class="acmini-cell">
+                            <span class="jb-acmini">
+                              <template x-for="(s, i) in acStatesFor(job)" :key="i">
+                                <span class="m" :class="s" x-text="acMark(s)"></span>
+                              </template>
+                              <template x-if="(job.acceptance_criteria || []).length">
+                                <span class="cnt"
+                                      x-text="acPassCount(acStatesFor(job)) + '/' + (job.acceptance_criteria || []).length"></span>
+                              </template>
+                            </span>
+                          </td>
+                          <td class="num" x-text="relativeTime(job.updated_at)"></td>
+                          <td class="t-act" @click.stop>
+                            <template x-for="action in rowActionsFor(job)" :key="action.key">
+                              <button class="rowbtn"
+                                      :class="{ primary: action.primary }"
+                                      :title="action.title"
+                                      @click="invokeRowAction(job, action.key)"
+                                      x-text="action.glyph"></button>
+                            </template>
+                          </td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </div>
+              </template>
+
+            </div>
+          </div>
+        </template>
+
+        <!-- New-job modal -->
+        <div x-data="tsuModal('new-job')" x-show="open" x-cloak
+             class="tsu-modal-backdrop new-job-modal"
+             @keydown.escape.window="onEscape()" @click.self="onBackdrop()">
+          <div class="tsu-modal --lg" role="dialog" aria-modal="true" aria-label="New job"
+               x-trap.noscroll="open">
+            <header class="tsu-modal-head">
+              <h2 class="tsu-modal-title">new job</h2>
+              <button class="tsu-modal-x" @click="closeNewJob()" aria-label="Close">&#x2715;</button>
+            </header>
+            <div class="tsu-modal-body">
+              <label class="tsu-field">
+                <span class="tsu-label">task</span>
+                <textarea class="tsu-textarea nj-grow" x-model="newForm.prompt"
+                          placeholder="describe the task · / commands · @ agent · # file"></textarea>
+                <p class="tsu-hint">the agent works until the criteria below pass - be specific about &ldquo;done&rdquo;.</p>
+              </label>
+
+              <div class="tsu-field">
+                <span class="tsu-label">acceptance criteria</span>
+                <div class="nj-ac-list">
+                  <template x-for="(ac, i) in newForm.acs" :key="i">
+                    <div class="nj-ac-row">
+                      <input type="text" class="tsu-input" x-model="ac.text" placeholder="criterion the verifier checks…">
+                      <button class="rm" title="remove" @click="removeAc(i)">&times;</button>
+                    </div>
+                  </template>
+                  <button class="nj-ac-add tsu-add" @click="addAc()">&#xff0b; add criterion</button>
+                </div>
+              </div>
+
+              <div class="tsu-grid-2">
+                <label class="tsu-field">
+                  <span class="tsu-label">agent</span>
+                  <select class="tsu-select" x-model="newForm.agent">
+                    <template x-for="a in $store.app.agents" :key="a.name">
+                      <option :value="a.name" x-text="a.name"></option>
+                    </template>
+                  </select>
+                </label>
+                <div class="tsu-field">
+                  <span class="tsu-label">max attempts</span>
+                  <div class="tsu-stepper">
+                    <button type="button" @click="stepAttempts(-1)">&minus;</button>
+                    <span class="val" x-text="newForm.maxAttempts"></span>
+                    <button type="button" @click="stepAttempts(1)">+</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="nj-cmd">
+                <div class="h">equivalent command</div>
+                <pre data-testid="nj-command-preview"><template x-for="(part, i) in commandPreviewParts" :key="i"><span :class="part.cls || ''" x-text="part.text"></span></template></pre>
+              </div>
+
+              <p class="tsu-hint" data-testid="nj-host-hint">runs in its own new conversation - open it from the job tile once queued.</p>
+
+              <template x-if="newError">
+                <div class="nj-error" x-text="newError"></div>
+              </template>
+            </div>
+            <footer class="tsu-modal-foot">
+              <span class="spacer"></span>
+              <button class="tsu-btn" type="button" @click="closeNewJob()">cancel</button>
+              <button class="tsu-btn --primary" type="button" :disabled="!canSubmit" @click="submitNewJob()">queue job</button>
+            </footer>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
 </div>
 
 <!-- Bottom keystrip -->
@@ -1703,35 +2533,46 @@
 </div>
 
 <!-- Settings modal -->
-<div class="console-modal-overlay" x-show="$store.app.showSettings" @click.self="$store.app.showSettings = false"
-     x-data="{ token: '', userId: '', tempTheme: '', tempModel: '', loadedModel: '', resolvedModel: '', models: [], pushSubscribed: false, pushLoading: false }"
-     x-effect="if ($store.app.showSettings) { token = localStorage.getItem('tsugite_token') || ''; userId = $store.app.userId; tempTheme = $store.app.theme; let agent = $store.app.selectedAgent; if (agent) { window.tsugiteApi.get('/api/agents/' + agent + '/status').then(d => { tempModel = d.model || ''; loadedModel = d.model || ''; resolvedModel = d.resolved_model || ''; }).catch(() => {}); } if (!models.length) { window.tsugiteApi.get('/api/models').then(d => { models = d.models || []; }).catch(() => {}); } if ('serviceWorker' in navigator && 'PushManager' in window) { navigator.serviceWorker.ready.then(r => r.pushManager.getSubscription()).then(s => { pushSubscribed = !!s; }).catch(() => {}); } }">
-  <div class="console-modal">
-    <h2>settings</h2>
-    <div class="body">
-      <div class="row"><label>api token</label>
-        <input type="password" x-model="token" @input="token = token.trim()" placeholder="tsu_…">
-      </div>
-      <div class="row"><label>user id</label>
-        <input type="text" x-model="userId" placeholder="web-user-1">
-      </div>
-      <div class="row"><label>theme</label>
-        <select x-model="tempTheme" @change="$store.app.theme = tempTheme">
+<div x-data="tsuModal('settings')" x-show="open" x-cloak
+     class="tsu-modal-backdrop settings-modal"
+     @keydown.escape.window="onEscape()" @click.self="onBackdrop()">
+  <div class="tsu-modal --sm" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title"
+       x-trap.noscroll="open"
+       x-data="{ token: '', userId: '', tempTheme: '', tempModel: '', loadedModel: '', resolvedModel: '', models: [], pushSubscribed: false, pushLoading: false }"
+       x-effect="if (open) { token = localStorage.getItem('tsugite_token') || ''; userId = $store.app.userId; tempTheme = $store.app.theme; let agent = $store.app.selectedAgent; if (agent) { window.tsugiteApi.get('/api/agents/' + agent + '/status').then(d => { tempModel = d.model || ''; loadedModel = d.model || ''; resolvedModel = d.resolved_model || ''; }).catch(() => {}); } if (!models.length) { window.tsugiteApi.get('/api/models').then(d => { models = d.models || []; }).catch(() => {}); } if ('serviceWorker' in navigator && 'PushManager' in window) { navigator.serviceWorker.ready.then(r => r.pushManager.getSubscription()).then(s => { pushSubscribed = !!s; }).catch(() => {}); } }">
+    <header class="tsu-modal-head">
+      <h2 class="tsu-modal-title" id="settings-modal-title">settings</h2>
+      <button class="tsu-modal-x" @click="close()" aria-label="Close">&#x2715;</button>
+    </header>
+    <div class="tsu-modal-body">
+      <label class="tsu-field">
+        <span class="tsu-label">api token</span>
+        <input class="tsu-input" type="password" x-model="token" @input="token = token.trim()" placeholder="tsu_…">
+      </label>
+      <label class="tsu-field">
+        <span class="tsu-label">user id</span>
+        <input class="tsu-input" type="text" x-model="userId" placeholder="web-user-1">
+      </label>
+      <label class="tsu-field">
+        <span class="tsu-label">theme</span>
+        <select class="tsu-select" x-model="tempTheme" @change="$store.app.theme = tempTheme">
           <option value="latte">latte</option>
           <option value="frappe">frappé</option>
           <option value="macchiato">macchiato</option>
           <option value="mocha">mocha</option>
         </select>
-      </div>
-      <div class="row"><label>agent</label>
-        <select x-model="$store.app.selectedAgent">
+      </label>
+      <label class="tsu-field">
+        <span class="tsu-label">agent</span>
+        <select class="tsu-select" x-model="$store.app.selectedAgent">
           <template x-for="a in $store.app.agents" :key="a.name">
             <option :value="a.name" x-text="a.name"></option>
           </template>
         </select>
-      </div>
-      <div class="row"><label>model override</label>
-        <select x-model="tempModel">
+      </label>
+      <label class="tsu-field">
+        <span class="tsu-label">model override</span>
+        <select class="tsu-select" x-model="tempModel">
           <option value="">— agent default</option>
           <template x-if="tempModel && !models.find(m => m.id === tempModel)">
             <option :value="tempModel" x-text="tempModel + '  (custom)'"></option>
@@ -1740,28 +2581,28 @@
             <option :value="m.id" x-text="m.context_window ? m.id + '  · ' + (m.context_window/1000).toFixed(0) + 'k ctx' : m.id"></option>
           </template>
         </select>
-      </div>
-      <div x-show="resolvedModel" style="font-size:10.5px;color:var(--overlay1);padding-left:96px;margin-top:-4px">
-        resolves to <code x-text="resolvedModel"></code>
-      </div>
-      <div class="row" style="align-items:flex-start"><label>options</label>
-        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-family:var(--font-mono);font-size:11.5px;color:var(--text);text-transform:none;letter-spacing:normal">
+        <p class="tsu-hint" x-show="resolvedModel">resolves to <code x-text="resolvedModel"></code></p>
+      </label>
+      <div class="tsu-field">
+        <span class="tsu-label">options</span>
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-family:var(--font-mono);font-size:11.5px;color:var(--text)">
           <input type="checkbox" :checked="$store.app.autoFollow" @change="$store.app.autoFollow = $el.checked; localStorage.setItem('tsugite_auto_follow', $el.checked)">
           auto-follow turn details
         </label>
       </div>
       <template x-if="'serviceWorker' in navigator && 'PushManager' in window">
-        <div class="row"><label>push</label>
-          <button class="head-btn" :disabled="pushLoading"
+        <div class="tsu-field">
+          <span class="tsu-label">push</span>
+          <button class="tsu-btn" :disabled="pushLoading"
                   @click="pushLoading = true; window.tsugiteTogglePush(pushSubscribed).then(s => { pushSubscribed = s; }).catch(() => {}).finally(() => { pushLoading = false; })"
-                  x-text="pushLoading ? 'working…' : (pushSubscribed ? 'disable notifications' : 'enable notifications')"
-                  style="background:var(--surface0);border:1px solid var(--surface1);color:var(--text);padding:4px 10px;border-radius:3px;font-family:var(--font-mono);font-size:11px;cursor:pointer"></button>
+                  x-text="pushLoading ? 'working…' : (pushSubscribed ? 'disable notifications' : 'enable notifications')"></button>
         </div>
       </template>
     </div>
-    <div class="foot">
-      <button @click="$store.app.theme = localStorage.getItem('tsugite_theme') || 'frappe'; $store.app.showSettings = false">cancel</button>
-      <button class="primary" @click="
+    <footer class="tsu-modal-foot">
+      <span class="spacer"></span>
+      <button class="tsu-btn" @click="$store.app.theme = localStorage.getItem('tsugite_theme') || 'frappe'; close()">cancel</button>
+      <button class="tsu-btn --primary" @click="
         if (token.trim()) localStorage.setItem('tsugite_token', token.trim()); else localStorage.removeItem('tsugite_token');
         $store.app.userId = userId.trim() || 'web-user-1';
         localStorage.setItem('tsugite_user_id', $store.app.userId);
@@ -1770,9 +2611,9 @@
         if (tempModel !== loadedModel) {
           window.tsugiteApi.patch('/api/agents/' + $store.app.selectedAgent + '/config', { model: tempModel || null }).catch(() => {});
         }
-        $store.app.showSettings = false;
+        close();
       ">save</button>
-    </div>
+    </footer>
   </div>
 </div>
 

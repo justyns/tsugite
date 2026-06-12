@@ -1,5 +1,5 @@
 import { get, post, patch } from '../api.js';
-import { escapeHtml, renderMarkdown, scrollToBottom, formatDate, formatRelativeTime, stateBadgeClass, copyText, toast } from '../utils.js';
+import { escapeHtml, renderMarkdown, scrollToBottom, formatDate, formatRelativeTime, stateBadgeClass, copyText, toast, jobCriteriaStates } from '../utils.js';
 import { sessionsMixin } from './conversation/sessions.js';
 import { historyMixin } from './conversation/history.js';
 import { attachmentsMixin } from './conversation/attachments.js';
@@ -37,10 +37,30 @@ export default () => ({
   // _sessionState routes every closure-captured write to the live successor's
   // state object so in-flight progress shows up on the session the user now sees.
   _supersededMap: {},
-  showAttachments: false,
   attachments: [],
   inputMenuOpen: false,
-  showSkills: false,
+  // Retry-with-hint and mark-done dialogs replace the browser prompt()/confirm()
+  // formerly used in jobRetryWithHint/jobMarkDone. Open via _openRetryDialog /
+  // _openMarkDoneDialog; submit posts to the same /api/jobs/{id}/... endpoints.
+  retryDialog: {
+    jobId: '',
+    prompt: '',
+    lastVerdict: '',
+    hint: '',
+    resetCounter: true,
+    workspace: 'keep',
+    suggestions: [
+      "the failing tests are pre-existing - verify against a clean baseline first",
+      "split the change into smaller commits and re-run tests between each",
+      "check the verifier output more carefully and address each failure",
+    ],
+  },
+  markDoneDialog: {
+    jobId: '',
+    prompt: '',
+    criteria: [],
+    reason: '',
+  },
   inspectingSnapshot: null,
   piExpanded: null,
   effortLevels: [],
@@ -48,6 +68,24 @@ export default () => ({
   // Getters must stay here — spread loses get descriptors
   get userId() {
     return this.$store.app.userId;
+  },
+
+  // Which "kind" of thing is selected in the sidebar - drives the main pane.
+  // chat (the default) vs terminal (the /run sub-session, including the
+  // empty-state placeholder). Used by index.html to pick between the chat
+  // thread view and the full-session terminal view.
+  get selectedKind() {
+    const t = this.$store.terminals;
+    if (t?.selectedId || t?.showEmpty) return 'terminal';
+    return 'chat';
+  },
+
+  // Clear any chat selection then hand off to the terminals store. Called
+  // from the sidebar terminal-section row click handler so the two selection
+  // surfaces stay mutually exclusive.
+  selectTerminal(terminalId) {
+    if (this.selectedSessionId) this.backToSessions();
+    this.$store.terminals?.selectTerminal(terminalId);
   },
 
   _resolveSessionId(sid) {
@@ -170,7 +208,13 @@ export default () => ({
     if (!text.startsWith('/')) return [];
     const query = text.slice(1).split(/\s/)[0].toLowerCase();
     if (text.includes(' ')) return [];
-    return this.availableCommands.filter(c => c.name.startsWith(query));
+    // /run is wired client-side (input.js) and isn't in the server-side
+    // adapter command registry, so synthesise it into the suggestion list.
+    const RUN_VIRTUAL = { name: 'run', description: 'open a PTY-backed terminal session', plugin: '' };
+    const all = this.availableCommands.some(c => c.name === 'run')
+      ? this.availableCommands
+      : [...this.availableCommands, RUN_VIRTUAL];
+    return all.filter(c => c.name.startsWith(query));
   },
 
   get groupedSessions() {
@@ -183,6 +227,12 @@ export default () => ({
       // Superseded sessions stay in allSessions for chase lookups but should
       // never appear in the sidebar.
       if (s.superseded_by) continue;
+      // Hide Job worker / verifier sessions from the sidebar - they're
+      // represented by the tile in the parent chat. Users navigate to them by
+      // clicking the tile (which calls selectSessionById on the id), not via
+      // the sidebar. Without this filter, every job spawns 2 extra sidebar
+      // rows that clutter the view.
+      if (s.metadata && s.metadata.job_id) continue;
       if (s.pinned) {
         pinned.push(s);
         continue;
@@ -282,6 +332,9 @@ export default () => ({
       if (ev.type === 'session_event') {
         this._updateProgressCache(d);
         this._handleSessionEvent(d);
+      }
+      if (ev.type === 'job_update') {
+        this._handleJobUpdate(d);
       }
       if (ev.type === 'compaction_started' && d.agent === this.$store.app.selectedAgent && d.session_id) {
         const s = this._sessionState(d.session_id);
@@ -534,7 +587,7 @@ export default () => ({
   async openAttachments() {
     const agent = this.$store.app.selectedAgent;
     if (!agent) return;
-    this.showAttachments = true;
+    this.$store.tsu.open('attachments');
     this.attachments = [];
     try {
       const data = await get(`/api/agents/${agent}/attachments`);
@@ -712,12 +765,180 @@ export default () => ({
       return;
     }
 
-    const progressIdx = this.messages.indexOf(this._sessionProgress);
-    if (progressIdx >= 0) {
+    // Guard: only forward while the live bubble is still rendered (selectSession
+    // / reload may have swapped the messages array).
+    if (this.messages.includes(this._sessionProgress)) {
       const { session_id, event_type, ...rest } = d;
-      this._handleProgressEvent(progressIdx, { type: evType, ...rest });
+      this._handleProgressEvent({ type: evType, ...rest }, this.selectedSessionId);
       this._scrollThrottled();
     }
+  },
+
+  _handleJobUpdate(d) {
+    if (!d.parent_session_id) return;
+    // Route the update to the OWNING session's message list, not just the one
+    // currently on screen. A job's running→verifying→done updates arrive while
+    // the user may be viewing the worker/verifier session (e.g. via "open
+    // worker"); dropping them there left the tile stuck on its last-seen state
+    // when they returned, because revisits don't reload history.
+    const owner = this._resolveSessionId(d.parent_session_id);
+    const state = this.sessionsState[owner];
+    if (!state) return;  // parent not loaded in memory; the tile renders fresh from history on next visit
+    const existing = state.messages.find(m => m.type === 'job_status' && m.job_id === d.job_id);
+    // Drop undefined fields so an emit without `error` (e.g. a RUNNING tick after
+    // a STUCK terminal) doesn't wipe a previously-set error from the tile.
+    // acceptance_criteria/result are consumed when present - the backend doesn't
+    // include them in _emit_job_event today, but the tile is forward-compatible.
+    // ac_results is broadcast top-level during VERIFYING so mid-verify criteria reach the tile.
+    const fields = {};
+    for (const k of ['state', 'prompt', 'worker_session_id', 'worker_terminal_id', 'verifier_session_id', 'verify_attempts', 'error', 'attempts', 'acceptance_criteria', 'result', 'ac_results']) {
+      if (d[k] !== undefined) fields[k] = d[k];
+    }
+    if (existing) {
+      Object.assign(existing, fields);
+    } else if (owner === this.selectedSessionId) {
+      // Only spawn a brand-new tile in the session being viewed (a job just
+      // created in this chat). Background sessions already carry their tile.
+      state.messages.push({ type: 'job_status', job_id: d.job_id, ...fields });
+      this._scrollThrottled();
+    }
+  },
+
+  // ---------- Job tile helpers (template-side) ----------
+
+  // Default-open the tile for live/attention states; collapse done/cancelled/queued.
+  // Sticky once the user toggles, via msg._open.
+  jobTileOpen(msg) {
+    if (typeof msg._open === 'boolean') return msg._open;
+    return msg.state === 'running' || msg.state === 'verifying'
+      || msg.state === 'stuck' || msg.state === 'errored';
+  },
+
+  jobStateLabel(state) {
+    return state === 'errored' ? 'error' : (state || 'unknown');
+  },
+
+  jobShortId(jobId) {
+    if (!jobId) return '';
+    // Strip the "job-" prefix and keep the hex suffix; matches the design's
+    // "job_8e3b" style without baking in the underscore separator.
+    const cleaned = String(jobId).replace(/^job[-_]/, '');
+    return cleaned.length > 8 ? cleaned.slice(0, 8) : cleaned;
+  },
+
+  jobMetaLine(msg) {
+    const bits = [];
+    const attempts = (msg.attempts || []).length;
+    if (attempts > 1) bits.push(`${attempts} attempts`);
+    else if (msg.verify_attempts) bits.push(`attempt ${msg.verify_attempts + 1}`);
+    return bits.join(' · ');
+  },
+
+  // Per-criterion AC chip list. Reads `acceptance_criteria` (list of strings)
+  // from the job event payload. Each chip's status is derived from
+  // `result.ac_results` when available - matched first by `ac_index`, then by
+  // `ac_text` as a fallback. Otherwise pending (or `active` for the first AC
+  // while the verifier is mid-flight).
+  jobCriteria(msg) {
+    return jobCriteriaStates(msg);
+  },
+
+  jobResultSummary(msg) {
+    if (!msg.result) return '';
+    if (typeof msg.result === 'string') return msg.result;
+    return msg.result.summary || '';
+  },
+
+  jobHasFooter(msg) {
+    if (!msg) return false;
+    if (msg.state === 'running' || msg.state === 'verifying') return true;
+    if (msg.state === 'stuck' || msg.state === 'errored') return true;
+    return !!msg.worker_session_id;
+  },
+
+  // ---------- Job tile actions (dialogs) ----------
+
+  async jobCancel(jobId) {
+    // Cancel is reversible enough - no confirm dialog per the design.
+    try {
+      await post(`/api/jobs/${jobId}/cancel`, {});
+    } catch (e) {
+      toast(`Cancel failed: ${e.message}`, 'error');
+    }
+  },
+
+  jobMarkDone(jobId) {
+    const msg = this._findJobMessage(jobId);
+    const criteria = msg ? this.jobCriteria(msg) : [];
+    const failed = criteria.filter(c => c.status === 'fail');
+    const passed = criteria.filter(c => c.status === 'pass');
+    this.markDoneDialog.jobId = jobId;
+    this.markDoneDialog.prompt = msg?.prompt || '';
+    this.markDoneDialog.criteria = [...failed, ...passed];  // failed first, design's recap order
+    this.markDoneDialog.reason = '';
+    this.$store.tsu.open('mark-done');
+  },
+
+  closeMarkDoneDialog() {
+    this.$store.tsu.close('mark-done');
+  },
+
+  async submitMarkDoneDialog() {
+    const { jobId, reason } = this.markDoneDialog;
+    this.$store.tsu.close('mark-done');
+    try {
+      await post(`/api/jobs/${jobId}/mark-done`, { reason: reason.trim() || 'marked done by user' });
+    } catch (e) {
+      toast(`Mark done failed: ${e.message}`, 'error');
+    }
+  },
+
+  jobRetryWithHint(jobId) {
+    const msg = this._findJobMessage(jobId);
+    // Pull the last verifier verdict from result.ac_results (first failing reason)
+    // when available; fall back to the job's error string.
+    let lastVerdict = '';
+    if (msg?.result?.ac_results && Array.isArray(msg.result.ac_results)) {
+      const firstFail = msg.result.ac_results.find(r => r && r.pass === false);
+      if (firstFail) lastVerdict = firstFail.reason || firstFail.ac_text || '';
+    }
+    if (!lastVerdict && msg?.error) lastVerdict = String(msg.error).split('\n')[0].slice(0, 200);
+    this.retryDialog.jobId = jobId;
+    this.retryDialog.prompt = msg?.prompt || '';
+    this.retryDialog.lastVerdict = lastVerdict;
+    this.retryDialog.hint = '';
+    this.retryDialog.resetCounter = true;
+    this.retryDialog.workspace = 'keep';
+    this.$store.tsu.open('retry-hint');
+    this.$nextTick(() => {
+      try { this.$refs.retryHintText?.focus(); } catch { /* non-fatal */ }
+    });
+  },
+
+  closeRetryDialog() {
+    this.$store.tsu.close('retry-hint');
+  },
+
+  async submitRetryDialog() {
+    const hint = (this.retryDialog.hint || '').trim();
+    if (!hint) return;
+    const jobId = this.retryDialog.jobId;
+    const body = {
+      hint,
+      reset_counter: !!this.retryDialog.resetCounter,
+      fresh_workspace: this.retryDialog.workspace === 'fresh',
+    };
+    this.$store.tsu.close('retry-hint');
+    try {
+      await post(`/api/jobs/${jobId}/retry`, body);
+    } catch (e) {
+      toast(`Retry failed: ${e.message}`, 'error');
+    }
+  },
+
+  _findJobMessage(jobId) {
+    if (!jobId) return null;
+    return this.messages.find(m => m.type === 'job_status' && m.job_id === jobId) || null;
   },
 
   // ---------- Console helpers ----------

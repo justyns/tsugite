@@ -457,6 +457,9 @@ body.is-resizing-sidebar { cursor: col-resize; user-select: none; }
 @media (max-width: 640px) {
   .console-thread-header .hbtn.mobile-back { display: inline-flex; }
 }
+/* Mobile-only popover rows (rename/pin/mark-complete) are hidden on desktop
+   and shown via responsive.css inside the @media (max-width: 640px) block. */
+.console-thread-header .setting-pop-row.mobile-only { display: none; }
 .console-thread-header .hbtn.pin { color: var(--yellow); }
 .console-thread-header .hbtn.pin.on { color: var(--yellow); text-shadow: 0 0 8px color-mix(in oklab, var(--yellow) 50%, transparent); }
 .console-thread-header .hbtn.archive {
@@ -884,6 +887,10 @@ body.is-resizing-sidebar { cursor: col-resize; user-select: none; }
 }
 .console-turn-bubble th { color: var(--overlay1); font-weight: 600; }
 .console-turn-bubble hr { border: none; border-top: 1px dashed var(--surface1); margin: 10px 0; }
+
+/* Legacy .job-status tile rules removed in the jobs UI redesign.
+   The replacement tile (.jx) lives in jobs.css; in-thread notify messages
+   (.jn) and the retry/mark-done dialogs (.dlg-*) live in job-flows.css. */
 
 .console-turn-bubble .copy-btn {
   position: absolute; top: 6px; right: 6px;
@@ -1654,69 +1661,8 @@ textarea.editor-body {
 }
 
 /* ============================================================================
-   SETTINGS MODAL (kept simple) and toast.
+   TOAST.  (Settings modal lives in tsu-modal.css now.)
    ============================================================================ */
-.console-modal-overlay {
-  position: fixed; inset: 0;
-  background: color-mix(in oklab, black 50%, transparent);
-  display: grid; place-items: center;
-  z-index: 100;
-}
-.console-modal {
-  width: min(420px, calc(100vw - 32px));
-  background: var(--mantle);
-  border: 1px solid var(--surface1);
-  border-radius: 6px;
-  box-shadow: 0 16px 40px rgba(0,0,0,0.5);
-  font-family: var(--font-mono);
-}
-.console-modal h2 {
-  margin: 0; padding: 12px 16px;
-  border-bottom: 1px solid var(--surface0);
-  font-family: var(--font-mono); font-size: 11px;
-  text-transform: uppercase; letter-spacing: 0.16em;
-  color: var(--lavender);
-}
-.console-modal .body {
-  padding: 12px 16px;
-  display: grid;
-  gap: 10px;
-  font-size: 12px;
-  min-width: 0;
-}
-.console-modal .row { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.console-modal .row > label:first-child {
-  color: var(--overlay1); font-size: 11px;
-  min-width: 84px; flex: 0 0 84px;
-  text-transform: uppercase; letter-spacing: 0.1em;
-}
-.console-modal select, .console-modal input {
-  background: var(--crust); border: 1px solid var(--surface1);
-  color: var(--text); font: inherit; font-family: var(--font-mono); font-size: 12px;
-  padding: 4px 8px; border-radius: 3px; outline: none;
-  flex: 1 1 0;
-  min-width: 0;
-  max-width: 100%;
-}
-.console-modal select:focus, .console-modal input:focus { border-color: var(--lavender); }
-.console-modal .foot {
-  display: flex; justify-content: flex-end; gap: 6px;
-  padding: 8px 16px;
-  border-top: 1px solid var(--surface0);
-}
-.console-modal .foot button {
-  background: var(--surface0); color: var(--text);
-  border: 1px solid var(--surface1);
-  padding: 4px 12px; border-radius: 3px;
-  font: inherit; font-family: var(--font-mono); font-size: 11px;
-  cursor: pointer;
-}
-.console-modal .foot button.primary {
-  background: var(--lavender); color: var(--crust); border-color: var(--lavender);
-  font-weight: 700;
-}
-.console-modal .foot button:hover { border-color: var(--lavender); }
-
 .console-toast {
   position: fixed; bottom: 36px; left: 50%;
   transform: translateX(-50%);

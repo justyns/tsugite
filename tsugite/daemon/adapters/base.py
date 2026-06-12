@@ -386,6 +386,14 @@ class BaseAdapter(ABC):
         ctx["session_id"] = meta.get("session_id", "") if ctx["is_session"] else ""
         ctx["is_channel_session"] = bool(meta.get("channel_session"))
         ctx["can_spawn_sessions"] = True  # Always true in daemon mode
+        # Derived from actual wiring: a daemon without the session runner /
+        # orchestrator / PTY runtime (e.g. Discord-only, HTTP disabled) must not
+        # render default.md guidance for tools that would just error.
+        from tsugite.tools.jobs import get_jobs_orchestrator
+        from tsugite.tools.terminal import runtime_available
+
+        ctx["can_spawn_jobs"] = get_jobs_orchestrator() is not None
+        ctx["can_use_pty"] = runtime_available()
 
         window_minutes = meta.get("heartbeat_window", 10)
         since = (datetime.now(timezone.utc) - timedelta(minutes=window_minutes)).isoformat()
@@ -461,13 +469,33 @@ class BaseAdapter(ABC):
         except Exception:
             tokens_used = 0
 
+        # workspace_override beats agent_config.workspace_dir so the rendered cwd
+        # matches what set_workspace_dir actually puts the agent in (per-session
+        # override used by the Jobs feature for its git worktree).
+        cwd_for_render = (channel_context.metadata or {}).get("workspace_override") or self.agent_config.workspace_dir
+
+        # Jobs anchored on this session - surface active + last 3 terminal so the
+        # LLM can answer "what's happening with my job?" without dumping the full
+        # worker output into the chat.
+        jobs_xml = ""
+        try:
+            from tsugite.tools.jobs import get_jobs_orchestrator
+
+            orchestrator = get_jobs_orchestrator()
+            if orchestrator is not None and session is not None:
+                rendered = orchestrator.render_context_xml(session.id)
+                if rendered:
+                    jobs_xml = "\n" + rendered
+        except Exception:
+            logger.debug("Jobs context render failed", exc_info=True)
+
         return f"""<message_context>
   <datetime>{timestamp}</datetime>{session_started_xml}{last_active_xml}{scheduler_timing_xml}
-  <working_directory>{self.agent_config.workspace_dir}</working_directory>
+  <working_directory>{cwd_for_render}</working_directory>
   <source>{channel_context.source}</source>
   <user_id>{channel_context.user_id}</user_id>
   <context_tokens_used>{tokens_used}</context_tokens_used>
-  <context_limit>{context_limit_for_render}</context_limit>{session_topic_xml}{session_meta_xml}{scratchpad_xml}
+  <context_limit>{context_limit_for_render}</context_limit>{session_topic_xml}{session_meta_xml}{scratchpad_xml}{jobs_xml}
 </message_context>
 
 {message}"""
@@ -596,7 +624,15 @@ class BaseAdapter(ABC):
 
         from tsugite.cli.helpers import PathContext, set_workspace_dir
 
-        workspace_dir = self.agent_config.workspace_dir
+        # workspace_override lets a single session run inside a different working
+        # directory than the adapter's default - used by the Jobs feature so a
+        # worker session lives in its provisioned git worktree, not the parent
+        # adapter's workspace.
+        workspace_override = (channel_context.metadata or {}).get("workspace_override")
+        if workspace_override:
+            workspace_dir = Path(workspace_override)
+        else:
+            workspace_dir = self.agent_config.workspace_dir
         path_context = PathContext(
             invoked_from=workspace_dir,
             workspace_dir=workspace_dir,
@@ -607,8 +643,11 @@ class BaseAdapter(ABC):
             """Run agent with workspace bound via task-local ContextVar."""
             set_workspace_dir(workspace_dir)
             attachments = list(self._get_workspace_attachments())
+            # .get, not .pop: the prompt-too-long auto-compact path re-invokes
+            # run_in_workspace, and the retried turn must still see the uploads
+            # (the enriched prompt already promises their content).
             if channel_context.metadata and channel_context.metadata.get("uploaded_attachments"):
-                attachments.extend(channel_context.metadata.pop("uploaded_attachments"))
+                attachments.extend(channel_context.metadata.get("uploaded_attachments"))
 
             meta = channel_context.metadata or {}
             effort_override = meta.get("reasoning_effort_override") or self.session_store.get_reasoning_effort(conv_id)
@@ -630,6 +669,7 @@ class BaseAdapter(ABC):
                 custom_logger=custom_logger,
                 context=agent_context,
                 user_input_for_history=message,
+                channel_metadata=metadata,
             )
 
         code_events_before = self.session_store.count_events_by_type(conv_id, "code_execution")

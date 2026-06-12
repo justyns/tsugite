@@ -207,6 +207,9 @@ class Session:
     suppressed_skills: list[str] = field(default_factory=list)
     reasoning_effort: Optional[str] = None
     model_override: Optional[str] = None
+    # Per-session working directory override (used by Jobs feature so a worker
+    # session runs inside its provisioned git worktree, not the adapter's default).
+    workspace_override: Optional[str] = None
     compacting: bool = False
     # Provider-reported context window for this session's model. None until the
     # first turn reports it; consumers fall back to the agent-wide default via
@@ -665,6 +668,11 @@ class SessionStore:
             old_session = self._sessions.get(session_id)
             if not old_session:
                 raise ValueError(f"Session '{session_id}' not found")
+            if old_session.superseded_by:
+                # Re-compacting a superseded session (a stale tab that missed the
+                # rotation) would overwrite superseded_by and fork the chain into
+                # two live successors. Callers should resolve the successor first.
+                raise ValueError(f"Session '{session_id}' was already compacted into '{old_session.superseded_by}'")
 
             new_id = generate_session_id(old_session.agent)
             new_session = Session(
@@ -685,6 +693,7 @@ class SessionStore:
                 suppressed_skills=list(old_session.suppressed_skills),
                 reasoning_effort=old_session.reasoning_effort,
                 model_override=old_session.model_override,
+                workspace_override=old_session.workspace_override,
                 context_limit=old_session.context_limit,
             )
             # Preserve original conversation start so <session_started> in the
@@ -719,17 +728,24 @@ class SessionStore:
         return new_session
 
     def resolve_compacted_successor(self, session_id: str) -> Optional[Session]:
-        """Return the post-compaction successor of `session_id`, or None.
+        """Return the LIVE end of `session_id`'s compaction chain, or None.
 
-        Folds the `superseded_by` lookup and the successor fetch into one lock
-        acquisition. Returns None when `session_id` is unknown, has no
-        successor, or the successor itself has been pruned.
+        Walks `superseded_by` links to the tail: a tab that missed SSE updates
+        can hold a session that was compacted more than once, and stopping one
+        hop in lands on another superseded/completed session (which the chat
+        endpoint then rejects). Returns None when `session_id` is unknown, has
+        no successor, or the chain dead-ends on a pruned session.
         """
         with self._lock:
             old = self._sessions.get(session_id)
             if not old or not old.superseded_by:
                 return None
-            return self._sessions.get(old.superseded_by)
+            seen = {session_id}
+            current = self._sessions.get(old.superseded_by)
+            while current and current.superseded_by and current.id not in seen:
+                seen.add(current.id)
+                current = self._sessions.get(current.superseded_by)
+            return current
 
     def update_token_count(self, session_id: str, tokens_used: int) -> None:
         with self._lock:
@@ -1370,3 +1386,30 @@ class SessionStore:
         if migrated:
             logger.info("Migrated %d legacy sessions to unified store", len(self._sessions))
             self._save()
+
+
+def create_interactive_session(session_store, agent_name: str, user_id: str, title=None, event_bus=None) -> str:
+    """Provision a fresh interactive session and broadcast its creation.
+
+    Single implementation behind both the HTTP "new chat" endpoint and the
+    Jobs-tab host-session path, so session provisioning can't drift between them.
+    Returns the new session id.
+    """
+    from tsugite.history.storage import generate_session_id
+
+    session_id = generate_session_id(agent_name)
+    session_store.create_session(
+        Session(
+            id=session_id,
+            agent=agent_name,
+            source=SessionSource.INTERACTIVE.value,
+            user_id=user_id,
+            title=title or None,
+        )
+    )
+    if event_bus is not None:
+        try:
+            event_bus.emit("session_update", {"action": "created", "id": session_id})
+        except Exception:
+            logger.debug("session_update emit failed for new session '%s'", session_id)
+    return session_id

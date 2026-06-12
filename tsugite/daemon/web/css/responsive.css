@@ -80,8 +80,45 @@
 
   /* Thread header rows wrap cleanly */
   .console-thread-header { padding: 6px 12px; }
-  .console-thread-header .row { gap: 6px; }
-  .console-thread-header .meta-row { gap: 8px; font-size: 10.5px; }
+  .console-thread-header .row { gap: 6px; flex-wrap: nowrap; min-width: 0; }
+  .console-thread-header .meta-row { gap: 8px; font-size: 10.5px; flex-wrap: wrap; }
+
+  /* Row 1: collapse 5-segment path to view / session-id and hide
+     pin/rename/mark-complete inline buttons; they move into the
+     more-actions popover (rows marked .mobile-only). */
+  .console-thread-header .row.top { min-width: 0; }
+  .console-thread-header .path { min-width: 0; flex: 0 1 auto; overflow: hidden; }
+  .console-thread-header .path .state-seg,
+  .console-thread-header .path .state-slash { display: none; }
+  .console-thread-header .row.top .inline-only { display: none; }
+  .console-thread-header .more-actions .setting-pop-row.mobile-only { display: flex; }
+
+  /* Row 3 (title): clamp h1 and let ctx-mini shrink rather than overflow. */
+  .console-thread-header .row.title-row { min-width: 0; }
+  .console-thread-header h1 {
+    min-width: 0; flex: 1 1 auto;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .console-thread-header .row.title-row .ctx-mini { flex-shrink: 0; }
+  .console-thread-header .row.title-row .ctx-bar { width: 48px; }
+
+  /* Row 4 (topic): hide metadata chips (already in row 5) and keep just the
+     editable topic span with ellipsis behavior. */
+  .console-thread-header .row.topic-row { min-width: 0; }
+  .console-thread-header .row.topic-row .chip { display: none; }
+  .console-thread-header .topic { min-width: 0; flex: 1 1 auto; }
+
+  /* Row 5 (meta): clamp model dropdown to ~12em with ellipsis; hide
+     working_dir tag (still available via the more-actions popover). */
+  .console-thread-header .meta-row .v-btn.model {
+    max-width: 12em;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .console-thread-header .meta-row .v-btn.model > span:first-child {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    min-width: 0;
+  }
+  .console-thread-header .meta-row .meta-tag { display: none; }
 
   /* Composer: prevent iOS zoom on textarea focus */
   .console-composer-input-wrap textarea { font-size: 16px; min-height: 56px; max-height: 200px; }
@@ -98,14 +135,11 @@
   .console-keystrip kbd { font-size: 9px; }
 }
 
-/* Paste / expand legacy modals shrink on small viewports (kept lifted from prior responsive.css) */
+/* Paste / expand modals on mobile: stretch textarea, stack footer buttons.
+   The shell's mobile breakpoint already pins the panel to the bottom of the
+   viewport via tsu-modal.css; this just relaxes the textarea height limits. */
 @media (max-width: 600px) {
-  .paste-modal .modal-content,
-  .expand-modal .modal-content {
-    width: 100%; max-width: none; height: 100%; max-height: none;
-    border-radius: 0; display: flex; flex-direction: column;
-  }
-  .paste-modal textarea, .expand-modal textarea { flex: 1; min-height: 0; }
-  .paste-modal .modal-actions, .expand-modal .modal-actions { flex-direction: column; }
-  .paste-modal .modal-actions button, .expand-modal .modal-actions button { width: 100%; }
+  .paste-modal .tsu-textarea, .expand-modal .tsu-textarea { flex: 1; min-height: 0; }
+  .paste-modal .tsu-modal-foot, .expand-modal .tsu-modal-foot { flex-direction: column; align-items: stretch; }
+  .paste-modal .tsu-modal-foot .tsu-btn, .expand-modal .tsu-modal-foot .tsu-btn { width: 100%; justify-content: center; }
 }

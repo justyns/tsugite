@@ -275,7 +275,7 @@ def discover_agents() -> List[Dict[str, str]]:
     by `list_available_agents` as the on-demand discovery tool). Excludes the
     currently running agent.
     """
-    from ..agent_inheritance import get_builtin_agents_path, get_global_agents_paths
+    from ..agent_inheritance import AgentDirSource, iter_agent_search_paths
     from ..agent_runner import get_current_agent
 
     agents_info: List[Dict[str, str]] = []
@@ -283,21 +283,18 @@ def discover_agents() -> List[Dict[str, str]]:
     current_agent_name = get_current_agent()
 
     effective_cwd = _effective_cwd()
-    builtin_path = get_builtin_agents_path()
-    search_paths = [
-        effective_cwd / ".tsugite" / "agents",
-        effective_cwd / "agents",
-        builtin_path,
-        *get_global_agents_paths(),
-    ]
+    readonly_suffix = {
+        AgentDirSource.BUILTIN: " (built-in)",
+        AgentDirSource.PLUGIN: " (plugin)",
+    }
 
-    for search_dir in search_paths:
-        if not search_dir.exists() or not search_dir.is_dir():
+    # include_local_roots=False: discovery globs *.md, and the workspace cwd of
+    # a daemon agent can be a notes vault where every file has frontmatter.
+    for entry in iter_agent_search_paths(current_agent_dir=effective_cwd, include_local_roots=False):
+        if not entry.path.is_dir():
             continue
 
-        is_builtin_dir = search_dir == builtin_path
-
-        for agent_file in search_dir.glob("*.md"):
+        for agent_file in entry.path.glob("*.md"):
             if agent_file.stem in seen_names:
                 continue
             try:
@@ -310,16 +307,15 @@ def discover_agents() -> List[Dict[str, str]]:
                 if current_agent_name and name == current_agent_name:
                     continue
 
-                if is_builtin_dir:
+                suffix = readonly_suffix.get(entry.source)
+                if suffix:
                     display_path = name
+                    description = f"{description}{suffix}"
                 else:
                     try:
                         display_path = str(agent_file.relative_to(effective_cwd))
                     except ValueError:
                         display_path = str(agent_file)
-
-                if is_builtin_dir:
-                    description = f"{description} (built-in)"
 
                 agents_info.append({"name": name, "description": description, "path": display_path})
                 seen_names.add(agent_file.stem)

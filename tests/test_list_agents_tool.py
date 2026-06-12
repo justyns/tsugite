@@ -132,11 +132,11 @@ description: From agents (lower priority)
         with patch("tsugite.agent_inheritance.get_global_agents_paths", return_value=[]):
             result = list_agents()
 
-            # Should show higher priority duplicate + package-provided agents
-            assert result.count("\n") == 4  # 5 agents total: duplicate, default, file_searcher, code_searcher, onboard
+            # Higher-priority duplicate wins; lower-priority copy is hidden.
             assert "From .tsugite (higher priority)" in result
             assert "From agents (lower priority)" not in result
-            # Package-provided agents should also be listed
+            # Package-provided agents should also be listed (count is the set of
+            # built-ins on disk; not hardcoded so new bundled agents don't break this).
             assert "default" in result
             assert "file_searcher" in result
 
@@ -230,3 +230,42 @@ description: Agent number {i}
         assert "agent2" in result
         # Should be newline separated
         assert result.count("\n") >= 2
+
+
+def test_list_agents_excludes_workspace_root_notes(tmp_path, monkeypatch):
+    """A daemon agent's workspace may be a notes/docs vault where every .md has
+    YAML frontmatter. Those are NOT agents and must not appear in the LLM-facing
+    list - only the dedicated agents dirs get globbed."""
+    monkeypatch.chdir(tmp_path)
+
+    (tmp_path / "meeting-notes.md").write_text("""---
+name: meeting-notes
+description: Q3 planning notes
+---
+Not an agent.
+""")
+    tsugite_root_note = tmp_path / ".tsugite"
+    tsugite_root_note.mkdir()
+    (tsugite_root_note / "scratch.md").write_text("""---
+name: scratch
+description: scratch file
+---
+Also not an agent.
+""")
+
+    agents_dir = tmp_path / "agents"
+    agents_dir.mkdir()
+    (agents_dir / "real_agent.md").write_text("""---
+name: real_agent
+description: An actual agent
+---
+""")
+
+    from unittest.mock import patch
+
+    with patch("tsugite.agent_inheritance.get_global_agents_paths", return_value=[]):
+        result = list_agents()
+
+    assert "real_agent" in result
+    assert "meeting-notes" not in result
+    assert "scratch" not in result

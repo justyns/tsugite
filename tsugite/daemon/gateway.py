@@ -78,13 +78,32 @@ async def _send_discord_dm(discord_adapters: dict, config, message: str) -> dict
     return {"status": "sent"}
 
 
+def _render_webhook_body(body_template: str, message: str) -> str:
+    """Substitute {message} into the template.
+
+    JSON templates (e.g. `{"text": "{message}"}`) get a JSON-escaped message -
+    a quote/newline in agent output would otherwise corrupt the payload or
+    inject sibling keys. Non-JSON templates get the raw text.
+    """
+    import json as _json
+
+    if not body_template:
+        return message
+    try:
+        _json.loads(body_template.replace("{message}", ""))
+        escaped = _json.dumps(message)[1:-1]
+        return body_template.replace("{message}", escaped)
+    except _json.JSONDecodeError:
+        return body_template.replace("{message}", message)
+
+
 async def _send_webhook(config, message: str) -> dict:
     """Send a notification via webhook."""
     import httpx
 
     from tsugite.user_agent import set_user_agent_header
 
-    body = config.body_template.replace("{message}", message) if config.body_template else message
+    body = _render_webhook_body(config.body_template, message) if config.body_template else message
     headers = dict(config.headers)
     set_user_agent_header(headers)
 
@@ -113,6 +132,10 @@ class Gateway:
         self._vapid_private_key = None
         self._vapid_claims = None
         self._compaction_scheduler = None
+        self._terminal_store = None
+        self._pty_manager = None
+        self._jobs_orchestrator = None
+        self._job_store = None
         self._shutting_down = False
 
     async def start(self):
@@ -298,7 +321,10 @@ class Gateway:
             logger.info("Scheduler enabled (schedules: %s)", schedules_path)
 
             # Start session runner (uses the unified session store)
+            from tsugite.daemon.job_store import JobStore
+            from tsugite.daemon.jobs_orchestrator import JobsOrchestrator
             from tsugite.daemon.session_runner import SessionRunner
+            from tsugite.tools.jobs import set_jobs_orchestrator
             from tsugite.tools.sessions import set_session_runner
 
             event_bus = self._http_server.event_bus if self._http_server else None
@@ -310,9 +336,47 @@ class Gateway:
             if self._http_server:
                 self._http_server.session_runner = self._session_runner
             set_session_runner(self._session_runner, asyncio.get_running_loop())
+
+            # Terminal viewer: PTY runtime + persistent session store. Owned by
+            # the gateway so it survives across HTTP restarts and shuts down
+            # cleanly via _shutdown() below. Built before the orchestrator so it
+            # can be passed in (job_status payloads include worker_terminal_id).
+            from tsugite.daemon.pty_manager import PtyManager
+            from tsugite.daemon.terminal_store import TerminalSessionStore
+
+            self._terminal_store = TerminalSessionStore(self.config.state_dir / "terminal_sessions.json")
+            self._pty_manager = PtyManager()
+            terminal_state_change_cb = lambda tid, state: (  # noqa: E731
+                event_bus.emit("terminal_state", {"terminal_id": tid, "state": state}) if event_bus else None
+            )
+            if self._http_server:
+                self._http_server.terminal_store = self._terminal_store
+                self._http_server.pty_manager = self._pty_manager
+            # Expose to adapters so the /run slash command can reach them.
+            for adapter in http_adapters.values():
+                adapter.terminal_store = self._terminal_store
+                adapter.pty_manager = self._pty_manager
+                adapter.terminal_state_change_callback = terminal_state_change_cb
+
+            # Expose the same runtime to the agent-facing @terminal tools.
+            from tsugite.tools.terminal import set_terminal_runtime
+
+            set_terminal_runtime(self._pty_manager, self._terminal_store, terminal_state_change_cb)
+
+            self._job_store = JobStore(self.config.state_dir / "jobs.json")
+            self._jobs_orchestrator = JobsOrchestrator(
+                self._job_store, self._session_runner, event_bus=event_bus, terminal_store=self._terminal_store
+            )
+            self._jobs_orchestrator.attach()
+            self._jobs_orchestrator.recover_orphaned_jobs()
+            set_jobs_orchestrator(self._jobs_orchestrator, asyncio.get_running_loop())
+            if self._http_server:
+                self._http_server.jobs_orchestrator = self._jobs_orchestrator
+                self._http_server.job_store = self._job_store
+
             if self._scheduler_adapter:
                 self._scheduler_adapter.set_session_runner(self._session_runner)
-            logger.info("Session runner enabled")
+            logger.info("Session runner + Jobs orchestrator enabled")
 
         # Start compaction scheduler for agents with auto_compact config
         agents_with_auto_compact = {
@@ -376,14 +440,24 @@ class Gateway:
         self._shutting_down = True
 
         from tsugite.tools import set_daemon_mode
+        from tsugite.tools.jobs import set_jobs_orchestrator
         from tsugite.tools.notify import set_notifier
         from tsugite.tools.schedule import set_scheduler
         from tsugite.tools.sessions import set_session_runner
+        from tsugite.tools.terminal import set_terminal_runtime
 
         set_notifier(None)
         set_scheduler(None)
         set_session_runner(None)
+        set_jobs_orchestrator(None, None)
+        set_terminal_runtime(None, None, None)
         set_daemon_mode(False)
+
+        if self._jobs_orchestrator:
+            try:
+                self._jobs_orchestrator.shutdown()
+            except Exception as e:
+                logger.error("Error shutting down jobs orchestrator: %s", e)
 
         # Stop HTTP server first since SSE connections block uvicorn shutdown
         if self._http_server:
@@ -409,6 +483,12 @@ class Gateway:
                 self._session_store.flush()
             except Exception as e:
                 logger.error("Error flushing session store: %s", e)
+
+        if self._pty_manager:
+            try:
+                self._pty_manager.shutdown()
+            except Exception as e:
+                logger.error("Error shutting down PTY manager: %s", e)
 
 
 _LOG_FORMAT = "%(asctime)s [%(name)s] %(levelname)s: %(message)s"

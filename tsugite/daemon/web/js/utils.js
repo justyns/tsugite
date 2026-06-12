@@ -118,3 +118,31 @@ export function stateBadgeClass(state) {
   return _stateBadgeMap[state] || 'badge-muted';
 }
 
+export function jobCriteriaStates(job) {
+  /* Per-AC verdict rows for a Job payload (tile + Jobs tab share this so the
+     two surfaces can't disagree). Matches ac_results entries against the
+     acceptance_criteria order - by ac_index first, ac_text as fallback - and
+     prefers the LATEST attempt's verdict, since ac_results accumulates one
+     batch per verifier round. */
+  const acs = job && job.acceptance_criteria;
+  if (!Array.isArray(acs) || acs.length === 0) return [];
+  const acResults = (job.result && Array.isArray(job.result.ac_results))
+    ? job.result.ac_results
+    : (Array.isArray(job.ac_results) ? job.ac_results : []);
+  const latest = (entries) => entries.reduce((a, b) => (((b.attempt ?? 0) >= (a.attempt ?? 0)) ? b : a));
+  return acs.map((acText, i) => {
+    const label = String(acText);
+    const objs = acResults.filter((x) => x && typeof x === 'object');
+    const byIndex = objs.filter((x) => x.ac_index === i);
+    const byText = objs.filter((x) => x.ac_text === label);
+    const r = byIndex.length ? latest(byIndex) : (byText.length ? latest(byText) : null);
+    let status = 'pending', mark = '○';
+    if (r) {
+      if (r.pass === true) { status = 'pass'; mark = '✓'; }
+      else if (r.pass === false) { status = 'fail'; mark = '✗'; }
+    } else if (job.state === 'running' || job.state === 'verifying') {
+      status = 'active'; mark = '◔';
+    }
+    return { label, status, mark };
+  });
+}

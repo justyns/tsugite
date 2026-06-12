@@ -1,8 +1,24 @@
 """Tool registry for Tsugite agents."""
 
+import asyncio
 import inspect
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List
+
+
+def call_on_loop(loop, fn, *args, timeout=30, **kwargs):
+    """Run `fn` on the daemon event loop from a tool executor thread and wait
+    for the result. Awaits coroutine results transparently. Shared by the
+    daemon-bridged tool modules (sessions, jobs, schedule)."""
+
+    async def _wrapper():
+        result = fn(*args, **kwargs)
+        if asyncio.iscoroutine(result):
+            return await result
+        return result
+
+    future = asyncio.run_coroutine_threadsafe(_wrapper(), loop)
+    return future.result(timeout=timeout)
 
 
 @dataclass
@@ -178,7 +194,7 @@ def get_tools_by_category(category: str) -> List[str]:
     return sorted(category_tools)
 
 
-_OPTIONAL_CATEGORIES = {"schedule", "notify", "scratchpad", "sessions", "secrets", "tmux"}
+_OPTIONAL_CATEGORIES = {"schedule", "notify", "scratchpad", "sessions", "jobs", "secrets", "tmux", "terminal"}
 
 
 def _expand_single_spec(spec: str, strict: bool = True) -> List[str]:
@@ -338,6 +354,7 @@ def _ensure_tools_loaded():
     from . import history as history  # noqa: E402, F401
     from . import http as http  # noqa: E402, F401
     from . import interactive as interactive  # noqa: E402, F401
+    from . import jobs as jobs  # noqa: E402, F401
     from . import notify as notify  # noqa: E402, F401
     from . import schedule as schedule  # noqa: E402, F401
     from . import scratchpad as scratchpad  # noqa: E402, F401
@@ -345,6 +362,7 @@ def _ensure_tools_loaded():
     from . import sessions as sessions  # noqa: E402, F401
     from . import shell as shell  # noqa: E402, F401
     from . import skills as skills  # noqa: E402, F401
+    from . import terminal as terminal  # noqa: E402, F401
     from . import time as time  # noqa: E402, F401
 
     # Load custom shell tools after built-in tools

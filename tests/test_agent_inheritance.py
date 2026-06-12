@@ -1,13 +1,17 @@
 """Tests for agent inheritance system."""
 
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
 from tsugite.agent_inheritance import (
+    AgentDirSource,
     detect_circular_inheritance,
     find_agent_file,
     get_global_agents_paths,
+    iter_agent_search_paths,
     merge_agent_configs,
     resolve_agent_inheritance,
 )
@@ -24,6 +28,111 @@ def test_get_global_agents_paths():
     # All paths should be XDG-compliant (under .config)
     assert any(".config" in str(p) for p in paths)
     assert all("tsugite/agents" in str(p) for p in paths)
+
+
+def test_iter_agent_search_paths_returns_canonical_order(tmp_path):
+    """Order: workspace -> project (.tsugite/, agents/, cwd) -> extras -> builtin -> global -> plugin, deduped.
+
+    Global (user) agents MUST come before plugin agents: installing a plugin
+    that ships agents/reviewer.md must not silently shadow the user's own
+    ~/.config/tsugite/agents/reviewer.md."""
+    workspace_dir = tmp_path / "ws"
+    workspace_dir.mkdir()
+    (workspace_dir / "agents").mkdir()
+    workspace = SimpleNamespace(agents_dir=workspace_dir / "agents")
+
+    project = tmp_path / "proj"
+    project.mkdir()
+    (project / ".tsugite").mkdir()
+    (project / ".tsugite" / "agents").mkdir()
+    (project / "agents").mkdir()
+
+    extra_dir = tmp_path / "shared"
+    extra_dir.mkdir()
+
+    plugin_dir = tmp_path / "plugin_pkg" / "agents"
+    plugin_dir.mkdir(parents=True)
+
+    fake_global = tmp_path / "xdg" / "tsugite" / "agents"
+    fake_global.mkdir(parents=True)
+
+    with (
+        patch("tsugite.agent_inheritance.get_plugin_agents_paths", return_value=[plugin_dir]),
+        patch("tsugite.agent_inheritance.get_global_agents_paths", return_value=[fake_global]),
+    ):
+        entries = iter_agent_search_paths(
+            current_agent_dir=project,
+            workspace=workspace,
+            extra_project_dirs=[extra_dir, extra_dir],  # duplicate to test dedup
+        )
+
+    sources = [e.source for e in entries]
+    paths = [e.path.resolve() for e in entries]
+
+    assert sources == [
+        AgentDirSource.WORKSPACE,
+        AgentDirSource.PROJECT,  # .tsugite
+        AgentDirSource.PROJECT,  # .tsugite/agents
+        AgentDirSource.PROJECT,  # agents
+        AgentDirSource.PROJECT,  # cwd
+        AgentDirSource.PROJECT,  # extra
+        AgentDirSource.BUILTIN,
+        AgentDirSource.GLOBAL,
+        AgentDirSource.PLUGIN,
+    ]
+    # Dedup: extra_dir only appears once even though it was passed twice.
+    assert paths.count(extra_dir.resolve()) == 1
+    # Readonly flags align with source.
+    by_source = {e.source: e.readonly for e in entries}
+    assert by_source[AgentDirSource.BUILTIN] is True
+    assert by_source[AgentDirSource.PLUGIN] is True
+    assert by_source[AgentDirSource.WORKSPACE] is False
+    assert by_source[AgentDirSource.PROJECT] is False
+    assert by_source[AgentDirSource.GLOBAL] is False
+
+
+def test_iter_agent_search_paths_can_exclude_local_roots(tmp_path):
+    """Discovery callers (list_agents) must be able to skip the bare cwd and
+    .tsugite/ roots - globbing *.md there reports every frontmattered note in a
+    docs/notes workspace as a spawnable agent. Name-resolution callers keep them."""
+    project = tmp_path / "proj"
+    project.mkdir()
+    (project / ".tsugite" / "agents").mkdir(parents=True)
+    (project / "agents").mkdir()
+
+    with (
+        patch("tsugite.agent_inheritance.get_plugin_agents_paths", return_value=[]),
+        patch("tsugite.agent_inheritance.get_global_agents_paths", return_value=[]),
+    ):
+        entries = iter_agent_search_paths(current_agent_dir=project, include_local_roots=False)
+
+    paths = [e.path.resolve() for e in entries]
+    assert project.resolve() not in paths
+    assert (project / ".tsugite").resolve() not in paths
+    assert (project / ".tsugite" / "agents").resolve() in paths
+    assert (project / "agents").resolve() in paths
+
+
+def test_find_agent_file_prefers_user_global_over_plugin(tmp_path):
+    """A user's global agent wins over a same-named plugin agent."""
+    plugin_dir = tmp_path / "plugin_pkg" / "agents"
+    plugin_dir.mkdir(parents=True)
+    (plugin_dir / "reviewer.md").write_text("---\nname: reviewer\n---\nplugin copy\n")
+
+    fake_global = tmp_path / "xdg" / "tsugite" / "agents"
+    fake_global.mkdir(parents=True)
+    (fake_global / "reviewer.md").write_text("---\nname: reviewer\n---\nuser copy\n")
+
+    cwd = tmp_path / "empty"
+    cwd.mkdir()
+
+    with (
+        patch("tsugite.agent_inheritance.get_plugin_agents_paths", return_value=[plugin_dir]),
+        patch("tsugite.agent_inheritance.get_global_agents_paths", return_value=[fake_global]),
+    ):
+        found = find_agent_file("reviewer", cwd)
+
+    assert found == (fake_global / "reviewer.md").resolve()
 
 
 def test_merge_agent_configs_scalars():

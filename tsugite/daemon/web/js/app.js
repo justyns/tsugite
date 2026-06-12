@@ -1,4 +1,5 @@
 import Alpine from 'https://cdn.jsdelivr.net/npm/alpinejs@3/dist/module.esm.js';
+import focus from 'https://cdn.jsdelivr.net/npm/@alpinejs/focus@3/dist/module.esm.js';
 import { get, post, patch, connectEvents, onAuthRequired } from './api.js';
 import conversationsView from './views/conversations.js';
 import scheduleView from './views/schedules.js';
@@ -6,10 +7,14 @@ import webhookView from './views/webhooks.js';
 import fileEditorView from './views/file-editor.js';
 import workspaceView from './views/workspace.js';
 import usageView from './views/usage.js';
+import terminalsView, { terminalSessionView, jobTerminalView } from './views/terminals.js';
+import jobsView from './views/jobs.js';
+import { tsuStore, tsuModal, installWindowHandle } from './utils/tsu-modal.js';
 import { toast } from './utils.js';
 
 window.Alpine = Alpine;
 window.tsugiteApi = { get, post, patch };
+Alpine.plugin(focus);
 
 // Restore persisted sidebar width before Alpine paints, so the layout doesn't flash.
 const SIDEBAR_W_KEY = 'tsugite-sidebar-width';
@@ -36,20 +41,23 @@ const initialParsed = parseHash(location.hash.slice(1));
 const initialView = legacyViews[initialParsed.view] || initialParsed.view || localStorage.getItem('tsugite-view') || 'conversations';
 
 Alpine.store('app', {
-  tabs: ['conversations','workspace','agents','skills','schedules','webhooks','usage'],
+  tabs: ['conversations','workspace','agents','skills','jobs','schedules','webhooks','usage'],
   agents: [],
   selectedAgent: localStorage.getItem('tsugite-agent') || null,
   view: initialView,
   theme: localStorage.getItem('tsugite_theme') || 'frappe',
   userId: localStorage.getItem('tsugite_user_id') || 'web-user-1',
   authRequired: !localStorage.getItem('tsugite_token'),
-  showSettings: false,
   menuOpen: false,
   lastEvent: null,
   viewSessionId: initialParsed.sessionId || null,
   pendingWorkspaceFiles: [],
   autoFollow: localStorage.getItem('tsugite_auto_follow') !== 'false',
   skillIssues: [],
+  // Count of jobs in stuck/errored states; surfaced as a peach badge on the
+  // 'jobs' top-tab. Kept on the store so the badge stays visible even when
+  // the jobs view itself isn't mounted.
+  jobsNeedsYou: 0,
   tokensTotal: null,  // updated by usageView.load() so the keystrip shows daily token count
   version: '',
 });
@@ -64,6 +72,24 @@ Alpine.data('agentFileView', fileEditorView('agents', 'agent-files'));
 Alpine.data('skillFileView', fileEditorView('skills', 'skill-files'));
 Alpine.data('workspaceView', workspaceView);
 Alpine.data('usageView', usageView);
+Alpine.data('jobsView', jobsView);
+Alpine.data('tsuModal', tsuModal);
+Alpine.store('tsu', tsuStore);
+installWindowHandle();
+document.addEventListener('tsu:open', (e) => Alpine.store('tsu').open(e.detail));
+document.addEventListener('tsu:close', (e) => Alpine.store('tsu').close(e.detail));
+// terminalsView is exposed via Alpine.store('terminals') so the sidebar
+// section (rendered inside conversationsView's wrapper) and the main pane's
+// full-session block (sibling to the chat thread) can share one piece of
+// state without a parent x-data scope they can both reach.
+Alpine.store('terminals', terminalsView());
+// terminalSessionView wraps an xterm renderer mounted in the main pane.
+// Registered as Alpine.data so x-init can spin it up each time a different
+// terminal is selected (Alpine destroys + re-creates the x-data scope).
+Alpine.data('terminalSessionView', terminalSessionView);
+// jobTerminalView mounts an xterm renderer inside a job tile when the worker
+// session has a PTY-backed terminal. Looked up via /api/terminals?parent_session_id.
+Alpine.data('jobTerminalView', jobTerminalView);
 
 Alpine.data('sidebarResizer', () => ({
   onDown(e) {
@@ -152,6 +178,7 @@ async function loadAgents() {
   }
   connectSSE();
   loadSkillIssues().catch(() => {});
+  loadJobsNeedsYou().catch(() => {});
 }
 window.tsugiteLoadAgents = loadAgents;
 
@@ -165,11 +192,27 @@ async function loadSkillIssues() {
 }
 window.tsugiteLoadSkillIssues = loadSkillIssues;
 
+// Refresh the 'needs you' Jobs badge from the list endpoint. Cheap, runs once
+// at boot + on every job_update SSE so the badge tracks the orchestrator without
+// requiring the user to open the Jobs tab.
+async function loadJobsNeedsYou() {
+  try {
+    const data = await get('/api/jobs?state=stuck');
+    Alpine.store('app').jobsNeedsYou = (data.jobs || []).length;
+  } catch {
+    /* keep prior count on transient failure */
+  }
+}
+window.tsugiteLoadJobsNeedsYou = loadJobsNeedsYou;
+
 function connectSSE() {
   if (_es) return;
   _es = connectEvents((event) => {
     if (event.type === 'reconnect') {
       loadAgents().catch(() => {});
+    }
+    if (event.type === 'job_update') {
+      loadJobsNeedsYou().catch(() => {});
     }
     Alpine.store('app').lastEvent = { ...event, _ts: Date.now() };
   });
@@ -221,7 +264,13 @@ if ('serviceWorker' in navigator) {
       nw.addEventListener('statechange', () => notifyIfWaiting(nw));
     });
     let reloading = false;
+    // controllerchange also fires when the FIRST service worker claims a
+    // previously-uncontrolled page (every fresh profile's first visit) - that
+    // reload killed in-flight chat streams. Only reload when an existing
+    // controller is REPLACED, i.e. a real update.
+    let hadController = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadController) { hadController = true; return; }
       if (reloading) return;
       reloading = true;
       location.reload();

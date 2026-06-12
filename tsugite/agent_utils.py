@@ -134,34 +134,48 @@ def list_local_agents(base_path: Path = None) -> dict[str, List[Path]]:
         base_path: Base directory to search from (defaults to cwd)
 
     Returns:
-        Dictionary mapping location names to list of agent paths
+        Dictionary mapping location names to list of agent paths,
+        ordered: Built-in, Plugins, Current directory, .tsugite/, agents/.
     """
-    from .agent_inheritance import get_builtin_agents_path
+    from .agent_inheritance import AgentDirSource, iter_agent_search_paths
 
     if base_path is None:
         base_path = Path.cwd()
 
-    results = {}
+    project_labels = {
+        (base_path / ".tsugite").resolve(): ".tsugite/",
+        (base_path / ".tsugite" / "agents").resolve(): ".tsugite/agents/",
+        (base_path / "agents").resolve(): "agents/",
+        base_path.resolve(): "Current directory",
+    }
+    source_labels = {
+        AgentDirSource.BUILTIN: "Built-in",
+        AgentDirSource.PLUGIN: "Plugins",
+    }
+    grouped: dict[str, List[Path]] = {}
 
-    # Add built-in agents first
-    builtin_path = get_builtin_agents_path()
-    if builtin_path.exists() and builtin_path.is_dir():
-        builtin_agents = sorted(builtin_path.glob("*.md"))
-        if builtin_agents:
-            results["Built-in"] = builtin_agents
+    for entry in iter_agent_search_paths(current_agent_dir=base_path):
+        if entry.source == AgentDirSource.GLOBAL:
+            continue
+        if not entry.path.exists() or not entry.path.is_dir():
+            continue
 
-    locations = [
-        ("Current directory", base_path),
-        (".tsugite/", base_path / ".tsugite"),
-        ("agents/", base_path / "agents"),
-    ]
+        if entry.source == AgentDirSource.PROJECT:
+            label = project_labels.get(entry.path.resolve())
+        else:
+            label = source_labels.get(entry.source)
+        if label is None:
+            continue
 
-    for location_name, location_path in locations:
-        if location_path.exists() and location_path.is_dir():
-            all_md_files = sorted(location_path.glob("*.md"))
+        all_md_files = sorted(entry.path.glob("*.md"))
+        if entry.source == AgentDirSource.PROJECT:
             agent_files = [f for f in all_md_files if _is_valid_agent_file(f)]
+        else:
+            agent_files = all_md_files
 
-            if agent_files:
-                results[location_name] = agent_files
+        if agent_files:
+            grouped.setdefault(label, []).extend(agent_files)
 
-    return results
+    # Preserve historical display order: Built-in, Plugins, then project labels.
+    label_order = ["Built-in", "Plugins", "Current directory", ".tsugite/", ".tsugite/agents/", "agents/"]
+    return {label: grouped[label] for label in label_order if label in grouped}

@@ -64,8 +64,8 @@ def test_freeze_skips_superseded_sessions(store):
     """Sessions that have been compacted-into a successor shouldn't be touched —
     the successor is the one that will actually run.
     """
-    a = _make(store, "predecessor")
-    b = _make(store, "successor")
+    _make(store, "predecessor")
+    _make(store, "successor")
     store._sessions["predecessor"].superseded_by = "successor"
 
     store.freeze_session_models_to_current("agent-a", "anthropic:opus")

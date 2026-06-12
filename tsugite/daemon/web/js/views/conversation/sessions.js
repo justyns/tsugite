@@ -1,6 +1,6 @@
 import { get, post, patch, del } from '../../api.js';
 import { formatDate } from '../../utils.js';
-import { REPLAY_SKIP_EVENTS, progressFromPayload } from './event_types.js';
+import { REPLAY_SKIP_EVENTS, SESSION_END_EVENTS, progressFromPayload } from './event_types.js';
 
 export const sessionsMixin = {
   _debounceTimer: null,
@@ -112,6 +112,9 @@ export const sessionsMixin = {
   },
 
   async selectSession(session, opts = {}) {
+    // Selecting a chat clears any terminal selection so the two sidebar
+    // surfaces stay mutually exclusive in the main pane.
+    this.$store.terminals?.deselectTerminal();
     // Compaction marks the old session completed and stamps superseded_by on it.
     // The localStorage sidebar cache may still show the old one as pinned on
     // cold load, so chase the chain to land on the live continuation. Pass
@@ -175,24 +178,37 @@ export const sessionsMixin = {
 
   async _rehydrateProgressFromEvents(sessionId) {
     let progress = this._sessionProgress;
-    let idx;
     if (progress) {
-      idx = this.messages.indexOf(progress);
-      if (idx < 0) {
-        idx = this.messages.push(progress) - 1;
-      }
+      if (!this.messages.includes(progress)) this.messages.push(progress);
     } else {
       progress = { type: 'progress', steps: [], statusText: 'Starting...', turnCount: 0, toolCount: 0 };
       this._sessionProgress = progress;
-      idx = this.messages.push(progress) - 1;
+      this.messages.push(progress);
     }
     try {
       const data = await get(`/api/sessions/${sessionId}/events`);
       // Bail if reload/backToSessions/another selectSession swapped our bubble out while the fetch was in flight.
-      if (this.selectedSessionId !== sessionId || this.messages[idx] !== progress) return;
-      for (const ev of data.events || []) {
+      if (this.selectedSessionId !== sessionId || !this.messages.includes(progress)) return;
+      const events = data.events || [];
+      // The "turn in flight" signal that got us here can be stale: a reload can
+      // race the turn's completion (the session record's status_text clears a
+      // beat after the final event lands). If the log says the turn already
+      // ended, render the settled history instead of a perpetual running bubble.
+      let ended = false;
+      for (const ev of events) {
+        if (ev.type === 'user_input' || ev.type === 'turn_start') ended = false;
+        if (ev.type === 'final_result' || SESSION_END_EVENTS.has(ev.type)) ended = true;
+      }
+      if (ended) {
+        this._sessionProgress = null;
+        await this.loadHistory({ dropTrailing: false });
+        return;
+      }
+      for (const ev of events) {
         if (REPLAY_SKIP_EVENTS.has(ev.type)) continue;
-        this._handleProgressEvent(idx, ev);
+        // JSONL events are {type, ts, data}; the progress handler takes the
+        // flattened shape the live stream uses.
+        this._handleProgressEvent({ type: ev.type, ...(ev.data || {}) }, sessionId);
       }
       this.scrollMessages();
     } catch { /* ignore */ }

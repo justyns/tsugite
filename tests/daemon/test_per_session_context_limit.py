@@ -64,8 +64,8 @@ def test_needs_compaction_uses_per_session_limit(store):
     1M model with 700k tokens would falsely trigger compaction because the
     agent-wide default (128k) says it's over threshold.
     """
-    a = _make_session(store, "big")
-    b = _make_session(store, "small")
+    _make_session(store, "big")
+    _make_session(store, "small")
     store.update_session_context_limit("big", 1_000_000)
 
     store._sessions["big"].cumulative_tokens = 700_000
@@ -80,7 +80,7 @@ def test_needs_compaction_uses_per_session_limit(store):
 
 
 def test_compacted_session_inherits_predecessor_limit(store):
-    s1 = _make_session(store, "s1")
+    _make_session(store, "s1")
     store.update_session_context_limit("s1", 1_000_000)
     store._sessions["s1"].message_count = 1  # compact_session requires non-empty
 

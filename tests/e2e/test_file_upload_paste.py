@@ -147,10 +147,10 @@ def test_paste_modal_attaches_custom_filename(composer_page):
     page.locator(".console-icon-btn", has_text="＋").click()
     page.locator(".setting-pop-row", has_text="paste as file").click()
 
-    page.wait_for_selector(".paste-modal.open .paste-modal-text", timeout=3000)
+    page.wait_for_selector(".tsu-modal-backdrop.paste-modal .paste-modal-text", state="visible", timeout=3000)
     page.locator("#paste-modal-filename").fill("my-snippet.txt")
     page.locator("#paste-modal-text").fill("body content for the snippet")
-    page.locator(".paste-modal.open .btn-primary").click()
+    page.locator(".tsu-modal-backdrop.paste-modal .tsu-btn.--primary").click()
 
     page.wait_for_selector(PILL, timeout=3000)
     assert "my-snippet.txt" in (page.locator(PILL).first.text_content() or "")

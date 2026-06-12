@@ -3,12 +3,12 @@
 Tools use @tool(require_daemon=True) so they only appear in daemon mode.
 """
 
-import asyncio
-from dataclasses import asdict
 from typing import Optional
 from uuid import uuid4
 
-from . import tool
+from tsugite.daemon.scheduler import entry_to_dict
+
+from . import call_on_loop, tool
 
 _scheduler = None
 _loop = None
@@ -27,12 +27,7 @@ def set_scheduler(scheduler, loop=None, channel_names=None, agent_names=None):
 
 def _call(fn, *args, **kwargs):
     """Call a scheduler method on the event loop thread (thread-safe)."""
-
-    async def _wrapper():
-        return fn(*args, **kwargs)
-
-    future = asyncio.run_coroutine_threadsafe(_wrapper(), _loop)
-    return future.result(timeout=10)
+    return call_on_loop(_loop, fn, *args, timeout=10, **kwargs)
 
 
 def _validate_notify(notify: Optional[list[str]], notify_tool: bool) -> None:
@@ -154,7 +149,7 @@ def schedule_create(
         target_session=target_session,
     )
     result = _call(_scheduler.add, entry)
-    return asdict(result)
+    return entry_to_dict(result)
 
 
 @tool(require_daemon=True)
@@ -165,7 +160,7 @@ def schedule_list() -> list:
         List of schedules with id, agent, type, enabled, next_run, last_status
     """
     entries = _call(_scheduler.list)
-    return [asdict(e) for e in entries]
+    return [entry_to_dict(e) for e in entries]
 
 
 @tool(require_daemon=True)
@@ -193,7 +188,7 @@ def schedule_enable(id: str) -> dict:
         Confirmation with updated schedule details
     """
     _call(_scheduler.enable, id)
-    return asdict(_call(_scheduler.get, id))
+    return entry_to_dict(_call(_scheduler.get, id))
 
 
 @tool(require_daemon=True)
@@ -207,7 +202,7 @@ def schedule_disable(id: str) -> dict:
         Confirmation with updated schedule details
     """
     _call(_scheduler.disable, id)
-    return asdict(_call(_scheduler.get, id))
+    return entry_to_dict(_call(_scheduler.get, id))
 
 
 @tool(require_daemon=True)
@@ -293,7 +288,7 @@ def schedule_update(
         raise ValueError("No fields to update")
 
     result = _call(_scheduler.update, id, **fields)
-    return asdict(result)
+    return entry_to_dict(result)
 
 
 @tool(require_daemon=True)

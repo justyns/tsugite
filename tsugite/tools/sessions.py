@@ -3,11 +3,10 @@
 Tools use @tool(require_daemon=True) so they only appear in daemon mode.
 """
 
-import asyncio
 from dataclasses import asdict
 from typing import Optional
 
-from . import tool
+from . import call_on_loop, tool
 
 _session_runner = None
 _loop = None
@@ -22,15 +21,7 @@ def set_session_runner(runner, loop=None):
 
 def _call(fn, *args, timeout=30, **kwargs):
     """Call a session runner method on the event loop thread (thread-safe)."""
-
-    async def _wrapper():
-        result = fn(*args, **kwargs)
-        if asyncio.iscoroutine(result):
-            return await result
-        return result
-
-    future = asyncio.run_coroutine_threadsafe(_wrapper(), _loop)
-    return future.result(timeout=timeout)
+    return call_on_loop(_loop, fn, *args, timeout=timeout, **kwargs)
 
 
 @tool(require_daemon=True)

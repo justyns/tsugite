@@ -50,7 +50,7 @@ def test_set_metadata_bulk_does_not_bump_last_active(store):
 
 
 def test_delete_metadata_does_not_bump_last_active(store):
-    s = _make_session(store)
+    _make_session(store)
     store.set_metadata("sess-1", "task", "task-123")
     before = store._sessions["sess-1"].last_active
 
@@ -65,7 +65,7 @@ def test_message_activity_still_bumps_last_active(store):
     """Sanity check: real message activity (update_token_count) must still bump
     last_active, otherwise we'd break unread tracking for actual replies.
     """
-    s = _make_session(store)
+    _make_session(store)
     past = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
     store._sessions["sess-1"].last_active = past
 
@@ -81,7 +81,7 @@ def test_unread_does_not_revive_after_mark_viewed_then_metadata_update(store):
     same session must not re-flip `last_active` past `last_viewed_at` and make
     the unread re-derivation flip back to True.
     """
-    s = _make_session(store)
+    _make_session(store)
     # Simulate: user just finished a turn (last_active advanced) and the
     # stream-end mark-viewed handler stamped last_viewed_at to the current time.
     store._sessions["sess-1"].last_active = "2026-05-18T10:00:00+00:00"
