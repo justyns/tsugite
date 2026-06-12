@@ -34,6 +34,11 @@ jobs:
         # Trusted publishing: each package (tsugite-cli, tsugite-tmux, ...) must be
         # registered separately on PyPI as a trusted publisher pointing at this workflow.
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # Tolerate partial re-runs: if some packages of a version are already
+          # uploaded (e.g. one package's trusted publisher wasn't registered yet
+          # and was fixed), skip those instead of erroring on the duplicate.
+          skip-existing: true
 
       - name: Generate release notes from conventional commits
         id: changelog
@@ -43,6 +48,9 @@ jobs:
           args: --latest --strip header
 
       - name: Create GitHub release
+        # Only on a real tag push; a manual workflow_dispatch on a branch has no
+        # tag for the release to attach to.
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           body: ${{ steps.changelog.outputs.content }}
