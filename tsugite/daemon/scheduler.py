@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import logging
 import os
@@ -128,13 +129,35 @@ class Scheduler:
 
     async def start(self):
         self._load()
-        for entry in self._schedules.values():
-            entry.next_run = self._compute_next_run_iso(entry)
+        self._arm_loaded_schedules()
         self._save()
         self.cleanup_history()
         self._running = True
         logger.info("Scheduler started with %d schedule(s)", len(self._schedules))
         await self._main_loop()
+
+    def _arm_loaded_schedules(self) -> None:
+        """Recompute next_run for everything loaded from disk.
+
+        Per-entry isolation: one corrupt record (bad timezone, garbage dates)
+        must not prevent the scheduler from starting - that bricked the daemon
+        until schedules.json was hand-edited. One-offs whose time passed beyond
+        grace while the daemon was down get a disabled_reason so cleanup()
+        reaps them instead of leaving enabled zombies that can never fire.
+        """
+        for entry in self._schedules.values():
+            try:
+                entry.next_run = self._compute_next_run_iso(entry)
+            except Exception as e:
+                logger.exception("Schedule '%s' has invalid data; disabling: %s", entry.id, e)
+                entry.enabled = False
+                entry.disabled_reason = f"invalid schedule data: {e}"
+                entry.next_run = None
+                continue
+            if entry.schedule_type == "once" and entry.enabled and not entry.next_run and not entry.disabled_reason:
+                logger.warning("Schedule '%s' missed its one-off run while the daemon was down; disabling", entry.id)
+                entry.enabled = False
+                entry.disabled_reason = "missed one-off (run_at passed while daemon was down)"
 
     async def stop(self):
         self._running = False
@@ -192,47 +215,64 @@ class Scheduler:
     def _fire_due_schedules(self):
         now = datetime.now(timezone.utc)
         for entry in list(self._schedules.values()):
-            if not entry.enabled or not entry.next_run:
-                continue
+            try:
+                self._fire_if_due(entry, now)
+            except Exception as e:
+                # One corrupt entry (e.g. unparseable expires_at from a legacy
+                # or hand-edited record) must not kill the whole fire loop -
+                # that silently stopped EVERY schedule until restart, and then
+                # crashed again on the next loop.
+                logger.exception("Schedule '%s' has invalid data; disabling: %s", entry.id, e)
+                self._auto_disable(entry, f"invalid schedule data: {e}")
 
-            # Auto-expiry checks
-            if entry.expires_at:
-                expires_dt = datetime.fromisoformat(entry.expires_at)
-                if expires_dt.tzinfo is None:
-                    expires_dt = expires_dt.replace(tzinfo=timezone.utc)
-                if now >= expires_dt:
-                    self._auto_disable(entry, "expired")
-                    continue
-            if entry.max_runs is not None and entry.run_count >= entry.max_runs:
-                self._auto_disable(entry, "max_runs_reached")
-                continue
+    def _fire_if_due(self, entry: ScheduleEntry, now: datetime):
+        if not entry.enabled or not entry.next_run:
+            return
 
-            next_dt = datetime.fromisoformat(entry.next_run)
-            if next_dt > now:
-                continue
+        # Auto-expiry checks
+        if entry.expires_at:
+            expires_dt = datetime.fromisoformat(entry.expires_at)
+            if expires_dt.tzinfo is None:
+                expires_dt = expires_dt.replace(tzinfo=timezone.utc)
+            if now >= expires_dt:
+                self._auto_disable(entry, "expired")
+                return
+        if entry.max_runs is not None and entry.run_count >= entry.max_runs:
+            self._auto_disable(entry, "max_runs_reached")
+            return
 
-            # Misfire check: skip if too far past due
-            grace = timedelta(seconds=entry.misfire_grace_seconds)
-            if now - next_dt > grace:
-                logger.warning("Schedule '%s' misfired (past grace period), skipping to next run", entry.id)
-                entry.next_run = self._compute_next_run_iso(entry)
-                self._save()
-                continue
+        next_dt = datetime.fromisoformat(entry.next_run)
+        if next_dt > now:
+            return
 
-            # Capture the planned fire time before rolling next_run forward,
-            # so the adapter can surface scheduled_for vs actual_fire_time to
-            # the agent (drift detection on misfires/queue delays).
-            entry.last_scheduled_for = entry.next_run
-
-            # Update next_run IMMEDIATELY so the main loop doesn't busy-spin
+        # Misfire check: skip if too far past due
+        grace = timedelta(seconds=entry.misfire_grace_seconds)
+        if now - next_dt > grace:
             if entry.schedule_type == "once":
-                entry.next_run = None
-            else:
-                entry.next_run = self._compute_next_run_iso(entry)
+                # No "next run" exists for a one-off - disable with a reason
+                # so cleanup() reaps it instead of leaving an enabled zombie
+                # that can never fire.
+                self._auto_disable(entry, "missed one-off (past misfire grace)")
+                return
+            logger.warning("Schedule '%s' misfired (past grace period), skipping to next run", entry.id)
+            entry.next_run = self._compute_next_run_iso(entry)
+            self._save()
+            return
 
-            task = asyncio.create_task(self._fire_schedule(entry))
-            self._active_tasks.add(task)
-            task.add_done_callback(self._active_tasks.discard)
+        # Capture the planned fire time before rolling next_run forward,
+        # so the adapter can surface scheduled_for vs actual_fire_time to
+        # the agent (drift detection on misfires/queue delays).
+        entry.last_scheduled_for = entry.next_run
+
+        # Update next_run IMMEDIATELY so the main loop doesn't busy-spin
+        if entry.schedule_type == "once":
+            entry.next_run = None
+        else:
+            entry.next_run = self._compute_next_run_iso(entry)
+
+        task = asyncio.create_task(self._fire_schedule(entry))
+        self._active_tasks.add(task)
+        task.add_done_callback(self._active_tasks.discard)
 
     async def _fire_schedule(self, entry: ScheduleEntry):
         from tsugite.agent_runner.models import AgentSkippedError
@@ -291,10 +331,14 @@ class Scheduler:
                 run_dt = run_dt.replace(tzinfo=timezone.utc)
             else:
                 run_dt = run_dt.astimezone(timezone.utc)
-            return run_dt.isoformat() if run_dt > now else None
+            # A slightly-late one-off (daemon restart spanning the fire time)
+            # is still fireable within its misfire grace - _fire_due_schedules
+            # applies the same window. Beyond grace it's a miss (None).
+            grace = timedelta(seconds=entry.misfire_grace_seconds)
+            return run_dt.isoformat() if run_dt > now - grace else None
 
         if entry.schedule_type == "cron" and entry.cron_expr:
-            tz = ZoneInfo(entry.timezone)
+            tz = self._zoneinfo(entry.timezone)
             now_local = now.astimezone(tz)
             it = CronSim(entry.cron_expr, now_local)
             try:
@@ -305,18 +349,42 @@ class Scheduler:
 
         return None
 
-    # CRUD operations
+    @staticmethod
+    def _zoneinfo(name: str) -> ZoneInfo:
+        """ZoneInfo that raises ValueError (not KeyError) on unknown names so
+        callers' ValueError handling (HTTP 400 mapping) works."""
+        try:
+            return ZoneInfo(name)
+        except Exception as e:
+            raise ValueError(f"Invalid timezone '{name}': {e}") from e
 
-    def add(self, entry: ScheduleEntry) -> ScheduleEntry:
-        if entry.id in self._schedules:
-            raise ValueError(f"Schedule '{entry.id}' already exists")
-        # Validate cron expression early
+    def _validate_entry(self, entry: ScheduleEntry) -> str | None:
+        """Validate everything user-settable and return the computed next_run.
+
+        Raises ValueError on bad cron syntax, sub-minimum cron interval,
+        unknown timezone, or unparseable expires_at - shared by add() and
+        update() so no creation path can skip a guard.
+        """
         if entry.schedule_type == "cron" and entry.cron_expr:
             try:
                 CronSim(entry.cron_expr, datetime.now(timezone.utc))
             except (ValueError, KeyError, CronSimError) as e:
                 raise ValueError(f"Invalid cron expression '{entry.cron_expr}': {e}") from e
-        entry.next_run = self._compute_next_run_iso(entry)
+        if entry.expires_at:
+            try:
+                datetime.fromisoformat(entry.expires_at)
+            except ValueError as e:
+                raise ValueError(f"Invalid expires_at '{entry.expires_at}': {e}") from e
+        next_run = self._compute_next_run_iso(entry)  # raises ValueError on bad timezone
+        self._validate_cron_interval(entry)
+        return next_run
+
+    # CRUD operations
+
+    def add(self, entry: ScheduleEntry) -> ScheduleEntry:
+        if entry.id in self._schedules:
+            raise ValueError(f"Schedule '{entry.id}' already exists")
+        entry.next_run = self._validate_entry(entry)
         self._schedules[entry.id] = entry
         self._save()
         self._wakeup.set()
@@ -378,19 +446,21 @@ class Scheduler:
 
     def update(self, schedule_id: str, **fields) -> ScheduleEntry:
         entry = self.get(schedule_id)
-        for key, value in fields.items():
-            if key in ("id", "created_at"):
-                continue
+        updates = {k: v for k, v in fields.items() if k not in ("id", "created_at")}
+        for key in updates:
             if not hasattr(entry, key):
                 raise ValueError(f"Unknown field '{key}'")
+        # Validate against a throwaway copy BEFORE touching the live entry: a
+        # rejected update (bad timezone/cron/expires_at) must not poison
+        # in-memory state that a later unrelated _save() would persist - that
+        # bricked scheduler startup until schedules.json was hand-edited.
+        candidate = copy.copy(entry)
+        for key, value in updates.items():
+            setattr(candidate, key, value)
+        next_run = self._validate_entry(candidate)
+        for key, value in updates.items():
             setattr(entry, key, value)
-        if "cron_expr" in fields and entry.cron_expr:
-            try:
-                CronSim(entry.cron_expr, datetime.now(timezone.utc))
-            except (ValueError, KeyError, CronSimError) as e:
-                raise ValueError(f"Invalid cron expression '{entry.cron_expr}': {e}") from e
-        entry.next_run = self._compute_next_run_iso(entry)
-        self._validate_cron_interval(entry)
+        entry.next_run = next_run
         self._save()
         self._wakeup.set()
         logger.info("Updated schedule '%s'", schedule_id)

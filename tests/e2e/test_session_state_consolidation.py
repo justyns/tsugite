@@ -31,10 +31,12 @@ def _select(page, sid: str) -> None:
     )
 
 
-def _seed_session_state(page, sid: str) -> None:
-    """Populate every consolidated field on `sid` so each bleed assertion has something to find."""
-    page.evaluate(
-        f"""
+def _seed_session_state_js(sid: str) -> str:
+    """JS that seeds every consolidated field on `sid`. Returned as a string so
+    the seed and the readback can run in ONE page.evaluate - no event-loop tick
+    (and thus no late selectSession network callback) can interleave and clobber
+    the seed, which was the source of this test's flake under parallel load."""
+    return f"""
         const v = Alpine.$data(document.querySelector({CONV_VIEW!r}));
         const s = v._sessionState({sid!r});
         s.statusInfo = {{ message_count: 42, tokens: 1234, model: 'gpt-a-only' }};
@@ -45,8 +47,7 @@ def _seed_session_state(page, sid: str) -> None:
         s.liveProgress = {{ type: 'progress', steps: [], statusText: 'A in progress', turnCount: 1, toolCount: 0 }};
         s.loadedSkills = [{{ name: 'skill-from-a', description: '' }}];
         s.compacting = true;
-        """
-    )
+    """
 
 
 def test_per_session_state_does_not_bleed_across_sessions(authenticated_page, e2e_session_store):
@@ -60,19 +61,23 @@ def test_per_session_state_does_not_bleed_across_sessions(authenticated_page, e2
     reload_conversations_view(page)
 
     _select(page, a.id)
-    _seed_session_state(page, a.id)
 
+    # Seed A's state and read it back ATOMICALLY in one evaluate so no async
+    # selectSession response can land between the write and the read.
     a_view = page.evaluate(
-        f"""({{
-            statusInfo: Alpine.$data(document.querySelector({CONV_VIEW!r})).statusInfo,
-            effort: Alpine.$data(document.querySelector({CONV_VIEW!r})).sessionEffort,
-            model: Alpine.$data(document.querySelector({CONV_VIEW!r})).sessionModel,
-            summary: Alpine.$data(document.querySelector({CONV_VIEW!r})).compactionSummary,
-            compactedInto: Alpine.$data(document.querySelector({CONV_VIEW!r})).compactedIntoEvent,
-            liveProgress: Alpine.$data(document.querySelector({CONV_VIEW!r}))._sessionProgress,
-            loadedSkills: Alpine.$data(document.querySelector({CONV_VIEW!r})).loadedSkills,
-            compacting: Alpine.$data(document.querySelector({CONV_VIEW!r})).compacting,
-        }})"""
+        f"""(() => {{
+            {_seed_session_state_js(a.id)}
+            return {{
+                statusInfo: v.statusInfo,
+                effort: v.sessionEffort,
+                model: v.sessionModel,
+                summary: v.compactionSummary,
+                compactedInto: v.compactedIntoEvent,
+                liveProgress: v._sessionProgress,
+                loadedSkills: v.loadedSkills,
+                compacting: v.compacting,
+            }};
+        }})()"""
     )
     assert a_view["statusInfo"].get("message_count") == 42, "A should see its own statusInfo"
     assert a_view["effort"] == "high"

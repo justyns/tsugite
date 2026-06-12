@@ -777,3 +777,59 @@ async def test_local_executor_concurrent_executes_see_own_workspace(tmp_path):
     finally:
         if Path.cwd().resolve() != original_cwd:
             os.chdir(original_cwd)
+
+
+@pytest.mark.asyncio
+async def test_state_rebind_persists_across_turns():
+    """Rebinding `state = {...}` (not just mutating it) must persist - the
+    SubprocessExecutor captures this, so LocalExecutor must match or behavior
+    silently diverges by backend and the model's assignment is lost."""
+    executor = LocalExecutor()
+
+    r1 = await executor.execute("state = {'rebound': 7}\nprint(state['rebound'])")
+    assert r1.error is None
+    assert "7" in r1.output
+
+    r2 = await executor.execute("print(state.get('rebound'))")
+    assert r2.error is None
+    assert "7" in r2.output
+
+
+@pytest.mark.asyncio
+async def test_state_rebind_round_trips_to_disk(tmp_path):
+    state_path = tmp_path / "s" / "state.json"
+    executor = LocalExecutor(state_path=state_path, session_id="rebind")
+    r = await executor.execute("state = {'persisted': 'yes'}")
+    assert r.error is None
+
+    executor2 = LocalExecutor(state_path=state_path, session_id="rebind")
+    r2 = await executor2.execute("print(state.get('persisted'))")
+    assert "yes" in r2.output
+
+
+@pytest.mark.asyncio
+async def test_content_block_cannot_shadow_a_tool():
+    """A model-authored <content name="X"> block must not replace a tool/builtin
+    of the same name with a string - that turns the callable into an uncallable
+    str for the rest of the session."""
+
+    def read_file(path: str) -> str:
+        """stub tool"""
+        return f"contents of {path}"
+
+    from tsugite.core.tools import create_tool_from_function
+
+    executor = LocalExecutor()
+    executor.register_tools({"read_file": read_file})
+    # Inject a content block that collides with the tool name.
+    await executor.inject_content_blocks({"read_file": "I am not a function"})
+
+    result = await executor.execute("print(type(read_file).__name__)\nprint(read_file('x'))")
+    assert result.error is None, f"tool was shadowed by the content block: {result.error}"
+    assert "contents of x" in result.output
+    # A non-colliding block is still available.
+    await executor.inject_content_blocks({"my_doc": "hello doc"})
+    r2 = await executor.execute("print(my_doc)")
+    assert "hello doc" in r2.output
+
+    _ = create_tool_from_function  # keep import used

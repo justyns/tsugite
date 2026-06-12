@@ -46,7 +46,7 @@ def tool_loop():
 class TestFireNow:
     @pytest.mark.asyncio
     async def test_fires_enabled_entry(self, scheduler, run_callback):
-        entry = ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="* * * * *")
+        entry = ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="*/5 * * * *")
         scheduler.add(entry)
         scheduler.fire_now("job1")
 
@@ -57,7 +57,7 @@ class TestFireNow:
         assert run_callback.call_args[0][0].id == "job1"
 
     def test_rejects_disabled_entry(self, scheduler):
-        entry = ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="* * * * *")
+        entry = ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="*/5 * * * *")
         scheduler.add(entry)
         scheduler.disable("job1")
         with pytest.raises(ValueError, match="disabled"):

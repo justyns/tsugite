@@ -153,6 +153,52 @@ def _find_python_blocks(cleaned: str) -> List[tuple[int, int]]:
         search_pos = close_at + len(_CLOSE_FENCE)
 
 
+# Tags the runtime injects into the model's NEXT user message after executing
+# its code (the execution result, multi-block warning, and budget hints). A
+# well-behaved model never writes these itself; one that does is impersonating
+# the runtime - usually hallucinating the execution loop and replaying stale
+# data from a prior session, occasionally just quoting the protocol in prose.
+_RUNTIME_TAG_NAMES = ("tsugite_execution_result", "tsugite_multi_block_warning", "tsugite_budget")
+
+
+def escape_runtime_injection_tags(content: str) -> tuple[str, bool]:
+    """Neutralize any runtime-only tags a model emitted, returning (escaped, found).
+
+    Escaping (not dropping) the angle bracket keeps the response verbatim and
+    non-destructive - a legitimate explanation of the protocol survives intact -
+    while making the tag inert so it can't be mistaken for a real injection by:
+      - the compaction eliding pass (its regex matches `<tsugite_execution_result>`),
+      - the web UI's history renderer (a fabricated result would otherwise show
+        as its own prose bubble - the post-reload double-render), or
+      - the model itself, which would otherwise re-read its own fabricated
+        results as fact on every subsequent turn.
+    """
+    if not content:
+        return content, False
+    found = False
+    for name in _RUNTIME_TAG_NAMES:
+        for raw, esc in ((f"<{name}", f"&lt;{name}"), (f"</{name}", f"&lt;/{name}")):
+            if raw in content:
+                found = True
+                content = content.replace(raw, esc)
+    return content, found
+
+
+def _build_spoofed_runtime_tag_warning() -> str:
+    """Model-visible note when a response contained a runtime-only tag. Tells the
+    model those tags are runtime-injected (not its to write) so a hallucinated
+    execution loop doesn't compound across turns."""
+    return (
+        "\n<tsugite_runtime_tag_notice>"
+        "Your previous response wrote one or more runtime-only tags "
+        "(tsugite_execution_result / tsugite_multi_block_warning / tsugite_budget). "
+        "The runtime injects those AFTER it runs your code - do not write them yourself. "
+        "They were neutralized; only the real execution result below is authoritative. "
+        "Reply with prose or exactly one ```python block."
+        "</tsugite_runtime_tag_notice>"
+    )
+
+
 def _build_multi_block_warning_xml(count: int) -> str:
     """Model-visible note appended to a turn's observation when the agent
     received N>1 ```python blocks in one response.
@@ -192,6 +238,9 @@ class TurnResult:
     content_blocks: Dict[str, str] = field(default_factory=dict)
     response: Optional[Any] = None
     num_code_blocks: int = 0
+    # True when the model emitted a runtime-only tag (escaped before storage);
+    # drives the model-facing notice so a hallucinated loop doesn't compound.
+    spoofed_runtime_tag: bool = False
 
 
 @dataclass
@@ -541,6 +590,11 @@ class TsugiteAgent:
                 # No code = the model is done. Its raw text is the answer.
                 if not code or not code.strip():
                     final_value = last_response_text
+                    trailing_notice = ""
+                    if multi_block_count:
+                        trailing_notice += _build_multi_block_warning_xml(multi_block_count)
+                    if turn.spoofed_runtime_tag:
+                        trailing_notice += _build_spoofed_runtime_tag_warning()
                     self.memory.add_step(
                         thought=thought,
                         code="",
@@ -548,9 +602,7 @@ class TsugiteAgent:
                         tools_called=[],
                         content_blocks=turn.content_blocks,
                         raw_content=last_response_text,
-                        xml_observation=(
-                            _build_multi_block_warning_xml(multi_block_count) if multi_block_count else None
-                        ),
+                        xml_observation=trailing_notice or None,
                     )
                     break
 
@@ -588,6 +640,11 @@ class TsugiteAgent:
                 # knows to re-emit them rather than assume they ran.
                 if multi_block_count:
                     xml_observation += _build_multi_block_warning_xml(multi_block_count)
+
+                # The model wrote a runtime-only tag (now escaped). Tell it not to,
+                # so a hallucinated execution loop doesn't compound across turns.
+                if turn.spoofed_runtime_tag:
+                    xml_observation += _build_spoofed_runtime_tag_warning()
 
                 budget_tag = self._build_budget_tag(turn_num)
                 xml_observation += budget_tag
@@ -686,11 +743,18 @@ class TsugiteAgent:
     def _record_code_execution(self, code: str, exec_result, duration_ms: int) -> None:
         if not self.storage:
             return
+        # Mask secrets BEFORE persisting: the live observation (to_xml) masks, but
+        # the stored event must too - otherwise the raw value sits on disk and is
+        # replayed verbatim into the model on continuation (reconstruction only
+        # escapes, never masks).
+        from tsugite.secrets.registry import get_registry
+
+        mask = get_registry().mask
         self.storage.record(
             "code_execution",
             code=code,
-            output=exec_result.output,
-            error=exec_result.error,
+            output=mask(exec_result.output) if exec_result.output else exec_result.output,
+            error=mask(exec_result.error) if exec_result.error else exec_result.error,
             duration_ms=duration_ms,
             tools_called=list(exec_result.tools_called) if exec_result.tools_called else None,
         )
@@ -769,6 +833,7 @@ class TsugiteAgent:
         if final_chunk and final_chunk.usage:
             step_cost = self._accumulate_usage(final_chunk.usage, final_chunk.cost or 0.0)
 
+        accumulated_content, spoofed = escape_runtime_injection_tags(accumulated_content)
         parsed = self._parse_response_from_text(accumulated_content)
         if accumulated_reasoning:
             self.memory.add_reasoning(accumulated_reasoning)
@@ -788,12 +853,14 @@ class TsugiteAgent:
             content_blocks=parsed.content_blocks,
             response=synthetic,
             num_code_blocks=parsed.num_code_blocks,
+            spoofed_runtime_tag=spoofed,
         )
 
     async def _provider_turn_blocking(self, messages, turn_num) -> TurnResult:
         response: ProviderResponse = await self._provider.acompletion(
             messages=messages, model=self._model_id, stream=False, **self._model_kwargs
         )
+        response.content, spoofed = escape_runtime_injection_tags(response.content)
         parsed = self._parse_response_from_text(response.content)
 
         step_cost = response.cost or 0.0
@@ -833,6 +900,7 @@ class TsugiteAgent:
             content_blocks=parsed.content_blocks,
             response=response,
             num_code_blocks=parsed.num_code_blocks,
+            spoofed_runtime_tag=spoofed,
         )
 
     def _record_model_request(self, messages, turn_num: int) -> None:

@@ -297,7 +297,12 @@ class LocalExecutor:
 
         ns.update(self._tool_functions)
         ns.update(self._sticky_injections)
-        ns.update(self._content_blocks)
+        # Content blocks are model-authored; never let one shadow a tool / builtin
+        # / state (a block named read_file would replace the callable with a str).
+        for name, value in self._content_blocks.items():
+            if name in ns or name == "state":
+                continue
+            ns[name] = value
         ns["state"] = self._state
         return ns
 
@@ -436,6 +441,15 @@ class LocalExecutor:
             sys.stdout = old_stdout
             sys.stderr = old_stderr
 
+        # Capture a `state = {...}` rebind, not just in-place mutation. The
+        # namespace's `state` may now point at a new object; adopt it so the
+        # rebind persists (SubprocessExecutor does the same via namespace.get).
+        # Ignore a rebind to a non-dict - keep the prior state rather than crash
+        # the save/summarize path.
+        rebound = self.namespace.get("state")
+        if isinstance(rebound, dict) and rebound is not self._state:
+            self._state = rebound
+
         variables_set = self._get_new_variables(namespace_before)
         state_keys = self._summarize_state_keys()
         save_error = self._save_state()
@@ -497,7 +511,12 @@ class LocalExecutor:
         turns' block names do not carry forward.
         """
         self._content_blocks = dict(blocks)
-        self.namespace.update(blocks)
+        # Don't let a block shadow a live tool/builtin/state in the current
+        # namespace (mirrors _build_turn_namespace's guard).
+        for name, value in blocks.items():
+            if name in self._tool_functions or name in self._sticky_injections or name == "state":
+                continue
+            self.namespace[name] = value
 
     def register_tools(self, tools: Dict[str, Callable[..., Any]]):
         """Register tool functions that should be re-injected into the namespace every turn.

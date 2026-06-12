@@ -140,6 +140,21 @@ class CompactionScheduler:
 
             user_id = session.user_id or ""
             sid = session.id
+            # Never rotate a session mid-turn: the compaction snapshot misses
+            # every event the in-flight turn writes after it, so the exchange
+            # vanishes from the successor. status_text is non-empty exactly
+            # while a turn is running (the UI pulse uses the same signal); the
+            # next scheduled cycle retries once the turn settles.
+            try:
+                summary = self._session_store.session_progress_summary(sid)
+                # last_event_time gates the never-started default ("Starting..."
+                # with zero events) - same guard the UI applies to this signal.
+                in_flight = bool(summary.get("status_text")) and bool(summary.get("last_event_time"))
+            except Exception:
+                in_flight = False
+            if in_flight:
+                logger.info("[%s] Skipping scheduled compaction of '%s': turn in flight", agent_name, sid)
+                continue
             if not self._session_store.begin_compaction(user_id, agent_name, session_id=sid):
                 logger.debug("[%s] Compaction already in progress, skipping", agent_name)
                 continue

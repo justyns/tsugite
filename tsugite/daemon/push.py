@@ -88,7 +88,10 @@ async def send_web_push(
                 subscription_info=subscription_info,
                 data=json.dumps(message),
                 vapid_private_key=vapid_private_key,
-                vapid_claims=vapid_claims,
+                # pywebpush mutates the claims dict (pins `aud` to the first
+                # endpoint's origin) - pass a copy so one subscriber's push
+                # service can't poison the JWT audience for all the others.
+                vapid_claims=dict(vapid_claims),
             )
             return {"status": "sent"}
         except WebPushException as e:

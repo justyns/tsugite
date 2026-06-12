@@ -20,6 +20,15 @@ logger = logging.getLogger(__name__)
 # Env vars that must be unset to avoid "nested session" detection
 _CLAUDE_ENV_VARS = {"CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "ANTHROPIC_API_KEY"}
 
+# How long to wait for a graceful SIGTERM exit before escalating to SIGKILL.
+_STOP_TIMEOUT_SECONDS = 5.0
+
+# StreamReader buffer cap. asyncio defaults to 64KB, but a single stream-json
+# line (a long answer plus the result event's usage/modelUsage payload) routinely
+# exceeds that - and `readline()` then raises LimitOverrunError, crashing the turn
+# on stdout or killing the stderr drain into a pipe deadlock. 16MB is ample.
+_STREAM_READ_LIMIT = 16 * 1024 * 1024
+
 
 async def claude_code_complete(system_prompt: str, user_content: str, model: str) -> str:
     """One-shot completion via Claude Code CLI.
@@ -65,15 +74,24 @@ class ClaudeCodeProcess:
         return self._compacted
 
     async def _drain_stderr(self) -> None:
-        """Background task: read stderr lines so the pipe never fills up."""
-        try:
-            while True:
+        """Background task: read stderr lines so the pipe never fills up.
+
+        Must keep draining even if one read fails - bailing on the first error
+        (e.g. an over-limit line) lets the OS stderr buffer fill, which blocks
+        the subprocess writing stderr and deadlocks the whole exchange.
+        """
+        while True:
+            try:
                 line = await self._process.stderr.readline()
-                if not line:
-                    break
-                self._stderr_lines.append(line.decode().rstrip())
-        except (asyncio.CancelledError, Exception):
-            pass
+            except asyncio.CancelledError:
+                return
+            except Exception:
+                # A read error (e.g. transient decode/limit issue) must not stop
+                # the drain. Keep the pipe moving until EOF.
+                continue
+            if not line:
+                return
+            self._stderr_lines.append(line.decode(errors="replace").rstrip())
 
     def _get_stderr(self) -> str:
         return "\n".join(self._stderr_lines[-20:])  # last 20 lines
@@ -143,6 +161,7 @@ class ClaudeCodeProcess:
             stderr=asyncio.subprocess.PIPE,
             env=env,
             cwd=str(workspace) if workspace is not None else None,
+            limit=_STREAM_READ_LIMIT,
         )
 
         # Start draining stderr in background to prevent pipe buffer deadlock
@@ -280,7 +299,17 @@ class ClaudeCodeProcess:
         if self._process:
             try:
                 self._process.terminate()
-                await self._process.wait()
+                try:
+                    # Bounded wait: a wedged or SIGTERM-ignoring claude (it's a
+                    # Node process) would otherwise hang this finally forever and
+                    # leak a long-lived orphan. Escalate to SIGKILL on timeout.
+                    await asyncio.wait_for(self._process.wait(), timeout=_STOP_TIMEOUT_SECONDS)
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "Claude Code subprocess (pid=%s) ignored SIGTERM; sending SIGKILL", self._process.pid
+                    )
+                    self._process.kill()
+                    await self._process.wait()
             except ProcessLookupError:
                 pass
             self._process = None

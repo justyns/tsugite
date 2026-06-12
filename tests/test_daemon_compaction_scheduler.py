@@ -248,3 +248,35 @@ class TestSessionStoreListInteractive:
         store = _make_session_store(tmp_path)
         sessions = store.list_interactive_by_agent("nonexistent")
         assert sessions == []
+
+
+class TestMidTurnGuard:
+    def test_check_agent_skips_session_with_turn_in_flight(self, tmp_path):
+        """Rotating a session mid-turn loses every event the in-flight turn
+        writes after the compaction snapshot - the exchange vanishes from the
+        successor. status_text is non-empty exactly while a turn runs."""
+        from tsugite.daemon.session_store import Session, SessionSource
+
+        store = _make_session_store(tmp_path)
+        s = Session(id="busy", agent="test-agent", source=SessionSource.INTERACTIVE.value, user_id="u")
+        s.message_count = 10
+        store.create_session(s)
+        adapter = _make_adapter()
+        scheduler, agent_config = _make_scheduler(tmp_path, adapter, store, min_turns=1)
+
+        store.session_progress_summary = lambda sid: {
+            "status_text": "Turn 2...",
+            "turn_count": 2,
+            "last_event_time": "2026-06-10T00:00:00Z",
+        }
+        asyncio.run(scheduler._check_agent("test-agent", agent_config))
+        adapter._compact_session.assert_not_called()
+        # And the mutex must not be left held - the next cycle (turn settled)
+        # must be able to compact.
+        store.session_progress_summary = lambda sid: {
+            "status_text": "",
+            "turn_count": 2,
+            "last_event_time": "2026-06-10T00:00:01Z",
+        }
+        asyncio.run(scheduler._check_agent("test-agent", agent_config))
+        adapter._compact_session.assert_called_once()

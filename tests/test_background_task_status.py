@@ -42,13 +42,13 @@ class TestGetRunningIds:
         assert scheduler.get_running_ids() == []
 
     def test_empty_with_schedules_not_running(self, scheduler):
-        entry = ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="* * * * *")
+        entry = ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="*/5 * * * *")
         scheduler.add(entry)
         assert scheduler.get_running_ids() == []
 
     @pytest.mark.asyncio
     async def test_returns_ids_while_lock_held(self, scheduler):
-        entry = ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="* * * * *")
+        entry = ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="*/5 * * * *")
         scheduler.add(entry)
 
         entry = scheduler.get("job1")

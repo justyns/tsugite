@@ -307,6 +307,15 @@ class SchedulerAdapter:
         """Process background task result on the user's session and send a response."""
         for _name, config in resolved_channels:
             if config.type != "discord":
+                # Webhook / web-push channels have no per-user chat session to
+                # process the result on - deliver the raw result instead of
+                # silently dropping it (auto_reply is set whenever any notify
+                # channel is configured, not just Discord ones).
+                try:
+                    notification = f"**Background task `{entry.id}` completed:**\n\n{truncated_result}"
+                    await asyncio.to_thread(send_notification, notification, [(_name, config)])
+                except Exception as e:
+                    logger.error("Auto-reply notification for '%s' via '%s' failed: %s", entry.id, _name, e)
                 continue
 
             canonical = self._resolve_canonical_user(config)
