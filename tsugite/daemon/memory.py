@@ -1,8 +1,10 @@
 """Memory management helpers for daemon."""
 
 import asyncio
+import contextvars
 import logging
 import re
+from contextlib import contextmanager
 
 DEFAULT_COMPACT_MODEL = "openai:gpt-4o-mini"
 DEFAULT_CONTEXT_LIMIT = 128_000
@@ -174,6 +176,27 @@ def _chunk_messages(messages: list[dict], max_chunk_tokens: int, model: str) -> 
 
 _MISSING = object()
 
+# Accumulates summarization token usage for the in-progress compaction so the
+# caller can record/attribute it. None when not inside a tracked block.
+_compaction_usage: contextvars.ContextVar = contextvars.ContextVar("_compaction_usage", default=None)
+
+
+@contextmanager
+def track_compaction_usage():
+    """Accumulate LLM token usage from summarization calls within the block.
+
+    Yields a dict that `_llm_complete` adds each call's prompt/completion tokens
+    to. The accumulator is shared by reference across `asyncio.gather`ed chunk
+    tasks (map-reduce summarization), so totals aggregate correctly. Compaction
+    spend was previously discarded; this makes it visible to the caller.
+    """
+    acc = {"prompt_tokens": 0, "completion_tokens": 0, "calls": 0}
+    token = _compaction_usage.set(acc)
+    try:
+        yield acc
+    finally:
+        _compaction_usage.reset(token)
+
 
 async def _llm_complete(system_prompt: str, user_content: str, model: str) -> str:
     """Send a system+user message pair to the LLM and return the response text."""
@@ -197,6 +220,11 @@ async def _llm_complete(system_prompt: str, user_content: str, model: str) -> st
             if saved_context_window is not _MISSING:
                 provider._context_window = saved_context_window
         content = response.content
+        acc = _compaction_usage.get()
+        if acc is not None and response.usage is not None:
+            acc["prompt_tokens"] += response.usage.prompt_tokens or 0
+            acc["completion_tokens"] += response.usage.completion_tokens or 0
+            acc["calls"] += 1
     except Exception as e:
         raise RuntimeError(f"LLM call failed ({model}): {e}") from e
 
@@ -359,6 +387,14 @@ def split_events_for_compaction(
         used += cost
         kept_turns += 1
         cutoff = start
+    else:
+        # Loop finished without exceeding the budget: every turn is retained, so
+        # there is nothing to summarize. Return empty old_events even when a
+        # session_start/compaction prefix precedes the first user_input — this
+        # lets the caller's `if not old_events` gate skip the no-op compaction
+        # instead of re-rotating (and re-summarizing) an unchanged session on
+        # every scheduled run.
+        return [], list(events)
 
     if cutoff is None or cutoff == 0:
         return [], list(events)

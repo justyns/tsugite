@@ -202,3 +202,147 @@ async def test_retained_model_response_loses_provider_session_id(workspace_dir, 
     with patch("tsugite.agent_runner.history_integration.get_history_dir", return_value=history_dir):
         info = get_claude_code_session_info(new_session.id)
     assert info is None, f"Expected no resume target post-compaction, got {info}"
+
+
+@pytest.mark.asyncio
+async def test_retained_events_preserve_timestamps_and_drop_session_end(workspace_dir, history_dir, tmp_path):
+    """Carried-forward retained events must keep their ORIGINAL `ts` (not the
+    compaction-spawn time), and per-turn `session_end` markers must not be
+    copied mid-file. Otherwise a retained turn's whole timeline collapses into
+    the spawn instant and the new session structurally "ends" before it ends.
+    """
+    from datetime import datetime, timezone
+    from unittest.mock import AsyncMock, patch
+
+    from tsugite.history.models import Event
+
+    store = SessionStore(tmp_path / "session_store.json", context_limits={"test-agent": 1_000_000})
+    session = store.get_or_create_interactive("test-user", "test-agent")
+    conv_id = session.id
+    _seed_session_events(history_dir / f"{conv_id}.jsonl")
+
+    old_ts = datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    old_events = [Event(type="user_input", ts=datetime.now(timezone.utc), data={"text": "old"})]
+    recent_events = [
+        Event(type="user_input", ts=old_ts, data={"text": "recent"}),
+        Event(type="model_response", ts=old_ts, data={"raw_content": "reply"}),
+        Event(type="session_end", ts=old_ts, data={"status": "success"}),
+    ]
+
+    async def fake_summarize(messages, model=None, max_context_tokens=None, progress_callback=None):
+        return "Summary"
+
+    agent_config = AgentConfig(workspace_dir=workspace_dir, agent_file="default")
+    agent_config.context_limit = 1_000_000
+    adapter = _StubAdapter("test-agent", agent_config, store)
+
+    with (
+        patch("tsugite.daemon.memory.get_context_limit", return_value=1_000_000),
+        patch("tsugite.daemon.memory.infer_compaction_model", return_value="anthropic:claude-3-haiku-20240307"),
+        patch("tsugite.daemon.memory.split_events_for_compaction", return_value=(old_events, recent_events)),
+        patch("tsugite.daemon.memory.summarize_session", new=fake_summarize),
+        patch("tsugite.history.get_history_dir", return_value=history_dir),
+        patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
+        patch("tsugite.history.storage.get_machine_name", return_value="test"),
+        patch("tsugite.hooks.fire_compact_hooks", new_callable=AsyncMock, return_value=[]),
+    ):
+        new_session = await adapter._compact_session(conv_id, reason="manual")
+
+    assert new_session is not None
+    new_events = SessionStorage.load(history_dir / f"{new_session.id}.jsonl").load_events()
+    assert all(e.type != "session_end" for e in new_events), "retained session_end must not be copied mid-file"
+    carried = [e for e in new_events if e.type in ("user_input", "model_response")]
+    assert carried, "expected carried turns in the new session"
+    assert all(e.ts == old_ts for e in carried), f"carried events lost their original ts: {[e.ts for e in carried]}"
+
+
+@pytest.mark.asyncio
+async def test_compaction_session_start_records_effective_model_override(workspace_dir, history_dir, tmp_path):
+    """When a mid-session model override is active, the new session's
+    `session_start.model` must reflect the model that will actually run (the
+    override), not the agent's config default — otherwise the post-compaction
+    session is born mislabeled.
+    """
+    store = SessionStore(tmp_path / "session_store.json", context_limits={"test-agent": 1_000_000})
+    session = store.get_or_create_interactive("test-user", "test-agent")
+    conv_id = session.id
+    store.set_model_override(conv_id, "codex_cli:gpt-5.5")
+    _seed_session_events(history_dir / f"{conv_id}.jsonl")
+
+    agent_config = AgentConfig(workspace_dir=workspace_dir, agent_file="default")
+    agent_config.context_limit = 1_000_000
+    adapter = _StubAdapter("test-agent", agent_config, store)
+
+    with ExitStack() as stack:
+        for p in _patches(history_dir):
+            stack.enter_context(p)
+        new_session = await adapter._compact_session(conv_id, reason="manual")
+
+    assert new_session is not None
+    new_events = SessionStorage.load(history_dir / f"{new_session.id}.jsonl").load_events()
+    start = next(e for e in new_events if e.type == "session_start")
+    assert start.data["model"] == "codex_cli:gpt-5.5"
+
+
+def test_compact_session_preserves_topic_and_type_metadata(tmp_path):
+    """Compaction must carry `topic` (and `type`) metadata to the successor so
+    the conversation keeps its subject across the rotation, consistent with how
+    `title` is already preserved.
+    """
+    store = SessionStore(tmp_path / "session_store.json", context_limits={"test-agent": 1_000_000})
+    session = store.get_or_create_interactive("test-user", "test-agent")
+    store.set_metadata(session.id, "topic", "researching widgets")
+    store.set_metadata(session.id, "type", "research")
+
+    new_session = store.compact_session(session.id)
+
+    assert new_session.metadata.get("topic") == "researching widgets"
+    assert new_session.metadata.get("type") == "research"
+
+
+@pytest.mark.asyncio
+async def test_compaction_event_records_summary_token_usage(workspace_dir, history_dir, tmp_path):
+    """The compaction event must record how many tokens the summarization LLM
+    call consumed, so compaction spend is auditable instead of invisible.
+    """
+    from datetime import datetime, timezone
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from tsugite.history.models import Event
+    from tsugite.providers.base import CompletionResponse, Usage
+
+    store = SessionStore(tmp_path / "session_store.json", context_limits={"test-agent": 1_000_000})
+    session = store.get_or_create_interactive("test-user", "test-agent")
+    conv_id = session.id
+    _seed_session_events(history_dir / f"{conv_id}.jsonl")
+
+    old_events = [Event(type="user_input", ts=datetime.now(timezone.utc), data={"text": "old"})]
+    recent_events = [Event(type="user_input", ts=datetime.now(timezone.utc), data={"text": "recent"})]
+
+    provider = MagicMock()
+    provider.acompletion = AsyncMock(
+        return_value=CompletionResponse(content="Summary", usage=Usage(prompt_tokens=500, completion_tokens=40))
+    )
+    provider.count_tokens = MagicMock(return_value=10)
+
+    agent_config = AgentConfig(workspace_dir=workspace_dir, agent_file="default")
+    agent_config.context_limit = 1_000_000
+    adapter = _StubAdapter("test-agent", agent_config, store)
+
+    with (
+        patch("tsugite.daemon.memory.get_context_limit", return_value=1_000_000),
+        patch("tsugite.daemon.memory.infer_compaction_model", return_value="openai:gpt-4o-mini"),
+        patch("tsugite.daemon.memory.split_events_for_compaction", return_value=(old_events, recent_events)),
+        patch("tsugite.models.get_provider_and_model", return_value=("openai:gpt-4o-mini", provider, "gpt-4o-mini")),
+        patch("tsugite.history.get_history_dir", return_value=history_dir),
+        patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
+        patch("tsugite.history.storage.get_machine_name", return_value="test"),
+        patch("tsugite.hooks.fire_compact_hooks", new_callable=AsyncMock, return_value=[]),
+    ):
+        new_session = await adapter._compact_session(conv_id, reason="manual")
+
+    assert new_session is not None
+    new_events = SessionStorage.load(history_dir / f"{new_session.id}.jsonl").load_events()
+    comp = next(e for e in new_events if e.type == "compaction")
+    assert comp.data["summary_prompt_tokens"] == 500
+    assert comp.data["summary_completion_tokens"] == 40

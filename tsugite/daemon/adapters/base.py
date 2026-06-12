@@ -941,6 +941,7 @@ class BaseAdapter(ABC):
             sanitize_for_summary,
             split_events_for_compaction,
             summarize_session,
+            track_compaction_usage,
         )
         from tsugite.history import SessionStorage, SessionSummary, events_to_messages, get_history_dir
         from tsugite.hooks import fire_compact_hooks
@@ -974,6 +975,13 @@ class BaseAdapter(ABC):
 
         old_user_inputs = sum(1 for e in old_events if e.type == "user_input")
         recent_user_inputs = sum(1 for e in recent_events if e.type == "user_input")
+
+        if old_user_inputs == 0:
+            # Defensive: split returned a non-empty prefix (e.g. session_start +
+            # prior compaction) but no actual turns to summarize. Nothing to do —
+            # skip rather than rotate the session and burn a summarization call.
+            logger.info("[%s] No turns to summarize, skipping compaction", self.agent_name)
+            return None
 
         logger.info(
             "[%s] Compacting session: %d old turns summarized, %d recent turns retained",
@@ -1072,21 +1080,34 @@ class BaseAdapter(ABC):
         old_messages = sanitize_for_summary(old_messages, model=model, attachment_basenames=attachment_basenames)
 
         try:
-            summary = await summarize_session(
-                old_messages,
-                model=model,
-                max_context_tokens=session_limit_fallback,
-                progress_callback=progress_callback,
-            )
+            with track_compaction_usage() as summary_usage:
+                summary = await summarize_session(
+                    old_messages,
+                    model=model,
+                    max_context_tokens=session_limit_fallback,
+                    progress_callback=progress_callback,
+                )
         except Exception:
             logger.exception("[%s] Compaction summarization failed", self.agent_name)
             raise
+        if summary_usage["calls"]:
+            logger.info(
+                "[%s] Compaction summary used %d prompt + %d completion tokens across %d call(s)",
+                self.agent_name,
+                summary_usage["prompt_tokens"],
+                summary_usage["completion_tokens"],
+                summary_usage["calls"],
+            )
 
         new_session = self.session_store.compact_session(session_id)
         new_session_path = get_history_dir() / f"{new_session.id}.jsonl"
+        # Record the model the new session will actually run with. A mid-session
+        # model override (carried forward by compact_session) drives every turn,
+        # so session_start must reflect it rather than the agent's config default
+        # — otherwise the post-compaction session is born mislabeled.
         new_storage = SessionStorage.create(
             agent_name=self.agent_name,
-            model=resolved_model,
+            model=new_session.model_override or resolved_model,
             parent_session=old_conv_id,
             session_path=new_session_path,
         )
@@ -1102,8 +1123,16 @@ class BaseAdapter(ABC):
             range_start=range_start,
             range_end=range_end,
             source_session_id=old_conv_id,
+            summary_prompt_tokens=summary_usage["prompt_tokens"] or None,
+            summary_completion_tokens=summary_usage["completion_tokens"] or None,
         )
         for event in recent_events:
+            if event.type == "session_end":
+                # Per-turn lifecycle markers from retained turns must not be
+                # copied: a `session_end` mid-file makes the session structurally
+                # "end" before it really ends. The new session emits its own
+                # single session_end at its real end.
+                continue
             data = event.data
             if event.type == "model_response" and "state_delta" in data:
                 # state_delta holds provider-specific runtime IDs (e.g. claude_code
@@ -1111,7 +1140,10 @@ class BaseAdapter(ABC):
                 # Carrying them forward causes the next turn to resume the old
                 # Claude Code session and bypass compaction entirely.
                 data = {k: v for k, v in data.items() if k != "state_delta"}
-            new_storage.record(event.type, **data)
+            # Preserve each event's ORIGINAL ts. Without this the retained turns
+            # collapse onto the compaction-spawn instant (the whole timeline of a
+            # ~minute of real work appears to happen in milliseconds).
+            new_storage.record(event.type, ts=event.ts, **data)
 
         post_compact_execs = await fire_compact_hooks(
             self.agent_config.workspace_dir,

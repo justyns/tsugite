@@ -2,13 +2,19 @@
 
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
+
+import pytest
 
 from tsugite.daemon.memory import (
+    _llm_complete,
     extract_file_paths_from_events,
     split_events_for_compaction,
+    track_compaction_usage,
 )
 from tsugite.history import SessionStorage, events_to_messages
 from tsugite.history.models import Event
+from tsugite.providers.base import CompletionResponse, Usage
 
 
 def _ev(type_: str, **data) -> Event:
@@ -51,6 +57,28 @@ class TestSplitEventsForCompaction:
         # Recent count includes whole turn(s)
         recent_user_inputs = sum(1 for e in recent if e.type == "user_input")
         assert recent_user_inputs >= 2
+
+    def test_all_turns_fit_returns_empty_old_despite_prefix(self):
+        """When every turn fits the retention budget there is nothing to
+        summarize, even though a session_start/compaction prefix precedes the
+        first user_input. Must return empty old_events so the caller's
+        `if not old_events` gate skips the no-op compaction — otherwise an
+        unchanged session is re-rotated (and re-summarized) on every scheduled
+        run, collapsing its timestamps and burning tokens.
+        """
+        events = [
+            _ev("session_start", agent="a", model="openai:gpt-4o-mini"),
+            _ev("compaction", summary="prior conversation"),
+            _ev("user_input", text="one"),
+            _ev("model_response", raw_content="r1"),
+            _ev("user_input", text="two"),
+            _ev("model_response", raw_content="r2"),
+            _ev("user_input", text="three"),
+            _ev("model_response", raw_content="r3"),
+        ]
+        old, recent = split_events_for_compaction(events, "openai:gpt-4o-mini", retention_budget_tokens=1_000_000)
+        assert old == []
+        assert recent == events
 
 
 class TestExtractFilePaths:
@@ -158,3 +186,28 @@ class TestCompactionWritesEventInPlace:
         assert events[1].data["retained_count"] == 2
         assert events[2].type == "user_input"
         assert events[3].type == "model_response"
+
+
+class TestCompactionUsageTracking:
+    @pytest.mark.asyncio
+    async def test_llm_complete_accumulates_usage_only_inside_block(self):
+        """Compaction summarization token usage (previously discarded) is summed
+        across calls inside `track_compaction_usage`, and calls outside the block
+        are not tracked.
+        """
+        provider = AsyncMock()
+        provider.acompletion = AsyncMock(
+            return_value=CompletionResponse(content="ok", usage=Usage(prompt_tokens=100, completion_tokens=25))
+        )
+
+        with patch(
+            "tsugite.models.get_provider_and_model",
+            return_value=("openai:gpt-4o-mini", provider, "gpt-4o-mini"),
+        ):
+            with track_compaction_usage() as usage:
+                await _llm_complete("sys", "u1", "openai:gpt-4o-mini")
+                await _llm_complete("sys", "u2", "openai:gpt-4o-mini")
+            # Outside the block the accumulator is cleared, so this call is untracked.
+            await _llm_complete("sys", "u3", "openai:gpt-4o-mini")
+
+        assert usage == {"prompt_tokens": 200, "completion_tokens": 50, "calls": 2}
