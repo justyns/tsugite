@@ -301,9 +301,10 @@ def test_compact_session_preserves_topic_and_type_metadata(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_compaction_event_records_summary_token_usage(workspace_dir, history_dir, tmp_path):
-    """The compaction event must record how many tokens the summarization LLM
-    call consumed, so compaction spend is auditable instead of invisible.
+async def test_compaction_records_summary_token_usage_to_usage_store(workspace_dir, history_dir, tmp_path):
+    """Compaction summarization spend must be recorded in the UsageStore (what
+    `tsugite usage` reads) under source="compaction" - the same sink normal
+    turns use - so compaction cost is visible instead of untracked.
     """
     from datetime import datetime, timezone
     from unittest.mock import AsyncMock, MagicMock, patch
@@ -324,6 +325,7 @@ async def test_compaction_event_records_summary_token_usage(workspace_dir, histo
         return_value=CompletionResponse(content="Summary", usage=Usage(prompt_tokens=500, completion_tokens=40))
     )
     provider.count_tokens = MagicMock(return_value=10)
+    usage_store = MagicMock()
 
     agent_config = AgentConfig(workspace_dir=workspace_dir, agent_file="default")
     agent_config.context_limit = 1_000_000
@@ -334,6 +336,7 @@ async def test_compaction_event_records_summary_token_usage(workspace_dir, histo
         patch("tsugite.daemon.memory.infer_compaction_model", return_value="openai:gpt-4o-mini"),
         patch("tsugite.daemon.memory.split_events_for_compaction", return_value=(old_events, recent_events)),
         patch("tsugite.models.get_provider_and_model", return_value=("openai:gpt-4o-mini", provider, "gpt-4o-mini")),
+        patch("tsugite.usage.get_usage_store", return_value=usage_store),
         patch("tsugite.history.get_history_dir", return_value=history_dir),
         patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
         patch("tsugite.history.storage.get_machine_name", return_value="test"),
@@ -342,7 +345,9 @@ async def test_compaction_event_records_summary_token_usage(workspace_dir, histo
         new_session = await adapter._compact_session(conv_id, reason="manual")
 
     assert new_session is not None
-    new_events = SessionStorage.load(history_dir / f"{new_session.id}.jsonl").load_events()
-    comp = next(e for e in new_events if e.type == "compaction")
-    assert comp.data["summary_prompt_tokens"] == 500
-    assert comp.data["summary_completion_tokens"] == 40
+    usage_store.record.assert_called_once()
+    kwargs = usage_store.record.call_args.kwargs
+    assert kwargs["source"] == "compaction"
+    assert kwargs["session_id"] == conv_id
+    assert kwargs["input_tokens"] == 500
+    assert kwargs["output_tokens"] == 40

@@ -976,13 +976,6 @@ class BaseAdapter(ABC):
         old_user_inputs = sum(1 for e in old_events if e.type == "user_input")
         recent_user_inputs = sum(1 for e in recent_events if e.type == "user_input")
 
-        if old_user_inputs == 0:
-            # Defensive: split returned a non-empty prefix (e.g. session_start +
-            # prior compaction) but no actual turns to summarize. Nothing to do —
-            # skip rather than rotate the session and burn a summarization call.
-            logger.info("[%s] No turns to summarize, skipping compaction", self.agent_name)
-            return None
-
         logger.info(
             "[%s] Compacting session: %d old turns summarized, %d recent turns retained",
             self.agent_name,
@@ -1098,6 +1091,23 @@ class BaseAdapter(ABC):
                 summary_usage["completion_tokens"],
                 summary_usage["calls"],
             )
+            # Record summarization spend in the same UsageStore as normal turns
+            # (see _save_history) so `tsugite usage` sees compaction cost under
+            # source="compaction" instead of it being untracked.
+            try:
+                from tsugite.usage import get_usage_store
+
+                get_usage_store().record(
+                    session_id=old_conv_id,
+                    agent=self.agent_name,
+                    model=model,
+                    source="compaction",
+                    input_tokens=summary_usage["prompt_tokens"],
+                    output_tokens=summary_usage["completion_tokens"],
+                    total_tokens=summary_usage["prompt_tokens"] + summary_usage["completion_tokens"],
+                )
+            except Exception as e:
+                logger.debug("Failed to record compaction usage: %s", e)
 
         new_session = self.session_store.compact_session(session_id)
         new_session_path = get_history_dir() / f"{new_session.id}.jsonl"
@@ -1123,8 +1133,6 @@ class BaseAdapter(ABC):
             range_start=range_start,
             range_end=range_end,
             source_session_id=old_conv_id,
-            summary_prompt_tokens=summary_usage["prompt_tokens"] or None,
-            summary_completion_tokens=summary_usage["completion_tokens"] or None,
         )
         for event in recent_events:
             if event.type == "session_end":
