@@ -16,11 +16,13 @@ side: spawn, read, write stdin, kill.
 from __future__ import annotations
 
 import errno
+import fcntl
 import logging
 import os
 import pty
 import signal
 import subprocess
+import termios
 import threading
 import time
 from typing import Callable, Optional
@@ -28,6 +30,24 @@ from typing import Callable, Optional
 logger = logging.getLogger(__name__)
 
 DEFAULT_BUFFER_CAP = 1024 * 1024  # 1 MB
+
+
+def _acquire_controlling_tty() -> None:
+    """preexec_fn for PTY children: new session + claim the slave as ctty.
+
+    Runs in the forked child after subprocess has dup'd the slave onto fds
+    0/1/2 but before exec. ``setsid()`` makes the child a session leader (so we
+    can signal the whole tree by pgid); ``TIOCSCTTY`` then makes the slave
+    (fd 0) the session's controlling terminal with the child as its foreground
+    process group. Without that step a Ctrl+C byte written to the master is not
+    guaranteed to raise SIGINT - it works on some kernels and silently no-ops on
+    others (notably CI runners), so terminal-driven interrupts must not rely on
+    ``setsid`` alone.
+    """
+    os.setsid()
+    fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+
+
 SIGKILL_GRACE_SECONDS = 2.0
 _READ_CHUNK_SIZE = 8192
 
@@ -97,9 +117,11 @@ class PtyProcess:
                 stderr=slave_fd,
                 cwd=cwd,
                 env=full_env,
-                # Putting the child in its own process group lets us kill the
-                # whole tree (a shell + its children) with one signal to -pgid.
-                preexec_fn=os.setsid,
+                # New session (its own process group, so we can signal the
+                # whole tree via -pgid) plus claiming the slave as the
+                # controlling terminal so a Ctrl+C byte written to the master
+                # actually raises SIGINT. See _acquire_controlling_tty.
+                preexec_fn=_acquire_controlling_tty,
                 close_fds=True,
             )
         except Exception:
