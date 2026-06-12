@@ -14,7 +14,7 @@ from tsugite.core.agent import TsugiteAgent  # noqa: E402
 from tsugite.core.executor import LocalExecutor  # noqa: E402
 from tsugite.exceptions import AgentExecutionError, is_prompt_too_long_error  # noqa: E402
 from tsugite.md_agents import AgentConfig, parse_agent_file  # noqa: E402
-from tsugite.models import resolve_effective_model  # noqa: E402
+from tsugite.models import resolve_effective_model, strip_reserved_model_kwargs  # noqa: E402
 from tsugite.options import ExecutionOptions  # noqa: E402
 from tsugite.renderer import AgentRenderer  # noqa: E402
 from tsugite.utils import is_interactive  # noqa: E402
@@ -411,6 +411,7 @@ async def _execute_agent_with_prompt(
     hook_vars: Optional[Dict[str, str]] = None,
     continue_conversation_id: Optional[str] = None,
     user_input_for_history: Optional[str] = None,
+    channel_metadata: Optional[Dict[str, Any]] = None,
 ) -> str | AgentExecutionResult:
     """Execute agent with a prepared agent.
 
@@ -491,13 +492,29 @@ async def _execute_agent_with_prompt(
     # Get model string
     model_string = _get_model_string(exec_options.model_override, agent_config)
 
-    # Merge reasoning_effort. Resolution order: explicit kwargs > override > agent config.
-    final_model_kwargs = dict(model_kwargs or {})
+    # Merge model_kwargs from the agent frontmatter first (lowest precedence), then
+    # explicit caller kwargs override. This lets agents declare e.g.
+    # `model_kwargs: {response_format: {type: json_object}}` once and have every
+    # invocation get structured output without each caller threading it through.
+    final_model_kwargs = {}
+    if hasattr(agent_config, "model_kwargs") and agent_config.model_kwargs:
+        final_model_kwargs.update(agent_config.model_kwargs)
+    final_model_kwargs.update(model_kwargs or {})
+    # Reject provider-call args (messages/model/stream) that would collide with the
+    # explicit keywords splatted alongside **model_kwargs in core/agent.py.
+    final_model_kwargs = strip_reserved_model_kwargs(final_model_kwargs)
+
+    # Resolve reasoning_effort. Precedence (highest wins): exec_options override >
+    # caller-supplied model_kwargs > agent.model_kwargs > agent.reasoning_effort field.
+    # The override is a user-facing CLI/daemon knob - it MUST beat any agent default,
+    # including one baked into agent.model_kwargs (which would otherwise shadow it).
+    # Caller kwargs and agent.model_kwargs are already in final_model_kwargs from the merge
+    # above, so only the override and the agent.reasoning_effort fallback resolve here.
     effort_override = getattr(exec_options, "reasoning_effort_override", None)
-    if "reasoning_effort" not in final_model_kwargs:
-        if effort_override:
-            final_model_kwargs["reasoning_effort"] = effort_override
-        elif hasattr(agent_config, "reasoning_effort") and agent_config.reasoning_effort:
+    if effort_override:
+        final_model_kwargs["reasoning_effort"] = effort_override
+    elif "reasoning_effort" not in final_model_kwargs:
+        if hasattr(agent_config, "reasoning_effort") and agent_config.reasoning_effort:
             final_model_kwargs["reasoning_effort"] = agent_config.reasoning_effort
 
     from tsugite.models import resolve_reasoning_effort
@@ -573,7 +590,12 @@ async def _execute_agent_with_prompt(
             # model_request event; replaying the whole thing here would clog the
             # chat bubble with noise the user never wrote.
             display_prompt = user_input_for_history or prepared.original_prompt or prepared.rendered_prompt
-            record_user_input(session_storage, display_prompt, attachments=prepared.attachments)
+            record_user_input(
+                session_storage,
+                display_prompt,
+                attachments=prepared.attachments,
+                channel_metadata=channel_metadata,
+            )
     except Exception as e:
         logger.debug("Could not open session storage for live event recording: %s", e)
         session_storage = None
@@ -743,6 +765,7 @@ def run_agent(
     attachments: Optional[List[Any]] = None,
     path_context: Optional[Any] = None,
     user_input_for_history: Optional[str] = None,
+    channel_metadata: Optional[Dict[str, Any]] = None,
 ) -> str | AgentExecutionResult:
     """Run a Tsugite agent (sync wrapper around run_agent_async).
 
@@ -793,6 +816,7 @@ def run_agent(
             attachments=attachments,
             path_context=path_context,
             user_input_for_history=user_input_for_history,
+            channel_metadata=channel_metadata,
         )
     )
 
@@ -976,6 +1000,7 @@ async def run_agent_async(
                 hook_vars=hook_vars,
                 continue_conversation_id=continue_conversation_id,
                 user_input_for_history=user_input_for_history,
+                channel_metadata=channel_metadata,
             )
         except (RuntimeError, AgentExecutionError) as e:
             err_str = str(e).lower()
@@ -1001,6 +1026,7 @@ async def run_agent_async(
                     hook_vars=hook_vars,
                     continue_conversation_id=continue_conversation_id,
                     user_input_for_history=user_input_for_history,
+                    channel_metadata=channel_metadata,
                 )
             raise
     finally:
@@ -1026,6 +1052,8 @@ _MULTISTEP_FRAMEWORK_FLAG_DEFAULTS: Dict[str, Any] = {
     "has_notify_tool": False,
     "agent_name": "",
     "can_spawn_sessions": False,
+    "can_spawn_jobs": False,
+    "can_use_pty": False,
     "is_channel_session": False,
     "active_sessions": [],
     "recent_completions": [],

@@ -12,6 +12,23 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# Provider-call arguments tsugite passes explicitly to acompletion(). User-supplied
+# model_kwargs must never contain these, or the **splat collides with the explicit
+# keyword and raises "got multiple values for keyword argument" mid-run.
+RESERVED_MODEL_KWARGS = frozenset({"messages", "model", "stream"})
+
+
+def strip_reserved_model_kwargs(kwargs: dict) -> dict:
+    """Drop reserved provider-call keys from model_kwargs, logging each removal.
+
+    Returns a new dict; the input is not mutated.
+    """
+    cleaned = {k: v for k, v in kwargs.items() if k not in RESERVED_MODEL_KWARGS}
+    for key in kwargs.keys() & RESERVED_MODEL_KWARGS:
+        logger.warning("Dropping reserved model_kwargs key %r; it collides with a provider call argument", key)
+    return cleaned
+
+
 class UnsupportedEffortError(ValueError):
     """Raised when a reasoning_effort value is not supported for the resolved model."""
 
@@ -22,16 +39,6 @@ class UnsupportedEffortError(ValueError):
         super().__init__(
             f"reasoning_effort={value!r} is not supported for {model}. Valid values: {', '.join(supported)}"
         )
-
-
-_CLAUDE_CODE_MODEL_MAP = {
-    "opus": "claude-opus-4-8",
-    "opus-4-8": "claude-opus-4-8",
-    "opus-4-7": "claude-opus-4-7",
-    "opus-4-6": "claude-opus-4-6",
-    "sonnet": "claude-sonnet-4-6",
-    "haiku": "claude-haiku-4-5-20251001",
-}
 
 
 def resolve_effective_model(
@@ -102,7 +109,10 @@ def get_model_id(model_string: str) -> str:
     provider, model_name, variant = parse_model_string(resolved)
 
     if provider == "claude_code":
-        return _CLAUDE_CODE_MODEL_MAP.get(model_name, model_name)
+        # Lazy import: the provider owns the alias table (single source of truth).
+        from tsugite.providers.claude_code import resolve_alias
+
+        return resolve_alias(model_name)
 
     if provider == "ollama" and variant:
         return f"{model_name}:{variant}"
@@ -206,7 +216,7 @@ def get_model_kwargs(model_string: str, **kwargs) -> dict:
     """
     resolved = resolve_model_alias(model_string)
 
-    params = dict(kwargs)
+    params = strip_reserved_model_kwargs(kwargs)
     if is_reasoning_model_without_stop_support(resolved):
         _, model_name, _ = parse_model_string(resolved)
         params = filter_reasoning_model_params(model_name, params)

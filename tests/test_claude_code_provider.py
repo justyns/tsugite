@@ -6,7 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from tsugite.models import _CLAUDE_CODE_MODEL_MAP, get_model_id, parse_model_string
+from tsugite.models import get_model_id, parse_model_string
+from tsugite.providers.claude_code import _ALIASES as _CLAUDE_CODE_MODEL_MAP
 
 # ── Model parsing tests ──
 
@@ -1188,3 +1189,94 @@ class TestClaudeCodeErrorResult:
             async for _ in stream:
                 pass
         assert "prompt is too long" in str(excinfo.value).lower()
+
+
+class TestClaudeCodeProcessStopRobustness:
+    @pytest.fixture(autouse=True)
+    def _mock_claude_cli(self):
+        with patch("shutil.which", return_value="/usr/bin/claude"):
+            yield
+
+    @pytest.mark.asyncio
+    async def test_stop_escalates_to_sigkill_when_sigterm_ignored(self):
+        """A claude subprocess that ignores SIGTERM (Node can be slow/wedged) must
+        be SIGKILLed within a timeout - otherwise stop() hangs the agent's finally
+        forever and leaks a multi-hour orphan process (seen on the real box)."""
+        from tsugite.core.claude_code import ClaudeCodeProcess
+
+        proc = ClaudeCodeProcess()
+        killed = {"term": False, "kill": False}
+        wait_calls = {"n": 0}
+
+        mock = MagicMock()  # terminate()/kill() are sync on asyncio subprocess
+        mock.pid = 4242
+        mock.terminate = MagicMock(side_effect=lambda: killed.__setitem__("term", True))
+        mock.kill = MagicMock(side_effect=lambda: killed.__setitem__("kill", True))
+
+        async def fake_wait():
+            wait_calls["n"] += 1
+            # First wait (after SIGTERM) never returns until killed; after kill it returns.
+            while not killed["kill"]:
+                await asyncio.sleep(0.01)
+            return 0
+
+        mock.wait = fake_wait
+        proc._process = mock
+
+        await asyncio.wait_for(proc.stop(), timeout=10)
+        assert killed["term"], "SIGTERM must be sent first"
+        assert killed["kill"], "must escalate to SIGKILL when the process ignores SIGTERM"
+        assert proc._process is None
+
+    @pytest.mark.asyncio
+    async def test_stop_is_clean_when_process_exits_on_sigterm(self):
+        from tsugite.core.claude_code import ClaudeCodeProcess
+
+        proc = ClaudeCodeProcess()
+        mock = MagicMock()
+        mock.pid = 99
+        mock.terminate = MagicMock()
+        mock.kill = MagicMock()
+
+        async def fake_wait():
+            return 0
+
+        mock.wait = fake_wait
+        proc._process = mock
+
+        await asyncio.wait_for(proc.stop(), timeout=5)
+        mock.terminate.assert_called_once()
+        mock.kill.assert_not_called()
+        assert proc._process is None
+
+
+class TestClaudeCodeProcessReadLimit:
+    @pytest.fixture(autouse=True)
+    def _mock_claude_cli(self):
+        with patch("shutil.which", return_value="/usr/bin/claude"):
+            yield
+
+    @pytest.mark.asyncio
+    async def test_subprocess_uses_large_stream_limit(self):
+        """The default asyncio StreamReader limit is 64KB. A stream-json result
+        line (full answer + usage + modelUsage) routinely exceeds that, and the
+        bare readline() then raises LimitOverrunError - crashing the turn (stdout)
+        or killing the stderr drain into a pipe deadlock. The subprocess must be
+        created with a generous read limit."""
+        from tsugite.core.claude_code import ClaudeCodeProcess
+
+        proc = ClaudeCodeProcess()
+        mock_proc = AsyncMock()
+        mock_proc.stdin = AsyncMock()
+        mock_proc.stderr = AsyncMock()
+        mock_proc.stderr.readline = AsyncMock(return_value=b"")
+        mock_proc.stdout = AsyncMock()
+        mock_proc.pid = 1
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc) as mock_exec:
+            await proc.start(model="sonnet", system_prompt="x")
+            limit = mock_exec.call_args[1].get("limit")
+            assert limit is not None and limit >= 1024 * 1024, (
+                f"subprocess must raise the 64KB readline limit (got limit={limit!r})"
+            )
+        await proc.stop()

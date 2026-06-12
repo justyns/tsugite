@@ -43,6 +43,15 @@ _ALIASES = {
 }
 
 
+def resolve_alias(model_name: str) -> str:
+    """Map a short alias (opus, sonnet, ...) to the full Claude Code model id.
+
+    Single source of truth for the alias table - models.get_model_id delegates
+    here so a new model only needs registering in this file.
+    """
+    return _ALIASES.get(model_name, model_name)
+
+
 def _raise_if_error(result_event: dict) -> None:
     """Translate a Claude CLI error result into AgentExecutionError.
 
