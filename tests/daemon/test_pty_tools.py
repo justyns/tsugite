@@ -53,6 +53,22 @@ def _wait_until_terminal_state(store: TerminalSessionStore, terminal_id: str, ti
     return store.get(terminal_id)
 
 
+def _wait_for_output(terminal_id: str, marker: str, timeout: float = 5.0) -> bool:
+    """Block until `marker` appears in the captured buffer, or timeout.
+
+    Seeing output proves the child has exec'd and the PTY is flowing both ways,
+    so the slave is the controlling terminal with the child in the foreground
+    group - the precondition for a written Ctrl+C byte to raise SIGINT. Polling
+    for this beats a fixed sleep, which slow CI runners lose the race on.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if marker in terminal_tools.pty_capture(terminal_id)["text"]:
+            return True
+        time.sleep(0.05)
+    return False
+
+
 def test_pty_create_spawns_real_process(runtime):
     mgr, store = runtime
     result = terminal_tools.pty_create("echo hi")
@@ -93,10 +109,10 @@ def test_pty_send_keys_writes_to_stdin(runtime):
 
 def test_pty_send_keys_ctrl_c_interrupts(runtime):
     mgr, store = runtime
-    created = terminal_tools.pty_create("sleep 30")
+    created = terminal_tools.pty_create("echo READY; sleep 30")
     tid = created["terminal_id"]
 
-    time.sleep(0.1)
+    assert _wait_for_output(tid, "READY"), "child never produced output; PTY not ready for Ctrl+C"
     sent = terminal_tools.pty_send_keys(tid, "\x03", enter=False)
     assert sent["bytes_written"] > 0
 
@@ -165,10 +181,10 @@ def test_pty_kill_int_does_not_cancel(runtime):
     """
     mgr, store = runtime
     # A foreground program that catches SIGINT itself (no shell-only trap).
-    created = terminal_tools.pty_create("sleep 30")
+    created = terminal_tools.pty_create("echo READY; sleep 30")
     tid = created["terminal_id"]
 
-    time.sleep(0.1)
+    assert _wait_for_output(tid, "READY"), "child never produced output; PTY not ready for INT"
     result = terminal_tools.pty_kill(tid, signal="INT")
     assert result["signal"] == "INT"
 
