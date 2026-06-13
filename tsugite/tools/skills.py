@@ -80,6 +80,20 @@ def _append_resource_block(body: str, skill_dir: Path, resources: List[str]) -> 
     return "\n".join(lines) + "\n"
 
 
+def _skill_wants_jinja(frontmatter: Dict, skill_name: str) -> bool:
+    """Whether a skill body should be Jinja-rendered.
+
+    Defaults to True. A skill sets `jinja: false` in frontmatter to opt out -
+    useful for documentation skills whose bodies contain literal {{ }} / {% %}
+    examples that must be shown verbatim rather than executed.
+    """
+    value = frontmatter.get("jinja", True)
+    if not isinstance(value, bool):
+        logger.warning(f"Skill '{skill_name}' has non-boolean 'jinja' value {value!r}; defaulting to true")
+        return True
+    return value
+
+
 class SkillManager:
     """Manages skill discovery, loading, and lifecycle events.
 
@@ -167,13 +181,17 @@ class SkillManager:
             if "description" not in frontmatter or not frontmatter["description"]:
                 logger.warning(f"Skill '{skill_name}' missing 'description' field (recommended)")
 
-            agent_renderer = AgentRenderer()
-            context = {
-                "user_prompt": "",
-                "today": renderer.today,
-                "now": renderer.now,
-            }
-            rendered_body = agent_renderer.render(content, context)
+            if _skill_wants_jinja(frontmatter, skill_name):
+                agent_renderer = AgentRenderer()
+                context = {
+                    "user_prompt": "",
+                    "today": renderer.today,
+                    "now": renderer.now,
+                }
+                rendered_body = agent_renderer.render(content, context)
+            else:
+                # jinja: false -> body shown verbatim (ignore blocks still stripped).
+                rendered_body = renderer.strip_ignored_sections(content)
             resources = _enumerate_bundled_resources(skill.directory)
             rendered_content = _append_resource_block(rendered_body, skill.directory, resources)
 

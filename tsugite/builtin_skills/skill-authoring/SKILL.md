@@ -1,6 +1,7 @@
 ---
 name: skill-authoring
 description: How to write effective skills, convert agentskills.io/Claude Code skills to tsugite format, and review skills for safety; load when authoring, converting, or auditing skills
+jinja: false
 ---
 
 # Skill Authoring Guide

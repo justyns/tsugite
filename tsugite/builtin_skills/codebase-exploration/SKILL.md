@@ -1,6 +1,7 @@
 ---
 name: codebase-exploration
 description: Strategies and patterns for exploring unfamiliar codebases efficiently, with adaptive approaches based on size and scope
+jinja: false
 ---
 
 # Codebase Exploration Strategies

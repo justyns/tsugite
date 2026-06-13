@@ -1,6 +1,7 @@
 ---
 name: tsugite-skill-basics
 description: How Tsugite skills are structured, discovered, and loaded at runtime; load when creating, auditing, or debugging skills
+jinja: false
 ---
 
 # Tsugite Skill Basics
@@ -27,7 +28,7 @@ skill-name/
     assets/             # optional: templates, data, or other static resources
 ```
 
-`SKILL.md` itself is a Jinja2-rendered Markdown file:
+`SKILL.md` itself is a Jinja2-rendered Markdown file (set `jinja: false` in frontmatter to opt out and show the body verbatim):
 
 ```yaml
 ---
@@ -54,6 +55,7 @@ Available in templates:
 **Tsugite extensions** (not part of the agentskills.io spec; safe to omit for cross-client portability):
 - `triggers: [keywords]` - when any listed keyword appears in the user prompt (word-boundary match, case-insensitive), the skill is auto-loaded.
 - `ttl: N` - sticky time-to-live (in user messages). Only applies in the daemon. A sticky skill that goes N turns without being referenced is auto-unloaded. `0` means never expire. Defaults to the global `skill_ttl_default` config value (currently 10).
+- `jinja: false` - skip Jinja rendering for this skill's body, showing it verbatim. Use for documentation/reference skills whose content contains literal `{{ }}` / `{% %}` examples that must not be executed. Default is `true`. (`<!-- tsu:ignore -->` blocks are still stripped either way.)
 
 ## Discovery Order
 
@@ -236,7 +238,7 @@ read_file(results[0])
 
 ### Undefined Variable in Template
 
-Skills only have `today()`, `now()`, `env`, and `user_prompt`. Remove references to other variables.
+Skills only have `today()`, `now()`, `env`, and `user_prompt`. Remove references to other variables, or set `jinja: false` in frontmatter if the `{{ }}` are literal documentation examples that should not be rendered at all.
 
 ### Name/Directory Mismatch Warning
 

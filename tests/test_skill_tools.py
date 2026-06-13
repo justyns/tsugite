@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from tsugite.skill_discovery import SkillMeta
+from tsugite.skill_discovery import SkillMeta, get_builtin_skills_path
 from tsugite.tools import call_tool
 from tsugite.tools.skills import SkillManager, set_skill_manager
 
@@ -109,6 +109,63 @@ class TestLoadSkillTool:
         rendered = manager._loaded_skills["template-skill"]
         assert "Today's date:" in rendered
         assert "{{" not in rendered
+
+    def test_jinja_false_skips_rendering(self, tmp_path, monkeypatch):
+        # A documentation skill opts out of Jinja so literal {{ }} / {% %} examples
+        # are shown verbatim instead of executed (and never error on undefined vars).
+        body = "Example: {{ undefined_var }} and {% if nope %}x{% endif %}\n"
+        skill_dir = _make_skill_dir(tmp_path / "skills", "doc-skill", body=body, frontmatter_extra="jinja: false\n")
+        registry = {"doc-skill": _meta(skill_dir)}
+        monkeypatch.chdir(tmp_path)
+
+        manager = SkillManager()
+        manager._skill_registry = registry
+        manager._registry_initialized = True
+        set_skill_manager(manager)
+
+        result = manager.load_skill("doc-skill")
+
+        assert "Failed" not in result
+        assert "doc-skill" not in manager._load_failures
+        rendered = manager._loaded_skills["doc-skill"]
+        assert "{{ undefined_var }}" in rendered
+        assert "{% if nope %}" in rendered
+
+    def test_jinja_false_still_strips_ignore_blocks(self, tmp_path, monkeypatch):
+        body = "Keep me.\n<!-- tsu:ignore -->\nDrop me.\n<!-- /tsu:ignore -->\nKeep me too.\n"
+        skill_dir = _make_skill_dir(tmp_path / "skills", "doc-skill", body=body, frontmatter_extra="jinja: false\n")
+        registry = {"doc-skill": _meta(skill_dir)}
+        monkeypatch.chdir(tmp_path)
+
+        manager = SkillManager()
+        manager._skill_registry = registry
+        manager._registry_initialized = True
+        set_skill_manager(manager)
+
+        manager.load_skill("doc-skill")
+        rendered = manager._loaded_skills["doc-skill"]
+        assert "Keep me." in rendered
+        assert "Drop me." not in rendered
+
+    def test_non_bool_jinja_defaults_to_rendering(self, tmp_path, monkeypatch):
+        # A malformed jinja value falls back to rendering (default behavior).
+        skill_dir = _make_skill_dir(
+            tmp_path / "skills",
+            "weird-skill",
+            body="Date: {{ today() }}\n",
+            frontmatter_extra="jinja: maybe\n",
+        )
+        registry = {"weird-skill": _meta(skill_dir)}
+        monkeypatch.chdir(tmp_path)
+
+        manager = SkillManager()
+        manager._skill_registry = registry
+        manager._registry_initialized = True
+        set_skill_manager(manager)
+
+        manager.load_skill("weird-skill")
+        rendered = manager._loaded_skills["weird-skill"]
+        assert "{{" not in rendered  # rendered, not verbatim
 
     def test_load_skill_appends_bundled_resources(self, tmp_path, monkeypatch):
         skill_dir = _make_skill_dir(tmp_path / "skills", "resourceful", body="Main body.\n")
@@ -442,3 +499,40 @@ class TestSkillFailureTracking:
         assert isinstance(result, list)
         names = [item["name"] for item in result]
         assert "bad-trig" in names
+
+
+@pytest.mark.parametrize(
+    "skill_md",
+    sorted(get_builtin_skills_path().glob("*/SKILL.md")),
+    ids=lambda p: p.parent.name,
+)
+def test_builtin_skill_loads(skill_md, tmp_path, monkeypatch):
+    """Every shipped builtin skill must load without a render error.
+
+    Documentation skills that contain literal Jinja examples opt out via
+    `jinja: false`; this guards that they (and the rest) stay loadable.
+    """
+    meta = _meta(skill_md.parent)
+    monkeypatch.chdir(tmp_path)
+    manager = SkillManager()
+    manager._skill_registry = {meta.name: meta}
+    manager._registry_initialized = True
+
+    result = manager.load_skill(meta.name)
+
+    assert "Failed" not in result, result
+    assert meta.name not in manager._load_failures
+
+
+def test_jinja_false_builtin_preserves_examples(tmp_path, monkeypatch):
+    """tsugite-skill-basics documents {{ today() }} etc.; jinja:false keeps them literal."""
+    skill_md = get_builtin_skills_path() / "tsugite-skill-basics" / "SKILL.md"
+    meta = _meta(skill_md.parent)
+    monkeypatch.chdir(tmp_path)
+    manager = SkillManager()
+    manager._skill_registry = {meta.name: meta}
+    manager._registry_initialized = True
+
+    manager.load_skill(meta.name)
+    rendered = manager._loaded_skills[meta.name]
+    assert "{{ today() }}" in rendered

@@ -1,6 +1,7 @@
 ---
 name: tsugite-jinja-reference
 description: Reference for Jinja templating in Tsugite agents, including helpers and context variables; load when editing templates or debugging rendering
+jinja: false
 ---
 
 # Tsugite Jinja Reference

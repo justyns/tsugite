@@ -1,6 +1,7 @@
 ---
 name: scheduling
 description: How to create, manage, and monitor scheduled agent tasks using Tsugite's schedule tools
+jinja: false
 ---
 
 # Scheduling Agent Tasks
