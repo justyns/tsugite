@@ -62,6 +62,10 @@ class ScheduleEntry:
     # Per-run session isolation
     session_id: str | None = None  # If set, reuse this session across runs; otherwise each run gets a unique session
     run_history: list[dict] = field(default_factory=list)  # Last N runs [{timestamp, status, error, session_id}]
+    # Failure surfacing: notify once after N consecutive errors, re-arm on success.
+    consecutive_failures: int = 0
+    failure_notified: bool = False
+    notify_on_failure: int = 3  # notify after this many consecutive failures; 0 disables
     # Completion callbacks
     originating_session_id: str | None = None  # Session that spawned this task
     on_complete: dict | None = None  # {"action": "reply"} to auto-reply on completion
@@ -118,10 +122,19 @@ RunCallback = Callable[["ScheduleEntry"], Coroutine[None, None, "RunResult"]]
 
 
 class Scheduler:
-    def __init__(self, schedules_path: Path, run_callback: RunCallback, script_callback: RunCallback | None = None):
+    def __init__(
+        self,
+        schedules_path: Path,
+        run_callback: RunCallback,
+        script_callback: RunCallback | None = None,
+        on_repeated_failure: Callable[["ScheduleEntry"], None] | None = None,
+    ):
         self._path = schedules_path
         self._run_callback = run_callback
         self._script_callback = script_callback
+        # Called once when a schedule crosses its consecutive-failure threshold,
+        # so the daemon/adapter can surface it (Discord/notify). None = log only.
+        self._on_repeated_failure = on_repeated_failure
         self._schedules: dict[str, ScheduleEntry] = {}
         self._wakeup = asyncio.Event()
         self._running = False
@@ -304,6 +317,15 @@ class Scheduler:
                 entry.last_status = "error"
                 entry.last_error = str(e)
 
+            if entry.last_status == "error":
+                entry.consecutive_failures += 1
+                self._maybe_notify_repeated_failure(entry)
+            elif entry.last_status == "success":
+                # A real run clears the streak and re-arms the notification.
+                entry.consecutive_failures = 0
+                entry.failure_notified = False
+            # "skipped" leaves the streak unchanged: not a failure, not a real run.
+
             entry.last_run = datetime.now(timezone.utc).isoformat()
             entry.run_history.append(
                 {
@@ -319,6 +341,31 @@ class Scheduler:
             if entry.schedule_type == "once":
                 self._schedules.pop(entry.id, None)
             self._save()
+
+    def _maybe_notify_repeated_failure(self, entry: ScheduleEntry):
+        """Surface a schedule that keeps failing instead of letting it die silently.
+
+        Fires once when the consecutive-failure count first reaches
+        notify_on_failure, then stays quiet until a success re-arms it (so a
+        permanently-broken schedule doesn't notify on every run). Always logs at
+        ERROR; the optional hook adds Discord/notify delivery on top.
+        """
+        threshold = entry.notify_on_failure
+        if threshold <= 0 or entry.consecutive_failures < threshold or entry.failure_notified:
+            return
+        entry.failure_notified = True
+        logger.error(
+            "Schedule '%s' has failed %d consecutive times; latest error: %s",
+            entry.id,
+            entry.consecutive_failures,
+            entry.last_error,
+        )
+        if self._on_repeated_failure is None:
+            return
+        try:
+            self._on_repeated_failure(entry)
+        except Exception:
+            logger.exception("on_repeated_failure hook raised for schedule '%s'", entry.id)
 
     def _compute_next_run_iso(self, entry: ScheduleEntry) -> str | None:
         now = datetime.now(timezone.utc)

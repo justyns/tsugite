@@ -734,3 +734,61 @@ class TestSchedulerHardening:
         # cleanup() can now reap both
         removed = scheduler.cleanup()
         assert set(removed) >= {"badtz", "missed"}
+
+
+class TestRepeatedFailureNotification:
+    """Schedules must not fail silently: notify once after N consecutive errors."""
+
+    @pytest.fixture
+    def failing_callback(self):
+        cb = AsyncMock()
+        # The real-world trigger: an agent-load error surfaces as a bare RuntimeError.
+        cb.side_effect = RuntimeError("Failed to create tools: Invalid tool 'final_answer': not found")
+        return cb
+
+    def _entry(self, **kw):
+        return ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *", **kw)
+
+    @pytest.mark.asyncio
+    async def test_notifies_once_at_threshold_then_suppresses_until_success(self, schedules_path, failing_callback):
+        notified = []
+        sched = Scheduler(schedules_path, failing_callback, on_repeated_failure=lambda e: notified.append(e.id))
+        sched.add(self._entry(notify_on_failure=3))
+
+        # Below threshold: count climbs, no notification yet.
+        await sched._fire_schedule(sched.get("job1"))
+        await sched._fire_schedule(sched.get("job1"))
+        assert sched.get("job1").consecutive_failures == 2
+        assert notified == []
+
+        # Third consecutive failure crosses the threshold -> notify exactly once.
+        await sched._fire_schedule(sched.get("job1"))
+        assert sched.get("job1").consecutive_failures == 3
+        assert notified == ["job1"]
+
+        # Further failures are suppressed (no notification spam).
+        await sched._fire_schedule(sched.get("job1"))
+        assert notified == ["job1"]
+
+        # A success resets the streak and re-arms the notification.
+        failing_callback.side_effect = None
+        failing_callback.return_value = RunResult(output="ok")
+        await sched._fire_schedule(sched.get("job1"))
+        assert sched.get("job1").consecutive_failures == 0
+        assert sched.get("job1").failure_notified is False
+
+        # Failing again to the threshold notifies a second time.
+        failing_callback.side_effect = RuntimeError("boom")
+        for _ in range(3):
+            await sched._fire_schedule(sched.get("job1"))
+        assert notified == ["job1", "job1"]
+
+    @pytest.mark.asyncio
+    async def test_notify_on_failure_zero_disables(self, schedules_path, failing_callback):
+        notified = []
+        sched = Scheduler(schedules_path, failing_callback, on_repeated_failure=lambda e: notified.append(e.id))
+        sched.add(self._entry(notify_on_failure=0))
+        for _ in range(5):
+            await sched._fire_schedule(sched.get("job1"))
+        assert notified == []
+        assert sched.get("job1").consecutive_failures == 5
