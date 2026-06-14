@@ -226,6 +226,22 @@ def _should_context_attach(path: Path, size: int) -> bool:
     return False
 
 
+def _format_upload_message_suffix(workspace_only_files: list[str], attachment_names: list[str]) -> str:
+    """Hint appended to the user's message describing where uploaded files were saved.
+
+    Non-inlined files land in <workspace>/uploads/ and the agent has to open them itself,
+    so the hint must give a tool-ready relative path, not a bare filename.
+    """
+    suffix = ""
+    if workspace_only_files:
+        paths = ", ".join(f"uploads/{n}" for n in workspace_only_files)
+        suffix += f"\n\n[Uploaded files saved to the workspace, readable at: {paths}]"
+    if attachment_names:
+        names = ", ".join(attachment_names)
+        suffix += f"\n\n[Attached files (content included below, saved to uploads/): {names}]"
+    return suffix
+
+
 class SSEBroadcaster:
     """Pub/sub for pushing real-time events to SSE subscribers."""
 
@@ -1421,13 +1437,7 @@ class HTTPServer:
             else:
                 workspace_only_files.append(filename)
 
-        if workspace_only_files:
-            names = ", ".join(workspace_only_files)
-            message += f"\n\n[Uploaded files available in workspace: {names}]"
-
-        if uploaded_attachments:
-            names = ", ".join(a.name for a in uploaded_attachments)
-            message += f"\n\n[Attached files (content included below, saved to uploads/): {names}]"
+        message += _format_upload_message_suffix(workspace_only_files, [a.name for a in uploaded_attachments])
 
         metadata = {"client_ip": request.client.host if request.client else "unknown"}
         if uploaded_attachments:
