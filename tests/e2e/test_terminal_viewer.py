@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 
 def _stub_terminals_api(page, terminals=None, stream_chunks=None, stream_state=None, replay_chunk=None):
     """Intercept /api/terminals + the SSE stream with deterministic fixtures.
@@ -300,6 +302,59 @@ def test_xterm_host_mounted_after_selection(authenticated_page):
     # assertion. (xterm.js rendering itself is out of scope for the brief.)
     if has_xterm:
         assert page.locator("[data-xterm-host] .xterm").count() > 0
+
+
+def test_typing_into_full_session_terminal_forwards_to_stdin(authenticated_page):
+    """A keystroke in the full-session terminal must POST to /api/terminals/<id>/stdin.
+
+    The panel was read-only: createTerminalRenderer got disableStdin:true and no
+    term.onData wiring, even though the backend stdin endpoint already existed.
+    """
+    page = authenticated_page
+    stdin_posts: list[str] = []
+
+    def handle_stdin(route, request):
+        stdin_posts.append(request.post_data or "")
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps({"status": "ok", "bytes_written": 1}),
+        )
+
+    _stub_terminals_api(
+        page,
+        terminals=[
+            {
+                "id": "term-001",
+                "cmd": "bash",
+                "state": "running",
+                "created_at": "2026-05-30T10:00:00Z",
+                "updated_at": "2026-05-30T10:00:00Z",
+                "exit_code": None,
+                "bytes_out": 0,
+                "lines_out": 0,
+                "last_line": "",
+                "pid": 222,
+            },
+        ],
+    )
+    page.route("**/api/terminals/*/stdin", handle_stdin)
+    page.evaluate("Alpine.store('terminals').loadTerminals()")
+    page.locator(".console-tabs button.console-tab", has_text="Conversations").click()
+    page.wait_for_function("Alpine.store('app').view === 'conversations'", timeout=3000)
+    page.wait_for_function("Alpine.store('terminals').terminals.length === 1", timeout=3000)
+    page.evaluate("Alpine.store('terminals').selectTerminal('term-001')")
+
+    page.locator("[data-xterm-host]").wait_for(state="visible", timeout=3000)
+    # xterm.js loads from a CDN; without it there is no input surface to drive.
+    page.wait_for_timeout(1200)
+    if not page.evaluate("() => !!document.querySelector('.tv-fs .xterm-helper-textarea')"):
+        pytest.skip("xterm.js (CDN) not loaded; cannot exercise terminal input")
+
+    with page.expect_request("**/api/terminals/*/stdin", timeout=4000):
+        page.locator(".tv-fs .xterm-helper-textarea").focus()
+        page.keyboard.type("x")
+    assert any("x" in d for d in stdin_posts), f"keystroke must POST to /stdin, got: {stdin_posts}"
 
 
 def test_empty_state_renders_when_no_terminal_selected(authenticated_page):

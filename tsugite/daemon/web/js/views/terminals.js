@@ -562,9 +562,15 @@ export default () => ({
 async function bindXtermToTerminalId(host, terminalId, opts = {}) {
   const renderer = await createTerminalRenderer(host, {
     cursorBlink: !!opts.cursorBlink,
-    disableStdin: true,  // backend wires stdin later (out of scope for v1)
+    disableStdin: false,
     scrollback: 5000,
     onScrollState: opts.onScrollState,
+  });
+
+  // Forward keystrokes to the PTY. The backend writes them straight to the
+  // master fd (POST /api/terminals/<id>/stdin); a dead terminal just 4xx/no-ops.
+  renderer.term.onData((data) => {
+    post(`/api/terminals/${encodeURIComponent(terminalId)}/stdin`, { data }).catch(() => { /* terminal gone */ });
   });
 
   if (typeof opts.replayBuffer === 'function') {
