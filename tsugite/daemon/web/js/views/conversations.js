@@ -383,11 +383,20 @@ export default () => ({
     });
     // Refresh relative-time labels ("5m ago") in the sidebar.
     this._relTimeTimer = setInterval(() => { this._relTimeTick++; }, 60000);
-    // Mark the currently-selected session as viewed when the user refocuses the tab.
+    // On tab refocus, mark the selected session viewed AND refetch its history:
+    // the SSE reconnect on resume suppresses its 'reconnect' catch-up event (fresh
+    // closure) and missed events aren't replayed, so the live stream can't be trusted
+    // to have delivered messages that arrived while backgrounded (e.g. a reply from
+    // another device).
     this._onVisibilityChange = () => {
       if (document.visibilityState !== 'visible' || !this.selectedSessionId) return;
       const s = this.allSessions.find(x => (x.conversation_id || x.id) === this.selectedSessionId);
       if (s && s.unread) this._markSessionViewed(s);
+      // Only catch up while following the tail: loadHistory force-scrolls to the
+      // bottom, so refetching when the user has scrolled up into history would yank
+      // them down. !sending mirrors history_update (don't race a turn); the 200ms
+      // debounce coalesces rapid tab-flips into a single refetch.
+      if (this.isActiveSession && !this.sending && this.isAtBottom) this._debouncedLoadHistory();
     };
     document.addEventListener('visibilitychange', this._onVisibilityChange);
   },
