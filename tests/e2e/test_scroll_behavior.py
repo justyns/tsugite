@@ -135,6 +135,37 @@ def test_streaming_does_not_yank_user_when_scrolled_up(authenticated_page, e2e_a
         assert after == before, "scroll position changed while user was reading history"
 
 
+def test_follow_tail_repins_on_late_content_growth(authenticated_page, e2e_adapter, e2e_tmp):
+    """While pinned at the bottom, content that grows AFTER the scroll call (late
+    markdown/code render, or a streamed chunk) must re-pin to the bottom rather than
+    undershoot — the one-shot scrollMessages() can fire before late layout settles."""
+    page = authenticated_page
+    history_dir, user_id, session_id = _seed_long_session(e2e_adapter, e2e_tmp, "followtail", turns=12)
+
+    with patch("tsugite.daemon.adapters.http.get_history_dir", return_value=history_dir):
+        _open_session(page, user_id, session_id)
+        _wait_at_bottom(page)
+        # Sync isAtBottom=true deterministically (we are at the bottom).
+        page.evaluate("document.getElementById('messages').dispatchEvent(new Event('scroll'))")
+
+        # Late content grows the thread with no explicit scroll call (the undershoot vector).
+        page.evaluate(
+            "(() => { const el = document.getElementById('messages');"
+            " const tall = document.createElement('div');"
+            " tall.className = 'console-turn agent';"
+            " tall.style.height = '1500px';"
+            " tall.textContent = 'late-rendered block';"
+            " el.appendChild(tall); })()"
+        )
+
+        # The follow observer must re-pin to the new bottom within a few frames.
+        page.wait_for_function(
+            "(() => { const el = document.getElementById('messages'); "
+            "return el.scrollHeight - el.scrollTop - el.clientHeight < 40; })()",
+            timeout=3000,
+        )
+
+
 def test_streaming_follows_when_user_is_at_bottom(authenticated_page, e2e_adapter, e2e_tmp):
     page = authenticated_page
     history_dir, user_id, session_id = _seed_long_session(e2e_adapter, e2e_tmp, "pinfollow", turns=10)

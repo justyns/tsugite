@@ -401,6 +401,7 @@ export default () => ({
     if (this._historyDebounceTimer) clearTimeout(this._historyDebounceTimer);
     if (this._relTimeTimer) clearInterval(this._relTimeTimer);
     if (this._onVisibilityChange) document.removeEventListener('visibilitychange', this._onVisibilityChange);
+    if (this._followObserver) this._followObserver.disconnect();
     Object.values(this.sessionsState).forEach(s => { if (s.reader) s.reader.cancel().catch(() => {}); });
     this.pendingFiles.forEach(f => { if (f.previewUrl) URL.revokeObjectURL(f.previewUrl); });
   },
@@ -694,8 +695,29 @@ export default () => ({
     this.$nextTick(() => {
       const el = this.$refs.messages;
       if (!el) return;
+      this._ensureFollowObserver(el);
       if (force || this.isAtBottom) scrollToBottom(el);
     });
+  },
+
+  // While the user is at the bottom, keep the view pinned as content streams in
+  // and as markdown/code blocks render late: the one-shot scroll above can fire
+  // before late layout settles, so it undershoots the true bottom. The observer
+  // re-pins on any content mutation (rAF-throttled), and only while isAtBottom,
+  // so a user who has scrolled up is never yanked back down.
+  _ensureFollowObserver(el) {
+    if (this._followObserver) return;
+    let scheduled = false;
+    this._followObserver = new MutationObserver(() => {
+      if (!this.isAtBottom || scheduled) return;
+      scheduled = true;
+      requestAnimationFrame(() => {
+        scheduled = false;
+        const m = this.$refs.messages;
+        if (m && this.isAtBottom) scrollToBottom(m);
+      });
+    });
+    this._followObserver.observe(el, { childList: true, subtree: true, characterData: true });
   },
 
   _updateProgressCache(d) {
