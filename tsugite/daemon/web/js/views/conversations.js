@@ -286,6 +286,15 @@ export default () => ({
     this.$watch('$store.app.view', (view) => {
       if (view === 'conversations' && this.$store.app.selectedAgent) this.reload();
     });
+    // Session-only back/forward keeps view==='conversations', so the view
+    // watcher above never fires and reload() never re-consumes viewSessionId.
+    // Handle it here. The equality guard prevents re-entry when a sidebar click
+    // writes the hash, re-setting viewSessionId to the now-selected id.
+    this.$watch('$store.app.viewSessionId', (targetId) => {
+      if (!targetId || this.$store.app.view !== 'conversations') return;
+      if (targetId === this.selectedSessionId) return;
+      this.openViewSession(targetId, { follow: false });
+    });
     if (this.$store.app.view === 'conversations' && this.$store.app.selectedAgent) {
       this.reload();
     }
@@ -406,12 +415,7 @@ export default () => ({
     const targetId = this.$store.app.viewSessionId;
     if (targetId) {
       this.$store.app.viewSessionId = null;
-      const match = this.allSessions.find(s => s.conversation_id === targetId || s.id === targetId);
-      if (match) {
-        this.selectSession(match);
-      } else {
-        this.selectSession({ conversation_id: targetId, agent: this.$store.app.selectedAgent });
-      }
+      this.openViewSession(targetId);
     } else {
       // PWA cold-restart at start_url drops the URL hash; restore the user's
       // last selection from localStorage before falling back to autoSelect.

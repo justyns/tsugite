@@ -101,6 +101,15 @@ export const sessionsMixin = {
     if (s) this.selectSession(s, opts);
   },
 
+  // Resolve a viewSessionId (a conversation id) to a loaded session and select
+  // it, falling back to a synthetic stub when the target isn't loaded yet.
+  // Matches on conversation_id OR id (unlike findSession's id-only match), so
+  // reload() and the viewSessionId watcher resolve the hash the same way.
+  openViewSession(targetId, opts = {}) {
+    const match = this.allSessions.find((s) => s.conversation_id === targetId || s.id === targetId);
+    this.selectSession(match || { conversation_id: targetId, agent: this.$store.app.selectedAgent }, opts);
+  },
+
   autoSelectInteractive() {
     // Pinned-and-mine wins over a recently-fired schedule run; if no pinned
     // interactive session exists, fall back to any of mine, then to whatever's
