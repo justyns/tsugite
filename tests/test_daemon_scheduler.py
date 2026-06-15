@@ -792,3 +792,31 @@ class TestRepeatedFailureNotification:
             await sched._fire_schedule(sched.get("job1"))
         assert notified == []
         assert sched.get("job1").consecutive_failures == 5
+
+
+@pytest.mark.asyncio
+async def test_overlapping_fire_does_not_corrupt_drift_metadata(scheduler):
+    """When a fire is due but the previous run is still in progress, the overlap must be
+    suppressed WITHOUT overwriting last_scheduled_for to the dropped fire's planned time
+    (which would mislead the adapter's drift detection)."""
+    scheduler.add(ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="*/5 * * * *"))
+    e = scheduler.get("job1")
+
+    # Simulate the previous run still holding the lock.
+    await e.lock.acquire()
+    try:
+        e.last_scheduled_for = "1999-01-01T00:00:00+00:00"  # the last run that actually happened
+        e.last_run = "1999-01-01T00:00:01+00:00"
+        e.next_run = (datetime.now(timezone.utc) - timedelta(seconds=60)).isoformat()  # due, within grace
+
+        scheduler._fire_if_due(e, datetime.now(timezone.utc))
+        await asyncio.sleep(0)  # flush any spawned task
+
+        # Drift metadata preserved (not overwritten to the dropped fire) ...
+        assert e.last_scheduled_for == "1999-01-01T00:00:00+00:00"
+        assert e.last_run == "1999-01-01T00:00:01+00:00"
+        # ... and next_run rolled forward so the loop doesn't busy-spin.
+        assert e.next_run is not None
+        assert datetime.fromisoformat(e.next_run) > datetime.now(timezone.utc)
+    finally:
+        e.lock.release()

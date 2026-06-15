@@ -272,6 +272,17 @@ class Scheduler:
             self._save()
             return
 
+        # If the previous run is still in progress, suppress this overlapping fire
+        # without corrupting drift metadata: roll next_run forward to avoid busy-spin,
+        # but leave last_scheduled_for/last_run reflecting the run that actually happened.
+        # (_fire_schedule guards on the same lock; checking here avoids the metadata
+        # write + task spawn for a fire that would just be dropped.)
+        if entry.lock.locked():
+            logger.info("Schedule '%s' still running, skipping overlapping fire", entry.id)
+            entry.next_run = None if entry.schedule_type == "once" else self._compute_next_run_iso(entry)
+            self._save()
+            return
+
         # Capture the planned fire time before rolling next_run forward,
         # so the adapter can surface scheduled_for vs actual_fire_time to
         # the agent (drift detection on misfires/queue delays).
