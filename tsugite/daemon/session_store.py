@@ -708,10 +708,16 @@ class SessionStore:
             self._sessions[new_id] = new_session
 
             # Compaction preserves is_primary metadata, so the new session automatically
-            # becomes the user's default if the predecessor was. Thread index needs updating.
+            # becomes the user's default if the predecessor was. The named-route lookup
+            # indexes must follow the successor too, otherwise the next thread/channel
+            # message finds the now-completed predecessor and forks a fresh empty session,
+            # abandoning the compacted history.
             thread_id = new_session.metadata.get("thread_id")
             if thread_id:
                 self._thread_index[thread_id] = new_id
+            channel_id = new_session.metadata.get("channel_id")
+            if channel_id:
+                self._channel_index[(channel_id, new_session.agent)] = new_id
 
             # Mark old session as completed and superseded so it stops appearing in
             # the default sidebar list (the new session is the live continuation).

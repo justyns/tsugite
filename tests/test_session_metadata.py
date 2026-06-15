@@ -150,6 +150,16 @@ class TestChannelSessionIndex:
     def test_find_by_channel_missing(self, store):
         assert store.find_by_channel("nonexistent", "odyn") is None
 
+    def test_compact_session_repoints_channel_index(self, store):
+        """Compacting a channel session must repoint the channel index to the successor,
+        else the next channel message orphans the compacted history into a new empty session."""
+        s = store.get_or_create_channel_session("channel-xyz", "odyn", "user-1")
+        successor = store.compact_session(s.id)
+        assert successor.id != s.id
+        # The channel must now resolve to the compacted successor, not a fresh empty session.
+        assert store.get_or_create_channel_session("channel-xyz", "odyn", "user-1").id == successor.id
+        assert store.find_by_channel("channel-xyz", "odyn").id == successor.id
+
     def test_channel_index_rebuilt_on_load(self, tmp_path):
         store1 = SessionStore(tmp_path / "store.json")
         store1.get_or_create_channel_session("ch-1", "odyn", "user-1")
