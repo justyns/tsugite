@@ -210,16 +210,17 @@ class OpenAICompatProvider:
                 except json.JSONDecodeError:
                     continue
 
-                # Final chunk with usage data (empty choices, usage present)
+                # Usage may arrive on its own final chunk (empty choices) OR attached to
+                # the finish chunk that still carries a choices entry (vLLM/Azure and some
+                # OpenAI-compat servers). Capture it either way; the choices below still run.
                 usage_data = data.get("usage")
-                if usage_data and not data.get("choices"):
+                if usage_data:
                     stream_usage = Usage(
                         prompt_tokens=usage_data.get("prompt_tokens", 0),
                         completion_tokens=usage_data.get("completion_tokens", 0),
                         total_tokens=usage_data.get("total_tokens", 0),
                     )
                     stream_cost = calculate_cost(self.name, model, stream_usage)
-                    continue
 
                 choices = data.get("choices", [])
                 if choices:
