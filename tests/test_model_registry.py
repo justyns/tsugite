@@ -35,3 +35,19 @@ def test_model_info_has_supported_effort_levels_default_none():
 def test_model_info_accepts_supported_effort_levels():
     info = ModelInfo(supported_effort_levels=["low", "medium", "high"])
     assert info.supported_effort_levels == ["low", "medium", "high"]
+
+
+def test_prefix_match_rejects_variants_but_allows_dated_versions():
+    """Prefix lookup must not let an unlisted variant inherit a sibling's pricing:
+    `o1-mini` is a distinct model from `o1` (~13x cheaper), so it must resolve to None,
+    while a dated version (`o1-2024-12-17`) should still prefix-match the base entry."""
+    from tsugite.providers.model_registry import _REGISTRY, get_model_info, register_model
+
+    register_model("testreg", "o1", ModelInfo(input_cost_per_million=15.0, output_cost_per_million=60.0))
+    try:
+        assert get_model_info("testreg", "o1") is not None  # exact
+        assert get_model_info("testreg", "o1-2024-12-17") is not None  # dated version -> same family
+        assert get_model_info("testreg", "o1-mini") is None  # variant -> must NOT inherit o1 pricing
+        assert get_model_info("testreg", "o1-preview") is None
+    finally:
+        _REGISTRY.pop("testreg/o1", None)

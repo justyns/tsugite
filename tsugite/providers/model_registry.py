@@ -19,9 +19,16 @@ def get_model_info(provider: str, model: str) -> ModelInfo | None:
     best_match = None
     best_len = 0
     for reg_key, info in _REGISTRY.items():
-        if key.startswith(reg_key) and len(reg_key) > best_len:
-            best_match = info
-            best_len = len(reg_key)
+        if not key.startswith(reg_key) or len(reg_key) <= best_len:
+            continue
+        # Only treat the prefix as the same model when the remainder is a date/version
+        # continuation (e.g. "-20250805"), not a distinct variant ("-mini", "-turbo")
+        # — otherwise an unlisted variant silently inherits a sibling's pricing.
+        suffix = key[len(reg_key) :]
+        if suffix and not (suffix.startswith("-") and len(suffix) > 1 and suffix[1].isdigit()):
+            continue
+        best_match = info
+        best_len = len(reg_key)
     return best_match
 
 
