@@ -65,6 +65,11 @@ def _looks_html_escaped(source: str) -> bool:
 # or special completion signaling.
 EXECUTOR_BUILTIN_TOOLS = frozenset({"return_value", "final_answer", "send_message", "react_to_message"})
 
+# Max execution output shown to the model before truncation. Shared so the live
+# observation (ExecutionResult.to_xml) and the replayed one (history reconstruction)
+# truncate at the same boundary and stay byte-stable.
+MAX_EXECUTION_OUTPUT_KB = 50
+
 
 @dataclass
 class ExecutionResult:
@@ -83,7 +88,7 @@ class ExecutionResult:
     truncated: bool = False
     truncated_to: Optional[str] = None  # Path to full output if truncated
 
-    def to_xml(self, duration_ms: int = 0, max_output_kb: int = 50) -> str:
+    def to_xml(self, duration_ms: int = 0, max_output_kb: int = MAX_EXECUTION_OUTPUT_KB) -> str:
         """Convert execution result to structured XML format.
 
         Args:
