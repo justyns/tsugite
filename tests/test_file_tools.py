@@ -321,6 +321,19 @@ def test_read_file_ranged_to_end(five_line_file, file_tools):
     assert "1: Line 1" not in result
 
 
+def test_read_file_end_line_without_start_line(five_line_file, file_tools):
+    """end_line alone must bound the read; it was previously ignored (whole file returned)."""
+    result = call_tool("read_file", path=str(five_line_file), end_line=2, with_metadata=False)
+    assert result == "Line 1\nLine 2"
+
+
+def test_read_file_metadata_end_line_clamped_to_eof(five_line_file, file_tools):
+    """Partial-read metadata must report the real last line, not an end_line past EOF."""
+    result = call_tool("read_file", path=str(five_line_file), start_line=2, end_line=999)
+    assert 'lines="2-5"' in result
+    assert "999" not in result
+
+
 def test_read_file_invalid_range(temp_dir, file_tools):
     """Test read_file with end_line < start_line raises ValueError."""
     test_file = temp_dir / "lines.txt"

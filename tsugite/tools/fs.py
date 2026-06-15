@@ -54,9 +54,12 @@ def _wrap_file_metadata(
         f'mtime="{mtime_iso}"',
         f'size_bytes="{stats.st_size}"',
     ]
-    if start_line is not None:
+    if start_line is not None or end_line is not None:
+        eff_start = start_line if start_line is not None else 1
         end_label = end_line if end_line is not None else (total_lines if total_lines is not None else "end")
-        attrs.append(f'lines="{start_line}-{end_label}"')
+        if total_lines is not None and isinstance(end_label, int):
+            end_label = min(end_label, total_lines)  # don't advertise lines past EOF
+        attrs.append(f'lines="{eff_start}-{end_label}"')
     return f"<file {' '.join(attrs)}>\n{body}\n</file>"
 
 
@@ -114,22 +117,21 @@ def read_file(
     emit_file_read_event(str(file_path), content, "tool_call")
 
     total_lines: Optional[int] = None
-    if start_line is None and not line_numbers:
+    if start_line is None and end_line is None and not line_numbers:
         body = content
     else:
         lines = content.splitlines()
         total_lines = len(lines)
+        # end_line is usable on its own (defaults start to line 1); previously it
+        # was silently ignored unless start_line was also set.
+        eff_start = start_line if start_line is not None else 1
+        start_idx = eff_start - 1
+        if start_line is not None and start_idx >= total_lines:
+            return f"File only has {total_lines} lines, but start_line is {start_line}"
 
-        if start_line is None:
-            body = _format_lines(lines, 1, line_numbers)
-        else:
-            start_idx = start_line - 1
-            if start_idx >= total_lines:
-                return f"File only has {total_lines} lines, but start_line is {start_line}"
-
-            effective_end = min(end_line, total_lines) if end_line is not None else total_lines
-            selected = lines[start_idx:effective_end]
-            body = _format_lines(selected, start_line, line_numbers)
+        effective_end = min(end_line, total_lines) if end_line is not None else total_lines
+        selected = lines[start_idx:effective_end]
+        body = _format_lines(selected, eff_start, line_numbers)
 
     if not with_metadata:
         return body
