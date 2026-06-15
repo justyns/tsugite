@@ -144,6 +144,8 @@ class AnthropicProvider:
         client = self._get_client()
         input_tokens = 0
         output_tokens = 0
+        cache_creation = 0
+        cache_read = 0
         model = body.get("model", "")
 
         async with client.stream("POST", url, json=body, headers=headers) as resp:
@@ -167,12 +169,20 @@ class AnthropicProvider:
                 elif event_type == "message_start":
                     usage_data = data.get("message", {}).get("usage", {})
                     input_tokens = usage_data.get("input_tokens", 0)
+                    cache_creation = usage_data.get("cache_creation_input_tokens") or 0
+                    cache_read = usage_data.get("cache_read_input_tokens") or 0
                 elif event_type == "message_delta":
                     usage_data = data.get("usage", {})
                     output_tokens = usage_data.get("output_tokens", 0)
                 elif event_type == "message_stop":
-                    total = input_tokens + output_tokens
-                    usage = Usage(prompt_tokens=input_tokens, completion_tokens=output_tokens, total_tokens=total)
+                    total = input_tokens + cache_creation + cache_read + output_tokens
+                    usage = Usage(
+                        prompt_tokens=input_tokens,
+                        completion_tokens=output_tokens,
+                        total_tokens=total,
+                        cache_creation_input_tokens=cache_creation or None,
+                        cache_read_input_tokens=cache_read or None,
+                    )
                     cost = calculate_cost(self.name, model, usage)
                     yield StreamChunk(content="", done=True, usage=usage, cost=cost)
                     return
@@ -189,10 +199,15 @@ class AnthropicProvider:
                 reasoning_parts.append(block.get("thinking", ""))
 
         usage_data = data.get("usage", {})
+        input_t = usage_data.get("input_tokens", 0)
+        output_t = usage_data.get("output_tokens", 0)
+        cache_creation = usage_data.get("cache_creation_input_tokens") or 0
+        cache_read = usage_data.get("cache_read_input_tokens") or 0
         usage = Usage(
-            prompt_tokens=usage_data.get("input_tokens", 0),
-            completion_tokens=usage_data.get("output_tokens", 0),
-            total_tokens=usage_data.get("input_tokens", 0) + usage_data.get("output_tokens", 0),
+            prompt_tokens=input_t,
+            completion_tokens=output_t,
+            # Anthropic's input_tokens is the uncached remainder; cache tokens are additive.
+            total_tokens=input_t + cache_creation + cache_read + output_t,
             cache_creation_input_tokens=usage_data.get("cache_creation_input_tokens"),
             cache_read_input_tokens=usage_data.get("cache_read_input_tokens"),
         )
