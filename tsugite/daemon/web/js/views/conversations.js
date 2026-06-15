@@ -572,7 +572,10 @@ export default () => ({
       if (data.busy && data.pending_message && !state.sending &&
           !this.messages.some(m => m.type === 'user' && m.text === data.pending_message)) {
         this.messages.push({ type: 'user', text: data.pending_message });
-        this.messages.push({ type: 'progress', steps: [], statusText: 'Working...', turnCount: 0, toolCount: 0 });
+        // Track this as the live progress bubble so the next session_event reuses it
+        // instead of pushing a second one that spins "Working..." forever.
+        this._sessionProgress = { type: 'progress', steps: [], statusText: 'Working...', turnCount: 0, toolCount: 0 };
+        this.messages.push(this._sessionProgress);
         this.scrollMessages();
       }
     } catch { /* ignore */ }
@@ -784,24 +787,29 @@ export default () => ({
     // session's `sending` flag and produce duplicate bubbles.
     if (TURN_END_EVENTS.has(evType)) return;
 
-    if (!this._sessionProgress) {
-      this._sessionProgress = { type: 'progress', steps: [], statusText: 'Working...', turnCount: 0, toolCount: 0 };
-      this.messages.push(this._sessionProgress);
-    }
-
     if (SESSION_END_EVENTS.has(evType)) {
-      this._sessionProgress.type = 'progress-done';
-      if (evType === 'session_error') {
-        this._sessionProgress.failed = true;
-        this._sessionProgress.errorText = d.error || 'Session failed';
+      // Only finalize an in-flight progress bubble; don't materialize an empty one
+      // for a session that ended with no progress shown in this tab (which would
+      // render a phantom "code ✓/✗" bubble with zero steps).
+      if (this._sessionProgress) {
+        this._sessionProgress.type = 'progress-done';
+        if (evType === 'session_error') {
+          this._sessionProgress.failed = true;
+          this._sessionProgress.errorText = d.error || 'Session failed';
+        }
+        this._sessionProgress = null;
       }
-      this._sessionProgress = null;
       this._debouncedLoadSessions();
       if (evType === 'session_complete' && d.result_preview) {
         this.messages.push({ type: 'agent', text: d.result_preview });
       }
       this._scrollThrottled();
       return;
+    }
+
+    if (!this._sessionProgress) {
+      this._sessionProgress = { type: 'progress', steps: [], statusText: 'Working...', turnCount: 0, toolCount: 0 };
+      this.messages.push(this._sessionProgress);
     }
 
     // Guard: only forward while the live bubble is still rendered (selectSession
