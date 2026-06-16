@@ -813,7 +813,10 @@ def resolve_effective_sandbox(
     desired = set(fm_network.get("domains") or []) | set(fm_sandbox.get("allow_domains") or [])
     base = list(daemon_domains or [])
     if desired:
-        effective = [d for d in base if d in desired] if base else sorted(desired)
+        # Keep each desired pattern only if the daemon ceiling permits it, using the
+        # proxy's glob semantics (so agent "api.github.com" is kept under daemon
+        # "*.github.com"). An empty ceiling permits everything.
+        effective = sorted(d for d in desired if _domain_within_ceiling(d, base))
         if not effective:
             # The agent asked only for domains outside the ceiling -> grant none.
             no_network = True
@@ -822,6 +825,21 @@ def resolve_effective_sandbox(
         allow_domains = base
 
     return enabled, allow_domains, no_network
+
+
+def _domain_within_ceiling(desired_pattern: str, ceiling: list) -> bool:
+    """True if a desired domain pattern is permitted by the daemon ceiling, using the
+    proxy's glob matching so e.g. 'api.github.com' is within '*.github.com'. An empty
+    ceiling means 'all allowed'. Ports are ignored for the cap decision (the desired
+    pattern, with any port, is kept as-is when its domain is within the ceiling)."""
+    if not ceiling:
+        return True
+    import fnmatch
+
+    from tsugite.core.proxy import _parse_pattern
+
+    desired_domain = _parse_pattern(desired_pattern.lower())[0]
+    return any(fnmatch.fnmatch(desired_domain, _parse_pattern(c.lower())[0]) for c in ceiling)
 
 
 def _resolve_workspace_dir(workspace: Optional[Any], path_context: Optional[Any]) -> Optional[Path]:

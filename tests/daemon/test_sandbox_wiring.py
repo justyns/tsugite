@@ -127,6 +127,32 @@ class TestResolveEffectiveSandbox:
         _, domains, _ = self._resolve(daemon_enabled=True, daemon_domains=["github.com"])
         assert domains == ["github.com"]
 
+    def test_glob_ceiling_allows_matching_subdomain(self):
+        # Daemon ceiling is a glob; a more specific agent domain is within it.
+        _, domains, no_net = self._resolve(
+            daemon_enabled=True,
+            daemon_domains=["*.github.com"],
+            fm_sandbox={"allow_domains": ["api.github.com"]},
+        )
+        assert domains == ["api.github.com"]
+        assert no_net is False
+
+    def test_wildcard_ceiling_allows_any_requested(self):
+        _, domains, _ = self._resolve(
+            daemon_enabled=True, daemon_domains=["*"], fm_sandbox={"allow_domains": ["api.github.com"]}
+        )
+        assert domains == ["api.github.com"]
+
+    def test_cannot_widen_glob_beyond_specific_ceiling(self):
+        # Ceiling is specific; agent asking for the broader glob can't widen.
+        _, domains, no_net = self._resolve(
+            daemon_enabled=True,
+            daemon_domains=["api.github.com"],
+            fm_sandbox={"allow_domains": ["*.github.com"]},
+        )
+        assert domains == []
+        assert no_net is True
+
 
 class TestResolveWorkspaceDir:
     def test_workspace_object_wins(self):
@@ -159,6 +185,57 @@ class TestResolveWorkspaceDir:
 
         pc = SimpleNamespace(workspace_dir=None)
         assert _resolve_workspace_dir(None, pc) is None
+
+
+class TestGatewaySessionSandboxResolver:
+    """The terminal resolver must honor a session's inherited sandbox_override, not
+    just the target agent's config - else a terminal opened for a sandboxed child
+    session (whose agent has sandbox off) would run on the host."""
+
+    def _gateway(self, tmp_path, agents):
+        from tsugite.daemon.config import DaemonConfig
+        from tsugite.daemon.gateway import Gateway
+        from tsugite.daemon.session_store import SessionStore
+
+        gw = Gateway(DaemonConfig(state_dir=tmp_path, agents=agents))
+        gw._session_store = SessionStore(tmp_path / "s.json")
+        return gw
+
+    def test_inherited_override_wins_over_disabled_agent(self, tmp_path):
+        from tsugite.daemon.config import AgentConfig
+        from tsugite.daemon.session_store import Session, SessionSource
+
+        gw = self._gateway(tmp_path, {"plain": AgentConfig(workspace_dir=tmp_path, agent_file="default")})
+        gw._session_store.create_session(
+            Session(
+                id="child",
+                agent="plain",  # agent config has sandbox OFF
+                source=SessionSource.SPAWNED.value,
+                metadata={"sandbox_override": {"enabled": True, "allow_domains": ["github.com"], "no_network": False}},
+            )
+        )
+        ctx = gw._resolve_session_sandbox("child")
+        assert ctx is not None
+        assert ctx.allow_domains == ["github.com"]
+
+    def test_agent_config_used_when_no_override(self, tmp_path):
+        from tsugite.daemon.config import AgentConfig
+        from tsugite.daemon.session_store import Session, SessionSource
+
+        gw = self._gateway(
+            tmp_path,
+            {"boxed": AgentConfig(workspace_dir=tmp_path, agent_file="default", sandbox=SandboxSettings(enabled=True))},
+        )
+        gw._session_store.create_session(Session(id="s", agent="boxed", source=SessionSource.BACKGROUND.value))
+        assert gw._resolve_session_sandbox("s") is not None
+
+    def test_none_when_neither(self, tmp_path):
+        from tsugite.daemon.config import AgentConfig
+        from tsugite.daemon.session_store import Session, SessionSource
+
+        gw = self._gateway(tmp_path, {"plain": AgentConfig(workspace_dir=tmp_path, agent_file="default")})
+        gw._session_store.create_session(Session(id="s", agent="plain", source=SessionSource.BACKGROUND.value))
+        assert gw._resolve_session_sandbox("s") is None
 
 
 class TestSandboxStartupCheck:

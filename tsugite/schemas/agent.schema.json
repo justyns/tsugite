@@ -275,6 +275,19 @@
       "default": null,
       "title": "Network"
     },
+    "sandbox": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Sandbox"
+    },
     "allowed_secrets": {
       "items": {
         "type": "string"

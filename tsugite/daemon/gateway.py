@@ -468,6 +468,7 @@ class Gateway:
         is configured for it.
         """
         from tsugite.agent_runner.helpers import SandboxContext
+        from tsugite.daemon.config import SandboxSettings
 
         store = self._session_store
         if store is None:
@@ -477,7 +478,15 @@ class Gateway:
         except Exception:
             return None
         agent_cfg = self.config.agents.get(getattr(session, "agent", None))
-        sb = getattr(agent_cfg, "sandbox", None)
+        # Prefer an inherited override stamped on the session (a sandboxed parent's
+        # policy) over the target agent's own config, mirroring the chokepoint - else
+        # a terminal opened for a sandboxed child session whose agent has sandbox
+        # disabled would run on the host.
+        override = (getattr(session, "metadata", None) or {}).get("sandbox_override")
+        if isinstance(override, dict):
+            sb = SandboxSettings.model_validate(override)
+        else:
+            sb = getattr(agent_cfg, "sandbox", None)
         if sb is None or not sb.enabled:
             return None
         workspace = getattr(session, "workspace_override", None) or (agent_cfg.workspace_dir if agent_cfg else None)
