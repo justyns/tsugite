@@ -103,6 +103,13 @@ class TestReadOnlyKeys:
         with pytest.raises(ValueError, match="read-only"):
             store.delete_metadata(session_in_store.id, key)
 
+    def test_sandbox_override_is_read_only(self, store, session_in_store):
+        # A sandboxed agent must not be able to write its own sandbox policy via the
+        # session_metadata tool (which routes through set_metadata).
+        assert "sandbox_override" in READ_ONLY_METADATA_KEYS
+        with pytest.raises(ValueError, match="read-only"):
+            store.set_metadata(session_in_store.id, "sandbox_override", '{"enabled": false}')
+
     def test_bulk_with_read_only_key_rejects_all(self, store, session_in_store):
         with pytest.raises(ValueError, match="read-only"):
             store.set_metadata_bulk(

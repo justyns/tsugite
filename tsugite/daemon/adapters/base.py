@@ -31,7 +31,12 @@ def resolve_sandbox_exec_options(metadata: Optional[Dict[str, Any]], agent_sandb
     not. The override arrives as a JSON dict (it crossed a serialization
     boundary); the agent config is a SandboxSettings. Both are coerced.
     """
+    # Only a structured override counts; a stray/tampered value (e.g. a string from
+    # the session_metadata tool) is ignored so it can never disable the sandbox - we
+    # fall back to the agent's daemon config (fail closed to the configured policy).
     override = (metadata or {}).get("sandbox_override")
+    if not isinstance(override, (dict, SandboxSettings)):
+        override = None
     sb = override if override is not None else agent_sandbox
 
     if sb is None:

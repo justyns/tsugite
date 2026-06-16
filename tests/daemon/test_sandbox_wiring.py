@@ -59,6 +59,74 @@ class TestResolveSandboxExecOptions:
         assert opts["sandbox"] is True
         assert opts["allow_domains"] == ["y.com"]
 
+    def test_non_dict_override_ignored_falls_back_to_config(self):
+        # A tampered/stray override (e.g. a string written via session_metadata)
+        # must not disable the sandbox or crash - it's ignored, so the agent's
+        # configured policy wins (fail closed to the daemon config).
+        agent_sb = SandboxSettings(enabled=True, allow_domains=["github.com"])
+        opts = resolve_sandbox_exec_options({"sandbox_override": "off"}, agent_sb)
+        assert opts["sandbox"] is True
+        assert opts["allow_domains"] == ["github.com"]
+
+
+class TestResolveEffectiveSandbox:
+    """Tighten-only frontmatter overrides layered on the daemon ceiling."""
+
+    def _resolve(self, **kw):
+        from tsugite.agent_runner.runner import resolve_effective_sandbox
+
+        base = dict(
+            daemon_enabled=False,
+            daemon_domains=[],
+            daemon_no_network=False,
+            fm_network=None,
+            fm_sandbox=None,
+        )
+        base.update(kw)
+        return resolve_effective_sandbox(**base)
+
+    def test_no_config_no_frontmatter_disabled(self):
+        assert self._resolve() == (False, [], False)
+
+    def test_frontmatter_can_enable_when_daemon_off(self):
+        enabled, _, _ = self._resolve(fm_sandbox={"enabled": True})
+        assert enabled is True
+
+    def test_frontmatter_cannot_disable(self):
+        # daemon on + frontmatter enabled:false must stay enabled (no loosening).
+        enabled, _, _ = self._resolve(daemon_enabled=True, fm_sandbox={"enabled": False})
+        assert enabled is True
+
+    def test_frontmatter_can_force_no_network(self):
+        _, _, no_net = self._resolve(daemon_enabled=True, fm_sandbox={"no_network": True})
+        assert no_net is True
+
+    def test_frontmatter_narrows_domains_within_ceiling(self):
+        _, domains, _ = self._resolve(
+            daemon_enabled=True,
+            daemon_domains=["github.com", "pypi.org"],
+            fm_sandbox={"allow_domains": ["github.com"]},
+        )
+        assert domains == ["github.com"]
+
+    def test_empty_ceiling_means_frontmatter_caps_from_all(self):
+        _, domains, _ = self._resolve(daemon_enabled=True, fm_network={"domains": ["github.com"]})
+        assert domains == ["github.com"]
+
+    def test_cannot_widen_beyond_ceiling(self):
+        # daemon allows only github; frontmatter asking for pypi can't add it.
+        _, domains, no_net = self._resolve(
+            daemon_enabled=True, daemon_domains=["github.com"], fm_network={"domains": ["pypi.org"]}
+        )
+        assert "pypi.org" not in domains
+        # Nothing in-ceiling remained -> no network granted (not all-allowed).
+        assert domains == []
+        assert no_net is True
+
+    def test_no_frontmatter_leaves_daemon_domains(self):
+        _, domains, _ = self._resolve(daemon_enabled=True, daemon_domains=["github.com"])
+        assert domains == ["github.com"]
+
 
 class TestResolveWorkspaceDir:
     def test_workspace_object_wins(self):

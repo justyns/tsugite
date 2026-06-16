@@ -534,23 +534,29 @@ async def _execute_agent_with_prompt(
 
     state_path = _resolve_state_path(continue_conversation_id)
 
-    if exec_options.sandbox:
+    # The daemon config (exec_options) is the ceiling; the agent's frontmatter may
+    # only tighten it (opt in, force no_network, narrow domains), never loosen.
+    sandbox_on, allowed_domains, sandbox_no_network = resolve_effective_sandbox(
+        daemon_enabled=exec_options.sandbox,
+        daemon_domains=list(exec_options.allow_domains),
+        daemon_no_network=exec_options.no_network,
+        fm_network=agent_config.network,
+        fm_sandbox=getattr(agent_config, "sandbox", None),
+    )
+
+    if sandbox_on:
         from tsugite.core.sandbox import BubblewrapSandbox, SandboxConfig
         from tsugite.core.subprocess_executor import SubprocessExecutor
 
         if not BubblewrapSandbox.check_available():
             raise RuntimeError("bwrap not found. Install bubblewrap or use --no-sandbox.")
 
-        allowed_domains = list(exec_options.allow_domains)
-        if agent_config.network:
-            allowed_domains += agent_config.network.get("domains", [])
-
         # The effective policy. SandboxConfig (for the executor's bwrap) is derived
         # from it so the two never drift; the context is also published below so
         # host-exec/spawn tools running in the parent inherit the same isolation.
         sandbox_ctx = SandboxContext(
             allow_domains=allowed_domains,
-            no_network=exec_options.no_network,
+            no_network=sandbox_no_network,
             extra_ro_binds=list(exec_options.extra_ro_binds),
             extra_rw_binds=list(exec_options.extra_rw_binds),
             workspace_dir=workspace_dir,
@@ -776,6 +782,46 @@ async def _execute_agent_with_prompt(
             # Wait for all tasks to be cancelled
             if pending_tasks:
                 await asyncio.gather(*pending_tasks, return_exceptions=True)
+
+
+def resolve_effective_sandbox(
+    *,
+    daemon_enabled: bool,
+    daemon_domains: list,
+    daemon_no_network: bool,
+    fm_network: Optional[dict],
+    fm_sandbox: Optional[dict],
+) -> tuple[bool, list, bool]:
+    """Combine the daemon sandbox policy with tighten-only frontmatter overrides.
+
+    The daemon config (or CLI flags) is the ceiling. An agent's frontmatter may make
+    itself MORE restricted - opt into the sandbox, force `no_network`, or narrow the
+    domain allowlist - but never less: it cannot disable the sandbox or reach a
+    domain the daemon didn't allow.
+
+    Returns (enabled, allow_domains, no_network).
+    """
+    fm_network = fm_network or {}
+    fm_sandbox = fm_sandbox or {}
+
+    enabled = bool(daemon_enabled) or bool(fm_sandbox.get("enabled"))
+    no_network = bool(daemon_no_network) or bool(fm_sandbox.get("no_network"))
+
+    # Domains the agent declares (network hints + an explicit cap list), capped to
+    # the daemon ceiling. An empty ceiling means "all", so the agent's declared set
+    # becomes the allowlist (narrowing from all to that set).
+    desired = set(fm_network.get("domains") or []) | set(fm_sandbox.get("allow_domains") or [])
+    base = list(daemon_domains or [])
+    if desired:
+        effective = [d for d in base if d in desired] if base else sorted(desired)
+        if not effective:
+            # The agent asked only for domains outside the ceiling -> grant none.
+            no_network = True
+        allow_domains = effective
+    else:
+        allow_domains = base
+
+    return enabled, allow_domains, no_network
 
 
 def _resolve_workspace_dir(workspace: Optional[Any], path_context: Optional[Any]) -> Optional[Path]:

@@ -105,6 +105,10 @@ class AgentConfig(BaseModel):
     visibility: str = "public"  # Agent visibility: public, private, internal
     spawnable: bool = True  # Whether this agent can be spawned by other agents
     network: Optional[Dict[str, Any]] = None  # Network hints for sandbox proxy allowlist
+    # Tighten-only sandbox self-restriction: {enabled, no_network, allow_domains}.
+    # Can opt into the sandbox, force no network, or narrow the domain allowlist;
+    # it can never disable the sandbox or widen network beyond the daemon ceiling.
+    sandbox: Optional[Dict[str, Any]] = None
     allowed_secrets: List[str] = Field(default_factory=list)  # Per-agent secret allowlist (empty = all allowed)
     run_if: Optional[str] = Field(
         default=None,

@@ -172,6 +172,27 @@ The scheduling tools (`schedule_create`, `background_task`,
 persistent or detached host execution that outlives the sandboxed turn; run those
 agents unsandboxed if they need to schedule.
 
+### The daemon config is the ceiling
+
+Whether an agent is sandboxed (and how) is set in `daemon.yaml` by the operator —
+**an agent can't disable or loosen its own sandbox.** Agent code runs in the bwrap
+child and can't reach the policy, there's no "disable" tool, and the inheritance
+metadata key (`sandbox_override`) is read-only.
+
+An agent *can* make itself **more** restricted via its frontmatter (tighten-only):
+
+```yaml
+sandbox:
+  enabled: true                 # opt in even if the daemon left it off
+  no_network: true              # force no network
+  allow_domains: ["github.com"] # narrow to a subset of the daemon's allowlist
+```
+
+These can only tighten: `enabled`/`no_network` can flip on but not off, and
+`allow_domains` (plus `network.domains`) is capped by the daemon allowlist — an agent
+can never reach a domain the daemon didn't allow (asking only for out-of-ceiling
+domains yields no network).
+
 Notes:
 - Linux-only and requires `bwrap` on the host (user-namespace support). If an agent
   has `sandbox.enabled` but `bwrap` is missing, the daemon **refuses to start** (fail
@@ -179,8 +200,6 @@ Notes:
 - The shipped Docker image does not include bubblewrap, and unprivileged containers
   usually can't use user namespaces - daemon sandboxing targets a bare-metal /
   privileged host.
-- Agent frontmatter `network: {domains: [...]}` is merged into the agent's
-  `allow_domains` when sandboxed.
 
 ## Config and Data Directories
 

@@ -135,6 +135,11 @@ READ_ONLY_METADATA_KEYS = frozenset(
         "parent_session_id",
         "created_at",
         "started_at",
+        # Sandbox inheritance policy. Stamped only by spawn code (Session
+        # construction); never writable via the agent-facing session_metadata tool,
+        # so a sandboxed agent can't tamper with its own / a child's isolation. It's
+        # in COMPACTION_PRESERVED via this set, so it also survives compaction.
+        "sandbox_override",
     }
 )
 
