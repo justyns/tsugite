@@ -20,16 +20,19 @@ from tsugite.renderer import AgentRenderer  # noqa: E402
 from tsugite.utils import is_interactive  # noqa: E402
 
 from .helpers import (  # noqa: E402
+    SandboxContext,
     _stderr_console,
     clear_allowed_agents,
     clear_current_agent,
     clear_multistep_ui_context,
+    clear_sandbox_context,
     get_display_console,
     get_ui_handler,
     print_step_progress,
     set_allowed_secrets,
     set_current_agent,
     set_multistep_ui_context,
+    set_sandbox_context,
 )
 from .metrics import StepMetrics, display_step_metrics  # noqa: E402
 from .models import AgentExecutionResult  # noqa: E402
@@ -527,7 +530,7 @@ async def _execute_agent_with_prompt(
             final_model_kwargs["reasoning_effort"] = resolved_effort
 
     # Create executor with workspace directory and event bus
-    workspace_dir = workspace.path if workspace else None
+    workspace_dir = _resolve_workspace_dir(workspace, path_context)
 
     state_path = _resolve_state_path(continue_conversation_id)
 
@@ -542,9 +545,21 @@ async def _execute_agent_with_prompt(
         if agent_config.network:
             allowed_domains += agent_config.network.get("domains", [])
 
-        sandbox_config = SandboxConfig(
-            allowed_domains=allowed_domains,
+        # The effective policy. SandboxConfig (for the executor's bwrap) is derived
+        # from it so the two never drift; the context is also published below so
+        # host-exec/spawn tools running in the parent inherit the same isolation.
+        sandbox_ctx = SandboxContext(
+            allow_domains=allowed_domains,
             no_network=exec_options.no_network,
+            extra_ro_binds=list(exec_options.extra_ro_binds),
+            extra_rw_binds=list(exec_options.extra_rw_binds),
+            workspace_dir=workspace_dir,
+        )
+        sandbox_config = SandboxConfig(
+            allowed_domains=sandbox_ctx.allow_domains,
+            no_network=sandbox_ctx.no_network,
+            extra_ro_binds=sandbox_ctx.extra_ro_binds,
+            extra_rw_binds=sandbox_ctx.extra_rw_binds,
         )
         executor = SubprocessExecutor(
             workspace_dir=workspace_dir,
@@ -554,6 +569,8 @@ async def _execute_agent_with_prompt(
             state_path=state_path,
             session_id=continue_conversation_id,
         )
+        # Presence of the context == "this agent is sandboxed".
+        set_sandbox_context(sandbox_ctx)
     else:
         executor = LocalExecutor(
             workspace_dir=workspace_dir,
@@ -562,6 +579,7 @@ async def _execute_agent_with_prompt(
             state_path=state_path,
             session_id=continue_conversation_id,
         )
+        set_sandbox_context(None)
 
     # Inject variables into executor (for multi-step agents)
     if injectable_vars:
@@ -728,6 +746,11 @@ async def _execute_agent_with_prompt(
         else:
             raise RuntimeError(f"Agent execution failed: {e}")
     finally:
+        # Drop the sandbox policy from this thread so a later run on the same
+        # pooled thread (daemon asyncio.to_thread) can't read a stale context
+        # before it sets its own.
+        clear_sandbox_context()
+
         # Clean up subprocess executor temp files
         if hasattr(executor, "cleanup"):
             try:
@@ -753,6 +776,21 @@ async def _execute_agent_with_prompt(
             # Wait for all tasks to be cancelled
             if pending_tasks:
                 await asyncio.gather(*pending_tasks, return_exceptions=True)
+
+
+def _resolve_workspace_dir(workspace: Optional[Any], path_context: Optional[Any]) -> Optional[Path]:
+    """Resolve the executor's workspace directory.
+
+    Prefer an explicit Workspace object (CLI workspace runs); otherwise fall back
+    to the PathContext's workspace_dir. The daemon passes only a path_context (no
+    Workspace), so without this fallback the sandbox would bind/chdir the daemon's
+    CWD instead of the agent's workspace (or job worktree).
+    """
+    if workspace:
+        return workspace.path
+    if path_context and getattr(path_context, "workspace_dir", None):
+        return path_context.workspace_dir
+    return None
 
 
 def run_agent(

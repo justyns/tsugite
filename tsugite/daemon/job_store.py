@@ -128,6 +128,9 @@ class Job:
     # Accumulates across retry attempts (the orchestrator replaces only the current
     # attempt's entries when the verifier responds). None when no verifier has run.
     ac_results: Optional[list] = None
+    # Inherited sandbox policy (a SandboxSettings-shaped dict) stamped when a
+    # sandboxed agent spawns the job, so worker + verifier sessions stay sandboxed.
+    sandbox_override: Optional[dict] = None
 
     def __post_init__(self):
         if not self.id:

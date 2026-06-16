@@ -3,16 +3,23 @@
 from tsugite.agent_runner.exec_directives import execute_exec_directives  # noqa: F401
 from tsugite.agent_runner.exec_runner import ExecBlockResult, run_python_block  # noqa: F401
 from tsugite.agent_runner.helpers import (  # noqa: F401
+    SandboxContext,
+    SandboxToolDeniedError,
     clear_allowed_agents,
     clear_current_agent,
+    clear_sandbox_context,
+    enforce_sandbox,
     get_allowed_agents,
     get_allowed_secrets,
     get_current_agent,
     get_display_console,
+    get_sandbox_context,
     get_ui_handler,
+    sandbox_context_to_override,
     set_allowed_agents,
     set_allowed_secrets,
     set_current_agent,
+    set_sandbox_context,
 )
 from tsugite.agent_runner.metrics import StepMetrics, display_step_metrics  # noqa: F401
 from tsugite.agent_runner.models import AgentExecutionResult  # noqa: F401
@@ -57,4 +64,11 @@ __all__ = [
     "set_allowed_secrets",
     "get_display_console",
     "get_ui_handler",
+    "SandboxContext",
+    "SandboxToolDeniedError",
+    "get_sandbox_context",
+    "set_sandbox_context",
+    "clear_sandbox_context",
+    "enforce_sandbox",
+    "sandbox_context_to_override",
 ]

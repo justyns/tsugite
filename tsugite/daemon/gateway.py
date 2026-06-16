@@ -117,6 +117,23 @@ async def _send_webhook(config, message: str) -> dict:
     return {"status": "sent", "status_code": resp.status_code}
 
 
+def check_sandbox_prerequisites(config: DaemonConfig) -> None:
+    """Fail closed if any agent enabled sandboxing but bwrap is unavailable.
+
+    Run once at daemon startup so a misconfigured host surfaces immediately
+    instead of every sandboxed turn failing (or, worse, running unsandboxed).
+    """
+    from tsugite.core.sandbox import BubblewrapSandbox
+
+    enabled = sorted(name for name, agent in config.agents.items() if agent.sandbox and agent.sandbox.enabled)
+    if enabled and not BubblewrapSandbox.check_available():
+        raise RuntimeError(
+            f"Sandbox enabled for agents {enabled} but 'bwrap' was not found on PATH. "
+            "Install bubblewrap, or set sandbox.enabled: false for these agents. "
+            "(Sandboxing is Linux-only and needs user-namespace support.)"
+        )
+
+
 class Gateway:
     """Main daemon gateway routing messages between platform adapters and agents."""
 
@@ -143,6 +160,10 @@ class Gateway:
         from tsugite.tools import set_daemon_mode
 
         set_daemon_mode(True)
+
+        # Fail closed: refuse to start if an agent opted into sandboxing but the
+        # host can't provide it, rather than silently running its code unsandboxed.
+        check_sandbox_prerequisites(self.config)
 
         loop = asyncio.get_running_loop()
 
@@ -363,6 +384,12 @@ class Gateway:
 
             set_terminal_runtime(self._pty_manager, self._terminal_store, terminal_state_change_cb)
 
+            # Let terminals opened outside an agent turn (/run, the HTTP API)
+            # inherit their parent session's agent sandbox config.
+            from tsugite.daemon.terminal_runtime import set_session_sandbox_resolver
+
+            set_session_sandbox_resolver(self._resolve_session_sandbox)
+
             self._job_store = JobStore(self.config.state_dir / "jobs.json")
             self._jobs_orchestrator = JobsOrchestrator(
                 self._job_store, self._session_runner, event_bus=event_bus, terminal_store=self._terminal_store
@@ -432,6 +459,35 @@ class Gateway:
             logger.info("Shutting down...")
         finally:
             await self._shutdown()
+
+    def _resolve_session_sandbox(self, session_id: str):
+        """Resolve a session's agent sandbox config into a SandboxContext, or None.
+
+        Used by the terminal runtime so a PTY opened for a session (via /run or the
+        HTTP API, outside an agent turn) is sandboxed whenever that session's agent
+        is configured for it.
+        """
+        from tsugite.agent_runner.helpers import SandboxContext
+
+        store = self._session_store
+        if store is None:
+            return None
+        try:
+            session = store.get_session(session_id)
+        except Exception:
+            return None
+        agent_cfg = self.config.agents.get(getattr(session, "agent", None))
+        sb = getattr(agent_cfg, "sandbox", None)
+        if sb is None or not sb.enabled:
+            return None
+        workspace = getattr(session, "workspace_override", None) or (agent_cfg.workspace_dir if agent_cfg else None)
+        return SandboxContext(
+            allow_domains=list(sb.allow_domains),
+            no_network=sb.no_network,
+            extra_ro_binds=list(sb.extra_ro_binds),
+            extra_rw_binds=list(sb.extra_rw_binds),
+            workspace_dir=Path(workspace) if workspace else None,
+        )
 
     async def _shutdown(self):
         """Graceful shutdown of all adapters."""

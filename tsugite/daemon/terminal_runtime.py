@@ -38,6 +38,67 @@ def parse_command(cmd: str) -> list[str]:
     return ["/bin/sh", "-c", cmd]
 
 
+# Resolver wired by the gateway: session_id -> Optional[SandboxContext], so a
+# terminal opened outside an agent turn (the /run command, the HTTP API) still
+# inherits its parent session's agent sandbox config.
+_session_sandbox_resolver = None
+
+
+def set_session_sandbox_resolver(fn) -> None:
+    """Wire the session -> sandbox-policy resolver (called from the gateway)."""
+    global _session_sandbox_resolver
+    _session_sandbox_resolver = fn
+
+
+def resolve_terminal_sandbox(parent_session_id: Optional[str]):
+    """Sandbox policy for a terminal: the running agent's thread-local context if
+    present (agent-turn pty_create), else the parent session's agent config
+    (terminals opened via /run or the API). None when nothing is sandboxed."""
+    from tsugite.agent_runner import get_sandbox_context
+
+    ctx = get_sandbox_context()
+    if ctx is not None:
+        return ctx
+    if _session_sandbox_resolver is not None and parent_session_id:
+        return _session_sandbox_resolver(parent_session_id)
+    return None
+
+
+def maybe_sandbox_argv(argv: list[str], cwd: Optional[str], sandbox_ctx=None) -> list[str]:
+    """Wrap a PTY command in bwrap when its agent runs sandboxed.
+
+    PTYs run in the daemon (parent) process, so without this a sandboxed agent
+    could use pty_create to execute outside the sandbox. Sandboxed PTYs are
+    filesystem-isolated to the workspace and get no network (no filtering proxy
+    is wired for the long-lived PTY path) - the agent's own code/shell still
+    reach the network through the executor's filtered proxy.
+
+    Returns argv unchanged when sandbox_ctx is None (not sandboxed). Fails closed
+    if a policy is active but no workspace dir is known.
+    """
+    if sandbox_ctx is None:
+        return argv
+
+    from pathlib import Path
+
+    from tsugite.core.sandbox import BubblewrapSandbox, SandboxConfig
+
+    workspace_dir = sandbox_ctx.workspace_dir or (Path(cwd) if cwd else None)
+    if workspace_dir is None:
+        raise RuntimeError("Cannot sandbox PTY: no workspace directory in the active sandbox policy")
+
+    sandbox = BubblewrapSandbox(
+        config=SandboxConfig(
+            no_network=True,
+            extra_ro_binds=list(sandbox_ctx.extra_ro_binds),
+            extra_rw_binds=list(sandbox_ctx.extra_rw_binds),
+        ),
+        workspace_dir=Path(workspace_dir),
+        state_dir=None,
+    )
+    return sandbox.build_command(argv)
+
+
 def spawn_terminal(
     *,
     store: TerminalSessionStore,
@@ -70,6 +131,7 @@ def spawn_terminal(
 
     try:
         argv = parse_command(cmd)
+        argv = maybe_sandbox_argv(argv, cwd, resolve_terminal_sandbox(parent_session_id))
         proc = manager.spawn(session.id, argv, cwd=cwd, env=env, buffer_cap=buffer_cap)
     except Exception as e:
         logger.exception("Failed to spawn PTY for terminal '%s': %s", session.id, e)

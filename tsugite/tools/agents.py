@@ -12,6 +12,25 @@ def _effective_cwd() -> Path:
     return get_workspace_dir() or Path.cwd()
 
 
+def _build_subagent_cmd(agent_file: Path, model_override: Optional[str], sandbox_ctx: Optional[Any]) -> List[str]:
+    """Build the `tsu run --subagent-mode` command, propagating the sandbox policy.
+
+    When the spawning agent runs sandboxed (sandbox_ctx is set), the child gets
+    `--sandbox` plus the same network policy so it re-enters the sandbox branch
+    with its own bwrap - inheritance, so spawn_agent can't be used to escape.
+    """
+    cmd = ["uv", "run", "tsu", "run", str(agent_file), "--subagent-mode"]
+    if model_override:
+        cmd.extend(["--model", model_override])
+    if sandbox_ctx is not None:
+        cmd.append("--sandbox")
+        if sandbox_ctx.no_network:
+            cmd.append("--no-network")
+        for domain in sandbox_ctx.allow_domains:
+            cmd.extend(["--allow-domain", domain])
+    return cmd
+
+
 def resolve_agent_path(agent_path: str) -> Optional[Path]:
     """Resolve an agent reference (path or name) to a file. Returns None if missing.
 
@@ -53,7 +72,7 @@ def spawn_agent(
     import json
     import subprocess
 
-    from ..agent_runner import get_allowed_agents, get_current_agent
+    from ..agent_runner import get_allowed_agents, get_current_agent, get_sandbox_context
 
     agent_file = resolve_agent_path(agent_path)
     if agent_file is None:
@@ -120,10 +139,9 @@ def spawn_agent(
             "Only use dicts, lists, strings, numbers, bools, and None."
         ) from e
 
-    # Build command
-    cmd = ["uv", "run", "tsu", "run", str(agent_file), "--subagent-mode"]
-    if model_override:
-        cmd.extend(["--model", model_override])
+    # Build command. Inherit the sandbox: if this (parent) agent runs sandboxed,
+    # the subagent must too, otherwise spawn_agent is a trivial escape.
+    cmd = _build_subagent_cmd(agent_file, model_override, get_sandbox_context())
 
     # Set up progress spinner
     import queue

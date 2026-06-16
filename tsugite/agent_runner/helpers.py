@@ -1,6 +1,8 @@
 """Shared helper functions for agent execution."""
 
 import threading
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, List, Optional
 
 from rich.console import Console
@@ -12,6 +14,89 @@ _stderr_console = get_stderr_console()
 
 # Thread-local storage for tracking currently executing agent
 _current_agent_context = threading.local()
+
+# Thread-local storage for the active sandbox policy. Set per-run (in the same
+# thread as the agent loop and its parent-only tool dispatch) when an agent runs
+# sandboxed; read by host-exec/spawn tools to inherit the sandbox or be denied.
+# Thread-local (like _current_agent_context) so concurrent daemon sessions don't
+# clobber each other.
+_sandbox_context = threading.local()
+
+
+@dataclass
+class SandboxContext:
+    """Effective sandbox policy for the currently executing agent.
+
+    Presence of a SandboxContext means the agent is running sandboxed; tools read
+    it to propagate the same isolation to anything they spawn.
+    """
+
+    allow_domains: List[str] = field(default_factory=list)
+    no_network: bool = False
+    extra_ro_binds: List[Path] = field(default_factory=list)
+    extra_rw_binds: List[Path] = field(default_factory=list)
+    workspace_dir: Optional[Path] = None
+
+
+class SandboxToolDeniedError(RuntimeError):
+    """Raised when a host-exec tool is invoked under sandboxing without coverage."""
+
+
+def set_sandbox_context(ctx: Optional["SandboxContext"]) -> None:
+    """Set (or clear, with None) the active sandbox policy for this thread."""
+    _sandbox_context.value = ctx
+
+
+def get_sandbox_context() -> Optional["SandboxContext"]:
+    """Return the active sandbox policy, or None when not running sandboxed."""
+    return getattr(_sandbox_context, "value", None)
+
+
+def clear_sandbox_context() -> None:
+    """Clear the active sandbox policy from thread-local storage."""
+    if hasattr(_sandbox_context, "value"):
+        delattr(_sandbox_context, "value")
+
+
+def sandbox_context_to_override() -> Optional[dict]:
+    """Serialize the active sandbox policy as a metadata override dict, or None.
+
+    Spawn tools stamp this onto the records they create (sessions, jobs,
+    schedules) so the spawned daemon run inherits the same sandbox when it later
+    reaches the adapter chokepoint. The shape matches SandboxSettings so it can
+    be validated back there; paths are stringified to survive JSON metadata.
+    """
+    ctx = get_sandbox_context()
+    if ctx is None:
+        return None
+    return {
+        "enabled": True,
+        "no_network": ctx.no_network,
+        "allow_domains": list(ctx.allow_domains),
+        "extra_ro_binds": [str(p) for p in ctx.extra_ro_binds],
+        "extra_rw_binds": [str(p) for p in ctx.extra_rw_binds],
+    }
+
+
+def enforce_sandbox(tool_name: str, *, covered: bool) -> None:
+    """Fail-closed backstop for the zero-escape invariant.
+
+    When an agent runs sandboxed, a host-exec / spawn tool whose path does NOT
+    route execution through the sandbox (or inherit it) must be refused, so a
+    sandboxed agent can never reach the host via an unsandboxed tool.
+
+    Args:
+        tool_name: Tool being invoked (for the error message).
+        covered: True when this tool's path keeps execution inside the sandbox
+            (wraps in bwrap or stamps inheritance); False means it would escape.
+    """
+    if not covered and get_sandbox_context() is not None:
+        raise SandboxToolDeniedError(
+            f"{tool_name}() is not available while this agent runs sandboxed: "
+            "it would execute code outside the sandbox. Disable the agent's "
+            "sandbox to use it."
+        )
+
 
 # Module-level storage for allowed agents (single-threaded CLI execution)
 # Subagents run in separate processes, so this doesn't need to be thread-local

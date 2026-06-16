@@ -157,6 +157,10 @@ class SessionRunner:
             metadata["agent_file_override"] = str(adapter._resolve_agent_path(session.agent_file) or session.agent_file)
         if session.workspace_override:
             metadata["workspace_override"] = session.workspace_override
+        # Carry an inherited sandbox policy (stamped by a sandboxed spawner) into
+        # the chokepoint so the spawned run stays sandboxed.
+        if session.metadata and session.metadata.get("sandbox_override"):
+            metadata["sandbox_override"] = session.metadata["sandbox_override"]
 
         channel_context = ChannelContext(
             source="session",

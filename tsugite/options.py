@@ -34,6 +34,8 @@ class ExecutionOptions:
     sandbox: bool = False
     allow_domains: List[str] = field(default_factory=list)
     no_network: bool = False
+    extra_ro_binds: List[Path] = field(default_factory=list)
+    extra_rw_binds: List[Path] = field(default_factory=list)
 
     @classmethod
     def from_cli(

@@ -243,7 +243,10 @@ class SubprocessExecutor:
                 continue
 
             registry_info = registry.get(t.name)
-            if registry_info and registry_info.parent_only:
+            if registry_info and (registry_info.parent_only or registry_info.require_daemon):
+                # require_daemon tools need the daemon runtime (pty manager, jobs
+                # orchestrator, scheduler, session store) which only exists in the
+                # parent process — so they must run there, not in the sandboxed child.
                 self._parent_only_tools.add(t.name)
             elif registry_info:
                 mod = registry_info.func.__module__

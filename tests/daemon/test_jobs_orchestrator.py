@@ -1010,7 +1010,7 @@ async def test_no_verifier_spawn_when_timeout_finalizes_during_predicate_eval(st
     # One predicate (drives the await) + one prose AC (would trigger a verifier spawn).
     job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=["cmd:true", "prose criterion"])
 
-    def eval_then_timeout(predicate, *, cwd, ac_index, ac_text, attempt):
+    def eval_then_timeout(predicate, *, cwd, ac_index, ac_text, attempt, sandbox_override=None):
         # Simulate the timeout firing mid-await: finalize the Job to STUCK.
         orchestrator._on_timeout(job.id)
         return {"ac_index": ac_index, "ac_text": ac_text, "pass": True, "reason": "ok", "attempt": attempt}

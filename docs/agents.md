@@ -353,4 +353,4 @@ network:
     - "*.openai.com"
 ```
 
-These are added to the sandbox proxy's allowlist alongside any `--allow-domain` flags from the CLI.
+These are added to the sandbox proxy's allowlist alongside any `--allow-domain` flags from the CLI. In daemon mode they merge with the agent's `sandbox.allow_domains` from `daemon.yaml` when that agent runs sandboxed (see the Daemon sandbox section of the README).

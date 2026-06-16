@@ -169,3 +169,78 @@ class TestSandboxedExecution:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
         assert result.returncode == 0
         assert "hello from sandbox" in result.stdout
+
+    @pytest.mark.asyncio
+    async def test_sandboxed_executor_binds_workspace_and_isolates_fs(self, tmp_path, shell_tools):
+        """End-to-end: a sandboxed SubprocessExecutor (the daemon's executor when
+        sandbox is enabled) runs the shell `run()` tool inside the workspace and
+        cannot read outside it. Guards both the workspace-bind fix and the fact
+        that run() is sandboxed for free by executing inside the child."""
+        from tsugite.core.subprocess_executor import SubprocessExecutor
+        from tsugite.core.tools import create_tool_from_tsugite
+
+        (tmp_path / "inside.txt").write_text("hi")
+        executor = SubprocessExecutor(workspace_dir=tmp_path, sandbox_config=SandboxConfig(no_network=True))
+        executor.set_tools([create_tool_from_tsugite("run")])
+        try:
+            pwd = await executor.execute("print(run(command='pwd'))")
+            assert pwd.error is None, pwd.error
+            assert str(tmp_path) in pwd.output
+
+            listing = await executor.execute("print(run(command='ls'))")
+            assert "inside.txt" in listing.output
+
+            # /etc/shadow is not bound into the sandbox, so it is unreadable.
+            shadow = await executor.execute("print(run(command='cat /etc/shadow 2>&1 || true'))")
+            assert "inside.txt" not in shadow.output
+            assert any(s in shadow.output for s in ("No such file", "Permission denied", "can't open"))
+        finally:
+            executor.cleanup()
+
+    def test_sandboxed_job_predicate_runs_in_bwrap(self, tmp_path):
+        """A sandboxed job's shell predicate runs inside bwrap: it sees the
+        worktree (cwd) but cannot read outside it."""
+        from tsugite.daemon.jobs_orchestrator import _evaluate_predicate
+
+        (tmp_path / "inside.txt").write_text("x")
+        override = {
+            "enabled": True,
+            "no_network": True,
+            "allow_domains": [],
+            "extra_ro_binds": [],
+            "extra_rw_binds": [],
+        }
+
+        ok = _evaluate_predicate(
+            {"kind": "cmd", "cmd": "test -f inside.txt"},
+            cwd=str(tmp_path),
+            ac_index=0,
+            ac_text="file present",
+            attempt=1,
+            sandbox_override=override,
+        )
+        assert ok["pass"] is True
+
+        # /etc/shadow is not bound into the sandbox -> cat fails -> non-zero exit.
+        escaped = _evaluate_predicate(
+            {"kind": "cmd", "cmd": "cat /etc/shadow"},
+            cwd=str(tmp_path),
+            ac_index=1,
+            ac_text="cannot read host",
+            attempt=1,
+            sandbox_override=override,
+        )
+        assert escaped["pass"] is False
+
+    def test_unsandboxed_job_predicate_runs_via_shell(self, tmp_path):
+        from tsugite.daemon.jobs_orchestrator import _evaluate_predicate
+
+        (tmp_path / "inside.txt").write_text("x")
+        ok = _evaluate_predicate(
+            {"kind": "cmd", "cmd": "test -f inside.txt"},
+            cwd=str(tmp_path),
+            ac_index=0,
+            ac_text="file present",
+            attempt=1,
+        )
+        assert ok["pass"] is True

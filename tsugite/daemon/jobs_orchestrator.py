@@ -41,6 +41,14 @@ _PREDICATE_TIMEOUT_SECONDS = 30
 _PREDICATE_STDERR_TRUNCATE = 100
 
 
+def _with_sandbox(job: Job, metadata: dict) -> dict:
+    """Carry the job's inherited sandbox policy onto a spawned session's metadata
+    so worker/verifier runs stay sandboxed (resolved at the adapter chokepoint)."""
+    if job.sandbox_override:
+        return {**metadata, "sandbox_override": job.sandbox_override}
+    return metadata
+
+
 class JobsOrchestrator:
     """Drives Job state in response to worker/verifier session completions."""
 
@@ -120,6 +128,7 @@ class JobsOrchestrator:
         spawned_by: str = "user-slash",
         max_attempts: Optional[int] = None,
         notify_when: Optional[str] = None,
+        sandbox_override: Optional[dict] = None,
     ) -> tuple[Job, Session]:
         """Create a Job record + spawn the worker session in one step.
 
@@ -131,6 +140,15 @@ class JobsOrchestrator:
         max_attempts: verifier-loop cap. Defaults to 3 when omitted.
         """
         worker_agent_file = agent or WORKER_AGENT
+
+        # If the spawner didn't supply an inherited policy (the /job slash command
+        # path, vs the spawn_job tool from a sandboxed agent), fall back to the
+        # parent agent's own sandbox config so jobs are sandboxed whenever that
+        # agent is - the worker/verifier sessions and predicate evaluation all key
+        # off job.sandbox_override.
+        if sandbox_override is None:
+            sandbox_override = self._resolve_parent_sandbox_override(parent_session_id)
+
         job_kwargs: dict = {}
         if max_attempts is not None:
             job_kwargs["max_attempts"] = max_attempts
@@ -151,6 +169,7 @@ class JobsOrchestrator:
                 agent=worker_agent_file,
                 timeout_minutes=timeout_minutes,
                 spawned_by=spawned_by,
+                sandbox_override=sandbox_override,
                 **job_kwargs,
             )
         )
@@ -197,7 +216,7 @@ class JobsOrchestrator:
             agent_file=job.agent or WORKER_AGENT,
             model=job.model,
             workspace_override=workspace,
-            metadata={"job_id": job.id, **(extra_metadata or {})},
+            metadata=_with_sandbox(job, {"job_id": job.id, **(extra_metadata or {})}),
         )
         return self._runner.start_session(session)
 
@@ -519,6 +538,7 @@ class JobsOrchestrator:
                         ac_index=p["ac_index"],
                         ac_text=p["ac_text"],
                         attempt=attempt_num,
+                        sandbox_override=job.sandbox_override,
                     )
                     for p in predicates
                 ]
@@ -579,7 +599,7 @@ class JobsOrchestrator:
             # Same worktree as the worker - the verifier inspects `git diff` /
             # files, which only exist there for repo jobs.
             workspace_override=job.worktree_path,
-            metadata={"job_id": job.id, "verifier_for": worker.id},
+            metadata=_with_sandbox(job, {"job_id": job.id, "verifier_for": worker.id}),
         )
         try:
             started_verifier = self._runner.start_session(verifier_session)
@@ -901,6 +921,26 @@ class JobsOrchestrator:
             return next(iter(adapters))
         return "default"
 
+    def _resolve_parent_sandbox_override(self, parent_session_id: str) -> Optional[dict]:
+        """Resolve the parent session's agent sandbox config as an override dict,
+        or None when that agent isn't sandboxed. Lets /job-created jobs inherit
+        the agent's sandbox even though there's no running-agent context."""
+        parent = self._get_parent_session(parent_session_id)
+        adapters = getattr(self._runner, "_adapters", {})
+        adapter = adapters.get(parent.agent) if parent is not None else None
+        if adapter is None and adapters:
+            adapter = next(iter(adapters.values()))
+        sb = getattr(getattr(adapter, "agent_config", None), "sandbox", None)
+        if sb is None or not sb.enabled:
+            return None
+        return {
+            "enabled": True,
+            "no_network": sb.no_network,
+            "allow_domains": list(sb.allow_domains),
+            "extra_ro_binds": [str(p) for p in sb.extra_ro_binds],
+            "extra_rw_binds": [str(p) for p in sb.extra_rw_binds],
+        }
+
     def _resolve_workspace_root(self, parent_session_id: str) -> Optional[Path]:
         """Workspace root a relative --repo is interpreted against: the parent
         session's workspace_override, else its adapter's configured workspace_dir.
@@ -1216,14 +1256,16 @@ def _evaluate_predicate(
     ac_index: int,
     ac_text: str,
     attempt: int,
+    sandbox_override: Optional[dict] = None,
 ) -> dict:
     """Run a predicate locally and return an ac_results entry.
 
-    Security note: `exit_code:` / `cmd:` predicates run with `shell=True` so
-    arbitrary command strings work the same way they would in a shell. This is
-    no broader an attack surface than the worker session itself, which already
-    runs arbitrary code; predicates were already part of the trusted AC list
-    that the agent / user passed to spawn_job.
+    `exit_code:` / `cmd:` predicates shell out. When the job is sandboxed
+    (sandbox_override set, resolved from the agent's config or an inheriting
+    parent), the command runs inside bubblewrap - filesystem-isolated to the
+    predicate cwd (the worktree) and with no network - so a sandboxed agent's
+    predicate ACs can't execute outside the sandbox. Otherwise they run with
+    `shell=True` against the worktree, same surface as the worker session.
     """
 
     def verdict(passed: bool, reason: str) -> dict:
@@ -1255,13 +1297,28 @@ def _evaluate_predicate(
                     cmd,
                 )
                 return verdict(False, "no working directory for command predicate (job has neither worktree nor repo)")
-            completed = subprocess.run(
-                cmd,
-                shell=True,
-                capture_output=True,
-                timeout=_PREDICATE_TIMEOUT_SECONDS,
-                cwd=cwd,
-            )
+            if sandbox_override:
+                from tsugite.core.sandbox import BubblewrapSandbox, SandboxConfig
+
+                bwrap = BubblewrapSandbox(
+                    config=SandboxConfig(
+                        no_network=True,
+                        extra_ro_binds=[Path(p) for p in sandbox_override.get("extra_ro_binds", [])],
+                        extra_rw_binds=[Path(p) for p in sandbox_override.get("extra_rw_binds", [])],
+                    ),
+                    workspace_dir=Path(cwd),
+                    state_dir=None,
+                )
+                run_cmd = bwrap.build_command(["sh", "-c", cmd])
+                completed = subprocess.run(run_cmd, capture_output=True, timeout=_PREDICATE_TIMEOUT_SECONDS, cwd=cwd)
+            else:
+                completed = subprocess.run(
+                    cmd,
+                    shell=True,
+                    capture_output=True,
+                    timeout=_PREDICATE_TIMEOUT_SECONDS,
+                    cwd=cwd,
+                )
             if completed.returncode == expected:
                 return verdict(True, f"exit code {completed.returncode}")
             stderr = (completed.stderr or b"").decode("utf-8", "replace").strip()

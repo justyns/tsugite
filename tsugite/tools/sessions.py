@@ -70,6 +70,15 @@ def start_session(
 
         agent = get_current_agent() or "default"
 
+    # Inherit the sandbox: a sandboxed agent's spawned session must stay
+    # sandboxed regardless of the target agent's own config.
+    from tsugite.agent_runner.helpers import sandbox_context_to_override
+
+    metadata = {}
+    sandbox_override = sandbox_context_to_override()
+    if sandbox_override is not None:
+        metadata["sandbox_override"] = sandbox_override
+
     session = Session(
         id=session_id or "",
         agent=agent,
@@ -78,6 +87,7 @@ def start_session(
         model=model,
         agent_file=agent_file,
         notify=notify or [],
+        metadata=metadata,
     )
     result = _call(_session_runner.start_session, session)
     return asdict(result)
@@ -210,6 +220,15 @@ def spawn_session(
     if parent_session_id is None:
         parent_session_id = get_current_session_id()
 
+    # Inherit the sandbox: a sandboxed agent's spawned session must stay sandboxed
+    # regardless of the target agent's own config.
+    from tsugite.agent_runner.helpers import sandbox_context_to_override
+
+    metadata = {}
+    sandbox_override = sandbox_context_to_override()
+    if sandbox_override is not None:
+        metadata["sandbox_override"] = sandbox_override
+
     session = Session(
         id=f"spawn-{name}" if name else "",
         agent=agent,
@@ -219,6 +238,7 @@ def spawn_session(
         agent_file=agent_file,
         parent_id=parent_session_id,
         notify=notify or [],
+        metadata=metadata,
     )
     result = _call(_session_runner.start_session, session)
     return asdict(result)

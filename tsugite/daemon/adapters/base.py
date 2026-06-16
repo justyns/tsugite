@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 
 from tsugite.agent_inheritance import find_agent_file
 from tsugite.agent_runner import run_agent
-from tsugite.daemon.config import AgentConfig
+from tsugite.daemon.config import AgentConfig, SandboxSettings
 from tsugite.daemon.session_store import METADATA_PRIMARY_FLAG, READ_ONLY_METADATA_KEYS, Session, SessionStore
 from tsugite.events.base import BaseEvent
 from tsugite.exceptions import AgentExecutionError, is_prompt_too_long_error
@@ -20,6 +20,32 @@ from tsugite.options import ExecutionOptions
 from tsugite.ui.jsonl import JSONLUIHandler
 
 logger = logging.getLogger(__name__)
+
+
+def resolve_sandbox_exec_options(metadata: Optional[Dict[str, Any]], agent_sandbox: Optional[Any]) -> Dict[str, Any]:
+    """Resolve sandbox-related ExecutionOptions kwargs for a daemon agent run.
+
+    Inheritance: a `sandbox_override` stamped into the message metadata by a
+    spawning sandboxed agent wins over the target agent's own config, so spawned
+    sessions/jobs/schedules stay sandboxed even when their configured agent is
+    not. The override arrives as a JSON dict (it crossed a serialization
+    boundary); the agent config is a SandboxSettings. Both are coerced.
+    """
+    override = (metadata or {}).get("sandbox_override")
+    sb = override if override is not None else agent_sandbox
+
+    if sb is None:
+        return {"sandbox": False, "allow_domains": [], "no_network": False, "extra_ro_binds": [], "extra_rw_binds": []}
+    if isinstance(sb, dict):
+        sb = SandboxSettings.model_validate(sb)
+
+    return {
+        "sandbox": bool(sb.enabled),
+        "allow_domains": list(sb.allow_domains),
+        "no_network": bool(sb.no_network),
+        "extra_ro_binds": list(sb.extra_ro_binds),
+        "extra_rw_binds": list(sb.extra_rw_binds),
+    }
 
 
 def _render_session_topic_lines(topic: Optional[str], indent: str = "") -> list[str]:
@@ -664,6 +690,7 @@ class BaseAdapter(ABC):
                     model_override=model_override,
                     max_turns_override=meta.get("max_turns_override") or self.agent_config.max_turns,
                     reasoning_effort_override=effort_override,
+                    **resolve_sandbox_exec_options(meta, self.agent_config.sandbox),
                 ),
                 path_context=path_context,
                 custom_logger=custom_logger,

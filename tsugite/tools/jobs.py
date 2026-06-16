@@ -74,6 +74,7 @@ def spawn_job(
     Returns:
         Dict with job_id, worker_session_id, parent_session_id, state.
     """
+    from tsugite.agent_runner.helpers import sandbox_context_to_override
     from tsugite.daemon.session_runner import get_current_session_id
 
     parent_session_id = get_current_session_id()
@@ -81,6 +82,10 @@ def spawn_job(
         raise RuntimeError("spawn_job requires a current session context")
     if _jobs_orchestrator is None:
         raise RuntimeError("Jobs orchestrator not initialised")
+
+    # Inherit the sandbox: worker + verifier sessions stay sandboxed if this agent
+    # is, and predicate ACs are evaluated inside bwrap by the orchestrator.
+    sandbox_override = sandbox_context_to_override()
 
     try:
         # Generous timeout: --repo provisioning runs `git worktree add`, which
@@ -97,6 +102,7 @@ def spawn_job(
             spawned_by="agent-tool",
             max_attempts=max_attempts,
             notify_when=notify_when,
+            sandbox_override=sandbox_override,
             timeout=180,
         )
     except concurrent.futures.TimeoutError:

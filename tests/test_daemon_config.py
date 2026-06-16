@@ -6,7 +6,20 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from tsugite.daemon.config import AgentConfig, DaemonConfig, DiscordBotConfig, load_daemon_config
+from tsugite.daemon.config import AgentConfig, DaemonConfig, DiscordBotConfig, SandboxSettings, load_daemon_config
+
+
+def _write_config(path: Path, data: dict) -> Path:
+    config_file = path / "daemon.yaml"
+    with open(config_file, "w") as f:
+        yaml.dump(data, f)
+    return config_file
+
+
+def _agent(tmp_path: Path, **extra) -> dict:
+    base = {"workspace_dir": str(tmp_path / "workspace"), "agent_file": "default"}
+    base.update(extra)
+    return base
 
 
 def test_agent_config():
@@ -205,3 +218,90 @@ def test_discord_bot_config_defaults():
     assert config.command_prefix == "!"  # default
     assert config.dm_policy == "allowlist"  # default
     assert config.allow_from == []  # default
+
+
+def test_sandbox_settings_defaults():
+    """SandboxSettings is disabled with no network restrictions by default."""
+    sb = SandboxSettings()
+    assert sb.enabled is False
+    assert sb.no_network is False
+    assert sb.allow_domains == []
+    assert sb.extra_ro_binds == []
+    assert sb.extra_rw_binds == []
+
+
+def test_agent_config_sandbox_defaults_none():
+    """An agent with no sandbox config resolves to None (treated as disabled)."""
+    config = AgentConfig(workspace_dir=Path("/tmp/workspace"), agent_file="default")
+    assert config.sandbox is None
+
+
+def test_sandbox_global_applies_to_all_agents(tmp_path):
+    """A global sandbox block is inherited by agents that omit their own."""
+    config_file = _write_config(
+        tmp_path,
+        {
+            "sandbox": {"enabled": True, "allow_domains": ["github.com"]},
+            "agents": {"a": _agent(tmp_path), "b": _agent(tmp_path)},
+        },
+    )
+    config = load_daemon_config(config_file)
+    for name in ("a", "b"):
+        assert config.agents[name].sandbox is not None
+        assert config.agents[name].sandbox.enabled is True
+        assert config.agents[name].sandbox.allow_domains == ["github.com"]
+
+
+def test_sandbox_per_agent_overrides_global(tmp_path):
+    """Per-agent enabled:false overrides global enabled:true; unset fields inherit."""
+    config_file = _write_config(
+        tmp_path,
+        {
+            "sandbox": {"enabled": True, "allow_domains": ["github.com"]},
+            "agents": {
+                "inherits": _agent(tmp_path),
+                "opted_out": _agent(tmp_path, sandbox={"enabled": False}),
+            },
+        },
+    )
+    config = load_daemon_config(config_file)
+    assert config.agents["inherits"].sandbox.enabled is True
+    assert config.agents["opted_out"].sandbox.enabled is False
+    # Unset list field still inherits the global value.
+    assert config.agents["opted_out"].sandbox.allow_domains == ["github.com"]
+
+
+def test_sandbox_per_agent_only_no_global(tmp_path):
+    """An agent-level sandbox works without any global default."""
+    config_file = _write_config(
+        tmp_path,
+        {
+            "agents": {
+                "plain": _agent(tmp_path),
+                "boxed": _agent(tmp_path, sandbox={"enabled": True, "no_network": True}),
+            }
+        },
+    )
+    config = load_daemon_config(config_file)
+    assert config.agents["plain"].sandbox is None
+    assert config.agents["boxed"].sandbox.enabled is True
+    assert config.agents["boxed"].sandbox.no_network is True
+
+
+def test_sandbox_extra_binds_path_expansion(tmp_path, monkeypatch):
+    """~ in sandbox bind paths is expanded to absolute paths."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    config_file = _write_config(
+        tmp_path,
+        {
+            "agents": {
+                "boxed": _agent(
+                    tmp_path,
+                    sandbox={"enabled": True, "extra_ro_binds": ["~/creds"], "extra_rw_binds": ["~/scratch"]},
+                )
+            }
+        },
+    )
+    config = load_daemon_config(config_file)
+    assert config.agents["boxed"].sandbox.extra_ro_binds == [tmp_path / "creds"]
+    assert config.agents["boxed"].sandbox.extra_rw_binds == [tmp_path / "scratch"]

@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from tsugite.daemon.scheduler import entry_to_dict
 
-from . import call_on_loop, tool
+from . import call_on_loop, deny_when_sandboxed, tool
 
 _scheduler = None
 _loop = None
@@ -54,6 +54,7 @@ def _resolve_agent(agent: Optional[str]) -> str:
 
 
 @tool(require_daemon=True)
+@deny_when_sandboxed
 def schedule_create(
     id: str,
     prompt: str = "",
@@ -178,6 +179,7 @@ def schedule_remove(id: str) -> dict:
 
 
 @tool(require_daemon=True)
+@deny_when_sandboxed
 def schedule_enable(id: str) -> dict:
     """Enable a disabled schedule.
 
@@ -206,6 +208,7 @@ def schedule_disable(id: str) -> dict:
 
 
 @tool(require_daemon=True)
+@deny_when_sandboxed
 def schedule_update(
     id: str,
     prompt: Optional[str] = None,
@@ -303,6 +306,7 @@ def schedule_cleanup() -> dict:
 
 
 @tool(require_daemon=True)
+@deny_when_sandboxed
 def schedule_run(id: str) -> dict:
     """Fire an existing schedule immediately in the background.
 
@@ -366,6 +370,7 @@ def list_running_tasks() -> list:
 
 
 @tool(require_daemon=True)
+@deny_when_sandboxed
 def background_task(
     prompt: str = "",
     agent: Optional[str] = None,

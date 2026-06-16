@@ -31,6 +31,7 @@ class ToolInfo:
     parameters: Dict[str, Any]
     parent_only: bool = False
     interactive_only: bool = False
+    require_daemon: bool = False
     category: str | None = None
 
 
@@ -66,6 +67,7 @@ def _register_tool(func: Callable) -> None:
         parameters=parameters,
         parent_only=getattr(func, "_parent_only", False),
         interactive_only=getattr(func, "_interactive_only", False),
+        require_daemon=getattr(func, "_require_daemon", False),
         category=getattr(func, "_category", None),
     )
 
@@ -88,6 +90,7 @@ def tool(func=None, *, require_daemon=False, parent_only=False, interactive_only
     def decorator(fn):
         fn._parent_only = parent_only
         fn._interactive_only = interactive_only
+        fn._require_daemon = require_daemon
         fn._category = category
         if require_daemon:
             _daemon_tools[fn.__name__] = fn
@@ -100,6 +103,28 @@ def tool(func=None, *, require_daemon=False, parent_only=False, interactive_only
     if func is not None:
         return decorator(func)
     return decorator
+
+
+def deny_when_sandboxed(fn):
+    """Tool decorator: refuse the call while the agent runs sandboxed.
+
+    For host-exec tools whose path cannot be routed through the sandbox (so they
+    would execute outside it). Apply BELOW @tool so @tool registers the wrapper:
+
+        @tool(require_daemon=True)
+        @deny_when_sandboxed
+        def schedule_create(...): ...
+    """
+    import functools
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        from tsugite.agent_runner.helpers import enforce_sandbox
+
+        enforce_sandbox(fn.__name__, covered=False)
+        return fn(*args, **kwargs)
+
+    return wrapper
 
 
 def set_daemon_mode(enabled: bool):

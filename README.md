@@ -129,6 +129,59 @@ tsu run +default "task" --sandbox --no-network
 
 Filesystem access is limited to the workspace.  Network goes through a filtering proxy that only allows domains you specify.
 
+### Daemon sandbox
+
+The daemon does not sandbox by default. Opt in per `daemon.yaml`, globally and/or
+per agent (the per-agent block overrides the global field by field):
+
+```yaml
+# Global default applied to every agent unless it overrides
+sandbox:
+  enabled: true
+  allow_domains: ["github.com", "pypi.org"]   # via the filtering proxy
+  # no_network: true                          # or cut network entirely
+  # extra_ro_binds: ["~/.config/some-tool"]   # extra read-only mounts
+  # extra_rw_binds: []                         # extra read-write mounts
+
+agents:
+  researcher:
+    workspace_dir: ~/work/research
+    agent_file: researcher
+    # inherits the global sandbox above
+  trusted-ops:
+    workspace_dir: ~/work/ops
+    agent_file: ops
+    sandbox:
+      enabled: false   # opt this one agent back out
+```
+
+When an agent runs sandboxed there are **no escape paths**:
+
+- Its per-turn code and shell `run()` execute inside bubblewrap.
+- `spawn_agent`, `start_session`, and `spawn_job` propagate the sandbox so child
+  agents / sessions / job workers + verifiers stay isolated.
+- Jobs honor the agent's sandbox however they're created (the `spawn_job` tool or
+  the `/job` command); predicate acceptance criteria (`cmd:`/`exit_code:`) run inside
+  bubblewrap (workspace-only, no network), not on the host.
+- Terminal commands run inside bubblewrap (workspace-only filesystem, no network),
+  whether opened by the agent (`pty_create`) or for the agent's session via `/run`
+  or the web UI - the terminal inherits its session's agent sandbox config.
+
+The scheduling tools (`schedule_create`, `background_task`,
+`schedule_run`/`update`/`enable`) are **refused** while sandboxed, since they arrange
+persistent or detached host execution that outlives the sandboxed turn; run those
+agents unsandboxed if they need to schedule.
+
+Notes:
+- Linux-only and requires `bwrap` on the host (user-namespace support). If an agent
+  has `sandbox.enabled` but `bwrap` is missing, the daemon **refuses to start** (fail
+  closed) rather than running its code unsandboxed.
+- The shipped Docker image does not include bubblewrap, and unprivileged containers
+  usually can't use user namespaces - daemon sandboxing targets a bare-metal /
+  privileged host.
+- Agent frontmatter `network: {domains: [...]}` is merged into the agent's
+  `allow_domains` when sandboxed.
+
 ## Config and Data Directories
 
 All paths follow [XDG Base Directory](https://specifications.freedesktop.org/basedir-spec/latest/) conventions and can be overridden with the standard environment variables.
