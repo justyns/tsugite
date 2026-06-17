@@ -832,9 +832,10 @@ def _domain_within_ceiling(desired_pattern: str, ceiling: list) -> bool:
 
     Uses the proxy's glob + port semantics so e.g. 'api.github.com' is within
     '*.github.com', but 'github.com:22' is NOT within 'github.com' (which only allows
-    the default 80/443). A single ceiling pattern must cover both the domain glob and
-    the ports: an empty port set means "all ports" (from '*:*'), otherwise the desired
-    ports must be a subset. An empty ceiling list means "all allowed".
+    the default 80/443). The ceiling is a union: the desired ports must be covered by
+    the union of port sets from ALL ceiling patterns whose domain glob matches (so
+    ['github.com:80','github.com:443'] together cover the default 80/443). An empty
+    port set means "all ports" (from '*:*'); an empty ceiling list means "all allowed".
     """
     if not ceiling:
         return True
