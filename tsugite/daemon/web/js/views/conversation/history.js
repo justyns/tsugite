@@ -14,16 +14,16 @@ function _extractContentBlocks(raw) {
   return { prose, blocks };
 }
 
-// Only python fences are tsugite tool-execution blocks (they're surfaced as
-// separate code_execution steps). Plain ``` fences are part of the agent's
-// prose answer and must stay visible.
-function _stripCodeFences(text) {
-  return text.replace(/```python\n[\s\S]*?```/g, '').trim();
-}
+// A ```python fence means tsugite parsed this model_response as an executable
+// tool action (it always runs python fences). Such a turn's surrounding text is
+// thought/preamble, not a user-visible answer, and is unsafe to surface: the
+// non-syntax-aware strip leaked the block's tail (nested markdown fences inside
+// return_value("""...""") strings) as phantom prose.
+const _EXECUTABLE_FENCE = /```python\n/;
 
 // Runtime-only tags a model may have fabricated (escaped to &lt; by the backend
-// before storage). Without this they'd survive _stripCodeFences and render as a
-// phantom prose bubble - the post-reload double-render of a hallucinated result.
+// before storage). Without _stripRuntimeEcho they'd survive into a non-executable
+// prose bubble - the post-reload double-render of a hallucinated result.
 const _RUNTIME_TAGS = 'tsugite_execution_result|tsugite_multi_block_warning|tsugite_budget';
 // A role-leak word some providers emit right before a fabricated tag (e.g.
 // `system<tsugite_execution_result>`); strip it so it doesn't survive as prose.
@@ -235,7 +235,11 @@ export function eventsToBubbles(events, { dropTrailing = false } = {}) {
     if (type === 'model_response') {
       const raw = data.raw_content || '';
       const { prose, blocks } = _extractContentBlocks(raw);
-      const textOnly = _stripRuntimeEcho(_stripCodeFences(prose));
+      // Suppress prose for executable turns (Option C): the answer renders from
+      // the following code_execution / final_result, and the leftover text is
+      // either preamble or leaked code. Plain prose responses (no python fence)
+      // still render normally.
+      const textOnly = _EXECUTABLE_FENCE.test(prose) ? '' : _stripRuntimeEcho(prose);
 
       for (const [name, content] of Object.entries(blocks)) {
         currentSteps.push({ html: contentBlockHtml(name, content), _turn: false });
