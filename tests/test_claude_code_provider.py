@@ -251,10 +251,78 @@ class TestClaudeCodeProcess:
             collected.append(event)
 
         text_deltas = [e for e in collected if e.get("type") == "text_delta"]
-        # 2 deltas + 1 from assistant event
-        assert len(text_deltas) == 3
+        # 2 deltas; the trailing assistant event repeats the same text and must
+        # NOT be re-emitted (it's already been streamed as the deltas above).
+        assert len(text_deltas) == 2
         assert text_deltas[0]["text"] == "Hello"
         assert text_deltas[1]["text"] == " world"
+
+    @pytest.mark.asyncio
+    async def test_partial_deltas_not_doubled_by_assistant_event(self, process):
+        """The CLI streams content_block_delta chunks AND then repeats the full
+        text in the trailing `assistant` event. The provider must not yield that
+        text twice: the consumer concatenates every text_delta, so re-emitting the
+        full assistant text duplicates the whole response. That doubling is what
+        produced the concatenated verifier JSON ("{...}{...}") that Jobs then
+        treated as unparseable and wrongly marked stuck.
+        """
+        verdict = '{"ac_results":[{"ac_text":"x","pass":true}],"overall_pass":true}'
+        head, tail = verdict[:30], verdict[30:]
+        events = [
+            json.dumps({"type": "content_block_delta", "delta": {"type": "text_delta", "text": head}}),
+            json.dumps({"type": "content_block_delta", "delta": {"type": "text_delta", "text": tail}}),
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {"role": "assistant", "content": [{"type": "text", "text": verdict}]},
+                    "session_id": "s1",
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "result",
+                    "subtype": "success",
+                    "result": verdict,
+                    "total_cost_usd": 0.003,
+                    "duration_ms": 500,
+                    "session_id": "s1",
+                }
+            ),
+        ]
+        process._process = self._mock_proc(events)
+        process._session_id = "s1"
+
+        streamed = "".join(
+            [e["text"] async for e in process.send_message("verify") if e.get("type") == "text_delta"]
+        )
+        assert streamed == verdict, "streamed text was doubled by the repeated assistant-event text"
+
+    @pytest.mark.asyncio
+    async def test_partial_deltas_prefix_of_assistant_text_keeps_tail(self, process):
+        """If the CLI streams only a prefix as deltas before the full assistant
+        event, the dedup must emit just the missing tail - never drop it. Guards
+        against a naive "saw deltas, suppress the assistant text entirely" fix.
+        """
+        events = [
+            json.dumps({"type": "content_block_delta", "delta": {"type": "text_delta", "text": "Hel"}}),
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {"role": "assistant", "content": [{"type": "text", "text": "Hello world"}]},
+                    "session_id": "s1",
+                }
+            ),
+            json.dumps(
+                {"type": "result", "subtype": "success", "result": "Hello world", "session_id": "s1"}
+            ),
+        ]
+        process._process = self._mock_proc(events)
+        process._session_id = "s1"
+
+        streamed = "".join(
+            [e["text"] async for e in process.send_message("hi") if e.get("type") == "text_delta"]
+        )
+        assert streamed == "Hello world"
 
     @pytest.mark.asyncio
     async def test_send_message_writes_correct_json(self, process):

@@ -197,6 +197,12 @@ class ClaudeCodeProcess:
         await self._process.stdin.drain()
         logger.debug("Sent message (%d chars, ~%d est tokens): %.200s", content_len, content_len // 4, content)
 
+        # Text already emitted as content_block_delta chunks. The CLI repeats the
+        # full message text in the trailing `assistant` event, so without tracking
+        # what we already streamed the consumer would accumulate it twice (the
+        # duplicate-JSON / doubled-prose bug that marked passing Jobs stuck).
+        streamed_text = ""
+
         while True:
             line = await self._process.stdout.readline()
             if not line:
@@ -235,6 +241,7 @@ class ClaudeCodeProcess:
             if event_type == "content_block_delta":
                 delta = event.get("delta", {})
                 if delta.get("type") == "text_delta":
+                    streamed_text += delta["text"]
                     yield {"type": "text_delta", "text": delta["text"]}
 
             # Full assistant message — extract text and usage from content blocks
@@ -247,8 +254,14 @@ class ClaudeCodeProcess:
                 # Claude CLI redacts thinking text, leaving an empty payload, so drop it
                 # entirely rather than surfacing a content-free placeholder block.
                 text = "".join(block.get("text", "") for block in content_blocks if block.get("type") == "text")
-                if text:
-                    yield {"type": "text_delta", "text": text}
+                # This event repeats the full message text. Emit only the part not
+                # already streamed as content_block_delta chunks; otherwise the
+                # consumer accumulates it twice. removeprefix is a no-op when no
+                # deltas streamed (prefix "") or the text isn't a clean prefix.
+                remainder = text.removeprefix(streamed_text)
+                if remainder:
+                    yield {"type": "text_delta", "text": remainder}
+                streamed_text = ""
 
             # Final result
             elif event_type == "result":
