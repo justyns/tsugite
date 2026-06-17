@@ -16,7 +16,7 @@ import sys
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterator, List, Optional
+from typing import Any, Callable, Dict, Iterator, List, Optional, Protocol, runtime_checkable
 
 from tsugite.core.state import load_state, save_state
 from tsugite.exceptions import StateSerializationError
@@ -144,6 +144,36 @@ class ExecutionResult:
 
         parts.append("</tsugite_execution_result>")
         return "\n".join(parts)
+
+
+@runtime_checkable
+class Executor(Protocol):
+    """Shared turn-execution surface of LocalExecutor and SubprocessExecutor.
+
+    Tool registration is excluded: the backends register tools differently
+    (in-process namespace injection vs IPC stub generation across a process
+    boundary), so callers special-case it.
+    """
+
+    async def execute(self, code: str) -> ExecutionResult:
+        """Run a turn of code and return its result."""
+        ...
+
+    async def send_variables(self, variables: Dict[str, Any]) -> None:
+        """Register harness-level variables re-injected at the start of every turn."""
+        ...
+
+    async def inject_content_blocks(self, blocks: Dict[str, str]) -> None:
+        """Replace the content-block variables available to the next turn."""
+        ...
+
+    def register_loaded_skill(self, name: str, content: str) -> None:
+        """Record a skill loaded during the current turn."""
+        ...
+
+    def register_unloaded_skill(self, name: str) -> None:
+        """Record a skill unloaded during the current turn."""
+        ...
 
 
 def _summarize_mapping(items) -> Dict[str, str]:

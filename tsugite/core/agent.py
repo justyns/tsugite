@@ -36,7 +36,7 @@ from tsugite.providers.base import CompletionResponse as ProviderResponse  # noq
 from tsugite.skill_discovery import Skill  # noqa: E402
 
 from .content_blocks import extract_content_blocks  # noqa: E402
-from .executor import LocalExecutor  # noqa: E402
+from .executor import Executor, LocalExecutor  # noqa: E402
 from .memory import AgentMemory, StepResult  # noqa: E402
 from .tools import Tool  # noqa: E402
 
@@ -283,7 +283,7 @@ class TsugiteAgent:
         tools: List[Tool],
         instructions: str = "",
         max_turns: int = DEFAULT_MAX_TURNS,
-        executor: LocalExecutor = None,
+        executor: Optional[Executor] = None,
         model_kwargs: dict = None,
         event_bus: EventBus = None,
         model_name: str = None,
@@ -501,8 +501,6 @@ class TsugiteAgent:
 
         if hasattr(self.executor, "register_tools"):
             self.executor.register_tools(tool_functions)
-        elif hasattr(self.executor, "namespace"):
-            self.executor.namespace.update(tool_functions)
 
     async def run(self, task: str, return_full_result: bool = False, stream: bool = False):
         """Run the agent on a task.

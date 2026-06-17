@@ -39,6 +39,33 @@ async def test_execution_result_with_error():
     assert result.error == "NameError: name 'x' is not defined"
 
 
+def test_executor_backends_conform_to_protocol():
+    """Both execution backends satisfy the shared Executor protocol."""
+    from tsugite.core.executor import Executor
+    from tsugite.core.subprocess_executor import SubprocessExecutor
+
+    assert issubclass(LocalExecutor, Executor)
+    assert issubclass(SubprocessExecutor, Executor)
+
+
+def test_executor_protocol_requires_full_surface():
+    """Missing any single shared method drops protocol conformance."""
+    from tsugite.core.executor import Executor
+
+    class MissingOneMethod:
+        async def execute(self, code): ...
+
+        async def send_variables(self, variables): ...
+
+        async def inject_content_blocks(self, blocks): ...
+
+        def register_loaded_skill(self, name, content): ...
+
+        # register_unloaded_skill intentionally omitted
+
+    assert not issubclass(MissingOneMethod, Executor)
+
+
 @pytest.mark.asyncio
 async def test_local_executor_basic():
     """Test basic code execution."""

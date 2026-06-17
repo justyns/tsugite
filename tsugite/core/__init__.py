@@ -1,13 +1,14 @@
 """Core agent implementation with plugin-based provider system."""
 
 from .agent import AgentResult, TsugiteAgent
-from .executor import ExecutionResult, LocalExecutor
+from .executor import ExecutionResult, Executor, LocalExecutor
 from .memory import AgentMemory, StepResult
 from .tools import Tool, create_tool_from_function, create_tool_from_tsugite
 
 __all__ = [
     "TsugiteAgent",
     "AgentResult",
+    "Executor",
     "LocalExecutor",
     "ExecutionResult",
     "AgentMemory",
