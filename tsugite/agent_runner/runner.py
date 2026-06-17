@@ -843,16 +843,23 @@ def _domain_within_ceiling(desired_pattern: str, ceiling: list) -> bool:
     from tsugite.core.proxy import _parse_pattern
 
     d_domain, d_ports = _parse_pattern(desired_pattern.lower())
+    # The proxy treats the allowlist as a union, so collect the ports from EVERY
+    # ceiling pattern whose domain glob matches and check the desired ports against
+    # their union (e.g. ["github.com:80","github.com:443"] together cover 80/443).
+    matched = False
+    allowed_ports: set = set()
     for c in ceiling:
         c_domain, c_ports = _parse_pattern(c.lower())
         if not fnmatch.fnmatch(d_domain, c_domain):
             continue
-        if not c_ports:  # ceiling pattern allows all ports
+        matched = True
+        if not c_ports:  # this ceiling pattern allows all ports
             return True
-        # Desired wanting all ports (empty set) can't fit a finite ceiling port set.
-        if d_ports and d_ports <= c_ports:
-            return True
-    return False
+        allowed_ports |= c_ports
+    if not matched:
+        return False
+    # Desired wanting all ports (empty set) needs an all-ports ceiling (handled above).
+    return bool(d_ports) and d_ports <= allowed_ports
 
 
 def _resolve_workspace_dir(workspace: Optional[Any], path_context: Optional[Any]) -> Optional[Path]:

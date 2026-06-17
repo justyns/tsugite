@@ -186,6 +186,26 @@ class TestResolveEffectiveSandbox:
         )
         assert domains == ["github.com:22"]
 
+    def test_split_port_ceiling_union_covers_default(self):
+        # The proxy unions the allowlist: :80 + :443 together == default ports, so
+        # an agent requesting "github.com" (default 80/443) is within the ceiling.
+        _, domains, no_net = self._resolve(
+            daemon_enabled=True,
+            daemon_domains=["github.com:80", "github.com:443"],
+            fm_sandbox={"allow_domains": ["github.com"]},
+        )
+        assert domains == ["github.com"]
+        assert no_net is False
+
+    def test_split_domain_and_port_ceiling_union(self):
+        # Ports come from different matching ceiling patterns; their union covers it.
+        _, domains, _ = self._resolve(
+            daemon_enabled=True,
+            daemon_domains=["*.github.com:443", "api.github.com:80"],
+            fm_sandbox={"allow_domains": ["api.github.com"]},
+        )
+        assert domains == ["api.github.com"]
+
 
 class TestResolveWorkspaceDir:
     def test_workspace_object_wins(self):
