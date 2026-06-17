@@ -2,7 +2,9 @@
 
 On Linux, agent code can run inside a [bubblewrap](https://github.com/containers/bubblewrap) sandbox: the filesystem is limited to the workspace, and network goes through a filtering proxy that only allows the domains you list.
 
-It needs `bwrap` on the host (it uses user namespaces) and does nothing on other platforms.  It isn't bulletproof - it's bubblewrap plus a domain-filtering proxy, not a VM.
+It needs `bwrap` on the host and does nothing on other platforms.
+
+**Note**: Consider sandboxing experimental for now.  It may change in the future, but you could also achieve something similar with containers, vms, or [srt](https://github.com/anthropic-experimental/sandbox-runtime).
 
 ## CLI
 
@@ -38,29 +40,9 @@ agents:
 
 When an agent is sandboxed, the things it can run stay inside the sandbox:
 
-- Its per-turn Python and the `run()` shell tool.
-- Anything it spawns - `spawn_agent`, `start_session`, `spawn_job` (worker and verifier) inherit the sandbox.
-- Jobs made with `/job` too, including `cmd:` / `exit_code:` acceptance criteria, which run in the sandbox instead of on the host.
-- Terminals, whether opened by the agent (`pty_create`) or for its session via `/run` or the web UI - scoped to the workspace with no network.
+- per-turn python code exec
+- tools (except scheduling tools, see below)
+- spawned agents and jobs
+- pty sessions
 
 The scheduling tools (`schedule_create`, `background_task`, `schedule_run`, and friends) are refused while sandboxed, because they set up work that runs later, outside the sandboxed turn.  Run those agents unsandboxed if they need to schedule.
-
-## The daemon config is the ceiling
-
-Whether an agent is sandboxed is the operator's call in `daemon.yaml`.  An agent can't turn its own sandbox off or widen it: there's no tool for it, its code runs inside the sandbox, and the inherited policy is stored where the agent can't edit it.
-
-An agent can make itself *more* restricted from its frontmatter:
-
-```yaml
-sandbox:
-  enabled: true                  # opt in even if the daemon didn't
-  no_network: true               # drop network
-  allow_domains: ["github.com"]  # narrow to fewer domains
-```
-
-These only tighten.  `enabled` and `no_network` can flip on but not off, and the domains (here and in `network:`) are capped by the daemon's allowlist - an agent can never reach a domain the daemon didn't allow.
-
-## Notes
-
-- Linux only, and `bwrap` must be installed.  If an agent sets `sandbox.enabled` but `bwrap` is missing, the daemon refuses to start instead of running unsandboxed.
-- The Docker image doesn't include bubblewrap, and unprivileged containers usually can't use user namespaces, so this is meant for a bare-metal or privileged host.
