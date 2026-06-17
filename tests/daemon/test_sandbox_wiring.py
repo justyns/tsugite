@@ -206,6 +206,18 @@ class TestResolveEffectiveSandbox:
         )
         assert domains == ["api.github.com"]
 
+    def test_all_ports_request_rejected_by_finite_split_ceiling(self):
+        # Agent asks for ALL ports (":*"); the split ceiling's union is the finite
+        # {80, 443}, so an all-ports request can't be granted -> no network. Documents
+        # the empty-port-set ("all ports") semantic.
+        _, domains, no_net = self._resolve(
+            daemon_enabled=True,
+            daemon_domains=["github.com:80", "github.com:443"],
+            fm_sandbox={"allow_domains": ["github.com:*"]},
+        )
+        assert domains == []
+        assert no_net is True
+
 
 class TestResolveWorkspaceDir:
     def test_workspace_object_wins(self):

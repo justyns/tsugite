@@ -1,6 +1,7 @@
 """Agent execution engine using TsugiteAgent."""
 
 import asyncio
+import fnmatch
 import logging
 import time
 
@@ -12,6 +13,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional  # noqa: E402
 from tsugite.config import get_xdg_data_path  # noqa: E402
 from tsugite.core.agent import TsugiteAgent  # noqa: E402
 from tsugite.core.executor import LocalExecutor  # noqa: E402
+from tsugite.core.proxy import _parse_pattern  # noqa: E402
 from tsugite.exceptions import AgentExecutionError, is_prompt_too_long_error  # noqa: E402
 from tsugite.md_agents import AgentConfig, parse_agent_file  # noqa: E402
 from tsugite.models import resolve_effective_model, strip_reserved_model_kwargs  # noqa: E402
@@ -839,10 +841,6 @@ def _domain_within_ceiling(desired_pattern: str, ceiling: list) -> bool:
     """
     if not ceiling:
         return True
-    import fnmatch
-
-    from tsugite.core.proxy import _parse_pattern
-
     d_domain, d_ports = _parse_pattern(desired_pattern.lower())
     # The proxy treats the allowlist as a union, so collect the ports from EVERY
     # ceiling pattern whose domain glob matches and check the desired ports against
