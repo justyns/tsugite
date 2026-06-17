@@ -828,18 +828,31 @@ def resolve_effective_sandbox(
 
 
 def _domain_within_ceiling(desired_pattern: str, ceiling: list) -> bool:
-    """True if a desired domain pattern is permitted by the daemon ceiling, using the
-    proxy's glob matching so e.g. 'api.github.com' is within '*.github.com'. An empty
-    ceiling means 'all allowed'. Ports are ignored for the cap decision (the desired
-    pattern, with any port, is kept as-is when its domain is within the ceiling)."""
+    """True if a desired domain:port pattern is permitted by the daemon ceiling.
+
+    Uses the proxy's glob + port semantics so e.g. 'api.github.com' is within
+    '*.github.com', but 'github.com:22' is NOT within 'github.com' (which only allows
+    the default 80/443). A single ceiling pattern must cover both the domain glob and
+    the ports: an empty port set means "all ports" (from '*:*'), otherwise the desired
+    ports must be a subset. An empty ceiling list means "all allowed".
+    """
     if not ceiling:
         return True
     import fnmatch
 
     from tsugite.core.proxy import _parse_pattern
 
-    desired_domain = _parse_pattern(desired_pattern.lower())[0]
-    return any(fnmatch.fnmatch(desired_domain, _parse_pattern(c.lower())[0]) for c in ceiling)
+    d_domain, d_ports = _parse_pattern(desired_pattern.lower())
+    for c in ceiling:
+        c_domain, c_ports = _parse_pattern(c.lower())
+        if not fnmatch.fnmatch(d_domain, c_domain):
+            continue
+        if not c_ports:  # ceiling pattern allows all ports
+            return True
+        # Desired wanting all ports (empty set) can't fit a finite ceiling port set.
+        if d_ports and d_ports <= c_ports:
+            return True
+    return False
 
 
 def _resolve_workspace_dir(workspace: Optional[Any], path_context: Optional[Any]) -> Optional[Path]:

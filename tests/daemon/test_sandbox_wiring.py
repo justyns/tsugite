@@ -153,6 +153,39 @@ class TestResolveEffectiveSandbox:
         assert domains == []
         assert no_net is True
 
+    def test_cannot_widen_port_beyond_default_ceiling(self):
+        # daemon "github.com" allows only default 80/443; agent can't add port 22.
+        _, domains, no_net = self._resolve(
+            daemon_enabled=True,
+            daemon_domains=["github.com"],
+            fm_sandbox={"allow_domains": ["github.com:22"]},
+        )
+        assert domains == []
+        assert no_net is True
+
+    def test_wildcard_domain_still_caps_nonstandard_port(self):
+        # daemon "*" allows any domain but only on default ports; ":22" is out.
+        _, domains, no_net = self._resolve(
+            daemon_enabled=True, daemon_domains=["*"], fm_sandbox={"allow_domains": ["evil.com:22"]}
+        )
+        assert domains == []
+        assert no_net is True
+
+    def test_explicit_port_ceiling_allows_matching_port(self):
+        _, domains, no_net = self._resolve(
+            daemon_enabled=True,
+            daemon_domains=["github.com:22"],
+            fm_sandbox={"allow_domains": ["github.com:22"]},
+        )
+        assert domains == ["github.com:22"]
+        assert no_net is False
+
+    def test_all_ports_ceiling_allows_any_port(self):
+        _, domains, _ = self._resolve(
+            daemon_enabled=True, daemon_domains=["*:*"], fm_sandbox={"allow_domains": ["github.com:22"]}
+        )
+        assert domains == ["github.com:22"]
+
 
 class TestResolveWorkspaceDir:
     def test_workspace_object_wins(self):
