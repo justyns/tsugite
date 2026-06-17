@@ -119,9 +119,13 @@ def deny_when_sandboxed(fn):
 
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
-        from tsugite.agent_runner.helpers import enforce_sandbox
+        from tsugite.agent_runner.helpers import SandboxToolDeniedError, get_sandbox_context
 
-        enforce_sandbox(fn.__name__, covered=False)
+        if get_sandbox_context() is not None:
+            raise SandboxToolDeniedError(
+                f"{fn.__name__}() is not available while this agent runs sandboxed: "
+                "it would execute code outside the sandbox."
+            )
         return fn(*args, **kwargs)
 
     return wrapper

@@ -8,7 +8,6 @@ from tsugite.agent_runner.helpers import (  # noqa: F401
     clear_allowed_agents,
     clear_current_agent,
     clear_sandbox_context,
-    enforce_sandbox,
     get_allowed_agents,
     get_allowed_secrets,
     get_current_agent,
@@ -69,6 +68,5 @@ __all__ = [
     "get_sandbox_context",
     "set_sandbox_context",
     "clear_sandbox_context",
-    "enforce_sandbox",
     "sandbox_context_to_override",
 ]

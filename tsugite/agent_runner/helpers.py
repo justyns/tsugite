@@ -39,7 +39,8 @@ class SandboxContext:
 
 
 class SandboxToolDeniedError(RuntimeError):
-    """Raised when a host-exec tool is invoked under sandboxing without coverage."""
+    """Raised when a host-exec tool is refused because the agent runs sandboxed
+    (see the deny_when_sandboxed decorator)."""
 
 
 def set_sandbox_context(ctx: Optional["SandboxContext"]) -> None:
@@ -76,26 +77,6 @@ def sandbox_context_to_override() -> Optional[dict]:
         "extra_ro_binds": [str(p) for p in ctx.extra_ro_binds],
         "extra_rw_binds": [str(p) for p in ctx.extra_rw_binds],
     }
-
-
-def enforce_sandbox(tool_name: str, *, covered: bool) -> None:
-    """Fail-closed backstop for the zero-escape invariant.
-
-    When an agent runs sandboxed, a host-exec / spawn tool whose path does NOT
-    route execution through the sandbox (or inherit it) must be refused, so a
-    sandboxed agent can never reach the host via an unsandboxed tool.
-
-    Args:
-        tool_name: Tool being invoked (for the error message).
-        covered: True when this tool's path keeps execution inside the sandbox
-            (wraps in bwrap or stamps inheritance); False means it would escape.
-    """
-    if not covered and get_sandbox_context() is not None:
-        raise SandboxToolDeniedError(
-            f"{tool_name}() is not available while this agent runs sandboxed: "
-            "it would execute code outside the sandbox. Disable the agent's "
-            "sandbox to use it."
-        )
 
 
 # Module-level storage for allowed agents (single-threaded CLI execution)

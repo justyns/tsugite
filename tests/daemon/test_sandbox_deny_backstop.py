@@ -13,7 +13,6 @@ from tsugite.agent_runner.helpers import (
     SandboxContext,
     SandboxToolDeniedError,
     clear_sandbox_context,
-    enforce_sandbox,
     get_sandbox_context,
     set_sandbox_context,
 )
@@ -36,20 +35,23 @@ class TestSandboxContext:
         assert get_sandbox_context() is None
 
 
-class TestEnforceSandbox:
-    def test_no_context_allows_anything(self):
-        # Not sandboxed: every tool is allowed regardless of coverage.
-        enforce_sandbox("pty_create", covered=False)
-        enforce_sandbox("pty_create", covered=True)
+class TestDenyWhenSandboxed:
+    def _decorated(self):
+        from tsugite.tools import deny_when_sandboxed
 
-    def test_uncovered_denied_under_sandbox(self):
-        set_sandbox_context(SandboxContext())
-        with pytest.raises(SandboxToolDeniedError, match="pty_create"):
-            enforce_sandbox("pty_create", covered=False)
+        @deny_when_sandboxed
+        def some_tool():
+            return "ran"
 
-    def test_covered_allowed_under_sandbox(self):
+        return some_tool
+
+    def test_allowed_when_not_sandboxed(self):
+        assert self._decorated()() == "ran"
+
+    def test_denied_when_sandboxed(self):
         set_sandbox_context(SandboxContext())
-        enforce_sandbox("spawn_agent", covered=True)  # must not raise
+        with pytest.raises(SandboxToolDeniedError, match="some_tool"):
+            self._decorated()()
 
 
 class TestRequireDaemonRoutesToParent:
