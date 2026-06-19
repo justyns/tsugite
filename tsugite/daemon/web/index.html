@@ -782,7 +782,7 @@
                 <div>
                   <template x-if="msg.type === 'compaction'">
                     <div class="console-history-sep">
-                      <template x-if="msg.summary">
+                      <template x-if="shouldExpandInlineCompaction(msg)">
                         <details>
                           <summary>session compacted
                             <template x-if="msg.reason"><span class="badge" x-text="msg.reason"></span></template>
@@ -790,7 +790,7 @@
                           <div class="console-compaction-banner" x-html="renderHtml(msg.summary)"></div>
                         </details>
                       </template>
-                      <template x-if="!msg.summary">
+                      <template x-if="!shouldExpandInlineCompaction(msg)">
                         <span>session compacted
                           <template x-if="msg.reason"><span class="badge" x-text="msg.reason"></span></template>
                         </span>

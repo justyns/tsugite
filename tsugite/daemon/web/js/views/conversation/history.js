@@ -430,6 +430,16 @@ export const historyMixin = {
 
   _historyDebounceTimer: null,
 
+  // The top-of-thread banner already renders the last compaction's summary
+  // (state.compactionSummary). An inline compaction event carrying that same
+  // text would duplicate it as a nested .console-compaction-banner, so the
+  // inline event collapses to a bare "session compacted" separator instead.
+  // Only an inline event with a *different* summary (an earlier link in a
+  // multi-compaction chain) expands its own summary.
+  shouldExpandInlineCompaction(msg) {
+    return !!msg.summary && msg.summary !== this.compactionSummary;
+  },
+
   _debouncedLoadHistory() {
     if (this._historyDebounceTimer) clearTimeout(this._historyDebounceTimer);
     this._historyDebounceTimer = setTimeout(() => this.loadHistory(), 200);
