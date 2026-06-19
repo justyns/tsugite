@@ -27,12 +27,14 @@ def version():
 
 # Register main commands from split modules
 from .chat import chat  # noqa: E402
+from .exec import exec_cmd  # noqa: E402
 from .render import render  # noqa: E402
 from .run import run  # noqa: E402
 
 app.command()(run)
 app.command()(render)
 app.command()(chat)
+app.command("exec")(exec_cmd)
 
 # Backward-compatible re-exports + subcommand registration
 from .agents import agents_app  # noqa: E402

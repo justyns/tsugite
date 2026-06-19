@@ -22,8 +22,8 @@ from tsugite.renderer import AgentRenderer  # noqa: E402
 from tsugite.utils import is_interactive  # noqa: E402
 
 from .helpers import (  # noqa: E402
-    SandboxContext,
     _stderr_console,
+    build_sandbox_policy,
     clear_allowed_agents,
     clear_current_agent,
     clear_multistep_ui_context,
@@ -538,37 +538,15 @@ async def _execute_agent_with_prompt(
 
     # The daemon config (exec_options) is the ceiling; the agent's frontmatter may
     # only tighten it (opt in, force no_network, narrow domains), never loosen.
-    sandbox_on, allowed_domains, sandbox_no_network = resolve_effective_sandbox(
-        daemon_enabled=exec_options.sandbox,
-        daemon_domains=list(exec_options.allow_domains),
-        daemon_no_network=exec_options.no_network,
-        fm_network=agent_config.network,
-        fm_sandbox=getattr(agent_config, "sandbox", None),
+    # build_sandbox_policy returns (None, None) when the sandbox is off; the same
+    # helper backs `tsu exec` so the two paths never drift.
+    sandbox_config, sandbox_ctx = build_sandbox_policy(
+        exec_options, workspace_dir=workspace_dir, agent_config=agent_config
     )
 
-    if sandbox_on:
-        from tsugite.core.sandbox import BubblewrapSandbox, SandboxConfig
+    if sandbox_config is not None:
         from tsugite.core.subprocess_executor import SubprocessExecutor
 
-        if not BubblewrapSandbox.check_available():
-            raise RuntimeError("bwrap not found. Install bubblewrap or use --no-sandbox.")
-
-        # The effective policy. SandboxConfig (for the executor's bwrap) is derived
-        # from it so the two never drift; the context is also published below so
-        # host-exec/spawn tools running in the parent inherit the same isolation.
-        sandbox_ctx = SandboxContext(
-            allow_domains=allowed_domains,
-            no_network=sandbox_no_network,
-            extra_ro_binds=list(exec_options.extra_ro_binds),
-            extra_rw_binds=list(exec_options.extra_rw_binds),
-            workspace_dir=workspace_dir,
-        )
-        sandbox_config = SandboxConfig(
-            allowed_domains=sandbox_ctx.allow_domains,
-            no_network=sandbox_ctx.no_network,
-            extra_ro_binds=sandbox_ctx.extra_ro_binds,
-            extra_rw_binds=sandbox_ctx.extra_rw_binds,
-        )
         executor = SubprocessExecutor(
             workspace_dir=workspace_dir,
             event_bus=event_bus,

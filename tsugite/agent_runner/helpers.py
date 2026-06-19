@@ -3,11 +3,14 @@
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import TYPE_CHECKING, Any, List, Optional
 
 from rich.console import Console
 
 from tsugite.console import get_stderr_console
+
+if TYPE_CHECKING:
+    from tsugite.options import ExecutionOptions
 
 # Console for warnings and debug output (stderr)
 _stderr_console = get_stderr_console()
@@ -77,6 +80,52 @@ def sandbox_context_to_override() -> Optional[dict]:
         "extra_ro_binds": [str(p) for p in ctx.extra_ro_binds],
         "extra_rw_binds": [str(p) for p in ctx.extra_rw_binds],
     }
+
+
+def build_sandbox_policy(
+    exec_options: "ExecutionOptions",
+    *,
+    workspace_dir: Optional[Path] = None,
+    agent_config: Any = None,
+):
+    """Resolve the effective sandbox policy into (SandboxConfig, SandboxContext).
+
+    Returns (None, None) when the sandbox is off. Shared by the agent runner and
+    `tsu exec` so the two never drift. Agent frontmatter (network/sandbox) can only
+    tighten the CLI/daemon ceiling, never loosen it.
+
+    Raises RuntimeError if the sandbox is requested but bwrap is unavailable.
+    """
+    from tsugite.agent_runner.runner import resolve_effective_sandbox
+    from tsugite.core.sandbox import BubblewrapSandbox, SandboxConfig
+
+    sandbox_on, allow_domains, no_network = resolve_effective_sandbox(
+        daemon_enabled=exec_options.sandbox,
+        daemon_domains=list(exec_options.allow_domains),
+        daemon_no_network=exec_options.no_network,
+        fm_network=getattr(agent_config, "network", None),
+        fm_sandbox=getattr(agent_config, "sandbox", None),
+    )
+    if not sandbox_on:
+        return None, None
+
+    if not BubblewrapSandbox.check_available():
+        raise RuntimeError("bwrap not found. Install bubblewrap or use --no-sandbox.")
+
+    ctx = SandboxContext(
+        allow_domains=allow_domains,
+        no_network=no_network,
+        extra_ro_binds=list(exec_options.extra_ro_binds),
+        extra_rw_binds=list(exec_options.extra_rw_binds),
+        workspace_dir=workspace_dir,
+    )
+    config = SandboxConfig(
+        allowed_domains=ctx.allow_domains,
+        no_network=ctx.no_network,
+        extra_ro_binds=ctx.extra_ro_binds,
+        extra_rw_binds=ctx.extra_rw_binds,
+    )
+    return config, ctx
 
 
 # Module-level storage for allowed agents (single-threaded CLI execution)

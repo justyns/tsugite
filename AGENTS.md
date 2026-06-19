@@ -44,6 +44,20 @@ uv run tsu render agent.md "task"
 uv run tsu validate agents/*.md
 ```
 
+### Reusing tsugite from external coding agents
+
+`tsu exec` runs a Python snippet in tsugite's tool namespace, so a tsugite skill's code
+(which calls `read_file`, `http_request`, `get_secret`, ...) runs without the full agent
+loop. Secrets are allowlisted + masked; `--no-network` / `--sandbox` isolate the run. See
+[docs/external-agent-integration.md](docs/external-agent-integration.md) for reusing skills
+and agents from Claude Code, Cursor, or any agent that runs shell commands.
+
+```bash
+echo 'read_file(path="README.md")' | tsu exec -
+tsu exec snippet.py --tools @fs,@http --allow-secret gh-token
+tsu run +<agent> "task"                                 # or reuse a whole agent
+```
+
 ### Schema Management
 ```bash
 # Regenerate JSON schema after modifying AgentConfig
