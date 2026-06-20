@@ -2317,7 +2317,7 @@ wheels = [
 
 [[package]]
 name = "tsugite-acp"
-version = "0.15.0"
+version = "0.16.0"
 source = { editable = "plugins/tsugite-acp" }
 dependencies = [
     { name = "agent-client-protocol" },
@@ -2332,7 +2332,7 @@ requires-dist = [
 
 [[package]]
 name = "tsugite-cli"
-version = "0.15.0"
+version = "0.16.0"
 source = { editable = "." }
 dependencies = [
     { name = "cryptography" },
@@ -2430,7 +2430,7 @@ dev = [
 
 [[package]]
 name = "tsugite-codex-cli"
-version = "0.15.0"
+version = "0.16.0"
 source = { editable = "plugins/tsugite-codex-cli" }
 dependencies = [
     { name = "tsugite-cli" },
@@ -2441,7 +2441,7 @@ requires-dist = [{ name = "tsugite-cli", editable = "." }]
 
 [[package]]
 name = "tsugite-tmux"
-version = "0.15.0"
+version = "0.16.0"
 source = { editable = "plugins/tsugite-tmux" }
 dependencies = [
     { name = "tsugite-cli" },

@@ -1,10 +1,10 @@
 [project]
 name = "tsugite-codex-cli"
-version = "0.15.0"
+version = "0.16.0"
 description = "Tsugite plugin: ChatGPT subscription auth via Codex CLI token store"
 requires-python = ">=3.11"
 dependencies = [
-  "tsugite-cli==0.15.0",
+  "tsugite-cli==0.16.0",
 ]
 
 [project.entry-points."tsugite.providers"]
