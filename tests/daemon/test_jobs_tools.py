@@ -11,9 +11,9 @@ tools directly.
 """
 
 import pytest
+from tsugite_daemon.job_store import Job, JobState, JobStore
 
 import tsugite.tools.jobs as jobs_tool
-from tsugite.daemon.job_store import Job, JobState, JobStore
 
 
 class _StoreSpy:
@@ -212,7 +212,7 @@ def test_spawn_job_timeout_is_generous_and_warns_about_duplicates(monkeypatch):
     from types import SimpleNamespace
 
     monkeypatch.setattr(jobs_tool, "_jobs_orchestrator", SimpleNamespace(create_and_start_job=lambda **k: None))
-    monkeypatch.setattr("tsugite.daemon.session_runner.get_current_session_id", lambda: "parent-1")
+    monkeypatch.setattr("tsugite_daemon.session_runner.get_current_session_id", lambda: "parent-1")
 
     seen = {}
 

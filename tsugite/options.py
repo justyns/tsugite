@@ -11,7 +11,6 @@ class UIOptions:
 
     plain: bool = False
     headless: bool = False
-    live: bool = False
     no_color: bool = False
     final_only: bool = False
     verbose: bool = False
@@ -36,6 +35,7 @@ class ExecutionOptions:
     no_network: bool = False
     extra_ro_binds: List[Path] = field(default_factory=list)
     extra_rw_binds: List[Path] = field(default_factory=list)
+    pass_env: List[str] = field(default_factory=list)
 
     @classmethod
     def from_cli(
@@ -48,6 +48,7 @@ class ExecutionOptions:
         no_sandbox: bool = False,
         allow_domain: Optional[List[str]] = None,
         no_network: bool = False,
+        pass_env: Optional[List[str]] = None,
     ) -> "ExecutionOptions":
         return cls(
             model_override=model,
@@ -57,6 +58,7 @@ class ExecutionOptions:
             sandbox=sandbox and not no_sandbox,
             allow_domains=list(allow_domain) if allow_domain else [],
             no_network=no_network,
+            pass_env=list(pass_env) if pass_env else [],
         )
 
 

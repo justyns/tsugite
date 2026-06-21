@@ -10,10 +10,10 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from tsugite_daemon.adapters.base import BaseAdapter, ChannelContext
+from tsugite_daemon.config import AgentConfig
+from tsugite_daemon.session_store import SessionStore
 
-from tsugite.daemon.adapters.base import BaseAdapter, ChannelContext
-from tsugite.daemon.config import AgentConfig
-from tsugite.daemon.session_store import SessionStore
 from tsugite.history.models import Event
 
 
@@ -141,13 +141,13 @@ class TestCompactionTopic:
             return "Summary"
 
         with (
-            patch("tsugite.daemon.memory.get_context_limit", return_value=200_000),
-            patch("tsugite.daemon.memory.infer_compaction_model", return_value="anthropic:claude-3-haiku-20240307"),
+            patch("tsugite_daemon.memory.get_context_limit", return_value=200_000),
+            patch("tsugite_daemon.memory.infer_compaction_model", return_value="anthropic:claude-3-haiku-20240307"),
             patch(
-                "tsugite.daemon.memory.split_events_for_compaction",
+                "tsugite_daemon.memory.split_events_for_compaction",
                 return_value=(old_events, recent_events),
             ),
-            patch("tsugite.daemon.memory.summarize_session", new=fake_summarize),
+            patch("tsugite_daemon.memory.summarize_session", new=fake_summarize),
             patch("tsugite.history.get_history_dir", return_value=history_dir),
             patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
             patch("tsugite.history.storage.get_machine_name", return_value="test"),
@@ -189,13 +189,13 @@ class TestCompactionTopic:
             return "Summary"
 
         with (
-            patch("tsugite.daemon.memory.get_context_limit", return_value=200_000),
-            patch("tsugite.daemon.memory.infer_compaction_model", return_value="anthropic:claude-3-haiku-20240307"),
+            patch("tsugite_daemon.memory.get_context_limit", return_value=200_000),
+            patch("tsugite_daemon.memory.infer_compaction_model", return_value="anthropic:claude-3-haiku-20240307"),
             patch(
-                "tsugite.daemon.memory.split_events_for_compaction",
+                "tsugite_daemon.memory.split_events_for_compaction",
                 return_value=(old_events, recent_events),
             ),
-            patch("tsugite.daemon.memory.summarize_session", new=fake_summarize),
+            patch("tsugite_daemon.memory.summarize_session", new=fake_summarize),
             patch("tsugite.history.get_history_dir", return_value=history_dir),
             patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
             patch("tsugite.history.storage.get_machine_name", return_value="test"),

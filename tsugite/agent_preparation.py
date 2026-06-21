@@ -488,7 +488,7 @@ class AgentPreparer:
         from tsugite.core.agent import build_system_prompt
         from tsugite.core.tools import create_tool_from_tsugite
         from tsugite.renderer import AgentRenderer
-        from tsugite.tools import expand_tool_specs
+        from tsugite.tools import expand_tool_specs, list_tools
         from tsugite.utils import is_interactive
 
         if context is None:
@@ -608,6 +608,9 @@ class AgentPreparer:
             "tsugite_url": context.get("tsugite_url", ""),
             "tsugite_token": context.get("tsugite_token", ""),
             "tools": agent_config.tools,
+            # Tool names actually installed, so templates can conditionally mention optional
+            # tools, e.g. `{% if 'web_search' in available_tools %}`.
+            "available_tools": list_tools(),
             # Subagent context
             "is_subagent": context.get("is_subagent", False),
             "parent_agent": context.get("parent_agent", None),
@@ -675,7 +678,9 @@ class AgentPreparer:
         # Step 6: Expand and create tools
         try:
             # Expand tool specifications (categories, globs, regular names)
-            expanded_tools = expand_tool_specs(agent_config.tools) if agent_config.tools else []
+            expanded_tools = (
+                expand_tool_specs(agent_config.tools, strict=agent_config.strict_tools) if agent_config.tools else []
+            )
 
             # Auto-inject or filter interactive tools based on interaction capability.
             from tsugite.interaction import get_interaction_backend

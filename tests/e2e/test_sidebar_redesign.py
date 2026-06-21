@@ -1,6 +1,6 @@
 """E2E tests for the redesigned session sidebar."""
 
-from tsugite.daemon.session_store import Session, SessionSource, SessionStatus
+from tsugite_daemon.session_store import Session, SessionSource, SessionStatus
 
 
 def test_sidebar_shows_active_recent_groups(authenticated_page, e2e_session_store):
@@ -143,7 +143,7 @@ def test_ui_follows_session_after_compaction(authenticated_page, e2e_session_sto
     the next /chat POST gets routed to the successor by the server but the UI URL
     and selected-meta state stay on the old session - confusing.
     """
-    from tsugite.daemon.session_store import Session, SessionSource, SessionStatus
+    from tsugite_daemon.session_store import Session, SessionSource, SessionStatus
 
     page = authenticated_page
     user_id = page.evaluate("Alpine.store('app').userId")

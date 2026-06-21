@@ -42,10 +42,24 @@ tsu run +morning-brief "what's happening today"
 
 ## Install
 
+`tsugite-cli` is a light kernel (CLI, built-in tools, providers, history). Optional
+subsystems install as extras:
+
 ```bash
-uv tool install tsugite-cli    # recommended
-pipx install tsugite-cli       # alternative
-pip install tsugite-cli        # or plain pip
+uv tool install tsugite-cli              # recommended; kernel only
+pipx install tsugite-cli                 # alternative
+pip install tsugite-cli                  # or plain pip
+```
+
+| Extra | Adds |
+| --- | --- |
+| `tsugite-cli[daemon]` | Daemon: HTTP API, web UI, scheduler, jobs, terminals (pty), sandbox, Discord |
+| `tsugite-cli[web]` | `web_search` + YouTube transcripts |
+| `tsugite-cli[sandbox]` | bwrap sandbox backend (also needs the `bwrap` binary) |
+| `tsugite-cli[all]` | Everything above plus the optional tmux + provider plugins |
+
+```bash
+uv tool install "tsugite-cli[daemon]"    # full server install
 ```
 
 The package is `tsugite-cli`, the command is `tsugite` (or `tsu` for short).
@@ -63,7 +77,7 @@ tsu run +default "summarize the files in this directory"
 # Run an agent file directly
 tsu run my-agent.md "do the thing"
 
-# Start the daemon (web UI, Discord/Telegram bots)
+# Start the daemon (web UI, Discord/Telegram bots) -- needs the [daemon] extra
 tsu daemon
 ```
 
@@ -75,7 +89,6 @@ in nested tmux / non-Rich-friendly shells. Pick a richer or quieter mode when yo
 | Mode | When to use |
 | --- | --- |
 | **Default (plain)** | Everyday interactive runs and piped output (`tsu run ... \| less`). |
-| `--ui live` | Long-running interactive runs where a persistent footer showing turn / current tool / tokens / cost / elapsed time is useful. Falls back to plain if stdout is not a TTY or `NO_COLOR` is set. |
 | `--headless` | CI/scripts: result on stdout, no progress chrome. Combine with `--verbose` for stderr trace. |
 | `--plain` | Force plain explicitly (same as the default; useful when overriding configs/aliases). |
 

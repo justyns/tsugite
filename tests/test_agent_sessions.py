@@ -5,8 +5,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
-from tsugite.daemon.session_store import (
+from tsugite_daemon.session_store import (
     Session,
     SessionSource,
     SessionStatus,
@@ -331,7 +330,7 @@ def mock_adapter():
 
 @pytest.mark.asyncio
 async def test_session_runner_start_and_complete(tmp_path, mock_adapter):
-    from tsugite.daemon.session_runner import SessionRunner
+    from tsugite_daemon.session_runner import SessionRunner
 
     store = SessionStore(tmp_path / "session_store.json")
     adapters = {"default": mock_adapter}
@@ -351,7 +350,7 @@ async def test_session_runner_start_and_complete(tmp_path, mock_adapter):
 
 @pytest.mark.asyncio
 async def test_session_runner_cancel(tmp_path, mock_adapter):
-    from tsugite.daemon.session_runner import SessionRunner
+    from tsugite_daemon.session_runner import SessionRunner
 
     hang_event = asyncio.Event()
 
@@ -377,7 +376,7 @@ async def test_session_runner_cancel(tmp_path, mock_adapter):
 
 @pytest.mark.asyncio
 async def test_session_runner_failure(tmp_path):
-    from tsugite.daemon.session_runner import SessionRunner
+    from tsugite_daemon.session_runner import SessionRunner
 
     adapter = MagicMock()
     adapter.handle_message = AsyncMock(side_effect=RuntimeError("boom"))
@@ -401,7 +400,7 @@ async def test_session_runner_failure(tmp_path):
 
 @pytest.mark.asyncio
 async def test_session_runner_notify_callback(tmp_path, mock_adapter):
-    from tsugite.daemon.session_runner import SessionRunner
+    from tsugite_daemon.session_runner import SessionRunner
 
     notify_called = asyncio.Event()
     notify_args = {}
@@ -424,7 +423,7 @@ async def test_session_runner_notify_callback(tmp_path, mock_adapter):
 
 @pytest.mark.asyncio
 async def test_session_runner_event_logging(tmp_path, mock_adapter):
-    from tsugite.daemon.session_runner import SessionRunner
+    from tsugite_daemon.session_runner import SessionRunner
 
     store = SessionStore(tmp_path / "session_store.json")
     runner = SessionRunner(store, {"default": mock_adapter})
@@ -444,7 +443,7 @@ async def test_session_runner_event_logging(tmp_path, mock_adapter):
 
 @pytest.mark.asyncio
 async def test_session_tools_start(tmp_path, mock_adapter):
-    from tsugite.daemon.session_runner import SessionRunner
+    from tsugite_daemon.session_runner import SessionRunner
 
     store = SessionStore(tmp_path / "session_store.json")
     runner = SessionRunner(store, {"default": mock_adapter})
@@ -461,7 +460,7 @@ async def test_session_tools_start(tmp_path, mock_adapter):
 
 @pytest.mark.asyncio
 async def test_session_tools_list(tmp_path, mock_adapter):
-    from tsugite.daemon.session_runner import SessionRunner
+    from tsugite_daemon.session_runner import SessionRunner
 
     store = SessionStore(tmp_path / "session_store.json")
     runner = SessionRunner(store, {"default": mock_adapter})
@@ -474,7 +473,7 @@ async def test_session_tools_list(tmp_path, mock_adapter):
 
 @pytest.mark.asyncio
 async def test_session_tools_status(tmp_path, mock_adapter):
-    from tsugite.daemon.session_runner import SessionRunner
+    from tsugite_daemon.session_runner import SessionRunner
 
     store = SessionStore(tmp_path / "session_store.json")
     runner = SessionRunner(store, {"default": mock_adapter})
@@ -487,7 +486,7 @@ async def test_session_tools_status(tmp_path, mock_adapter):
 
 @pytest.mark.asyncio
 async def test_session_tools_cancel(tmp_path, mock_adapter):
-    from tsugite.daemon.session_runner import SessionRunner
+    from tsugite_daemon.session_runner import SessionRunner
 
     hang = asyncio.Event()
 

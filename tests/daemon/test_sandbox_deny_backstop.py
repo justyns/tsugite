@@ -103,13 +103,13 @@ class TestSpawnAgentInheritsSandbox:
 
 class TestPtySandboxing:
     def test_no_context_returns_argv_unchanged(self):
-        from tsugite.daemon.terminal_runtime import maybe_sandbox_argv
+        from tsugite_pty.terminal_runtime import maybe_sandbox_argv
 
         argv = ["/bin/sh", "-c", "ls"]
         assert maybe_sandbox_argv(argv, None, None) == argv
 
     def test_sandboxed_wraps_in_bwrap(self, tmp_path):
-        from tsugite.daemon.terminal_runtime import maybe_sandbox_argv
+        from tsugite_pty.terminal_runtime import maybe_sandbox_argv
 
         wrapped = maybe_sandbox_argv(["/bin/sh", "-c", "ls"], None, SandboxContext(workspace_dir=tmp_path))
         assert wrapped[0] == "bwrap"
@@ -120,7 +120,7 @@ class TestPtySandboxing:
         assert wrapped[-3:] == ["/bin/sh", "-c", "ls"]
 
     def test_sandboxed_without_workspace_fails_closed(self):
-        from tsugite.daemon.terminal_runtime import maybe_sandbox_argv
+        from tsugite_pty.terminal_runtime import maybe_sandbox_argv
 
         with pytest.raises(RuntimeError, match="workspace"):
             maybe_sandbox_argv(["/bin/sh", "-c", "ls"], None, SandboxContext(workspace_dir=None))
@@ -131,14 +131,14 @@ class TestResolveTerminalSandbox:
     the parent session's agent config (so /run and API terminals are sandboxed)."""
 
     def test_thread_local_context_wins(self):
-        from tsugite.daemon import terminal_runtime
+        from tsugite_pty import terminal_runtime
 
         ctx = SandboxContext(workspace_dir=None, allow_domains=["a.com"])
         set_sandbox_context(ctx)
         assert terminal_runtime.resolve_terminal_sandbox("any-session") is ctx
 
     def test_falls_back_to_session_resolver(self, monkeypatch):
-        from tsugite.daemon import terminal_runtime
+        from tsugite_pty import terminal_runtime
 
         resolved = SandboxContext(allow_domains=["b.com"])
         monkeypatch.setattr(
@@ -149,7 +149,7 @@ class TestResolveTerminalSandbox:
         assert terminal_runtime.resolve_terminal_sandbox("other") is None
 
     def test_none_when_no_context_and_no_resolver(self, monkeypatch):
-        from tsugite.daemon import terminal_runtime
+        from tsugite_pty import terminal_runtime
 
         monkeypatch.setattr(terminal_runtime, "_session_sandbox_resolver", None)
         clear_sandbox_context()
@@ -180,3 +180,27 @@ class TestScheduleToolsDeniedUnderSandbox:
         set_sandbox_context(SandboxContext())
         with pytest.raises(SandboxToolDeniedError, match="schedule_run"):
             schedule_run(id="sched-1")
+
+    def test_schedule_remove_denied(self):
+        """A sandboxed agent must not delete the operator's schedules."""
+        from tsugite.tools.schedule import schedule_remove
+
+        set_sandbox_context(SandboxContext())
+        with pytest.raises(SandboxToolDeniedError, match="schedule_remove"):
+            schedule_remove(id="sched-1")
+
+    def test_schedule_disable_denied(self):
+        """A sandboxed agent must not disable the operator's schedules."""
+        from tsugite.tools.schedule import schedule_disable
+
+        set_sandbox_context(SandboxContext())
+        with pytest.raises(SandboxToolDeniedError, match="schedule_disable"):
+            schedule_disable(id="sched-1")
+
+    def test_schedule_cleanup_denied(self):
+        """A sandboxed agent must not bulk-delete schedules."""
+        from tsugite.tools.schedule import schedule_cleanup
+
+        set_sandbox_context(SandboxContext())
+        with pytest.raises(SandboxToolDeniedError, match="schedule_cleanup"):
+            schedule_cleanup()

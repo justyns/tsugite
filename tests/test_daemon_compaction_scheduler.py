@@ -5,10 +5,9 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import yaml
-
-from tsugite.daemon.compaction_scheduler import CompactionScheduler
-from tsugite.daemon.config import AgentConfig, AutoCompactConfig, load_daemon_config
-from tsugite.daemon.session_store import SessionStore
+from tsugite_daemon.compaction_scheduler import CompactionScheduler
+from tsugite_daemon.config import AgentConfig, AutoCompactConfig, load_daemon_config
+from tsugite_daemon.session_store import SessionStore
 
 
 def _make_session_store(tmp_path, agent="test-agent"):
@@ -255,7 +254,7 @@ class TestMidTurnGuard:
         """Rotating a session mid-turn loses every event the in-flight turn
         writes after the compaction snapshot - the exchange vanishes from the
         successor. status_text is non-empty exactly while a turn runs."""
-        from tsugite.daemon.session_store import Session, SessionSource
+        from tsugite_daemon.session_store import Session, SessionSource
 
         store = _make_session_store(tmp_path)
         s = Session(id="busy", agent="test-agent", source=SessionSource.INTERACTIVE.value, user_id="u")

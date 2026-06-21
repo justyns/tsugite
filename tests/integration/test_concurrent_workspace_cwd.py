@@ -8,12 +8,12 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from tsugite_daemon.adapters.base import ChannelContext
+from tsugite_daemon.adapters.http import HTTPAgentAdapter
+from tsugite_daemon.config import AgentConfig
+from tsugite_daemon.session_store import SessionStore
 
 from tsugite.cli.helpers import get_workspace_dir
-from tsugite.daemon.adapters.base import ChannelContext
-from tsugite.daemon.adapters.http import HTTPAgentAdapter
-from tsugite.daemon.config import AgentConfig
-from tsugite.daemon.session_store import SessionStore
 
 
 @pytest.fixture
@@ -68,7 +68,7 @@ async def test_concurrent_handle_message_sees_own_workspace_via_contextvar(monke
             last_input_tokens=0,
         )
 
-    monkeypatch.setattr("tsugite.daemon.adapters.base.run_agent", probe_run_agent)
+    monkeypatch.setattr("tsugite_daemon.adapters.base.run_agent", probe_run_agent)
 
     ctx_a = ChannelContext(source="http", channel_id=None, user_id="alice", reply_to="http:alice")
     ctx_b = ChannelContext(source="http", channel_id=None, user_id="bob", reply_to="http:bob")

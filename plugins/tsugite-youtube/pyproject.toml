@@ -1,0 +1,28 @@
+[project]
+name = "tsugite-youtube"
+version = "0.16.0"
+description = "Tsugite plugin: YouTube transcript attachment handler"
+requires-python = ">=3.11"
+dependencies = [
+  "tsugite-cli==0.16.0",
+  "youtube-transcript-api>=0.6.0",
+]
+
+[project.entry-points."tsugite.attachments"]
+youtube = "tsugite_youtube:create_handler"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["tsugite_youtube"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/tsugite_youtube",
+  "/pyproject.toml",
+]
+
+[tool.uv.sources]
+tsugite-cli = { workspace = true }

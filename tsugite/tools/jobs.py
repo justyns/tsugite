@@ -74,8 +74,9 @@ def spawn_job(
     Returns:
         Dict with job_id, worker_session_id, parent_session_id, state.
     """
+    from tsugite_daemon.session_runner import get_current_session_id
+
     from tsugite.agent_runner.helpers import sandbox_context_to_override
-    from tsugite.daemon.session_runner import get_current_session_id
 
     parent_session_id = get_current_session_id()
     if not parent_session_id:

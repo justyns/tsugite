@@ -6,7 +6,8 @@ fans out to all subscribed pages, and the compaction flow auto-follows the
 UI to the successor session.
 """
 
-from tsugite.daemon.session_store import Session, SessionSource, SessionStatus
+from tsugite_daemon.session_store import Session, SessionSource, SessionStatus
+
 from tsugite.history.storage import generate_session_id
 
 from .helpers import CONV_VIEW, open_conversations, reload_conversations_view

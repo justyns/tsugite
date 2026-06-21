@@ -46,6 +46,9 @@ def exec_cmd(
         None, "--allow-domain", help="Domain(s) allowed in sandbox (implies --sandbox)"
     ),
     no_network: bool = typer.Option(False, "--no-network", help="Sandbox with no network at all (implies --sandbox)"),
+    pass_env: Optional[List[str]] = typer.Option(
+        None, "--pass-env", help="Env var NAME(s) to pass into the sandbox on top of the safe defaults."
+    ),
     no_secrets: bool = typer.Option(False, "--no-secrets", help="Skip secrets backend initialization"),
 ):
     """Run a Python snippet in tsugite's tool namespace.
@@ -130,6 +133,7 @@ def exec_cmd(
         no_sandbox=no_sandbox,
         allow_domain=allow_domain,
         no_network=no_network,
+        pass_env=pass_env,
     )
 
     workspace_dir = Path(workspace).expanduser().resolve() if workspace else None

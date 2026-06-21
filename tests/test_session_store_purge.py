@@ -8,8 +8,7 @@ takes that state with it. What `_purge_session_state` still cleans up:
 """
 
 import pytest
-
-from tsugite.daemon.session_store import Session, SessionSource, SessionStatus, SessionStore
+from tsugite_daemon.session_store import Session, SessionSource, SessionStatus, SessionStore
 
 
 @pytest.fixture

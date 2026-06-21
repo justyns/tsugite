@@ -292,9 +292,7 @@ class TestClaudeCodeProcess:
         process._process = self._mock_proc(events)
         process._session_id = "s1"
 
-        streamed = "".join(
-            [e["text"] async for e in process.send_message("verify") if e.get("type") == "text_delta"]
-        )
+        streamed = "".join([e["text"] async for e in process.send_message("verify") if e.get("type") == "text_delta"])
         assert streamed == verdict, "streamed text was doubled by the repeated assistant-event text"
 
     @pytest.mark.asyncio
@@ -312,16 +310,12 @@ class TestClaudeCodeProcess:
                     "session_id": "s1",
                 }
             ),
-            json.dumps(
-                {"type": "result", "subtype": "success", "result": "Hello world", "session_id": "s1"}
-            ),
+            json.dumps({"type": "result", "subtype": "success", "result": "Hello world", "session_id": "s1"}),
         ]
         process._process = self._mock_proc(events)
         process._session_id = "s1"
 
-        streamed = "".join(
-            [e["text"] async for e in process.send_message("hi") if e.get("type") == "text_delta"]
-        )
+        streamed = "".join([e["text"] async for e in process.send_message("hi") if e.get("type") == "text_delta"])
         assert streamed == "Hello world"
 
     @pytest.mark.asyncio
@@ -777,25 +771,25 @@ class TestSessionIdPassthrough:
 
 class TestClaudeCodeContextLimit:
     def test_context_limit_opus_returns_1m(self):
-        from tsugite.daemon.memory import get_context_limit
+        from tsugite_daemon.memory import get_context_limit
 
         limit = get_context_limit("claude_code:opus")
         assert limit == 1_000_000
 
     def test_context_limit_sonnet_returns_1m(self):
-        from tsugite.daemon.memory import get_context_limit
+        from tsugite_daemon.memory import get_context_limit
 
         limit = get_context_limit("claude_code:sonnet")
         assert limit == 1_000_000
 
     def test_context_limit_haiku_returns_200k(self):
-        from tsugite.daemon.memory import get_context_limit
+        from tsugite_daemon.memory import get_context_limit
 
         limit = get_context_limit("claude_code:haiku")
         assert limit == 200_000
 
     def test_context_limit_claude_code_from_registry(self):
-        from tsugite.daemon.memory import get_context_limit
+        from tsugite_daemon.memory import get_context_limit
 
         limit = get_context_limit("claude_code:opus")
         assert limit == 1_000_000

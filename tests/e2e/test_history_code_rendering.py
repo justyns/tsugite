@@ -46,7 +46,7 @@ def test_history_code_block_not_truncated(authenticated_page, e2e_adapter, e2e_t
     storage.record("user_input", text="go")
     storage.record("code_execution", code=long_code, output="ran 40 lines", duration_ms=12)
 
-    with patch("tsugite.daemon.adapters.http.get_history_dir", return_value=history_dir):
+    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
         _open_progress_trace(page, user_id, session_id)
         code_details = page.locator(".console-codeblock .tool-step details").first
         code_details.click()
@@ -66,7 +66,7 @@ def test_history_tool_result_visible_between_code_steps(authenticated_page, e2e_
     storage.record("code_execution", code="print('hi')", output="hello world", duration_ms=7)
     storage.record("code_execution", code="return_value('done')", output="", duration_ms=1)
 
-    with patch("tsugite.daemon.adapters.http.get_history_dir", return_value=history_dir):
+    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
         _open_progress_trace(page, user_id, session_id)
         summaries = page.locator(".console-codeblock .tool-step details > summary")
         labels = [(summaries.nth(i).text_content() or "").lower() for i in range(summaries.count())]
@@ -90,7 +90,7 @@ def test_history_tool_result_not_truncated(authenticated_page, e2e_adapter, e2e_
     storage.record("user_input", text="go")
     storage.record("code_execution", code="print('hi')", output=full_output, duration_ms=3)
 
-    with patch("tsugite.daemon.adapters.http.get_history_dir", return_value=history_dir):
+    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
         _open_progress_trace(page, user_id, session_id)
         result_details = (
             page.locator(".console-codeblock .tool-step details")
@@ -118,7 +118,7 @@ def test_history_content_block_renders_with_model_response(authenticated_page, e
         raw_content='Some prose. <content name="reply">A reply content block.</content>',
     )
 
-    with patch("tsugite.daemon.adapters.http.get_history_dir", return_value=history_dir):
+    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
         _open_progress_trace(page, user_id, session_id)
         content_blocks = page.locator(".console-codeblock .tool-step details.content-block")
         assert content_blocks.count() >= 1

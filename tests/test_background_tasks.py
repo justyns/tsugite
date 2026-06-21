@@ -6,10 +6,10 @@ from threading import Thread
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from tsugite_daemon.adapters.scheduler_adapter import SchedulerAdapter
+from tsugite_daemon.config import NotificationChannelConfig
+from tsugite_daemon.scheduler import RunResult, ScheduleEntry, Scheduler
 
-from tsugite.daemon.adapters.scheduler_adapter import SchedulerAdapter
-from tsugite.daemon.config import NotificationChannelConfig
-from tsugite.daemon.scheduler import RunResult, ScheduleEntry, Scheduler
 from tsugite.exceptions import AgentExecutionError
 
 
@@ -204,7 +204,8 @@ class TestBackgroundTaskTool:
 
     def test_default_target_session_is_originating_when_on_complete_set(self, tool_loop):
         """on_complete tasks must default target_session='originating' so completion replies still land in the spawning session."""
-        from tsugite.daemon.session_runner import set_current_session_id
+        from tsugite_daemon.session_runner import set_current_session_id
+
         from tsugite.tools.schedule import background_task, set_scheduler
 
         mock_sched = MagicMock()
@@ -288,7 +289,7 @@ class TestAutoReply:
             auto_reply=True,
         )
 
-        with patch("tsugite.daemon.adapters.scheduler_adapter.send_notification"):
+        with patch("tsugite_daemon.adapters.scheduler_adapter.send_notification"):
             await sa._auto_reply(mock_adapter, entry, "file1.txt\nfile2.txt", [("dm", _make_discord_channel())])
 
         mock_adapter.handle_message.assert_awaited_once()
@@ -318,7 +319,7 @@ class TestAutoReply:
         )
 
         with (
-            patch("tsugite.daemon.adapters.scheduler_adapter.send_notification"),
+            patch("tsugite_daemon.adapters.scheduler_adapter.send_notification"),
             patch("tsugite.interaction.set_interaction_backend"),
             patch.object(sa, "_inject_into_user_sessions") as mock_inject,
             patch.object(sa, "_auto_reply", new_callable=AsyncMock) as mock_auto,
@@ -347,7 +348,7 @@ class TestAutoReply:
         )
 
         with (
-            patch("tsugite.daemon.adapters.scheduler_adapter.send_notification") as mock_notify,
+            patch("tsugite_daemon.adapters.scheduler_adapter.send_notification") as mock_notify,
             patch("tsugite.interaction.set_interaction_backend"),
             patch.object(sa, "_inject_into_user_sessions") as mock_inject,
             patch.object(sa, "_auto_reply") as mock_auto,
@@ -376,7 +377,7 @@ class TestAutoReply:
             auto_reply=True,
         )
 
-        with patch("tsugite.daemon.adapters.scheduler_adapter.send_notification") as mock_notify:
+        with patch("tsugite_daemon.adapters.scheduler_adapter.send_notification") as mock_notify:
             await sa._auto_reply(mock_adapter, entry, "raw result", [("dm", _make_discord_channel())])
 
         # Fallback notification should have been attempted
@@ -401,7 +402,7 @@ class TestAgentExecutionErrorNotification:
         )
 
         with (
-            patch("tsugite.daemon.adapters.scheduler_adapter.send_notification") as mock_notify,
+            patch("tsugite_daemon.adapters.scheduler_adapter.send_notification") as mock_notify,
             patch("tsugite.interaction.set_interaction_backend"),
         ):
             with pytest.raises(AgentExecutionError):
@@ -429,7 +430,7 @@ class TestAgentExecutionErrorNotification:
         )
 
         with (
-            patch("tsugite.daemon.adapters.scheduler_adapter.send_notification"),
+            patch("tsugite_daemon.adapters.scheduler_adapter.send_notification"),
             patch("tsugite.interaction.set_interaction_backend"),
         ):
             with pytest.raises(AgentExecutionError, match="max_turns"):
@@ -449,7 +450,7 @@ class TestAgentExecutionErrorNotification:
         )
 
         with (
-            patch("tsugite.daemon.adapters.scheduler_adapter.send_notification") as mock_notify,
+            patch("tsugite_daemon.adapters.scheduler_adapter.send_notification") as mock_notify,
             patch("tsugite.interaction.set_interaction_backend"),
         ):
             with pytest.raises(AgentExecutionError):
@@ -519,7 +520,7 @@ class TestPartialOutputOnMaxTurns:
         )
 
         with (
-            patch("tsugite.daemon.adapters.scheduler_adapter.send_notification") as mock_notify,
+            patch("tsugite_daemon.adapters.scheduler_adapter.send_notification") as mock_notify,
             patch("tsugite.interaction.set_interaction_backend"),
         ):
             with pytest.raises(AgentExecutionError):
@@ -547,7 +548,7 @@ class TestPartialOutputOnMaxTurns:
         )
 
         with (
-            patch("tsugite.daemon.adapters.scheduler_adapter.send_notification") as mock_notify,
+            patch("tsugite_daemon.adapters.scheduler_adapter.send_notification") as mock_notify,
             patch("tsugite.interaction.set_interaction_backend"),
         ):
             with pytest.raises(AgentExecutionError):
@@ -572,7 +573,7 @@ class TestSchedulerStatusUpdates:
 
     @pytest.mark.asyncio
     async def test_success_marks_session_completed(self):
-        from tsugite.daemon.session_store import SessionStatus
+        from tsugite_daemon.session_store import SessionStatus
 
         sa, mock_adapter = _make_scheduler_adapter()
         mock_adapter.handle_message = AsyncMock(return_value="all done")
@@ -593,8 +594,9 @@ class TestSchedulerStatusUpdates:
     @pytest.mark.asyncio
     async def test_agent_skipped_marks_session_cancelled(self):
         """AgentSkippedError currently re-raises without updating status, leaving the session pinned at RUNNING."""
+        from tsugite_daemon.session_store import SessionStatus
+
         from tsugite.agent_runner.models import AgentSkippedError
-        from tsugite.daemon.session_store import SessionStatus
 
         sa, mock_adapter = _make_scheduler_adapter()
         mock_adapter.handle_message = AsyncMock(side_effect=AgentSkippedError("conditions not met"))
@@ -616,7 +618,7 @@ class TestSchedulerStatusUpdates:
     @pytest.mark.asyncio
     async def test_unexpected_exception_marks_session_failed(self):
         """Any non-AgentExecutionError that escapes handle_message must still set FAILED."""
-        from tsugite.daemon.session_store import SessionStatus
+        from tsugite_daemon.session_store import SessionStatus
 
         sa, mock_adapter = _make_scheduler_adapter()
         mock_adapter.handle_message = AsyncMock(side_effect=RuntimeError("kaboom"))
@@ -653,7 +655,7 @@ class TestSchedulerStatusUpdates:
         )
 
         with patch("tsugite.interaction.set_interaction_backend"):
-            with caplog.at_level(logging.WARNING, logger="tsugite.daemon.adapters.scheduler_adapter"):
+            with caplog.at_level(logging.WARNING, logger="tsugite_daemon.adapters.scheduler_adapter"):
                 await sa._run_agent(entry)
 
         assert any(
@@ -666,7 +668,7 @@ class TestSchedulerStatusUpdates:
 class TestPartialHistoryOnError:
     @pytest.mark.asyncio
     async def test_saves_history_on_agent_execution_error(self, tmp_path):
-        from tsugite.daemon.adapters.base import BaseAdapter, ChannelContext
+        from tsugite_daemon.adapters.base import BaseAdapter, ChannelContext
 
         mock_adapter = MagicMock(spec=BaseAdapter)
         mock_adapter.agent_name = "bot"
@@ -707,7 +709,7 @@ class TestPartialHistoryOnError:
         )
 
         with (
-            patch("tsugite.daemon.adapters.base.run_agent", side_effect=error),
+            patch("tsugite_daemon.adapters.base.run_agent", side_effect=error),
             patch("tsugite.agent_runner.history_integration.save_run_to_history") as mock_save,
         ):
             mock_adapter.resolve_model = MagicMock(return_value="test-model")

@@ -1,6 +1,7 @@
 """Draft input persistence across reloads and session switches."""
 
-from tsugite.daemon.session_store import Session, SessionSource
+from tsugite_daemon.session_store import Session, SessionSource
+
 from tsugite.history.storage import generate_session_id
 
 from .helpers import CONV_VIEW

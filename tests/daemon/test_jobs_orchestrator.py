@@ -5,14 +5,13 @@ import json
 from unittest.mock import MagicMock
 
 import pytest
-
-from tsugite.daemon.job_store import Job, JobState, JobStore
-from tsugite.daemon.jobs_orchestrator import (
+from tsugite_daemon.job_store import Job, JobState, JobStore
+from tsugite_daemon.jobs_orchestrator import (
     MAX_VERIFY_ATTEMPTS,
     JobsOrchestrator,
     _parse_verifier_output,
 )
-from tsugite.daemon.session_store import Session, SessionStatus
+from tsugite_daemon.session_store import Session, SessionStatus
 
 
 class FakeStore:
@@ -903,7 +902,7 @@ async def test_worktree_prune_runs_off_the_event_loop_thread(store, runner, orch
     must offload it to a worker thread."""
     import threading
 
-    import tsugite.daemon.jobs_orchestrator as orch_mod
+    import tsugite_daemon.jobs_orchestrator as orch_mod
 
     repo = tmp_path / "repo"
     _make_git_repo(repo)
@@ -934,7 +933,7 @@ async def test_initial_worktree_provision_runs_off_the_event_loop_thread(store, 
     initial spawn path must offload it via asyncio.to_thread, like the retry path."""
     import threading
 
-    import tsugite.daemon.jobs_orchestrator as orch_mod
+    import tsugite_daemon.jobs_orchestrator as orch_mod
 
     loop_tid = threading.get_ident()
     seen: dict = {}
@@ -1005,7 +1004,7 @@ async def test_no_verifier_spawn_when_timeout_finalizes_during_predicate_eval(st
     that's an `await asyncio.to_thread(...)` yield point. By the time eval
     returns the Job may already be STUCK; the handler must re-check state and
     NOT go on to spawn a verifier / re-arm a timer on the terminal Job."""
-    import tsugite.daemon.jobs_orchestrator as orch_mod
+    import tsugite_daemon.jobs_orchestrator as orch_mod
 
     # One predicate (drives the await) + one prose AC (would trigger a verifier spawn).
     job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=["cmd:true", "prose criterion"])
@@ -1156,13 +1155,13 @@ async def test_retry_with_hint_rejects_non_stuck(store, runner, orchestrator):
 
 
 def test_render_jobs_context_xml_empty_for_no_jobs(store):
-    from tsugite.daemon.jobs_orchestrator import render_jobs_context_xml
+    from tsugite_daemon.jobs_orchestrator import render_jobs_context_xml
 
     assert render_jobs_context_xml(store, "parent-X") == ""
 
 
 def test_render_jobs_context_xml_lists_active_and_recent(store, runner, orchestrator, tmp_path):
-    from tsugite.daemon.jobs_orchestrator import render_jobs_context_xml
+    from tsugite_daemon.jobs_orchestrator import render_jobs_context_xml
 
     # Active job
     active = _seed_running_job(store, orchestrator, runner, acceptance_criteria=[])
@@ -1194,7 +1193,7 @@ def test_render_jobs_context_xml_truncates_prompt_and_error(store):
     store.update_state(job.id, JobState.STUCK.value)
     store.update(job.id, error=("y" * 500))
 
-    from tsugite.daemon.jobs_orchestrator import render_jobs_context_xml
+    from tsugite_daemon.jobs_orchestrator import render_jobs_context_xml
 
     xml = render_jobs_context_xml(store, "parent-T")
     # Prompt truncated to 80 + ellipsis
@@ -1247,7 +1246,7 @@ async def test_notify_false_does_not_fire_reply(store, runner, orchestrator):
 
 
 def test_build_notify_message_includes_job_id_and_state():
-    from tsugite.daemon.jobs_orchestrator import _build_notify_message
+    from tsugite_daemon.jobs_orchestrator import _build_notify_message
 
     job = Job(
         id="job-abc",
@@ -1480,7 +1479,7 @@ def test_legacy_notify_bool_migrates_on_load(tmp_path):
     notify_when='terminal' so older daemons' persisted state keeps working."""
     import json
 
-    from tsugite.daemon.job_store import JobStore
+    from tsugite_daemon.job_store import JobStore
 
     path = tmp_path / "jobs.json"
     path.write_text(
@@ -1713,7 +1712,7 @@ async def test_concurrent_retry_with_hint_spawns_only_one_worker(store, runner, 
     fresh_workspace provisioning await, so without a per-job lock both callers spawn."""
     import threading
 
-    import tsugite.daemon.jobs_orchestrator as orch_mod
+    import tsugite_daemon.jobs_orchestrator as orch_mod
 
     job = store.add(Job(id="", parent_session_id="parent-1", prompt="x", acceptance_criteria=["x"], repo="/fake/repo"))
     store.update(job.id, state=JobState.STUCK.value)

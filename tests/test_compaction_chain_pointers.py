@@ -13,10 +13,10 @@ needing `session_store.json`. Web UI consumes both directions.
 from contextlib import ExitStack
 
 import pytest
+from tsugite_daemon.config import AgentConfig
+from tsugite_daemon.session_store import SessionStore
 
 from tests.test_post_compaction_counters import _patches, _seed_session_events, _StubAdapter
-from tsugite.daemon.config import AgentConfig
-from tsugite.daemon.session_store import SessionStore
 from tsugite.history import SessionStorage
 
 
@@ -115,10 +115,10 @@ async def test_compacted_into_not_written_when_nothing_to_compact(workspace_dir,
         return "Summary"
 
     with (
-        patch("tsugite.daemon.memory.get_context_limit", return_value=200_000),
-        patch("tsugite.daemon.memory.infer_compaction_model", return_value="anthropic:claude-3-haiku-20240307"),
-        patch("tsugite.daemon.memory.split_events_for_compaction", return_value=([], [])),
-        patch("tsugite.daemon.memory.summarize_session", new=fake_summarize),
+        patch("tsugite_daemon.memory.get_context_limit", return_value=200_000),
+        patch("tsugite_daemon.memory.infer_compaction_model", return_value="anthropic:claude-3-haiku-20240307"),
+        patch("tsugite_daemon.memory.split_events_for_compaction", return_value=([], [])),
+        patch("tsugite_daemon.memory.summarize_session", new=fake_summarize),
         patch("tsugite.history.get_history_dir", return_value=history_dir),
         patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
         patch("tsugite.history.storage.get_machine_name", return_value="test"),
@@ -181,10 +181,10 @@ async def test_retained_model_response_loses_provider_session_id(workspace_dir, 
     adapter = _StubAdapter("test-agent", agent_config, store)
 
     with (
-        patch("tsugite.daemon.memory.get_context_limit", return_value=1_000_000),
-        patch("tsugite.daemon.memory.infer_compaction_model", return_value="anthropic:claude-3-haiku-20240307"),
-        patch("tsugite.daemon.memory.split_events_for_compaction", return_value=(old_events, recent_events)),
-        patch("tsugite.daemon.memory.summarize_session", new=fake_summarize),
+        patch("tsugite_daemon.memory.get_context_limit", return_value=1_000_000),
+        patch("tsugite_daemon.memory.infer_compaction_model", return_value="anthropic:claude-3-haiku-20240307"),
+        patch("tsugite_daemon.memory.split_events_for_compaction", return_value=(old_events, recent_events)),
+        patch("tsugite_daemon.memory.summarize_session", new=fake_summarize),
         patch("tsugite.history.get_history_dir", return_value=history_dir),
         patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
         patch("tsugite.history.storage.get_machine_name", return_value="test"),
@@ -199,7 +199,7 @@ async def test_retained_model_response_loses_provider_session_id(workspace_dir, 
     state_delta = model_responses[0].data.get("state_delta") or {}
     assert "session_id" not in state_delta, f"Retained model_response leaked pre-compaction session_id: {state_delta}"
 
-    with patch("tsugite.agent_runner.history_integration.get_history_dir", return_value=history_dir):
+    with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
         info = get_claude_code_session_info(new_session.id)
     assert info is None, f"Expected no resume target post-compaction, got {info}"
 
@@ -237,10 +237,10 @@ async def test_retained_events_preserve_timestamps_and_drop_session_end(workspac
     adapter = _StubAdapter("test-agent", agent_config, store)
 
     with (
-        patch("tsugite.daemon.memory.get_context_limit", return_value=1_000_000),
-        patch("tsugite.daemon.memory.infer_compaction_model", return_value="anthropic:claude-3-haiku-20240307"),
-        patch("tsugite.daemon.memory.split_events_for_compaction", return_value=(old_events, recent_events)),
-        patch("tsugite.daemon.memory.summarize_session", new=fake_summarize),
+        patch("tsugite_daemon.memory.get_context_limit", return_value=1_000_000),
+        patch("tsugite_daemon.memory.infer_compaction_model", return_value="anthropic:claude-3-haiku-20240307"),
+        patch("tsugite_daemon.memory.split_events_for_compaction", return_value=(old_events, recent_events)),
+        patch("tsugite_daemon.memory.summarize_session", new=fake_summarize),
         patch("tsugite.history.get_history_dir", return_value=history_dir),
         patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
         patch("tsugite.history.storage.get_machine_name", return_value="test"),
@@ -332,9 +332,9 @@ async def test_compaction_records_summary_token_usage_to_usage_store(workspace_d
     adapter = _StubAdapter("test-agent", agent_config, store)
 
     with (
-        patch("tsugite.daemon.memory.get_context_limit", return_value=1_000_000),
-        patch("tsugite.daemon.memory.infer_compaction_model", return_value="openai:gpt-4o-mini"),
-        patch("tsugite.daemon.memory.split_events_for_compaction", return_value=(old_events, recent_events)),
+        patch("tsugite_daemon.memory.get_context_limit", return_value=1_000_000),
+        patch("tsugite_daemon.memory.infer_compaction_model", return_value="openai:gpt-4o-mini"),
+        patch("tsugite_daemon.memory.split_events_for_compaction", return_value=(old_events, recent_events)),
         patch("tsugite.models.get_provider_and_model", return_value=("openai:gpt-4o-mini", provider, "gpt-4o-mini")),
         patch("tsugite.usage.get_usage_store", return_value=usage_store),
         patch("tsugite.history.get_history_dir", return_value=history_dir),

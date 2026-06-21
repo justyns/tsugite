@@ -10,7 +10,8 @@ def test_create_and_switch_sessions(authenticated_page, e2e_session_store, mock_
 
     # Create two sessions
     e2e_session_store.get_or_create_interactive(user_id, "test-agent")
-    from tsugite.daemon.session_store import Session, SessionSource
+    from tsugite_daemon.session_store import Session, SessionSource
+
     from tsugite.history.storage import generate_session_id
 
     s2_id = generate_session_id("test-agent")

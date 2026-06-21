@@ -10,8 +10,7 @@ Caught a regression: an earlier `/job` definition used `list` for the
 """
 
 import pytest
-
-from tsugite.daemon.commands import get_commands
+from tsugite_daemon.commands import get_commands
 
 _DISCORD_SAFE_PARAM_TYPES = {str, int, bool, float}
 

@@ -4,15 +4,15 @@ disk and SSE listeners must be notified after each turn."""
 from pathlib import Path
 
 import pytest
-
-from tsugite.daemon.adapters.base import (
+from tsugite_daemon.adapters.base import (
     BaseAdapter,
     ChannelContext,
     CompositeUIHandler,
     SSEBroadcastHandler,
 )
-from tsugite.daemon.config import AgentConfig
-from tsugite.daemon.session_store import Session, SessionSource, SessionStore
+from tsugite_daemon.config import AgentConfig
+from tsugite_daemon.session_store import Session, SessionSource, SessionStore
+
 from tsugite.events import FinalAnswerEvent, StepStartEvent
 
 

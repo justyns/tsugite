@@ -4,12 +4,11 @@ from unittest.mock import patch
 
 import pytest
 from starlette.testclient import TestClient
-
-from tsugite.daemon.adapters.http import HTTPAgentAdapter, HTTPServer
-from tsugite.daemon.config import AgentConfig, HTTPConfig
-from tsugite.daemon.session_runner import SessionRunner
-from tsugite.daemon.session_store import Session, SessionSource, SessionStore
-from tsugite.daemon.webhook_store import WebhookStore
+from tsugite_daemon.adapters.http import HTTPAgentAdapter, HTTPServer
+from tsugite_daemon.config import AgentConfig, HTTPConfig
+from tsugite_daemon.session_runner import SessionRunner
+from tsugite_daemon.session_store import Session, SessionSource, SessionStore
+from tsugite_daemon.webhook_store import WebhookStore
 
 
 @pytest.fixture
@@ -35,7 +34,7 @@ def server(tmp_workspace, session_store, session_runner, tmp_path):
     http_config = HTTPConfig(enabled=True, host="127.0.0.1", port=8374)
     webhook_store = WebhookStore(tmp_path / "webhooks.json")
 
-    from tsugite.daemon.auth import TokenStore
+    from tsugite_daemon.auth import TokenStore
 
     token_store = TokenStore(tmp_path / "tokens.json")
 

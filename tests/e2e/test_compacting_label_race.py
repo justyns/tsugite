@@ -4,7 +4,8 @@ counts are still pending instead of flashing the same plain "compacting" label
 that gets shown when counts never arrive.
 """
 
-from tsugite.daemon.session_store import Session, SessionSource
+from tsugite_daemon.session_store import Session, SessionSource
+
 from tsugite.history.storage import generate_session_id
 
 from .helpers import CONV_VIEW, open_conversations, reload_conversations_view, wait_for_session_in_list

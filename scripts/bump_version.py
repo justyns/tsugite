@@ -23,7 +23,9 @@ ROOT_PYPROJECT = REPO_ROOT / "pyproject.toml"
 PLUGIN_GLOB = "plugins/*/pyproject.toml"
 
 VERSION_LINE_RE = re.compile(r'^(version\s*=\s*)"[^"]+"', re.MULTILINE)
-CORE_DEP_RE = re.compile(r'"tsugite-cli==[^"]+"')
+# Matches any inter-package pin like "tsugite-cli==X" / "tsugite-pty==X" so
+# plugins that depend on sibling packages stay in lockstep.
+SIBLING_DEP_RE = re.compile(r'"(tsugite-[a-z0-9-]+)==[^"]+"')
 PEP440_RE = re.compile(r"^\d+\.\d+\.\d+([a-zA-Z0-9.+-]*)?$")
 
 
@@ -43,9 +45,9 @@ def bump_root(new_version: str, dry_run: bool) -> None:
 def bump_plugin(path: Path, new_version: str, dry_run: bool) -> None:
     text = path.read_text()
     new_text = _replace_first(text, VERSION_LINE_RE, rf'\g<1>"{new_version}"', path)
-    if CORE_DEP_RE.search(new_text):
-        new_text = CORE_DEP_RE.sub(f'"tsugite-cli=={new_version}"', new_text)
-    _write(path, text, new_text, dry_run, label=f"{path.parent.name} version + core pin")
+    if SIBLING_DEP_RE.search(new_text):
+        new_text = SIBLING_DEP_RE.sub(rf'"\g<1>=={new_version}"', new_text)
+    _write(path, text, new_text, dry_run, label=f"{path.parent.name} version + sibling pins")
 
 
 def _write(path: Path, before: str, after: str, dry_run: bool, label: str) -> None:

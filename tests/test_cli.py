@@ -319,7 +319,7 @@ tools: []
 
 
 class TestUIDefault:
-    """Default UI selection: plain on TTY, --ui live for the three-region status UI."""
+    """Default UI selection: plain on TTY; --headless uses custom_agent_ui."""
 
     @staticmethod
     def _make_logger_mock():
@@ -329,7 +329,6 @@ class TestUIDefault:
         cm.__enter__ = MagicMock(return_value=None)
         cm.__exit__ = MagicMock(return_value=None)
         logger.ui_handler.progress_context.return_value = cm
-        logger.ui_handler.live_context.return_value = cm
         return logger
 
     @patch("tsugite.utils.should_use_plain_output", return_value=False)
@@ -351,54 +350,6 @@ class TestUIDefault:
 
         assert result.exit_code == 0
         mock_plain.assert_called_once()
-        mock_custom_ui.assert_not_called()
-
-    @patch("tsugite.utils.should_use_plain_output", return_value=False)
-    @patch("tsugite.ui.create_live_logger")
-    @patch("tsugite.ui.create_plain_logger")
-    @patch("tsugite.ui.custom_agent_ui")
-    def test_ui_live_flag_uses_live_handler_on_tty(
-        self,
-        mock_custom_ui,
-        mock_plain,
-        mock_live,
-        mock_should_plain,
-        cli_runner,
-        sample_agent_file,
-        mock_agent_execution,
-    ):
-        """--ui live + TTY -> create_live_logger fires, others do not."""
-        mock_live.return_value = self._make_logger_mock()
-
-        result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--ui", "live"])
-
-        assert result.exit_code == 0
-        mock_live.assert_called_once()
-        mock_plain.assert_not_called()
-        mock_custom_ui.assert_not_called()
-
-    @patch("tsugite.utils.should_use_plain_output", return_value=True)
-    @patch("tsugite.ui.create_live_logger")
-    @patch("tsugite.ui.create_plain_logger")
-    @patch("tsugite.ui.custom_agent_ui")
-    def test_ui_live_piped_falls_back_to_plain(
-        self,
-        mock_custom_ui,
-        mock_plain,
-        mock_live,
-        mock_should_plain,
-        cli_runner,
-        sample_agent_file,
-        mock_agent_execution,
-    ):
-        """--ui live when stdout is not a TTY (or NO_COLOR) -> silently degrade to plain."""
-        mock_plain.return_value = self._make_logger_mock()
-
-        result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--ui", "live"])
-
-        assert result.exit_code == 0
-        mock_plain.assert_called_once()
-        mock_live.assert_not_called()
         mock_custom_ui.assert_not_called()
 
     @patch("tsugite.utils.should_use_plain_output", return_value=False)
@@ -472,21 +423,19 @@ class TestUIDefault:
         mock_plain.assert_called_once()
         mock_custom_ui.assert_not_called()
 
-    def test_subagent_mode_rejects_ui_live(self, cli_runner, sample_agent_file):
-        """--subagent-mode + --ui live errors out (subagents must emit JSONL)."""
-        result = cli_runner.invoke(
-            app, ["run", str(sample_agent_file), "test prompt", "--subagent-mode", "--ui", "live"]
-        )
+    def test_subagent_mode_rejects_plain(self, cli_runner, sample_agent_file):
+        """--subagent-mode + --plain errors out (subagents must emit JSONL)."""
+        result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--subagent-mode", "--plain"])
         assert result.exit_code == 1
         combined = (result.stdout or "") + (result.stderr or "")
-        assert "subagent-mode" in combined.lower() or "live" in combined.lower()
+        assert "subagent-mode" in combined.lower()
 
 
 PANEL_BORDER_CHARS = ["╭", "╮", "╰", "╯", "│", "─", "┌", "┐", "└", "┘", "├", "┤"]
 
 
 class TestPipeRegression:
-    """Default and --ui live must not leak ANSI panel/box chars when stdout is not a TTY."""
+    """Default output must not leak ANSI panel/box chars when stdout is not a TTY."""
 
     def _assert_clean(self, output: str) -> None:
         assert "\x1b[" not in output, f"ANSI escape detected: {output!r}"
@@ -496,12 +445,6 @@ class TestPipeRegression:
     def test_default_pipe_has_no_ansi_panels(self, cli_runner, sample_agent_file, mock_agent_execution):
         """No flags + CliRunner (non-TTY) -> plain output, no escapes or box chars."""
         result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt"])
-        assert result.exit_code == 0
-        self._assert_clean(result.stdout)
-
-    def test_ui_live_piped_degrades_clean(self, cli_runner, sample_agent_file, mock_agent_execution):
-        """--ui live + non-TTY -> degrades to plain (no escapes, no panel chars)."""
-        result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--ui", "live"])
         assert result.exit_code == 0
         self._assert_clean(result.stdout)
 
@@ -779,7 +722,6 @@ class TestRunCommandHistory:
         with (
             patch("tsugite.history.storage.get_history_dir", return_value=tmp_path),
             patch("tsugite.history.storage.get_machine_name", return_value="test_machine"),
-            patch("tsugite.agent_runner.history_integration.get_history_dir", return_value=tmp_path),
             patch("tsugite.agent_runner.run_agent") as mock_run_agent,
             patch("tsugite.md_agents.validate_agent_execution") as mock_validate,
             patch("tsugite.config.load_config") as mock_config,

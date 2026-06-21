@@ -7,8 +7,8 @@ navigation. These tests pin the collapse and back-button flow.
 """
 
 import pytest
+from tsugite_daemon.session_store import Session, SessionSource
 
-from tsugite.daemon.session_store import Session, SessionSource
 from tsugite.history.storage import generate_session_id
 
 from .helpers import CONV_VIEW, open_conversations, reload_conversations_view

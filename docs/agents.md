@@ -40,6 +40,7 @@ All fields are optional except `name`.
 | `model`            | str  | config default   | Provider and model (`provider:model-name`)                        |
 | `max_turns`        | int  | `5`              | Max LLM round-trips before stopping                               |
 | `tools`            | list | `[]`             | Tools the agent can use                                           |
+| `strict_tools`     | bool | `false`          | Require every listed tool; default skips uninstalled ones with a warning |
 | `extends`          | str  | built-in default | Parent agent to inherit from (`"none"` to opt out)                |
 | `instructions`     | str  | `""`             | Behavioral guidelines (combined with defaults)                    |
 | `attachments`      | list | `[]`             | Files or URLs to include as context                               |
@@ -54,6 +55,11 @@ All fields are optional except `name`.
 | `network`          | dict | none             | Allowed domains for sandbox mode                                  |
 | `allowed_secrets`  | list | `[]`             | Restrict which secrets this agent can access (empty = all)        |
 | `run_if`           | str  | none             | Jinja2 condition, skip agent if false, useful for scheduled tasks |
+
+By default a tool that isn't installed (for example a tool from an optional plugin like
+`tsugite-web`) is skipped at runtime with a warning, so the agent still runs. Set
+`strict_tools: true` to require every listed tool instead, failing fast if any is missing.
+`tsu validate` reports missing tools (as warnings, or as errors when `strict_tools` is set).
 
 ## Jinja templating
 

@@ -7,9 +7,8 @@ import sys
 import types
 
 import pytest
-
-from tsugite.daemon.gateway import _render_webhook_body
-from tsugite.daemon.session_store import Session, SessionSource, SessionStore
+from tsugite_daemon.gateway import _render_webhook_body
+from tsugite_daemon.session_store import Session, SessionSource, SessionStore
 
 # ── push: shared claims must not be mutated across sends ──
 
@@ -18,7 +17,7 @@ from tsugite.daemon.session_store import Session, SessionSource, SessionStore
 async def test_send_web_push_does_not_let_claims_mutation_leak(monkeypatch, tmp_path):
     """pywebpush pins `aud` onto the claims dict it receives. With a shared
     dict, the first subscriber's push origin poisons every later send."""
-    from tsugite.daemon import push as push_mod
+    from tsugite_daemon import push as push_mod
 
     seen_auds = []
 

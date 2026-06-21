@@ -16,6 +16,10 @@ GROUP_PROVIDERS = "tsugite.providers"
 GROUP_SECRETS = "tsugite.secrets"
 GROUP_HOOKS = "tsugite.hooks"
 GROUP_EVENT_SUBSCRIBERS = "tsugite.event_subscribers"
+GROUP_HISTORY = "tsugite.history"
+GROUP_ATTACHMENTS = "tsugite.attachments"
+GROUP_SANDBOX = "tsugite.sandbox"
+GROUP_EXECUTORS = "tsugite.executors"
 PLUGIN_GROUPS = (
     GROUP_PLUGINS,
     GROUP_TOOLS,
@@ -24,10 +28,15 @@ PLUGIN_GROUPS = (
     GROUP_SECRETS,
     GROUP_HOOKS,
     GROUP_EVENT_SUBSCRIBERS,
+    GROUP_HISTORY,
+    GROUP_ATTACHMENTS,
+    GROUP_SANDBOX,
+    GROUP_EXECUTORS,
 )
 
 _plugin_hooks: dict[str, list] = {}
 _plugin_subscriptions: list[Subscription] = []
+_plugin_attachment_handlers: list | None = None
 
 
 @dataclass
@@ -53,6 +62,19 @@ def _iter_plugins(group: str, plugin_config: dict | None = None):
         cfg = plugin_config.get(ep.name, {})
         enabled = cfg.get("enabled", True)
         yield ep, cfg, enabled
+
+
+def load_backend_entry_point(group: str, name: str):
+    """Return the object registered under `name` in entry-point `group`, or None.
+
+    Shared by the backend resolvers (executor, history, sandbox, ...) to look up a
+    swappable battery by name. Built-in backends are handled by the caller before
+    falling through to this plugin lookup.
+    """
+    for ep in importlib.metadata.entry_points(group=group):
+        if ep.name == name:
+            return ep.load()
+    return None
 
 
 def discover_plugins(plugin_config: dict | None = None) -> list[PluginInfo]:
@@ -149,6 +171,37 @@ def load_event_subscriber_plugins(plugin_config: dict | None = None) -> list[Plu
 def get_plugin_subscriptions() -> list[Subscription]:
     """Return all registered plugin event subscriptions."""
     return _plugin_subscriptions
+
+
+def load_attachment_plugins(plugin_config: dict | None = None) -> list[PluginInfo]:
+    """Discover attachment handler plugins.
+
+    Each entry point resolves to a factory callable that accepts a config dict and
+    returns an AttachmentHandler instance.
+    """
+    global _plugin_attachment_handlers
+    handlers: list = []
+    results = _load_plugin_group(
+        GROUP_ATTACHMENTS,
+        plugin_config,
+        handlers.append,
+        summarize=lambda h: type(h).__name__,
+    )
+    _plugin_attachment_handlers = handlers
+    return results
+
+
+def get_attachment_handlers() -> list:
+    """Return plugin-contributed attachment handlers (loaded once, cached)."""
+    if _plugin_attachment_handlers is None:
+        load_attachment_plugins()
+    return _plugin_attachment_handlers
+
+
+def reset_attachment_handlers() -> None:
+    """Clear the cached plugin attachment handlers (used by tests)."""
+    global _plugin_attachment_handlers
+    _plugin_attachment_handlers = None
 
 
 def load_decorator_plugins(plugin_config: dict | None = None) -> list[PluginInfo]:

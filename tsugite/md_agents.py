@@ -89,6 +89,7 @@ class AgentConfig(BaseModel):
     model: Optional[str] = None
     max_turns: int = 5
     tools: List[str] = Field(default_factory=list)
+    strict_tools: bool = False  # require every declared tool; default skips uninstalled ones
     prefetch: List[Dict[str, Any]] = Field(default_factory=list)
     attachments: List[Union[str, AttachmentSpec]] = Field(default_factory=list)
     auto_load_skills: List[str] = Field(default_factory=list)

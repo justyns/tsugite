@@ -265,8 +265,7 @@ def init_daemon(
 ):
     """Interactive setup wizard for Discord bot."""
     import yaml
-
-    from tsugite.daemon.config import load_daemon_config
+    from tsugite_daemon.config import load_daemon_config
 
     console.print(
         Panel(
@@ -718,7 +717,7 @@ daemon_app.add_typer(token_app, name="token")
 
 
 def _get_tokens_path() -> Path:
-    from tsugite.daemon.auth import TOKENS_FILENAME
+    from tsugite_daemon.auth import TOKENS_FILENAME
 
     return get_xdg_data_path("daemon") / TOKENS_FILENAME
 
@@ -728,7 +727,7 @@ def token_create(
     name: str = typer.Option("", "--name", "-n", help="Name for the token (for identification)"),
 ):
     """Create a new admin API token."""
-    from tsugite.daemon.auth import TokenStore
+    from tsugite_daemon.auth import TokenStore
 
     store = TokenStore(_get_tokens_path())
     t, raw = store.create_admin_token(name=name)
@@ -743,7 +742,7 @@ def token_create(
 @token_app.command("list")
 def token_list():
     """List all admin API tokens."""
-    from tsugite.daemon.auth import TokenStore
+    from tsugite_daemon.auth import TokenStore
 
     store = TokenStore(_get_tokens_path())
     tokens = store.list_admin_tokens()
@@ -760,7 +759,7 @@ def token_revoke(
     name_or_prefix: str = typer.Argument(help="Token name or prefix to revoke"),
 ):
     """Revoke an admin API token."""
-    from tsugite.daemon.auth import TokenStore
+    from tsugite_daemon.auth import TokenStore
 
     store = TokenStore(_get_tokens_path())
     if store.revoke_admin_token(name_or_prefix):
@@ -788,7 +787,14 @@ def daemon_main(
 
     import asyncio
 
-    from tsugite.daemon.gateway import run_daemon
+    try:
+        from tsugite_daemon.gateway import run_daemon
+    except ModuleNotFoundError as e:
+        console.print(
+            "[red]The daemon battery is not installed.[/red] "
+            "Install it with: [cyan]pip install tsugite-cli[daemon][/cyan]"
+        )
+        raise typer.Exit(1) from e
 
     overrides = {}
     if log_file is not None:

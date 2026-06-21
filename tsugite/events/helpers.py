@@ -67,7 +67,7 @@ def _current_session_id() -> Optional[str]:
     when called from CLI contexts where the daemon isn't in play.
     """
     try:
-        from tsugite.daemon.session_runner import get_current_session_id
+        from tsugite_daemon.session_runner import get_current_session_id
     except ImportError:
         return None
     return get_current_session_id()

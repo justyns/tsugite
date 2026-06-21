@@ -1,8 +1,8 @@
 """File upload via picker and large-paste-as-file flows in the composer."""
 
 import pytest
+from tsugite_daemon.session_store import Session, SessionSource
 
-from tsugite.daemon.session_store import Session, SessionSource
 from tsugite.history.storage import generate_session_id
 
 PILL = ".console-pending-files .file-pill"

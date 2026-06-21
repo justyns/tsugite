@@ -1,0 +1,25 @@
+[project]
+name = "tsugite-pty"
+version = "0.16.0"
+description = "Tsugite plugin: PTY terminal runtime and tools (daemon-only)"
+requires-python = ">=3.11"
+dependencies = ["tsugite-cli==0.16.0"]
+
+[project.entry-points."tsugite.plugins"]
+pty = "tsugite_pty.tools"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["tsugite_pty"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/tsugite_pty",
+  "/pyproject.toml",
+]
+
+[tool.uv.sources]
+tsugite-cli = { workspace = true }

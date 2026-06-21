@@ -5,13 +5,13 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
-
-from tsugite.daemon.memory import (
+from tsugite_daemon.memory import (
     _llm_complete,
     extract_file_paths_from_events,
     split_events_for_compaction,
     track_compaction_usage,
 )
+
 from tsugite.history import SessionStorage, events_to_messages
 from tsugite.history.models import Event
 from tsugite.providers.base import CompletionResponse, Usage

@@ -34,7 +34,7 @@ Schedule this weekly.""")
 
 # Event-199 shape: two ```python blocks (runtime executes only the first, drops
 # the second) plus trailing prose that was never live-visible.
-_RAW_TWO_BLOCKS_TRAILING_PROSE = '''Let me check for a duplicate first.
+_RAW_TWO_BLOCKS_TRAILING_PROSE = """Let me check for a duplicate first.
 
 ```python
 search_issues(query="x")
@@ -46,7 +46,7 @@ No duplicate. Filing it.
 create_issue(title="x")
 ```
 
-PHANTOM_filed_issue and captured the syntax.'''
+PHANTOM_filed_issue and captured the syntax."""
 
 _REAL_ANSWER = "All done: packages upgraded and the cache was trimmed."
 
@@ -64,7 +64,7 @@ def _new_session(e2e_adapter, e2e_tmp, label):
 
 
 def _render_body(page, history_dir, user_id, session_id, *, screenshot=None):
-    with patch("tsugite.daemon.adapters.http.get_history_dir", return_value=history_dir):
+    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
         open_session_by_url(page, page.url.split("#")[0], user_id, session_id)
         page.wait_for_selector(".console-turn.user", timeout=5000)
         page.wait_for_selector(".console-turn.agent", timeout=5000)

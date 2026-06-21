@@ -9,8 +9,7 @@ each other through a shared scalar.
 """
 
 import pytest
-
-from tsugite.daemon.session_store import Session, SessionSource, SessionStore
+from tsugite_daemon.session_store import Session, SessionSource, SessionStore
 
 
 @pytest.fixture

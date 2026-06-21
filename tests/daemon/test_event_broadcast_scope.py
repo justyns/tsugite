@@ -10,7 +10,7 @@ active client to render progress twice.
 
 from unittest.mock import MagicMock
 
-from tsugite.daemon.adapters.http import SSEProgressHandler
+from tsugite_daemon.adapters.http import SSEProgressHandler
 
 
 def _broadcast_event_types(handler: SSEProgressHandler, event_types: list[str]) -> list[dict]:

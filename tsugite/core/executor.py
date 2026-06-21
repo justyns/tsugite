@@ -8,12 +8,14 @@ injected `state` object persist across turns.
 """
 
 import ast
+import asyncio
 import contextlib
 import io
 import os
 import pprint
 import sys
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Optional, Protocol, runtime_checkable
@@ -148,12 +150,16 @@ class ExecutionResult:
 
 @runtime_checkable
 class Executor(Protocol):
-    """Shared turn-execution surface of LocalExecutor and SubprocessExecutor.
+    """Shared turn-execution surface of every executor backend.
 
-    Tool registration is excluded: the backends register tools differently
-    (in-process namespace injection vs IPC stub generation across a process
-    boundary), so callers special-case it.
+    Backends register tools differently (in-process namespace injection vs IPC
+    stub generation across a process/host boundary), but they all expose the same
+    `set_tools` entry point so the agent stays backend-agnostic.
     """
+
+    def set_tools(self, tools: List[Any], event_bus: Optional[Any] = None) -> None:
+        """Register the tools available to executed code for this run."""
+        ...
 
     async def execute(self, code: str) -> ExecutionResult:
         """Run a turn of code and return its result."""
@@ -213,6 +219,64 @@ def _summarize_variable(value: Any) -> str:
         except Exception:
             pass
     return t
+
+
+def run_async_in_sync_context(coro):
+    """Run an async coroutine from synchronous user code, handling the event loop.
+
+    In-process tool wrappers are sync but tools are async; when called from inside
+    the agent's running loop we run the coroutine in a dedicated thread with its own
+    loop (copying contextvars so the interaction backend etc. propagate).
+    """
+    import concurrent.futures
+    import contextvars
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop is not None:
+        ctx = contextvars.copy_context()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+
+            def run_coro():
+                new_loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(new_loop)
+                try:
+                    return new_loop.run_until_complete(coro)
+                finally:
+                    new_loop.close()
+
+            return pool.submit(ctx.run, run_coro).result()
+    return asyncio.run(coro)
+
+
+def convert_positional_to_kwargs(tool_obj, args, kwargs):
+    """Map positional args onto keyword args using the tool's signature."""
+    if not args:
+        return
+
+    import inspect
+
+    try:
+        param_names = list(inspect.signature(tool_obj.function).parameters.keys())
+    except (ValueError, TypeError):
+        raise TypeError(
+            f"Tool '{tool_obj.name}' must be called with keyword arguments, not positional. "
+            f"Example: {tool_obj.name}(param1=value1, param2=value2)"
+        )
+
+    for i, arg in enumerate(args):
+        if i >= len(param_names):
+            raise TypeError(
+                f"Tool '{tool_obj.name}' takes at most {len(param_names)} "
+                f"positional arguments but {len(args)} were given"
+            )
+        param_name = param_names[i]
+        if param_name in kwargs:
+            raise TypeError(f"Tool '{tool_obj.name}' got multiple values for argument '{param_name}'")
+        kwargs[param_name] = arg
 
 
 class LocalExecutor:
@@ -552,6 +616,55 @@ class LocalExecutor:
             if name in self._tool_functions or name in self._sticky_injections or name == "state":
                 continue
             self.namespace[name] = value
+
+    def set_tools(self, tools: List[Any], event_bus: Optional[Any] = None):
+        """Wrap tools as in-process namespace functions the executed code can call."""
+        if event_bus is not None:
+            self.event_bus = event_bus
+        wrappers = {t.name: self._make_tool_wrapper(t) for t in tools if t.name not in EXECUTOR_BUILTIN_TOOLS}
+        self.register_tools(wrappers)
+
+    def _make_tool_wrapper(self, tool_obj):
+        """Build the sync namespace wrapper that calls a tool's async execute()."""
+        from tsugite.events import ToolCallEvent, ToolResultEvent
+
+        def tool_wrapper(*args, **kwargs):
+            self._tools_called.append(tool_obj.name)
+            convert_positional_to_kwargs(tool_obj, args, kwargs)
+            if self.event_bus:
+                self.event_bus.emit(ToolCallEvent(tool_name=tool_obj.name, arguments=kwargs))
+            t0 = time.perf_counter()
+            try:
+                result = run_async_in_sync_context(tool_obj.execute(**kwargs))
+                if self.event_bus:
+                    self.event_bus.emit(
+                        ToolResultEvent(
+                            tool_name=tool_obj.name,
+                            success=True,
+                            result_summary=str(result)[:200] if result is not None else "",
+                            duration_ms=int((time.perf_counter() - t0) * 1000),
+                        )
+                    )
+                return result
+            except Exception as exc:
+                if self.event_bus:
+                    self.event_bus.emit(
+                        ToolResultEvent(
+                            tool_name=tool_obj.name,
+                            success=False,
+                            result_summary=str(exc)[:200],
+                            duration_ms=int((time.perf_counter() - t0) * 1000),
+                        )
+                    )
+                raise
+
+        tool_wrapper.__name__ = tool_obj.name
+        tool_wrapper.__doc__ = tool_obj.description
+        if hasattr(tool_obj.function, "__signature__"):
+            tool_wrapper.__signature__ = tool_obj.function.__signature__
+        if hasattr(tool_obj.function, "__annotations__"):
+            tool_wrapper.__annotations__ = tool_obj.function.__annotations__
+        return tool_wrapper
 
     def register_tools(self, tools: Dict[str, Callable[..., Any]]):
         """Register tool functions that should be re-injected into the namespace every turn.

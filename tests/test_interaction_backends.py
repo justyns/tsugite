@@ -165,7 +165,7 @@ class TestAskUserBatchDispatch:
 
 class TestHTTPInteractionBackend:
     def test_emits_event_and_blocks(self):
-        from tsugite.daemon.adapters.http import HTTPInteractionBackend, SSEProgressHandler
+        from tsugite_daemon.adapters.http import HTTPInteractionBackend, SSEProgressHandler
 
         progress = MagicMock(spec=SSEProgressHandler)
         backend = HTTPInteractionBackend(progress)
@@ -186,7 +186,7 @@ class TestHTTPInteractionBackend:
         progress._emit.assert_called_once_with("ask_user", {"question": "What?", "question_type": "text"})
 
     def test_timeout_raises(self):
-        from tsugite.daemon.adapters.http import HTTPInteractionBackend, SSEProgressHandler
+        from tsugite_daemon.adapters.http import HTTPInteractionBackend, SSEProgressHandler
 
         progress = MagicMock(spec=SSEProgressHandler)
         backend = HTTPInteractionBackend(progress)

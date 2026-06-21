@@ -8,8 +8,8 @@ moved-into-popover set of secondary actions.
 """
 
 import pytest
+from tsugite_daemon.session_store import Session, SessionSource, SessionStatus
 
-from tsugite.daemon.session_store import Session, SessionSource, SessionStatus
 from tsugite.history.storage import generate_session_id
 
 from .helpers import open_conversations, reload_conversations_view, select_session_in_view

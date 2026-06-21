@@ -10,10 +10,10 @@ ExecutionOptions chokepoint and fix the daemon workspace-bind:
 from pathlib import Path
 
 import pytest
+from tsugite_daemon.adapters.base import resolve_sandbox_exec_options
+from tsugite_daemon.config import AgentConfig, DaemonConfig, SandboxSettings
+from tsugite_sandbox import BubblewrapSandbox
 
-from tsugite.core.sandbox import BubblewrapSandbox
-from tsugite.daemon.adapters.base import resolve_sandbox_exec_options
-from tsugite.daemon.config import AgentConfig, DaemonConfig, SandboxSettings
 from tsugite.options import ExecutionOptions
 
 
@@ -258,17 +258,17 @@ class TestGatewaySessionSandboxResolver:
     session (whose agent has sandbox off) would run on the host."""
 
     def _gateway(self, tmp_path, agents):
-        from tsugite.daemon.config import DaemonConfig
-        from tsugite.daemon.gateway import Gateway
-        from tsugite.daemon.session_store import SessionStore
+        from tsugite_daemon.config import DaemonConfig
+        from tsugite_daemon.gateway import Gateway
+        from tsugite_daemon.session_store import SessionStore
 
         gw = Gateway(DaemonConfig(state_dir=tmp_path, agents=agents))
         gw._session_store = SessionStore(tmp_path / "s.json")
         return gw
 
     def test_inherited_override_wins_over_disabled_agent(self, tmp_path):
-        from tsugite.daemon.config import AgentConfig
-        from tsugite.daemon.session_store import Session, SessionSource
+        from tsugite_daemon.config import AgentConfig
+        from tsugite_daemon.session_store import Session, SessionSource
 
         gw = self._gateway(tmp_path, {"plain": AgentConfig(workspace_dir=tmp_path, agent_file="default")})
         gw._session_store.create_session(
@@ -284,8 +284,8 @@ class TestGatewaySessionSandboxResolver:
         assert ctx.allow_domains == ["github.com"]
 
     def test_agent_config_used_when_no_override(self, tmp_path):
-        from tsugite.daemon.config import AgentConfig
-        from tsugite.daemon.session_store import Session, SessionSource
+        from tsugite_daemon.config import AgentConfig
+        from tsugite_daemon.session_store import Session, SessionSource
 
         gw = self._gateway(
             tmp_path,
@@ -295,8 +295,8 @@ class TestGatewaySessionSandboxResolver:
         assert gw._resolve_session_sandbox("s") is not None
 
     def test_none_when_neither(self, tmp_path):
-        from tsugite.daemon.config import AgentConfig
-        from tsugite.daemon.session_store import Session, SessionSource
+        from tsugite_daemon.config import AgentConfig
+        from tsugite_daemon.session_store import Session, SessionSource
 
         gw = self._gateway(tmp_path, {"plain": AgentConfig(workspace_dir=tmp_path, agent_file="default")})
         gw._session_store.create_session(Session(id="s", agent="plain", source=SessionSource.BACKGROUND.value))
@@ -312,7 +312,7 @@ class TestSandboxStartupCheck:
         return DaemonConfig(state_dir=tmp_path, agents=agents)
 
     def test_raises_when_sandbox_enabled_and_bwrap_missing(self, tmp_path, monkeypatch):
-        from tsugite.daemon.gateway import check_sandbox_prerequisites
+        from tsugite_daemon.gateway import check_sandbox_prerequisites
 
         monkeypatch.setattr(BubblewrapSandbox, "check_available", staticmethod(lambda: False))
         config = self._config(tmp_path, boxed=SandboxSettings(enabled=True))
@@ -323,14 +323,14 @@ class TestSandboxStartupCheck:
             check_sandbox_prerequisites(config)
 
     def test_ok_when_bwrap_available(self, tmp_path, monkeypatch):
-        from tsugite.daemon.gateway import check_sandbox_prerequisites
+        from tsugite_daemon.gateway import check_sandbox_prerequisites
 
         monkeypatch.setattr(BubblewrapSandbox, "check_available", staticmethod(lambda: True))
         config = self._config(tmp_path, boxed=SandboxSettings(enabled=True))
         check_sandbox_prerequisites(config)  # must not raise
 
     def test_ok_when_no_sandbox_enabled(self, tmp_path, monkeypatch):
-        from tsugite.daemon.gateway import check_sandbox_prerequisites
+        from tsugite_daemon.gateway import check_sandbox_prerequisites
 
         monkeypatch.setattr(BubblewrapSandbox, "check_available", staticmethod(lambda: False))
         config = self._config(tmp_path, plain=SandboxSettings(enabled=False))

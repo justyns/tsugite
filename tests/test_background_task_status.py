@@ -5,9 +5,8 @@ from threading import Thread
 from unittest.mock import MagicMock
 
 import pytest
-
-from tsugite.daemon.adapters.base import ChannelContext
-from tsugite.daemon.scheduler import ScheduleEntry, Scheduler
+from tsugite_daemon.adapters.base import ChannelContext
+from tsugite_daemon.scheduler import ScheduleEntry, Scheduler
 
 
 @pytest.fixture
@@ -143,7 +142,7 @@ class TestListRunningTasksTool:
 
 class TestAgentContextRunningTasks:
     def test_includes_running_tasks_from_metadata(self):
-        from tsugite.daemon.adapters.base import BaseAdapter
+        from tsugite_daemon.adapters.base import BaseAdapter
 
         ctx = ChannelContext(
             source="scheduler",
@@ -158,7 +157,7 @@ class TestAgentContextRunningTasks:
         assert result["running_tasks"] == ["job1", "job2"]
 
     def test_defaults_to_empty_list(self):
-        from tsugite.daemon.adapters.base import BaseAdapter
+        from tsugite_daemon.adapters.base import BaseAdapter
 
         ctx = ChannelContext(
             source="cli",
@@ -172,7 +171,7 @@ class TestAgentContextRunningTasks:
         assert result["running_tasks"] == []
 
     def test_defaults_when_no_metadata(self):
-        from tsugite.daemon.adapters.base import BaseAdapter
+        from tsugite_daemon.adapters.base import BaseAdapter
 
         ctx = ChannelContext(
             source="cli",

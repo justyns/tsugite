@@ -11,8 +11,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
-from tsugite.daemon.session_store import Session, SessionSource, SessionStore
+from tsugite_daemon.session_store import Session, SessionSource, SessionStore
 
 
 @pytest.fixture
@@ -28,7 +27,7 @@ def mock_adapter():
 
 @pytest.mark.asyncio
 async def test_session_run_propagates_sandbox_override(tmp_path, mock_adapter):
-    from tsugite.daemon.session_runner import SessionRunner
+    from tsugite_daemon.session_runner import SessionRunner
 
     store = SessionStore(tmp_path / "session_store.json")
     runner = SessionRunner(store, {"default": mock_adapter})
@@ -49,7 +48,7 @@ async def test_session_run_propagates_sandbox_override(tmp_path, mock_adapter):
 
 @pytest.mark.asyncio
 async def test_session_run_no_override_when_unset(tmp_path, mock_adapter):
-    from tsugite.daemon.session_runner import SessionRunner
+    from tsugite_daemon.session_runner import SessionRunner
 
     store = SessionStore(tmp_path / "session_store.json")
     runner = SessionRunner(store, {"default": mock_adapter})
@@ -107,8 +106,8 @@ def test_spawn_session_no_override_when_not_sandboxed(monkeypatch):
 
 
 def test_with_sandbox_helper_threads_job_override():
-    from tsugite.daemon.job_store import Job
-    from tsugite.daemon.jobs_orchestrator import _with_sandbox
+    from tsugite_daemon.job_store import Job
+    from tsugite_daemon.jobs_orchestrator import _with_sandbox
 
     job = Job(id="j1", parent_session_id="p", prompt="x", sandbox_override={"enabled": True})
     assert _with_sandbox(job, {"job_id": "j1"})["sandbox_override"] == {"enabled": True}
@@ -127,7 +126,9 @@ def test_sandbox_context_to_override_roundtrip():
 
     clear_sandbox_context()
     assert sandbox_context_to_override() is None
-    set_sandbox_context(SandboxContext(allow_domains=["x.com"], no_network=True, extra_ro_binds=[Path("/a")]))
+    set_sandbox_context(
+        SandboxContext(allow_domains=["x.com"], no_network=True, extra_ro_binds=[Path("/a")], pass_env=["MY_VAR"])
+    )
     try:
         ov = sandbox_context_to_override()
     finally:
@@ -136,3 +137,18 @@ def test_sandbox_context_to_override_roundtrip():
     assert ov["allow_domains"] == ["x.com"]
     assert ov["no_network"] is True
     assert ov["extra_ro_binds"] == ["/a"]  # stringified for JSON metadata
+    assert ov["pass_env"] == ["MY_VAR"]
+
+
+def test_build_sandbox_policy_threads_pass_env():
+    """pass_env flows ExecutionOptions -> SandboxContext + SandboxConfig."""
+    from tsugite.agent_runner.helpers import build_sandbox_policy
+    from tsugite.core.sandbox import sandbox_available
+    from tsugite.options import ExecutionOptions
+
+    if not sandbox_available():
+        return
+    opts = ExecutionOptions(sandbox=True, no_network=True, pass_env=["FOO", "BAR"])
+    config, ctx = build_sandbox_policy(opts, workspace_dir=Path("/tmp"))
+    assert ctx.pass_env == ["FOO", "BAR"]
+    assert config.pass_env == ["FOO", "BAR"]

@@ -12,7 +12,7 @@ bloat the summary input:
 The sanitizer elides scaffolding and truncates oversized tool outputs.
 """
 
-from tsugite.daemon.memory import COMBINE_SYSTEM_PROMPT, SUMMARIZE_SYSTEM_PROMPT, sanitize_for_summary
+from tsugite_daemon.memory import COMBINE_SYSTEM_PROMPT, SUMMARIZE_SYSTEM_PROMPT, sanitize_for_summary
 
 MODEL = "openai:gpt-4o-mini"
 

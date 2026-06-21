@@ -14,8 +14,7 @@ were resolving to; only new sessions pick up the new default.
 """
 
 import pytest
-
-from tsugite.daemon.session_store import Session, SessionSource, SessionStatus, SessionStore
+from tsugite_daemon.session_store import Session, SessionSource, SessionStatus, SessionStore
 
 
 @pytest.fixture

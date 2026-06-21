@@ -51,7 +51,7 @@ def test_job_status_tile_renders_latest_state(authenticated_page, e2e_adapter, e
         states=["running", "verifying", "done"],
     )
 
-    with patch("tsugite.daemon.adapters.http.get_history_dir", return_value=history_dir):
+    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
         page.reload()
         page.wait_for_selector(".console-turn.user", timeout=5000)
         page.wait_for_selector(".jx", timeout=5000)
@@ -93,7 +93,7 @@ def test_job_status_tile_shows_error_in_stuck_state(authenticated_page, e2e_adap
         error="Verifier failed after max attempts:\n- AC1: nope",
     )
 
-    with patch("tsugite.daemon.adapters.http.get_history_dir", return_value=history_dir):
+    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
         page.reload()
         # Stuck tile defaults to expanded so the issue note is visible.
         tile = page.wait_for_selector('.jx[data-state="stuck"]', timeout=5000)

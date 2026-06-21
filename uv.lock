@@ -16,7 +16,13 @@ members = [
     "tsugite-acp",
     "tsugite-cli",
     "tsugite-codex-cli",
+    "tsugite-daemon",
+    "tsugite-discord",
+    "tsugite-pty",
+    "tsugite-sandbox",
     "tsugite-tmux",
+    "tsugite-web",
+    "tsugite-youtube",
 ]
 
 [[package]]
@@ -2336,7 +2342,6 @@ version = "0.16.0"
 source = { editable = "." }
 dependencies = [
     { name = "cryptography" },
-    { name = "ddgs" },
     { name = "html2text" },
     { name = "httpx" },
     { name = "jinja2" },
@@ -2347,23 +2352,37 @@ dependencies = [
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "questionary" },
-    { name = "readability-lxml" },
     { name = "rich" },
     { name = "tiktoken" },
     { name = "typer" },
     { name = "tzlocal" },
-    { name = "youtube-transcript-api" },
 ]
 
 [package.optional-dependencies]
+all = [
+    { name = "tsugite-acp" },
+    { name = "tsugite-codex-cli" },
+    { name = "tsugite-daemon" },
+    { name = "tsugite-discord" },
+    { name = "tsugite-pty" },
+    { name = "tsugite-sandbox" },
+    { name = "tsugite-tmux" },
+    { name = "tsugite-web" },
+    { name = "tsugite-youtube" },
+]
 daemon = [
-    { name = "cronsim" },
-    { name = "discord-py" },
-    { name = "py-vapid" },
-    { name = "python-multipart" },
-    { name = "pywebpush" },
-    { name = "starlette" },
-    { name = "uvicorn" },
+    { name = "tsugite-daemon" },
+    { name = "tsugite-discord" },
+]
+discord = [
+    { name = "tsugite-discord" },
+]
+sandbox = [
+    { name = "tsugite-sandbox" },
+]
+web = [
+    { name = "tsugite-web" },
+    { name = "tsugite-youtube" },
 ]
 
 [package.dev-dependencies]
@@ -2378,16 +2397,19 @@ dev = [
     { name = "ruff" },
     { name = "tsugite-acp" },
     { name = "tsugite-codex-cli" },
+    { name = "tsugite-daemon" },
+    { name = "tsugite-discord" },
+    { name = "tsugite-pty" },
+    { name = "tsugite-sandbox" },
     { name = "tsugite-tmux" },
+    { name = "tsugite-web" },
+    { name = "tsugite-youtube" },
     { name = "vulture" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "cronsim", marker = "extra == 'daemon'", specifier = ">=2.6" },
     { name = "cryptography", specifier = ">=46.0.5" },
-    { name = "ddgs", specifier = ">=9.6.0" },
-    { name = "discord-py", marker = "extra == 'daemon'", specifier = ">=2.3.2" },
     { name = "html2text", specifier = ">=2020.1.16" },
     { name = "httpx", specifier = ">=0.25" },
     { name = "jinja2", specifier = ">=3.1" },
@@ -2395,22 +2417,30 @@ requires-dist = [
     { name = "pathspec", specifier = ">=0.11.0" },
     { name = "portalocker", specifier = ">=2.8.0" },
     { name = "prompt-toolkit", specifier = ">=3.0.43" },
-    { name = "py-vapid", marker = "extra == 'daemon'", specifier = ">=1.9.0" },
     { name = "pydantic", specifier = ">=2.12.3" },
-    { name = "python-multipart", marker = "extra == 'daemon'", specifier = ">=0.0.9" },
-    { name = "pywebpush", marker = "extra == 'daemon'", specifier = ">=2.0.0" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "questionary", specifier = ">=2.1.1" },
-    { name = "readability-lxml", specifier = ">=0.8" },
     { name = "rich", specifier = ">=13.0" },
-    { name = "starlette", marker = "extra == 'daemon'", specifier = ">=0.36" },
     { name = "tiktoken", specifier = ">=0.7.0" },
+    { name = "tsugite-acp", marker = "extra == 'all'", editable = "plugins/tsugite-acp" },
+    { name = "tsugite-codex-cli", marker = "extra == 'all'", editable = "plugins/tsugite-codex-cli" },
+    { name = "tsugite-daemon", marker = "extra == 'all'", editable = "plugins/tsugite-daemon" },
+    { name = "tsugite-daemon", marker = "extra == 'daemon'", editable = "plugins/tsugite-daemon" },
+    { name = "tsugite-discord", marker = "extra == 'all'", editable = "plugins/tsugite-discord" },
+    { name = "tsugite-discord", marker = "extra == 'daemon'", editable = "plugins/tsugite-discord" },
+    { name = "tsugite-discord", marker = "extra == 'discord'", editable = "plugins/tsugite-discord" },
+    { name = "tsugite-pty", marker = "extra == 'all'", editable = "plugins/tsugite-pty" },
+    { name = "tsugite-sandbox", marker = "extra == 'all'", editable = "plugins/tsugite-sandbox" },
+    { name = "tsugite-sandbox", marker = "extra == 'sandbox'", editable = "plugins/tsugite-sandbox" },
+    { name = "tsugite-tmux", marker = "extra == 'all'", editable = "plugins/tsugite-tmux" },
+    { name = "tsugite-web", marker = "extra == 'all'", editable = "plugins/tsugite-web" },
+    { name = "tsugite-web", marker = "extra == 'web'", editable = "plugins/tsugite-web" },
+    { name = "tsugite-youtube", marker = "extra == 'all'", editable = "plugins/tsugite-youtube" },
+    { name = "tsugite-youtube", marker = "extra == 'web'", editable = "plugins/tsugite-youtube" },
     { name = "typer", specifier = ">=0.12" },
     { name = "tzlocal", specifier = ">=5.3.1" },
-    { name = "uvicorn", marker = "extra == 'daemon'", specifier = ">=0.25" },
-    { name = "youtube-transcript-api", specifier = ">=0.6.0" },
 ]
-provides-extras = ["daemon"]
+provides-extras = ["web", "sandbox", "daemon", "discord", "all"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -2424,7 +2454,13 @@ dev = [
     { name = "ruff", specifier = ">=0.1" },
     { name = "tsugite-acp", editable = "plugins/tsugite-acp" },
     { name = "tsugite-codex-cli", editable = "plugins/tsugite-codex-cli" },
+    { name = "tsugite-daemon", editable = "plugins/tsugite-daemon" },
+    { name = "tsugite-discord", editable = "plugins/tsugite-discord" },
+    { name = "tsugite-pty", editable = "plugins/tsugite-pty" },
+    { name = "tsugite-sandbox", editable = "plugins/tsugite-sandbox" },
     { name = "tsugite-tmux", editable = "plugins/tsugite-tmux" },
+    { name = "tsugite-web", editable = "plugins/tsugite-web" },
+    { name = "tsugite-youtube", editable = "plugins/tsugite-youtube" },
     { name = "vulture", specifier = ">=2.14" },
 ]
 
@@ -2432,6 +2468,72 @@ dev = [
 name = "tsugite-codex-cli"
 version = "0.16.0"
 source = { editable = "plugins/tsugite-codex-cli" }
+dependencies = [
+    { name = "tsugite-cli" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "tsugite-cli", editable = "." }]
+
+[[package]]
+name = "tsugite-daemon"
+version = "0.16.0"
+source = { editable = "plugins/tsugite-daemon" }
+dependencies = [
+    { name = "cronsim" },
+    { name = "py-vapid" },
+    { name = "python-multipart" },
+    { name = "pywebpush" },
+    { name = "starlette" },
+    { name = "tsugite-cli" },
+    { name = "tsugite-pty" },
+    { name = "tsugite-sandbox" },
+    { name = "uvicorn" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "cronsim", specifier = ">=2.6" },
+    { name = "py-vapid", specifier = ">=1.9.0" },
+    { name = "python-multipart", specifier = ">=0.0.9" },
+    { name = "pywebpush", specifier = ">=2.0.0" },
+    { name = "starlette", specifier = ">=0.36" },
+    { name = "tsugite-cli", editable = "." },
+    { name = "tsugite-pty", editable = "plugins/tsugite-pty" },
+    { name = "tsugite-sandbox", editable = "plugins/tsugite-sandbox" },
+    { name = "uvicorn", specifier = ">=0.25" },
+]
+
+[[package]]
+name = "tsugite-discord"
+version = "0.16.0"
+source = { editable = "plugins/tsugite-discord" }
+dependencies = [
+    { name = "discord-py" },
+    { name = "tsugite-daemon" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "discord-py", specifier = ">=2.3.2" },
+    { name = "tsugite-daemon", editable = "plugins/tsugite-daemon" },
+]
+
+[[package]]
+name = "tsugite-pty"
+version = "0.16.0"
+source = { editable = "plugins/tsugite-pty" }
+dependencies = [
+    { name = "tsugite-cli" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "tsugite-cli", editable = "." }]
+
+[[package]]
+name = "tsugite-sandbox"
+version = "0.16.0"
+source = { editable = "plugins/tsugite-sandbox" }
 dependencies = [
     { name = "tsugite-cli" },
 ]
@@ -2449,6 +2551,38 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [{ name = "tsugite-cli", editable = "." }]
+
+[[package]]
+name = "tsugite-web"
+version = "0.16.0"
+source = { editable = "plugins/tsugite-web" }
+dependencies = [
+    { name = "ddgs" },
+    { name = "readability-lxml" },
+    { name = "tsugite-cli" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "ddgs", specifier = ">=9.6.0" },
+    { name = "readability-lxml", specifier = ">=0.8" },
+    { name = "tsugite-cli", editable = "." },
+]
+
+[[package]]
+name = "tsugite-youtube"
+version = "0.16.0"
+source = { editable = "plugins/tsugite-youtube" }
+dependencies = [
+    { name = "tsugite-cli" },
+    { name = "youtube-transcript-api" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "tsugite-cli", editable = "." },
+    { name = "youtube-transcript-api", specifier = ">=0.6.0" },
+]
 
 [[package]]
 name = "typer"

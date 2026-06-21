@@ -5,10 +5,9 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
-from tsugite.daemon.adapters.base import BaseAdapter, ChannelContext, resolve_agent_path
-from tsugite.daemon.adapters.scheduler_adapter import SchedulerAdapter
-from tsugite.daemon.scheduler import ScheduleEntry
+from tsugite_daemon.adapters.base import BaseAdapter, ChannelContext, resolve_agent_path
+from tsugite_daemon.adapters.scheduler_adapter import SchedulerAdapter
+from tsugite_daemon.scheduler import ScheduleEntry
 
 
 def _get_channel_context(mock):
@@ -74,7 +73,7 @@ class TestAgentFileField:
 class TestRunAgentWithAgentFile:
     @pytest.fixture
     def adapter(self, tmp_path):
-        from tsugite.daemon.session_store import SessionStore
+        from tsugite_daemon.session_store import SessionStore
 
         adapter = MagicMock(spec=BaseAdapter)
         adapter.agent_config = MagicMock()
@@ -111,7 +110,7 @@ class TestRunAgentWithAgentFile:
             agent_file=str(agent_file),
         )
 
-        with patch("tsugite.daemon.adapters.scheduler_adapter.send_notification"):
+        with patch("tsugite_daemon.adapters.scheduler_adapter.send_notification"):
             await scheduler_adapter._run_agent(entry)
 
         ctx = _get_channel_context(adapter.handle_message)
@@ -133,7 +132,7 @@ class TestRunAgentWithAgentFile:
             agent_file="+custom",
         )
 
-        with patch("tsugite.daemon.adapters.scheduler_adapter.send_notification"):
+        with patch("tsugite_daemon.adapters.scheduler_adapter.send_notification"):
             await scheduler_adapter._run_agent(entry)
 
         ctx = _get_channel_context(adapter.handle_message)
@@ -155,7 +154,7 @@ class TestRunAgentWithAgentFile:
             agent_file="agents/custom.md",
         )
 
-        with patch("tsugite.daemon.adapters.scheduler_adapter.send_notification"):
+        with patch("tsugite_daemon.adapters.scheduler_adapter.send_notification"):
             await scheduler_adapter._run_agent(entry)
 
         ctx = _get_channel_context(adapter.handle_message)
@@ -185,7 +184,7 @@ class TestRunAgentWithAgentFile:
             cron_expr="0 9 * * *",
         )
 
-        with patch("tsugite.daemon.adapters.scheduler_adapter.send_notification"):
+        with patch("tsugite_daemon.adapters.scheduler_adapter.send_notification"):
             await scheduler_adapter._run_agent(entry)
 
         ctx = _get_channel_context(adapter.handle_message)
@@ -251,7 +250,7 @@ class TestHandleMessageOverride:
         adapter = _make_base_adapter(tmp_path)
         with (
             patch.object(adapter, "_resolve_agent_path", return_value=None),
-            patch("tsugite.daemon.adapters.base.run_agent", return_value=_mock_run_result()) as mock_run,
+            patch("tsugite_daemon.adapters.base.run_agent", return_value=_mock_run_result()) as mock_run,
         ):
             await adapter.handle_message("test", "hi", channel_context)
             assert mock_run.call_args.kwargs["agent_path"] == override_file
@@ -273,7 +272,7 @@ class TestHandleMessageOverride:
         adapter = _make_base_adapter(tmp_path)
         with (
             patch.object(adapter, "_resolve_agent_path", return_value=default_agent),
-            patch("tsugite.daemon.adapters.base.run_agent", return_value=_mock_run_result()) as mock_run,
+            patch("tsugite_daemon.adapters.base.run_agent", return_value=_mock_run_result()) as mock_run,
         ):
             await adapter.handle_message("test", "hi", channel_context)
             assert mock_run.call_args.kwargs["agent_path"] == default_agent

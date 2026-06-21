@@ -13,6 +13,37 @@ from tsugite.tools import (
 )
 
 
+def test_expand_tool_specs_skips_unknown_when_lenient(file_tools):
+    """Default (lenient): an unknown tool name is skipped, not fatal (e.g. a tool from an
+    optional plugin that isn't installed)."""
+    assert expand_tool_specs(["read_file", "definitely_not_a_real_tool"]) == ["read_file"]
+
+
+def test_expand_tool_specs_strict_raises_on_unknown(file_tools):
+    """strict=True restores the hard failure for agents that require all their tools."""
+    with pytest.raises(ValueError, match="definitely_not_a_real_tool"):
+        expand_tool_specs(["read_file", "definitely_not_a_real_tool"], strict=True)
+
+
+def test_tool_rejects_var_positional(reset_tool_registry):
+    """Tools are always called by keyword, so *args can't be supported; reject it at registration."""
+    with pytest.raises(TypeError, match="variadic positional"):
+
+        @tool
+        def bad_tool(first: str, *rest) -> str:
+            return first
+
+
+def test_tool_allows_var_keyword(reset_tool_registry):
+    """**kwargs is fine - tools are called with keyword args."""
+
+    @tool
+    def flexible_tool(name: str, **opts) -> str:
+        return name
+
+    assert "flexible_tool" in list_tools()
+
+
 def test_tool_decorator(reset_tool_registry):
     """Test that the @tool decorator registers functions correctly."""
 
@@ -278,7 +309,7 @@ def test_expand_tool_specs_invalid_tool(file_tools):
     specs = ["nonexistent_tool"]
 
     with pytest.raises(ValueError, match="Invalid tool 'nonexistent_tool': not found"):
-        expand_tool_specs(specs)
+        expand_tool_specs(specs, strict=True)
 
 
 def test_expand_tool_specs_invalid_category(file_tools):
@@ -286,7 +317,7 @@ def test_expand_tool_specs_invalid_category(file_tools):
     specs = ["@nonexistent"]
 
     with pytest.raises(ValueError, match="Invalid tool category 'nonexistent': not found or empty"):
-        expand_tool_specs(specs)
+        expand_tool_specs(specs, strict=True)
 
 
 def test_expand_tool_specs_no_glob_matches(file_tools):
@@ -294,7 +325,7 @@ def test_expand_tool_specs_no_glob_matches(file_tools):
     specs = ["xyz_*_abc"]
 
     with pytest.raises(ValueError, match="Invalid tool pattern 'xyz_\\*_abc': matched no tools"):
-        expand_tool_specs(specs)
+        expand_tool_specs(specs, strict=True)
 
 
 def test_expand_tool_specs_empty_list(file_tools):

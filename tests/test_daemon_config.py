@@ -5,8 +5,7 @@ from pathlib import Path
 import pytest
 import yaml
 from pydantic import ValidationError
-
-from tsugite.daemon.config import AgentConfig, DaemonConfig, DiscordBotConfig, SandboxSettings, load_daemon_config
+from tsugite_daemon.config import AgentConfig, DaemonConfig, DiscordBotConfig, SandboxSettings, load_daemon_config
 
 
 def _write_config(path: Path, data: dict) -> Path:

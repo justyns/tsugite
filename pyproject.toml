@@ -13,9 +13,7 @@ dependencies = [
   "pyyaml>=6.0",
   "httpx>=0.25",
   "rich>=13.0",
-  "ddgs>=9.6.0",
   "questionary>=2.1.1",
-  "youtube-transcript-api>=0.6.0",
   "html2text>=2020.1.16",
   "tiktoken>=0.7.0",
   "pydantic>=2.12.3",
@@ -24,19 +22,34 @@ dependencies = [
   "portalocker>=2.8.0",
   "tzlocal>=5.3.1",
   "cryptography>=46.0.5",
-  "readability-lxml>=0.8",
   "nest_asyncio>=1.5.0",
 ]
 
 [project.optional-dependencies]
+web = [
+  "tsugite-web",
+  "tsugite-youtube",
+]
+sandbox = [
+  "tsugite-sandbox",
+]
 daemon = [
-  "discord.py>=2.3.2",
-  "cronsim>=2.6",
-  "starlette>=0.36",
-  "uvicorn>=0.25",
-  "python-multipart>=0.0.9",
-  "pywebpush>=2.0.0",
-  "py-vapid>=1.9.0",
+  "tsugite-daemon",
+  "tsugite-discord",
+]
+discord = [
+  "tsugite-discord",
+]
+all = [
+  "tsugite-web",
+  "tsugite-youtube",
+  "tsugite-sandbox",
+  "tsugite-pty",
+  "tsugite-daemon",
+  "tsugite-discord",
+  "tsugite-tmux",
+  "tsugite-acp",
+  "tsugite-codex-cli",
 ]
 
 [project.scripts]
@@ -68,6 +81,12 @@ tsugite-cli = { workspace = true }
 tsugite-tmux = { workspace = true }
 tsugite-acp = { workspace = true }
 tsugite-codex-cli = { workspace = true }
+tsugite-web = { workspace = true }
+tsugite-youtube = { workspace = true }
+tsugite-sandbox = { workspace = true }
+tsugite-pty = { workspace = true }
+tsugite-daemon = { workspace = true }
+tsugite-discord = { workspace = true }
 
 [tool.ruff]
 target-version = "py311"
@@ -104,7 +123,7 @@ norecursedirs = [
 ]
 
 [tool.coverage.run]
-source = ["tsugite"]
+source = ["tsugite", "tsugite_web", "tsugite_youtube", "tsugite_sandbox", "tsugite_pty", "tsugite_daemon", "tsugite_discord"]
 omit = ["*/tests/*", "*/test_*.py", "*/__pycache__/*", "*/site-packages/*"]
 
 [tool.coverage.report]
@@ -144,4 +163,10 @@ dev = [
   "tsugite-tmux",
   "tsugite-acp",
   "tsugite-codex-cli",
+  "tsugite-web",
+  "tsugite-youtube",
+  "tsugite-sandbox",
+  "tsugite-pty",
+  "tsugite-daemon",
+  "tsugite-discord",
 ]

@@ -14,11 +14,11 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from tsugite_daemon.adapters.base import BaseAdapter
+from tsugite_daemon.config import AgentConfig
+from tsugite_daemon.memory import _llm_complete
+from tsugite_daemon.session_store import SessionStore
 
-from tsugite.daemon.adapters.base import BaseAdapter
-from tsugite.daemon.config import AgentConfig
-from tsugite.daemon.memory import _llm_complete
-from tsugite.daemon.session_store import SessionStore
 from tsugite.history.models import Event
 
 
@@ -155,13 +155,13 @@ async def test_compact_session_preserves_context_limit(workspace_dir, tmp_path):
         return "Summary"
 
     with (
-        patch("tsugite.daemon.memory.get_context_limit", return_value=200_000),
-        patch("tsugite.daemon.memory.infer_compaction_model", return_value="anthropic:claude-3-haiku-20240307"),
+        patch("tsugite_daemon.memory.get_context_limit", return_value=200_000),
+        patch("tsugite_daemon.memory.infer_compaction_model", return_value="anthropic:claude-3-haiku-20240307"),
         patch(
-            "tsugite.daemon.memory.split_events_for_compaction",
+            "tsugite_daemon.memory.split_events_for_compaction",
             return_value=(old_events, recent_events),
         ),
-        patch("tsugite.daemon.memory.summarize_session", new=fake_summarize_with_pollution),
+        patch("tsugite_daemon.memory.summarize_session", new=fake_summarize_with_pollution),
         patch("tsugite.history.get_history_dir", return_value=history_dir),
         patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
         patch("tsugite.history.storage.get_machine_name", return_value="test"),
@@ -227,13 +227,13 @@ async def test_compact_session_restores_when_mutation_happens_after_summarize(wo
         return []
 
     with (
-        patch("tsugite.daemon.memory.get_context_limit", return_value=200_000),
-        patch("tsugite.daemon.memory.infer_compaction_model", return_value="anthropic:claude-3-haiku-20240307"),
+        patch("tsugite_daemon.memory.get_context_limit", return_value=200_000),
+        patch("tsugite_daemon.memory.infer_compaction_model", return_value="anthropic:claude-3-haiku-20240307"),
         patch(
-            "tsugite.daemon.memory.split_events_for_compaction",
+            "tsugite_daemon.memory.split_events_for_compaction",
             return_value=(old_events, recent_events),
         ),
-        patch("tsugite.daemon.memory.summarize_session", new=clean_summarize),
+        patch("tsugite_daemon.memory.summarize_session", new=clean_summarize),
         patch("tsugite.history.get_history_dir", return_value=history_dir),
         patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
         patch("tsugite.history.storage.get_machine_name", return_value="test"),
@@ -288,13 +288,13 @@ async def test_compact_session_restores_even_on_summarize_failure(workspace_dir,
         raise RuntimeError("simulated summarization failure")
 
     with (
-        patch("tsugite.daemon.memory.get_context_limit", return_value=200_000),
-        patch("tsugite.daemon.memory.infer_compaction_model", return_value="anthropic:claude-3-haiku-20240307"),
+        patch("tsugite_daemon.memory.get_context_limit", return_value=200_000),
+        patch("tsugite_daemon.memory.infer_compaction_model", return_value="anthropic:claude-3-haiku-20240307"),
         patch(
-            "tsugite.daemon.memory.split_events_for_compaction",
+            "tsugite_daemon.memory.split_events_for_compaction",
             return_value=(old_events, recent_events),
         ),
-        patch("tsugite.daemon.memory.summarize_session", new=failing_summarize),
+        patch("tsugite_daemon.memory.summarize_session", new=failing_summarize),
         patch("tsugite.history.get_history_dir", return_value=history_dir),
         patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
         patch("tsugite.history.storage.get_machine_name", return_value="test"),

@@ -299,26 +299,6 @@ class TestAttachmentResolution:
         results3 = resolve_attachments(["myfile"], refresh_cache=True)
         assert results3[0].content == "Modified content"
 
-    def test_youtube_handler_integration(self, tmp_path, monkeypatch):
-        """Test YouTube handler integration."""
-        monkeypatch.setenv("HOME", str(tmp_path))
-
-        add_attachment("tutorial", source="https://youtube.com/watch?v=test123")
-
-        mock_transcript = [
-            {"start": 0.0, "text": "Hello world"},
-            {"start": 5.0, "text": "This is a test"},
-        ]
-
-        with patch("youtube_transcript_api.YouTubeTranscriptApi") as mock_api:
-            mock_api.get_transcript.return_value = mock_transcript
-
-            results = resolve_attachments(["tutorial"])
-            assert len(results) == 1
-            assert results[0].name == "youtube:test123"
-            assert "[00:00] Hello world" in results[0].content
-            assert "[00:05] This is a test" in results[0].content
-
     def test_cache_metadata_structure(self, tmp_path, monkeypatch):
         """Test that cache metadata has expected structure."""
         from tsugite.cache import get_cache_key, list_cache

@@ -9,10 +9,10 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from tsugite_daemon.adapters.base import BaseAdapter, ChannelContext
+from tsugite_daemon.config import AgentConfig
+from tsugite_daemon.session_store import SessionStore
 
-from tsugite.daemon.adapters.base import BaseAdapter, ChannelContext
-from tsugite.daemon.config import AgentConfig
-from tsugite.daemon.session_store import SessionStore
 from tsugite.exceptions import AgentExecutionError
 
 
@@ -91,7 +91,7 @@ async def test_retry_skipped_after_side_effecting_code_ran(stub_adapter_internal
     async def fake_compaction(*args, **kwargs):
         return session.id
 
-    monkeypatch.setattr("tsugite.daemon.adapters.base.run_agent", fake_run_agent)
+    monkeypatch.setattr("tsugite_daemon.adapters.base.run_agent", fake_run_agent)
     monkeypatch.setattr(adapter, "_run_compaction", fake_compaction)
 
     with pytest.raises(AgentExecutionError):
@@ -124,7 +124,7 @@ async def test_retry_still_fires_when_no_side_effects_yet(stub_adapter_internals
     async def fake_compaction(*args, **kwargs):
         return session.id
 
-    monkeypatch.setattr("tsugite.daemon.adapters.base.run_agent", fake_run_agent)
+    monkeypatch.setattr("tsugite_daemon.adapters.base.run_agent", fake_run_agent)
     monkeypatch.setattr(adapter, "_run_compaction", fake_compaction)
 
     await adapter.handle_message(
@@ -156,7 +156,7 @@ async def test_retry_fires_for_pinned_session_when_no_side_effects(stub_adapter_
     async def fake_compaction(*args, **kwargs):
         return session.id
 
-    monkeypatch.setattr("tsugite.daemon.adapters.base.run_agent", fake_run_agent)
+    monkeypatch.setattr("tsugite_daemon.adapters.base.run_agent", fake_run_agent)
     monkeypatch.setattr(adapter, "_run_compaction", fake_compaction)
 
     await adapter.handle_message(
@@ -191,7 +191,7 @@ async def test_retry_skipped_for_pinned_session_after_side_effects(stub_adapter_
     async def fake_compaction(*args, **kwargs):
         return session.id
 
-    monkeypatch.setattr("tsugite.daemon.adapters.base.run_agent", fake_run_agent)
+    monkeypatch.setattr("tsugite_daemon.adapters.base.run_agent", fake_run_agent)
     monkeypatch.setattr(adapter, "_run_compaction", fake_compaction)
 
     with pytest.raises(AgentExecutionError):
@@ -227,7 +227,7 @@ async def test_proactive_compaction_runs_for_override_session(stub_adapter_inter
     def fake_run_agent(*args, **kwargs):
         return MagicMock(token_count=0, cost=0, execution_steps=[], __str__=lambda self: "ok")
 
-    monkeypatch.setattr("tsugite.daemon.adapters.base.run_agent", fake_run_agent)
+    monkeypatch.setattr("tsugite_daemon.adapters.base.run_agent", fake_run_agent)
     monkeypatch.setattr(adapter, "_run_compaction", fake_compaction)
 
     await adapter.handle_message(

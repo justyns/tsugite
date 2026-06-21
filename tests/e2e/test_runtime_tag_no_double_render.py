@@ -51,7 +51,7 @@ def test_fabricated_runtime_tag_does_not_double_render(authenticated_page, e2e_a
     user_id = page.evaluate("Alpine.store('app').userId")
     history_dir, session = _seed(e2e_adapter, e2e_tmp, user_id, raw_content)
 
-    with patch("tsugite.daemon.adapters.http.get_history_dir", return_value=history_dir):
+    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
         reload_conversations_view(page)
         select_session_in_view(page, session.id)
         page.wait_for_selector(".console-turn.agent", timeout=5000)

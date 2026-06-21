@@ -4,7 +4,7 @@ Non-inlined files are saved to <workspace>/uploads/ and the agent must open them
 so a bare filename leaves it guessing (usually the workspace root) and failing to read them.
 """
 
-from tsugite.daemon.adapters.http import _format_upload_message_suffix
+from tsugite_daemon.adapters.http import _format_upload_message_suffix
 
 
 def test_workspace_only_hint_includes_uploads_path():

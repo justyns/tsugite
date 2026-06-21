@@ -6,9 +6,15 @@ Tools use @tool(require_daemon=True) so they only appear in daemon mode.
 from typing import Optional
 from uuid import uuid4
 
-from tsugite.daemon.scheduler import entry_to_dict
-
 from . import call_on_loop, deny_when_sandboxed, tool
+
+
+def _entry_to_dict(entry):
+    """Lazily import the daemon serializer so this module loads without the daemon battery."""
+    from tsugite_daemon.scheduler import entry_to_dict
+
+    return entry_to_dict(entry)
+
 
 _scheduler = None
 _loop = None
@@ -126,7 +132,7 @@ def schedule_create(
     agent = _resolve_agent(agent)
     _validate_agent(agent)
 
-    from tsugite.daemon.scheduler import ScheduleEntry
+    from tsugite_daemon.scheduler import ScheduleEntry
 
     entry = ScheduleEntry(
         id=id,
@@ -150,7 +156,7 @@ def schedule_create(
         target_session=target_session,
     )
     result = _call(_scheduler.add, entry)
-    return entry_to_dict(result)
+    return _entry_to_dict(result)
 
 
 @tool(require_daemon=True)
@@ -161,10 +167,11 @@ def schedule_list() -> list:
         List of schedules with id, agent, type, enabled, next_run, last_status
     """
     entries = _call(_scheduler.list)
-    return [entry_to_dict(e) for e in entries]
+    return [_entry_to_dict(e) for e in entries]
 
 
 @tool(require_daemon=True)
+@deny_when_sandboxed
 def schedule_remove(id: str) -> dict:
     """Remove a schedule.
 
@@ -190,10 +197,11 @@ def schedule_enable(id: str) -> dict:
         Confirmation with updated schedule details
     """
     _call(_scheduler.enable, id)
-    return entry_to_dict(_call(_scheduler.get, id))
+    return _entry_to_dict(_call(_scheduler.get, id))
 
 
 @tool(require_daemon=True)
+@deny_when_sandboxed
 def schedule_disable(id: str) -> dict:
     """Disable a schedule without removing it.
 
@@ -204,7 +212,7 @@ def schedule_disable(id: str) -> dict:
         Confirmation with updated schedule details
     """
     _call(_scheduler.disable, id)
-    return entry_to_dict(_call(_scheduler.get, id))
+    return _entry_to_dict(_call(_scheduler.get, id))
 
 
 @tool(require_daemon=True)
@@ -291,10 +299,11 @@ def schedule_update(
         raise ValueError("No fields to update")
 
     result = _call(_scheduler.update, id, **fields)
-    return entry_to_dict(result)
+    return _entry_to_dict(result)
 
 
 @tool(require_daemon=True)
+@deny_when_sandboxed
 def schedule_cleanup() -> dict:
     """Remove all orphaned one-off schedules (disabled, already fired).
 
@@ -431,8 +440,8 @@ def background_task(
     agent = _resolve_agent(agent)
     _validate_agent(agent)
 
-    from tsugite.daemon.scheduler import ScheduleEntry
-    from tsugite.daemon.session_runner import get_current_chain_depth, get_current_session_id
+    from tsugite_daemon.scheduler import ScheduleEntry
+    from tsugite_daemon.session_runner import get_current_chain_depth, get_current_session_id
 
     originating_session_id = get_current_session_id() if on_complete else None
     if on_complete and not originating_session_id:
@@ -440,7 +449,7 @@ def background_task(
     chain_depth = get_current_chain_depth() if on_complete else 0
 
     if target_session is None and on_complete:
-        from tsugite.daemon.scheduler import TARGET_SESSION_ORIGINATING
+        from tsugite_daemon.scheduler import TARGET_SESSION_ORIGINATING
 
         target_session = TARGET_SESSION_ORIGINATING
 

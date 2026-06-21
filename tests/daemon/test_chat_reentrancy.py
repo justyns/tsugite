@@ -8,10 +8,9 @@ from unittest.mock import patch
 
 import pytest
 from starlette.testclient import TestClient
-
-from tsugite.daemon.adapters.http import HTTPAgentAdapter, HTTPServer
-from tsugite.daemon.config import AgentConfig, HTTPConfig
-from tsugite.daemon.webhook_store import WebhookStore
+from tsugite_daemon.adapters.http import HTTPAgentAdapter, HTTPServer
+from tsugite_daemon.config import AgentConfig, HTTPConfig
+from tsugite_daemon.webhook_store import WebhookStore
 
 
 @pytest.fixture
@@ -28,7 +27,8 @@ def agent_config(tmp_workspace):
 
 @pytest.fixture
 def mock_adapter(agent_config, tmp_path):
-    from tsugite.daemon.session_store import SessionStore
+    from tsugite_daemon.session_store import SessionStore
+
     from tsugite.workspace import WorkspaceNotFoundError
 
     session_store = SessionStore(tmp_path / "session_store.json")
@@ -44,7 +44,7 @@ def mock_adapter(agent_config, tmp_path):
 
 @pytest.fixture
 def token_store(tmp_path):
-    from tsugite.daemon.auth import TokenStore
+    from tsugite_daemon.auth import TokenStore
 
     store = TokenStore(tmp_path / "tokens.json")
     return store
@@ -155,7 +155,7 @@ def test_sequential_chats_for_same_user_both_run(client, mock_adapter, test_toke
 
 def _make_session(mock_adapter, sid: str, user_id: str):
     """Pre-create an interactive session with an explicit id."""
-    from tsugite.daemon.session_store import Session, SessionSource
+    from tsugite_daemon.session_store import Session, SessionSource
 
     session = Session(
         id=sid,

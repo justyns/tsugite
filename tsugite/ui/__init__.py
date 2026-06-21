@@ -9,10 +9,9 @@ Use the helper functions to create loggers:
 - create_plain_logger(): Plain text logger
 """
 
-from tsugite.ui.base import CustomUIHandler, CustomUILogger, UIState
+from tsugite.ui.base import CustomUIHandler, CustomUILogger, UIHandler, UIState
 from tsugite.ui.chat import ChatManager, ChatTurn
 from tsugite.ui.helpers import (
-    create_live_logger,
     create_plain_logger,
     custom_agent_ui,
 )
@@ -21,24 +20,15 @@ from tsugite.ui.plain import PlainUIHandler
 __all__ = [
     # Core classes
     "UIState",
+    "UIHandler",
     "CustomUILogger",
     # UI Handlers
     "CustomUIHandler",
     "PlainUIHandler",
-    "LiveUIHandler",
     # Chat functionality
     "ChatManager",
     "ChatTurn",
     # Helper functions
     "custom_agent_ui",
     "create_plain_logger",
-    "create_live_logger",
 ]
-
-
-def __getattr__(name: str):
-    if name == "LiveUIHandler":
-        from tsugite.ui.live import LiveUIHandler as _LiveUIHandler
-
-        return _LiveUIHandler
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

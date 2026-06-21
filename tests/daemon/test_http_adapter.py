@@ -5,11 +5,10 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from starlette.testclient import TestClient
-
-from tsugite.daemon.adapters.http import HTTPAgentAdapter, HTTPServer, SSEProgressHandler
-from tsugite.daemon.config import AgentConfig, HTTPConfig
-from tsugite.daemon.scheduler import RunResult, ScheduleEntry, Scheduler
-from tsugite.daemon.webhook_store import WebhookStore
+from tsugite_daemon.adapters.http import HTTPAgentAdapter, HTTPServer, SSEProgressHandler
+from tsugite_daemon.config import AgentConfig, HTTPConfig
+from tsugite_daemon.scheduler import RunResult, ScheduleEntry, Scheduler
+from tsugite_daemon.webhook_store import WebhookStore
 
 
 @pytest.fixture
@@ -31,7 +30,8 @@ def http_config():
 
 @pytest.fixture
 def mock_adapter(agent_config, tmp_path):
-    from tsugite.daemon.session_store import SessionStore
+    from tsugite_daemon.session_store import SessionStore
+
     from tsugite.workspace import WorkspaceNotFoundError
 
     session_store = SessionStore(tmp_path / "session_store.json")
@@ -56,7 +56,7 @@ def webhook_store(tmp_path):
 
 @pytest.fixture
 def token_store(tmp_path):
-    from tsugite.daemon.auth import TokenStore
+    from tsugite_daemon.auth import TokenStore
 
     store = TokenStore(tmp_path / "tokens.json")
     store.create_admin_token(name="test-token")
@@ -147,7 +147,7 @@ class TestChatEndpoint:
 
     def test_chat_with_compacted_session_id_routes_to_successor(self, client, server, mock_adapter, test_token):
         """POST with a compacted predecessor's session_id must transparently route to its successor, not 409."""
-        from tsugite.daemon.session_store import Session, SessionSource, SessionStatus
+        from tsugite_daemon.session_store import Session, SessionSource, SessionStatus
 
         store = mock_adapter.session_store
         successor = store.create_session(
@@ -204,7 +204,7 @@ class TestChatEndpoint:
         self, client, server, mock_adapter, test_token
     ):
         """When body has session_id, broadcasts must carry that id even if a newer interactive session has since become the user's default."""
-        from tsugite.daemon.session_store import Session, SessionSource, SessionStatus
+        from tsugite_daemon.session_store import Session, SessionSource, SessionStatus
 
         store = mock_adapter.session_store
         # User's older interactive session, still visible in sidebar.
@@ -262,7 +262,7 @@ class TestAgentSessionsEndpoint:
     """GET /api/agents/{agent}/sessions exposes progress for running sessions."""
 
     def test_running_session_includes_progress(self, client, mock_adapter, test_token):
-        from tsugite.daemon.session_store import Session, SessionSource, SessionStatus
+        from tsugite_daemon.session_store import Session, SessionSource, SessionStatus
 
         store = mock_adapter.session_store
         session = store.create_session(
@@ -290,7 +290,7 @@ class TestAgentSessionsEndpoint:
         assert row["progress"]["status_text"] == "Tool: bash"
 
     def test_completed_session_omits_progress(self, client, mock_adapter, test_token):
-        from tsugite.daemon.session_store import Session, SessionSource, SessionStatus
+        from tsugite_daemon.session_store import Session, SessionSource, SessionStatus
 
         store = mock_adapter.session_store
         session = store.create_session(
@@ -561,7 +561,7 @@ class TestWebhookEndpoint:
     def test_webhook_logs_receipt(self, client, caplog):
         import logging
 
-        with caplog.at_level(logging.INFO, logger="tsugite.daemon.adapters.http"):
+        with caplog.at_level(logging.INFO, logger="tsugite_daemon.adapters.http"):
             client.post("/webhook/whk_test", json={"event": "push"})
 
         assert any("Received webhook [whk_test" in r.message for r in caplog.records)
@@ -571,7 +571,7 @@ class TestWebhookEndpoint:
     def test_webhook_logs_invalid_token(self, client, caplog):
         import logging
 
-        with caplog.at_level(logging.WARNING, logger="tsugite.daemon.adapters.http"):
+        with caplog.at_level(logging.WARNING, logger="tsugite_daemon.adapters.http"):
             client.post("/webhook/bad-token", json={"data": 1})
 
         assert any("invalid token [bad-toke" in r.message for r in caplog.records)
@@ -613,7 +613,7 @@ class TestHistoryEndpoint:
         storage.record("model_response", raw_content="hi", usage={"total_tokens": 5})
         storage.record("session_end", status="success")
 
-        with patch("tsugite.daemon.adapters.http.get_history_dir", return_value=history_dir):
+        with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
             resp = client.get(
                 "/api/agents/test-agent/history?user_id=web-anonymous",
                 headers={"Authorization": f"Bearer {test_token}"},
@@ -644,7 +644,7 @@ class TestHistoryEndpoint:
             {"type": "reaction", "emoji": "👍", "timestamp": "2026-01-01T00:00:00+00:00"},
         )
 
-        with patch("tsugite.daemon.adapters.http.get_history_dir", return_value=history_dir):
+        with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
             resp = client.get(
                 "/api/agents/test-agent/history?user_id=web-anonymous",
                 headers={"Authorization": f"Bearer {test_token}"},
@@ -671,7 +671,7 @@ class TestHistoryEndpoint:
         storage.record("code_execution", code="print('hi')", output="hi\n", duration_ms=12)
         storage.record("model_response", raw_content="Done.")
 
-        with patch("tsugite.daemon.adapters.http.get_history_dir", return_value=history_dir):
+        with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
             resp = client.get(
                 "/api/agents/test-agent/history?user_id=web-anonymous",
                 headers={"Authorization": f"Bearer {test_token}"},
@@ -901,7 +901,7 @@ class TestHTTPConfig:
         assert config.port == 8374
 
     def test_webhook_entry(self):
-        from tsugite.daemon.webhook_store import WebhookEntry
+        from tsugite_daemon.webhook_store import WebhookEntry
 
         wh = WebhookEntry(token="whk_test", agent="myagent", source="github")
         assert wh.token == "whk_test"

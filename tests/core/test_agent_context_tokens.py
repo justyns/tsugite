@@ -3,10 +3,10 @@
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from tsugite_daemon.session_store import SessionStore
 
 from tsugite.agent_runner.models import AgentExecutionResult
 from tsugite.core.agent import AgentResult, TsugiteAgent
-from tsugite.daemon.session_store import SessionStore
 from tsugite.providers.base import CompletionResponse, Usage
 
 

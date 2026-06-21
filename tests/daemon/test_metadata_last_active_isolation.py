@@ -12,8 +12,7 @@ metadata housekeeping.
 from datetime import datetime, timedelta, timezone
 
 import pytest
-
-from tsugite.daemon.session_store import Session, SessionSource, SessionStore
+from tsugite_daemon.session_store import Session, SessionSource, SessionStore
 
 
 @pytest.fixture

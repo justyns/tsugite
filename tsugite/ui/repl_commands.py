@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Optional
 from rich.console import Console
 from rich.table import Table
 
-from tsugite.history import SessionStorage, list_session_files
+from tsugite.history import get_history_backend
 
 if TYPE_CHECKING:
     from tsugite.ui.chat import ChatManager
@@ -87,9 +87,10 @@ def handle_history(console: Console, limit: int = 10) -> None:
         console: Rich console for output
         limit: Maximum number of conversations to show
     """
-    session_files = list_session_files()
+    backend = get_history_backend()
+    session_ids = backend.list_sessions()
 
-    if not session_files:
+    if not session_ids:
         console.print("[yellow]No conversation history found.[/yellow]")
         return
 
@@ -102,12 +103,12 @@ def handle_history(console: Console, limit: int = 10) -> None:
     table.add_column("Tokens", justify="right")
 
     count = 0
-    for session_file in session_files:
+    for sid in session_ids:
         if count >= limit:
             break
 
         try:
-            storage = SessionStorage.load(session_file)
+            storage = backend.load(sid)
             summary = storage.summary()
 
             if summary.created_at:
@@ -237,10 +238,7 @@ def handle_save(console: Console, path: str, manager: "ChatManager") -> None:
         return
 
     try:
-        from tsugite.history import get_history_dir
-
-        session_path = get_history_dir() / f"{manager.conversation_id}.jsonl"
-        storage = SessionStorage.load(session_path)
+        storage = get_history_backend().load(manager.conversation_id)
         events = storage.load_events()
         summary = storage.summary()
 

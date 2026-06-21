@@ -3,7 +3,7 @@
 import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Dict, Generator, List, Optional
+from typing import Any, Dict, Generator, List, Optional, Protocol, runtime_checkable
 
 from rich.console import Console
 from rich.markdown import Markdown
@@ -37,6 +37,18 @@ from tsugite.events import (
     WarningEvent,
 )
 from tsugite.ui_context import clear_ui_context, set_ui_context
+
+
+@runtime_checkable
+class UIHandler(Protocol):
+    """The event-handler contract every UI consumer implements.
+
+    The agent's EventBus drives all UI by calling ``handle_event`` on each subscribed
+    handler. The built-in handlers (PlainUIHandler, ReplUIHandler, JSONLUIHandler) satisfy
+    this; a plugin could ship its own without subclassing anything.
+    """
+
+    def handle_event(self, event: BaseEvent) -> None: ...
 
 
 @dataclass

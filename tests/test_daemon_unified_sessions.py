@@ -6,10 +6,9 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
-
-from tsugite.daemon.adapters.base import BaseAdapter, ChannelContext
-from tsugite.daemon.config import AgentConfig, DaemonConfig
-from tsugite.daemon.session_store import Session, SessionSource, SessionStore
+from tsugite_daemon.adapters.base import BaseAdapter, ChannelContext
+from tsugite_daemon.config import AgentConfig, DaemonConfig
+from tsugite_daemon.session_store import Session, SessionSource, SessionStore
 
 
 def _seed_session(store, sid="session-1", agent="test-agent"):
@@ -405,7 +404,7 @@ class TestHTTPAdapterResolveUser:
     """HTTPAgentAdapter.resolve_http_user resolves identity for direct session store calls."""
 
     def test_resolve_linked(self, workspace_dir, tmp_path, identity_map):
-        from tsugite.daemon.adapters.http import HTTPAgentAdapter
+        from tsugite_daemon.adapters.http import HTTPAgentAdapter
 
         agent_config = AgentConfig(workspace_dir=workspace_dir, agent_file="default")
         store = SessionStore(tmp_path / "session_store.json")
@@ -415,7 +414,7 @@ class TestHTTPAdapterResolveUser:
         assert adapter.resolve_http_user("web-anonymous") == "justyn"
 
     def test_resolve_unlinked(self, workspace_dir, tmp_path, identity_map):
-        from tsugite.daemon.adapters.http import HTTPAgentAdapter
+        from tsugite_daemon.adapters.http import HTTPAgentAdapter
 
         agent_config = AgentConfig(workspace_dir=workspace_dir, agent_file="default")
         store = SessionStore(tmp_path / "session_store.json")
@@ -424,7 +423,7 @@ class TestHTTPAdapterResolveUser:
         assert adapter.resolve_http_user("someone-else") == "someone-else"
 
     def test_resolve_no_map(self, workspace_dir, tmp_path):
-        from tsugite.daemon.adapters.http import HTTPAgentAdapter
+        from tsugite_daemon.adapters.http import HTTPAgentAdapter
 
         agent_config = AgentConfig(workspace_dir=workspace_dir, agent_file="default")
         store = SessionStore(tmp_path / "session_store.json")
@@ -469,13 +468,13 @@ class TestCompactSessionClearsSkills:
         recent_events = [Event(type="user_input", ts=datetime.now(timezone.utc), data={"text": "recent"})]
 
         with (
-            patch("tsugite.daemon.memory.get_context_limit", return_value=128_000),
-            patch("tsugite.daemon.memory.infer_compaction_model", return_value="openai:gpt-4o-mini"),
+            patch("tsugite_daemon.memory.get_context_limit", return_value=128_000),
+            patch("tsugite_daemon.memory.infer_compaction_model", return_value="openai:gpt-4o-mini"),
             patch(
-                "tsugite.daemon.memory.split_events_for_compaction",
+                "tsugite_daemon.memory.split_events_for_compaction",
                 return_value=(old_events, recent_events),
             ),
-            patch("tsugite.daemon.memory.summarize_session", new_callable=AsyncMock, return_value="Summary"),
+            patch("tsugite_daemon.memory.summarize_session", new_callable=AsyncMock, return_value="Summary"),
             patch("tsugite.history.get_history_dir", return_value=history_dir),
             patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
             patch("tsugite.history.storage.get_machine_name", return_value="test"),
@@ -524,13 +523,13 @@ class TestCompactSessionRecordsRange:
         recent_events = [Event(type="user_input", ts=datetime.now(timezone.utc), data={"text": "recent"})]
 
         with (
-            patch("tsugite.daemon.memory.get_context_limit", return_value=128_000),
-            patch("tsugite.daemon.memory.infer_compaction_model", return_value="openai:gpt-4o-mini"),
+            patch("tsugite_daemon.memory.get_context_limit", return_value=128_000),
+            patch("tsugite_daemon.memory.infer_compaction_model", return_value="openai:gpt-4o-mini"),
             patch(
-                "tsugite.daemon.memory.split_events_for_compaction",
+                "tsugite_daemon.memory.split_events_for_compaction",
                 return_value=(old_events, recent_events),
             ),
-            patch("tsugite.daemon.memory.summarize_session", new_callable=AsyncMock, return_value="Summary"),
+            patch("tsugite_daemon.memory.summarize_session", new_callable=AsyncMock, return_value="Summary"),
             patch("tsugite.history.get_history_dir", return_value=history_dir),
             patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
             patch("tsugite.history.storage.get_machine_name", return_value="test"),

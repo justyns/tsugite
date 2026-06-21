@@ -3,8 +3,7 @@
 from unittest.mock import MagicMock
 
 import pytest
-
-from tsugite.daemon.commands import _parse_acceptance_criteria, cmd_job
+from tsugite_daemon.commands import _parse_acceptance_criteria, cmd_job
 
 
 def test_empty_returns_empty_list():
@@ -98,7 +97,7 @@ async def test_cmd_job_default_notify_when_is_none(stub_orchestrator):
 
 
 def _real_adapter(tmp_path):
-    from tsugite.daemon.session_store import SessionStore
+    from tsugite_daemon.session_store import SessionStore
 
     store = SessionStore(tmp_path / "session_store.json")
     adapter = MagicMock()
@@ -128,7 +127,7 @@ async def test_cmd_job_no_session_creates_fresh_host_session(stub_orchestrator, 
 async def test_cmd_job_valid_session_anchors_there_no_extra_session(stub_orchestrator, tmp_path):
     """In-conversation path (composer /job): an existing session_id anchors the
     Job there and does NOT spawn an extra host session."""
-    from tsugite.daemon.session_store import Session, SessionSource
+    from tsugite_daemon.session_store import Session, SessionSource
 
     adapter, store = _real_adapter(tmp_path)
     store.create_session(
@@ -145,7 +144,7 @@ async def test_cmd_job_invalid_session_raises_friendly_command_error(stub_orches
     """A stale/invalid explicit session_id raises CommandError (HTTP maps it to a
     clean 400 with the message; Discord renders the text) - never an unhandled
     ValueError -> HTTP 500 - and spawns nothing."""
-    from tsugite.daemon.commands import CommandError
+    from tsugite_daemon.commands import CommandError
 
     adapter, store = _real_adapter(tmp_path)
     with pytest.raises(CommandError, match="not found"):

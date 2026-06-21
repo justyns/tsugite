@@ -6,10 +6,9 @@ fires for that session.
 """
 
 import pytest
-
-from tsugite.daemon.adapters.base import BaseAdapter, ChannelContext
-from tsugite.daemon.config import AgentConfig
-from tsugite.daemon.session_store import SessionStore
+from tsugite_daemon.adapters.base import BaseAdapter, ChannelContext
+from tsugite_daemon.config import AgentConfig
+from tsugite_daemon.session_store import SessionStore
 
 
 class _StubAdapter(BaseAdapter):

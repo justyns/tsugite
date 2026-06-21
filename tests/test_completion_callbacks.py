@@ -7,13 +7,11 @@ from threading import Thread
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
-from tsugite.agent_runner.models import AgentExecutionResult
-from tsugite.daemon.adapters.base import BaseAdapter, ChannelContext
-from tsugite.daemon.adapters.scheduler_adapter import MAX_CHAIN_DEPTH, SchedulerAdapter
-from tsugite.daemon.config import AgentConfig
-from tsugite.daemon.scheduler import ScheduleEntry
-from tsugite.daemon.session_runner import (
+from tsugite_daemon.adapters.base import BaseAdapter, ChannelContext
+from tsugite_daemon.adapters.scheduler_adapter import MAX_CHAIN_DEPTH, SchedulerAdapter
+from tsugite_daemon.config import AgentConfig
+from tsugite_daemon.scheduler import ScheduleEntry
+from tsugite_daemon.session_runner import (
     SessionRunner,
     _current_session_id,
     get_current_chain_depth,
@@ -21,7 +19,9 @@ from tsugite.daemon.session_runner import (
     set_current_chain_depth,
     set_current_session_id,
 )
-from tsugite.daemon.session_store import Session, SessionSource, SessionStatus, SessionStore
+from tsugite_daemon.session_store import Session, SessionSource, SessionStatus, SessionStore
+
+from tsugite.agent_runner.models import AgentExecutionResult
 
 # --- Fixtures & helpers ---
 
@@ -310,7 +310,7 @@ class TestBackgroundTaskTool:
 
         with (
             patch("tsugite.agent_runner.helpers.get_current_agent", return_value="bot"),
-            patch("tsugite.daemon.session_runner.get_current_session_id", return_value="session-123"),
+            patch("tsugite_daemon.session_runner.get_current_session_id", return_value="session-123"),
         ):
             result = background_task(prompt="test", on_complete={"action": "reply"})
 
@@ -328,8 +328,8 @@ class TestBackgroundTaskTool:
 
         with (
             patch("tsugite.agent_runner.helpers.get_current_agent", return_value="bot"),
-            patch("tsugite.daemon.session_runner.get_current_session_id", return_value="s"),
-            patch("tsugite.daemon.session_runner.get_current_chain_depth", return_value=3),
+            patch("tsugite_daemon.session_runner.get_current_session_id", return_value="s"),
+            patch("tsugite_daemon.session_runner.get_current_chain_depth", return_value=3),
         ):
             background_task(prompt="test", on_complete={"action": "reply"})
 
@@ -355,7 +355,7 @@ class TestBackgroundTaskTool:
 
         with (
             patch("tsugite.agent_runner.helpers.get_current_agent", return_value="bot"),
-            patch("tsugite.daemon.session_runner.get_current_session_id", return_value=None),
+            patch("tsugite_daemon.session_runner.get_current_session_id", return_value=None),
             pytest.raises(ValueError, match="session context"),
         ):
             background_task(prompt="test", on_complete={"action": "reply"})
@@ -454,7 +454,7 @@ class TestHandleMessageSetsSessionId:
 
         ctx = ChannelContext(source="http", channel_id=None, user_id="user1", reply_to="http:user1")
 
-        with patch("tsugite.daemon.adapters.base.run_agent", side_effect=fake_run_agent):
+        with patch("tsugite_daemon.adapters.base.run_agent", side_effect=fake_run_agent):
             await adapter.handle_message("user1", "hello", ctx)
 
         assert captured_session_id is not None, "_current_session_id was not set inside run_agent"
@@ -473,7 +473,7 @@ class TestHandleMessageSetsSessionId:
 
         ctx = ChannelContext(source="session", channel_id=None, user_id="user1", reply_to="session:user1")
 
-        with patch("tsugite.daemon.adapters.base.run_agent", side_effect=fake_run_agent):
+        with patch("tsugite_daemon.adapters.base.run_agent", side_effect=fake_run_agent):
             await adapter.handle_message("user1", "hello", ctx)
 
         assert captured_session_id == "scheduler-session-99"

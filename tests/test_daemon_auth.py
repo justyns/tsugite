@@ -5,7 +5,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
-from tsugite.daemon.auth import TokenStore
+from tsugite_daemon.auth import TokenStore
 
 
 class TestAdminTokens:
@@ -134,7 +134,7 @@ class TestTempTokens:
         assert valid is True
 
         expired_time = datetime.now(timezone.utc) + timedelta(seconds=2)
-        with patch("tsugite.daemon.auth.datetime") as mock_dt:
+        with patch("tsugite_daemon.auth.datetime") as mock_dt:
             mock_dt.now.return_value = expired_time
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             valid, _ = store.validate(raw)
@@ -147,7 +147,7 @@ class TestTempTokens:
         store.issue(agent="c", schedule_id="s", ttl=3600)
 
         expired_time = datetime.now(timezone.utc) + timedelta(seconds=2)
-        with patch("tsugite.daemon.auth.datetime") as mock_dt:
+        with patch("tsugite_daemon.auth.datetime") as mock_dt:
             mock_dt.now.return_value = expired_time
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             removed = store.cleanup_expired()

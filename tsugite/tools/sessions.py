@@ -63,7 +63,7 @@ def start_session(
     Returns:
         Session details including ID and status
     """
-    from tsugite.daemon.session_store import Session, SessionSource
+    from tsugite_daemon.session_store import Session, SessionSource
 
     if agent is None:
         from tsugite.agent_runner.helpers import get_current_agent
@@ -94,7 +94,7 @@ def start_session(
 
 
 def get_current_session_id():
-    from tsugite.daemon.session_runner import get_current_session_id as _get
+    from tsugite_daemon.session_runner import get_current_session_id as _get
 
     return _get()
 
@@ -210,7 +210,7 @@ def spawn_session(
     Returns:
         Session details including ID and status
     """
-    from tsugite.daemon.session_store import Session, SessionSource
+    from tsugite_daemon.session_store import Session, SessionSource
 
     if agent is None:
         from tsugite.agent_runner.helpers import get_current_agent

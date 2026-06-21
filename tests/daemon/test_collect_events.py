@@ -18,8 +18,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from tsugite_daemon.adapters.http import HTTPServer
 
-from tsugite.daemon.adapters.http import HTTPServer
 from tsugite.history import SessionStorage
 
 
@@ -27,7 +27,7 @@ from tsugite.history import SessionStorage
 def history_dir(tmp_path: Path):
     h = tmp_path / "history"
     h.mkdir()
-    with patch("tsugite.daemon.adapters.http.get_history_dir", return_value=h):
+    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=h):
         yield h
 
 

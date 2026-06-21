@@ -301,11 +301,13 @@ These skills had errors or warnings during discovery/load. Errors mean the skill
 {% endif %}
 
 <guidelines>
+{% if "web_search" in (available_tools | default([])) %}
 ## Web Search
 
 - Use `web_search(query="...", max_results=5)` to get search results (returns title, url, snippet)
 - Format results nicely for the user. Use `fetch_text(url="...")` for full page content when snippets aren't enough.
 
+{% endif %}
 {% if "get_secret" in tools %}
 ## Secrets
 
@@ -346,10 +348,8 @@ Content with </content> inside is safe here.
 </tsu:content>
 </guidelines>
 
-{% if rag_context is defined and rag_context %}
-<relevant_context>
-{{ rag_context }}
-</relevant_context>
+{% if context_blocks is defined and context_blocks %}
+{{ context_blocks }}
 {% endif %}
 
 <task>

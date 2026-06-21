@@ -62,7 +62,7 @@ def chat(
     with workspace_directory_context(resolved_workspace, root, console) as path_context:
         if continue_ is not None:
             from tsugite.agent_runner.history_integration import get_latest_conversation
-            from tsugite.history import get_history_dir
+            from tsugite.history import get_history_backend
 
             if continue_ == "" or continue_.lower() == "latest":
                 history_opts.continue_id = get_latest_conversation()
@@ -74,8 +74,7 @@ def chat(
                 history_opts.continue_id = continue_
                 console.print(f"[cyan]Resuming conversation: {history_opts.continue_id}[/cyan]")
 
-            session_path = get_history_dir() / f"{history_opts.continue_id}.jsonl"
-            if not session_path.exists():
+            if not get_history_backend().exists(history_opts.continue_id):
                 console.print(f"[red]Conversation not found: {history_opts.continue_id}[/red]")
                 raise typer.Exit(1)
 

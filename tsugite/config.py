@@ -103,6 +103,26 @@ class SecretsConfig(BaseModel):
     provider: str = "env"
 
 
+class BackendConfig(BaseModel):
+    """Selects a swappable backend by name; extra fields pass through to it."""
+
+    model_config = ConfigDict(extra="allow")
+
+    backend: str
+
+
+class HistoryConfig(BackendConfig):
+    backend: str = "jsonl"
+
+
+class SandboxSettings(BackendConfig):
+    backend: str = "bwrap"
+
+
+class ExecutorConfig(BackendConfig):
+    backend: str = "subprocess"
+
+
 class Config(BaseModel):
     """Tsugite configuration."""
 
@@ -125,6 +145,9 @@ class Config(BaseModel):
     skill_paths: List[str] = Field(default_factory=list)
     skill_ttl_default: int = 10
     secrets: Optional[SecretsConfig] = None
+    history: Optional[HistoryConfig] = None
+    sandbox: Optional[SandboxSettings] = None
+    executor: Optional[ExecutorConfig] = None
     user_agent: Optional[str] = None
 
 

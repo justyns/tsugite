@@ -61,6 +61,7 @@ Phases that ignore return values:
 
 - `pre_tool_call` - before a tool executes
 - `post_tool` - after a tool executes successfully
+- `pre_llm_call` - before each provider call; mutate `context["messages"]` in place
 - `pre_response` - before final answer is emitted
 - `post_response` - after final answer is emitted
 - `session_end` - after session is saved to history
@@ -71,9 +72,41 @@ Phases that ignore return values:
 
 Each phase receives a `context: dict` with relevant keys:
 
-- `pre_context_build` - `message`, `agent_name`, plus any captured vars from `pre_message`
+- `pre_context_build` - `message`, `agent_name`, `blocks` (mutable, see below), plus any captured vars from `pre_message`
+- `pre_llm_call` - `messages` (mutable list sent to the provider), `model`, `agent`
 - `session_end` - `session_id`, `agent_name`, `result`, `model`, `tokens`, `cost`, `status`
 - `pre_tool_call` / `post_tool` - `tool`, plus the tool's arguments
+
+## Context blocks (rich prompt injection)
+
+A `pre_context_build` python hook can append `Block`s to `context["blocks"]` instead of
+returning a string. The default agent renders them as XML-tagged sections (sorted by
+descending `priority`), so a memory/RAG plugin contributes data without editing any prompt:
+
+```python
+from tsugite.hooks import Block, hook
+
+@hook("pre_context_build")
+def inject_memory(context):
+    context["blocks"].append(
+        Block(tag="memory", body="User prefers tea.", attributes={"source": "USER.md"}, priority=10)
+    )
+    # renders as: <memory source="USER.md">\nUser prefers tea.\n</memory>
+```
+
+The legacy `rag_context` capture still works and is rendered as a `<context>` block.
+
+## Late message mutation (`pre_llm_call`)
+
+A `pre_llm_call` python hook mutates the outgoing `messages` list in place right before the
+provider call (e.g. to inject a system block or late RAG). Shell/agent hooks can't mutate a
+Python list, so this phase is python-only for message edits.
+
+```python
+@hook("pre_llm_call")
+def add_cache_breakpoint(context):
+    context["messages"].insert(0, {"role": "system", "content": "..."})
+```
 
 ## Behavior
 

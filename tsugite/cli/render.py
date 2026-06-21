@@ -88,11 +88,10 @@ def render(
 
     # Auto-detect agent from conversation if not specified
     if continue_conversation_id and not agent_path:
-        from tsugite.history import SessionStorage, get_history_dir
+        from tsugite.history import get_history_backend
 
-        session_path = get_history_dir() / f"{continue_conversation_id}.jsonl"
         try:
-            meta = SessionStorage.load_meta_fast(session_path)
+            meta = get_history_backend().get_meta(continue_conversation_id)
             agent_name = meta.data.get("agent") if meta else None
             if not agent_name:
                 raise ValueError("agent name missing")

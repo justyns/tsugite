@@ -7,7 +7,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -28,15 +28,14 @@ from tsugite.events import (  # noqa: E402
     StreamChunkEvent,
     StreamCompleteEvent,
     TaskStartEvent,
-    ToolCallEvent,
-    ToolResultEvent,
     WarningEvent,
 )
 from tsugite.providers.base import CompletionResponse as ProviderResponse  # noqa: E402
 from tsugite.skill_discovery import Skill  # noqa: E402
 
 from .content_blocks import extract_content_blocks  # noqa: E402
-from .executor import Executor, LocalExecutor  # noqa: E402
+from .executor import Executor  # noqa: E402
+from .executor_registry import get_executor_class  # noqa: E402
 from .memory import AgentMemory, StepResult  # noqa: E402
 from .tools import Tool  # noqa: E402
 
@@ -295,6 +294,7 @@ class TsugiteAgent:
         resume_after_compaction: bool = False,
         hook_vars: Optional[Dict[str, str]] = None,
         storage: Optional[Any] = None,
+        pre_llm_call: Optional[Callable] = None,
     ):
         """Initialize the agent.
 
@@ -318,7 +318,7 @@ class TsugiteAgent:
         self.tools = tools
         self.instructions = instructions
         self.max_turns = max_turns
-        self.executor = executor or LocalExecutor()
+        self.executor = executor or get_executor_class()()
         self.memory = AgentMemory()
         self.event_bus = event_bus
         self.model_name = model_name or model_string
@@ -330,6 +330,7 @@ class TsugiteAgent:
         self.expiring_skills: Dict[str, int] = dict(expiring_skills or {})
         self.previous_messages = previous_messages or []
         self.hook_vars = hook_vars or {}
+        self._pre_llm_call = pre_llm_call
         self._resume_session = resume_session
         self._resume_after_compaction = resume_after_compaction
 
@@ -357,150 +358,9 @@ class TsugiteAgent:
             previous_messages=self.previous_messages,
         )
 
-    def _run_async_in_sync_context(self, coro):
-        """Run async coroutine in synchronous context, handling event loop properly.
-
-        This handles the case where we're already inside an async context (the agent's
-        run method) but need to run tool coroutines synchronously from user code.
-        """
-        import concurrent.futures
-
-        try:
-            # Check if there's an existing running loop
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-
-        if loop is not None:
-            # We're inside an async context - run in a thread with its own event loop
-            # to avoid issues with nest_asyncio and coroutine reuse.
-            # Copy current context so contextvars (interaction backend, etc.) propagate.
-            import contextvars
-
-            ctx = contextvars.copy_context()
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-
-                def run_coro():
-                    # Create a fresh event loop for this thread
-                    new_loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(new_loop)
-                    try:
-                        return new_loop.run_until_complete(coro)
-                    finally:
-                        new_loop.close()
-
-                future = executor.submit(ctx.run, run_coro)
-                return future.result()
-        else:
-            # No running loop - we can use asyncio.run directly
-            return asyncio.run(coro)
-
-    def _convert_positional_to_kwargs(self, tool_obj, args, kwargs):
-        """Convert positional arguments to keyword arguments based on function signature."""
-        if not args:
-            return
-
-        import inspect
-
-        try:
-            sig = inspect.signature(tool_obj.function)
-            param_names = list(sig.parameters.keys())
-
-            for i, arg in enumerate(args):
-                if i < len(param_names):
-                    param_name = param_names[i]
-                    if param_name not in kwargs:
-                        kwargs[param_name] = arg
-                else:
-                    raise TypeError(
-                        f"Tool '{tool_obj.name}' takes at most {len(param_names)} "
-                        f"positional arguments but {len(args)} were given"
-                    )
-        except Exception:
-            raise TypeError(
-                f"Tool '{tool_obj.name}' must be called with keyword arguments, "
-                f"not positional arguments. "
-                f"Example: {tool_obj.name}(param1=value1, param2=value2)"
-            )
-
     def _inject_tools_into_executor(self):
-        """Inject tools into executor namespace so they can be called from Python code.
-
-        Creates wrapper functions for each tool that call the tool's execute() method.
-        The LLM sees tools as Python functions and calls them directly in generated code.
-
-        For SubprocessExecutor, tools are registered via set_tools() instead of
-        namespace injection — the child process handles tool dispatch via IPC.
-
-        Note: return_value (and the final_answer alias) are documentation-only tools.
-        The executor injects the real implementations; we skip injecting the wrappers
-        here to avoid overriding the built-ins.
-        """
-        from .subprocess_executor import SubprocessExecutor
-
-        if isinstance(self.executor, SubprocessExecutor):
-            self.executor.set_tools(self.tools, event_bus=self.event_bus)
-            return
-        from tsugite.core.executor import EXECUTOR_BUILTIN_TOOLS
-
-        tool_functions = {}
-
-        for tool in self.tools:
-            if tool.name in EXECUTOR_BUILTIN_TOOLS:
-                continue
-
-            def make_tool_wrapper(tool_obj):
-                def tool_wrapper(*args, **kwargs):
-                    if hasattr(self.executor, "_tools_called"):
-                        self.executor._tools_called.append(tool_obj.name)
-
-                    self._convert_positional_to_kwargs(tool_obj, args, kwargs)
-
-                    # Emit audit events
-                    if self.event_bus:
-                        self.event_bus.emit(ToolCallEvent(tool_name=tool_obj.name, arguments=kwargs))
-
-                    t0 = time.perf_counter()
-                    try:
-                        result = self._run_async_in_sync_context(tool_obj.execute(**kwargs))
-                        duration_ms = int((time.perf_counter() - t0) * 1000)
-                        if self.event_bus:
-                            summary = str(result)[:200] if result is not None else ""
-                            self.event_bus.emit(
-                                ToolResultEvent(
-                                    tool_name=tool_obj.name,
-                                    success=True,
-                                    result_summary=summary,
-                                    duration_ms=duration_ms,
-                                )
-                            )
-                        return result
-                    except Exception as exc:
-                        duration_ms = int((time.perf_counter() - t0) * 1000)
-                        if self.event_bus:
-                            self.event_bus.emit(
-                                ToolResultEvent(
-                                    tool_name=tool_obj.name,
-                                    success=False,
-                                    result_summary=str(exc)[:200],
-                                    duration_ms=duration_ms,
-                                )
-                            )
-                        raise
-
-                tool_wrapper.__name__ = tool_obj.name
-                tool_wrapper.__doc__ = tool_obj.description
-                if hasattr(tool_obj.function, "__signature__"):
-                    tool_wrapper.__signature__ = tool_obj.function.__signature__
-                if hasattr(tool_obj.function, "__annotations__"):
-                    tool_wrapper.__annotations__ = tool_obj.function.__annotations__
-
-                return tool_wrapper
-
-            tool_functions[tool.name] = make_tool_wrapper(tool)
-
-        if hasattr(self.executor, "register_tools"):
-            self.executor.register_tools(tool_functions)
+        """Register tools with the executor; each backend handles dispatch its own way."""
+        self.executor.set_tools(self.tools, event_bus=self.event_bus)
 
     async def run(self, task: str, return_full_result: bool = False, stream: bool = False):
         """Run the agent on a task.
@@ -797,6 +657,9 @@ class TsugiteAgent:
 
     async def _provider_turn(self, messages, turn_num, stream) -> TurnResult:
         """Execute one turn via the provider system."""
+        if self._pre_llm_call is not None:
+            await self._pre_llm_call(messages, self._model_id)
+
         self._record_model_request(messages, turn_num)
 
         async with self._llm_wait_heartbeat():

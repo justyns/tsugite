@@ -13,7 +13,7 @@ from typing import Optional
 
 from tsugite.cli.helpers import get_workspace_dir
 from tsugite.config import get_xdg_data_path
-from tsugite.tools import tool
+from tsugite.tools import deny_when_sandboxed, tool
 
 SESSION_PREFIX = "tsu-"
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]|\x1b\].*?\x07|\x1b\(B")
@@ -109,7 +109,14 @@ def _list_managed_sessions() -> list:
     return sessions
 
 
-@tool(category="tmux")
+# Sandbox policy: these tools use the host tmux server (default socket) and run commands with
+# host privileges, so they're denied to sandboxed agents to prevent a host escape. pty is the
+# sandboxed terminal alternative today.
+# TODO: allow sandboxed agents to use tmux by running a per-agent tmux server on its own `-S`
+# socket under bwrap, lifecycle-managed like the PTY runtime, so sessions inherit the agent's
+# sandbox. Then drop @deny_when_sandboxed. (See the parent_only sandbox rule in AGENTS.md.)
+@tool(category="tmux", parent_only=True)
+@deny_when_sandboxed
 def tmux_create(name: str, command: Optional[str] = None) -> dict:
     """Create a named tmux session with automatic output logging.
 
@@ -169,7 +176,8 @@ def tmux_create(name: str, command: Optional[str] = None) -> dict:
     }
 
 
-@tool(category="tmux")
+@tool(category="tmux", parent_only=True)
+@deny_when_sandboxed
 def tmux_read(name: str, lines: int = 50, source: str = "pane") -> str:
     """Read output from a tmux session.
 
@@ -210,7 +218,8 @@ def tmux_read(name: str, lines: int = 50, source: str = "pane") -> str:
         raise ValueError(f"Invalid source '{source}': must be 'pane' or 'log'")
 
 
-@tool(category="tmux")
+@tool(category="tmux", parent_only=True)
+@deny_when_sandboxed
 def tmux_send(name: str, keys: str, enter: bool = True) -> str:
     """Send keystrokes to a tmux session.
 
@@ -240,7 +249,8 @@ def tmux_send(name: str, keys: str, enter: bool = True) -> str:
     return f"Sent {'keys' if not enter else 'command'} to session '{name}'"
 
 
-@tool(category="tmux")
+@tool(category="tmux", parent_only=True)
+@deny_when_sandboxed
 def tmux_list() -> list:
     """List all tsugite-managed tmux sessions with their current status.
 
@@ -250,7 +260,8 @@ def tmux_list() -> list:
     return _list_managed_sessions()
 
 
-@tool(category="tmux")
+@tool(category="tmux", parent_only=True)
+@deny_when_sandboxed
 def tmux_kill(name: str) -> str:
     """Terminate a tmux session and clean up its metadata.
 

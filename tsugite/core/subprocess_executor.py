@@ -151,22 +151,66 @@ _TIMED_AUDIT_WRAPPER = textwrap.dedent("""\
             with concurrent.futures.ThreadPoolExecutor() as pool:
                 return pool.submit(_asyncio.run, fn(**kwargs)).result()
         return _asyncio.run(fn(**kwargs))
+
+    def _bind_positional(tool_name, pos_names, args, kwargs):
+        for i, a in enumerate(args):
+            if i >= len(pos_names):
+                raise TypeError(
+                    "%s() takes at most %d positional arguments but %d were given"
+                    % (tool_name, len(pos_names), len(args))
+                )
+            name = pos_names[i]
+            if name in kwargs:
+                raise TypeError("%s() got multiple values for argument '%s'" % (tool_name, name))
+            kwargs[name] = a
+        return kwargs
 """)
 
 
-def _build_parent_only_tool_stub(name: str) -> str:
+def _positional_param_names(func) -> list:
+    """Names of params that can be passed positionally, for positional->kwarg binding."""
+    import inspect
+
+    try:
+        params = inspect.signature(func).parameters.values()
+    except (ValueError, TypeError):
+        return []
+    return [p.name for p in params if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)]
+
+
+def _build_parent_only_tool_stub(name: str, param_names: list) -> str:
     """Generate an IPC stub function for a parent-only tool."""
     return textwrap.dedent(f"""\
-    def {name}(**kwargs):
+    def {name}(*args, **kwargs):
+        kwargs = _bind_positional("{name}", {param_names!r}, args, kwargs)
         return _timed_audit_call("{name}", lambda **kw: _ipc_call("tool_call", name="{name}", kwargs=kw), kwargs)
     """)
 
 
-def _build_local_tool_stub(name: str, module_path: str) -> str:
+def _importable_in_child(module: str, name: str, func) -> bool:
+    """True if `from {module} import {name}` in the child yields this exact tool.
+
+    Lets pure plugin tools (web_search, etc.) run in the sandboxed child like the
+    built-ins do; custom closures and `__main__`-defined tools fail this check and
+    fall back to running in the parent over IPC.
+    """
+    if not module or module == "__main__":
+        return False
+    try:
+        import importlib
+
+        mod = importlib.import_module(module)
+    except Exception:
+        return False
+    return getattr(mod, name, None) is func
+
+
+def _build_local_tool_stub(name: str, module_path: str, param_names: list) -> str:
     """Generate a wrapper for a non-parent-only tool that runs locally in the child."""
     return textwrap.dedent(f"""\
     from {module_path} import {name} as _raw_{name}
-    def {name}(**kwargs):
+    def {name}(*args, **kwargs):
+        kwargs = _bind_positional("{name}", {param_names!r}, args, kwargs)
         return _timed_audit_call("{name}", lambda **kw: _run_maybe_async(_raw_{name}, kw), kwargs)
     """)
 
@@ -191,6 +235,7 @@ class SubprocessExecutor:
         self.event_bus = event_bus
         self.path_context = path_context
         self.sandbox_config = sandbox_config
+        self._sandbox_cls = None  # resolved once on first sandboxed execute, then reused
 
         self._state_path = state_path
         self._session_id = session_id
@@ -200,6 +245,7 @@ class SubprocessExecutor:
         self._tool_map: Dict[str, Any] = {}
         self._parent_only_tools: set = set()
         self._local_tools: Dict[str, str] = {}  # name -> module_path
+        self._tool_param_names: Dict[str, list] = {}  # name -> positional param names
         self._return_value = None
         self._tools_called: List[str] = []
         self._loaded_skills_for_turn: Dict[str, str] = {}
@@ -243,14 +289,20 @@ class SubprocessExecutor:
                 continue
 
             registry_info = registry.get(t.name)
+            func = registry_info.func if registry_info else getattr(t, "function", None)
+            if func is not None:
+                self._tool_param_names[t.name] = _positional_param_names(func)
             if registry_info and (registry_info.parent_only or registry_info.require_daemon):
                 # require_daemon tools need the daemon runtime (pty manager, jobs
                 # orchestrator, scheduler, session store) which only exists in the
                 # parent process — so they must run there, not in the sandboxed child.
                 self._parent_only_tools.add(t.name)
             elif registry_info:
+                # Built-in and plugin tools run in the (sandboxed) child as long as
+                # the child can import them; parent-only tools already took the branch
+                # above. Custom/non-importable tools fall through to parent IPC.
                 mod = registry_info.func.__module__
-                if mod.startswith("tsugite.tools."):
+                if mod.startswith("tsugite.tools.") or _importable_in_child(mod, t.name, registry_info.func):
                     self._local_tools[t.name] = mod
                 else:
                     self._parent_only_tools.add(t.name)
@@ -263,22 +315,27 @@ class SubprocessExecutor:
         state_path = os.path.join(self._tmpdir, "state.json")
         injections_path = os.path.join(self._tmpdir, "injections.json")
         result_path = os.path.join(self._tmpdir, "result.json")
+        req_fifo = os.path.join(self._tmpdir, "req.fifo")
+        resp_fifo = os.path.join(self._tmpdir, "resp.fifo")
 
         # Build tool stubs
         tool_stubs = []
         for t in self._tools:
             if t.name in EXECUTOR_BUILTIN_TOOLS:
                 continue
+            params = self._tool_param_names.get(t.name, [])
             if t.name in self._parent_only_tools:
-                tool_stubs.append(_build_parent_only_tool_stub(t.name))
+                tool_stubs.append(_build_parent_only_tool_stub(t.name, params))
             elif t.name in self._local_tools:
-                tool_stubs.append(_build_local_tool_stub(t.name, self._local_tools[t.name]))
+                tool_stubs.append(_build_local_tool_stub(t.name, self._local_tools[t.name], params))
 
         # Escape the user code for embedding
         code_escaped = json.dumps(code)
 
         harness = f"""\
 {_HARNESS_IMPORTS}
+os.environ.setdefault("_TSUGITE_REQ_PATH", {json.dumps(req_fifo)})
+os.environ.setdefault("_TSUGITE_RESP_PATH", {json.dumps(resp_fifo)})
 {_IPC_HELPER}
 {_TIMED_AUDIT_WRAPPER}
 {_RETURN_VALUE_STUB}
@@ -484,13 +541,25 @@ with open(RESULT_PATH, "w") as f:
         # Build command: either plain python or bwrap-wrapped
         inner_cmd = [sys.executable, harness_path]
         if self.sandbox_config:
-            from .sandbox import BubblewrapSandbox
+            if self._sandbox_cls is None:
+                from .sandbox import get_sandbox_class
+
+                self._sandbox_cls = get_sandbox_class()
+            sandbox_cls = self._sandbox_cls
+            if sandbox_cls is None:
+                # Fail closed: never run an intended-sandboxed command unsandboxed.
+                return ExecutionResult(
+                    output="",
+                    error="Sandbox requested but no backend is installed (pip install tsugite-sandbox).",
+                    stdout="",
+                    stderr="",
+                )
 
             # Start proxy on first execution (if network is allowed)
             if not self.sandbox_config.no_network and not self._proxy:
                 await self._start_proxy()
 
-            sandbox = BubblewrapSandbox(
+            sandbox = sandbox_cls(
                 config=self.sandbox_config,
                 proxy_socket=self._proxy_socket,
                 workspace_dir=Path(self.workspace_dir) if self.workspace_dir else None,

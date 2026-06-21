@@ -5,9 +5,8 @@ user's primary/default session."""
 from unittest.mock import MagicMock
 
 import pytest
-
-from tsugite.daemon.commands import cmd_context, cmd_status
-from tsugite.daemon.session_store import Session, SessionSource, SessionStore
+from tsugite_daemon.commands import cmd_context, cmd_status
+from tsugite_daemon.session_store import Session, SessionSource, SessionStore
 
 
 def _adapter(tmp_path):

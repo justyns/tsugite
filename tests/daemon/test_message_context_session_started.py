@@ -9,10 +9,9 @@ yesterday-relative-to-conversation-start.
 from datetime import datetime, timedelta, timezone
 
 import pytest
-
-from tsugite.daemon.adapters.base import BaseAdapter, ChannelContext  # noqa: F401
-from tsugite.daemon.config import AgentConfig
-from tsugite.daemon.session_store import SessionStore
+from tsugite_daemon.adapters.base import BaseAdapter, ChannelContext  # noqa: F401
+from tsugite_daemon.config import AgentConfig
+from tsugite_daemon.session_store import SessionStore
 
 
 class _StubAdapter(BaseAdapter):

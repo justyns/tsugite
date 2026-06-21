@@ -15,18 +15,16 @@ from tsugite.attachments.storage import (
     search_attachments,
 )
 from tsugite.attachments.url import GenericURLHandler
-from tsugite.attachments.youtube import YouTubeHandler
 
 __all__ = [
     # Handlers
     "AttachmentHandler",
     "InlineHandler",
     "FileHandler",
-    "YouTubeHandler",
     "GenericURLHandler",
     "AutoContextHandler",
-    "HANDLERS",
     "get_handler",
+    "get_handlers",
     # Storage functions
     "add_attachment",
     "get_attachment",
@@ -36,14 +34,24 @@ __all__ = [
     "search_attachments",
 ]
 
-# Handler registry - order matters! More specific handlers first
-HANDLERS: List[AttachmentHandler] = [
+# Built-in handlers. Order matters: specific handlers first, generic fallbacks last.
+# Plugin handlers (tsugite.attachments) are inserted between the two so they can
+# claim sources before the file/URL fallbacks.
+_SPECIFIC_HANDLERS: List[AttachmentHandler] = [
     InlineHandler(),
     AutoContextHandler(),
-    YouTubeHandler(),
+]
+_FALLBACK_HANDLERS: List[AttachmentHandler] = [
     FileHandler(),
     GenericURLHandler(),
 ]
+
+
+def get_handlers() -> List[AttachmentHandler]:
+    """Return all handlers: built-in specific, then plugin, then built-in fallback."""
+    from tsugite.plugins import get_attachment_handlers
+
+    return _SPECIFIC_HANDLERS + list(get_attachment_handlers()) + _FALLBACK_HANDLERS
 
 
 def get_handler(source: str) -> AttachmentHandler:
@@ -58,7 +66,7 @@ def get_handler(source: str) -> AttachmentHandler:
     Raises:
         ValueError: If no handler found
     """
-    for handler in HANDLERS:
+    for handler in get_handlers():
         if handler.can_handle(source):
             return handler
 

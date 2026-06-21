@@ -7,12 +7,12 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from tsugite_daemon.adapters.base import ChannelContext
+from tsugite_daemon.adapters.http import HTTPAgentAdapter
+from tsugite_daemon.config import AgentConfig
+from tsugite_daemon.session_runner import SessionRunner
+from tsugite_daemon.session_store import Session, SessionStore
 
-from tsugite.daemon.adapters.base import ChannelContext
-from tsugite.daemon.adapters.http import HTTPAgentAdapter
-from tsugite.daemon.config import AgentConfig
-from tsugite.daemon.session_runner import SessionRunner
-from tsugite.daemon.session_store import Session, SessionStore
 from tsugite.interaction import (
     NonInteractiveBackend,
     get_interaction_backend,
@@ -101,7 +101,7 @@ async def test_parent_interactive_backend_survives_nested_session_spawn(monkeypa
             return _stub_run_agent_result()
         raise AssertionError(f"Unexpected workspace: {ws}")
 
-    monkeypatch.setattr("tsugite.daemon.adapters.base.run_agent", shared_probe)
+    monkeypatch.setattr("tsugite_daemon.adapters.base.run_agent", shared_probe)
 
     set_interaction_backend(parent_backend)
     parent_ctx = ChannelContext(
@@ -169,7 +169,7 @@ async def test_concurrent_sessions_each_see_their_own_backend(monkeypatch, works
         sessions_observed[which] = get_interaction_backend()
         return _stub_run_agent_result()
 
-    monkeypatch.setattr("tsugite.daemon.adapters.base.run_agent", shared_probe)
+    monkeypatch.setattr("tsugite_daemon.adapters.base.run_agent", shared_probe)
 
     ctx_a = ChannelContext(source="http", channel_id=None, user_id="u-a", reply_to="http:u-a")
     ctx_b = ChannelContext(source="http", channel_id=None, user_id="u-b", reply_to="http:u-b")

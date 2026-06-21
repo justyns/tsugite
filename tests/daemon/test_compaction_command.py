@@ -17,10 +17,9 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from starlette.testclient import TestClient
-
-from tsugite.daemon.adapters.http import HTTPAgentAdapter, HTTPServer
-from tsugite.daemon.config import AgentConfig, HTTPConfig
-from tsugite.daemon.webhook_store import WebhookStore
+from tsugite_daemon.adapters.http import HTTPAgentAdapter, HTTPServer
+from tsugite_daemon.config import AgentConfig, HTTPConfig
+from tsugite_daemon.webhook_store import WebhookStore
 
 
 @pytest.fixture
@@ -37,7 +36,8 @@ def agent_config(tmp_workspace):
 
 @pytest.fixture
 def adapter(agent_config, tmp_path):
-    from tsugite.daemon.session_store import SessionStore
+    from tsugite_daemon.session_store import SessionStore
+
     from tsugite.workspace import WorkspaceNotFoundError
 
     session_store = SessionStore(tmp_path / "session_store.json", context_limits={"test-agent": 128_000})
@@ -54,7 +54,7 @@ def adapter(agent_config, tmp_path):
 
 @pytest.fixture
 def token_store(tmp_path):
-    from tsugite.daemon.auth import TokenStore
+    from tsugite_daemon.auth import TokenStore
 
     return TokenStore(tmp_path / "tokens.json")
 
@@ -185,7 +185,7 @@ class TestCompactRouteRoutesBySessionId:
     """
 
     def _seed_named_session(self, adapter, user_id: str, session_id: str):
-        from tsugite.daemon.session_store import Session, SessionSource
+        from tsugite_daemon.session_store import Session, SessionSource
 
         s = Session(
             id=session_id,

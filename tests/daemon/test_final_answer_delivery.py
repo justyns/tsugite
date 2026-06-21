@@ -8,7 +8,8 @@ lost with no way for the UI to recover it.
 
 from unittest.mock import MagicMock
 
-from tsugite.daemon.adapters.http import SSEProgressHandler
+from tsugite_daemon.adapters.http import SSEProgressHandler
+
 from tsugite.events import ErrorEvent, FinalAnswerEvent, InfoEvent, ReactionEvent
 
 

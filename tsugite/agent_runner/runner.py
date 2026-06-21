@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional  # noqa: E402
 
 from tsugite.config import get_xdg_data_path  # noqa: E402
 from tsugite.core.agent import TsugiteAgent  # noqa: E402
-from tsugite.core.executor import LocalExecutor  # noqa: E402
+from tsugite.core.executor_registry import get_executor_class  # noqa: E402
 from tsugite.core.proxy import _parse_pattern  # noqa: E402
 from tsugite.exceptions import AgentExecutionError, is_prompt_too_long_error  # noqa: E402
 from tsugite.md_agents import AgentConfig, parse_agent_file  # noqa: E402
@@ -402,6 +402,26 @@ def _extract_reasoning_content(agent: TsugiteAgent, custom_logger: Optional[Any]
                 event_bus.emit(ReasoningContentEvent(content=reasoning_content, step=None))
 
 
+def _make_pre_llm_call_callback(hooks_dir: Path, agent_name: str):
+    """Build an async callback that fires pre_llm_call hooks to mutate outgoing
+    messages in place. Returns None when no such hooks exist (keeps the hot path clean)."""
+    from tsugite.hooks import fire_hooks, load_hooks_config
+
+    cfg = load_hooks_config(hooks_dir)
+    if not cfg or not cfg.pre_llm_call:
+        return None
+
+    async def _callback(messages, model):
+        await fire_hooks(
+            hooks_dir,
+            "pre_llm_call",
+            {"messages": messages, "model": model, "agent": agent_name},
+            interactive=is_interactive(),
+        )
+
+    return _callback
+
+
 async def _execute_agent_with_prompt(
     prepared: "PreparedAgent",
     exec_options: Optional[ExecutionOptions] = None,
@@ -458,6 +478,7 @@ async def _execute_agent_with_prompt(
     else:
         hooks_dir = Path.cwd()
     setup_hook_handler(hooks_dir, event_bus, interactive=is_interactive())
+    pre_llm_call_cb = _make_pre_llm_call_callback(hooks_dir, agent_config.name)
 
     # Start with tools from prepared agent
     tools = list(prepared.tools)  # Make a copy
@@ -545,6 +566,8 @@ async def _execute_agent_with_prompt(
     )
 
     if sandbox_config is not None:
+        # bwrap sandboxing is a subprocess feature, so a sandboxed run always uses
+        # the subprocess executor regardless of the configured default backend.
         from tsugite.core.subprocess_executor import SubprocessExecutor
 
         executor = SubprocessExecutor(
@@ -558,7 +581,8 @@ async def _execute_agent_with_prompt(
         # Presence of the context == "this agent is sandboxed".
         set_sandbox_context(sandbox_ctx)
     else:
-        executor = LocalExecutor(
+        executor_cls = get_executor_class()
+        executor = executor_cls(
             workspace_dir=workspace_dir,
             event_bus=event_bus,
             path_context=path_context,
@@ -623,6 +647,7 @@ async def _execute_agent_with_prompt(
             resume_after_compaction=claude_code_resume_after_compaction,
             hook_vars=hook_vars,
             storage=session_storage,
+            pre_llm_call=pre_llm_call_cb,
         )
         # Tell the agent we already wrote the user_input event so it doesn't
         # duplicate.
@@ -983,18 +1008,20 @@ async def run_agent_async(
     )
     context.update(hook_vars)
 
-    # Fire pre_context_build hooks (plugin hooks can inject extra context)
-    from tsugite.hooks import fire_hooks
+    # Fire pre_context_build hooks (plugin hooks can inject extra context + blocks)
+    from tsugite.hooks import collect_context_blocks, fire_hooks, render_blocks
 
+    context_blocks: list = []
     pre_ctx_results = await fire_hooks(
         hooks_dir,
         "pre_context_build",
-        {"message": hook_message, "agent_name": agent_path.stem, **context},
+        {"message": hook_message, "agent_name": agent_path.stem, **context, "blocks": context_blocks},
         interactive=is_interactive(),
         on_status=on_status,
         on_result=on_hook_result,
     )
     context.update(pre_ctx_results.captured)
+    context["context_blocks"] = render_blocks(collect_context_blocks(context_blocks, context.get("rag_context")))
 
     # Load conversation history if continuing
     previous_messages = []
@@ -1238,7 +1265,9 @@ def _build_prepared_agent_for_step(
     combined_instructions = _combine_instructions(base_instructions, agent_instructions)
 
     # Expand and create tools
-    expanded_tools = expand_tool_specs(agent.config.tools) if agent.config.tools else []
+    expanded_tools = (
+        expand_tool_specs(agent.config.tools, strict=agent.config.strict_tools) if agent.config.tools else []
+    )
     # Always include spawn_agent if not already present
     if "spawn_agent" not in expanded_tools:
         expanded_tools.append("spawn_agent")

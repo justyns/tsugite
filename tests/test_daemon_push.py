@@ -4,9 +4,8 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
-from tsugite.daemon.config import NotificationChannelConfig
-from tsugite.daemon.push import PushSubscriptionStore
+from tsugite_daemon.config import NotificationChannelConfig
+from tsugite_daemon.push import PushSubscriptionStore
 
 
 @pytest.fixture
@@ -89,14 +88,14 @@ class TestPushSubscriptionStore:
 
 class TestGetOrCreateVapidKeys:
     def test_generates_keys(self, tmp_path):
-        from tsugite.daemon.push import get_or_create_vapid_keys
+        from tsugite_daemon.push import get_or_create_vapid_keys
 
         private_key_path, public_key_b64url = get_or_create_vapid_keys(tmp_path)
         assert Path(private_key_path).exists()
         assert len(public_key_b64url) > 0
 
     def test_reuses_existing_keys(self, tmp_path):
-        from tsugite.daemon.push import get_or_create_vapid_keys
+        from tsugite_daemon.push import get_or_create_vapid_keys
 
         path1, pub1 = get_or_create_vapid_keys(tmp_path)
         path2, pub2 = get_or_create_vapid_keys(tmp_path)
@@ -107,7 +106,7 @@ class TestGetOrCreateVapidKeys:
 class TestSendWebPush:
     @pytest.mark.asyncio
     async def test_send_success(self):
-        from tsugite.daemon.push import send_web_push
+        from tsugite_daemon.push import send_web_push
 
         sub = {"endpoint": "https://push.example.com/sub/abc", "keys": {"p256dh": "x", "auth": "y"}}
         with patch("pywebpush.webpush") as mock_wp:
@@ -117,7 +116,7 @@ class TestSendWebPush:
 
     @pytest.mark.asyncio
     async def test_send_expired_410(self):
-        from tsugite.daemon.push import send_web_push
+        from tsugite_daemon.push import send_web_push
 
         sub = {"endpoint": "https://push.example.com/sub/expired", "keys": {"p256dh": "x", "auth": "y"}}
         mock_response = MagicMock()
@@ -134,7 +133,7 @@ class TestSendWebPush:
 
     @pytest.mark.asyncio
     async def test_send_expired_404(self):
-        from tsugite.daemon.push import send_web_push
+        from tsugite_daemon.push import send_web_push
 
         sub = {"endpoint": "https://push.example.com/sub/gone", "keys": {"p256dh": "x", "auth": "y"}}
         mock_response = MagicMock()
@@ -150,7 +149,7 @@ class TestSendWebPush:
 
     @pytest.mark.asyncio
     async def test_send_other_error(self):
-        from tsugite.daemon.push import send_web_push
+        from tsugite_daemon.push import send_web_push
 
         sub = {"endpoint": "https://push.example.com/sub/err", "keys": {"p256dh": "x", "auth": "y"}}
         mock_response = MagicMock()
@@ -188,39 +187,39 @@ class TestNotificationChannelConfig:
 class TestSendWebPushAll:
     @pytest.mark.asyncio
     async def test_no_store(self):
-        from tsugite.daemon.gateway import _send_web_push_all
+        from tsugite_daemon.gateway import _send_web_push_all
 
         result = await _send_web_push_all(None, "test", "/key.pem", {"sub": "mailto:t@t"})
         assert result == {"error": "push store not initialized"}
 
     @pytest.mark.asyncio
     async def test_no_subscribers(self, store):
-        from tsugite.daemon.gateway import _send_web_push_all
+        from tsugite_daemon.gateway import _send_web_push_all
 
         result = await _send_web_push_all(store, "test", "/key.pem", {"sub": "mailto:t@t"})
         assert result == {"status": "no_subscribers"}
 
     @pytest.mark.asyncio
     async def test_sends_to_all(self, store, sample_sub):
-        from tsugite.daemon.gateway import _send_web_push_all
+        from tsugite_daemon.gateway import _send_web_push_all
 
         sub2 = {"endpoint": "https://push.example.com/sub/def456", "keys": {"p256dh": "x", "auth": "y"}}
         store.subscribe(sample_sub)
         store.subscribe(sub2)
 
-        with patch("tsugite.daemon.push.send_web_push", new_callable=AsyncMock, return_value={"status": "sent"}):
+        with patch("tsugite_daemon.push.send_web_push", new_callable=AsyncMock, return_value={"status": "sent"}):
             result = await _send_web_push_all(store, "hello", "/key.pem", {"sub": "mailto:t@t"})
             assert result["sent"] == 2
             assert result["expired"] == 0
 
     @pytest.mark.asyncio
     async def test_prunes_expired(self, store, sample_sub):
-        from tsugite.daemon.gateway import _send_web_push_all
+        from tsugite_daemon.gateway import _send_web_push_all
 
         store.subscribe(sample_sub)
 
         with patch(
-            "tsugite.daemon.push.send_web_push",
+            "tsugite_daemon.push.send_web_push",
             new_callable=AsyncMock,
             return_value={"status": "expired", "endpoint": sample_sub["endpoint"]},
         ):
@@ -230,13 +229,13 @@ class TestSendWebPushAll:
 
     @pytest.mark.asyncio
     async def test_truncates_long_message(self, store, sample_sub):
-        from tsugite.daemon.gateway import _send_web_push_all
+        from tsugite_daemon.gateway import _send_web_push_all
 
         store.subscribe(sample_sub)
         long_msg = "x" * 500
 
         with patch(
-            "tsugite.daemon.push.send_web_push", new_callable=AsyncMock, return_value={"status": "sent"}
+            "tsugite_daemon.push.send_web_push", new_callable=AsyncMock, return_value={"status": "sent"}
         ) as mock_send:
             await _send_web_push_all(store, long_msg, "/key.pem", {"sub": "mailto:t@t"})
             payload = mock_send.call_args[0][1]
@@ -246,7 +245,7 @@ class TestSendWebPushAll:
 class TestBuildNotifier:
     @pytest.mark.asyncio
     async def test_web_push_channel(self, store, sample_sub):
-        from tsugite.daemon.gateway import _build_notifier
+        from tsugite_daemon.gateway import _build_notifier
 
         store.subscribe(sample_sub)
         notifier = _build_notifier(
@@ -254,7 +253,7 @@ class TestBuildNotifier:
         )
 
         config = NotificationChannelConfig(type="web-push")
-        with patch("tsugite.daemon.push.send_web_push", new_callable=AsyncMock, return_value={"status": "sent"}):
+        with patch("tsugite_daemon.push.send_web_push", new_callable=AsyncMock, return_value={"status": "sent"}):
             results = await notifier("test message", [("push", config)])
             assert "push" in results
             assert results["push"]["sent"] == 1

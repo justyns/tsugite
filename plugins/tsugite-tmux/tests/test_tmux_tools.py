@@ -373,3 +373,23 @@ class TestGetTmuxSessions:
         mock_run.return_value = _make_run_result(returncode=1)
 
         assert get_tmux_sessions() == []
+
+
+def test_tmux_tools_denied_when_agent_sandboxed():
+    """A sandboxed agent must not reach host tmux (tmux runs unsandboxed in the parent);
+    pty is the sandboxed terminal alternative."""
+    from tsugite.agent_runner.helpers import SandboxContext, SandboxToolDeniedError, set_sandbox_context
+
+    set_sandbox_context(SandboxContext(no_network=True))
+    try:
+        for fn in (
+            lambda: tmux_create(name="x"),
+            tmux_list,
+            lambda: tmux_read(name="x"),
+            lambda: tmux_send(name="x", keys="ls"),
+            lambda: tmux_kill(name="x"),
+        ):
+            with pytest.raises(SandboxToolDeniedError):
+                fn()
+    finally:
+        set_sandbox_context(None)

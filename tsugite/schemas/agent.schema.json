@@ -133,6 +133,11 @@
         ]
       ]
     },
+    "strict_tools": {
+      "default": false,
+      "title": "Strict Tools",
+      "type": "boolean"
+    },
     "prefetch": {
       "items": {
         "additionalProperties": true,

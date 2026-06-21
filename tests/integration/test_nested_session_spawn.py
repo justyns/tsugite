@@ -6,11 +6,10 @@ import threading
 from types import SimpleNamespace
 
 import pytest
-
-from tsugite.daemon.adapters.base import ChannelContext
-from tsugite.daemon.adapters.http import HTTPAgentAdapter
-from tsugite.daemon.config import AgentConfig
-from tsugite.daemon.session_store import SessionStore
+from tsugite_daemon.adapters.base import ChannelContext
+from tsugite_daemon.adapters.http import HTTPAgentAdapter
+from tsugite_daemon.config import AgentConfig
+from tsugite_daemon.session_store import SessionStore
 
 
 @pytest.fixture
@@ -84,7 +83,7 @@ async def test_child_handle_message_not_starved_by_parent(monkeypatch, workspace
 
         raise AssertionError(f"Unexpected workspace in probe: {ws}")
 
-    monkeypatch.setattr("tsugite.daemon.adapters.base.run_agent", shared_probe)
+    monkeypatch.setattr("tsugite_daemon.adapters.base.run_agent", shared_probe)
 
     parent_ctx = ChannelContext(
         source="http",

@@ -3,13 +3,12 @@
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
-from tsugite.daemon.scheduler import ScheduleEntry
+from tsugite_daemon.scheduler import ScheduleEntry
 
 
 def _make_scheduler_adapter(agent_name="bot"):
     """Create a SchedulerAdapter with a mock adapter for testing."""
-    from tsugite.daemon.adapters.scheduler_adapter import SchedulerAdapter
+    from tsugite_daemon.adapters.scheduler_adapter import SchedulerAdapter
 
     adapter_mock = AsyncMock()
     adapter_mock.handle_message = AsyncMock(return_value="done")

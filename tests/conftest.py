@@ -252,6 +252,34 @@ def reset_tool_registry():
 
 
 @pytest.fixture(autouse=True)
+def default_local_executor(monkeypatch):
+    """Tests default to the in-process executor (fast + namespace-inspectable), matching
+    the pre-unify default. Production defaults to subprocess; tests that need it construct
+    SubprocessExecutor explicitly."""
+    monkeypatch.setenv("TSUGITE_EXECUTOR_BACKEND", "local")
+
+
+@pytest.fixture(autouse=True)
+def reset_history_backend_fixture():
+    """Clear the cached history backend so a swapped backend never leaks between tests."""
+    from tsugite.history import reset_history_backend
+
+    reset_history_backend()
+    yield
+    reset_history_backend()
+
+
+@pytest.fixture(autouse=True)
+def reset_attachment_handlers_fixture():
+    """Clear cached plugin attachment handlers so a fake handler never leaks between tests."""
+    from tsugite.plugins import reset_attachment_handlers
+
+    reset_attachment_handlers()
+    yield
+    reset_attachment_handlers()
+
+
+@pytest.fixture(autouse=True)
 def isolate_config_files(tmp_path, monkeypatch):
     """Isolate config files for each test to prevent cross-test contamination.
 
@@ -355,8 +383,10 @@ def agents_tools(reset_tool_registry):
 @pytest.fixture
 def http_tools(reset_tool_registry):
     """Register HTTP tools for testing."""
+    from tsugite_web import web_search
+
     from tsugite.tools import tool
-    from tsugite.tools.http import fetch_text, http_request, web_search
+    from tsugite.tools.http import fetch_text, http_request
 
     # Re-register the tools after registry reset
     tool(fetch_text)

@@ -6,7 +6,7 @@ has multiple sessions. Better fallback priority: date > truncated prompt >
 session ID > username.
 """
 
-from tsugite.daemon.session_store import Session, SessionSource, SessionStatus
+from tsugite_daemon.session_store import Session, SessionSource, SessionStatus
 
 from .helpers import open_conversations, reload_conversations_view, wait_for_session_in_list
 

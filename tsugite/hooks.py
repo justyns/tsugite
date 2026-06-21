@@ -8,6 +8,7 @@ import os
 import shlex
 import subprocess
 import time
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Literal, NamedTuple, Optional, Union
@@ -48,6 +49,38 @@ _jinja_env.filters["shell_quote"] = shlex.quote
 from tsugite.tools.secrets import register_jinja_globals as _register_secret_globals  # noqa: E402
 
 _register_secret_globals(_jinja_env)
+
+
+@dataclass
+class Block:
+    """A labeled, XML-renderable context block contributed by a plugin.
+
+    Rendered as ``<tag attr="...">\\nbody\\n</tag>``. Higher priority renders first.
+    """
+
+    tag: str
+    body: str = ""
+    attributes: dict[str, str] = field(default_factory=dict)
+    priority: int = 0
+
+
+def render_blocks(blocks: list[Block]) -> str:
+    """Render context blocks to an XML-tagged string for the prompt."""
+    parts = []
+    for b in blocks:
+        attrs = "".join(f' {k}="{v}"' for k, v in b.attributes.items())
+        parts.append(f"<{b.tag}{attrs}>\n{b.body}\n</{b.tag}>")
+    return "\n".join(parts)
+
+
+def collect_context_blocks(blocks: Optional[list], rag_context: Optional[str] = None) -> list[Block]:
+    """Merge blocks appended by pre_context_build hooks with the legacy rag_context
+    string (rendered as a <context> block), sorted by descending priority."""
+    result = [b for b in (blocks or []) if isinstance(b, Block)]
+    if rag_context:
+        result.append(Block(tag="context", body=str(rag_context)))
+    result.sort(key=lambda b: b.priority, reverse=True)
+    return result
 
 
 class HookRule(BaseModel):
@@ -155,6 +188,7 @@ class HooksConfig(BaseModel):
     pre_message: list[HookRule] = Field(default_factory=list)
     pre_context_build: list[HookRule] = Field(default_factory=list)
     post_context_build: list[HookRule] = Field(default_factory=list)
+    pre_llm_call: list[HookRule] = Field(default_factory=list)
     pre_tool_call: list[HookRule] = Field(default_factory=list)
     pre_response: list[HookRule] = Field(default_factory=list)
     post_response: list[HookRule] = Field(default_factory=list)
@@ -597,6 +631,7 @@ HookPhase = Literal[
     "pre_message",
     "pre_context_build",
     "post_context_build",
+    "pre_llm_call",
     "pre_tool_call",
     "pre_response",
     "post_response",

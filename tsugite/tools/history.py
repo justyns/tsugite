@@ -6,7 +6,7 @@ summaries (one turn = one user_input → next user_input span).
 
 from typing import Any, Dict, List, Optional
 
-from ..history import Event, SessionStorage, SessionSummary, get_history_dir, list_session_files
+from ..history import Event, SessionSummary, get_history_backend
 from . import tool
 
 
@@ -79,10 +79,10 @@ def read_conversation(conversation_id: str) -> Dict[str, Any]:
     Raises:
         ValueError: If conversation_id is not found
     """
-    session_path = get_history_dir() / f"{conversation_id}.jsonl"
+    backend = get_history_backend()
     try:
-        storage = SessionStorage.load(session_path)
-    except FileNotFoundError as e:
+        storage = backend.load(conversation_id)
+    except (FileNotFoundError, KeyError) as e:
         raise ValueError(f"Conversation '{conversation_id}' not found: {e}")
 
     events = storage.load_events()
@@ -128,12 +128,13 @@ def list_conversations(
     if limit < 1 or limit > 100:
         raise ValueError("Limit must be between 1 and 100")
 
+    backend = get_history_backend()
     out: List[Dict[str, Any]] = []
-    for path in list_session_files():
+    for sid in backend.list_sessions():
         if len(out) >= limit:
             break
         try:
-            meta = SessionStorage.load_meta_fast(path)
+            meta = backend.get_meta(sid)
             if not meta:
                 continue
             if agent and meta.data.get("agent") != agent:
@@ -141,7 +142,7 @@ def list_conversations(
             if machine and meta.data.get("machine") != machine:
                 continue
 
-            storage = SessionStorage.load(path)
+            storage = backend.load(sid)
             events = storage.load_events()
             summary = _summary_dict(events)
 
@@ -182,18 +183,19 @@ def search_conversations(
         raise ValueError("Limit must be between 1 and 50")
 
     q = query.lower()
+    backend = get_history_backend()
     out: List[Dict[str, Any]] = []
-    for path in list_session_files():
+    for sid in backend.list_sessions():
         if len(out) >= limit:
             break
         try:
-            meta = SessionStorage.load_meta_fast(path)
+            meta = backend.get_meta(sid)
             if not meta:
                 continue
             if agent and meta.data.get("agent") != agent:
                 continue
 
-            storage = SessionStorage.load(path)
+            storage = backend.load(sid)
             events = storage.load_events()
             snippet = _snippet_for_query(events, q)
             if not snippet:

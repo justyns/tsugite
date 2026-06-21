@@ -380,3 +380,33 @@ async def test_sandbox_blocks_network():
         assert "NETWORK_OK" not in result.output
     finally:
         executor.cleanup()
+
+
+@pytest.mark.skipif(not shutil.which("bwrap"), reason="bwrap not installed")
+@pytest.mark.asyncio
+async def test_sandboxed_executor_binds_workspace_and_isolates_fs(tmp_path, shell_tools):
+    """End-to-end: a sandboxed SubprocessExecutor (resolving the bwrap backend via the
+    sandbox seam) runs the shell `run()` tool inside the workspace and cannot read
+    outside it."""
+    from pathlib import Path
+
+    from tsugite.core.sandbox import SandboxConfig
+    from tsugite.core.tools import create_tool_from_tsugite
+
+    (tmp_path / "inside.txt").write_text("hi")
+    executor = SubprocessExecutor(workspace_dir=Path(tmp_path), sandbox_config=SandboxConfig(no_network=True))
+    executor.set_tools([create_tool_from_tsugite("run")])
+    try:
+        pwd = await executor.execute("print(run(command='pwd'))")
+        assert pwd.error is None, pwd.error
+        assert str(tmp_path) in pwd.output
+
+        listing = await executor.execute("print(run(command='ls'))")
+        assert "inside.txt" in listing.output
+
+        # /etc/shadow is not bound into the sandbox, so it is unreadable.
+        shadow = await executor.execute("print(run(command='cat /etc/shadow 2>&1 || true'))")
+        assert "inside.txt" not in shadow.output
+        assert any(s in shadow.output for s in ("No such file", "Permission denied", "can't open"))
+    finally:
+        executor.cleanup()

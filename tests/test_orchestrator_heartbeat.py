@@ -5,10 +5,9 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
-from tsugite.daemon.adapters.base import BaseAdapter, ChannelContext, _is_recent
-from tsugite.daemon.config import AgentConfig
-from tsugite.daemon.session_store import Session, SessionStore
+from tsugite_daemon.adapters.base import BaseAdapter, ChannelContext, _is_recent
+from tsugite_daemon.config import AgentConfig
+from tsugite_daemon.session_store import Session, SessionStore
 
 
 class _StubAdapter(BaseAdapter):
@@ -165,7 +164,7 @@ class TestRunIfWithSessions:
 
 class TestSchedulerMinInterval:
     def test_update_rejects_too_frequent_cron(self, tmp_path):
-        from tsugite.daemon.scheduler import ScheduleEntry, Scheduler
+        from tsugite_daemon.scheduler import ScheduleEntry, Scheduler
 
         path = tmp_path / "schedules.json"
         scheduler = Scheduler(path, run_callback=AsyncMock())
@@ -176,7 +175,7 @@ class TestSchedulerMinInterval:
             scheduler.update("hb", cron_expr="* * * * *")
 
     def test_update_allows_valid_cron(self, tmp_path):
-        from tsugite.daemon.scheduler import ScheduleEntry, Scheduler
+        from tsugite_daemon.scheduler import ScheduleEntry, Scheduler
 
         path = tmp_path / "schedules.json"
         scheduler = Scheduler(path, run_callback=AsyncMock())
@@ -194,7 +193,7 @@ class TestSessionReply:
     def test_reply_to_session_calls_adapter(self, tmp_store):
         import asyncio
 
-        from tsugite.daemon.session_runner import SessionRunner
+        from tsugite_daemon.session_runner import SessionRunner
 
         mock_adapter = MagicMock()
         mock_adapter.handle_message = AsyncMock(return_value="response text")
@@ -217,7 +216,7 @@ class TestSessionReply:
     def test_reply_to_missing_adapter_raises(self, tmp_store):
         import asyncio
 
-        from tsugite.daemon.session_runner import SessionRunner
+        from tsugite_daemon.session_runner import SessionRunner
 
         runner = SessionRunner(store=tmp_store, adapters={})
 

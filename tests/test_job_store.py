@@ -3,8 +3,7 @@
 import threading
 
 import pytest
-
-from tsugite.daemon.job_store import (
+from tsugite_daemon.job_store import (
     Job,
     JobState,
     JobStateTransitionError,

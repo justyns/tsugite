@@ -5,7 +5,8 @@ watched it, so the viewed conversation only changed on a view transition (or a
 full reload) -- never on back/forward between two conversations.
 """
 
-from tsugite.daemon.session_store import Session, SessionSource
+from tsugite_daemon.session_store import Session, SessionSource
+
 from tsugite.history.storage import generate_session_id
 
 from .helpers import CONV_VIEW, open_conversations, reload_conversations_view, select_session_in_view

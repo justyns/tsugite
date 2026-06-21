@@ -16,6 +16,25 @@ from tsugite.md_agents import parse_agent_file
 console = Console()
 
 
+def _missing_declared_tools(config) -> List[str]:
+    """Plain tool names the agent declares that aren't installed.
+
+    Categories (@x), globs, and exclusions (-x) are skipped here; this only flags simple tool
+    names so it doesn't false-positive on optional-category specs.
+    """
+    from tsugite.tools import _ensure_tools_loaded, list_tools
+
+    _ensure_tools_loaded()
+    installed = set(list_tools())
+    missing = []
+    for spec in config.tools or []:
+        if spec.startswith(("@", "-")) or any(c in spec for c in "*?["):
+            continue
+        if spec not in installed:
+            missing.append(spec)
+    return missing
+
+
 def validate_command(
     files: List[Path] = typer.Argument(..., help="Agent file(s) to validate (supports glob patterns)"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed validation information"),
@@ -61,12 +80,25 @@ def validate_command(
             # Use existing validation
             is_valid, error_msg = validate_agent_file(agent_file)
 
+            # Surface tools that won't be available at runtime. strict_tools makes them fatal
+            # (mirroring the runtime behavior); otherwise they're warnings (skipped at runtime).
+            warnings: List[str] = []
+            if is_valid and agent.config:
+                missing = _missing_declared_tools(agent.config)
+                if missing:
+                    if agent.config.strict_tools:
+                        is_valid = False
+                        error_msg = f"missing required tools (strict_tools): {', '.join(missing)}"
+                    else:
+                        warnings = [f"tool '{t}' is not installed; it will be skipped at runtime" for t in missing]
+
             results.append(
                 {
                     "file": agent_file,
                     "valid": is_valid,
                     "error": error_msg if not is_valid else None,
                     "config": agent.config if is_valid else None,
+                    "warnings": warnings,
                 }
             )
 
@@ -115,6 +147,10 @@ def validate_command(
             if verbose and result["config"]:
                 config = result["config"]
                 details = f"name={config.name}, model={config.model or 'unknown'}, tools={len(config.tools)}"
+            warns = result.get("warnings") or []
+            if warns:
+                note = f"[yellow]{len(warns)} tool warning(s)[/yellow]"
+                details = f"{details}  {note}" if details else note
         else:
             status = "[red]✗ Invalid[/red]"
             details = f"[red]{result['error']}[/red]" if result["error"] else "[red]Unknown error[/red]"
@@ -124,6 +160,13 @@ def validate_command(
     console.print()
     console.print(table)
     console.print()
+
+    # Detail the per-file tool warnings below the table (full names, not truncated cells).
+    for result in results:
+        for w in result.get("warnings") or []:
+            console.print(f"[yellow]⚠ {result['file']}: {w}[/yellow]")
+    if any(r.get("warnings") for r in results):
+        console.print()
 
     # Summary panel
     summary_style = "green" if invalid_count == 0 else "yellow"

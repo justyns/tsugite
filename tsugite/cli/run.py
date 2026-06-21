@@ -96,7 +96,7 @@ def _resolve_ui_mode(ui_mode: Optional[str], ui_opts: UIOptions, stderr_console:
         stderr_console.print("[red]Error: --ui cannot be used with --plain or --headless[/red]")
         raise typer.Exit(1)
 
-    ui_modes = {"plain", "headless", "live"}
+    ui_modes = {"plain", "headless"}
     ui_lower = ui_mode.lower()
     if ui_lower not in ui_modes:
         stderr_console.print(
@@ -108,8 +108,6 @@ def _resolve_ui_mode(ui_mode: Optional[str], ui_opts: UIOptions, stderr_console:
         ui_opts.plain = True
     elif ui_lower == "headless":
         ui_opts.headless = True
-    elif ui_lower == "live":
-        ui_opts.live = True
 
     return ui_opts
 
@@ -176,9 +174,7 @@ def _execute_agent_with_ui(
 
     Dispatch order:
       1. --headless / --final-only -> custom_agent_ui with silent progress
-      2. --ui live (on a real TTY) -> three-region LiveUIHandler
-      3. fall-through default -> plain logger (covers no flags, --plain, piped/NO_COLOR,
-         and --ui live degraded to plain by should_use_plain_output)
+      2. fall-through default -> plain logger (covers no flags, --plain, piped/NO_COLOR)
     """
     from tsugite.ui import create_plain_logger, custom_agent_ui
 
@@ -195,14 +191,6 @@ def _execute_agent_with_ui(
             show_panels=False,
             show_debug_messages=ui_opts.verbose,
         ) as custom_logger:
-            executor_kwargs["custom_logger"] = custom_logger
-            return executor(**executor_kwargs)
-
-    if ui_opts.live and not use_plain_output:
-        from tsugite.ui import create_live_logger
-
-        custom_logger = create_live_logger(show_reasoning=ui_opts.show_reasoning)
-        with custom_logger.ui_handler.live_context():
             executor_kwargs["custom_logger"] = custom_logger
             return executor(**executor_kwargs)
 
@@ -253,7 +241,7 @@ def run(
     ui: Optional[str] = typer.Option(
         None,
         "--ui",
-        help="UI mode: plain, headless, or live. Default: plain (auto-degrades when piped or NO_COLOR is set)",
+        help="UI mode: plain or headless. Default: plain (auto-degrades when piped or NO_COLOR is set)",
     ),
     non_interactive: bool = typer.Option(False, "--non-interactive", help="Run without interactive prompts"),
     history_dir: Optional[str] = typer.Option(None, "--history-dir", help="Directory to store history files"),
@@ -306,6 +294,11 @@ def run(
         help="Domain(s) allowed in sandbox, with optional port (e.g. github.com, *.example.com:8080). Default ports: 80, 443",
     ),
     no_network: bool = typer.Option(False, "--no-network", help="Sandbox with no network access at all"),
+    pass_env: Optional[List[str]] = typer.Option(
+        None,
+        "--pass-env",
+        help="Env var NAME(s) to pass into the sandbox on top of the safe defaults (value read from the environment).",
+    ),
     no_secrets: bool = typer.Option(False, "--no-secrets", help="Skip secrets backend initialization"),
 ):
     """Run an agent with the given prompt.
@@ -364,6 +357,7 @@ def run(
         no_sandbox=no_sandbox,
         allow_domain=allow_domain,
         no_network=no_network,
+        pass_env=pass_env,
     )
     history_opts = HistoryOptions.from_cli(
         no_history=no_history,
@@ -418,10 +412,8 @@ def run(
     import os
 
     if subagent_mode:
-        if ui_opts.plain or ui_opts.headless or ui_opts.live:
-            stderr_console.print(
-                "[red]Error: --subagent-mode cannot be combined with --plain, --headless, or --ui live[/red]"
-            )
+        if ui_opts.plain or ui_opts.headless:
+            stderr_console.print("[red]Error: --subagent-mode cannot be combined with --plain or --headless[/red]")
             raise typer.Exit(1)
 
         ui_opts.non_interactive = True
@@ -430,10 +422,10 @@ def run(
 
     daemon_metadata = None
     if daemon_agent:
-        from tsugite.history import SessionStorage, get_history_dir, list_session_files
+        from tsugite.history import get_history_backend
 
         try:
-            from tsugite.daemon.config import load_daemon_config
+            from tsugite_daemon.config import load_daemon_config
 
             daemon_config = load_daemon_config()
             if daemon_agent not in daemon_config.agents:
@@ -442,6 +434,11 @@ def run(
 
             agent_config = daemon_config.agents[daemon_agent]
 
+        except ModuleNotFoundError as e:
+            stderr_console.print(
+                "[red]The daemon battery is not installed.[/red] Install it with: pip install tsugite-cli[daemon]"
+            )
+            raise typer.Exit(1) from e
         except ValueError as e:
             stderr_console.print(f"[red]Daemon config not found: {e}[/red]")
             stderr_console.print("[dim]Run 'tsugite daemon' to start daemon first[/dim]")
@@ -452,11 +449,12 @@ def run(
 
         # Search for daemon-managed sessions for this agent
         latest_conv_id = None
-        for session_file in list_session_files():
+        backend = get_history_backend()
+        for sid in backend.list_sessions():
             try:
-                meta = SessionStorage.load_meta_fast(session_file)
+                meta = backend.get_meta(sid)
                 if meta and meta.data.get("agent") == daemon_agent:
-                    latest_conv_id = session_file.stem
+                    latest_conv_id = sid
                     break
             except Exception:
                 continue
@@ -516,11 +514,10 @@ def run(
             base_dir = Path.cwd()
 
             if not agent_refs and continue_conversation:
-                from tsugite.history import SessionStorage, get_history_dir
+                from tsugite.history import get_history_backend
 
-                session_path = get_history_dir() / f"{history_opts.continue_id}.jsonl"
                 try:
-                    meta = SessionStorage.load_meta_fast(session_path)
+                    meta = get_history_backend().get_meta(history_opts.continue_id)
                     agent_name = meta.data.get("agent") if meta else None
                     if not agent_name:
                         raise ValueError("agent name missing from session_start")

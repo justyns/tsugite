@@ -423,6 +423,23 @@ See `examples/attachment_assign_demo.md` and `examples/attachment_index_demo.md`
 3. Update relevant documentation in `AGENTS.md` and any user-facing doc under `docs/`
 4. Add validation tests in `tests/test_agent_parser.py`
 
+### Swappable batteries
+
+Subsystems are pluggable behind a uniform seam: (1) a Protocol, (2) a `tsugite.<area>`
+entry-point group, (3) a `config.<area>.backend` selector resolved via
+`load_backend_entry_point` (`plugins.py`), with a built-in default. Areas: tools, providers,
+adapters, secrets, hooks, event_subscribers, history, attachments, sandbox, executors.
+
+To add one: add `GROUP_<X>` + a loader in `plugins.py`, a `BackendConfig` subclass in
+`config.py`, a resolver that handles built-ins then falls through to
+`load_backend_entry_point`, and ship the backend as a `plugins/` package that registers the
+entry point. The production executor default is `subprocess`; tests pin `local` (in-process).
+
+Sandbox rule for `parent_only` tools: running in the parent process means running outside the
+agent's sandbox, so a parent-only tool that executes commands must either sandbox-wrap the
+process it spawns (pty does this via `maybe_sandbox_argv` + `resolve_terminal_sandbox`, failing
+closed) or refuse for sandboxed agents with `@deny_when_sandboxed` (tmux does this).
+
 ## Testing Strategy
 
 ### TDD is the default

@@ -9,7 +9,7 @@ import pytest
 from typer.testing import CliRunner
 
 from tsugite.cli import app
-from tsugite.core.sandbox import BubblewrapSandbox
+from tsugite.core.sandbox import sandbox_available
 
 runner = CliRunner()
 
@@ -23,6 +23,8 @@ def _register_exec_tools(reset_tool_registry):
     secret tools must keep parent_only=True so they run in the parent process,
     where the secret allowlist + masking registry live.
     """
+    from tsugite_web import web_search
+
     from tsugite.tools import tool
     from tsugite.tools.fs import (
         create_directory,
@@ -33,7 +35,7 @@ def _register_exec_tools(reset_tool_registry):
         read_file,
         write_file,
     )
-    from tsugite.tools.http import check_url, download_file, fetch_json, fetch_text, http_request, web_search
+    from tsugite.tools.http import check_url, download_file, fetch_json, fetch_text, http_request
     from tsugite.tools.secrets import get_secret, list_secrets
 
     for fn in [
@@ -74,10 +76,22 @@ def test_exec_tsugite_tool_in_scope(tmp_path):
 
 @pytest.fixture
 def env_secrets(monkeypatch):
-    """Force the env secrets backend and seed two secrets."""
+    """Force the env secrets backend and seed two secrets.
+
+    The backend is a process-global lazy singleton, so under `-n auto` a backend cached
+    by an earlier test in the same worker would shadow these env vars (get_secret would
+    miss). Install the env backend explicitly, and drop it on teardown so it doesn't leak.
+    """
     monkeypatch.setenv("TSUGITE_SECRETS_BACKEND", "env")
     monkeypatch.setenv("MY_TOKEN", "supersecret123")
     monkeypatch.setenv("OTHER_TOKEN", "othervalue456")
+
+    from tsugite.secrets import set_backend
+    from tsugite.secrets.env import EnvSecretBackend
+
+    set_backend(EnvSecretBackend(prefix=""))
+    yield
+    set_backend(None)  # force a fresh re-create for the next test in this worker
 
 
 def test_exec_secret_success_and_masked(env_secrets):
@@ -127,7 +141,7 @@ def test_exec_tools_comma_or_space_separated():
         assert "both" in result.output
 
 
-@pytest.mark.skipif(not BubblewrapSandbox.check_available(), reason="bubblewrap not installed")
+@pytest.mark.skipif(not sandbox_available(), reason="sandbox backend not available")
 def test_exec_sandbox_no_network_blocks_egress():
     """--no-network implies --sandbox and blocks outbound connections."""
     result = runner.invoke(

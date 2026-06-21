@@ -3,8 +3,7 @@
 from datetime import datetime, timezone
 
 import pytest
-
-from tsugite.daemon.session_store import Session, SessionSource, SessionStatus, SessionStore
+from tsugite_daemon.session_store import Session, SessionSource, SessionStatus, SessionStore
 
 
 @pytest.fixture

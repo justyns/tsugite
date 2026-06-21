@@ -19,10 +19,10 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from tsugite_daemon.adapters.base import BaseAdapter
+from tsugite_daemon.config import AgentConfig
+from tsugite_daemon.session_store import Session, SessionSource, SessionStore
 
-from tsugite.daemon.adapters.base import BaseAdapter
-from tsugite.daemon.config import AgentConfig
-from tsugite.daemon.session_store import Session, SessionSource, SessionStore
 from tsugite.history.models import Event
 
 
@@ -70,13 +70,13 @@ def _patches(history_dir):
         return "Summary"
 
     return [
-        patch("tsugite.daemon.memory.get_context_limit", return_value=200_000),
-        patch("tsugite.daemon.memory.infer_compaction_model", return_value="anthropic:claude-3-haiku-20240307"),
+        patch("tsugite_daemon.memory.get_context_limit", return_value=200_000),
+        patch("tsugite_daemon.memory.infer_compaction_model", return_value="anthropic:claude-3-haiku-20240307"),
         patch(
-            "tsugite.daemon.memory.split_events_for_compaction",
+            "tsugite_daemon.memory.split_events_for_compaction",
             return_value=(old_events, recent_events),
         ),
-        patch("tsugite.daemon.memory.summarize_session", new=fake_summarize),
+        patch("tsugite_daemon.memory.summarize_session", new=fake_summarize),
         patch("tsugite.history.get_history_dir", return_value=history_dir),
         patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
         patch("tsugite.history.storage.get_machine_name", return_value="test"),
@@ -239,11 +239,11 @@ async def test_compact_session_returns_none_when_nothing_to_compact(workspace_di
         return "Summary"
 
     with (
-        patch("tsugite.daemon.memory.get_context_limit", return_value=200_000),
-        patch("tsugite.daemon.memory.infer_compaction_model", return_value="anthropic:claude-3-haiku-20240307"),
+        patch("tsugite_daemon.memory.get_context_limit", return_value=200_000),
+        patch("tsugite_daemon.memory.infer_compaction_model", return_value="anthropic:claude-3-haiku-20240307"),
         # Empty old_events triggers the early-exit at base.py:753-755.
-        patch("tsugite.daemon.memory.split_events_for_compaction", return_value=([], [])),
-        patch("tsugite.daemon.memory.summarize_session", new=fake_summarize),
+        patch("tsugite_daemon.memory.split_events_for_compaction", return_value=([], [])),
+        patch("tsugite_daemon.memory.summarize_session", new=fake_summarize),
         patch("tsugite.history.get_history_dir", return_value=history_dir),
         patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
         patch("tsugite.history.storage.get_machine_name", return_value="test"),

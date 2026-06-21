@@ -75,23 +75,3 @@ def create_plain_logger(show_reasoning: bool = False) -> CustomUILogger:
     """
     plain_handler = PlainUIHandler(show_reasoning=show_reasoning)
     return CustomUILogger(plain_handler, plain_handler.console)
-
-
-def create_live_logger(show_reasoning: bool = False) -> CustomUILogger:
-    """Create a three-region live logger: scrollback above, persistent status footer.
-
-    Wraps :class:`LiveUIHandler`, which inherits PlainUIHandler's scrollback formatting
-    and adds a 1-3 line status panel pinned at the bottom showing turn, current tool,
-    cumulative tokens/cost, and elapsed time.
-
-    Args:
-        show_reasoning: When True, render LLM reasoning blocks in the scrollback.
-
-    Returns:
-        CustomUILogger with LiveUIHandler; caller is expected to enter
-        ``custom_logger.ui_handler.live_context()``.
-    """
-    from tsugite.ui.live import LiveUIHandler
-
-    live_handler = LiveUIHandler(show_reasoning=show_reasoning)
-    return CustomUILogger(live_handler, live_handler.console)

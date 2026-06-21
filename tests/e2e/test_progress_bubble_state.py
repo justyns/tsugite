@@ -6,7 +6,8 @@ arrives; and a session that ends with no progress shown in this tab must not ren
 empty `progress-done` (`code ✓/✗`) bubble.
 """
 
-from tsugite.daemon.session_store import Session, SessionSource
+from tsugite_daemon.session_store import Session, SessionSource
+
 from tsugite.history.storage import generate_session_id
 
 from .helpers import CONV_VIEW, open_conversations, reload_conversations_view

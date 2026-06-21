@@ -6,13 +6,12 @@ from unittest.mock import patch
 
 import pytest
 from starlette.testclient import TestClient
-
-from tsugite.daemon.adapters.http import HTTPAgentAdapter, HTTPServer
-from tsugite.daemon.auth import TokenStore
-from tsugite.daemon.config import AgentConfig, HTTPConfig
-from tsugite.daemon.job_store import Job, JobStore
-from tsugite.daemon.session_store import SessionStore
-from tsugite.daemon.webhook_store import WebhookStore
+from tsugite_daemon.adapters.http import HTTPAgentAdapter, HTTPServer
+from tsugite_daemon.auth import TokenStore
+from tsugite_daemon.config import AgentConfig, HTTPConfig
+from tsugite_daemon.job_store import Job, JobStore
+from tsugite_daemon.session_store import SessionStore
+from tsugite_daemon.webhook_store import WebhookStore
 
 
 @pytest.fixture

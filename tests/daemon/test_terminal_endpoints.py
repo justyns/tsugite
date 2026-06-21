@@ -9,12 +9,11 @@ from unittest.mock import patch
 
 import pytest
 from starlette.testclient import TestClient
-
-from tsugite.daemon.adapters.http import HTTPAgentAdapter, HTTPServer
-from tsugite.daemon.config import AgentConfig, HTTPConfig
-from tsugite.daemon.pty_manager import PtyManager
-from tsugite.daemon.terminal_store import TerminalSessionStore, TerminalState
-from tsugite.daemon.webhook_store import WebhookStore
+from tsugite_daemon.adapters.http import HTTPAgentAdapter, HTTPServer
+from tsugite_daemon.config import AgentConfig, HTTPConfig
+from tsugite_daemon.webhook_store import WebhookStore
+from tsugite_pty.pty_manager import PtyManager
+from tsugite_pty.terminal_store import TerminalSessionStore, TerminalState
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="PTY support is POSIX-only")
 
@@ -38,7 +37,8 @@ def http_config():
 
 @pytest.fixture
 def mock_adapter(agent_config, tmp_path):
-    from tsugite.daemon.session_store import SessionStore
+    from tsugite_daemon.session_store import SessionStore
+
     from tsugite.workspace import WorkspaceNotFoundError
 
     session_store = SessionStore(tmp_path / "session_store.json")
@@ -59,7 +59,7 @@ def webhook_store(tmp_path):
 
 @pytest.fixture
 def token_store(tmp_path):
-    from tsugite.daemon.auth import TokenStore
+    from tsugite_daemon.auth import TokenStore
 
     return TokenStore(tmp_path / "tokens.json")
 
@@ -321,7 +321,7 @@ class TestStream:
 
         # Run the exit hook so the buffer is persisted to disk, then forcibly
         # evict to simulate "user reconnects long after exit".
-        from tsugite.daemon.terminal_runtime import _on_pty_exit
+        from tsugite_pty.terminal_runtime import _on_pty_exit
 
         _on_pty_exit(proc, terminal_store, pty_manager, tid)
         pty_manager.remove(tid)

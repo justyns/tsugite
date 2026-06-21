@@ -20,7 +20,7 @@ def test_tab_resume_refetches_open_conversation(authenticated_page, e2e_adapter,
     page = authenticated_page
     history_dir, user_id, session_id = _seed_long_session(e2e_adapter, e2e_tmp, "resume", turns=3)
 
-    with patch("tsugite.daemon.adapters.http.get_history_dir", return_value=history_dir):
+    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
         _open_session(page, user_id, session_id)
         assert "CROSSDEVICE" not in (page.locator("#messages").text_content() or "")
 
@@ -49,7 +49,7 @@ def test_tab_resume_does_not_yank_when_scrolled_up(authenticated_page, e2e_adapt
     page = authenticated_page
     history_dir, user_id, session_id = _seed_long_session(e2e_adapter, e2e_tmp, "resume-up", turns=14)
 
-    with patch("tsugite.daemon.adapters.http.get_history_dir", return_value=history_dir):
+    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
         _open_session(page, user_id, session_id)
         _wait_at_bottom(page)
 

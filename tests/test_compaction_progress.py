@@ -9,10 +9,10 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from tsugite_daemon.adapters.base import BaseAdapter
+from tsugite_daemon.config import AgentConfig
+from tsugite_daemon.session_store import SessionStore
 
-from tsugite.daemon.adapters.base import BaseAdapter
-from tsugite.daemon.config import AgentConfig
-from tsugite.daemon.session_store import SessionStore
 from tsugite.history.models import Event
 
 
@@ -79,13 +79,13 @@ async def test_run_compaction_broadcasts_counts_and_phase(workspace_dir, tmp_pat
         return "Summary"
 
     with (
-        patch("tsugite.daemon.memory.get_context_limit", return_value=128_000),
-        patch("tsugite.daemon.memory.infer_compaction_model", return_value="openai:gpt-4o-mini"),
+        patch("tsugite_daemon.memory.get_context_limit", return_value=128_000),
+        patch("tsugite_daemon.memory.infer_compaction_model", return_value="openai:gpt-4o-mini"),
         patch(
-            "tsugite.daemon.memory.split_events_for_compaction",
+            "tsugite_daemon.memory.split_events_for_compaction",
             return_value=(old_events, recent_events),
         ),
-        patch("tsugite.daemon.memory.summarize_session", new=fake_summarize),
+        patch("tsugite_daemon.memory.summarize_session", new=fake_summarize),
         patch("tsugite.history.get_history_dir", return_value=history_dir),
         patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
         patch("tsugite.history.storage.get_machine_name", return_value="test"),
@@ -154,13 +154,13 @@ async def test_run_compaction_finishes_even_with_no_event_bus(workspace_dir, tmp
     recent_events = [Event(type="user_input", ts=datetime.now(timezone.utc), data={"text": "recent"})]
 
     with (
-        patch("tsugite.daemon.memory.get_context_limit", return_value=128_000),
-        patch("tsugite.daemon.memory.infer_compaction_model", return_value="openai:gpt-4o-mini"),
+        patch("tsugite_daemon.memory.get_context_limit", return_value=128_000),
+        patch("tsugite_daemon.memory.infer_compaction_model", return_value="openai:gpt-4o-mini"),
         patch(
-            "tsugite.daemon.memory.split_events_for_compaction",
+            "tsugite_daemon.memory.split_events_for_compaction",
             return_value=(old_events, recent_events),
         ),
-        patch("tsugite.daemon.memory.summarize_session", new_callable=AsyncMock, return_value="Summary"),
+        patch("tsugite_daemon.memory.summarize_session", new_callable=AsyncMock, return_value="Summary"),
         patch("tsugite.history.get_history_dir", return_value=history_dir),
         patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
         patch("tsugite.history.storage.get_machine_name", return_value="test"),

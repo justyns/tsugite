@@ -7,7 +7,8 @@ to `autoSelectInteractive()` and lands the user on whatever happens to be
 "most recently active" - rarely the conversation they had open.
 """
 
-from tsugite.daemon.session_store import Session, SessionSource, SessionStatus
+from tsugite_daemon.session_store import Session, SessionSource, SessionStatus
+
 from tsugite.history.storage import generate_session_id
 
 from .helpers import (

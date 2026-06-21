@@ -6,8 +6,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 
 import pytest
-
-from tsugite.daemon.scheduler import RunResult, ScheduleEntry, Scheduler
+from tsugite_daemon.scheduler import RunResult, ScheduleEntry, Scheduler
 
 
 @pytest.fixture

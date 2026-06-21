@@ -83,7 +83,7 @@ class ChatManager:
                 from tsugite.core.tools import create_tool_from_tsugite
                 from tsugite.tools import expand_tool_specs
 
-                expanded = expand_tool_specs(agent.config.tools)
+                expanded = expand_tool_specs(agent.config.tools, strict=agent.config.strict_tools)
                 self.available_tools = [create_tool_from_tsugite(name) for name in expanded]
         except Exception:
             # Don't fail if tools can't be loaded
@@ -97,12 +97,12 @@ class ChatManager:
         # Only create new conversation if not resuming
         if history_enabled and not resume_conversation_id:
             try:
-                from tsugite.history import SessionStorage
+                from tsugite.history import get_history_backend
 
                 agent = parse_agent_file(agent_path)
                 model = resolve_effective_model(model_override, agent.config.model) or "unknown"
 
-                storage = SessionStorage.create(
+                storage = get_history_backend().create(
                     agent_name=agent.config.name or agent_path.stem,
                     model=model,
                 )

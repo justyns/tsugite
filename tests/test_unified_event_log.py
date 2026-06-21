@@ -6,8 +6,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from tsugite_daemon.session_store import SessionStore
 
-from tsugite.daemon.session_store import SessionStore
 from tsugite.history import SessionStorage
 
 

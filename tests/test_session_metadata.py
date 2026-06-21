@@ -6,8 +6,7 @@ import threading
 from unittest.mock import MagicMock, patch
 
 import pytest
-
-from tsugite.daemon.session_store import (
+from tsugite_daemon.session_store import (
     READ_ONLY_METADATA_KEYS,
     Session,
     SessionSource,
@@ -190,7 +189,7 @@ class TestSessionRunnerMetadata:
         return store, event_bus, session
 
     def test_update_metadata_emits_event(self, runner_deps):
-        from tsugite.daemon.session_runner import SessionRunner
+        from tsugite_daemon.session_runner import SessionRunner
 
         store, event_bus, session = runner_deps
         runner = SessionRunner(store, {}, event_bus=event_bus)
@@ -204,7 +203,7 @@ class TestSessionRunnerMetadata:
         assert "task" in call_args[0][1]["metadata"]
 
     def test_delete_metadata_emits_event(self, runner_deps):
-        from tsugite.daemon.session_runner import SessionRunner
+        from tsugite_daemon.session_runner import SessionRunner
 
         store, event_bus, session = runner_deps
         store.set_metadata(session.id, "notes", "temp")
@@ -224,7 +223,8 @@ class TestSessionMetadataTool:
     @pytest.fixture(autouse=True)
     def _setup_runner(self, tmp_path):
         """Set up a SessionRunner with a running event loop for tool calls."""
-        from tsugite.daemon.session_runner import SessionRunner
+        from tsugite_daemon.session_runner import SessionRunner
+
         from tsugite.tools.sessions import set_session_runner
 
         self.store = SessionStore(tmp_path / "store.json")

@@ -2,8 +2,11 @@
 
 import asyncio
 import inspect
+import logging
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List
+
+logger = logging.getLogger(__name__)
 
 
 def call_on_loop(loop, fn, *args, timeout=30, **kwargs):
@@ -50,6 +53,13 @@ def _register_tool(func: Callable) -> None:
     set by the @tool decorator.
     """
     sig = inspect.signature(func)
+    for param in sig.parameters.values():
+        if param.kind is inspect.Parameter.VAR_POSITIONAL:
+            raise TypeError(
+                f"Tool '{func.__name__}' uses *{param.name} (variadic positional args). Tools are "
+                f"always called by keyword, so *args can't be supported - declare explicit named "
+                f"parameters instead."
+            )
     doc = func.__doc__ or "No description available"
 
     parameters = {}
@@ -259,12 +269,21 @@ def _expand_single_spec(spec: str, strict: bool = True) -> List[str]:
             if strict:
                 available = ", ".join(list(_tools.keys())) if _tools else "none"
                 raise ValueError(f"Invalid tool '{spec}': not found. Available: {available}")
+            logger.warning(
+                "Tool '%s' is not installed; skipping. Install the plugin that provides it, "
+                "or set `strict_tools: true` in the agent to require it.",
+                spec,
+            )
             return []
         return [spec]
 
 
-def expand_tool_specs(tool_specs: List[str]) -> List[str]:
+def expand_tool_specs(tool_specs: List[str], strict: bool = False) -> List[str]:
     """Expand tool specifications to actual tool names.
+
+    With ``strict=False`` (default) an unknown tool name is skipped with a warning, so an
+    agent referencing a tool from an uninstalled optional plugin still runs. ``strict=True``
+    raises on any unknown tool (used by agents with ``strict_tools: true``).
 
     Supports:
     - Regular tool names: 'read_file' -> ['read_file']
@@ -300,10 +319,12 @@ def expand_tool_specs(tool_specs: List[str]) -> List[str]:
         else:
             inclusions.append(spec)
 
-    # Expand inclusions (strict - must match something)
+    # Expand inclusions. Lenient by default: an unknown tool (e.g. from an optional plugin that
+    # isn't installed) is skipped with a warning rather than failing the whole agent. Agents that
+    # require all their tools opt into strict=True (via `strict_tools` frontmatter).
     expanded = []
     for spec in inclusions:
-        expanded.extend(_expand_single_spec(spec, strict=True))
+        expanded.extend(_expand_single_spec(spec, strict=strict))
 
     # Expand exclusions (non-strict - silently ignore if nothing matches)
     excluded_tools = set()
@@ -391,7 +412,6 @@ def _ensure_tools_loaded():
     from . import sessions as sessions  # noqa: E402, F401
     from . import shell as shell  # noqa: E402, F401
     from . import skills as skills  # noqa: E402, F401
-    from . import terminal as terminal  # noqa: E402, F401
     from . import time as time  # noqa: E402, F401
 
     # Load custom shell tools after built-in tools
@@ -399,6 +419,7 @@ def _ensure_tools_loaded():
 
     # Load plugin tools after custom shell tools
     from tsugite.plugins import (
+        load_attachment_plugins,
         load_decorator_plugins,
         load_event_subscriber_plugins,
         load_hook_plugins,
@@ -409,5 +430,6 @@ def _ensure_tools_loaded():
     load_tool_plugins()
     load_hook_plugins()
     load_event_subscriber_plugins()
+    load_attachment_plugins()
 
     _tools_loaded = True

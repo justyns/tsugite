@@ -12,8 +12,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from tsugite_daemon.session_store import SessionStatus, SessionStore
 
-from tsugite.daemon.session_store import SessionStatus, SessionStore
 from tsugite.history import SessionStorage
 
 
@@ -126,7 +126,7 @@ def test_progress_cache_evicted_on_session_finish(store, history_dir):
     events and the sidebar stops reading its progress, so the cache entry
     just leaks memory until daemon restart. Verify it's evicted on the
     status transition."""
-    from tsugite.daemon.session_store import Session
+    from tsugite_daemon.session_store import Session
 
     session = store.create_session(Session(id="finish-test", agent="t", status=SessionStatus.ACTIVE.value))
     sid = session.id

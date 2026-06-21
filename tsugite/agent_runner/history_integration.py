@@ -15,20 +15,19 @@ from typing import Any, Dict, List, Optional
 from tsugite.attachments.base import Attachment
 from tsugite.config import load_config
 from tsugite.history import (
-    SessionStorage,
+    Session,
     events_to_messages,
-    get_history_dir,
+    get_history_backend,
     last_index_of,
-    list_session_files,
 )
 
 
 def load_conversation_messages(conversation_id: str) -> List[Dict[str, Any]]:
     """Load conversation history as a messages list for an LLM call."""
-    session_path = get_history_dir() / f"{conversation_id}.jsonl"
-    if not session_path.exists():
+    backend = get_history_backend()
+    if not backend.exists(conversation_id):
         raise FileNotFoundError(f"Conversation not found: {conversation_id}")
-    storage = SessionStorage.load(session_path)
+    storage = backend.load(conversation_id)
     return events_to_messages(storage.iter_events())
 
 
@@ -47,7 +46,7 @@ def open_or_create_session(
     model: str,
     continue_conversation_id: Optional[str] = None,
     workspace: Optional[str] = None,
-) -> Optional[SessionStorage]:
+) -> Optional[Session]:
     """Open an existing session or create a new one.
 
     Returns None if history is disabled (config flag, agent flag, or subagent mode).
@@ -68,22 +67,22 @@ def open_or_create_session(
     except Exception as e:
         print(f"Warning: Could not check agent history settings: {e}", file=sys.stderr)
 
+    backend = get_history_backend()
     if continue_conversation_id:
-        session_path = get_history_dir() / f"{continue_conversation_id}.jsonl"
-        if session_path.exists():
-            return SessionStorage.load(session_path)
-        return SessionStorage.create(
+        if backend.exists(continue_conversation_id):
+            return backend.load(continue_conversation_id)
+        return backend.create(
             agent_name=agent_name,
             model=model,
             workspace=workspace,
-            session_path=session_path,
+            session_id=continue_conversation_id,
         )
 
-    return SessionStorage.create(agent_name=agent_name, model=model, workspace=workspace)
+    return backend.create(agent_name=agent_name, model=model, workspace=workspace)
 
 
 def record_user_input(
-    storage: SessionStorage,
+    storage: Session,
     text: str,
     attachments: Optional[List[Attachment]] = None,
     channel_metadata: Optional[Dict[str, Any]] = None,
@@ -100,7 +99,7 @@ def record_user_input(
 
 
 def record_session_end(
-    storage: SessionStorage,
+    storage: Session,
     status: str = "success",
     error_message: Optional[str] = None,
 ) -> None:
@@ -212,10 +211,10 @@ def get_claude_code_session_info(conversation_id: str) -> Optional[ClaudeCodeSes
     is stale at that point).
     """
     try:
-        session_path = get_history_dir() / f"{conversation_id}.jsonl"
-        if not session_path.exists():
+        backend = get_history_backend()
+        if not backend.exists(conversation_id):
             return None
-        storage = SessionStorage.load(session_path)
+        storage = backend.load(conversation_id)
         events = storage.load_events()
 
         # Find the last compaction. Anything before it is stale.
@@ -241,5 +240,5 @@ def get_claude_code_session_info(conversation_id: str) -> Optional[ClaudeCodeSes
 
 
 def get_latest_conversation() -> Optional[str]:
-    files = list_session_files()
-    return files[0].stem if files else None
+    sessions = get_history_backend().list_sessions()
+    return sessions[0] if sessions else None

@@ -10,7 +10,8 @@ These tests assert that setting a field on session A and switching to B
 leaves B's view at the field's default.
 """
 
-from tsugite.daemon.session_store import Session, SessionSource
+from tsugite_daemon.session_store import Session, SessionSource
+
 from tsugite.history.storage import generate_session_id
 
 from .helpers import CONV_VIEW, open_conversations, reload_conversations_view

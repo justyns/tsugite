@@ -38,6 +38,7 @@ class SandboxContext:
     no_network: bool = False
     extra_ro_binds: List[Path] = field(default_factory=list)
     extra_rw_binds: List[Path] = field(default_factory=list)
+    pass_env: List[str] = field(default_factory=list)
     workspace_dir: Optional[Path] = None
 
 
@@ -79,6 +80,7 @@ def sandbox_context_to_override() -> Optional[dict]:
         "allow_domains": list(ctx.allow_domains),
         "extra_ro_binds": [str(p) for p in ctx.extra_ro_binds],
         "extra_rw_binds": [str(p) for p in ctx.extra_rw_binds],
+        "pass_env": list(ctx.pass_env),
     }
 
 
@@ -97,7 +99,7 @@ def build_sandbox_policy(
     Raises RuntimeError if the sandbox is requested but bwrap is unavailable.
     """
     from tsugite.agent_runner.runner import resolve_effective_sandbox
-    from tsugite.core.sandbox import BubblewrapSandbox, SandboxConfig
+    from tsugite.core.sandbox import SandboxConfig, sandbox_available
 
     sandbox_on, allow_domains, no_network = resolve_effective_sandbox(
         daemon_enabled=exec_options.sandbox,
@@ -109,14 +111,15 @@ def build_sandbox_policy(
     if not sandbox_on:
         return None, None
 
-    if not BubblewrapSandbox.check_available():
-        raise RuntimeError("bwrap not found. Install bubblewrap or use --no-sandbox.")
+    if not sandbox_available():
+        raise RuntimeError("No sandbox backend available. Install tsugite-sandbox and bubblewrap, or use --no-sandbox.")
 
     ctx = SandboxContext(
         allow_domains=allow_domains,
         no_network=no_network,
         extra_ro_binds=list(exec_options.extra_ro_binds),
         extra_rw_binds=list(exec_options.extra_rw_binds),
+        pass_env=list(exec_options.pass_env),
         workspace_dir=workspace_dir,
     )
     config = SandboxConfig(
@@ -124,6 +127,7 @@ def build_sandbox_policy(
         no_network=ctx.no_network,
         extra_ro_binds=ctx.extra_ro_binds,
         extra_rw_binds=ctx.extra_rw_binds,
+        pass_env=ctx.pass_env,
     )
     return config, ctx
 

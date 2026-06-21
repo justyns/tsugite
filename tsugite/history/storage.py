@@ -222,3 +222,43 @@ def list_session_files() -> List[Path]:
         return files
     except OSError:
         return []
+
+
+def _session_path(session_id: str) -> Path:
+    return get_history_dir() / f"{session_id}.jsonl"
+
+
+class JsonlHistoryBackend:
+    """Default history backend: one JSONL file per session under the history dir."""
+
+    def create(
+        self,
+        agent_name: str,
+        model: str,
+        *,
+        workspace: Optional[str] = None,
+        parent_session: Optional[str] = None,
+        session_id: Optional[str] = None,
+        timestamp: Optional[datetime] = None,
+    ) -> SessionStorage:
+        session_path = _session_path(session_id) if session_id else None
+        return SessionStorage.create(
+            agent_name=agent_name,
+            model=model,
+            workspace=workspace,
+            parent_session=parent_session,
+            session_path=session_path,
+            timestamp=timestamp,
+        )
+
+    def load(self, session_id: str) -> SessionStorage:
+        return SessionStorage.load(_session_path(session_id))
+
+    def exists(self, session_id: str) -> bool:
+        return _session_path(session_id).exists()
+
+    def get_meta(self, session_id: str) -> Optional[Event]:
+        return SessionStorage.load_meta_fast(_session_path(session_id))
+
+    def list_sessions(self) -> List[str]:
+        return [p.stem for p in list_session_files()]
