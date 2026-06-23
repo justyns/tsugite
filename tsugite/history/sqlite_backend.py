@@ -151,29 +151,25 @@ def _copy_session_events(
     src_id: str,
     dst_id: str,
     *,
-    min_id: Optional[int] = None,
     max_id: Optional[int] = None,
     scrub_state_delta: bool = True,
     now_iso: Optional[str] = None,
 ) -> None:
     """Copy events from ``src_id`` into ``dst_id`` (caller owns the transaction).
 
-    Shared by branching (copy the head: ``max_id=cut``) and compaction (copy the tail:
-    ``min_id=cut``). Strips ``state_delta`` from copied ``model_response`` events so the
-    destination starts a fresh provider session instead of ``--resume``-ing into the
-    source's, and drops ``session_end`` so a copied-forward session stays active.
-    Destination rows get fresh ids; source ids are never preserved.
+    Used by branching to copy the head (events ``id <= max_id``). Strips ``state_delta``
+    from copied ``model_response`` events so the destination starts a fresh provider
+    session instead of ``--resume``-ing into the source's, and drops ``session_end`` so a
+    copied-forward session stays active. Destination rows get fresh ids; source ids are
+    never preserved.
     """
     now_iso = now_iso or iso_utc()
-    clauses = ["session_id = ?"]
+    sql = "SELECT type, ts, data FROM events WHERE session_id = ?"
     params: list[Any] = [src_id]
-    if min_id is not None:
-        clauses.append("id >= ?")
-        params.append(min_id)
     if max_id is not None:
-        clauses.append("id <= ?")
+        sql += " AND id <= ?"
         params.append(max_id)
-    sql = f"SELECT type, ts, data FROM events WHERE {' AND '.join(clauses)} ORDER BY id"
+    sql += " ORDER BY id"
     for row in conn.execute(sql, params).fetchall():
         if row["type"] == "session_end":
             continue
@@ -369,12 +365,12 @@ class SqliteHistoryBackend:
         return [r["session_id"] for r in self._conn().execute(sql, params).fetchall()]
 
     def count_events(self, session_id: str, *, type: Optional[str] = None) -> int:
-        conn = self._conn()
-        if type is None:
-            return conn.execute("SELECT COUNT(*) FROM events WHERE session_id=?", (session_id,)).fetchone()[0]
-        return conn.execute("SELECT COUNT(*) FROM events WHERE session_id=? AND type=?", (session_id, type)).fetchone()[
-            0
-        ]
+        sql = "SELECT COUNT(*) FROM events WHERE session_id=?"
+        params: list[Any] = [session_id]
+        if type is not None:
+            sql += " AND type=?"
+            params.append(type)
+        return self._conn().execute(sql, params).fetchone()[0]
 
     def ensure_session(self, session_id: str) -> SqliteSession:
         """Get-or-create a bare session row (no session_start), for telemetry targets.

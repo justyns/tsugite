@@ -240,5 +240,5 @@ def get_resumable_session_state(conversation_id: str) -> Optional[ResumableSessi
 
 
 def get_latest_conversation() -> Optional[str]:
-    sessions = get_history_backend().list_sessions()
+    sessions = get_history_backend().list_sessions(limit=1)
     return sessions[0] if sessions else None

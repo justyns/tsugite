@@ -3,7 +3,7 @@
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional
+from typing import Optional
 
 import typer
 from rich.console import Console
@@ -51,66 +51,6 @@ def _parse_date(date_str: Optional[str]) -> Optional[datetime]:
         return datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
     except ValueError:
         raise typer.BadParameter(f"Invalid date format: {date_str}. Use YYYY-MM-DD")
-
-
-def _filter_by_date(
-    session_files: List[Path],
-    since_dt: Optional[datetime] = None,
-    before_dt: Optional[datetime] = None,
-) -> List[Path]:
-    """Pre-filter session files by date extracted from filename (YYYYMMDD_HHMMSS_...)."""
-    if not since_dt and not before_dt:
-        return session_files
-    filtered = []
-    for sf in session_files:
-        try:
-            file_dt = datetime.strptime(sf.stem[:15], "%Y%m%d_%H%M%S").replace(tzinfo=timezone.utc)
-            if since_dt and file_dt < since_dt:
-                continue
-            if before_dt and file_dt >= before_dt:
-                continue
-        except ValueError:
-            pass
-        filtered.append(sf)
-    return filtered
-
-
-def _search_events(events, query_lower: str) -> Optional[str]:
-    """Search events for a query match, returning a display snippet or None."""
-    for event in events:
-        data = event.data
-        if event.type == "user_input":
-            text = data.get("text", "")
-            if text and query_lower in text.lower():
-                return _make_snippet(text, query_lower, prefix="User: ")
-        elif event.type == "model_response":
-            text = data.get("raw_content", "")
-            if text and query_lower in text.lower():
-                return _make_snippet(text, query_lower, prefix="Output: ")
-        elif event.type == "code_execution":
-            for fn in data.get("tools_called") or []:
-                if fn and query_lower in fn.lower():
-                    return f"Tool: {fn}"
-        elif event.type == "tool_invocation":
-            fn = data.get("name")
-            if fn and query_lower in fn.lower():
-                return f"Tool: {fn}"
-    return None
-
-
-def _make_snippet(text: str, query_lower: str, prefix: str = "", max_len: int = 80) -> str:
-    """Extract a snippet around the first match of query in text."""
-    idx = text.lower().find(query_lower)
-    if idx == -1:
-        return prefix + text[:max_len]
-    start = max(0, idx - 20)
-    end = min(len(text), idx + len(query_lower) + 40)
-    snippet = text[start:end]
-    if start > 0:
-        snippet = "..." + snippet
-    if end < len(text):
-        snippet = snippet + "..."
-    return prefix + snippet
 
 
 @history_app.command("list")

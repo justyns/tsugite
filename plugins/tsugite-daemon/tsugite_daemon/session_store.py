@@ -690,7 +690,10 @@ class SessionStore:
             user_id = source.user_id
             title = source.title
             preserved = {k: v for k, v in source.metadata.items() if k in READ_ONLY_METADATA_KEYS}
-            runtime = (source.model_override, source.reasoning_effort, source.workspace_override, source.context_limit)
+            model_override = source.model_override
+            reasoning_effort = source.reasoning_effort
+            workspace_override = source.workspace_override
+            context_limit = source.context_limit
 
         new_id = get_history_backend().create_branch(session_id, at_event_id=at_event_id)
 
@@ -701,10 +704,10 @@ class SessionStore:
             user_id=user_id,
             metadata={**preserved, "branched_from": session_id},
             title=label or (f"Branch of {title}" if title else f"Branch of {session_id}"),
-            model_override=runtime[0],
-            reasoning_effort=runtime[1],
-            workspace_override=runtime[2],
-            context_limit=runtime[3],
+            model_override=model_override,
+            reasoning_effort=reasoning_effort,
+            workspace_override=workspace_override,
+            context_limit=context_limit,
         )
         with self._lock:
             self._sessions[new_id] = branch
