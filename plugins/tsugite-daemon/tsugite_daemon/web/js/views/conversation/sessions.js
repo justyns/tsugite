@@ -166,6 +166,9 @@ export const sessionsMixin = {
     // SSE handler in conversations.js refreshes from the server when needed.
     const historyPromise = isFirstVisit ? this.loadHistory({ dropTrailing: liveTurn }) : Promise.resolve();
     this.loadSessionEffort();
+    // effortLevels is a single shared field, so re-derive it for the newly
+    // selected session's model; otherwise it keeps the prior session's levels.
+    this.loadEffortLevels();
     this._restoreDraft();
     this._markSessionViewed(session);
     if (isFirstVisit && !state.sending && liveTurn) {

@@ -1178,8 +1178,21 @@ class HTTPServer:
 
         return JSONResponse({"status": "ok", "session_id": session.id, "name": skill_name})
 
+    @staticmethod
+    def _resolve_session_model(adapter: "HTTPAgentAdapter", session_id: Optional[str]) -> str:
+        """Resolve the effective model for a session, honoring a per-session override.
+
+        Falls back to the agent/daemon default (``adapter.resolve_model()``) when
+        no session is given or the session has no model override.
+        """
+        if session_id:
+            override = adapter.session_store.get_model_override(session_id)
+            if override:
+                return override
+        return adapter.resolve_model()
+
     async def _effort_levels(self, request: Request) -> JSONResponse:
-        """Return the effort levels supported by the agent's resolved model."""
+        """Return the effort levels supported by the session's resolved model."""
         adapter, err = self._get_adapter(request)
         if err:
             return err
@@ -1187,7 +1200,7 @@ class HTTPServer:
         from tsugite.models import get_model_id, parse_model_string, resolve_model_alias
         from tsugite.providers import get_provider
 
-        model_string = adapter.resolve_model()
+        model_string = self._resolve_session_model(adapter, request.query_params.get("session_id"))
         levels: list[str] | None = None
         try:
             resolved = resolve_model_alias(model_string)
@@ -1215,15 +1228,15 @@ class HTTPServer:
         return None, None, JSONResponse({"error": f"unknown session: {session_id}"}, status_code=404)
 
     def _resolve_effort_or_400(
-        self, adapter: "HTTPAgentAdapter", value: Any
+        self, adapter: "HTTPAgentAdapter", value: Any, session_id: Optional[str] = None
     ) -> tuple[Optional[str], Optional[JSONResponse]]:
-        """Validate a reasoning_effort value against the adapter's resolved model."""
+        """Validate a reasoning_effort value against the session's resolved model."""
         if value is None:
             return None, None
         from tsugite.models import UnsupportedEffortError, resolve_reasoning_effort
 
         try:
-            return resolve_reasoning_effort(adapter.resolve_model(), value), None
+            return resolve_reasoning_effort(self._resolve_session_model(adapter, session_id), value), None
         except UnsupportedEffortError as err:
             return None, JSONResponse({"error": str(err), "supported": err.supported}, status_code=400)
 
@@ -1252,7 +1265,7 @@ class HTTPServer:
             return JSONResponse({"error": "invalid JSON body"}, status_code=400)
 
         if "reasoning_effort" in body:
-            value, err_resp = self._resolve_effort_or_400(adapter, body["reasoning_effort"])
+            value, err_resp = self._resolve_effort_or_400(adapter, body["reasoning_effort"], session_id)
             if err_resp:
                 return err_resp
             adapter.session_store.set_reasoning_effort(session_id, value)

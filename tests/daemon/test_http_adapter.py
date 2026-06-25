@@ -341,6 +341,46 @@ class TestEffortLevelsEndpoint:
         assert resp.status_code == 200
         assert resp.json()["supported_effort_levels"] is None
 
+    def test_resolves_against_session_model_override(self, client, mock_adapter, test_token):
+        # Agent default supports xhigh; the session overrides to a model that does not.
+        mock_adapter.agent_config.model = "claude_code:opus"
+        session = mock_adapter.session_store.get_or_create_interactive("user-eff", "test-agent")
+        mock_adapter.session_store.set_model_override(session.id, "openai:o3")
+
+        resp = client.get(
+            f"/api/agents/test-agent/effort-levels?session_id={session.id}",
+            headers={"Authorization": f"Bearer {test_token}"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["model"] == "openai:o3"
+        assert data["supported_effort_levels"] == ["low", "medium", "high"]
+
+    def test_without_override_falls_back_to_agent_default(self, client, mock_adapter, test_token):
+        mock_adapter.agent_config.model = "claude_code:opus"
+        session = mock_adapter.session_store.get_or_create_interactive("user-eff-fallback", "test-agent")
+
+        resp = client.get(
+            f"/api/agents/test-agent/effort-levels?session_id={session.id}",
+            headers={"Authorization": f"Bearer {test_token}"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["model"] == "claude_code:opus"
+        assert data["supported_effort_levels"] == ["low", "medium", "high", "xhigh", "max"]
+
+    def test_unknown_session_id_falls_back_to_agent_default(self, client, mock_adapter, test_token):
+        mock_adapter.agent_config.model = "claude_code:opus"
+
+        resp = client.get(
+            "/api/agents/test-agent/effort-levels?session_id=does-not-exist",
+            headers={"Authorization": f"Bearer {test_token}"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["model"] == "claude_code:opus"
+        assert data["supported_effort_levels"] == ["low", "medium", "high", "xhigh", "max"]
+
 
 class TestSessionSettingsEndpoint:
     """GET/PATCH /api/sessions/{session_id}/settings round-trips reasoning_effort."""
@@ -397,6 +437,21 @@ class TestSessionSettingsEndpoint:
         )
         assert resp.status_code == 200
         assert resp.json()["reasoning_effort"] is None
+
+    def test_patch_effort_validates_against_model_override(self, client, mock_adapter, test_token):
+        # Agent default lacks xhigh; the session overrides to a model that has it.
+        # The effort PATCH must validate against the override, not the agent default.
+        mock_adapter.agent_config.model = "openai:o3"
+        session = mock_adapter.session_store.get_or_create_interactive("user-eff-patch", "test-agent")
+        mock_adapter.session_store.set_model_override(session.id, "claude_code:opus")
+
+        resp = client.patch(
+            f"/api/sessions/{session.id}/settings",
+            json={"reasoning_effort": "xhigh"},
+            headers={"Authorization": f"Bearer {test_token}"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["reasoning_effort"] == "xhigh"
 
 
 class TestChatReasoningEffortOverride:

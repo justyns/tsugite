@@ -21,6 +21,10 @@ const PI_COLORS = {
   metadata: 'var(--sapphire)',
 };
 
+// Canonical low->high ordering of reasoning-effort levels, used to clamp a
+// selected effort down to the nearest supported level when the model changes.
+const EFFORT_ORDER = ['low', 'medium', 'high', 'xhigh', 'max'];
+
 export default () => ({
   ...sessionsMixin,
   ...historyMixin,
@@ -476,8 +480,10 @@ export default () => ({
   async loadEffortLevels() {
     const agent = this.$store.app.selectedAgent;
     if (!agent) { this.effortLevels = []; return; }
+    const sid = this.selectedSessionId;
+    const qs = sid ? `?session_id=${encodeURIComponent(sid)}` : '';
     try {
-      const data = await get(`/api/agents/${agent}/effort-levels`);
+      const data = await get(`/api/agents/${agent}/effort-levels${qs}`);
       this.effortLevels = Array.isArray(data.supported_effort_levels) ? data.supported_effort_levels : [];
     } catch {
       this.effortLevels = [];
@@ -530,10 +536,26 @@ export default () => ({
     this._sessionState(sid).model = next;
     try {
       await patch(`/api/sessions/${sid}/settings`, { model: value || null });
+      // The new model may support a different set of effort levels, so refresh
+      // the dropdown and clamp a now-unsupported selection to a valid level.
+      await this.loadEffortLevels();
+      await this._clampSessionEffort();
     } catch (e) {
       console.warn('Failed to save model override', e);
       toast(`model change failed: ${e.message || 'unknown'}`, 'error');
     }
+  },
+
+  async _clampSessionEffort() {
+    const current = this.sessionEffort;
+    if (!current || this.effortLevels.includes(current)) return;
+    // Prefer the highest supported level at or below the current one, so we
+    // never silently raise effort; fall back to the lowest supported otherwise.
+    const rank = EFFORT_ORDER.indexOf(current);
+    const supported = EFFORT_ORDER.filter((lvl) => this.effortLevels.includes(lvl));
+    const atOrBelow = supported.filter((lvl) => EFFORT_ORDER.indexOf(lvl) <= rank);
+    const target = (atOrBelow.length ? atOrBelow[atOrBelow.length - 1] : supported[0]) || '';
+    await this.setSessionEffort(target);
   },
 
   async loadModels() {
