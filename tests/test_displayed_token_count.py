@@ -83,10 +83,10 @@ def test_message_count_not_bumped_by_snapshot_update(store, session):
     assert refreshed.message_count == msg_count_before
 
 
-def test_event_still_persisted_to_jsonl(store, session):
+def test_event_still_persisted_to_history(store, session):
     persist = build_session_event_persister(store, session.id)
     persist({"type": "prompt_snapshot", "token_breakdown": {"total": 4_200}})
 
-    content = store._history_path(session.id).read_text()
-    assert '"type":"prompt_snapshot"' in content
-    assert '"total":4200' in content
+    events = store.read_events(session.id)
+    snapshot = next(e for e in events if e["type"] == "prompt_snapshot")
+    assert snapshot["token_breakdown"]["total"] == 4200

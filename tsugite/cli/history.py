@@ -115,7 +115,6 @@ def _make_snippet(text: str, query_lower: str, prefix: str = "", max_len: int = 
 
 @history_app.command("list")
 def history_list(
-    machine: str = typer.Option(None, "--machine", help="Filter by machine name"),
     agent: str = typer.Option(None, "--agent", help="Filter by agent name"),
     status: str = typer.Option(None, "--status", help="Filter by status (success, error, interrupted)"),
     tool: str = typer.Option(None, "--tool", help="Filter by tool/function name"),
@@ -130,25 +129,29 @@ def history_list(
         tsugite history list --agent chat_assistant --status error
         tsugite history list --since 2026-01-01 --tool shell_exec
     """
-    from tsugite.history import SessionStorage, get_history_dir, list_session_files
+    from tsugite.history import get_history_backend
 
+    backend = get_history_backend()
     since_dt = _parse_date(since)
     before_dt = _parse_date(before)
     try:
-        session_files = list_session_files()
+        session_ids = backend.list_sessions(agent=agent, status=status, since=since_dt, before=before_dt)
 
-        if not session_files:
+        if not session_ids:
             console.print("[yellow]No conversations found[/yellow]")
+            from tsugite.history import list_session_files
 
-            history_dir = get_history_dir()
-            if not history_dir.exists():
-                console.print(f"\nHistory directory doesn't exist yet: {history_dir}")
-                console.print("Conversations will be saved automatically when you use chat mode.")
+            legacy = list_session_files()
+            if legacy and not any(backend.exists(f.stem) for f in legacy[:50]):
+                console.print(
+                    f"[dim]Found {len(legacy)} legacy JSONL file(s) not yet in the database. "
+                    "Run [/dim][cyan]tsugite history import[/cyan][dim] to migrate them.[/dim]"
+                )
+            else:
+                console.print("Conversations are saved automatically when you use chat mode.")
             return
 
-        session_files = _filter_by_date(session_files, since_dt, before_dt)
-
-        table = Table(title=f"Conversation History ({len(session_files)} total)")
+        table = Table(title="Conversation History")
         table.add_column("ID", style="cyan", no_wrap=True)
         table.add_column("Agent", style="green")
         table.add_column("Status")
@@ -159,31 +162,17 @@ def history_list(
         table.add_column("Created", style="dim")
 
         count = 0
-        for session_file in session_files:
+        for sid in session_ids:
             if count >= limit:
                 break
-
             try:
-                if agent or machine:
-                    meta = SessionStorage.load_meta_fast(session_file)
-                    if meta:
-                        if agent and meta.data.get("agent") != agent:
-                            continue
-                        if machine and meta.data.get("machine") != machine:
-                            continue
-
-                storage = SessionStorage.load(session_file)
-                summary = storage.summary()
-
-                if status and summary.status != status:
-                    continue
+                summary = backend.load(sid).summary()
                 if tool and tool not in summary.functions_called:
                     continue
 
                 status_text = Text(summary.status or "unknown", style=_status_style(summary.status))
-
                 table.add_row(
-                    storage.session_id,
+                    sid,
                     summary.agent or "unknown",
                     status_text,
                     str(summary.turn_count),
@@ -193,7 +182,6 @@ def history_list(
                     _format_created(summary.created_at),
                 )
                 count += 1
-
             except Exception:
                 continue
 
@@ -224,19 +212,15 @@ def history_search(
         tsugite history search "deploy"
         tsugite history search "error" --status error --since 2026-01-01
     """
-    from tsugite.history import SessionStorage, SessionSummary, list_session_files
+    from tsugite.history import get_history_backend
 
+    backend = get_history_backend()
     since_dt = _parse_date(since)
-    query_lower = query.lower()
 
     try:
-        session_files = list_session_files()
-
-        if not session_files:
-            console.print("[yellow]No conversations found[/yellow]")
-            return
-
-        session_files = _filter_by_date(session_files, since_dt)
+        # Over-fetch when status/since narrow the results so the display limit still fills.
+        search_limit = 200 if (status or since_dt) else limit
+        hits = backend.search(query, agent=agent, limit=search_limit)
 
         table = Table(title=f"Search Results for '{query}'")
         table.add_column("ID", style="cyan", no_wrap=True)
@@ -246,38 +230,25 @@ def history_search(
         table.add_column("Created", style="dim")
 
         count = 0
-        for session_file in session_files:
+        for hit in hits:
             if count >= limit:
                 break
-
             try:
-                if agent:
-                    meta = SessionStorage.load_meta_fast(session_file)
-                    if meta and meta.data.get("agent") != agent:
-                        continue
-
-                storage = SessionStorage.load(session_file)
-                events = storage.load_events()
-                summary = SessionSummary.from_events(events)
-
+                summary = backend.load(hit["session_id"]).summary()
                 if status and summary.status != status:
                     continue
-
-                match_snippet = _search_events(events, query_lower)
-                if not match_snippet:
+                if since_dt and summary.created_at and summary.created_at < since_dt:
                     continue
 
                 status_text = Text(summary.status or "unknown", style=_status_style(summary.status))
-
                 table.add_row(
-                    storage.session_id,
+                    hit["session_id"],
                     summary.agent or "unknown",
-                    match_snippet,
+                    hit.get("snippet", ""),
                     status_text,
                     _format_created(summary.created_at),
                 )
                 count += 1
-
             except Exception:
                 continue
 
@@ -303,12 +274,11 @@ def history_show(
         tsugite history show 20251024_103000_chat_abc123 --format json
         tsugite history show 20251024_103000_chat_abc123 --format markdown
     """
-    from tsugite.history import SessionStorage, SessionSummary, get_history_dir
+    from tsugite.history import SessionSummary, get_history_backend
 
     try:
-        session_path = get_history_dir() / f"{conversation_id}.jsonl"
-        storage = SessionStorage.load(session_path)
-        events = storage.load_events()
+        backend = get_history_backend()
+        events = backend.load(conversation_id).load_events()
 
         if not events:
             console.print(f"[yellow]Conversation '{conversation_id}' is empty[/yellow]")
@@ -326,7 +296,6 @@ def history_show(
             for label, value in [
                 ("Agent", summary.agent),
                 ("Model", summary.model),
-                ("Machine", summary.machine),
                 ("Created", summary.created_at),
                 ("Status", summary.status),
             ]:
@@ -355,7 +324,6 @@ def history_show(
         console.print(f"Conversation: {conversation_id}")
         console.print(f"Agent: {summary.agent or 'unknown'}")
         console.print(f"Model: {summary.model or 'unknown'}")
-        console.print(f"Machine: {summary.machine or 'unknown'}")
         console.print(f"Created: {summary.created_at}")
         console.print(f"Status: {summary.status or 'unknown'}")
         console.print("=" * 60)
@@ -404,7 +372,6 @@ def _convert_old_records(records: list[dict]) -> list[dict]:
                         for k, v in {
                             "agent": r.get("agent") or "unknown",
                             "model": r.get("model") or "unknown",
-                            "machine": r.get("machine") or "unknown",
                             "workspace": r.get("workspace"),
                             "parent_session": r.get("compacted_from"),
                         }.items()
@@ -686,6 +653,56 @@ def history_migrate(
     )
     if not dry_run and backup and total_migrated:
         console.print("[dim]Originals saved as *.bak — delete when satisfied.[/dim]")
+
+
+@history_app.command("import")
+def history_import(
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would import without writing"),
+):
+    """Import legacy per-session JSONL files into the SQLite history database.
+
+    Idempotent — sessions already in the database are skipped. Original JSONL files are
+    left untouched as a backup. Run `history migrate` first to fold in legacy daemon logs.
+    """
+    from tsugite.history import get_history_dir
+    from tsugite.history.sqlite_backend import SqliteHistoryBackend
+
+    history_dir = get_history_dir()
+    files = sorted(history_dir.glob("*.jsonl"))
+    if not files:
+        console.print(f"[dim]No JSONL session files found in {history_dir}[/dim]")
+        return
+
+    report = SqliteHistoryBackend().import_jsonl(files, dry_run=dry_run)
+    verb = "Would import" if dry_run else "Imported"
+    console.print(
+        f"[bold]{verb}:[/bold] {report['imported']}  [dim]skipped:[/dim] {report['skipped']}"
+        f"  [dim]without session_start:[/dim] {report['no_session_start']}"
+    )
+    if not dry_run and report["imported"]:
+        console.print("[dim]Original JSONL files kept as backup.[/dim]")
+
+
+@history_app.command("export")
+def history_export(
+    conversation_id: str = typer.Argument(..., help="Session/conversation id to export"),
+    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Write to a file instead of stdout"),
+):
+    """Export a conversation as JSONL (one event per line), compatible with the legacy format."""
+    from tsugite.history.sqlite_backend import SqliteHistoryBackend
+
+    try:
+        lines = list(SqliteHistoryBackend().export_jsonl(conversation_id))
+    except FileNotFoundError:
+        console.print(f"[red]Session not found:[/red] {conversation_id}")
+        raise typer.Exit(1)
+
+    text = "".join(line + "\n" for line in lines)
+    if output:
+        output.write_text(text)
+        console.print(f"[green]Exported[/green] {len(lines)} events to {output}")
+    else:
+        typer.echo(text, nl=False)
 
 
 @history_app.command("rebuild-index")

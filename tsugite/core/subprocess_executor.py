@@ -22,7 +22,7 @@ import textwrap
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from .executor import EXECUTOR_BUILTIN_TOOLS, ExecutionResult
+from .executor import EXECUTOR_BUILTIN_TOOLS, ExecutionResult, LocalExecutor
 from .state import load_state, save_state
 
 logger = logging.getLogger(__name__)
@@ -652,6 +652,7 @@ with open(RESULT_PATH, "w") as f:
                 state_keys=result_data.get("state_keys", {}),
                 loaded_skills=self._loaded_skills_for_turn.copy(),
                 unloaded_skills=list(self._unloaded_skills_for_turn),
+                last_statement_type=LocalExecutor._classify_last_statement(code),
             )
         else:
             # Child crashed before writing result

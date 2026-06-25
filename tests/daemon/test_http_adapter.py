@@ -578,6 +578,13 @@ class TestWebhookEndpoint:
 
 
 class TestHistoryEndpoint:
+    @pytest.fixture(autouse=True)
+    def _jsonl(self):
+        from tsugite.history import JsonlHistoryBackend, set_history_backend
+
+        set_history_backend(JsonlHistoryBackend())
+        yield
+
     def test_history_empty_for_new_user(self, client, test_token):
         resp = client.get(
             "/api/agents/test-agent/history?user_id=brand-new-user",
@@ -601,23 +608,21 @@ class TestHistoryEndpoint:
 
     def test_history_returns_event_stream(self, client, test_token, mock_adapter, tmp_path):
         """The history endpoint returns the raw event log (session_start, user_input, model_response, ...)."""
-        from tsugite.history.storage import SessionStorage
+        from tsugite.history.storage import SessionStorage, get_history_dir
 
         session = mock_adapter.session_store.get_or_create_interactive("web-anonymous", "test-agent")
-        history_dir = tmp_path / "history"
-        history_dir.mkdir()
-        session_path = history_dir / f"{session.id}.jsonl"
+        session_path = get_history_dir() / f"{session.id}.jsonl"
+        session_path.parent.mkdir(parents=True, exist_ok=True)
 
         storage = SessionStorage.create("test-agent", model="test", session_path=session_path)
         storage.record("user_input", text="hello")
         storage.record("model_response", raw_content="hi", usage={"total_tokens": 5})
         storage.record("session_end", status="success")
 
-        with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
-            resp = client.get(
-                "/api/agents/test-agent/history?user_id=web-anonymous",
-                headers={"Authorization": f"Bearer {test_token}"},
-            )
+        resp = client.get(
+            "/api/agents/test-agent/history?user_id=web-anonymous",
+            headers={"Authorization": f"Bearer {test_token}"},
+        )
 
         assert resp.status_code == 200
         data = resp.json()
@@ -628,12 +633,11 @@ class TestHistoryEndpoint:
 
     def test_history_includes_reactions(self, client, test_token, mock_adapter, tmp_path):
         """Reactions from the live session event log appear as their own events in history."""
-        from tsugite.history.storage import SessionStorage
+        from tsugite.history.storage import SessionStorage, get_history_dir
 
         session = mock_adapter.session_store.get_or_create_interactive("web-anonymous", "test-agent")
-        history_dir = tmp_path / "history"
-        history_dir.mkdir()
-        session_path = history_dir / f"{session.id}.jsonl"
+        session_path = get_history_dir() / f"{session.id}.jsonl"
+        session_path.parent.mkdir(parents=True, exist_ok=True)
 
         storage = SessionStorage.create("test-agent", model="test", session_path=session_path)
         storage.record("user_input", text="hello")
@@ -644,11 +648,10 @@ class TestHistoryEndpoint:
             {"type": "reaction", "emoji": "👍", "timestamp": "2026-01-01T00:00:00+00:00"},
         )
 
-        with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
-            resp = client.get(
-                "/api/agents/test-agent/history?user_id=web-anonymous",
-                headers={"Authorization": f"Bearer {test_token}"},
-            )
+        resp = client.get(
+            "/api/agents/test-agent/history?user_id=web-anonymous",
+            headers={"Authorization": f"Bearer {test_token}"},
+        )
 
         assert resp.status_code == 200
         events = resp.json()["events"]
@@ -658,12 +661,11 @@ class TestHistoryEndpoint:
 
     def test_history_preserves_execution_result(self, client, test_token, mock_adapter, tmp_path):
         """Code execution events round-trip through the endpoint with output, error, duration."""
-        from tsugite.history.storage import SessionStorage
+        from tsugite.history.storage import SessionStorage, get_history_dir
 
         session = mock_adapter.session_store.get_or_create_interactive("web-anonymous", "test-agent")
-        history_dir = tmp_path / "history"
-        history_dir.mkdir()
-        session_path = history_dir / f"{session.id}.jsonl"
+        session_path = get_history_dir() / f"{session.id}.jsonl"
+        session_path.parent.mkdir(parents=True, exist_ok=True)
 
         storage = SessionStorage.create("test-agent", model="test", session_path=session_path)
         storage.record("user_input", text="go")
@@ -671,11 +673,10 @@ class TestHistoryEndpoint:
         storage.record("code_execution", code="print('hi')", output="hi\n", duration_ms=12)
         storage.record("model_response", raw_content="Done.")
 
-        with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
-            resp = client.get(
-                "/api/agents/test-agent/history?user_id=web-anonymous",
-                headers={"Authorization": f"Bearer {test_token}"},
-            )
+        resp = client.get(
+            "/api/agents/test-agent/history?user_id=web-anonymous",
+            headers={"Authorization": f"Bearer {test_token}"},
+        )
 
         assert resp.status_code == 200
         events = resp.json()["events"]
@@ -683,6 +684,46 @@ class TestHistoryEndpoint:
         assert len(code_events) == 1
         assert code_events[0]["data"]["output"] == "hi\n"
         assert code_events[0]["data"]["duration_ms"] == 12
+
+
+class TestBranchEndpoint:
+    """POST /sessions/{id}/branch forks a conversation at a point (#400). Needs sqlite."""
+
+    def test_branch_creates_independent_session(self, client, test_token, mock_adapter):
+        from tsugite.history import get_history_backend
+
+        session = mock_adapter.session_store.get_or_create_interactive("web-anonymous", "test-agent")
+        backend = get_history_backend()
+        hist = backend.create("test-agent", "test", session_id=session.id)
+        hist.record("user_input", text="original question")
+        hist.record("model_response", raw_content="answer", state_delta={"session_id": "PROVIDER-1"})
+        cut_id = next(e.id for e in backend.load(session.id).load_events() if e.type == "model_response")
+
+        resp = client.post(
+            f"/api/agents/test-agent/sessions/{session.id}/branch",
+            json={"at_event_id": cut_id, "label": "alt path"},
+            headers={"Authorization": f"Bearer {test_token}"},
+        )
+
+        assert resp.status_code == 200, resp.text
+        new_id = resp.json()["session_id"]
+        assert new_id != session.id
+
+        branch = mock_adapter.session_store.get_session(new_id)
+        assert branch.metadata.get("branched_from") == session.id
+        assert mock_adapter.session_store.get_session(session.id).superseded_by is None  # source untouched
+
+        btypes = [e.type for e in backend.load(new_id).load_events()]
+        assert btypes == ["session_start", "user_input", "model_response"]
+
+    def test_branch_requires_at_event_id(self, client, test_token, mock_adapter):
+        session = mock_adapter.session_store.get_or_create_interactive("web-anonymous", "test-agent")
+        resp = client.post(
+            f"/api/agents/test-agent/sessions/{session.id}/branch",
+            json={},
+            headers={"Authorization": f"Bearer {test_token}"},
+        )
+        assert resp.status_code == 400
 
 
 class TestWebUI:

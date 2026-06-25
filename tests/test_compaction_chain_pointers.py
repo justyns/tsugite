@@ -27,8 +27,12 @@ def workspace_dir(tmp_path):
 
 @pytest.fixture
 def history_dir(tmp_path):
+    from tsugite.history import JsonlHistoryBackend, set_history_backend
+
     d = tmp_path / "history"
     d.mkdir()
+    # These tests assert on JSONL file structure; drive the gateway with jsonl.
+    set_history_backend(JsonlHistoryBackend())
     return d
 
 
@@ -121,7 +125,6 @@ async def test_compacted_into_not_written_when_nothing_to_compact(workspace_dir,
         patch("tsugite_daemon.memory.summarize_session", new=fake_summarize),
         patch("tsugite.history.get_history_dir", return_value=history_dir),
         patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
-        patch("tsugite.history.storage.get_machine_name", return_value="test"),
         patch("tsugite.hooks.fire_compact_hooks", new_callable=AsyncMock, return_value=[]),
     ):
         result = await adapter._compact_session(conv_id)
@@ -187,7 +190,6 @@ async def test_retained_model_response_loses_provider_session_id(workspace_dir, 
         patch("tsugite_daemon.memory.summarize_session", new=fake_summarize),
         patch("tsugite.history.get_history_dir", return_value=history_dir),
         patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
-        patch("tsugite.history.storage.get_machine_name", return_value="test"),
         patch("tsugite.hooks.fire_compact_hooks", new_callable=AsyncMock, return_value=[]),
     ):
         new_session = await adapter._compact_session(conv_id, reason="manual")
@@ -243,7 +245,6 @@ async def test_retained_events_preserve_timestamps_and_drop_session_end(workspac
         patch("tsugite_daemon.memory.summarize_session", new=fake_summarize),
         patch("tsugite.history.get_history_dir", return_value=history_dir),
         patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
-        patch("tsugite.history.storage.get_machine_name", return_value="test"),
         patch("tsugite.hooks.fire_compact_hooks", new_callable=AsyncMock, return_value=[]),
     ):
         new_session = await adapter._compact_session(conv_id, reason="manual")
@@ -339,7 +340,6 @@ async def test_compaction_records_summary_token_usage_to_usage_store(workspace_d
         patch("tsugite.usage.get_usage_store", return_value=usage_store),
         patch("tsugite.history.get_history_dir", return_value=history_dir),
         patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
-        patch("tsugite.history.storage.get_machine_name", return_value="test"),
         patch("tsugite.hooks.fire_compact_hooks", new_callable=AsyncMock, return_value=[]),
     ):
         new_session = await adapter._compact_session(conv_id, reason="manual")

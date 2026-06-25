@@ -191,8 +191,6 @@ class Workspace:
 
         # Create .gitignore for workspace
         gitignore_content = """# Tsugite workspace files
-session.jsonl
-sessions/
 *.log
 
 # Python

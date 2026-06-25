@@ -57,6 +57,17 @@ def test_explicit_continue_overrides_workspace(mock_workspace):
     pass
 
 
+def test_start_new_writes_to_db_not_session_jsonl(mock_workspace):
+    """Workspace sessions live in the global store (tagged by workspace), not a marker file."""
+    from tsugite.history import get_history_backend
+
+    session = WorkspaceSession(mock_workspace)
+    sid = session.start_new()
+
+    assert not mock_workspace.session_path.exists()  # no legacy session.jsonl
+    assert sid in get_history_backend().list_sessions(workspace=mock_workspace.name)
+
+
 def test_session_info(mock_workspace):
     """Test session info retrieval."""
     session = WorkspaceSession(mock_workspace)

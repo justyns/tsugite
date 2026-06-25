@@ -11,6 +11,9 @@ from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+# Cap the persisted return_value repr so a huge structured return doesn't bloat the event.
+RETURN_VALUE_REPR_MAX = 2048
+
 from tsugite.attachments.base import Attachment, AttachmentContentType, format_attachment_open_tag  # noqa: E402
 from tsugite.events import (  # noqa: E402
     CodeExecutionEvent,
@@ -608,6 +611,14 @@ class TsugiteAgent:
         from tsugite.secrets.registry import get_registry
 
         mask = get_registry().mask
+        # Persist what the runtime already knows about the executed block so replay is
+        # deterministic instead of regex-scraping raw_content. Store the return value as
+        # a masked repr string (never json.dumps - it may be an arbitrary,
+        # non-serializable object).
+        rv = exec_result.return_value
+        return_value_repr = mask(repr(rv))[:RETURN_VALUE_REPR_MAX] if rv is not None else None
+        return_value_type = type(rv).__name__ if rv is not None else None
+        state_keys = list(exec_result.state_keys) if exec_result.state_keys else None
         self.storage.record(
             "code_execution",
             code=code,
@@ -615,6 +626,10 @@ class TsugiteAgent:
             error=mask(exec_result.error) if exec_result.error else exec_result.error,
             duration_ms=duration_ms,
             tools_called=list(exec_result.tools_called) if exec_result.tools_called else None,
+            last_statement_type=exec_result.last_statement_type,
+            return_value_repr=return_value_repr,
+            return_value_type=return_value_type,
+            state_keys=state_keys,
         )
 
     def _absorb_skill_changes(self, exec_result) -> None:
@@ -767,14 +782,21 @@ class TsugiteAgent:
     def _record_model_request(self, messages, turn_num: int) -> None:
         if not self.storage:
             return
-        self.storage.record(
-            "model_request",
-            turn=turn_num,
-            provider=self._provider_name,
-            model=self._model_id,
-            messages=messages,
-            tool_names=[t.name for t in self.tools],
+        # Store a hash of the sent messages, not the array itself: reconstruction rebuilds
+        # the messages from the other events on demand, so persisting the full array every
+        # turn just re-stored the whole conversation N times.
+        from tsugite.history.models import dedup_model_request_data
+
+        data = dedup_model_request_data(
+            {
+                "messages": messages,
+                "turn": turn_num,
+                "provider": self._provider_name,
+                "model": self._model_id,
+                "tool_names": [t.name for t in self.tools],
+            }
         )
+        self.storage.record("model_request", **data)
 
     def _record_model_response(self, turn_num: int, *, raw_content: str, usage, cost, response) -> None:
         if not self.storage:

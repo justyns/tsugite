@@ -107,6 +107,13 @@ class TestMessageContextTopic:
 class TestCompactionTopic:
     """Topic must survive compaction so the post-compaction agent still knows it."""
 
+    @pytest.fixture(autouse=True)
+    def _jsonl(self):
+        from tsugite.history import JsonlHistoryBackend, set_history_backend
+
+        set_history_backend(JsonlHistoryBackend())
+        yield
+
     @pytest.mark.asyncio
     async def test_topic_appears_in_compaction_prompt(self, adapter, tmp_path):
         from tsugite.history import SessionStorage
@@ -150,7 +157,6 @@ class TestCompactionTopic:
             patch("tsugite_daemon.memory.summarize_session", new=fake_summarize),
             patch("tsugite.history.get_history_dir", return_value=history_dir),
             patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
-            patch("tsugite.history.storage.get_machine_name", return_value="test"),
             patch("tsugite.hooks.fire_compact_hooks", new_callable=AsyncMock, return_value=[]),
         ):
             await adapter._compact_session(session.id)
@@ -198,7 +204,6 @@ class TestCompactionTopic:
             patch("tsugite_daemon.memory.summarize_session", new=fake_summarize),
             patch("tsugite.history.get_history_dir", return_value=history_dir),
             patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
-            patch("tsugite.history.storage.get_machine_name", return_value="test"),
             patch("tsugite.hooks.fire_compact_hooks", new_callable=AsyncMock, return_value=[]),
         ):
             await adapter._compact_session(session.id)

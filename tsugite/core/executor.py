@@ -89,6 +89,7 @@ class ExecutionResult:
     unloaded_skills: List[str] = field(default_factory=list)  # names unloaded this turn
     truncated: bool = False
     truncated_to: Optional[str] = None  # Path to full output if truncated
+    last_statement_type: Optional[str] = None  # "expr" | "statement" | None (unparsed) - history replay metadata
 
     def to_xml(self, duration_ms: int = 0, max_output_kb: int = MAX_EXECUTION_OUTPUT_KB) -> str:
         """Convert execution result to structured XML format.
@@ -440,6 +441,23 @@ class LocalExecutor:
         except SyntaxError:
             return (code, None)
 
+    @staticmethod
+    def _classify_last_statement(code: str) -> Optional[str]:
+        """Classify the last top-level statement for history replay metadata.
+
+        "expr" when it's a bare expression (a REPL-style trailing value, including a
+        ``return_value(...)`` call), "statement" otherwise, None when the code won't
+        parse. Lets history replay trust the executed shape instead of regex-scraping
+        raw_content.
+        """
+        try:
+            tree = ast.parse(code)
+        except SyntaxError:
+            return None
+        if not tree.body:
+            return None
+        return "expr" if isinstance(tree.body[-1], ast.Expr) else "statement"
+
     def _format_value(self, value: Any) -> str:
         """Format a value for display.
 
@@ -575,6 +593,7 @@ class LocalExecutor:
             state_keys=state_keys,
             loaded_skills=self._loaded_skills_for_turn.copy(),
             unloaded_skills=list(self._unloaded_skills_for_turn),
+            last_statement_type=self._classify_last_statement(code),
         )
 
     def _get_new_variables(self, namespace_before: set) -> Dict[str, str]:

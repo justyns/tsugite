@@ -209,8 +209,8 @@ def manage_session(
         console.print(f"[bold]Archived Sessions for {workspace.name}:[/bold]\n")
         archived = session.list_archived()
         if archived:
-            for archive_path in archived:
-                console.print(f"  {archive_path.name}")
+            for archive_id in archived:
+                console.print(f"  {archive_id}")
         else:
             console.print("  [dim]No archived sessions[/dim]")
         return
@@ -221,7 +221,7 @@ def manage_session(
         return
 
     if compact:
-        if not workspace.session_path.exists():
+        if session.get_conversation_id() is None:
             console.print("[yellow]No active session to compact[/yellow]")
             return
 

@@ -374,16 +374,16 @@ class SchedulerAdapter:
                 logger.error("Failed to inject history for schedule '%s' user '%s': %s", entry.id, canonical, e)
 
     @staticmethod
-    def _get_session_storage(session_id: str, adapter: BaseAdapter) -> "SessionStorage":
-        from tsugite.history import SessionStorage, get_history_dir
+    def _get_session_storage(session_id: str, adapter: BaseAdapter):
+        from tsugite.history import get_history_backend
 
-        session_path = get_history_dir() / f"{session_id}.jsonl"
-        if session_path.exists():
-            return SessionStorage.load(session_path)
-        return SessionStorage.create(
+        backend = get_history_backend()
+        if backend.exists(session_id):
+            return backend.load(session_id)
+        return backend.create(
             agent_name=adapter.agent_name,
             model=adapter.resolve_model(),
-            session_path=session_path,
+            session_id=session_id,
         )
 
     @staticmethod

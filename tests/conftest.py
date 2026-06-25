@@ -261,11 +261,17 @@ def default_local_executor(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def reset_history_backend_fixture():
-    """Clear the cached history backend so a swapped backend never leaks between tests."""
+    """Clear the cached history backend so a swapped backend never leaks between tests.
+
+    Also closes any cached sqlite connections: each test gets a fresh tmp db path, so a
+    leftover per-thread connection points at a deleted file and leaks the fd.
+    """
     from tsugite.history import reset_history_backend
+    from tsugite.history.sqlite_conn import close_all
 
     reset_history_backend()
     yield
+    close_all()
     reset_history_backend()
 
 
@@ -289,6 +295,12 @@ def isolate_config_files(tmp_path, monkeypatch):
     test_config = tmp_path / "config"
     test_config.mkdir(exist_ok=True)
     monkeypatch.setenv("XDG_CONFIG_HOME", str(test_config))
+
+    # Isolate the data dir too so history (now read/written through the backend, which
+    # resolves get_history_dir()) never touches real user data or leaks between tests.
+    test_data = tmp_path / "data"
+    test_data.mkdir(exist_ok=True)
+    monkeypatch.setenv("XDG_DATA_HOME", str(test_data))
 
     yield
 

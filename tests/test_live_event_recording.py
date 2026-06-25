@@ -15,6 +15,9 @@ def history_dir(tmp_path: Path):
     history = tmp_path / "history"
     history.mkdir()
     with patch("tsugite.history.storage.get_history_dir", return_value=history):
+        from tsugite.history import JsonlHistoryBackend, set_history_backend
+
+        set_history_backend(JsonlHistoryBackend())
         yield history
 
 

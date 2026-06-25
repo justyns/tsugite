@@ -95,7 +95,6 @@ def read_conversation(conversation_id: str) -> Dict[str, Any]:
         "conversation_id": storage.session_id,
         "agent": start.data.get("agent"),
         "model": start.data.get("model"),
-        "machine": start.data.get("machine"),
         "created_at": start.ts.isoformat(),
         "status": summary["status"],
     }
@@ -111,7 +110,6 @@ def read_conversation(conversation_id: str) -> Dict[str, Any]:
 def list_conversations(
     limit: int = 10,
     agent: Optional[str] = None,
-    machine: Optional[str] = None,
     status: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """List recent conversations with optional filtering.
@@ -119,7 +117,6 @@ def list_conversations(
     Args:
         limit: Maximum number of conversations to return (default: 10, max: 100)
         agent: Filter by agent name (optional)
-        machine: Filter by machine name (optional)
         status: Filter by status: success, error, interrupted (optional)
 
     Returns:
@@ -139,8 +136,6 @@ def list_conversations(
                 continue
             if agent and meta.data.get("agent") != agent:
                 continue
-            if machine and meta.data.get("machine") != machine:
-                continue
 
             storage = backend.load(sid)
             events = storage.load_events()
@@ -154,7 +149,6 @@ def list_conversations(
                     "conversation_id": storage.session_id,
                     "agent": meta.data.get("agent"),
                     "model": meta.data.get("model"),
-                    "machine": meta.data.get("machine"),
                     "created_at": meta.ts.isoformat(),
                     "turn_count": summary["turn_count"],
                     "total_tokens": summary["total_tokens"] or None,

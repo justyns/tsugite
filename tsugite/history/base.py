@@ -7,6 +7,7 @@ plugin backend (e.g. postgres) answers the same calls from its own store.
 """
 
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Iterable, Iterator, List, Optional, Protocol, runtime_checkable
 
 from .models import Event
@@ -51,4 +52,35 @@ class HistoryBackend(Protocol):
 
     def get_meta(self, session_id: str) -> Optional[Event]: ...
 
-    def list_sessions(self) -> List[str]: ...
+    def list_sessions(
+        self,
+        *,
+        workspace: Optional[str] = None,
+        agent: Optional[str] = None,
+        status: Optional[str] = None,
+        since: Optional[datetime] = None,
+        before: Optional[datetime] = None,
+        limit: Optional[int] = None,
+    ) -> List[str]: ...
+
+    def count_events(self, session_id: str, *, type: Optional[str] = None) -> int: ...
+
+    def ensure_session(self, session_id: str) -> Session: ...
+
+    def delete_session(self, session_id: str) -> bool: ...
+
+    def search(self, query: str, *, agent: Optional[str] = None, limit: int = 50) -> List[dict]: ...
+
+    def purge(self, *, older_than: Optional[datetime] = None) -> int: ...
+
+    def export_jsonl(self, session_id: str) -> Iterator[str]: ...
+
+    def import_jsonl(self, paths: Iterable[Path], *, dry_run: bool = False) -> dict: ...
+
+    def create_branch(
+        self,
+        source_id: str,
+        *,
+        at_event_id: int,
+        new_session_id: Optional[str] = None,
+    ) -> str: ...

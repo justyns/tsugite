@@ -29,7 +29,6 @@ from tsugite.agent_inheritance import iter_agent_search_paths
 from tsugite.attachments.base import AttachmentContentType
 from tsugite.attachments.file import FileHandler
 from tsugite.events.base import BaseEvent
-from tsugite.history.storage import get_history_dir
 from tsugite.skill_discovery import get_builtin_skills_path
 from tsugite.ui.jsonl import JSONLUIHandler
 from tsugite.utils import parse_yaml_frontmatter
@@ -534,6 +533,7 @@ class HTTPServer:
             Route("/api/agents", self._list_agents, methods=["GET"]),
             Route("/api/agents/{agent}/sessions", self._list_sessions, methods=["GET"]),
             Route("/api/agents/{agent}/sessions/new", self._new_interactive_session, methods=["POST"]),
+            Route("/api/agents/{agent}/sessions/{session_id}/branch", self._branch, methods=["POST"]),
             Route("/api/agents/{agent}/chat", self._chat, methods=["POST"]),
             Route("/api/agents/{agent}/chat/cancel", self._cancel_chat, methods=["POST"]),
             Route("/api/agents/{agent}/upload", self._upload, methods=["POST"]),
@@ -966,24 +966,18 @@ class HTTPServer:
         ``source_session_id`` pointers written into each file at compaction
         time.
         """
-        path = get_history_dir() / f"{session_id}.jsonl"
+        from tsugite.history import get_history_backend
+
+        backend = get_history_backend()
+        if not backend.exists(session_id):
+            return []
         events: list[dict] = []
         user_input_offsets: list[int] = []
-        try:
-            with path.open(encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        ev = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    if ev.get("type") == "user_input":
-                        user_input_offsets.append(len(events))
-                    events.append(ev)
-        except FileNotFoundError:
-            return []
+        for event in backend.load(session_id).iter_events():
+            if event.type == "user_input":
+                user_input_offsets.append(len(events))
+            # Same {type, ts, data} shape the raw JSONL lines had (id never exposed).
+            events.append(event.model_dump(mode="json", exclude={"id"}, exclude_none=True))
 
         if limit > 0 and len(user_input_offsets) > limit:
             events = events[user_input_offsets[-limit] :]
@@ -1061,6 +1055,30 @@ class HTTPServer:
         if not snapshots:
             return JSONResponse({"prompt_snapshot": None})
         return JSONResponse({"prompt_snapshot": {"token_breakdown": breakdown}})
+
+    async def _branch(self, request: Request) -> JSONResponse:
+        """Fork a session at an event into an independent branch (#400)."""
+        adapter, err = self._get_adapter(request)
+        if err:
+            return err
+
+        session_id = request.path_params["session_id"]
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+
+        at_event_id = body.get("at_event_id")
+        if at_event_id is None:
+            return JSONResponse({"error": "at_event_id is required"}, status_code=400)
+
+        try:
+            branch = adapter.session_store.branch_session(session_id, int(at_event_id), label=body.get("label"))
+        except (ValueError, TypeError) as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+
+        self.event_bus.emit("agent_status", {"agent": request.path_params["agent"]})
+        return JSONResponse({"session_id": branch.id})
 
     async def _compact(self, request: Request) -> JSONResponse:
         adapter, err = self._get_adapter(request)

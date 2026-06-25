@@ -721,13 +721,15 @@ class TestRunCommandHistory:
 
         with (
             patch("tsugite.history.storage.get_history_dir", return_value=tmp_path),
-            patch("tsugite.history.storage.get_machine_name", return_value="test_machine"),
             patch("tsugite.agent_runner.run_agent") as mock_run_agent,
             patch("tsugite.md_agents.validate_agent_execution") as mock_validate,
             patch("tsugite.config.load_config") as mock_config,
             patch("tsugite.md_agents.parse_agent_file") as mock_parse,
         ):
-            from tsugite.history import SessionStorage
+            from tsugite.history import JsonlHistoryBackend, SessionStorage, set_history_backend
+
+            # This test asserts a JSONL conversation file is written; use the jsonl backend.
+            set_history_backend(JsonlHistoryBackend())
 
             mock_run_agent.return_value = mock_agent_execution_result(
                 response="Result",

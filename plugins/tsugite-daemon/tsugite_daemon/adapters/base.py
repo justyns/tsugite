@@ -966,7 +966,7 @@ class BaseAdapter(ABC):
     ) -> Optional[Session]:
         if instructions is None:
             instructions = self._DEFAULT_COMPACT_INSTRUCTIONS
-        from tsugite.history import SessionStorage, SessionSummary, events_to_messages, get_history_dir
+        from tsugite.history import SessionSummary, events_to_messages, get_history_backend
         from tsugite.hooks import fire_compact_hooks
         from tsugite_daemon.memory import (
             RETENTION_BUDGET_RATIO,
@@ -983,8 +983,8 @@ class BaseAdapter(ABC):
         model = self.agent_config.compaction_model or infer_compaction_model(resolved_model)
 
         old_conv_id = session_id
-        old_session_path = get_history_dir() / f"{old_conv_id}.jsonl"
-        storage = SessionStorage.load(old_session_path)
+        backend = get_history_backend()
+        storage = backend.load(old_conv_id)
         all_events = storage.load_events()
 
         prior_summary = next(
@@ -1143,16 +1143,15 @@ class BaseAdapter(ABC):
                 logger.debug("Failed to record compaction usage: %s", e)
 
         new_session = self.session_store.compact_session(session_id)
-        new_session_path = get_history_dir() / f"{new_session.id}.jsonl"
         # Record the model the new session will actually run with. A mid-session
         # model override (carried forward by compact_session) drives every turn,
         # so session_start must reflect it rather than the agent's config default
         # — otherwise the post-compaction session is born mislabeled.
-        new_storage = SessionStorage.create(
+        new_storage = backend.create(
             agent_name=self.agent_name,
             model=new_session.model_override or resolved_model,
             parent_session=old_conv_id,
-            session_path=new_session_path,
+            session_id=new_session.id,
         )
 
         range_start = old_events[0].ts.isoformat() if old_events else None
@@ -1223,7 +1222,7 @@ class BaseAdapter(ABC):
         try:
             from tsugite_daemon.memory import _count_tokens, _message_text
 
-            new_events = SessionStorage.load(new_session_path).load_events()
+            new_events = backend.load(new_session.id).load_events()
             new_messages = events_to_messages(new_events)
             text = "\n".join(_message_text(m) for m in new_messages)
             estimated = _count_tokens(text, resolved_model) if text else 0

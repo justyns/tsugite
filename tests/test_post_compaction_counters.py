@@ -41,8 +41,13 @@ def workspace_dir(tmp_path):
 
 @pytest.fixture
 def history_dir(tmp_path):
+    from tsugite.history import JsonlHistoryBackend, set_history_backend
+
     d = tmp_path / "history"
     d.mkdir()
+    # These tests assert on JSONL file structure; drive the gateway with jsonl
+    # (the autouse reset_history_backend_fixture restores the default afterward).
+    set_history_backend(JsonlHistoryBackend())
     return d
 
 
@@ -79,7 +84,6 @@ def _patches(history_dir):
         patch("tsugite_daemon.memory.summarize_session", new=fake_summarize),
         patch("tsugite.history.get_history_dir", return_value=history_dir),
         patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
-        patch("tsugite.history.storage.get_machine_name", return_value="test"),
         patch("tsugite.hooks.fire_compact_hooks", new_callable=AsyncMock, return_value=[]),
     ]
 
@@ -246,7 +250,6 @@ async def test_compact_session_returns_none_when_nothing_to_compact(workspace_di
         patch("tsugite_daemon.memory.summarize_session", new=fake_summarize),
         patch("tsugite.history.get_history_dir", return_value=history_dir),
         patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
-        patch("tsugite.history.storage.get_machine_name", return_value="test"),
         patch("tsugite.hooks.fire_compact_hooks", new_callable=AsyncMock, return_value=[]),
     ):
         result = await adapter._compact_session(conv_id)

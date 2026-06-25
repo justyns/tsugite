@@ -19,9 +19,10 @@ def _reset_backend():
     reset_history_backend()
 
 
-def test_default_backend_is_jsonl_and_round_trips(isolate_config_files):
+def test_default_backend_is_sqlite_and_round_trips(isolate_config_files):
     backend = get_history_backend()
     assert isinstance(backend, HistoryBackend)
+    assert type(backend).__name__ == "SqliteHistoryBackend"
 
     session = backend.create(agent_name="tester", model="test:model")
     assert isinstance(session, Session)
@@ -127,3 +128,21 @@ def test_backend_resolves_named_plugin_from_config(monkeypatch):
 
     reset_history_backend()
     assert get_history_backend() is dummy
+
+
+def test_sqlite_backend_selected_by_env(monkeypatch, tmp_path):
+    """TSUGITE_HISTORY_BACKEND=sqlite resolves to the built-in SqliteHistoryBackend."""
+    from tsugite.history.sqlite_backend import SqliteHistoryBackend
+    from tsugite.history.sqlite_conn import close_all
+
+    monkeypatch.setenv("TSUGITE_HISTORY_BACKEND", "sqlite")
+    monkeypatch.setenv("TSUGITE_HISTORY_DB", str(tmp_path / "history.db"))
+    reset_history_backend()
+    try:
+        backend = get_history_backend()
+        assert isinstance(backend, SqliteHistoryBackend)
+        session = backend.create(agent_name="tester", model="test:model")
+        session.record("user_input", text="hi")
+        assert [e.type for e in backend.load(session.session_id).load_events()] == ["session_start", "user_input"]
+    finally:
+        close_all()

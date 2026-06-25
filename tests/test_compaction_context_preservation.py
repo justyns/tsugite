@@ -22,6 +22,15 @@ from tsugite_daemon.session_store import SessionStore
 from tsugite.history.models import Event
 
 
+@pytest.fixture(autouse=True)
+def _use_jsonl_backend():
+    # These tests assert on JSONL file structure; drive the gateway with jsonl.
+    from tsugite.history import JsonlHistoryBackend, set_history_backend
+
+    set_history_backend(JsonlHistoryBackend())
+    yield
+
+
 class _StubAdapter(BaseAdapter):
     async def start(self):
         pass
@@ -164,7 +173,6 @@ async def test_compact_session_preserves_context_limit(workspace_dir, tmp_path):
         patch("tsugite_daemon.memory.summarize_session", new=fake_summarize_with_pollution),
         patch("tsugite.history.get_history_dir", return_value=history_dir),
         patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
-        patch("tsugite.history.storage.get_machine_name", return_value="test"),
         patch("tsugite.hooks.fire_compact_hooks", new_callable=AsyncMock, return_value=[]),
     ):
         await adapter._compact_session(conv_id)
@@ -236,7 +244,6 @@ async def test_compact_session_restores_when_mutation_happens_after_summarize(wo
         patch("tsugite_daemon.memory.summarize_session", new=clean_summarize),
         patch("tsugite.history.get_history_dir", return_value=history_dir),
         patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
-        patch("tsugite.history.storage.get_machine_name", return_value="test"),
         patch("tsugite.hooks.fire_compact_hooks", new=post_summarize_pollution),
     ):
         await adapter._compact_session(conv_id)
@@ -297,7 +304,6 @@ async def test_compact_session_restores_even_on_summarize_failure(workspace_dir,
         patch("tsugite_daemon.memory.summarize_session", new=failing_summarize),
         patch("tsugite.history.get_history_dir", return_value=history_dir),
         patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
-        patch("tsugite.history.storage.get_machine_name", return_value="test"),
         patch("tsugite.hooks.fire_compact_hooks", new_callable=AsyncMock, return_value=[]),
     ):
         with pytest.raises(RuntimeError, match="simulated summarization failure"):

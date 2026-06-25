@@ -8,7 +8,6 @@ torn write can't poison the whole file.
 
 import hashlib
 import json
-import socket
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,7 +15,7 @@ from typing import Any, Iterable, Iterator, List, Optional
 
 import portalocker
 
-from tsugite.config import get_xdg_data_path, load_config
+from tsugite.config import get_xdg_data_path
 
 from .models import Event
 
@@ -32,17 +31,6 @@ def generate_session_id(agent_name: str, timestamp: Optional[datetime] = None) -
     clean_agent = "".join(c if c.isalnum() or c == "-" else "_" for c in agent_name)[:20]
     digest = hashlib.sha256(f"{timestamp.isoformat()}_{agent_name}".encode()).hexdigest()[:6]
     return f"{date_str}_{clean_agent}_{digest}"
-
-
-def get_machine_name() -> str:
-    config = load_config()
-    name = getattr(config, "machine_name", None)
-    if name:
-        return name
-    try:
-        return socket.gethostname()
-    except Exception:
-        return "unknown"
 
 
 class SessionStorage:
@@ -74,7 +62,6 @@ class SessionStorage:
             ts=timestamp,
             agent=agent_name,
             model=model,
-            machine=get_machine_name(),
             workspace=workspace,
             parent_session=parent_session,
         )
@@ -162,7 +149,6 @@ class SessionSummary:
     def __init__(self):
         self.agent: Optional[str] = None
         self.model: Optional[str] = None
-        self.machine: Optional[str] = None
         self.workspace: Optional[str] = None
         self.created_at: Optional[datetime] = None
         self.parent_session: Optional[str] = None
@@ -183,7 +169,6 @@ class SessionSummary:
             if event.type == "session_start":
                 s.agent = data.get("agent")
                 s.model = data.get("model")
-                s.machine = data.get("machine")
                 s.workspace = data.get("workspace")
                 s.created_at = event.ts
                 s.parent_session = data.get("parent_session")
@@ -229,7 +214,12 @@ def _session_path(session_id: str) -> Path:
 
 
 class JsonlHistoryBackend:
-    """Default history backend: one JSONL file per session under the history dir."""
+    """DEPRECATED legacy backend: one JSONL file per session under the history dir.
+
+    SQLite (SqliteHistoryBackend) is the default. This is retained for reading legacy
+    files during ``history import`` and as a fallback; it lacks the extended battery
+    methods (search, branching, filtered listing) and may be removed in a future release.
+    """
 
     def create(
         self,
@@ -260,5 +250,44 @@ class JsonlHistoryBackend:
     def get_meta(self, session_id: str) -> Optional[Event]:
         return SessionStorage.load_meta_fast(_session_path(session_id))
 
-    def list_sessions(self) -> List[str]:
-        return [p.stem for p in list_session_files()]
+    def list_sessions(self, **filters: Any) -> List[str]:
+        # The deprecated backend has no index; filtering would mean scanning every file.
+        if any(v is not None for k, v in filters.items() if k != "limit"):
+            raise NotImplementedError("the deprecated jsonl backend does not support filtered list_sessions")
+        ids = [p.stem for p in list_session_files()]
+        limit = filters.get("limit")
+        return ids[:limit] if limit is not None else ids
+
+    def count_events(self, session_id: str, *, type: Optional[str] = None) -> int:
+        path = _session_path(session_id)
+        if not path.exists():
+            return 0
+        return sum(1 for _ in SessionStorage.load(path).iter_events(types=[type] if type else None))
+
+    def ensure_session(self, session_id: str) -> SessionStorage:
+        """Return a handle whose JSONL file is created on first record (no session_start)."""
+        return SessionStorage(_session_path(session_id))
+
+    def delete_session(self, session_id: str) -> bool:
+        path = _session_path(session_id)
+        if not path.exists():
+            return False
+        path.unlink()
+        return True
+
+    # SQLite-only parts of the battery contract; the deprecated jsonl backend declares
+    # them (so it satisfies the protocol) but doesn't implement them.
+    def search(self, query: str, *, agent: Optional[str] = None, limit: int = 50) -> List[dict]:
+        raise NotImplementedError("history search requires the sqlite backend")
+
+    def purge(self, *, older_than: Optional[datetime] = None) -> int:
+        raise NotImplementedError("history purge requires the sqlite backend")
+
+    def export_jsonl(self, session_id: str):
+        raise NotImplementedError("history export requires the sqlite backend")
+
+    def import_jsonl(self, paths, *, dry_run: bool = False) -> dict:
+        raise NotImplementedError("history import requires the sqlite backend")
+
+    def create_branch(self, source_id: str, *, at_event_id: int, new_session_id=None) -> str:
+        raise NotImplementedError("branching requires the sqlite backend")

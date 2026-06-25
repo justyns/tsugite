@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Optional
 from uuid import uuid4
 
-from tsugite.history import SessionStorage, generate_session_id, get_history_dir
+from tsugite.history import event_to_ui_dict, generate_session_id, get_history_backend
 from tsugite.renderer import parse_iso_utc as _parse_ts
 from tsugite_daemon.memory import DEFAULT_CONTEXT_LIMIT
 
@@ -672,6 +672,45 @@ class SessionStore:
             return False
         return session.cumulative_tokens >= self.get_session_compaction_threshold(session_id)
 
+    def branch_session(self, session_id: str, at_event_id: int, label: Optional[str] = None) -> Session:
+        """Fork ``session_id`` at ``at_event_id`` into an independent branch session.
+
+        The source session is unchanged (not superseded). The branch gets the forked
+        history (provider state scrubbed) plus its own sidebar entry mirroring the
+        source's agent/user/runtime settings.
+        """
+        from tsugite.history import get_history_backend
+
+        with self._lock:
+            source = self._sessions.get(session_id)
+            if not source:
+                raise ValueError(f"Session '{session_id}' not found")
+            agent = source.agent
+            src = source.source
+            user_id = source.user_id
+            title = source.title
+            preserved = {k: v for k, v in source.metadata.items() if k in READ_ONLY_METADATA_KEYS}
+            runtime = (source.model_override, source.reasoning_effort, source.workspace_override, source.context_limit)
+
+        new_id = get_history_backend().create_branch(session_id, at_event_id=at_event_id)
+
+        branch = Session(
+            id=new_id,
+            agent=agent,
+            source=src,
+            user_id=user_id,
+            metadata={**preserved, "branched_from": session_id},
+            title=label or (f"Branch of {title}" if title else f"Branch of {session_id}"),
+            model_override=runtime[0],
+            reasoning_effort=runtime[1],
+            workspace_override=runtime[2],
+            context_limit=runtime[3],
+        )
+        with self._lock:
+            self._sessions[new_id] = branch
+            self._save()
+        return branch
+
     def compact_session(self, session_id: str) -> Session:
         with self._lock:
             old_session = self._sessions.get(session_id)
@@ -995,12 +1034,8 @@ class SessionStore:
 
     # ── Event log: unified with conversation history ──
     #
-    # UI events (reactions, prompt_snapshots, etc.) are stored in the same
-    # `history/{session_id}.jsonl` file as the conversation events recorded by
-    # the agent loop. There is no separate daemon/sessions/ log.
-
-    def _history_path(self, session_id: str) -> Path:
-        return self._history_dir / f"{session_id}.jsonl"
+    # UI events (reactions, prompt_snapshots, etc.) are recorded into the same
+    # history session as the conversation events, through the history backend.
 
     def append_event(self, session_id: str, event: dict) -> None:
         """Append a UI/telemetry event to the session's history JSONL.
@@ -1011,12 +1046,10 @@ class SessionStore:
         callers like the SSE handler don't have to coordinate file creation
         with the agent loop.
         """
-        path = self._history_path(session_id)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        storage = SessionStorage(path)  # bare wrapper; doesn't write anything
+        backend = get_history_backend()
         ts = _parse_ts(event.get("timestamp"))
         data = {k: v for k, v in event.items() if k not in ("type", "timestamp")}
-        storage.record(event.get("type", "unknown"), ts=ts, **data)
+        backend.ensure_session(session_id).record(event.get("type", "unknown"), ts=ts, **data)
 
         # Update hot caches incrementally. Skip when the session_id has never
         # been read — the cold-load path will populate everything in one go.
@@ -1028,44 +1061,28 @@ class SessionStore:
                 _apply_event_to_progress(progress, event)
 
     def read_events(self, session_id: str) -> list[dict]:
-        """Return events as flat dicts for backward compatibility with callers."""
-        path = self._history_path(session_id)
-        if not path.exists():
+        """Return events as flat UI dicts (type/timestamp + data) for callers."""
+        backend = get_history_backend()
+        if not backend.exists(session_id):
             return []
         try:
-            storage = SessionStorage.load(path)
+            session = backend.load(session_id)
         except Exception:
             return []
-        return [{"type": e.type, "timestamp": e.ts.isoformat(), **e.data} for e in storage.iter_events()]
+        return [event_to_ui_dict(e) for e in session.iter_events()]
 
     def event_count(self, session_id: str) -> int:
         with self._cache_lock:
             cached = self._event_count_cache.get(session_id)
         if cached is not None:
             return cached
-        path = self._history_path(session_id)
-        if not path.exists():
-            with self._cache_lock:
-                self._event_count_cache[session_id] = 0
-            return 0
-        try:
-            storage = SessionStorage.load(path)
-            count = sum(1 for _ in storage.iter_events())
-        except Exception:
-            count = 0
+        count = get_history_backend().count_events(session_id)
         with self._cache_lock:
             self._event_count_cache[session_id] = count
         return count
 
     def count_events_by_type(self, session_id: str, event_type: str) -> int:
-        path = self._history_path(session_id)
-        if not path.exists():
-            return 0
-        try:
-            storage = SessionStorage.load(path)
-        except Exception:
-            return 0
-        return sum(1 for _ in storage.iter_events(types=[event_type]))
+        return get_history_backend().count_events(session_id, type=event_type)
 
     def session_detail(self, session_id: str) -> dict:
         session = self.get_session(session_id)
@@ -1302,13 +1319,12 @@ class SessionStore:
 
     def _estimate_tokens(self, session_id: str) -> tuple[int, int]:
         try:
-            session_path = get_history_dir() / f"{session_id}.jsonl"
-            if not session_path.exists():
+            backend = get_history_backend()
+            if not backend.exists(session_id):
                 return 0, 0
-            storage = SessionStorage.load(session_path)
             last_tokens = 0
             user_input_count = 0
-            for event in storage.iter_events():
+            for event in backend.load(session_id).iter_events():
                 if event.type == "user_input":
                     user_input_count += 1
                 elif event.type == "model_response":

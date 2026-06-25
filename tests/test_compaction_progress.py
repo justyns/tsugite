@@ -16,6 +16,15 @@ from tsugite_daemon.session_store import SessionStore
 from tsugite.history.models import Event
 
 
+@pytest.fixture(autouse=True)
+def _use_jsonl_backend():
+    # These tests assert on JSONL file structure; drive the gateway with jsonl.
+    from tsugite.history import JsonlHistoryBackend, set_history_backend
+
+    set_history_backend(JsonlHistoryBackend())
+    yield
+
+
 class _StubAdapter(BaseAdapter):
     async def start(self):
         pass
@@ -88,7 +97,6 @@ async def test_run_compaction_broadcasts_counts_and_phase(workspace_dir, tmp_pat
         patch("tsugite_daemon.memory.summarize_session", new=fake_summarize),
         patch("tsugite.history.get_history_dir", return_value=history_dir),
         patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
-        patch("tsugite.history.storage.get_machine_name", return_value="test"),
         patch("tsugite.hooks.fire_compact_hooks", new_callable=AsyncMock, return_value=[]),
     ):
         await adapter._run_compaction("test-user", conv_id, reason="manual")
@@ -163,7 +171,6 @@ async def test_run_compaction_finishes_even_with_no_event_bus(workspace_dir, tmp
         patch("tsugite_daemon.memory.summarize_session", new_callable=AsyncMock, return_value="Summary"),
         patch("tsugite.history.get_history_dir", return_value=history_dir),
         patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
-        patch("tsugite.history.storage.get_machine_name", return_value="test"),
         patch("tsugite.hooks.fire_compact_hooks", new_callable=AsyncMock, return_value=[]),
     ):
         result = await adapter._run_compaction("test-user", conv_id, reason="manual")

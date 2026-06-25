@@ -112,7 +112,7 @@ class BackendConfig(BaseModel):
 
 
 class HistoryConfig(BackendConfig):
-    backend: str = "jsonl"
+    backend: str = "sqlite"
 
 
 class SandboxSettings(BackendConfig):
@@ -137,7 +137,6 @@ class Config(BaseModel):
     default_workspace: Optional[str] = None
     history_enabled: bool = True
     history_dir: Optional[Path] = None
-    machine_name: Optional[str] = None
     max_history_days: Optional[int] = None
     auto_context_enabled: bool = True
     auto_context_files: List[str] = Field(default_factory=lambda: [".tsugite/CONTEXT.md", "AGENTS.md", "CLAUDE.md"])

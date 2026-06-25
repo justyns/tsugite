@@ -435,6 +435,13 @@ class TestHTTPAdapterResolveUser:
 class TestCompactSessionClearsSkills:
     """Compaction should clear loaded skills so they get re-loaded in the new session."""
 
+    @pytest.fixture(autouse=True)
+    def _jsonl(self):
+        from tsugite.history import JsonlHistoryBackend, set_history_backend
+
+        set_history_backend(JsonlHistoryBackend())
+        yield
+
     @pytest.mark.asyncio
     async def test_compact_session_clears_loaded_skills(self, workspace_dir, tmp_path):
         from tsugite.history import SessionStorage
@@ -477,7 +484,6 @@ class TestCompactSessionClearsSkills:
             patch("tsugite_daemon.memory.summarize_session", new_callable=AsyncMock, return_value="Summary"),
             patch("tsugite.history.get_history_dir", return_value=history_dir),
             patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
-            patch("tsugite.history.storage.get_machine_name", return_value="test"),
             patch("tsugite.hooks.fire_compact_hooks", new_callable=AsyncMock, return_value=[]),
         ):
             await adapter._compact_session(conv_id)
@@ -490,6 +496,13 @@ class TestCompactSessionRecordsRange:
     so the resumed session's <previous_conversation> block can tell the agent
     *what time period* the summary covers.
     """
+
+    @pytest.fixture(autouse=True)
+    def _jsonl(self):
+        from tsugite.history import JsonlHistoryBackend, set_history_backend
+
+        set_history_backend(JsonlHistoryBackend())
+        yield
 
     @pytest.mark.asyncio
     async def test_compaction_event_records_range_start_and_end(self, workspace_dir, tmp_path):
@@ -532,7 +545,6 @@ class TestCompactSessionRecordsRange:
             patch("tsugite_daemon.memory.summarize_session", new_callable=AsyncMock, return_value="Summary"),
             patch("tsugite.history.get_history_dir", return_value=history_dir),
             patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
-            patch("tsugite.history.storage.get_machine_name", return_value="test"),
             patch("tsugite.hooks.fire_compact_hooks", new_callable=AsyncMock, return_value=[]),
         ):
             new_session = await adapter._compact_session(conv_id)

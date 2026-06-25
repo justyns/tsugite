@@ -539,56 +539,45 @@ class Scheduler:
         return to_remove
 
     def cleanup_history(self, max_age_days: int = 30, max_files_per_schedule: int = 50) -> int:
-        """Delete old per-run schedule session files."""
-        from tsugite.history import get_history_dir
+        """Delete old per-run schedule sessions: excess by count, then by age."""
+        from tsugite.history import get_history_backend
 
-        history_dir = get_history_dir()
-        if not history_dir.exists():
-            return 0
+        backend = get_history_backend()
+        cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
+        active_prefixes = {f"sched_{sid.replace(':', '_')}_" for sid in self._schedules}
 
         removed = 0
-        cutoff_ts = (datetime.now(timezone.utc) - timedelta(days=max_age_days)).timestamp()
+        try:
+            # list_sessions() is recency-ordered (newest first). Schedule runs are id-prefixed.
+            sched_ids = [s for s in backend.list_sessions() if s.startswith("sched_")]
+            old_ids = set(backend.list_sessions(before=cutoff))
 
-        # Active schedule prefixes for matching
-        active_prefixes = set()
-        for sid in self._schedules:
-            active_prefixes.add(f"sched_{sid.replace(':', '_')}_")
+            by_prefix: dict[str, list[str]] = {}
+            orphans: list[str] = []
+            for sid in sched_ids:
+                prefix = next((p for p in active_prefixes if sid.startswith(p)), None)
+                if prefix:
+                    by_prefix.setdefault(prefix, []).append(sid)
+                else:
+                    orphans.append(sid)
 
-        # Single glob for all schedule session files
-        all_files: dict[str, list[tuple[Path, float]]] = {}
-        for f in history_dir.glob("sched_*.jsonl"):
-            try:
-                mtime = f.stat().st_mtime
-            except FileNotFoundError:
-                continue
-            # Find which prefix this file belongs to
-            name = f.name
-            matched_prefix = None
-            for prefix in active_prefixes:
-                if name.startswith(prefix):
-                    matched_prefix = prefix
-                    break
-
-            if matched_prefix:
-                all_files.setdefault(matched_prefix, []).append((f, mtime))
-            elif mtime < cutoff_ts:
-                # Orphaned file from deleted schedule — remove if old
-                f.unlink(missing_ok=True)
-                removed += 1
-
-        # Per-schedule: remove excess by count, then by age
-        for prefix, file_list in all_files.items():
-            file_list.sort(key=lambda x: x[1])
-            for f, _ in file_list[:-max_files_per_schedule]:
-                f.unlink(missing_ok=True)
-                removed += 1
-            for f, mtime in file_list[-max_files_per_schedule:]:
-                if mtime < cutoff_ts:
-                    f.unlink(missing_ok=True)
+            # Orphaned runs from deleted schedules: remove if old.
+            for sid in orphans:
+                if sid in old_ids and backend.delete_session(sid):
                     removed += 1
+            # Per-schedule: drop the oldest beyond the count cap, then any remaining that are too old.
+            for ids in by_prefix.values():
+                for sid in ids[max_files_per_schedule:]:
+                    if backend.delete_session(sid):
+                        removed += 1
+                for sid in ids[:max_files_per_schedule]:
+                    if sid in old_ids and backend.delete_session(sid):
+                        removed += 1
+        except NotImplementedError:
+            return 0  # the deprecated jsonl backend has no db-side retention
 
         if removed:
-            logger.info("Cleaned up %d old schedule session file(s)", removed)
+            logger.info("Cleaned up %d old schedule session(s)", removed)
         return removed
 
     def fire_now(self, schedule_id: str) -> None:

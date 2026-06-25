@@ -11,6 +11,15 @@ from tsugite_daemon.config import NotificationChannelConfig
 from tsugite_daemon.scheduler import ScheduleEntry
 
 
+@pytest.fixture(autouse=True)
+def _use_jsonl_backend():
+    # Synthetic-turn injection asserts on JSONL files; drive the gateway with jsonl.
+    from tsugite.history import JsonlHistoryBackend, set_history_backend
+
+    set_history_backend(JsonlHistoryBackend())
+    yield
+
+
 def _make_entry(**kwargs) -> ScheduleEntry:
     defaults = dict(id="test-job", agent="bot", prompt="do something", schedule_type="cron", cron_expr="0 9 * * *")
     defaults.update(kwargs)
@@ -69,7 +78,7 @@ class TestRecordSyntheticTurn:
         session_path = tmp_path / "history" / f"{session_id}.jsonl"
         session_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with patch("tsugite.history.get_history_dir", return_value=tmp_path / "history"):
+        with patch("tsugite.history.storage.get_history_dir", return_value=tmp_path / "history"):
             SchedulerAdapter._record_synthetic_turn(mock_adapter, "justyn", _make_entry(), result)
 
         assert session_path.exists()
@@ -340,7 +349,7 @@ class TestRecordSyntheticTurnWithResolver:
 
         history_dir = tmp_path / "history"
         history_dir.mkdir()
-        with patch("tsugite.history.get_history_dir", return_value=history_dir):
+        with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
             SchedulerAdapter._record_synthetic_turn(adapter, "justyn", entry, "result")
 
         assert (history_dir / "resolved-target.jsonl").exists()
@@ -354,7 +363,7 @@ class TestRecordSyntheticTurnWithResolver:
 
         history_dir = tmp_path / "history"
         history_dir.mkdir()
-        with patch("tsugite.history.get_history_dir", return_value=history_dir):
+        with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
             SchedulerAdapter._record_synthetic_turn(adapter, "justyn", entry, "result")
 
         assert list(history_dir.iterdir()) == []
