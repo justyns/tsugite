@@ -431,8 +431,8 @@ async def _execute_agent_with_prompt(
     injectable_vars: Optional[Dict[str, Any]] = None,
     previous_messages: Optional[List[Dict]] = None,
     path_context: Optional[Any] = None,
-    claude_code_resume_session: Optional[str] = None,
-    claude_code_resume_after_compaction: bool = False,
+    resume_session: Optional[str] = None,
+    resume_after_compaction: bool = False,
     hook_vars: Optional[Dict[str, str]] = None,
     continue_conversation_id: Optional[str] = None,
     user_input_for_history: Optional[str] = None,
@@ -643,8 +643,8 @@ async def _execute_agent_with_prompt(
             skills=prepared.skills,
             expiring_skills=prepared.expiring_skills,
             previous_messages=previous_messages,
-            resume_session=claude_code_resume_session,
-            resume_after_compaction=claude_code_resume_after_compaction,
+            resume_session=resume_session,
+            resume_after_compaction=resume_after_compaction,
             hook_vars=hook_vars,
             storage=session_storage,
             pre_llm_call=pre_llm_call_cb,
@@ -1025,29 +1025,29 @@ async def run_agent_async(
 
     # Load conversation history if continuing
     previous_messages = []
-    claude_code_resume_session = None
-    claude_code_resume_after_compaction = False
+    resume_session = None
+    resume_after_compaction = False
     if continue_conversation_id:
         from tsugite.agent_runner.history_integration import (
-            get_claude_code_session_info,
+            get_resumable_session_state,
             load_and_apply_history,
         )
 
-        # Check if we can resume an existing Claude Code session
-        session_info = get_claude_code_session_info(continue_conversation_id)
+        # Resume an existing provider session if one was recorded for this conversation.
+        session_info = get_resumable_session_state(continue_conversation_id)
         if session_info:
-            claude_code_resume_session = session_info.session_id
-            claude_code_resume_after_compaction = session_info.compacted
+            resume_session = session_info.session_id
+            resume_after_compaction = session_info.compacted
             logger.info(
-                "Resuming Claude Code session %s (compacted=%s)",
-                claude_code_resume_session,
-                claude_code_resume_after_compaction,
+                "Resuming provider session %s (compacted=%s)",
+                resume_session,
+                resume_after_compaction,
             )
         else:
-            logger.debug("No Claude Code session to resume for %s", continue_conversation_id)
+            logger.debug("No resumable provider session for %s", continue_conversation_id)
 
-        if not claude_code_resume_session:
-            # No Claude Code session to resume -- load history for serialization
+        if not resume_session:
+            # No resumable provider session -- load history for serialization
             try:
                 previous_messages = load_and_apply_history(continue_conversation_id)
             except ValueError:
@@ -1121,8 +1121,8 @@ async def run_agent_async(
                 custom_logger=custom_logger,
                 previous_messages=previous_messages,
                 path_context=path_context,
-                claude_code_resume_session=claude_code_resume_session,
-                claude_code_resume_after_compaction=claude_code_resume_after_compaction,
+                resume_session=resume_session,
+                resume_after_compaction=resume_after_compaction,
                 hook_vars=hook_vars,
                 continue_conversation_id=continue_conversation_id,
                 user_input_for_history=user_input_for_history,
@@ -1130,13 +1130,13 @@ async def run_agent_async(
             )
         except (RuntimeError, AgentExecutionError) as e:
             err_str = str(e).lower()
-            if claude_code_resume_session and (
+            if resume_session and (
                 "process ended" in err_str
                 or "no conversation found" in err_str
                 or is_prompt_too_long_error(err_str)
                 or "format_error_loop" in err_str
             ):
-                logger.warning("Claude Code resume failed (%s), retrying with fresh session", e)
+                logger.warning("Provider session resume failed (%s), retrying with fresh session", e)
                 try:
                     previous_messages = load_and_apply_history(continue_conversation_id)
                 except Exception:

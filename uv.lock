@@ -14,6 +14,7 @@ exclude-newer-span = "P10D"
 [manifest]
 members = [
     "tsugite-acp",
+    "tsugite-claude-code",
     "tsugite-cli",
     "tsugite-codex-cli",
     "tsugite-daemon",
@@ -2337,6 +2338,17 @@ requires-dist = [
 ]
 
 [[package]]
+name = "tsugite-claude-code"
+version = "0.16.0"
+source = { editable = "plugins/tsugite-claude-code" }
+dependencies = [
+    { name = "tsugite-cli" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "tsugite-cli", editable = "." }]
+
+[[package]]
 name = "tsugite-cli"
 version = "0.16.0"
 source = { editable = "." }
@@ -2361,6 +2373,7 @@ dependencies = [
 [package.optional-dependencies]
 all = [
     { name = "tsugite-acp" },
+    { name = "tsugite-claude-code" },
     { name = "tsugite-codex-cli" },
     { name = "tsugite-daemon" },
     { name = "tsugite-discord" },
@@ -2369,6 +2382,9 @@ all = [
     { name = "tsugite-tmux" },
     { name = "tsugite-web" },
     { name = "tsugite-youtube" },
+]
+claude-code = [
+    { name = "tsugite-claude-code" },
 ]
 daemon = [
     { name = "tsugite-daemon" },
@@ -2396,6 +2412,7 @@ dev = [
     { name = "pytest-xdist" },
     { name = "ruff" },
     { name = "tsugite-acp" },
+    { name = "tsugite-claude-code" },
     { name = "tsugite-codex-cli" },
     { name = "tsugite-daemon" },
     { name = "tsugite-discord" },
@@ -2423,6 +2440,8 @@ requires-dist = [
     { name = "rich", specifier = ">=13.0" },
     { name = "tiktoken", specifier = ">=0.7.0" },
     { name = "tsugite-acp", marker = "extra == 'all'", editable = "plugins/tsugite-acp" },
+    { name = "tsugite-claude-code", marker = "extra == 'all'", editable = "plugins/tsugite-claude-code" },
+    { name = "tsugite-claude-code", marker = "extra == 'claude-code'", editable = "plugins/tsugite-claude-code" },
     { name = "tsugite-codex-cli", marker = "extra == 'all'", editable = "plugins/tsugite-codex-cli" },
     { name = "tsugite-daemon", marker = "extra == 'all'", editable = "plugins/tsugite-daemon" },
     { name = "tsugite-daemon", marker = "extra == 'daemon'", editable = "plugins/tsugite-daemon" },
@@ -2440,7 +2459,7 @@ requires-dist = [
     { name = "typer", specifier = ">=0.12" },
     { name = "tzlocal", specifier = ">=5.3.1" },
 ]
-provides-extras = ["web", "sandbox", "daemon", "discord", "all"]
+provides-extras = ["web", "sandbox", "daemon", "discord", "claude-code", "all"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -2453,6 +2472,7 @@ dev = [
     { name = "pytest-xdist", specifier = ">=3.5.0" },
     { name = "ruff", specifier = ">=0.1" },
     { name = "tsugite-acp", editable = "plugins/tsugite-acp" },
+    { name = "tsugite-claude-code", editable = "plugins/tsugite-claude-code" },
     { name = "tsugite-codex-cli", editable = "plugins/tsugite-codex-cli" },
     { name = "tsugite-daemon", editable = "plugins/tsugite-daemon" },
     { name = "tsugite-discord", editable = "plugins/tsugite-discord" },

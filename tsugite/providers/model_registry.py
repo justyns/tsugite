@@ -5,6 +5,7 @@ from __future__ import annotations
 from .base import ModelInfo, Usage
 
 _REGISTRY: dict[str, ModelInfo] = {}
+_ALIASES: dict[str, str] = {}
 
 
 def get_model_info(provider: str, model: str) -> ModelInfo | None:
@@ -45,6 +46,21 @@ def register_models(models: dict[str, ModelInfo]) -> None:
 def list_models() -> dict[str, ModelInfo]:
     """Return a snapshot of all registered models, keyed by 'provider/model'."""
     return dict(_REGISTRY)
+
+
+def register_aliases(provider: str, aliases: dict[str, str]) -> None:
+    """Register short model aliases for a provider, e.g. {'opus': 'claude-opus-4-8'}.
+
+    Called by providers during init, alongside register_models, so a provider owns
+    both its model metadata and its alias table.
+    """
+    for alias, target in aliases.items():
+        _ALIASES[f"{provider}/{alias}"] = target
+
+
+def resolve_alias(provider: str, model_name: str) -> str:
+    """Expand a provider's registered short alias to its full model id, else return it unchanged."""
+    return _ALIASES.get(f"{provider}/{model_name}", model_name)
 
 
 def calculate_cost(provider: str, model: str, usage: Usage) -> float | None:

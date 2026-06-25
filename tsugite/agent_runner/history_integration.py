@@ -196,19 +196,19 @@ def save_run_to_history(
 
 
 @dataclass
-class ClaudeCodeSessionInfo:
-    """Info about the Claude Code session for a conversation."""
+class ResumableSessionState:
+    """A session-owning provider's resume state recorded for a conversation."""
 
     session_id: str
     compacted: bool = False
 
 
-def get_claude_code_session_info(conversation_id: str) -> Optional[ClaudeCodeSessionInfo]:
-    """Find the most recent Claude Code session_id from a conversation's events.
+def get_resumable_session_state(conversation_id: str) -> Optional[ResumableSessionState]:
+    """Find the most recent resumable provider session from a conversation's events.
 
-    Returns None if no session_id was recorded (non-claude_code model used) or
-    if a compaction happened after the last session_id (the Claude Code session
-    is stale at that point).
+    Reads the ``session_id`` a session-owning provider recorded in its ``state_delta``.
+    Returns None if none was recorded (a stateless provider was used) or if a compaction
+    happened after the last one (the provider session is stale at that point).
     """
     try:
         backend = get_history_backend()
@@ -230,7 +230,7 @@ def get_claude_code_session_info(conversation_id: str) -> Optional[ClaudeCodeSes
                 continue
             if compaction_idx is not None and i <= compaction_idx:
                 continue
-            return ClaudeCodeSessionInfo(
+            return ResumableSessionState(
                 session_id=session_id,
                 compacted=bool(state.get("compacted", False)),
             )

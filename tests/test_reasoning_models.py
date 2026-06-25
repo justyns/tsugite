@@ -142,7 +142,8 @@ class TestResolveReasoningEffort:
 
     def _ensure_registered(self):
         # Provider constructors register their models on init.
-        from tsugite.providers.claude_code import ClaudeCodeProvider
+        from tsugite_claude_code.provider import ClaudeCodeProvider
+
         from tsugite.providers.model_registry import register_models
         from tsugite.providers.openai_compat import _OPENAI_MODELS
 

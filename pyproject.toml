@@ -40,6 +40,9 @@ daemon = [
 discord = [
   "tsugite-discord",
 ]
+claude-code = [
+  "tsugite-claude-code",
+]
 all = [
   "tsugite-web",
   "tsugite-youtube",
@@ -49,6 +52,7 @@ all = [
   "tsugite-discord",
   "tsugite-tmux",
   "tsugite-acp",
+  "tsugite-claude-code",
   "tsugite-codex-cli",
 ]
 
@@ -80,6 +84,7 @@ members = ["plugins/*"]
 tsugite-cli = { workspace = true }
 tsugite-tmux = { workspace = true }
 tsugite-acp = { workspace = true }
+tsugite-claude-code = { workspace = true }
 tsugite-codex-cli = { workspace = true }
 tsugite-web = { workspace = true }
 tsugite-youtube = { workspace = true }
@@ -162,6 +167,7 @@ dev = [
   "vulture>=2.14",
   "tsugite-tmux",
   "tsugite-acp",
+  "tsugite-claude-code",
   "tsugite-codex-cli",
   "tsugite-web",
   "tsugite-youtube",

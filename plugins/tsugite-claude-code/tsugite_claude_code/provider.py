@@ -6,10 +6,9 @@ import logging
 from typing import Any, AsyncIterator
 
 from tsugite.exceptions import AgentExecutionError
-
-from .base import CompletionResponse, ModelInfo, StreamChunk, Usage, default_count_tokens
-from .model_registry import get_model_info as _get_model_info
-from .model_registry import register_models
+from tsugite.providers.base import CompletionResponse, ModelInfo, StreamChunk, Usage, default_count_tokens
+from tsugite.providers.model_registry import get_model_info as _get_model_info
+from tsugite.providers.model_registry import register_aliases, register_models
 
 logger = logging.getLogger(__name__)
 
@@ -41,15 +40,6 @@ _ALIASES = {
     "sonnet": "claude-sonnet-4-6",
     "haiku": "claude-haiku-4-5-20251001",
 }
-
-
-def resolve_alias(model_name: str) -> str:
-    """Map a short alias (opus, sonnet, ...) to the full Claude Code model id.
-
-    Single source of truth for the alias table - models.get_model_id delegates
-    here so a new model only needs registering in this file.
-    """
-    return _ALIASES.get(model_name, model_name)
 
 
 def _raise_if_error(result_event: dict) -> None:
@@ -99,6 +89,7 @@ class ClaudeCodeProvider:
         self._cumulative_cost: float = 0.0
 
         register_models(_CLAUDE_CODE_MODELS)
+        register_aliases(self.name, _ALIASES)
 
     def set_context(self, **kwargs: Any) -> None:
         self._attachments = kwargs.get("attachments", [])
@@ -123,7 +114,7 @@ class ClaudeCodeProvider:
         stream: bool = False,
         **kwargs: Any,
     ) -> CompletionResponse | AsyncIterator[StreamChunk]:
-        from tsugite.core.claude_code import ClaudeCodeProcess
+        from tsugite_claude_code.process import ClaudeCodeProcess
 
         resolved_model = _ALIASES.get(model, model)
         if resolved_model != model and self._resolved_model != resolved_model:

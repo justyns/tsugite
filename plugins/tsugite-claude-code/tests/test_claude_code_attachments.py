@@ -1,9 +1,9 @@
 """Tests for Claude Code attachment handling and session ID fixes."""
 
 import pytest
+from tsugite_claude_code.provider import ClaudeCodeProvider
 
 from tsugite.attachments.base import Attachment, AttachmentContentType
-from tsugite.providers.claude_code import ClaudeCodeProvider
 from tsugite.skill_discovery import Skill
 
 

@@ -59,7 +59,7 @@ def _safe_json(value: Any) -> Any:
 
 
 def _attachment_char_limit(name: str) -> int | None:
-    """Return max chars for a Claude Code attachment, or None for no limit.
+    """Return max chars for an attachment, or None for no limit.
 
     Currently returns None (no limit) for all attachments.
     Kept as a hook for future per-attachment size policies.

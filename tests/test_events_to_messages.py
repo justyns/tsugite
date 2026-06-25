@@ -123,42 +123,6 @@ class TestEventsToMessagesStateless:
         ]
 
 
-class TestEventsToMessagesClaudeCode:
-    """Claude Code provider owns its session — we send only the latest delta."""
-
-    def test_returns_only_unsent_user_input(self):
-        events = [
-            _ev("user_input", text="first"),
-            _ev("model_request", provider="claude_code"),
-            _ev("model_response", provider="claude_code", raw_content="r1", state_delta={"session_id": "s1"}),
-            _ev("user_input", ts=FIXED_TS, text="second"),
-        ]
-        msgs = events_to_messages(events, provider="claude_code")
-        # Claude Code resumes from its own session; only the new user msg goes out.
-        assert msgs == [{"role": "user", "content": f"{FIXED_TS_PREFIX} second"}]
-
-    def test_initial_user_input_is_returned(self):
-        events = [
-            _ev("session_start", agent="a"),
-            _ev("user_input", ts=FIXED_TS, text="hi"),
-        ]
-        msgs = events_to_messages(events, provider="claude_code")
-        assert msgs == [{"role": "user", "content": f"{FIXED_TS_PREFIX} hi"}]
-
-    def test_observation_after_response_returned(self):
-        # If the agent loop produced code+observation but the model hasn't been
-        # called again yet, the observation is the next thing to send.
-        events = [
-            _ev("user_input", text="t"),
-            _ev("model_response", provider="claude_code", raw_content="```python\nx=1\n```"),
-            _ev("code_execution", output="ok"),
-        ]
-        msgs = events_to_messages(events, provider="claude_code")
-        assert len(msgs) == 1
-        assert msgs[0]["role"] == "user"
-        assert "<tsugite_execution_result" in msgs[0]["content"]
-
-
 class TestTimestampPrefixing:
     """Each user_input gets a `[ts tz]` prefix so the agent can anchor recalled
     facts in time. Code execution envelopes get a `ts="..."` attribute. Model

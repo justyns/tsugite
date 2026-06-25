@@ -35,7 +35,7 @@ class TestProviderCaching:
         assert p1 is not p2
 
     def test_cacheable_attribute_on_claude_code(self):
-        from tsugite.providers.claude_code import ClaudeCodeProvider
+        from tsugite_claude_code.provider import ClaudeCodeProvider
 
         assert ClaudeCodeProvider.cacheable is False
         assert ClaudeCodeProvider().cacheable is False

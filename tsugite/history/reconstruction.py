@@ -32,12 +32,11 @@ def last_index_of(events: List[Event], type_: str) -> Optional[int]:
     return None
 
 
-def events_to_messages(events: Iterable[Event], provider: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Walk events and return the messages list to send next.
+def events_to_messages(events: Iterable[Event]) -> List[Dict[str, Any]]:
+    """Walk events and return the full message history to send next.
 
-    For stateless providers (OpenAI/Anthropic) returns the full message
-    history. For session-owning providers (Claude Code) returns only the
-    unsent tail since the provider holds the prior conversation.
+    Session-owning providers that hold their own prior conversation trim this down
+    themselves; they receive the full history via ``set_context``.
     """
     events = list(events)
 
@@ -55,9 +54,6 @@ def events_to_messages(events: Iterable[Event], provider: Optional[str] = None) 
         rendered = _event_to_message(event)
         if rendered:
             messages.append(rendered)
-
-    if provider == "claude_code":
-        return _claude_code_tail(messages, post_compaction, cutoff)
 
     return messages
 
@@ -157,30 +153,3 @@ def _compaction_intro_line(event: Event) -> str:
         return f"Summary of conversation from {start_str} to {end_str}."
 
     return "The following is a summary of our earlier conversation, which was compacted to save context space."
-
-
-def _claude_code_tail(
-    messages: List[Dict[str, Any]],
-    post_compaction: List[Event],
-    compaction_cutoff: Optional[int],
-) -> List[Dict[str, Any]]:
-    """Return only the messages Claude Code hasn't seen yet.
-
-    Claude Code maintains its own session, so we send only what's been added
-    since its last `model_response`. After compaction we send the synthetic
-    summary block plus any newer events.
-    """
-    if compaction_cutoff is not None:
-        # After compaction, hand Claude Code the summary + everything since.
-        return messages
-
-    last_resp = last_index_of(post_compaction, "model_response")
-    if last_resp is None:
-        return messages
-
-    tail: List[Dict[str, Any]] = []
-    for event in post_compaction[last_resp + 1 :]:
-        m = _event_to_message(event)
-        if m:
-            tail.append(m)
-    return tail

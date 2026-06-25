@@ -141,7 +141,7 @@ async def test_retained_model_response_loses_provider_session_id(workspace_dir, 
     """Retained `model_response` events must not carry their `state_delta.session_id`
     forward into the new post-compaction JSONL.
 
-    Otherwise `get_claude_code_session_info` (which scans backward for the last
+    Otherwise `get_resumable_session_state` (which scans backward for the last
     model_response with a session_id, skipping only events before the compaction
     marker by file index) will find the stale id and the next turn resumes the
     pre-compaction Claude Code session — defeating the point of compaction since
@@ -150,7 +150,7 @@ async def test_retained_model_response_loses_provider_session_id(workspace_dir, 
     from datetime import datetime, timezone
     from unittest.mock import AsyncMock, patch
 
-    from tsugite.agent_runner.history_integration import get_claude_code_session_info
+    from tsugite.agent_runner.history_integration import get_resumable_session_state
     from tsugite.history.models import Event
 
     store = SessionStore(tmp_path / "session_store.json", context_limits={"test-agent": 1_000_000})
@@ -202,7 +202,7 @@ async def test_retained_model_response_loses_provider_session_id(workspace_dir, 
     assert "session_id" not in state_delta, f"Retained model_response leaked pre-compaction session_id: {state_delta}"
 
     with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
-        info = get_claude_code_session_info(new_session.id)
+        info = get_resumable_session_state(new_session.id)
     assert info is None, f"Expected no resume target post-compaction, got {info}"
 
 

@@ -5,9 +5,9 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from tsugite_claude_code.provider import _ALIASES as _CLAUDE_CODE_MODEL_MAP
 
 from tsugite.models import get_model_id, parse_model_string
-from tsugite.providers.claude_code import _ALIASES as _CLAUDE_CODE_MODEL_MAP
 
 # ── Model parsing tests ──
 
@@ -54,7 +54,7 @@ class TestClaudeCodeProcess:
 
     @pytest.fixture
     def process(self):
-        from tsugite.core.claude_code import ClaudeCodeProcess
+        from tsugite_claude_code.process import ClaudeCodeProcess
 
         return ClaudeCodeProcess()
 
@@ -391,7 +391,7 @@ class TestClaudeCodeEffort:
             yield
 
     def test_model_info_declares_effort_levels(self):
-        from tsugite.providers.claude_code import ClaudeCodeProvider
+        from tsugite_claude_code.provider import ClaudeCodeProvider
 
         provider = ClaudeCodeProvider()
         for alias in ("opus", "sonnet", "haiku"):
@@ -402,7 +402,7 @@ class TestClaudeCodeEffort:
     @pytest.mark.asyncio
     async def test_start_appends_effort_flag(self):
         """When start() is given an effort, it's appended as --effort <level>."""
-        from tsugite.core.claude_code import ClaudeCodeProcess
+        from tsugite_claude_code.process import ClaudeCodeProcess
 
         process = ClaudeCodeProcess()
         mock_proc = AsyncMock()
@@ -422,7 +422,7 @@ class TestClaudeCodeEffort:
 
     @pytest.mark.asyncio
     async def test_start_omits_effort_flag_when_none(self):
-        from tsugite.core.claude_code import ClaudeCodeProcess
+        from tsugite_claude_code.process import ClaudeCodeProcess
 
         process = ClaudeCodeProcess()
         mock_proc = AsyncMock()
@@ -442,7 +442,7 @@ class TestClaudeCodeEffort:
     @pytest.mark.asyncio
     async def test_provider_forwards_reasoning_effort_to_start(self):
         """ClaudeCodeProvider pulls reasoning_effort out of kwargs and forwards to process.start()."""
-        from tsugite.providers.claude_code import ClaudeCodeProvider
+        from tsugite_claude_code.provider import ClaudeCodeProvider
 
         provider = ClaudeCodeProvider()
         mock_process = AsyncMock()
@@ -463,7 +463,7 @@ class TestClaudeCodeEffort:
         mock_process.start = AsyncMock()
         mock_process.stop = AsyncMock()
 
-        with patch("tsugite.core.claude_code.ClaudeCodeProcess", return_value=mock_process):
+        with patch("tsugite_claude_code.process.ClaudeCodeProcess", return_value=mock_process):
             await provider.acompletion(
                 messages=[{"role": "system", "content": "sys"}, {"role": "user", "content": "q"}],
                 model="opus",
@@ -478,7 +478,7 @@ class TestClaudeCodeEffort:
     @pytest.mark.asyncio
     async def test_send_message_drops_redacted_thinking_blocks(self):
         """Redacted thinking blocks from Claude CLI produce no events - they carry no payload."""
-        from tsugite.core.claude_code import ClaudeCodeProcess
+        from tsugite_claude_code.process import ClaudeCodeProcess
 
         process = ClaudeCodeProcess()
         events = [
@@ -536,7 +536,7 @@ class TestClaudeCodeEffort:
     @pytest.mark.asyncio
     async def test_redacted_thinking_does_not_produce_reasoning_content(self):
         """Redacted thinking blocks must not surface as a placeholder reasoning_content (UI noise)."""
-        from tsugite.providers.claude_code import ClaudeCodeProvider
+        from tsugite_claude_code.provider import ClaudeCodeProvider
 
         provider = ClaudeCodeProvider()
         mock_process = AsyncMock()
@@ -561,7 +561,7 @@ class TestClaudeCodeEffort:
         mock_process.start = AsyncMock()
         mock_process.stop = AsyncMock()
 
-        with patch("tsugite.core.claude_code.ClaudeCodeProcess", return_value=mock_process):
+        with patch("tsugite_claude_code.process.ClaudeCodeProcess", return_value=mock_process):
             resp = await provider.acompletion(
                 messages=[{"role": "system", "content": "sys"}, {"role": "user", "content": "q"}],
                 model="opus",
@@ -578,8 +578,9 @@ class TestClaudeCodeEffort:
 
 class TestClaudeCodeAgentIntegration:
     def test_agent_uses_claude_code_provider(self):
+        from tsugite_claude_code.provider import ClaudeCodeProvider
+
         from tsugite.core.agent import TsugiteAgent
-        from tsugite.providers.claude_code import ClaudeCodeProvider
 
         agent = TsugiteAgent(
             model_string="claude_code:sonnet",
@@ -633,7 +634,7 @@ class TestClaudeCodeAgentIntegration:
         mock_process.start = AsyncMock()
         mock_process.stop = AsyncMock()
 
-        with patch("tsugite.core.claude_code.ClaudeCodeProcess", return_value=mock_process):
+        with patch("tsugite_claude_code.process.ClaudeCodeProcess", return_value=mock_process):
             result = await agent.run("what is 6*7")
 
         assert result == "42"
@@ -681,7 +682,7 @@ class TestClaudeCodeAgentIntegration:
         mock_process.start = AsyncMock()
         mock_process.stop = AsyncMock()
 
-        with patch("tsugite.core.claude_code.ClaudeCodeProcess", return_value=mock_process):
+        with patch("tsugite_claude_code.process.ClaudeCodeProcess", return_value=mock_process):
             await agent.run("hello")
 
         assert len(captured_events) == 1
@@ -729,7 +730,7 @@ class TestClaudeCodeAgentIntegration:
         mock_process.start = AsyncMock()
         mock_process.stop = AsyncMock()
 
-        with patch("tsugite.core.claude_code.ClaudeCodeProcess", return_value=mock_process):
+        with patch("tsugite_claude_code.process.ClaudeCodeProcess", return_value=mock_process):
             await agent.run("hello")
 
         assert len(captured_events) == 1
@@ -829,7 +830,7 @@ class TestClaudeCodeContextLimit:
         mock_process.start = AsyncMock()
         mock_process.stop = AsyncMock()
 
-        with patch("tsugite.core.claude_code.ClaudeCodeProcess", return_value=mock_process):
+        with patch("tsugite_claude_code.process.ClaudeCodeProcess", return_value=mock_process):
             result = await agent.run("hello", return_full_result=True)
 
         assert result.provider_state["context_window"] == 200000
@@ -844,7 +845,7 @@ class TestClaudeCodeCostTracking:
     @pytest.mark.asyncio
     async def test_cost_is_delta_not_cumulative(self):
         """total_cost_usd from Claude CLI is cumulative; provider must return per-turn delta."""
-        from tsugite.providers.claude_code import ClaudeCodeProvider
+        from tsugite_claude_code.provider import ClaudeCodeProvider
 
         provider = ClaudeCodeProvider()
         mock_process = AsyncMock()
@@ -875,7 +876,7 @@ class TestClaudeCodeCostTracking:
         mock_process.start = AsyncMock()
         mock_process.stop = AsyncMock()
 
-        with patch("tsugite.core.claude_code.ClaudeCodeProcess", return_value=mock_process):
+        with patch("tsugite_claude_code.process.ClaudeCodeProcess", return_value=mock_process):
             # Turn 1
             resp1 = await provider.acompletion(
                 messages=[{"role": "system", "content": "test"}, {"role": "user", "content": "q1"}],
@@ -900,7 +901,7 @@ class TestClaudeCodeCostTracking:
     @pytest.mark.asyncio
     async def test_cost_delta_streaming(self):
         """Cost delta works correctly in streaming mode too."""
-        from tsugite.providers.claude_code import ClaudeCodeProvider
+        from tsugite_claude_code.provider import ClaudeCodeProvider
 
         provider = ClaudeCodeProvider()
         mock_process = AsyncMock()
@@ -932,7 +933,7 @@ class TestClaudeCodeCostTracking:
         mock_process.start = AsyncMock()
         mock_process.stop = AsyncMock()
 
-        with patch("tsugite.core.claude_code.ClaudeCodeProcess", return_value=mock_process):
+        with patch("tsugite_claude_code.process.ClaudeCodeProcess", return_value=mock_process):
             # Turn 1 streaming
             chunks1 = []
             async for chunk in await provider.acompletion(
@@ -964,7 +965,7 @@ class TestClaudeCodeContextWindow:
     @pytest.mark.asyncio
     async def test_context_window_extracted_from_nested_model_usage(self):
         """modelUsage is keyed by model name; contextWindow is inside the nested dict."""
-        from tsugite.core.claude_code import ClaudeCodeProcess
+        from tsugite_claude_code.process import ClaudeCodeProcess
 
         process = ClaudeCodeProcess()
 
@@ -1018,7 +1019,7 @@ class TestClaudeCodeContextWindow:
     @pytest.mark.asyncio
     async def test_context_window_none_when_no_model_usage(self):
         """context_window should be None when modelUsage is missing."""
-        from tsugite.core.claude_code import ClaudeCodeProcess
+        from tsugite_claude_code.process import ClaudeCodeProcess
 
         process = ClaudeCodeProcess()
 
@@ -1109,7 +1110,7 @@ class TestClaudeCodeMultiTurnTokens:
         mock_process.start = AsyncMock()
         mock_process.stop = AsyncMock()
 
-        with patch("tsugite.core.claude_code.ClaudeCodeProcess", return_value=mock_process):
+        with patch("tsugite_claude_code.process.ClaudeCodeProcess", return_value=mock_process):
             await agent.run("test", return_full_result=True)
 
         # total_tokens = sum of all turns
@@ -1146,7 +1147,7 @@ class TestClaudeCodeErrorResult:
     async def test_process_yields_error_flag_for_is_error_result(self):
         """ClaudeCodeProcess surfaces is_error/subtype on the result event so
         the provider layer can detect the failure."""
-        from tsugite.core.claude_code import ClaudeCodeProcess
+        from tsugite_claude_code.process import ClaudeCodeProcess
 
         process = ClaudeCodeProcess()
         process._process = self._mock_proc_with_events(
@@ -1173,8 +1174,9 @@ class TestClaudeCodeErrorResult:
     @pytest.mark.asyncio
     async def test_provider_collect_raises_for_error_result(self):
         """_collect raises AgentExecutionError when the CLI returns is_error=true."""
+        from tsugite_claude_code.provider import ClaudeCodeProvider
+
         from tsugite.exceptions import AgentExecutionError
-        from tsugite.providers.claude_code import ClaudeCodeProvider
 
         provider = ClaudeCodeProvider()
 
@@ -1198,7 +1200,7 @@ class TestClaudeCodeErrorResult:
     @pytest.mark.asyncio
     async def test_provider_collect_passes_through_normal_result(self):
         """Sanity: non-error results still return CompletionResponse normally."""
-        from tsugite.providers.claude_code import ClaudeCodeProvider
+        from tsugite_claude_code.provider import ClaudeCodeProvider
 
         provider = ClaudeCodeProvider()
 
@@ -1227,8 +1229,9 @@ class TestClaudeCodeErrorResult:
     @pytest.mark.asyncio
     async def test_provider_stream_raises_for_error_result(self):
         """_stream also raises AgentExecutionError on error result events."""
+        from tsugite_claude_code.provider import ClaudeCodeProvider
+
         from tsugite.exceptions import AgentExecutionError
-        from tsugite.providers.claude_code import ClaudeCodeProvider
 
         provider = ClaudeCodeProvider()
 
@@ -1264,7 +1267,7 @@ class TestClaudeCodeProcessStopRobustness:
         """A claude subprocess that ignores SIGTERM (Node can be slow/wedged) must
         be SIGKILLed within a timeout - otherwise stop() hangs the agent's finally
         forever and leaks a multi-hour orphan process (seen on the real box)."""
-        from tsugite.core.claude_code import ClaudeCodeProcess
+        from tsugite_claude_code.process import ClaudeCodeProcess
 
         proc = ClaudeCodeProcess()
         killed = {"term": False, "kill": False}
@@ -1292,7 +1295,7 @@ class TestClaudeCodeProcessStopRobustness:
 
     @pytest.mark.asyncio
     async def test_stop_is_clean_when_process_exits_on_sigterm(self):
-        from tsugite.core.claude_code import ClaudeCodeProcess
+        from tsugite_claude_code.process import ClaudeCodeProcess
 
         proc = ClaudeCodeProcess()
         mock = MagicMock()
@@ -1325,7 +1328,7 @@ class TestClaudeCodeProcessReadLimit:
         bare readline() then raises LimitOverrunError - crashing the turn (stdout)
         or killing the stderr drain into a pipe deadlock. The subprocess must be
         created with a generous read limit."""
-        from tsugite.core.claude_code import ClaudeCodeProcess
+        from tsugite_claude_code.process import ClaudeCodeProcess
 
         proc = ClaudeCodeProcess()
         mock_proc = AsyncMock()

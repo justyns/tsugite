@@ -102,22 +102,21 @@ def parse_model_string(model_string: str) -> tuple[str, str, Optional[str]]:
 def get_model_id(model_string: str) -> str:
     """Get the model ID to pass to the provider's acompletion().
 
-    For most providers this is the model_name (+ variant for ollama).
-    For claude_code, maps short names to full model IDs.
+    For most providers this is the model_name (+ variant for ollama). A provider may
+    register short aliases (e.g. ``opus`` -> ``claude-opus-4-8``) via ``register_aliases``;
+    those are expanded here through the model registry.
     """
     resolved = resolve_model_alias(model_string)
     provider, model_name, variant = parse_model_string(resolved)
 
-    if provider == "claude_code":
-        # Lazy import: the provider owns the alias table (single source of truth).
-        from tsugite.providers.claude_code import resolve_alias
-
-        return resolve_alias(model_name)
-
     if provider == "ollama" and variant:
         return f"{model_name}:{variant}"
 
-    return model_name
+    from tsugite.providers import get_provider
+    from tsugite.providers.model_registry import resolve_alias
+
+    get_provider(provider)  # ensure the provider has registered its models + aliases
+    return resolve_alias(provider, model_name)
 
 
 def get_provider_and_model(model_string: str) -> tuple[str, Provider, str]:
