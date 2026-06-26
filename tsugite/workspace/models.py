@@ -25,16 +25,6 @@ class Workspace:
     path: Path
 
     @property
-    def session_path(self) -> Path:
-        """Path to active session file."""
-        return self.path / "session.jsonl"
-
-    @property
-    def sessions_dir(self) -> Path:
-        """Path to archived sessions directory."""
-        return self.path / "sessions"
-
-    @property
     def memory_dir(self) -> Path:
         """Path to memory files directory."""
         return self.path / "memory"
@@ -180,11 +170,10 @@ class Workspace:
         """
         path.mkdir(parents=True, exist_ok=True)
         (path / "memory").mkdir(exist_ok=True)
-        (path / "sessions").mkdir(exist_ok=True)
         (path / "skills").mkdir(exist_ok=True)
         (path / "agents").mkdir(exist_ok=True)
 
-        # Create .gitkeep files for directories that should be tracked (sessions is gitignored)
+        # Create .gitkeep files for directories that should be tracked
         (path / "memory" / ".gitkeep").touch()
         (path / "skills" / ".gitkeep").touch()
         (path / "agents" / ".gitkeep").touch()

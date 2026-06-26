@@ -196,7 +196,6 @@ def show_info(
 @workspace_app.command("session")
 def manage_session(
     name: str = typer.Argument(..., help="Workspace name"),
-    compact: bool = typer.Option(False, "--compact", help="Force session compaction"),
     new: bool = typer.Option(False, "--new", help="Start fresh session"),
     history: bool = typer.Option(False, "--history", help="List archived sessions"),
 ):
@@ -220,15 +219,6 @@ def manage_session(
         console.print(f"[green]✓[/green] Started new session: {session_id}")
         return
 
-    if compact:
-        if session.get_conversation_id() is None:
-            console.print("[yellow]No active session to compact[/yellow]")
-            return
-
-        session_id = session.compact()
-        console.print(f"[green]✓[/green] Compacted session, new ID: {session_id}")
-        return
-
     # Show session info
     info = session.get_info()
 
@@ -250,7 +240,7 @@ def manage_session(
 
     if session.should_compact():
         console.print("\n[yellow]⚠ Session approaching context limit[/yellow]")
-        console.print("Consider compacting: tsu workspace session --compact")
+        console.print("Consider starting fresh: tsu workspace session --new")
 
 
 @workspace_app.command("templates")

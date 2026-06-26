@@ -64,7 +64,7 @@ def test_start_new_writes_to_db_not_session_jsonl(mock_workspace):
     session = WorkspaceSession(mock_workspace)
     sid = session.start_new()
 
-    assert not mock_workspace.session_path.exists()  # no legacy session.jsonl
+    assert not (mock_workspace.path / "session.jsonl").exists()  # no legacy session.jsonl
     assert sid in get_history_backend().list_sessions(workspace=mock_workspace.name)
 
 

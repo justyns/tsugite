@@ -54,10 +54,6 @@ class WorkspaceSession:
         except Exception:
             return False
 
-    def compact(self) -> str:
-        """Rotate to a fresh session (the prior one stays in history)."""
-        return self.start_new()
-
     def get_info(self) -> SessionInfo:
         cid = self.get_conversation_id()
         if not cid:

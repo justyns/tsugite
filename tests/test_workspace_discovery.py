@@ -82,7 +82,6 @@ def test_workspace_create(tmp_path):
 
     assert workspace.path.exists()
     assert workspace.memory_dir.exists()
-    assert workspace.sessions_dir.exists()
     assert workspace.skills_dir.exists()
     assert workspace.agents_dir.exists()
 
@@ -113,8 +112,6 @@ def test_workspace_properties(tmp_path):
 
     workspace = Workspace.load(workspace_path)
 
-    assert workspace.session_path == workspace_path / "session.jsonl"
-    assert workspace.sessions_dir == workspace_path / "sessions"
     assert workspace.memory_dir == workspace_path / "memory"
     assert workspace.skills_dir == workspace_path / "skills"
     assert workspace.agents_dir == workspace_path / "agents"
