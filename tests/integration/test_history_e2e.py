@@ -7,7 +7,7 @@ History isolation comes from the autouse `_isolate_data_dirs` fixture in conftes
 """
 
 from tsugite.agent_runner.history_integration import save_run_to_history
-from tsugite.history.storage import list_session_files
+from tsugite.history import get_history_backend
 
 from .conftest import INTEGRATION_MODEL, run_integration_agent
 
@@ -26,9 +26,9 @@ class TestHistoryRoundTrip:
         )
 
         assert session_id is not None
-        sessions = list_session_files()
-        assert len(sessions) >= 1
-        assert "hello" in sessions[0].read_text().lower()
+        events = get_history_backend().load(session_id).load_events()
+        assert events
+        assert "hello" in " ".join(str(e.data) for e in events).lower()
 
     def test_continuation(self, agent_file):
         agent = agent_file(name="hist_cont", tools=[])

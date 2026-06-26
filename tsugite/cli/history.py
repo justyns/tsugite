@@ -643,30 +643,3 @@ def history_export(
         console.print(f"[green]Exported[/green] {len(lines)} events to {output}")
     else:
         typer.echo(text, nl=False)
-
-
-@history_app.command("rebuild-index")
-def history_rebuild_index():
-    """Rebuild conversation index from JSONL files.
-
-    Note: V2 storage format no longer uses a separate index file.
-    This command scans all session files to verify they are valid.
-    """
-    from tsugite.history import SessionStorage, list_session_files
-
-    try:
-        console.print("Scanning session files...")
-        session_files = list_session_files()
-        valid_count = 0
-        for session_file in session_files:
-            try:
-                SessionStorage.load(session_file)
-                valid_count += 1
-            except Exception as e:
-                console.print(f"[yellow]Skipping invalid session {session_file.stem}: {e}[/yellow]")
-
-        console.print(f"[green]Found {valid_count} valid sessions[/green]")
-
-    except Exception as e:
-        console.print(f"[red]Failed to scan sessions: {e}[/red]")
-        raise typer.Exit(1)
