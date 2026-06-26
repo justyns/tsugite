@@ -231,7 +231,7 @@ def tools_remove(
         tool_def = next((t for t in existing_tools if t.name == name), None)
         if not tool_def:
             console.print(f"[red]Custom tool '{name}' not found[/red]")
-            console.print("\nUse [cyan]tsugite tools list --custom[/cyan] to see custom tools")
+            console.print("\nUse [cyan]tsugite tools list[/cyan] to see available tools")
             raise typer.Exit(1)
 
         # Confirm
