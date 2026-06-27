@@ -74,6 +74,44 @@ def _seed_new_with_two_compactions(e2e_tmp, new_session_id, source_id):
     return history_dir
 
 
+def _set_compaction_summary(page, summary):
+    """Render the carried-forward summary card by setting what the real flow derives
+    from the last compaction event. compactionSummary is a getter over
+    sessionsState[selectedSessionId], so set the per-session field it reads. Keeps
+    these tests independent of the history-seeding pipeline."""
+    page.evaluate(
+        """([sel, summary]) => {
+            const v = Alpine.$data(document.querySelector(sel));
+            (v.sessionsState[v.selectedSessionId] ||= {}).compactionSummary = summary;
+        }""",
+        [CONV_VIEW, summary],
+    )
+    banner = page.locator(".console-thread .console-compaction-banner").first
+    banner.wait_for(state="visible", timeout=5000)
+    return banner
+
+
+def test_large_compaction_summary_is_height_capped(chat_page):
+    """A large carried-forward summary must not dominate the thread: the top banner
+    is height-capped and scrolls internally rather than rendering full-length and
+    pushing the actual conversation far down the page."""
+    big = "\n\n".join([f"## Section {i}\n\n" + " ".join(f"detail-{i}-{j}" for j in range(40)) for i in range(25)])
+
+    banner = _set_compaction_summary(chat_page, big)
+    chat_page.screenshot(path="/tmp/tsugite-issue-state.png", full_page=True)
+
+    box = banner.bounding_box()
+    assert box["height"] <= 360, f"carried-forward summary banner is {box['height']}px tall (not capped)"
+
+
+def test_short_compaction_summary_not_bloated(chat_page):
+    """The height cap must only bite large summaries: a short carried-forward
+    summary stays a small card (the cap is a max, not a min/forced scroll)."""
+    banner = _set_compaction_summary(chat_page, "prior work on widgets")
+    box = banner.bounding_box()
+    assert box["height"] < 120, f"short summary card unexpectedly tall: {box['height']}px"
+
+
 def test_previous_session_header_link_renders_and_navigates(authenticated_page, e2e_session_store, e2e_tmp):
     page = authenticated_page
     open_conversations(page)

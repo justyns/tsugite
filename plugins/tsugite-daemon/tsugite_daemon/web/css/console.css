@@ -1177,6 +1177,16 @@ body.is-resizing-sidebar { cursor: col-resize; user-select: none; }
 }
 .console-compaction-banner > div { color: var(--text); }
 
+/* Carried-forward summary card (top of a continued thread). Force a block card
+   (a later .console-compaction-banner rule sets display:flex for the inline
+   status banners) and cap the summary body so a large summary scrolls within the
+   card instead of dominating the thread and pushing the conversation off-screen. */
+.console-compaction-banner.console-carried-summary { display: block; }
+.console-carried-summary > div {
+  max-height: 16rem;
+  overflow-y: auto;
+}
+
 /* ============================================================================
    COMPOSER
    ============================================================================ */
