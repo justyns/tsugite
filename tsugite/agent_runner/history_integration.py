@@ -103,7 +103,17 @@ def record_session_end(
     status: str = "success",
     error_message: Optional[str] = None,
 ) -> None:
-    """Record a session_end event with final status."""
+    """Record a session_end event with final status.
+
+    Note: this fires at the end of every agent run, i.e. once per turn for a
+    daemon interactive session. So the history DB recording a session as
+    ``status=success`` with an ``ended_at`` only means the most recent *turn*
+    finished - it does NOT mean the conversation is closed. The daemon session
+    store deliberately keeps such a session ``active`` because the user can still
+    send more messages; the store is the source of truth for conversation
+    liveness. The two stores tracking different things (last-turn outcome vs
+    conversation open/closed) is expected, not a desync.
+    """
     storage.record("session_end", status=status, error_message=error_message)
 
 
