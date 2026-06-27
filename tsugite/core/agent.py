@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 RETURN_VALUE_REPR_MAX = 2048
 
 from tsugite.attachments.base import Attachment, AttachmentContentType, format_attachment_open_tag  # noqa: E402
+from tsugite.cancellation import is_cancelled  # noqa: E402
 from tsugite.events import (  # noqa: E402
     CodeExecutionEvent,
     ContentBlockEvent,
@@ -391,9 +392,17 @@ class TsugiteAgent:
         final_value: Any = unset
         last_response_text: str = ""
         turn_num = 0
+        cancelled = False
 
         try:
             for turn_num in range(self.max_turns):
+                # Cooperative cancel checkpoint (between turns): the daemon runs this
+                # loop in a worker thread that can't be preempted, so a user Stop is
+                # honored here rather than killing the thread. See tsugite/cancellation.py.
+                if is_cancelled():
+                    cancelled = True
+                    break
+
                 if self.event_bus:
                     self.event_bus.emit(
                         StepStartEvent(
@@ -467,6 +476,13 @@ class TsugiteAgent:
                     )
                     break
 
+                # Cooperative cancel checkpoint (before running a tool/code block):
+                # honor a Stop that landed after the model responded but before its
+                # code executes, so no further side effects run.
+                if is_cancelled():
+                    cancelled = True
+                    break
+
                 if self.event_bus:
                     self.event_bus.emit(CodeExecutionEvent(code=code))
 
@@ -530,9 +546,17 @@ class TsugiteAgent:
                     self.memory.add_final_answer(final_value)
                     break
 
+            # Cancelled at a checkpoint: keep whatever the model last produced as the
+            # partial answer and record the run as cancelled so partial work persists.
+            if cancelled:
+                final_value = last_response_text
+                status = "cancelled"
+                error_message = "Cancelled by user"
+                if self.event_bus:
+                    self.event_bus.emit(WarningEvent(message=error_message, step=turn_num + 1))
             # If we never broke out, max_turns hit. Use the last response text as
             # the answer and record the run as interrupted.
-            if final_value is unset:
+            elif final_value is unset:
                 final_value = last_response_text
                 status = "interrupted"
                 error_message = f"max_turns ({self.max_turns}) reached"

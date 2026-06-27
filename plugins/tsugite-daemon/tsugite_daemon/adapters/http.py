@@ -8,7 +8,7 @@ import re
 import shutil
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from dataclasses import fields as dataclass_fields
 from datetime import datetime, timezone
 from pathlib import Path
@@ -463,6 +463,10 @@ class ActiveChat:
     backend: HTTPInteractionBackend
     progress: SSEProgressHandler
     task: Optional[asyncio.Task] = None
+    # Cooperative cancel signal: cancelling the task tears down the SSE stream but
+    # cannot stop the agent loop running in a to_thread worker. The worker checks
+    # this Event at safe checkpoints and exits cleanly. See tsugite/cancellation.py.
+    cancel_event: threading.Event = field(default_factory=threading.Event)
 
 
 class HTTPServer:
@@ -1531,9 +1535,13 @@ class HTTPServer:
         self._active_chats[backend_key] = chat_state
 
         async def run_agent():
+            from tsugite.cancellation import set_cancel_event
             from tsugite.interaction import set_interaction_backend
 
             set_interaction_backend(interaction_backend)
+            # Bind the cooperative cancel Event into the run context so the agent
+            # loop (copy_context + to_thread) observes a user Stop and exits cleanly.
+            set_cancel_event(chat_state.cancel_event)
             try:
                 response = await adapter.handle_message(
                     user_id=user_id,
@@ -1608,6 +1616,10 @@ class HTTPServer:
         backend_key = (request.path_params["agent"], user_id, session_id)
         chat = self._active_chats.get(backend_key)
         if chat and chat.task and not chat.task.done():
+            # Signal the worker thread to stop at its next safe checkpoint (the real
+            # stop - task.cancel alone only tears down the awaiting coroutine/SSE
+            # stream, leaving the to_thread worker running to completion).
+            chat.cancel_event.set()
             chat.task.cancel()
             return JSONResponse({"status": "cancelled"})
         return JSONResponse({"error": "no active chat"}, status_code=404)

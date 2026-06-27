@@ -314,6 +314,38 @@ def test_cancel_chat_requires_session_id(client, test_token):
     assert resp.status_code == 400, f"expected 400, got {resp.status_code}: {resp.text}"
 
 
+def test_cancel_chat_sets_cooperative_cancel_event(client, mock_adapter, test_token, server):
+    """Cancel must set the per-chat cooperative cancel Event, not only cancel the
+    awaiting coroutine. task.cancel alone tears down the SSE stream but leaves the
+    agent loop running in its to_thread worker; the Event is what the worker checks.
+    """
+    import asyncio
+
+    _make_session(mock_adapter, "sess-COOP", "alice")
+
+    async def slow_handle(*args, **kwargs):
+        await asyncio.sleep(2.0)
+        return "ok"
+
+    with patch.object(mock_adapter, "handle_message", side_effect=slow_handle):
+        _t, _st, d = _start_chat_in_thread(client, test_token, session_id="sess-COOP", user_id="alice")
+        time.sleep(0.2)
+
+        chats = list(server._active_chats.values())
+        assert len(chats) == 1, f"expected one active chat, got {len(chats)}"
+        chat = chats[0]
+        assert not chat.cancel_event.is_set()
+
+        resp = client.post(
+            "/api/agents/test-agent/chat/cancel",
+            json={"user_id": "alice", "session_id": "sess-COOP"},
+            headers={"Authorization": f"Bearer {test_token}"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert chat.cancel_event.is_set()
+        d.wait(timeout=5)
+
+
 def test_respond_routes_by_session(client, mock_adapter, test_token, server):
     """POST /respond with session_id routes to the correct backend when two
     sessions are awaiting concurrently. Without per-session keying, the
