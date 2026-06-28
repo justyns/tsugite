@@ -27,6 +27,9 @@ def _seed_agent_turn(e2e_adapter, e2e_tmp, label, final_answer):
     storage = SessionStorage.create("test-agent", model="test", session_path=session_path)
     storage.record("user_input", text="show")
     storage.record("model_response", provider="test", model="test", raw_content=final_answer)
+    # Terminate the turn: without it the loaded session looks mid-turn and the view
+    # shows a phantom "Starting..." progress bubble as `.last`, racing the content.
+    storage.record("session_end", status="success")
     return history_dir, unique_user, session.id
 
 

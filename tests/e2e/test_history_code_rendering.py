@@ -45,6 +45,7 @@ def test_history_code_block_not_truncated(authenticated_page, e2e_adapter, e2e_t
     storage, history_dir, user_id, session_id = _seed_session(e2e_adapter, e2e_tmp, "truncate")
     storage.record("user_input", text="go")
     storage.record("code_execution", code=long_code, output="ran 40 lines", duration_ms=12)
+    storage.record("session_end", status="success")
 
     with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
         _open_progress_trace(page, user_id, session_id)
@@ -65,6 +66,7 @@ def test_history_tool_result_visible_between_code_steps(authenticated_page, e2e_
     storage.record("user_input", text="go")
     storage.record("code_execution", code="print('hi')", output="hello world", duration_ms=7)
     storage.record("code_execution", code="return_value('done')", output="", duration_ms=1)
+    storage.record("session_end", status="success")
 
     with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
         _open_progress_trace(page, user_id, session_id)
@@ -89,6 +91,7 @@ def test_history_tool_result_not_truncated(authenticated_page, e2e_adapter, e2e_
     storage, history_dir, user_id, session_id = _seed_session(e2e_adapter, e2e_tmp, "notrunc")
     storage.record("user_input", text="go")
     storage.record("code_execution", code="print('hi')", output=full_output, duration_ms=3)
+    storage.record("session_end", status="success")
 
     with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
         _open_progress_trace(page, user_id, session_id)
@@ -117,6 +120,7 @@ def test_history_content_block_renders_with_model_response(authenticated_page, e
         model="test",
         raw_content='Some prose. <content name="reply">A reply content block.</content>',
     )
+    storage.record("session_end", status="success")
 
     with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
         _open_progress_trace(page, user_id, session_id)
