@@ -64,7 +64,7 @@ def _new_session(e2e_adapter, e2e_tmp, label):
 
 
 def _render_body(page, history_dir, user_id, session_id, *, screenshot=None):
-    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
+    with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
         open_session_by_url(page, page.url.split("#")[0], user_id, session_id)
         page.wait_for_selector(".console-turn.user", timeout=5000)
         page.wait_for_selector(".console-turn.agent", timeout=5000)

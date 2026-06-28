@@ -124,7 +124,7 @@ def test_previous_session_header_link_renders_and_navigates(authenticated_page, 
 
     history_dir = _seed_new_with_compaction(e2e_tmp, new.id, old.id)
 
-    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
+    with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
         reload_conversations_view(page)
         select_session_in_view(page, new.id)
 
@@ -167,7 +167,7 @@ def test_compaction_summary_not_duplicated(authenticated_page, e2e_session_store
 
     history_dir = _seed_new_with_compaction(e2e_tmp, new.id, old.id)
 
-    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
+    with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
         reload_conversations_view(page)
         select_session_in_view(page, new.id)
 
@@ -201,7 +201,7 @@ def test_multi_compaction_only_top_summary_deduped(authenticated_page, e2e_sessi
 
     history_dir = _seed_new_with_two_compactions(e2e_tmp, new.id, old.id)
 
-    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
+    with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
         reload_conversations_view(page)
         select_session_in_view(page, new.id)
 

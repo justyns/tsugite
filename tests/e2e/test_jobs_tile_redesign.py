@@ -52,7 +52,7 @@ def test_redesigned_tile_renders_all_seven_states(authenticated_page, e2e_adapte
             verify_attempts=0,
         )
 
-    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
+    with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
         page.reload()
         page.wait_for_selector(".jx", timeout=5000)
         tiles = page.locator(".jx")
@@ -77,7 +77,7 @@ def test_tile_collapse_expand_toggle(authenticated_page, e2e_adapter, e2e_tmp):
         worker_session_id="worker-tg",
     )
 
-    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
+    with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
         page.reload()
         page.wait_for_selector(".jx", timeout=5000)
         tile = page.locator(".jx").first
@@ -117,7 +117,7 @@ def test_ac_chips_render_with_per_criterion_verdicts(authenticated_page, e2e_ada
         },
     )
 
-    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
+    with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
         page.reload()
         page.wait_for_selector(".jx .jt-acs", timeout=5000)
         chips = page.locator(".jx .jt-ac")
@@ -169,7 +169,7 @@ def test_attempts_expander_shows_when_multiple(authenticated_page, e2e_adapter, 
         ],
     )
 
-    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
+    with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
         page.reload()
         page.wait_for_selector(".jx .jt-attempts", timeout=5000)
         rows = page.locator(".jx .jt-attempt")
@@ -195,7 +195,7 @@ def test_no_terminal_for_job_without_worker(authenticated_page, e2e_adapter, e2e
         # No worker_session_id → tile renders without terminal embed.
     )
 
-    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
+    with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
         page.reload()
         page.wait_for_selector(".jx", timeout=5000)
         # The terminal pane is conditionally rendered only when worker_session_id is set.
@@ -231,7 +231,7 @@ def test_retry_with_hint_dialog_opens_and_submits(authenticated_page, e2e_adapte
 
     page.route("**/api/jobs/job-retry01/retry", _handle)
 
-    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
+    with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
         page.reload()
         page.wait_for_selector(".jx", timeout=5000)
         # Click the "retry with hint…" button in the tile footer.
@@ -289,7 +289,7 @@ def test_mark_done_dialog_opens_and_submits(authenticated_page, e2e_adapter, e2e
 
     page.route("**/api/jobs/job-md001/mark-done", _handle)
 
-    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
+    with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
         page.reload()
         page.wait_for_selector(".jx", timeout=5000)
         # Click "mark done" button (NOT "retry with hint…").
@@ -330,7 +330,7 @@ def test_job_notify_turn_renders_with_state_tinted_gutter(authenticated_page, e2
         text="Job job-8e3bdone finished with state 'done': write me a haiku about parallel processes. Use get_job('job-8e3bdone') for details.",
     )
 
-    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
+    with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
         page.reload()
         # The notify turn renders as a .jn block with the job gutter chip.
         page.wait_for_selector(".jn", timeout=5000)
@@ -365,7 +365,7 @@ def test_job_update_reaches_tile_while_viewing_another_session(authenticated_pag
     )
 
     view_sel = "[x-data*=conversationsView]"
-    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
+    with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
         page.reload()
         page.wait_for_selector(".jx", timeout=5000)
         # Open the parent chat so its tile lives in sessionsState.

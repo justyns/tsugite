@@ -60,7 +60,7 @@ def test_markdown_regression_basic_formatting(authenticated_page, e2e_adapter, e
 
     history_dir, user_id, session_id = _seed_agent_turn(e2e_adapter, e2e_tmp, "regression", md)
 
-    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
+    with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
         _open_session(page, user_id, session_id)
         agent = page.locator(".console-turn.agent").last
 
@@ -95,7 +95,7 @@ def test_markdown_gfm_table_renders(authenticated_page, e2e_adapter, e2e_tmp):
 
     history_dir, user_id, session_id = _seed_agent_turn(e2e_adapter, e2e_tmp, "table", md)
 
-    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
+    with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
         _open_session(page, user_id, session_id)
         agent = page.locator(".console-turn.agent").last
 
@@ -120,7 +120,7 @@ def test_markdown_gfm_table_alignment(authenticated_page, e2e_adapter, e2e_tmp):
 
     history_dir, user_id, session_id = _seed_agent_turn(e2e_adapter, e2e_tmp, "align", md)
 
-    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
+    with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
         _open_session(page, user_id, session_id)
         agent = page.locator(".console-turn.agent").last
 
@@ -150,7 +150,7 @@ def test_markdown_table_styling(authenticated_page, e2e_adapter, e2e_tmp):
 
     history_dir, user_id, session_id = _seed_agent_turn(e2e_adapter, e2e_tmp, "style", md)
 
-    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
+    with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
         _open_session(page, user_id, session_id)
         agent = page.locator(".console-turn.agent").last
 
@@ -187,7 +187,7 @@ def test_markdown_wide_table_scrolls_inside_bubble(authenticated_page, e2e_adapt
 
     page.set_viewport_size({"width": 400, "height": 800})
 
-    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
+    with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
         _open_session(page, user_id, session_id)
         table = page.locator(".console-turn.agent table").last
 

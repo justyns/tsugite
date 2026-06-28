@@ -56,7 +56,7 @@ def test_history_reactions_persist_across_reload(authenticated_page, mock_chat, 
         reactions=["✅"],
     )
 
-    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
+    with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
         page.reload()
         page.wait_for_function("!Alpine.store('app').authRequired", timeout=5000)
         page.locator(".console-tabs button.console-tab", has_text="Conversations").click()
@@ -75,7 +75,7 @@ def test_history_pagination_load_more(authenticated_page, e2e_adapter, e2e_tmp):
     turns = [(f"user msg {i}", f"assistant msg {i}") for i in range(30)]
     history_dir, session = _seed_history(e2e_adapter, e2e_tmp, user_id, turns=turns)
 
-    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
+    with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
         page.locator(".console-tabs button.console-tab", has_text="Conversations").click()
         page.wait_for_function("Alpine.store('app').view === 'conversations'", timeout=3000)
         page.evaluate(f"Alpine.store('app').viewSessionId = {session.id!r}")
@@ -128,7 +128,7 @@ def test_compaction_banner_displayed(authenticated_page, e2e_adapter, e2e_tmp):
     with open(actual_path, "w") as f:
         f.writelines(lines)
 
-    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
+    with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
         page.locator(".console-tabs button.console-tab", has_text="Conversations").click()
         page.wait_for_function("Alpine.store('app').view === 'conversations'", timeout=3000)
         page.evaluate("Alpine.$data(document.querySelector('[x-data*=conversationsView]')).reload()")

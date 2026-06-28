@@ -64,7 +64,7 @@ def test_scroll_fab_hidden_when_at_bottom(authenticated_page, e2e_adapter, e2e_t
     page = authenticated_page
     history_dir, user_id, session_id = _seed_long_session(e2e_adapter, e2e_tmp, "atbottom", turns=8)
 
-    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
+    with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
         _open_session(page, user_id, session_id)
 
         # History load forces scroll-to-bottom; FAB must be hidden.
@@ -79,7 +79,7 @@ def test_scroll_fab_appears_when_scrolled_up_and_returns_on_click(authenticated_
     page = authenticated_page
     history_dir, user_id, session_id = _seed_long_session(e2e_adapter, e2e_tmp, "scrollup", turns=12)
 
-    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
+    with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
         _open_session(page, user_id, session_id)
 
         page.evaluate("document.getElementById('messages').scrollTop = 0")
@@ -106,7 +106,7 @@ def test_streaming_does_not_yank_user_when_scrolled_up(authenticated_page, e2e_a
     page = authenticated_page
     history_dir, user_id, session_id = _seed_long_session(e2e_adapter, e2e_tmp, "nopin", turns=10)
 
-    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
+    with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
         _open_session(page, user_id, session_id)
 
         page.evaluate("""
@@ -142,7 +142,7 @@ def test_follow_tail_repins_on_late_content_growth(authenticated_page, e2e_adapt
     page = authenticated_page
     history_dir, user_id, session_id = _seed_long_session(e2e_adapter, e2e_tmp, "followtail", turns=12)
 
-    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
+    with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
         _open_session(page, user_id, session_id)
         _wait_at_bottom(page)
         # Sync isAtBottom=true deterministically (we are at the bottom).
@@ -170,7 +170,7 @@ def test_streaming_follows_when_user_is_at_bottom(authenticated_page, e2e_adapte
     page = authenticated_page
     history_dir, user_id, session_id = _seed_long_session(e2e_adapter, e2e_tmp, "pinfollow", turns=10)
 
-    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
+    with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
         _open_session(page, user_id, session_id)
 
         # Pinned to bottom after the history open.
@@ -207,7 +207,7 @@ def test_revisiting_session_lands_at_bottom(authenticated_page, e2e_adapter, e2e
     history_dir_b = e2e_tmp / "history-scroll-revisit-b"
     (history_dir_b / f"{session_b}.jsonl").rename(history_dir_a / f"{session_b}.jsonl")
 
-    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir_a):
+    with patch("tsugite.history.storage.get_history_dir", return_value=history_dir_a):
         _open_session(page, user_id, session_a)
         _wait_at_bottom(page)
 

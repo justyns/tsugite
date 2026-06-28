@@ -43,7 +43,7 @@ def test_copy_markdown_button_present_on_every_rendered_message(authenticated_pa
         agent_text="# Answer\n\nSome **bold** text.",
     )
 
-    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
+    with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
         _open_session(page, user_id, session_id)
 
         agent = page.locator(".console-turn.agent").last
@@ -79,7 +79,7 @@ def test_copy_markdown_button_writes_raw_markdown_to_clipboard(authenticated_pag
         agent_text=md,
     )
 
-    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
+    with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
         _open_session(page, user_id, session_id)
 
         agent = page.locator(".console-turn.agent").last
@@ -122,7 +122,7 @@ def test_copy_user_message_writes_raw_user_text(authenticated_page, e2e_adapter,
         agent_text="ok",
     )
 
-    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
+    with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
         _open_session(page, user_id, session_id)
 
         user = page.locator(".console-turn.user").last
@@ -146,7 +146,7 @@ def test_copy_code_block_button_injected_per_pre(authenticated_page, e2e_adapter
         agent_text=md,
     )
 
-    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
+    with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
         _open_session(page, user_id, session_id)
         agent = page.locator(".console-turn.agent").last
 
@@ -172,7 +172,7 @@ def test_copy_code_block_copies_full_code_preserving_whitespace(authenticated_pa
         agent_text=md,
     )
 
-    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
+    with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
         _open_session(page, user_id, session_id)
         agent = page.locator(".console-turn.agent").last
         pre = agent.locator("pre").first

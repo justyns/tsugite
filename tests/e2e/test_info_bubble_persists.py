@@ -28,7 +28,7 @@ def test_info_event_renders_as_bubble_on_history_replay(authenticated_page, e2e_
     user_id = page.evaluate("Alpine.store('app').userId")
     history_dir, _ = _seed_history_with_info(e2e_adapter, e2e_tmp, user_id)
 
-    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
+    with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
         page.reload()
         page.wait_for_selector(".console-turn.user", timeout=5000)
         page.wait_for_selector(".console-turn.agent", timeout=5000)

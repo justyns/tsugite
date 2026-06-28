@@ -70,7 +70,7 @@ def test_history_update_during_send_does_not_duplicate_streamed_bubble(chat_page
     response_text = "Final reply text"
     _seed_completed_turn(history_dir, session.id, "test-agent", "the prompt", response_text)
 
-    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
+    with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
         _setup_session(page, session.id, sending=True, user_msg="the prompt")
         _fire_history_update(page)
         page.wait_for_timeout(_RELOAD_WAIT_MS)
@@ -99,7 +99,7 @@ def test_history_update_when_idle_still_reloads(chat_page, e2e_adapter, e2e_tmp)
     response_text = "Adapter-driven reply"
     _seed_completed_turn(history_dir, session.id, "test-agent", "a prompt", response_text)
 
-    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
+    with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
         _setup_session(page, session.id, sending=False)
         _fire_history_update(page)
         page.wait_for_timeout(_RELOAD_WAIT_MS)
@@ -118,7 +118,7 @@ def test_history_update_after_send_completes_reloads(chat_page, e2e_adapter, e2e
     response_text = "Reconciled reply"
     _seed_completed_turn(history_dir, session.id, "test-agent", "a prompt", response_text)
 
-    with patch("tsugite_daemon.adapters.http.get_history_dir", return_value=history_dir):
+    with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
         _setup_session(page, session.id, sending=True)
         _fire_history_update(page)
         page.wait_for_timeout(_RELOAD_WAIT_MS)

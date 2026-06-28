@@ -147,6 +147,21 @@ def _reset_daemon_state(e2e_session_store, e2e_server):
     yield
 
 
+@pytest.fixture(autouse=True)
+def _e2e_jsonl_history(reset_history_backend_fixture):
+    """Pin the JSONL history backend for the e2e suite.
+
+    These tests were written for the JSONL era: they seed `<id>.jsonl` files and
+    patch `tsugite.history.storage.get_history_dir`. The daemon now defaults to the
+    SQLite backend, so without this the in-process daemon would never read the
+    seeded files. Depends on the global (autouse) reset_history_backend_fixture so
+    that reset runs first on setup and the default backend is restored on teardown.
+    """
+    from tsugite.history import JsonlHistoryBackend, set_history_backend
+
+    set_history_backend(JsonlHistoryBackend())
+
+
 @pytest.fixture
 def authenticated_page(page, base_url, e2e_auth_token):
     """Page with auth token pre-injected into localStorage."""
