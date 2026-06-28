@@ -161,10 +161,13 @@ export const sessionsMixin = {
     const cached = state.progress || progressFromPayload(session.progress);
     const liveTurn = !!cached?.statusText && !!cached?.lastEventTime;
     this.loadStatus();
-    // On revisit, the in-memory bubbles (including a streaming progress trace)
-    // are already authoritative; loadHistory would clobber them. The history_update
-    // SSE handler in conversations.js refreshes from the server when needed.
-    const historyPromise = isFirstVisit ? this.loadHistory({ dropTrailing: liveTurn }) : Promise.resolve();
+    // resetHistory() above wipes loadHistory-derived state (compactionSummary,
+    // pagination: _allHistoryMessages / hasMoreHistory). On a revisit we must
+    // rebuild it, so reload unless a live turn owns the in-memory bubbles - while
+    // sending (our own stream) or mid-turn (liveTurn), loadHistory would clobber
+    // the streaming trace, so skip and let the history_update SSE handler refresh.
+    const reloadHistory = isFirstVisit || (!state.sending && !liveTurn);
+    const historyPromise = reloadHistory ? this.loadHistory({ dropTrailing: liveTurn }) : Promise.resolve();
     this.loadSessionEffort();
     // effortLevels is a single shared field, so re-derive it for the newly
     // selected session's model; otherwise it keeps the prior session's levels.

@@ -3,9 +3,58 @@
 import json
 from unittest.mock import patch
 
-from tsugite.history.storage import SessionStorage
+from tsugite_daemon.session_store import Session, SessionSource
 
-from .helpers import open_session_by_url
+from tsugite.history.storage import SessionStorage, generate_session_id
+
+from .helpers import open_conversations, open_session_by_url, select_session_in_view
+
+
+def _make_and_seed(e2e_session_store, e2e_tmp, user_id, turns):
+    """Create an explicit interactive session + seed `turns` user/assistant pairs."""
+    sid = generate_session_id("test-agent")
+    e2e_session_store.create_session(
+        Session(id=sid, agent="test-agent", source=SessionSource.INTERACTIVE.value, user_id=user_id)
+    )
+    history_dir = e2e_tmp / "history"
+    history_dir.mkdir(exist_ok=True)
+    path = history_dir / f"{sid}.jsonl"
+    if path.exists():
+        path.unlink()
+    storage = SessionStorage.create("test-agent", model="test", session_path=path)
+    for i in range(turns):
+        storage.record("user_input", text=f"user message {i} with some length to it")
+        storage.record("model_response", provider="test", model="test", raw_content=f"assistant reply {i}")
+    storage.record("session_end", status="success")
+    return sid
+
+
+def test_pagination_survives_sidebar_revisit(authenticated_page, e2e_session_store, e2e_tmp):
+    """Re-opening a long session from the sidebar must keep the 'load more' button.
+
+    selectSession calls resetHistory() (wiping the pagination state) every time,
+    but on a revisit (state.messages already populated) it skipped loadHistory, so
+    the wiped state was never rebuilt and the button vanished.
+    """
+    page = authenticated_page
+    open_conversations(page)
+    user_id = page.evaluate("Alpine.store('app').userId")
+    long_sid = _make_and_seed(e2e_session_store, e2e_tmp, user_id, 30)
+    short_sid = _make_and_seed(e2e_session_store, e2e_tmp, user_id, 1)
+    history_dir = e2e_tmp / "history"
+
+    with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
+        # Clean first visit (full reload, single select) -> load-more present.
+        open_session_by_url(page, page.url.split("#")[0], user_id, long_sid)
+        page.wait_for_function(
+            "document.querySelectorAll('.console-history-sep button').length > 0", timeout=5000
+        )
+        # Navigate away, then back via the sidebar - the revisit that broke pagination.
+        select_session_in_view(page, short_sid)
+        select_session_in_view(page, long_sid)
+        page.wait_for_function(
+            "document.querySelectorAll('.console-history-sep button').length > 0", timeout=4000
+        )
 
 
 def _seed_history(e2e_adapter, e2e_tmp, user_id, turns, reactions=None):

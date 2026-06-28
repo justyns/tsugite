@@ -13,7 +13,13 @@ from tsugite_daemon.session_store import Session, SessionSource
 
 from tsugite.history.storage import SessionStorage, generate_session_id
 
-from .helpers import CONV_VIEW, open_conversations, reload_conversations_view, select_session_in_view
+from .helpers import (
+    CONV_VIEW,
+    open_conversations,
+    open_session_by_url,
+    reload_conversations_view,
+    select_session_in_view,
+)
 
 
 def _make_session(store, user_id):
@@ -45,6 +51,7 @@ def _seed_new_with_compaction(e2e_tmp, new_session_id, source_id):
     )
     storage.record("user_input", text="continue please")
     storage.record("model_response", provider="test", model="test", raw_content="sure, continuing")
+    storage.record("session_end", status="success")
     return history_dir
 
 
@@ -110,6 +117,41 @@ def test_short_compaction_summary_not_bloated(chat_page):
     banner = _set_compaction_summary(chat_page, "prior work on widgets")
     box = banner.bounding_box()
     assert box["height"] < 120, f"short summary card unexpectedly tall: {box['height']}px"
+
+
+def test_carried_forward_summary_survives_sidebar_revisit(authenticated_page, e2e_session_store, e2e_tmp):
+    """The carried-forward summary card must survive re-opening the session from the
+    sidebar. selectSession's resetHistory() nulls compactionSummary every time, and
+    the revisit path used to skip loadHistory, so the card vanished on revisit."""
+    page = authenticated_page
+    open_conversations(page)
+    user_id = page.evaluate("Alpine.store('app').userId")
+
+    old = _make_session(e2e_session_store, user_id)
+    new = _make_session(e2e_session_store, user_id)
+    other = _make_session(e2e_session_store, user_id)
+    new.parent_session = old.id
+    e2e_session_store._sessions[old.id].superseded_by = new.id
+
+    history_dir = _seed_new_with_compaction(e2e_tmp, new.id, old.id)
+    _, other_storage = _fresh_session_storage(e2e_tmp, other.id)
+    other_storage.record("user_input", text="hi")
+    other_storage.record("model_response", provider="test", model="test", raw_content="hello")
+    other_storage.record("session_end", status="success")
+
+    with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
+        # Clean first visit -> summary card present.
+        open_session_by_url(page, page.url.split("#")[0], user_id, new.id)
+        page.wait_for_function(
+            f"Alpine.$data(document.querySelector({CONV_VIEW!r})).compactionSummary", timeout=5000
+        )
+        # Navigate away then back via the sidebar (the revisit that dropped the card).
+        select_session_in_view(page, other.id)
+        select_session_in_view(page, new.id)
+        page.wait_for_function(
+            f"Alpine.$data(document.querySelector({CONV_VIEW!r})).compactionSummary", timeout=4000
+        )
+        assert page.locator(".console-thread .console-compaction-banner").count() == 1
 
 
 def test_previous_session_header_link_renders_and_navigates(authenticated_page, e2e_session_store, e2e_tmp):
