@@ -5,6 +5,8 @@ from unittest.mock import patch
 
 from tsugite.history.storage import SessionStorage
 
+from .helpers import open_session_by_url
+
 
 def _seed_history(e2e_adapter, e2e_tmp, user_id, turns, reactions=None):
     """Seed user_input + model_response events as a session JSONL.
@@ -34,7 +36,6 @@ def _seed_history(e2e_adapter, e2e_tmp, user_id, turns, reactions=None):
             model="test",
             raw_content=assistant_msg,
         )
-
     for emoji in reactions or []:
         storage.record("reaction", emoji=emoji)
 
@@ -76,14 +77,10 @@ def test_history_pagination_load_more(authenticated_page, e2e_adapter, e2e_tmp):
     history_dir, session = _seed_history(e2e_adapter, e2e_tmp, user_id, turns=turns)
 
     with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
-        page.locator(".console-tabs button.console-tab", has_text="Conversations").click()
-        page.wait_for_function("Alpine.store('app').view === 'conversations'", timeout=3000)
-        page.evaluate(f"Alpine.store('app').viewSessionId = {session.id!r}")
-        page.evaluate("Alpine.$data(document.querySelector('[x-data*=conversationsView]')).reload()")
-        page.wait_for_function(
-            f"Alpine.$data(document.querySelector('[x-data*=conversationsView]')).selectedSessionId === {session.id!r}",
-            timeout=5000,
-        )
+        # Open via the URL hash on a fresh page load (the realistic deep-link path,
+        # a single select). The old manual `viewSessionId = ...; reload()` dance
+        # double-fired the select and raced the pagination state.
+        open_session_by_url(page, page.url.split("#")[0], user_id, session.id)
         page.wait_for_selector(".console-turn.user", timeout=5000)
         # Pagination separator is only rendered when total bubbles > HISTORY_PAGE_SIZE.
         page.wait_for_function(
