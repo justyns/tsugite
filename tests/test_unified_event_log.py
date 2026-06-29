@@ -163,6 +163,38 @@ class TestExtendedMigration:
         reaction = next(e for e in events if e["type"] == "reaction")
         assert reaction["data"]["emoji"] == "👍"
 
+    def test_migrate_daemon_sessions_preserves_timestamp_order(self, tmp_path):
+        """Daemon events whose ts fall *within* the existing conversation range must
+        interleave by timestamp, not append after the last existing event (which
+        broke chronological order in `history show` / export)."""
+        from tsugite.cli.history import migrate_daemon_sessions
+
+        history_dir = tmp_path / "history"
+        history_dir.mkdir()
+        daemon_dir = tmp_path / "daemon" / "sessions"
+        daemon_dir.mkdir(parents=True)
+
+        sid = "interleave"
+        (history_dir / f"{sid}.jsonl").write_text(
+            json.dumps({"type": "user_input", "ts": "2026-01-01T12:00:05+00:00", "data": {"text": "a"}})
+            + "\n"
+            + json.dumps({"type": "model_response", "ts": "2026-01-01T12:00:30+00:00", "data": {"raw_content": "b"}})
+            + "\n"
+        )
+        (daemon_dir / f"{sid}.jsonl").write_text(
+            json.dumps({"type": "reaction", "emoji": "👍", "timestamp": "2026-01-01T12:00:08+00:00"})
+            + "\n"
+            + json.dumps({"type": "prompt_snapshot", "token_breakdown": {}, "timestamp": "2026-01-01T12:00:10+00:00"})
+            + "\n"
+        )
+
+        migrate_daemon_sessions(daemon_dir, history_dir, backup=False, dry_run=False)
+
+        events = [json.loads(line) for line in (history_dir / f"{sid}.jsonl").read_text().splitlines() if line.strip()]
+        tss = [e["ts"] for e in events]
+        assert tss == sorted(tss), f"events not in timestamp order: {tss}"
+        assert [e["type"] for e in events] == ["user_input", "reaction", "prompt_snapshot", "model_response"]
+
     def test_migrate_daemon_sessions_dry_run_does_nothing(self, tmp_path):
         from tsugite.cli.history import migrate_daemon_sessions
 

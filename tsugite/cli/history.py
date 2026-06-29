@@ -526,10 +526,32 @@ def migrate_daemon_sessions(daemon_dir: Path, history_dir: Path, *, backup: bool
             continue
 
         history_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(history_file, "a", encoding="utf-8") as f:
-            for e in new_events:
-                clean_data = {k: v for k, v in e["data"].items() if v is not None}
-                f.write(json.dumps({"type": e["type"], "ts": e["ts"], "data": clean_data}, ensure_ascii=False) + "\n")
+        # Read existing history, combine with the converted daemon events, sort the
+        # whole list by timestamp, and atomically rewrite. Daemon events (reactions,
+        # prompt_snapshots) whose ts fall within the existing range must interleave;
+        # appending (mode "a") put them after the last event and broke chronological
+        # order in `history show` / export.
+        existing_events = []
+        if history_file.exists():
+            with open(history_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        existing_events.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        continue
+        combined = existing_events + [
+            {"type": e["type"], "ts": e["ts"], "data": {k: v for k, v in e["data"].items() if v is not None}}
+            for e in new_events
+        ]
+        combined.sort(key=lambda e: e.get("ts") or "")
+        tmp_file = history_file.with_suffix(history_file.suffix + ".tmp")
+        with open(tmp_file, "w", encoding="utf-8") as f:
+            for e in combined:
+                f.write(json.dumps(e, ensure_ascii=False) + "\n")
+        tmp_file.replace(history_file)
 
         if backup:
             daemon_file.rename(daemon_file.with_suffix(daemon_file.suffix + ".bak"))
