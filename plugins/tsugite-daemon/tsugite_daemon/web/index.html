@@ -1215,27 +1215,27 @@
                         <div class="console-ask-user">
                           <div class="question" x-text="msg.question"></div>
                           <template x-if="msg.answered">
-                            <div style="font-style:italic;color:var(--overlay1);font-size:12px">
+                            <div class="answered">
                               Answered: <em x-text="msg.answer"></em>
                             </div>
                           </template>
                           <template x-if="!msg.answered && msg.questionType === 'yes_no'">
                             <div class="actions">
-                              <button class="hbtn archive" @click="submitAskUser(i, 'yes')">yes</button>
-                              <button class="hbtn" @click="submitAskUser(i, 'no')">no</button>
+                              <button class="primary" @click="submitAskUser(i, 'yes')">yes</button>
+                              <button @click="submitAskUser(i, 'no')">no</button>
                             </div>
                           </template>
                           <template x-if="!msg.answered && msg.questionType === 'choice'">
                             <div class="actions">
                               <template x-for="opt in msg.options" :key="opt">
-                                <button class="hbtn" @click="submitAskUser(i, opt)" x-text="opt"></button>
+                                <button @click="submitAskUser(i, opt)" x-text="opt"></button>
                               </template>
                             </div>
                           </template>
                           <template x-if="!msg.answered && msg.questionType === 'text'">
-                            <form class="actions" @submit.prevent="submitAskUser(i, msg.inputValue || '')" style="display:grid;gap:6px;width:100%">
+                            <form class="actions text-form" @submit.prevent="submitAskUser(i, msg.inputValue || '')">
                               <textarea x-model="msg.inputValue" placeholder="type your answer…" autofocus></textarea>
-                              <button type="submit" class="hbtn archive" style="justify-self:end">send</button>
+                              <button type="submit" class="primary">send</button>
                             </form>
                           </template>
                         </div>

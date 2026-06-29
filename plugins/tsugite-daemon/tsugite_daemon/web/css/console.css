@@ -1059,6 +1059,24 @@ body.is-resizing-sidebar { cursor: col-resize; user-select: none; }
 }
 .console-ask-user .question { font-size: 13px; color: var(--text); }
 .console-ask-user .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.console-ask-user .answered { font-style: italic; color: var(--overlay1); font-size: 12px; }
+/* Use the app's button language here, not the .console-thread-header-scoped .hbtn
+   (which never applied, so these rendered as bare browser buttons). Secondary by
+   default; affirmative/send actions get .primary (the composer send-button look). */
+.console-ask-user .actions button {
+  font-family: var(--font-mono); font-size: 11px; cursor: pointer;
+  padding: 5px 12px; border-radius: 3px;
+  background: var(--surface0); color: var(--text);
+  border: 1px solid var(--surface1);
+}
+.console-ask-user .actions button:hover { background: var(--surface1); border-color: var(--overlay0); }
+.console-ask-user .actions button.primary {
+  background: var(--lavender); color: var(--crust);
+  border-color: var(--lavender); font-weight: 700; letter-spacing: 0.04em;
+}
+.console-ask-user .actions button.primary:hover { background: var(--blue); border-color: var(--blue); }
+.console-ask-user form.text-form { display: grid; gap: 6px; width: 100%; }
+.console-ask-user form.text-form button.primary { justify-self: end; }
 .console-ask-user textarea {
   width: 100%; min-height: 60px;
   background: var(--crust); border: 1px solid var(--surface1);
