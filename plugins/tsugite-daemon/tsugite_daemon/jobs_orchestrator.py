@@ -1359,7 +1359,10 @@ def _parse_verifier_output(raw: str) -> Optional[dict]:
     if not raw:
         return None
     try:
-        parsed = json.loads(raw.strip())
+        # raw_decode parses the FIRST JSON value and ignores any trailing content, so a
+        # verdict object a model emitted twice back-to-back ({...}{...}) - which strict
+        # json.loads rejects as extra data, wrongly marking the Job stuck - still parses.
+        parsed, _end = json.JSONDecoder().raw_decode(raw.strip())
     except json.JSONDecodeError:
         return None
     return parsed if isinstance(parsed, dict) else None

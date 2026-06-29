@@ -133,8 +133,21 @@ def test_parse_verifier_output_handles_strict_json(raw, expected_pass):
 def test_parse_verifier_output_returns_none_for_unparseable():
     assert _parse_verifier_output("no json here, just prose") is None
     assert _parse_verifier_output("") is None
+    assert _parse_verifier_output("   ") is None
     # Fences are no longer stripped - the verifier MUST return raw JSON.
     assert _parse_verifier_output('```json\n{"overall_pass": true}\n```') is None
+
+
+def test_parse_verifier_output_tolerates_duplicate_json():
+    """Some models emit the verdict object twice, back-to-back. Strict json.loads
+    rejected `{...}{...}` as extra data and the Job was wrongly marked stuck even
+    though each object passed. Parse the first object and ignore the trailing copy."""
+    obj = '{"ac_results": [{"ac_text": "x", "pass": true, "reason": "ok"}], "overall_pass": true}'
+    parsed = _parse_verifier_output(obj + obj)
+    assert parsed is not None
+    assert parsed["overall_pass"] is True
+    # Leading whitespace + duplicate still works.
+    assert _parse_verifier_output("  " + obj + "\n" + obj)["overall_pass"] is True
 
 
 # ── orchestrator flow ──
