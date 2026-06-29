@@ -37,3 +37,22 @@ def test_cleanup_history_keeps_newest_per_schedule(backend, tmp_path):
     assert removed == 2  # two oldest runs dropped
     surviving = [i for i in ids if backend.exists(i)]
     assert len(surviving) == 2
+
+
+def test_cleanup_history_retains_active_reuse_session(backend, tmp_path):
+    """A schedule created with session_id reuses one session id (sched_<session_id>,
+    no trailing _<ts>), so it never matches the per-run prefix and used to be reaped
+    as an orphan once old - destroying an active schedule's live conversation."""
+    from datetime import datetime, timedelta, timezone
+    from types import SimpleNamespace
+
+    old = datetime.now(timezone.utc) - timedelta(days=40)
+    s = backend.create("sched", "m", session_id="sched_myreused", timestamp=old)
+    s.record("user_input", text="reused run")
+
+    scheduler = Scheduler(tmp_path / "schedules.json", lambda *a, **k: None)
+    # An active schedule that reuses session_id="myreused" (its own schedule id differs).
+    scheduler._schedules = {"sched-x": SimpleNamespace(session_id="myreused")}
+
+    scheduler.cleanup_history(max_age_days=30)
+    assert backend.exists("sched_myreused"), "active reuse-session history must survive cleanup"

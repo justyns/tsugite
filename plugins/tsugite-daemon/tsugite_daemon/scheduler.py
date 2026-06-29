@@ -545,6 +545,14 @@ class Scheduler:
         backend = get_history_backend()
         cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
         active_prefixes = {f"sched_{sid.replace(':', '_')}_" for sid in self._schedules}
+        # Reuse-session schedules (session_id set) write to a fixed `sched_<session_id>`
+        # with no trailing _<ts>, so they never match a per-run prefix. Protect them
+        # explicitly or cleanup reaps the live conversation history of an active schedule.
+        active_reuse_ids = {
+            f"sched_{entry.session_id.replace(':', '_')}"
+            for entry in self._schedules.values()
+            if entry is not None and getattr(entry, "session_id", None)
+        }
 
         removed = 0
         try:
@@ -555,6 +563,8 @@ class Scheduler:
             by_prefix: dict[str, list[str]] = {}
             orphans: list[str] = []
             for sid in sched_ids:
+                if sid in active_reuse_ids:
+                    continue  # active reuse session - never reap
                 prefix = next((p for p in active_prefixes if sid.startswith(p)), None)
                 if prefix:
                     by_prefix.setdefault(prefix, []).append(sid)
