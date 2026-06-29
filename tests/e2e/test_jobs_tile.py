@@ -100,3 +100,22 @@ def test_job_status_tile_shows_error_in_stuck_state(authenticated_page, e2e_adap
         text = tile.text_content() or ""
         assert "stuck" in text.lower()
         assert "Verifier failed" in text
+
+
+def test_stuck_job_tile_offers_dismiss_action(authenticated_page, e2e_adapter, e2e_tmp):
+    """A stuck job must be dismissible (cancel) from its tile, not only retry/mark-done.
+    Backend: cancel_job now drives STUCK -> CANCELLED (see test_jobs_orchestrator)."""
+    page = authenticated_page
+    page.locator(".console-tabs button.console-tab", has_text="Conversations").click()
+    page.wait_for_function("Alpine.store('app').view === 'conversations'", timeout=3000)
+
+    user_id = page.evaluate("Alpine.store('app').userId")
+    history_dir, _session = _seed_job_status_events(
+        e2e_adapter, e2e_tmp, user_id, "job-dismiss01", states=["stuck"]
+    )
+
+    with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
+        page.reload()
+        page.wait_for_selector('.jx[data-state="stuck"]', timeout=5000)
+        dismiss = page.locator('.jx[data-state="stuck"] .jx-foot button', has_text="dismiss")
+        assert dismiss.count() == 1, "stuck tile must offer a dismiss/cancel action"

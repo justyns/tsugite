@@ -244,7 +244,12 @@ export default () => ({
 
   rowActionsFor(job) {
     if (job.state === 'stuck' || job.state === 'errored') {
-      return [{ key: 'retry', glyph: '↻', primary: true, title: 'retry / restart' }];
+      // Retry resurrects it; dismiss (cancel) gives up -> CANCELLED, distinct from
+      // mark-done which would record a false success.
+      return [
+        { key: 'retry', glyph: '↻', primary: true, title: 'retry / restart' },
+        { key: 'cancel', glyph: '✗', title: 'dismiss' },
+      ];
     }
     if (job.state === 'done' || job.state === 'cancelled') {
       return [{ key: 'open', glyph: '⤢', title: 'open parent session' }];

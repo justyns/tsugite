@@ -355,11 +355,17 @@ class JobsOrchestrator:
         return lock
 
     async def cancel_job(self, job_id: str, reason: str = "cancelled by user") -> Job:
-        """User-initiated cancel from the tile. No-op on terminal Jobs."""
+        """User-initiated cancel/dismiss from the tile.
+
+        No-op only when the Job is already resolved (DONE/CANCELLED). STUCK and
+        ERRORED are *parked*, not resolved: cancel is the "give up / dismiss" action
+        for them, distinct from mark-done (which records a false success). Their
+        sessions are already terminal, so the loop below skips them.
+        """
         job = self._jobs.get(job_id)
         if job is None:
             raise ValueError(f"Unknown job: {job_id}")
-        if job.state in _TERMINAL_JOB_STATES:
+        if job.state in (JobState.DONE.value, JobState.CANCELLED.value):
             return job
         for sid in (job.worker_session_id, job.verifier_session_id):
             if sid and not self._session_already_terminal(sid):

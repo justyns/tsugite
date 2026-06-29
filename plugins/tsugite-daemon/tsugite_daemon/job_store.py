@@ -46,10 +46,11 @@ _VALID_TRANSITIONS: dict[str, frozenset[str]] = {
     ),
     JobState.DONE.value: frozenset(),
     # STUCK/ERRORED are parked, not sinks: retry-with-hint resurrects either to
-    # RUNNING, and mark-done overrides STUCK to DONE.
-    JobState.STUCK.value: frozenset({JobState.RUNNING.value, JobState.DONE.value}),
+    # RUNNING, mark-done overrides STUCK to DONE, and cancel/dismiss gives up on
+    # either -> CANCELLED (distinct from mark-done, which records a false success).
+    JobState.STUCK.value: frozenset({JobState.RUNNING.value, JobState.DONE.value, JobState.CANCELLED.value}),
     JobState.CANCELLED.value: frozenset(),
-    JobState.ERRORED.value: frozenset({JobState.RUNNING.value}),
+    JobState.ERRORED.value: frozenset({JobState.RUNNING.value, JobState.CANCELLED.value}),
 }
 
 

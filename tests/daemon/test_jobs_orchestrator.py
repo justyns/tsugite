@@ -1830,3 +1830,34 @@ async def test_retry_with_hint_allowed_on_errored(store, runner, orchestrator):
     assert updated.error is None
     assert len(runner.started) == 1
     assert "try again with X" in runner.started[0].prompt
+
+
+@pytest.mark.asyncio
+async def test_cancel_stuck_job_transitions_to_cancelled(store, runner, orchestrator):
+    """A stuck Job (verifier attempts exhausted, needs a human) must be cancellable
+    as 'give up / dismiss' -> CANCELLED, not stranded because cancel_job no-op'd on
+    terminal states. mark_done stays the 'accept it' path; cancel is 'give up'."""
+    job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=["x"])
+    store.update_state(job.id, JobState.STUCK.value)
+    result = await orchestrator.cancel_job(job.id, reason="give up")
+    assert result.state == JobState.CANCELLED.value
+    assert result.error == "give up"
+
+
+@pytest.mark.asyncio
+async def test_cancel_errored_job_transitions_to_cancelled(store, runner, orchestrator):
+    """Errored jobs are dismissible the same way as stuck ones."""
+    job = _seed_running_job(store, orchestrator, runner)
+    store.update_state(job.id, JobState.ERRORED.value)
+    result = await orchestrator.cancel_job(job.id, reason="dismiss")
+    assert result.state == JobState.CANCELLED.value
+
+
+@pytest.mark.asyncio
+async def test_cancel_resolved_job_remains_noop(store, runner, orchestrator):
+    """Cancel on an already-resolved (DONE) Job is still a no-op."""
+    job = _seed_running_job(store, orchestrator, runner)
+    store.update_state(job.id, JobState.STUCK.value)
+    store.update_state(job.id, JobState.DONE.value)  # STUCK -> DONE (the mark-done path)
+    result = await orchestrator.cancel_job(job.id)
+    assert result.state == JobState.DONE.value

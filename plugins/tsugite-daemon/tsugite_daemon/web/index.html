@@ -1066,6 +1066,11 @@
                                   <span class="k">↻</span>restart…
                                 </button>
                               </template>
+                              <template x-if="msg.state === 'stuck' || msg.state === 'errored'">
+                                <button type="button" class="jt-btn" @click.stop="jobCancel(msg.job_id)" title="Give up and dismiss this job">
+                                  <span class="k">✗</span>dismiss
+                                </button>
+                              </template>
                               <span class="grow"></span>
                               <template x-if="msg.worker_session_id">
                                 <button type="button" class="jt-btn ghost" @click.stop="selectSessionById(msg.worker_session_id)" title="Open worker session">
