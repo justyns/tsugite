@@ -84,7 +84,6 @@ def test_valid_transitions(store, from_state, to_state):
         (JobState.RUNNING, JobState.DONE),
         (JobState.DONE, JobState.RUNNING),
         (JobState.DONE, JobState.CANCELLED),
-        (JobState.STUCK, JobState.CANCELLED),
         (JobState.CANCELLED, JobState.RUNNING),
         (JobState.ERRORED, JobState.DONE),
     ],
@@ -101,10 +100,13 @@ def test_invalid_transition_raises(store, from_state, to_state):
     "from_state,to_state",
     [
         # The user-facing escape hatches (retry-with-hint, mark-done, retry an
-        # errored job) are real transitions, not out-of-band mutations.
+        # errored job, cancel/dismiss) are real transitions, not out-of-band
+        # mutations.
         (JobState.STUCK, JobState.RUNNING),
         (JobState.STUCK, JobState.DONE),
+        (JobState.STUCK, JobState.CANCELLED),
         (JobState.ERRORED, JobState.RUNNING),
+        (JobState.ERRORED, JobState.CANCELLED),
     ],
 )
 def test_parked_states_have_escape_transitions(store, from_state, to_state):

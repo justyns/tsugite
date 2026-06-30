@@ -110,9 +110,7 @@ def test_stuck_job_tile_offers_dismiss_action(authenticated_page, e2e_adapter, e
     page.wait_for_function("Alpine.store('app').view === 'conversations'", timeout=3000)
 
     user_id = page.evaluate("Alpine.store('app').userId")
-    history_dir, _session = _seed_job_status_events(
-        e2e_adapter, e2e_tmp, user_id, "job-dismiss01", states=["stuck"]
-    )
+    history_dir, _session = _seed_job_status_events(e2e_adapter, e2e_tmp, user_id, "job-dismiss01", states=["stuck"])
 
     with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
         page.reload()

@@ -142,15 +142,11 @@ def test_carried_forward_summary_survives_sidebar_revisit(authenticated_page, e2
     with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
         # Clean first visit -> summary card present.
         open_session_by_url(page, page.url.split("#")[0], user_id, new.id)
-        page.wait_for_function(
-            f"Alpine.$data(document.querySelector({CONV_VIEW!r})).compactionSummary", timeout=5000
-        )
+        page.wait_for_function(f"Alpine.$data(document.querySelector({CONV_VIEW!r})).compactionSummary", timeout=5000)
         # Navigate away then back via the sidebar (the revisit that dropped the card).
         select_session_in_view(page, other.id)
         select_session_in_view(page, new.id)
-        page.wait_for_function(
-            f"Alpine.$data(document.querySelector({CONV_VIEW!r})).compactionSummary", timeout=4000
-        )
+        page.wait_for_function(f"Alpine.$data(document.querySelector({CONV_VIEW!r})).compactionSummary", timeout=4000)
         assert page.locator(".console-thread .console-compaction-banner").count() == 1
 
 

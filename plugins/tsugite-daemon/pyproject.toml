@@ -22,9 +22,6 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["tsugite_daemon"]
 
-[tool.hatch.build.targets.wheel.force-include]
-"tsugite_daemon/web" = "tsugite_daemon/web"
-
 [tool.hatch.build.targets.sdist]
 include = [
   "/tsugite_daemon",

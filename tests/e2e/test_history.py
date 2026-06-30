@@ -46,15 +46,11 @@ def test_pagination_survives_sidebar_revisit(authenticated_page, e2e_session_sto
     with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
         # Clean first visit (full reload, single select) -> load-more present.
         open_session_by_url(page, page.url.split("#")[0], user_id, long_sid)
-        page.wait_for_function(
-            "document.querySelectorAll('.console-history-sep button').length > 0", timeout=5000
-        )
+        page.wait_for_function("document.querySelectorAll('.console-history-sep button').length > 0", timeout=5000)
         # Navigate away, then back via the sidebar - the revisit that broke pagination.
         select_session_in_view(page, short_sid)
         select_session_in_view(page, long_sid)
-        page.wait_for_function(
-            "document.querySelectorAll('.console-history-sep button').length > 0", timeout=4000
-        )
+        page.wait_for_function("document.querySelectorAll('.console-history-sep button').length > 0", timeout=4000)
 
 
 def _seed_history(e2e_adapter, e2e_tmp, user_id, turns, reactions=None):

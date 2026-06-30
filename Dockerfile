@@ -9,7 +9,15 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-reco
 
 COPY . /app
 WORKDIR /app
-RUN pip install --no-cache-dir ".[daemon]"
+# The [daemon] extra pulls tsugite-daemon/-discord/-pty/-sandbox, which aren't on
+# PyPI when this image builds (and pip ignores uv's workspace sources). Install the
+# whole stack from the copied source so the build never depends on a PyPI publish.
+RUN pip install --no-cache-dir \
+    ./plugins/tsugite-pty \
+    ./plugins/tsugite-sandbox \
+    ./plugins/tsugite-daemon \
+    ./plugins/tsugite-discord \
+    .
 
 RUN useradd -m tsu && mkdir -p /workspace && chown tsu:tsu /workspace
 USER tsu
