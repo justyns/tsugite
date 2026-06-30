@@ -1,10 +1,10 @@
 [project]
 name = "tsugite-youtube"
-version = "0.16.0"
+version = "0.17.0"
 description = "Tsugite plugin: YouTube transcript attachment handler"
 requires-python = ">=3.11"
 dependencies = [
-  "tsugite-cli==0.16.0",
+  "tsugite-cli==0.17.0",
   "youtube-transcript-api>=0.6.0",
 ]
 
