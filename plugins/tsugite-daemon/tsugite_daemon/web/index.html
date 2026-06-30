@@ -145,7 +145,7 @@
                     <span class="agent" x-text="s.agent || $store.app.selectedAgent"></span>
                     <span class="sep">·</span>
                     <template x-if="sessionProgressLabel(s)">
-                      <span class="live-label" :class="s.state" x-text="sessionProgressLabel(s)"></span>
+                      <span class="live-label" :class="liveLabelClass(s)" x-text="sessionProgressLabel(s)"></span>
                     </template>
                     <template x-if="!sessionProgressLabel(s)">
                       <span class="preview" x-text="lastMessagePreview(s)"></span>
@@ -214,7 +214,7 @@
                     <span class="agent" x-text="s.agent || $store.app.selectedAgent"></span>
                     <span class="sep">·</span>
                     <template x-if="sessionProgressLabel(s)">
-                      <span class="live-label" :class="s.state" x-text="sessionProgressLabel(s)"></span>
+                      <span class="live-label" :class="liveLabelClass(s)" x-text="sessionProgressLabel(s)"></span>
                     </template>
                     <template x-if="!sessionProgressLabel(s)">
                       <span class="preview" x-text="lastMessagePreview(s)"></span>

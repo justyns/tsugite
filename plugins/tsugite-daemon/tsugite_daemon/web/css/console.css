@@ -262,6 +262,7 @@ body.is-resizing-sidebar { cursor: col-resize; user-select: none; }
 .console-session .row1 .dot.scheduled { background: var(--mauve); }
 .console-session .row1 .dot.done { background: var(--surface2); }
 .console-session .row1 .dot.failed { background: var(--red); }
+.console-session .row1 .dot.awaiting { background: var(--peach); box-shadow: 0 0 8px var(--peach); }
 @keyframes pulse {
   0%   { box-shadow: 0 0 0 0 color-mix(in oklab, var(--green) 60%, transparent); }
   100% { box-shadow: 0 0 0 8px transparent; }
@@ -334,6 +335,7 @@ body.is-resizing-sidebar { cursor: col-resize; user-select: none; }
 .console-session .row2 .live-label { color: var(--yellow); }
 .console-session .row2 .live-label.running { color: var(--green); }
 .console-session .row2 .live-label.starting { color: var(--sky); }
+.console-session .row2 .live-label.awaiting { color: var(--peach); font-weight: 600; }
 .console-session.live .row2 .live-label::after {
   content: "▌"; margin-left: 2px; animation: blink 1s step-end infinite;
 }

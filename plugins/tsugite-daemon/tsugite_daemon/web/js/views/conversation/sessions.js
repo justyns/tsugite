@@ -444,8 +444,21 @@ export const sessionsMixin = {
     return (s.result || s.prompt || '').slice(0, 60) || '';
   },
 
+  // True when the session is blocked on an ask_user prompt: set in
+  // _updateProgressCache for every broadcast event and cleared on reply.
+  _isAwaitingInput(s) {
+    return !!this.sessionsState[s?.id]?.awaitingInput;
+  },
+
+  // Class for the row2 live-label: a waiting session gets its own (peach) treatment
+  // so it doesn't read as the green running/working state.
+  liveLabelClass(s) {
+    return this._isAwaitingInput(s) ? 'awaiting' : (s?.state || '');
+  },
+
   sessionProgressLabel(s) {
     if (!s) return '';
+    if (this._isAwaitingInput(s)) return 'waiting for your reply';
     const compacting = this.sessionCompactingLabel(s);
     if (compacting) return compacting;
     const running = s.state === 'running' || s.state === 'active';

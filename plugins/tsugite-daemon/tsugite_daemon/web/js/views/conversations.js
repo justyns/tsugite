@@ -124,6 +124,7 @@ export default () => ({
       compactedIntoEvent: null,
       compactionSourceId: null,
       liveProgress: null,
+      awaitingInput: false,
     });
   },
 
@@ -683,6 +684,10 @@ export default () => ({
     if (!msg || msg.answered) return;
     msg.answered = true;
     msg.answer = response;
+    // Clear the sidebar "waiting" flag immediately; the agent's resume event
+    // (final_result) isn't broadcast, so don't wait for _updateProgressCache.
+    const st = this.sessionsState[this.selectedSessionId];
+    if (st) st.awaitingInput = false;
     try {
       await post(`/api/agents/${agent}/respond`, { response, user_id: this.userId, session_id: this.selectedSessionId });
     } catch (e) {
@@ -759,6 +764,11 @@ export default () => ({
     if (!id) return;
     const state = this._sessionState(id);
     const evType = d.event_type;
+    // A session blocked on ask_user is waiting on the user. The agent emits no
+    // further events until they reply, so the next event clears the flag. This
+    // runs for every broadcast session_event, so it flags sessions the user
+    // isn't currently viewing too.
+    state.awaitingInput = evType === 'ask_user';
     if (SESSION_END_EVENTS.has(evType)) {
       state.progress = null;
       return;
@@ -1037,6 +1047,9 @@ export default () => ({
   // them to `[object Object]`. Build a flat string so the `pulse` class actually
   // lands on the dot.
   dotClassNames(s) {
+    // A session waiting on the user gets a distinct (peach), attention-pulsing dot
+    // so it reads differently from the green running/working state.
+    if (this._isAwaitingInput(s)) return 'awaiting pulse';
     const base = this.statusDotClass(s.state);
     return this.isSessionProgressFresh(s) ? `${base} pulse` : base;
   },
