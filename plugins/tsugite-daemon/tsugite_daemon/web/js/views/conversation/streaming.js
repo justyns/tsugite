@@ -47,8 +47,12 @@ export const streamingMixin = {
   _finalizeLiveProgress(arr) {
     const cur = this._currentLiveProgress(arr);
     if (!cur) return null;
-    if (cur.steps.length > 0) cur.type = 'progress-done';
-    else arr.pop();
+    if (cur.steps.length > 0) {
+      cur.type = 'progress-done';
+      cur.statusText = '';  // drop the in-flight "Working..."/"Turn N..." label once done
+    } else {
+      arr.pop();
+    }
     return cur;
   },
 
@@ -179,23 +183,16 @@ export const streamingMixin = {
 
       reader.cancel().catch(() => {});
 
-      const arr = sessMessages();
-      const prog = this._currentLiveProgress(arr);
-      if (prog) {
-        if (prog.steps.length > 0) {
-          prog.type = 'progress-done';
-          if (!gotResult && prog.errorText) {
-            prog.failed = true;
-            prog.lastMessage = msg;
-          }
-        } else {
-          arr.pop();
-        }
+      const prog = this._finalizeLiveProgress(sessMessages());
+      if (prog && prog.type === 'progress-done' && !gotResult && prog.errorText) {
+        prog.failed = true;
+        prog.lastMessage = msg;
       }
     } catch (e) {
       const arr = sessMessages();
-      const prog = this._currentLiveProgress(arr);
-      if (prog && prog.steps.length === 0) arr.pop();
+      // Finalize (not just pop-if-empty) so a connection error mid-turn doesn't
+      // strand a non-empty progress bubble as a never-closed "Working..." spinner.
+      this._finalizeLiveProgress(arr);
       arr.push({ type: 'error', text: `Connection error: ${e.message}` });
     } finally {
       sendState.reader = null;
@@ -261,6 +258,17 @@ export const streamingMixin = {
       }
       return;
     }
+    if (event.type === 'info') {
+      // An info line (e.g. send_message()) is its own bubble, like a thought.
+      // Finalize the live progress first so it isn't stranded behind the new
+      // bubble as a never-closed "Working..." spinner. Mirrors history.js.
+      if (event.message) {
+        this._finalizeLiveProgress(arr);
+        arr.push({ type: 'info', text: event.message });
+        this.scrollMessages();
+      }
+      return;
+    }
 
     const prog = this._ensureLiveProgress(arr);
 
@@ -319,10 +327,6 @@ export const streamingMixin = {
       prog.steps.push({ html: `<code>${escapeHtml(event.path)}</code> written (${writeSize})` });
     } else if (event.type === 'warning') {
       prog.steps.push({ html: `<span class="err">${escapeHtml(event.message)}</span>` });
-    } else if (event.type === 'info') {
-      prog.steps.push({ html: escapeHtml(event.message) });
-      arr.push({ type: 'info', text: event.message });
-      this.scrollMessages();
     }
   },
 
