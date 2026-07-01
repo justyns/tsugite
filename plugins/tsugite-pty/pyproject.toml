@@ -1,9 +1,9 @@
 [project]
 name = "tsugite-pty"
-version = "0.17.0"
+version = "0.17.1"
 description = "Tsugite plugin: PTY terminal runtime and tools (daemon-only)"
 requires-python = ">=3.11"
-dependencies = ["tsugite-cli==0.17.0"]
+dependencies = ["tsugite-cli==0.17.1"]
 
 [project.entry-points."tsugite.plugins"]
 pty = "tsugite_pty.tools"
