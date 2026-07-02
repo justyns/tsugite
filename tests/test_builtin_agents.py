@@ -225,3 +225,15 @@ class TestBuiltinDefaultAutoDiscovery:
 
         assert "Web Search" in agent.content
         assert "web_search(query=" in agent.content
+
+
+class TestJobVerifierAgent:
+    """Instruction-content constraints on the job_verifier builtin. Frontmatter
+    invariants (tools, no response_format, turn budget) are pinned by
+    tests/daemon/test_jobs_orchestrator.py::test_verifier_agent_resolves_to_hermetic_config."""
+
+    def test_job_verifier_instructs_inspection_before_failing(self):
+        agent = parse_agent_file(get_builtin_agents_path() / "job_verifier.md")
+        content_lower = agent.content.lower()
+        assert "read_file" in content_lower
+        assert "inspect" in content_lower

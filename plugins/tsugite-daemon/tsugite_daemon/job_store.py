@@ -106,6 +106,12 @@ class Job:
     # workers run inside this directory. Orchestrator prunes it on DONE/CANCELLED
     # and keeps it on STUCK/ERRORED so the user can inspect what the worker did.
     worktree_path: Optional[str] = None
+    # Workspace anchor for non-repo jobs: the parent session's workspace root at
+    # spawn time. Worker, verifier, predicate evaluation, and retries all resolve
+    # file artifacts against this directory - without it the verifier can't
+    # inspect what the worker wrote. None for repo jobs (worktree_path wins) and
+    # for legacy records predating the field.
+    workspace_path: Optional[str] = None
     # When to fire the wake-up message after a terminal transition: one of
     # "done", "stuck", "errored", "terminal" (any terminal state), or "never".
     # Default is None so __post_init__ can normalise to "never"; the JobStore

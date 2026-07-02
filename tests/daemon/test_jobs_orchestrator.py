@@ -123,25 +123,26 @@ def _verifier_session(job, session_id="verifier-1", status=SessionStatus.COMPLET
     ],
 )
 def test_parse_verifier_output_handles_strict_json(raw, expected_pass):
-    """The verifier agent is required to return structured JSON (response_format=json_object);
-    the parser is a thin json.loads wrapper that tolerates leading/trailing whitespace only."""
+    """Clean single-object output (the contract the agent is instructed to follow)
+    parses directly, tolerating leading/trailing whitespace."""
     parsed = _parse_verifier_output(raw)
     assert parsed is not None
     assert parsed["overall_pass"] is expected_pass
 
 
-def test_parse_verifier_output_returns_none_for_unparseable():
+def test_parse_verifier_output_returns_none_when_no_json_object():
     assert _parse_verifier_output("no json here, just prose") is None
     assert _parse_verifier_output("") is None
     assert _parse_verifier_output("   ") is None
-    # Fences are no longer stripped - the verifier MUST return raw JSON.
-    assert _parse_verifier_output('```json\n{"overall_pass": true}\n```') is None
+    # Non-object JSON values are not verdicts.
+    assert _parse_verifier_output("42") is None
+    assert _parse_verifier_output("[1, 2]") is None
 
 
 def test_parse_verifier_output_tolerates_duplicate_json():
     """Some models emit the verdict object twice, back-to-back. Strict json.loads
     rejected `{...}{...}` as extra data and the Job was wrongly marked stuck even
-    though each object passed. Parse the first object and ignore the trailing copy."""
+    though each object passed. The scanner returns the last verdict-shaped object."""
     obj = '{"ac_results": [{"ac_text": "x", "pass": true, "reason": "ok"}], "overall_pass": true}'
     parsed = _parse_verifier_output(obj + obj)
     assert parsed is not None
@@ -201,9 +202,9 @@ async def test_verifier_overall_pass_marks_done(store, runner, orchestrator):
 
 @pytest.mark.asyncio
 async def test_verifier_all_pass_without_overall_pass_marks_done(store, runner, orchestrator):
-    """`response_format: json_object` guarantees valid JSON, not a complete schema.
-    A verifier that lists all-pass criteria but omits the `overall_pass` summary
-    key must still be treated as a pass - not retried into STUCK on a missing key."""
+    """The verifier's verdict is model output and can omit the `overall_pass`
+    summary key. A verifier that lists all-pass criteria without it must still be
+    treated as a pass - not retried into STUCK on a missing key."""
     job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=["a", "b"])
     await orchestrator.on_session_complete(_worker_session(job), "## Summary\ndone\n- a: yes\n- b: yes")
     job = store.get(job.id)
@@ -681,8 +682,8 @@ async def test_late_worker_complete_for_cancelled_job_is_ignored(store, runner, 
 
 def test_verifier_agent_resolves_to_hermetic_config():
     """job_verifier.md must be reasoning-blind: no parent inheritance, no personal
-    attachments, no auto-loaded skills, minimal tools, declared max_turns, and
-    JSON-mode model_kwargs surviving the resolve step."""
+    attachments, no auto-loaded skills, minimal tools, and a turn budget that
+    leaves room for file inspection before the verdict."""
     from pathlib import Path
 
     from tsugite.md_agents import parse_agent_file
@@ -693,9 +694,10 @@ def test_verifier_agent_resolves_to_hermetic_config():
     assert set(agent.config.tools) == {"read_file", "run"}, f"verifier tools leaked: {agent.config.tools}"
     assert agent.config.attachments == [], f"verifier attachments leaked: {agent.config.attachments}"
     assert agent.config.auto_load_skills == [], f"verifier skills leaked: {agent.config.auto_load_skills}"
-    assert agent.config.max_turns == 5, f"verifier max_turns clobbered: {agent.config.max_turns}"
-    assert agent.config.model_kwargs.get("response_format") == {"type": "json_object"}, (
-        f"verifier must request structured JSON output, got {agent.config.model_kwargs!r}"
+    assert agent.config.max_turns >= 10, f"verifier needs turns to read files before deciding: {agent.config.max_turns}"
+    assert "response_format" not in (agent.config.model_kwargs or {}), (
+        "response_format: json_object makes code-block tool calls impossible on JSON-enforcing "
+        "providers; the orchestrator's parser recovers the verdict from mixed output instead"
     )
 
 
@@ -815,7 +817,8 @@ async def test_loop_attempt_metadata_matches_verify_attempts(store, runner, orch
 @pytest.mark.asyncio
 async def test_empty_ac_results_with_overall_pass_false_synthesises_failure_reason(store, runner, orchestrator):
     """If verifier returns overall_pass=false with empty ac_results, the retry prompt and
-    STUCK error must still carry actionable signal - not a headerless followup."""
+    STUCK error must still carry actionable signal - not a headerless followup. The
+    coverage guard pads each ungraded AC by name, which is that signal."""
     job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=["x"])
     await orchestrator.on_session_complete(_worker_session(job), "w1")
     job = store.get(job.id)
@@ -826,8 +829,8 @@ async def test_empty_ac_results_with_overall_pass_false_synthesises_failure_reas
     loop_workers = [s for s in runner.started if (s.metadata or {}).get("loop_attempt")]
     assert loop_workers
     prompt = loop_workers[0].prompt
-    assert "did not list" in prompt or "no failed criteria" in prompt or "review the AC list" in prompt, (
-        f"followup prompt must include a synthetic failure context when ac_results is empty; got {prompt[:200]!r}"
+    assert "x" in prompt and "did not grade" in prompt, (
+        f"followup prompt must name the ungraded AC when ac_results is empty; got {prompt[:200]!r}"
     )
 
 
@@ -1874,3 +1877,225 @@ async def test_cancel_resolved_job_remains_noop(store, runner, orchestrator):
     store.update_state(job.id, JobState.DONE.value)  # STUCK -> DONE (the mark-done path)
     result = await orchestrator.cancel_job(job.id)
     assert result.state == JobState.DONE.value
+
+
+# ── non-repo workspace anchoring ──
+# A file-creating Job with no --repo writes into the parent session's workspace.
+# The verifier (and predicates, and retry workers) must be anchored to that same
+# directory, otherwise file-structure ACs are graded blind and falsely fail.
+
+
+def _anchor_parent_workspace(runner, tmp_path) -> str:
+    runner.store.sessions["parent-1"].workspace_override = str(tmp_path)
+    return str(tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_non_repo_job_persists_parent_workspace_anchor(store, runner, orchestrator, tmp_path):
+    ws = _anchor_parent_workspace(runner, tmp_path)
+    job, started = await orchestrator.create_and_start_job(
+        parent_session_id="parent-1",
+        prompt="create kb page",
+        acceptance_criteria=["frontmatter contains only the allowed keys"],
+    )
+    assert store.get(job.id).workspace_path == ws, "non-repo job must persist the parent workspace root"
+    assert started.workspace_override == ws, "worker must be spawned into the parent workspace"
+
+
+@pytest.mark.asyncio
+async def test_non_repo_job_verifier_anchored_to_parent_workspace(store, runner, orchestrator, tmp_path):
+    ws = _anchor_parent_workspace(runner, tmp_path)
+    job, started = await orchestrator.create_and_start_job(
+        parent_session_id="parent-1",
+        prompt="create kb page",
+        acceptance_criteria=["frontmatter contains only the allowed keys"],
+    )
+    await orchestrator.on_session_complete(
+        _worker_session(job, started.id), "## Summary\nwrote kb/pages/technology/thread.md"
+    )
+    verifier = next(s for s in runner.started if (s.metadata or {}).get("verifier_for"))
+    assert verifier.workspace_override == ws, (
+        "verifier for a non-repo job must run in the worker's workspace so read_file/run see the artifacts"
+    )
+
+
+@pytest.mark.asyncio
+async def test_non_repo_job_retry_worker_keeps_workspace_anchor(store, runner, orchestrator, tmp_path):
+    ws = _anchor_parent_workspace(runner, tmp_path)
+    job, started = await orchestrator.create_and_start_job(
+        parent_session_id="parent-1",
+        prompt="create kb page",
+        acceptance_criteria=["frontmatter contains only the allowed keys"],
+    )
+    await orchestrator.on_session_complete(_worker_session(job, started.id), "wrote the page")
+    fail_json = json.dumps(
+        {"ac_results": [{"ac_text": "frontmatter", "pass": False, "reason": "missing key"}], "overall_pass": False}
+    )
+    await orchestrator.on_session_complete(_verifier_session(store.get(job.id)), fail_json)
+    retry = runner.started[-1]
+    assert (retry.metadata or {}).get("loop_attempt") == 1
+    assert retry.workspace_override == ws, "retry worker must stay anchored to the same workspace"
+
+
+@pytest.mark.asyncio
+async def test_non_repo_job_predicates_evaluate_in_parent_workspace(store, runner, orchestrator, tmp_path):
+    """file_exists:/cmd: predicates on a non-repo job must resolve against the
+    workspace the worker wrote into, not the daemon CWD (where they falsely fail)."""
+    _anchor_parent_workspace(runner, tmp_path)
+    (tmp_path / "kb").mkdir()
+    (tmp_path / "kb" / "thread.md").write_text("---\ntype: reference\n---\n")
+    job, started = await orchestrator.create_and_start_job(
+        parent_session_id="parent-1",
+        prompt="create kb page",
+        acceptance_criteria=["file_exists:kb/thread.md"],
+    )
+    await orchestrator.on_session_complete(_worker_session(job, started.id), "wrote kb/thread.md")
+    fresh = store.get(job.id)
+    assert fresh.state == JobState.DONE.value, (
+        f"predicate must pass against the workspace file (state={fresh.state}, ac_results={fresh.ac_results})"
+    )
+
+
+@pytest.mark.asyncio
+async def test_retry_with_hint_refuses_missing_workspace_anchor(store, runner, orchestrator, tmp_path):
+    """The dead-anchor refusal must cover the non-repo workspace anchor too, not
+    just worktrees - resuming into a deleted directory helps nobody."""
+    import shutil
+
+    gone = tmp_path / "gone"
+    gone.mkdir()
+    runner.store.sessions["parent-1"].workspace_override = str(gone)
+    job, _ = await orchestrator.create_and_start_job(
+        parent_session_id="parent-1", prompt="p", acceptance_criteria=["x"]
+    )
+    store.update_state(job.id, JobState.STUCK.value)
+    shutil.rmtree(gone)
+    with pytest.raises(ValueError, match="no longer exists"):
+        await orchestrator.retry_with_hint(job.id, hint="try again")
+
+
+def test_followup_prompt_carries_original_task_context():
+    """Retry workers are FRESH sessions: a followup prompt of just 'verifier
+    flagged X' gives a small model no idea what the job even is, priming it to
+    emit a fabricated summary instead of doing work (seen live: retry workers
+    with zero tool calls). The followup must restate the original task and warn
+    that this session must do/verify the work itself."""
+    from tsugite_daemon.jobs_orchestrator import _build_followup_prompt
+
+    job = Job(
+        id="",
+        parent_session_id="parent-1",
+        prompt="Create kb/pages/technology/thread.md with typed frontmatter",
+        acceptance_criteria=["frontmatter contains only type, status, created"],
+    )
+    prompt = _build_followup_prompt(job, [{"ac_text": "frontmatter", "reason": "title key present"}])
+    assert "Create kb/pages/technology/thread.md" in prompt, "followup must restate the original task"
+    assert "fresh session" in prompt.lower()
+    assert "tool" in prompt.lower(), "followup must direct the worker to use tools, not describe work"
+
+
+def test_hint_prompt_carries_original_task_context():
+    from tsugite_daemon.jobs_orchestrator import _build_hint_prompt
+
+    job = Job(
+        id="",
+        parent_session_id="parent-1",
+        prompt="Create kb/pages/technology/thread.md with typed frontmatter",
+        acceptance_criteria=["frontmatter contains only type, status, created"],
+    )
+    prompt = _build_hint_prompt(job, "remove the title key")
+    assert "Create kb/pages/technology/thread.md" in prompt, "hint prompt must restate the original task"
+    assert "remove the title key" in prompt
+
+
+def test_verifier_prompt_instructs_file_inspection_for_non_repo_jobs():
+    """The prompt must tell the verifier its CWD holds the worker's artifacts and
+    that file criteria are decided by reading files - not by what the summary quotes.
+    Previously this guidance only existed for repo jobs."""
+    from tsugite_daemon.jobs_orchestrator import _build_verifier_prompt
+
+    job = Job(id="", parent_session_id="parent-1", prompt="create kb page")
+    prompt = _build_verifier_prompt(job, worker_output="wrote kb/thread.md", prose_acs=["frontmatter is valid"])
+    assert "read_file" in prompt, "non-repo verifier prompt must mention read_file inspection"
+    assert "working directory" in prompt.lower()
+
+
+# ── verifier output robustness (the #402 family) ──
+
+
+def test_parse_verifier_output_recovers_verdict_from_noisy_preamble():
+    """Verbatim garbage-preamble shape from a real verifier session: junk JSON
+    tool-call attempts before the actual verdict. The parser must find the
+    verdict object, not stop at the first junk object."""
+    noisy = (
+        '{"cmd": "dummy"}{}{"oops": true}{"no": "tool"}{"still": "wrong"}'
+        '{"error": "I need use markdown code block"}'
+        '{"ac_results": [{"ac_text": "a", "pass": true, "reason": "ok"}], "overall_pass": true}'
+    )
+    parsed = _parse_verifier_output(noisy)
+    assert parsed is not None
+    assert parsed.get("overall_pass") is True
+    assert parsed["ac_results"][0]["pass"] is True
+
+
+def test_parse_verifier_output_recovers_fenced_json():
+    """Without response_format enforcement the model may fence its JSON despite
+    instructions; the verdict inside the fence must still parse."""
+    fenced = '```json\n{"ac_results": [{"ac_text": "a", "pass": true, "reason": "ok"}], "overall_pass": true}\n```'
+    parsed = _parse_verifier_output(fenced)
+    assert parsed is not None
+    assert parsed.get("overall_pass") is True
+
+
+def test_parse_verifier_output_recovers_json_after_prose():
+    raw = 'Here is my verdict after reading the file:\n{"ac_results": [], "overall_pass": false}'
+    parsed = _parse_verifier_output(raw)
+    assert parsed is not None
+    assert parsed.get("overall_pass") is False
+
+
+# ── verdict derivation hardening ──
+
+
+@pytest.mark.asyncio
+async def test_overall_pass_true_with_failing_entry_is_not_done(store, runner, orchestrator):
+    """A per-criterion failure vetoes a contradictory overall_pass=true - the
+    summary bit is derived data and must not override an explicit AC failure."""
+    job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=["a", "b"])
+    await orchestrator.on_session_complete(_worker_session(job), "out")
+    job = store.get(job.id)
+    verifier_json = json.dumps(
+        {
+            "ac_results": [
+                {"ac_text": "a", "pass": True, "reason": "y"},
+                {"ac_text": "b", "pass": False, "reason": "n"},
+            ],
+            "overall_pass": True,
+        }
+    )
+    await orchestrator.on_session_complete(_verifier_session(job), verifier_json)
+    assert store.get(job.id).state != JobState.DONE.value
+
+
+@pytest.mark.asyncio
+async def test_partially_graded_acs_are_padded_as_failed(store, runner, orchestrator):
+    """A verifier that grades only a subset of the prose ACs must not produce a
+    false DONE for the ungraded remainder - ungraded is not verified-pass."""
+    job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=["a", "b", "c"])
+    await orchestrator.on_session_complete(_worker_session(job), "out")
+    job = store.get(job.id)
+    verifier_json = json.dumps(
+        {
+            "ac_results": [
+                {"ac_text": "a", "pass": True, "reason": "y"},
+                {"ac_text": "b", "pass": True, "reason": "y"},
+            ],
+            "overall_pass": True,
+        }
+    )
+    await orchestrator.on_session_complete(_verifier_session(job), verifier_json)
+    fresh = store.get(job.id)
+    assert fresh.state != JobState.DONE.value, "an ungraded AC must not be treated as passed"
+    padded = [e for e in (fresh.ac_results or []) if e.get("ac_index") == 2]
+    assert padded and padded[0]["pass"] is False
+    assert "did not grade" in (padded[0].get("reason") or "")

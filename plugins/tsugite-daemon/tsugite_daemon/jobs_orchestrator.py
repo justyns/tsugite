@@ -49,6 +49,14 @@ def _with_sandbox(job: Job, metadata: dict) -> dict:
     return metadata
 
 
+def _job_workspace(job: Job) -> Optional[str]:
+    """Directory holding the job's file artifacts: the provisioned worktree for
+    repo jobs, else the persisted parent-workspace anchor for non-repo jobs.
+    Every spawn/eval site (worker, verifier, retries, predicates) resolves
+    against this so they all see the same files."""
+    return job.worktree_path or job.workspace_path
+
+
 class JobsOrchestrator:
     """Drives Job state in response to worker/verifier session completions."""
 
@@ -158,6 +166,12 @@ class JobsOrchestrator:
                 notify_when = "never"
             job_kwargs["notify_when"] = notify_when
 
+        # The parent's workspace root: relative --repo paths resolve against it,
+        # and non-repo jobs persist it as their workspace anchor (see
+        # Job.workspace_path) so every later phase resolves the same directory,
+        # even after a daemon restart when the parent session may be gone.
+        workspace_root = self._resolve_workspace_root(parent_session_id)
+
         job = self._jobs.add(
             Job(
                 id="",
@@ -170,22 +184,20 @@ class JobsOrchestrator:
                 timeout_minutes=timeout_minutes,
                 spawned_by=spawned_by,
                 sandbox_override=sandbox_override,
+                workspace_path=str(workspace_root) if workspace_root is not None and not repo else None,
                 **job_kwargs,
             )
         )
 
         # Provision a fresh git worktree if --repo was given so the worker has
         # an isolated working tree (no clashes with the parent shell or other jobs).
-        worktree_path: Optional[str] = None
         if repo:
             try:
                 # Offload the blocking `git worktree add` so a slow clone/checkout
                 # can't stall the daemon's single event loop (the retry/prune paths
-                # already do this). A relative --repo resolves against the parent
-                # session's workspace, not the daemon CWD.
-                workspace_root = self._resolve_workspace_root(parent_session_id)
+                # already do this).
                 worktree_path = await asyncio.to_thread(_provision_worktree, repo, job.id, workspace_root)
-                self._jobs.update(job.id, worktree_path=worktree_path)
+                job = self._jobs.update(job.id, worktree_path=worktree_path)
             except Exception as e:
                 logger.exception("Failed to provision worktree for job '%s': %s", job.id, e)
                 self._finalize(job, JobState.ERRORED, error=f"worktree provisioning failed: {e}")
@@ -193,7 +205,7 @@ class JobsOrchestrator:
 
         worker_prompt = build_worker_prompt(prompt, acceptance_criteria or [], repo)
         try:
-            started = self._spawn_worker(job, prompt=worker_prompt, workspace=worktree_path)
+            started = self._spawn_worker(job, prompt=worker_prompt, workspace=_job_workspace(job))
         except Exception as e:
             # Don't leave the Job persisted in QUEUED; mark it ERRORED so it
             # doesn't accumulate as a zombie in jobs.json.
@@ -444,16 +456,18 @@ class JobsOrchestrator:
                         await asyncio.to_thread(_prune_worktree, worktree_path)
                     workspace_root = self._resolve_workspace_root(job.parent_session_id)
                     worktree_path = await asyncio.to_thread(_provision_worktree, job.repo, job.id, workspace_root)
-                    self._jobs.update(job_id, worktree_path=worktree_path)
+                    job = self._jobs.update(job_id, worktree_path=worktree_path)
                 except Exception as e:
                     logger.exception("retry_with_hint: fresh_workspace failed for job '%s': %s", job_id, e)
                     raise ValueError(f"failed to recreate worktree: {e}") from e
-            elif worktree_path and not Path(worktree_path).is_dir():
-                # Worktree was hand-deleted between STUCK and retry - refuse rather
-                # than spawn a worker into a missing directory.
-                raise ValueError(
-                    f"retry_with_hint: worktree at '{worktree_path}' no longer exists; cannot resume in a missing directory"
-                )
+            else:
+                anchor = _job_workspace(job)
+                if anchor and not Path(anchor).is_dir():
+                    # Worktree/workspace was hand-deleted between STUCK and retry -
+                    # refuse rather than spawn a worker into a missing directory.
+                    raise ValueError(
+                        f"retry_with_hint: workspace at '{anchor}' no longer exists; cannot resume in a missing directory"
+                    )
 
             if reset_counter:
                 self._jobs.update(job_id, verify_attempts=0)
@@ -463,7 +477,7 @@ class JobsOrchestrator:
                 started = self._spawn_worker(
                     job,
                     prompt=_build_hint_prompt(job, hint),
-                    workspace=worktree_path,
+                    workspace=_job_workspace(job),
                     extra_metadata={"hint_attempt": True},
                 )
             except Exception as e:
@@ -602,9 +616,9 @@ class JobsOrchestrator:
             source=SessionSource.SPAWNED.value,
             prompt=verifier_prompt,
             agent_file=VERIFIER_AGENT,
-            # Same worktree as the worker - the verifier inspects `git diff` /
-            # files, which only exist there for repo jobs.
-            workspace_override=job.worktree_path,
+            # Same directory as the worker - the verifier inspects the files the
+            # worker wrote (and `git diff` for repo jobs), which only exist there.
+            workspace_override=_job_workspace(job),
             metadata=_with_sandbox(job, {"job_id": job.id, "verifier_for": worker.id}),
         )
         try:
@@ -703,6 +717,15 @@ class JobsOrchestrator:
         # Strict True: a string like "false" / "no" is truthy in Python but
         # explicitly NOT a pass. Treat anything other than literal True as failure.
         ac_results_raw = parsed.get("ac_results", [])
+        # Coverage guard: a verifier that grades only a subset of the prose ACs
+        # must not yield DONE for the ungraded remainder - ungraded is not
+        # verified. Pad the missing tail (positional, matching ac_index_map) as
+        # failed so the UI shows it and the retry prompt names it.
+        if isinstance(ac_results_raw, list) and len(ac_results_raw) < len(prose_entries):
+            ac_results_raw = list(ac_results_raw) + [
+                {"ac_text": e["ac_text"], "pass": False, "reason": "verifier did not grade this criterion"}
+                for e in prose_entries[len(ac_results_raw) :]
+            ]
         self._record_ac_results(
             job.id,
             ac_results_raw,
@@ -710,13 +733,14 @@ class JobsOrchestrator:
             ac_index_map=prose_ac_indices,
             merge_with_existing_attempt=merge_with_existing_attempt,
         )
-        # `response_format: json_object` forces valid JSON, not a complete schema -
-        # a verifier can list all-pass criteria yet omit the `overall_pass` summary
-        # key. When it's absent, derive the verdict from the criteria so an all-pass
-        # round isn't wrongly retried into STUCK. An explicit non-True value (False,
-        # "false", etc.) is still honoured as failure above.
+        # The per-criterion verdicts are the ground truth; `overall_pass` is a
+        # derived summary the model can omit or get wrong. Derive it when absent
+        # (an all-pass round must not be retried into STUCK on a missing key)
+        # and veto a contradictory True when any entry explicitly fails - both
+        # directions fail closed. An explicit non-True value (False, "false",
+        # etc.) is still honoured as failure.
         overall_pass = parsed.get("overall_pass")
-        if overall_pass is None and isinstance(ac_results_raw, list) and ac_results_raw:
+        if isinstance(ac_results_raw, list) and ac_results_raw and overall_pass in (None, True):
             overall_pass = all(isinstance(r, dict) and r.get("pass") is True for r in ac_results_raw)
         if overall_pass is True:
             self._update_latest_attempt(job.id, verifier_pass=True)
@@ -768,7 +792,7 @@ class JobsOrchestrator:
             started = self._spawn_worker(
                 job,
                 prompt=_build_followup_prompt(job, failed_acs),
-                workspace=job.worktree_path,
+                workspace=_job_workspace(job),
                 # loop_attempt mirrors verify_attempts (1-indexed retry count).
                 extra_metadata={"loop_attempt": new_attempts},
             )
@@ -1068,26 +1092,54 @@ def _build_verifier_prompt(job: Job, worker_output: str, prose_acs: Optional[lis
     parts.append("")
     parts.append("Worker output:")
     parts.append(worker_output.strip() or "(empty)")
+    parts.append("")
+    parts.append(
+        "You are running in the worker's working directory, so files it produced are "
+        "directly inspectable. For any criterion about a file's existence, contents, or "
+        "structure, read the actual file (`read_file`, or `run` for listings) before "
+        "deciding - do not fail a criterion just because the worker's summary doesn't "
+        "inline the contents."
+    )
     if job.repo:
-        parts.append("")
         parts.append(f"Repo: {job.repo}")
         parts.append("(use `run` to inspect `git diff` or `git log` if relevant.)")
     return "\n".join(parts)
 
 
+def _retry_context_lines(job: Job) -> list[str]:
+    """Shared preamble for retry/hint worker prompts.
+
+    Retry workers are FRESH sessions with none of the prior attempt's
+    conversation. Without the original task restated, the worker has nothing to
+    ground its work in and (observed live) tends to emit a fabricated summary
+    with zero tool calls instead of doing the work.
+    """
+    return [
+        "You are a fresh session retrying an earlier Job attempt. Any files the previous",
+        "attempt produced are in your working directory; you have none of its conversation.",
+        "",
+        "Original task:",
+        "",
+        job.prompt,
+        "",
+        "Use tools to verify the current state and to make the changes - do not claim work",
+        "you have not performed in this session.",
+    ]
+
+
 def _build_hint_prompt(job: Job, hint: str) -> str:
     """Compose the retry-with-hint prompt for a worker resurrected from STUCK."""
-    parts = [
-        "This job previously hit the verifier's max-attempt limit. A user has provided a hint:",
-        "",
-        hint,
-        "",
-        "Address the hint and produce a new structured summary in the same shape as before.",
-        "",
-        "Acceptance criteria the verifier will check:",
-    ]
+    parts = _retry_context_lines(job)
+    parts.append("")
+    parts.append("This job previously hit the verifier's max-attempt limit. A user provided a hint:")
+    parts.append("")
+    parts.append(hint)
+    parts.append("")
+    parts.append("Acceptance criteria the verifier will check:")
     for i, ac in enumerate(job.acceptance_criteria, 1):
         parts.append(f"{i}. {ac}")
+    parts.append("")
+    parts.append("Address the hint, then produce the structured summary required by your instructions.")
     return "\n".join(parts)
 
 
@@ -1174,11 +1226,13 @@ def _build_notify_message(job: Job) -> str:
 
 
 def _build_followup_prompt(job: Job, failed_acs: list[dict]) -> str:
-    parts = ["Verifier flagged the following acceptance criteria as not met:"]
+    parts = _retry_context_lines(job)
+    parts.append("")
+    parts.append("The verifier flagged these acceptance criteria as not met:")
     for ac in failed_acs:
         parts.append(f"- {ac.get('ac_text', '?')}: {ac.get('reason', '?')}")
     parts.append("")
-    parts.append("Address them and produce a new structured summary in the same shape as before.")
+    parts.append("Address them, then produce the structured summary required by your instructions.")
     return "\n".join(parts)
 
 
@@ -1248,12 +1302,12 @@ def partition_acs(acs: list[str]) -> tuple[list[dict], list[dict]]:
 
 
 def _resolve_predicate_cwd(job: Job) -> Optional[str]:
-    """Pick cwd for predicate evaluation: worktree_path > repo > None."""
-    if job.worktree_path:
-        return job.worktree_path
-    if job.repo:
-        return job.repo
-    return None
+    """Pick cwd for predicate evaluation: worktree_path > repo > workspace anchor.
+
+    The workspace fallback keeps non-repo jobs' `file_exists:`/`cmd:` predicates
+    resolving against the directory the worker wrote into, not the daemon CWD.
+    """
+    return job.worktree_path or job.repo or job.workspace_path
 
 
 def _evaluate_predicate(
@@ -1299,11 +1353,13 @@ def _evaluate_predicate(
             expected = predicate.get("expected", 0) if kind == "exit_code" else 0
             if cwd is None:
                 logger.warning(
-                    "Predicate eval has no cwd (job has neither worktree_path nor repo); "
+                    "Predicate eval has no cwd (job has no worktree, repo, or workspace anchor); "
                     "refusing to run '%s' in the daemon's cwd - marking criterion unmet",
                     cmd,
                 )
-                return verdict(False, "no working directory for command predicate (job has neither worktree nor repo)")
+                return verdict(
+                    False, "no working directory for command predicate (job has no worktree, repo, or workspace anchor)"
+                )
             if sandbox_override:
                 from tsugite.core.sandbox import SandboxConfig, get_sandbox_class
 
@@ -1348,24 +1404,41 @@ def _evaluate_predicate(
 
 
 def _parse_verifier_output(raw: str) -> Optional[dict]:
-    """Parse the verifier's JSON output. The verifier agent file forces
-    `response_format: json_object` so the LLM is required to return valid JSON;
-    if parsing still fails we treat it as a verifier malfunction.
+    """Extract the verifier's JSON verdict from its output text.
 
-    Returns None for: empty input, malformed JSON, OR valid JSON that isn't an
-    object (`42`, `null`, `true`, `[]`, `\"oops\"`) - `_handle_verifier_complete`
-    must be able to do `parsed.get(...)` on the return value.
+    Verifier output is model text, not guaranteed clean JSON: real sessions have
+    produced junk-JSON preambles (`{"cmd": "dummy"}{}...` tool-call flailing),
+    markdown-fenced verdicts, prose around the object, and the verdict emitted
+    twice back-to-back. Scan every top-level JSON object in the text and prefer
+    the LAST one that looks like a verdict (has `ac_results` or `overall_pass`);
+    fall back to the first object so bare single-object output still parses.
+
+    Returns None when no JSON object is found at all (empty input, prose-only,
+    or non-object JSON like `42` / `[]`) - `_handle_verifier_complete` must be
+    able to do `parsed.get(...)` on the return value.
     """
     if not raw:
         return None
-    try:
-        # raw_decode parses the FIRST JSON value and ignores any trailing content, so a
-        # verdict object a model emitted twice back-to-back ({...}{...}) - which strict
-        # json.loads rejects as extra data, wrongly marking the Job stuck - still parses.
-        parsed, _end = json.JSONDecoder().raw_decode(raw.strip())
-    except json.JSONDecodeError:
-        return None
-    return parsed if isinstance(parsed, dict) else None
+    decoder = json.JSONDecoder()
+    first_obj: Optional[dict] = None
+    last_verdict: Optional[dict] = None
+    idx = 0
+    while True:
+        start = raw.find("{", idx)
+        if start == -1:
+            break
+        try:
+            value, end = decoder.raw_decode(raw, start)
+        except json.JSONDecodeError:
+            idx = start + 1
+            continue
+        if isinstance(value, dict):
+            if first_obj is None:
+                first_obj = value
+            if "ac_results" in value or "overall_pass" in value:
+                last_verdict = value
+        idx = end
+    return last_verdict if last_verdict is not None else first_obj
 
 
 def _iso_now() -> str:
