@@ -39,6 +39,8 @@ _VALID_NOTIFY_WHEN = frozenset({"done", "stuck", "errored", "terminal", "never"}
 _PREDICATE_TIMEOUT_SECONDS = 30
 # Stderr snippet length surfaced in the failure reason.
 _PREDICATE_STDERR_TRUNCATE = 100
+# Excerpt length for unparseable-verifier-output diagnostics.
+_VERIFIER_EXCERPT_LIMIT = 200
 
 
 def _with_sandbox(job: Job, metadata: dict) -> dict:
@@ -705,8 +707,14 @@ class JobsOrchestrator:
         parsed = _parse_verifier_output(result_str)
         if parsed is None:
             self._update_latest_attempt(job.id, verifier_pass=False)
-            # Synthetic one-entry batch so the UI sees *something* for this attempt.
-            synthetic = [{"ac_text": "(verifier output)", "pass": False, "reason": "verifier output unparseable"}]
+            # Synthetic one-entry batch so the UI sees *something* for this
+            # attempt; the excerpt makes the formatting failure diagnosable from
+            # the tile instead of requiring a dig through the verifier session.
+            reason = (
+                "verifier output unparseable (no JSON verdict object found); "
+                f"excerpt: {_sanitize_output_excerpt(result_str)}"
+            )
+            synthetic = [{"ac_text": "(verifier output)", "pass": False, "reason": reason}]
             self._record_ac_results(
                 job.id,
                 synthetic,
@@ -1401,6 +1409,20 @@ def _evaluate_predicate(
         return verdict(False, "timeout")
     except Exception as e:
         return verdict(False, f"evaluation error: {e}")
+
+
+def _sanitize_output_excerpt(raw: str) -> str:
+    """Bounded single-line excerpt of verifier output for error diagnostics.
+
+    Masks registered secrets BEFORE truncating - truncating first could split a
+    secret so the mask no longer recognises it, leaking the remainder.
+    """
+    from tsugite.secrets.registry import get_registry
+
+    text = get_registry().mask(" ".join((raw or "").split()))
+    if len(text) > _VERIFIER_EXCERPT_LIMIT:
+        text = text[:_VERIFIER_EXCERPT_LIMIT] + "…"
+    return text or "(empty)"
 
 
 def _parse_verifier_output(raw: str) -> Optional[dict]:

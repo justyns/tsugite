@@ -2054,6 +2054,50 @@ def test_parse_verifier_output_recovers_json_after_prose():
     assert parsed.get("overall_pass") is False
 
 
+def test_parse_verifier_output_smoke_regression_string():
+    """Verbatim regression string requested by the tracker (the 2026-06-21
+    smoke-test failure shape)."""
+    raw = '{"cmd":"dummy"}{}{"still":"wrong"}{"ac_results":[{"ac_text":"x","pass":true,"reason":"ok"}],"overall_pass":true}'
+    parsed = _parse_verifier_output(raw)
+    assert parsed is not None
+    assert parsed["overall_pass"] is True
+    assert parsed["ac_results"][0]["ac_text"] == "x"
+
+
+@pytest.mark.asyncio
+async def test_unparseable_verifier_output_error_includes_excerpt(store, runner, orchestrator):
+    """When no verdict object can be extracted, the Job error must carry a
+    concise parse failure plus a sanitized excerpt of what the verifier actually
+    said - a bare 'verifier output unparseable' is undiagnosable."""
+    job = store.add(
+        Job(id="", parent_session_id="parent-1", prompt="do the thing", acceptance_criteria=["x"], max_attempts=1)
+    )
+    orchestrator.register_worker(job.id, "worker-1", timeout_minutes=30)
+    await orchestrator.on_session_complete(_worker_session(store.get(job.id)), "did it")
+    await orchestrator.on_session_complete(
+        _verifier_session(store.get(job.id)), "I could not decide, sorry about the format"
+    )
+    fresh = store.get(job.id)
+    assert fresh.state == JobState.STUCK.value
+    assert "could not decide" in (fresh.error or ""), f"error must include an output excerpt; got {fresh.error!r}"
+    assert "no JSON verdict" in (fresh.error or ""), "error must name the parse failure concisely"
+
+
+@pytest.mark.asyncio
+async def test_unparseable_verifier_excerpt_is_bounded(store, runner, orchestrator):
+    """The excerpt must be truncated - a multi-KB garbage output must not land
+    verbatim in job.error (it renders on the tile and in notify messages)."""
+    job = store.add(
+        Job(id="", parent_session_id="parent-1", prompt="do the thing", acceptance_criteria=["x"], max_attempts=1)
+    )
+    orchestrator.register_worker(job.id, "worker-1", timeout_minutes=30)
+    await orchestrator.on_session_complete(_worker_session(store.get(job.id)), "did it")
+    await orchestrator.on_session_complete(_verifier_session(store.get(job.id)), "y" * 5000)
+    fresh = store.get(job.id)
+    assert fresh.state == JobState.STUCK.value
+    assert len(fresh.error or "") < 500, f"error must stay bounded; got {len(fresh.error or '')} chars"
+
+
 # ── verdict derivation hardening ──
 
 
