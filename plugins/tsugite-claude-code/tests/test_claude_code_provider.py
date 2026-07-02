@@ -25,14 +25,18 @@ class TestClaudeCodeModelParams:
         assert model == "claude-sonnet-4-6"
 
     def test_model_id_maps_short_names(self):
-        assert get_model_id("claude_code:sonnet") == "claude-sonnet-4-6"
+        assert get_model_id("claude_code:sonnet") == "claude-sonnet-5"
         assert get_model_id("claude_code:opus") == "claude-opus-4-8"
         assert get_model_id("claude_code:haiku") == "claude-haiku-4-5-20251001"
+        assert get_model_id("claude_code:fable") == "claude-fable-5"
 
-    def test_model_id_version_pinned_opus_aliases(self):
+    def test_model_id_version_pinned_aliases(self):
         assert get_model_id("claude_code:opus-4-8") == "claude-opus-4-8"
         assert get_model_id("claude_code:opus-4-7") == "claude-opus-4-7"
         assert get_model_id("claude_code:opus-4-6") == "claude-opus-4-6"
+        assert get_model_id("claude_code:sonnet-5") == "claude-sonnet-5"
+        assert get_model_id("claude_code:sonnet-4-6") == "claude-sonnet-4-6"
+        assert get_model_id("claude_code:fable-5") == "claude-fable-5"
 
     def test_model_id_full_id_passthrough(self):
         assert get_model_id("claude_code:claude-sonnet-4-6") == "claude-sonnet-4-6"

@@ -15,6 +15,9 @@ logger = logging.getLogger(__name__)
 _CLAUDE_CODE_EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"]
 
 _CLAUDE_CODE_MODELS: dict[str, ModelInfo] = {
+    "claude_code/claude-fable-5": ModelInfo(
+        max_input_tokens=1_000_000, supports_vision=True, supported_effort_levels=_CLAUDE_CODE_EFFORT_LEVELS
+    ),
     "claude_code/claude-opus-4-8": ModelInfo(
         max_input_tokens=1_000_000, supports_vision=True, supported_effort_levels=_CLAUDE_CODE_EFFORT_LEVELS
     ),
@@ -22,6 +25,9 @@ _CLAUDE_CODE_MODELS: dict[str, ModelInfo] = {
         max_input_tokens=1_000_000, supports_vision=True, supported_effort_levels=_CLAUDE_CODE_EFFORT_LEVELS
     ),
     "claude_code/claude-opus-4-6": ModelInfo(
+        max_input_tokens=1_000_000, supports_vision=True, supported_effort_levels=_CLAUDE_CODE_EFFORT_LEVELS
+    ),
+    "claude_code/claude-sonnet-5": ModelInfo(
         max_input_tokens=1_000_000, supports_vision=True, supported_effort_levels=_CLAUDE_CODE_EFFORT_LEVELS
     ),
     "claude_code/claude-sonnet-4-6": ModelInfo(
@@ -32,12 +38,18 @@ _CLAUDE_CODE_MODELS: dict[str, ModelInfo] = {
     ),
 }
 
+# Bare tier aliases track the newest model in that tier; version-pinned aliases
+# stay for reproducible configs.
 _ALIASES = {
+    "fable": "claude-fable-5",
+    "fable-5": "claude-fable-5",
     "opus": "claude-opus-4-8",
     "opus-4-8": "claude-opus-4-8",
     "opus-4-7": "claude-opus-4-7",
     "opus-4-6": "claude-opus-4-6",
-    "sonnet": "claude-sonnet-4-6",
+    "sonnet": "claude-sonnet-5",
+    "sonnet-5": "claude-sonnet-5",
+    "sonnet-4-6": "claude-sonnet-4-6",
     "haiku": "claude-haiku-4-5-20251001",
 }
 
