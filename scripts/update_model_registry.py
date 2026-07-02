@@ -1,19 +1,32 @@
 #!/usr/bin/env python3
-"""Fetch litellm's model database and regenerate the model registry in provider files.
+"""Fetch the models.dev catalog and regenerate the model registry in provider files.
+
+Source: https://models.dev - an open-source model catalog (140+ providers) with
+structured capability metadata: reasoning options, modalities, context/output
+limits, and per-million costs (including cache pricing, unused here for now).
+Endpoint: https://models.dev/api.json - a dict keyed by provider id, each
+carrying a `models` dict keyed by model id.
 
 Usage:
     uv run python scripts/update_model_registry.py
+
+The refresh is manual: run it when new models ship, review the diff of the
+generated blocks, then run `uv run pytest` before committing. Only the code
+between the BEGIN/END markers is rewritten; manual ModelInfo entries outside
+the markers take priority at runtime, and the script warns when a generated
+key duplicates one.
 """
 
+import json
 import re
 import sys
 from pathlib import Path
 
 import httpx
 
-# TODO: Is there a abetter  source for this information?  None of the official apis seem to return their own pricing info or capabilities for the most part
-#       ^ maybe openrouter?   Need to verify whether it's the same via openrouter vs direct api calls.
-LITELLM_URL = "https://raw.githubusercontent.com/BerriAI/litellm/refs/heads/main/model_prices_and_context_window.json"
+from tsugite.providers.anthropic import _EFFORT_TO_BUDGET
+
+MODELS_DEV_URL = "https://models.dev/api.json"
 
 PROJECT_ROOT = Path(__file__).parent.parent
 PROVIDER_FILES = {
@@ -21,19 +34,16 @@ PROVIDER_FILES = {
     "anthropic": PROJECT_ROOT / "tsugite" / "providers" / "anthropic.py",
 }
 
-# litellm_provider value → our provider name
+# models.dev provider id → our provider name
 PROVIDER_MAP = {
     "openai": "openai",
     "anthropic": "anthropic",
 }
 
-# Models to skip (non-chat, deprecated, bedrock variants, etc.)
+# Model-id prefixes to skip (embeddings, media generation, moderation, etc.)
+# that the output-modality check alone doesn't catch (e.g. embeddings report
+# text output).
 SKIP_PREFIXES = (
-    "ft:",
-    "azure/",
-    "bedrock/",
-    "vertex_ai/",
-    "sagemaker/",
     "text-",
     "tts-",
     "whisper-",
@@ -48,65 +58,65 @@ SKIP_PREFIXES = (
     "codex-",
 )
 
-# Reasoning model name patterns (for supports_reasoning flag)
-REASONING_PATTERNS = re.compile(r"^(o1|o3|o4)(-mini|-preview|-pro)?")
-
-# Reasoning models that accept the reasoning_effort parameter.
-# Excludes o1-mini (unsupported by OpenAI).
-EFFORT_LEVELS_PATTERNS = re.compile(r"^(o1(-pro)?|o3(-mini|-pro)?|o4(-mini|-pro)?)(-\d{4}-\d{2}-\d{2})?$")
-
-# Anthropic models that support extended thinking (Claude 4+ families).
-ANTHROPIC_THINKING_PATTERNS = re.compile(r"^claude-(opus|sonnet|haiku)-4")
+# Tsugite's Anthropic provider translates effort strings into extended-thinking
+# budget_tokens, so any model with a budget_tokens reasoning option supports
+# that full vocabulary - even when models.dev lists a narrower native effort
+# set (or none, e.g. the budget-only Haiku 4.5 / Claude 3.7 Sonnet). Derived
+# from the runtime translation table so codegen can't drift from it.
+BUDGET_TOKENS_EFFORT_LEVELS = list(_EFFORT_TO_BUDGET)
 
 
-def fetch_litellm_data() -> dict:
-    print(f"Fetching {LITELLM_URL}...")
-    resp = httpx.get(LITELLM_URL, timeout=30)
+def fetch_models_dev_data() -> dict:
+    print(f"Fetching {MODELS_DEV_URL}...")
+    resp = httpx.get(MODELS_DEV_URL, timeout=30, follow_redirects=True)
     resp.raise_for_status()
     data = resp.json()
-    data.pop("sample_spec", None)
-    print(f"  Got {len(data)} entries")
+    print(f"  Got {len(data)} providers")
     return data
 
 
 def should_skip(key: str, entry: dict) -> bool:
-    if entry.get("mode") != "chat":
+    modalities = entry.get("modalities") or {}
+    if "text" not in (modalities.get("output") or []):
         return True
-    if any(key.startswith(p) for p in SKIP_PREFIXES):
-        return True
-    if "/" in key:
-        return True
-    return False
+    return any(key.startswith(p) for p in SKIP_PREFIXES)
+
+
+def _effort_levels(entry: dict, provider: str) -> list[str] | None:
+    """Derive supported_effort_levels from structured reasoning_options."""
+    options = {o.get("type"): o for o in (entry.get("reasoning_options") or []) if isinstance(o, dict)}
+    if provider == "anthropic" and "budget_tokens" in options:
+        return list(BUDGET_TOKENS_EFFORT_LEVELS)
+    effort = options.get("effort")
+    if effort and effort.get("values"):
+        return list(effort["values"])
+    return None
 
 
 def entry_to_model_info(key: str, entry: dict, provider: str) -> str:
-    """Convert a litellm entry to a ModelInfo(...) constructor string."""
-    max_in = entry.get("max_input_tokens")
-    max_out = entry.get("max_output_tokens")
-    cost_in = entry.get("input_cost_per_token")
-    cost_out = entry.get("output_cost_per_token")
-    vision = entry.get("supports_vision", False)
-    reasoning = bool(REASONING_PATTERNS.match(key))
+    """Convert a models.dev entry to a ModelInfo(...) constructor string."""
+    limit = entry.get("limit") or {}
+    cost = entry.get("cost") or {}
+    input_modalities = (entry.get("modalities") or {}).get("input") or []
 
     parts = []
-    if max_in:
-        parts.append(f"max_input_tokens={max_in:_}")
-    if max_out:
-        parts.append(f"max_output_tokens={max_out:_}")
-    if cost_in:
-        cpm_in = round(cost_in * 1_000_000, 4)
-        parts.append(f"input_cost_per_million={cpm_in}")
-    if cost_out:
-        cpm_out = round(cost_out * 1_000_000, 4)
-        parts.append(f"output_cost_per_million={cpm_out}")
-    if vision:
+    if limit.get("context"):
+        parts.append(f"max_input_tokens={limit['context']:_}")
+    if limit.get("output"):
+        parts.append(f"max_output_tokens={limit['output']:_}")
+    if cost.get("input"):
+        parts.append(f"input_cost_per_million={round(float(cost['input']), 4)}")
+    if cost.get("output"):
+        parts.append(f"output_cost_per_million={round(float(cost['output']), 4)}")
+    if "image" in input_modalities:
         parts.append("supports_vision=True")
-    if reasoning:
+    if "audio" in input_modalities:
+        parts.append("supports_audio=True")
+    if entry.get("reasoning"):
         parts.append("supports_reasoning=True")
-    if EFFORT_LEVELS_PATTERNS.match(key):
-        parts.append('supported_effort_levels=["low", "medium", "high"]')
-    elif provider == "anthropic" and ANTHROPIC_THINKING_PATTERNS.match(key):
-        parts.append('supported_effort_levels=["low", "medium", "high", "max"]')
+    effort_levels = _effort_levels(entry, provider)
+    if effort_levels:
+        parts.append(f"supported_effort_levels={json.dumps(effort_levels)}")
 
     return f"ModelInfo({', '.join(parts)})"
 
@@ -157,31 +167,22 @@ def replace_generated_block(file_path: Path, provider: str, new_block: str) -> s
 
 
 def main():
-    data = fetch_litellm_data()
+    data = fetch_models_dev_data()
 
-    # Group by our provider names
-    by_provider: dict[str, dict[str, str]] = {p: {} for p in PROVIDER_MAP.values()}
-
-    for key, entry in data.items():
-        if should_skip(key, entry):
+    for dev_provider, provider in PROVIDER_MAP.items():
+        entries = (data.get(dev_provider) or {}).get("models") or {}
+        if not entries:
+            print(f"  WARNING: no models found for provider '{dev_provider}'")
             continue
-
-        litellm_provider = entry.get("litellm_provider", "")
-        our_provider = PROVIDER_MAP.get(litellm_provider)
-        if not our_provider:
-            continue
-
-        model_info_str = entry_to_model_info(key, entry, our_provider)
-        by_provider[our_provider][key] = model_info_str
-
-    # Write to each provider file
-    for provider, models in by_provider.items():
-        file_path = PROVIDER_FILES.get(provider)
-        if not file_path:
-            continue
+        models = {
+            key: entry_to_model_info(key, entry, provider)
+            for key, entry in entries.items()
+            if not should_skip(key, entry)
+        }
 
         print(f"\n{provider}: {len(models)} chat models found")
 
+        file_path = PROVIDER_FILES[provider]
         manual_keys = replace_generated_block(file_path, provider, generate_dict_block(provider, models))
 
         # Check for duplicates
