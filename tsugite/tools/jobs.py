@@ -36,6 +36,7 @@ def spawn_job(
     acceptance_criteria: Optional[list] = None,
     repo: Optional[str] = None,
     model: Optional[str] = None,
+    verifier_model: Optional[str] = None,
     timeout_minutes: int = 30,
     agent: Optional[str] = None,
     max_attempts: Optional[int] = None,
@@ -61,7 +62,11 @@ def spawn_job(
             fresh git worktree provisioned under `<repo>/.tsugite-jobs/<job_id>`,
             isolated from the parent checkout; it's pruned on done/cancelled and
             kept on stuck/errored for inspection.
-        model: Optional model override; defaults to the workspace default.
+        model: Optional model override for the worker; defaults to the
+            workspace default.
+        verifier_model: Optional separate model for the verifier round. Defaults
+            to `model` (then the workspace default) when unset - handy to pin
+            verification to a cheaper/more-available model than the worker.
         timeout_minutes: Per-phase budget for each worker run and verifier round
             (re-armed each phase, not a whole-job wall clock); on expiry the Job
             transitions to `stuck`.
@@ -98,6 +103,7 @@ def spawn_job(
             acceptance_criteria=acceptance_criteria,
             repo=repo,
             model=model,
+            verifier_model=verifier_model,
             agent=agent,
             timeout_minutes=timeout_minutes,
             spawned_by="agent-tool",

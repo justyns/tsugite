@@ -90,6 +90,9 @@ class Job:
     acceptance_criteria: list[str] = field(default_factory=list)
     repo: Optional[str] = None
     model: Optional[str] = None
+    # Optional separate model for the verifier round. Falls back to `model`
+    # (then the workspace default) when unset.
+    verifier_model: Optional[str] = None
     agent: Optional[str] = None
     timeout_minutes: int = 30
     verify_attempts: int = 0
@@ -174,6 +177,7 @@ class Job:
             "result": self.result,
             "agent": self.agent,
             "model": self.model,
+            "verifier_model": self.verifier_model,
             "repo": self.repo,
             "created_at": self.created_at,
             "updated_at": self.updated_at,

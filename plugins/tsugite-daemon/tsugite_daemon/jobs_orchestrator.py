@@ -133,6 +133,7 @@ class JobsOrchestrator:
         acceptance_criteria: Optional[list] = None,
         repo: Optional[str] = None,
         model: Optional[str] = None,
+        verifier_model: Optional[str] = None,
         agent: Optional[str] = None,
         timeout_minutes: int = 30,
         spawned_by: str = "user-slash",
@@ -182,6 +183,7 @@ class JobsOrchestrator:
                 acceptance_criteria=acceptance_criteria or [],
                 repo=repo,
                 model=model,
+                verifier_model=verifier_model,
                 agent=worker_agent_file,
                 timeout_minutes=timeout_minutes,
                 spawned_by=spawned_by,
@@ -618,6 +620,12 @@ class JobsOrchestrator:
             source=SessionSource.SPAWNED.value,
             prompt=verifier_prompt,
             agent_file=VERIFIER_AGENT,
+            # Verifier uses its own model override when set, else inherits the
+            # job's model (same override as the worker), else the workspace
+            # default. Lets a job pick a cheaper/available verifier model, and
+            # stops a worker model override from silently applying to the
+            # verifier via the workspace default.
+            model=job.verifier_model or job.model,
             # Same directory as the worker - the verifier inspects the files the
             # worker wrote (and `git diff` for repo jobs), which only exist there.
             workspace_override=_job_workspace(job),
