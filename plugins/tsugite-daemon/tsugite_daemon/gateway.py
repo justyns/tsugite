@@ -5,6 +5,7 @@ import logging
 import logging.handlers
 import signal
 import sys
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -571,11 +572,12 @@ def _configure_logging(config: DaemonConfig) -> None:
     handlers: list[logging.Handler] = []
     if config.log_to_console:
         handlers.append(logging.StreamHandler(sys.stderr))
-    if config.log_file:
-        config.log_file.parent.mkdir(parents=True, exist_ok=True)
-        handlers.append(logging.handlers.RotatingFileHandler(config.log_file, maxBytes=10 * 1024 * 1024, backupCount=3))
-    if not handlers:
-        handlers.append(logging.NullHandler())
+    # Persistent log by default: without a durable file, a daemon crash leaves
+    # no retrievable traceback (stderr dies with the terminal). An explicit
+    # config.log_file wins; otherwise the log lands next to the daemon state.
+    log_file = config.log_file or (config.state_dir / "daemon.log")
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    handlers.append(logging.handlers.RotatingFileHandler(log_file, maxBytes=10 * 1024 * 1024, backupCount=3))
 
     root = logging.getLogger()
     root.setLevel(level)
@@ -584,6 +586,32 @@ def _configure_logging(config: DaemonConfig) -> None:
     for h in handlers:
         h.setFormatter(formatter)
         root.addHandler(h)
+
+
+def _install_crash_hooks() -> None:
+    """Route unhandled main-thread and worker-thread exceptions through logging
+    so a crash traceback survives in the daemon log.
+
+    The agent loop runs in worker threads (asyncio.to_thread), so
+    threading.excepthook matters as much as sys.excepthook. asyncio's own loop
+    exception handler already logs via the 'asyncio' logger and needs no hook.
+    """
+    crash_logger = logging.getLogger("tsugite_daemon.crash")
+
+    def _hook(exc_type, exc, tb):
+        crash_logger.critical("Unhandled exception (daemon crash)", exc_info=(exc_type, exc, tb))
+        sys.__excepthook__(exc_type, exc, tb)
+
+    sys.excepthook = _hook
+
+    def _thread_hook(args):
+        crash_logger.critical(
+            "Unhandled exception in thread %r",
+            args.thread.name if args.thread else "?",
+            exc_info=(args.exc_type, args.exc_value, args.exc_traceback),
+        )
+
+    threading.excepthook = _thread_hook
 
 
 async def run_daemon(
@@ -597,6 +625,7 @@ async def run_daemon(
             setattr(config, key, value)
 
     _configure_logging(config)
+    _install_crash_hooks()
 
     from tsugite.secrets import configure_from_daemon as configure_secrets
 
