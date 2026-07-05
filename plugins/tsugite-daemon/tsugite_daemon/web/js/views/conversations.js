@@ -607,13 +607,17 @@ export default () => ({
   updateStatusFromEvent(event, sessionId) {
     const sid = sessionId || this.selectedSessionId;
     if (!sid) return;
+    // Merge, don't replace: a partial session_info (interrupted-turn/resume
+    // paths) must not wipe previously-good tokens/context_limit - that blanks
+    // the context bar until the next full /status fetch.
+    const prev = this._sessionState(sid).statusInfo || {};
     this._sessionState(sid).statusInfo = {
-      model: event.model,
-      tokens: event.tokens,
-      context_limit: event.context_limit,
-      threshold: event.threshold,
-      message_count: event.message_count,
-      attachments: event.attachments,
+      model: event.model ?? prev.model,
+      tokens: event.tokens ?? prev.tokens,
+      context_limit: event.context_limit ?? prev.context_limit,
+      threshold: event.threshold ?? prev.threshold,
+      message_count: event.message_count ?? prev.message_count,
+      attachments: event.attachments ?? prev.attachments,
     };
   },
 
