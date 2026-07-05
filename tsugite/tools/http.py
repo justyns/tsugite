@@ -11,6 +11,11 @@ from tsugite.utils import convert_html_to_markdown
 
 _WEB_EXTRA_HINT = "Install it with: pip install tsugite-cli[web]"
 
+# Redirect hop bound for follow_redirects=True. Sandbox network policy applies
+# at the process level (bwrap network namespace), so followed redirects can't
+# reach anything the original request couldn't.
+_MAX_REDIRECTS = 5
+
 
 def _extract_article(html: str) -> str:
     """Extract the main article body from HTML using readability (optional dep)."""
@@ -29,12 +34,14 @@ def _default_headers(headers: Optional[Dict[str, str]] = None) -> Dict[str, str]
 
 
 class HttpResponse:
-    """Structured HTTP response. Use `.text` for the raw body; call `.json()` to parse as JSON."""
+    """Structured HTTP response. Use `.text` for the raw body; call `.json()` to parse as JSON.
+    `.url` is the final URL after any followed redirects."""
 
-    def __init__(self, status_code: int, headers: Dict[str, str], text: str):
+    def __init__(self, status_code: int, headers: Dict[str, str], text: str, url: Optional[str] = None):
         self.status_code = status_code
         self.headers = headers
         self.text = text
+        self.url = url
 
     @property
     def body(self) -> str:
@@ -58,16 +65,24 @@ def _simple_request(
     headers: Optional[Dict[str, str]],
     timeout: int,
     body: Optional[Union[str, Dict[str, Any]]] = None,
+    follow_redirects: bool = True,
 ) -> httpx.Response:
-    """Make an HTTP request and return the raw response."""
+    """Make an HTTP request and return the raw response.
+
+    Redirects are followed by default (bounded by _MAX_REDIRECTS; httpx keeps
+    method+body on 307/308). With follow_redirects=False a 3xx response is
+    returned for inspection instead of raising - that's the point of opting out.
+    """
     kwargs: Dict[str, Any] = {}
     if isinstance(body, dict):
         kwargs["json"] = body
     elif isinstance(body, str):
         kwargs["content"] = body
 
-    with httpx.Client(timeout=timeout) as client:
+    with httpx.Client(timeout=timeout, follow_redirects=follow_redirects, max_redirects=_MAX_REDIRECTS) as client:
         response = client.request(method=method.upper(), url=url, headers=_default_headers(headers), **kwargs)
+        if not follow_redirects and response.is_redirect:
+            return response
         response.raise_for_status()
         return response
 
@@ -78,6 +93,7 @@ def fetch_json(
     method: str = "GET",
     headers: Optional[Dict[str, str]] = None,
     timeout: int = 30,
+    follow_redirects: bool = True,
 ) -> Union[Dict[str, Any], list]:
     """Fetch JSON data from a URL.
 
@@ -86,9 +102,10 @@ def fetch_json(
         method: HTTP method (GET, POST, PUT, DELETE)
         headers: Optional HTTP headers
         timeout: Request timeout in seconds
+        follow_redirects: Follow 3xx redirects (default True, max 5 hops)
     """
     try:
-        response = _simple_request(url, method, headers, timeout)
+        response = _simple_request(url, method, headers, timeout, follow_redirects=follow_redirects)
         try:
             return response.json()
         except json.JSONDecodeError as e:
@@ -109,6 +126,7 @@ def fetch_text(
     timeout: int = 30,
     strip_html: bool = True,
     extract_article: bool = False,
+    follow_redirects: bool = True,
 ) -> str:
     """Fetch text content from a URL.
 
@@ -119,9 +137,10 @@ def fetch_text(
         timeout: Request timeout in seconds
         strip_html: Convert HTML to markdown (preserves headings, lists, links)
         extract_article: Extract article content only (strips nav/ads/boilerplate), implies strip_html
+        follow_redirects: Follow 3xx redirects (default True, max 5 hops)
     """
     try:
-        response = _simple_request(url, method, headers, timeout)
+        response = _simple_request(url, method, headers, timeout, follow_redirects=follow_redirects)
         text = response.text
         content_type = response.headers.get("content-type", "")
 
@@ -146,6 +165,7 @@ def http_request(
     body: Optional[Union[str, Dict[str, Any]]] = None,
     headers: Optional[Dict[str, str]] = None,
     timeout: int = 30,
+    follow_redirects: bool = True,
 ) -> HttpResponse:
     """Make an HTTP request. Returns HttpResponse with .status_code, .headers, .text (raw body); call .json() to parse JSON.
 
@@ -155,15 +175,17 @@ def http_request(
         body: Request body - dict for JSON (auto-serialized), string for raw body
         headers: Optional HTTP headers
         timeout: Request timeout in seconds
+        follow_redirects: Follow 3xx redirects (default True, max 5 hops); False returns the 3xx response for inspection
     """
     try:
         request_headers = dict(headers) if headers else {}
-        response = _simple_request(url, method, request_headers, timeout, body)
+        response = _simple_request(url, method, request_headers, timeout, body, follow_redirects=follow_redirects)
 
         return HttpResponse(
             status_code=response.status_code,
             headers=dict(response.headers),
             text=response.text,
+            url=str(response.url),
         )
     except httpx.TimeoutException as exc:
         raise RuntimeError(f"Request timed out after {timeout} seconds") from exc
@@ -174,16 +196,22 @@ def http_request(
 
 
 @tool
-def download_file(url: str, local_path: str, timeout: int = 60) -> str:
+def download_file(url: str, local_path: str, timeout: int = 60, follow_redirects: bool = True) -> str:
     """Download a file from URL to local path.
 
     Args:
         url: URL to download from
         local_path: Local file path to save to
         timeout: Request timeout in seconds
+        follow_redirects: Follow 3xx redirects (default True, max 5 hops)
     """
     try:
-        with httpx.Client(timeout=timeout, headers=_default_headers()) as client:
+        with httpx.Client(
+            timeout=timeout,
+            headers=_default_headers(),
+            follow_redirects=follow_redirects,
+            max_redirects=_MAX_REDIRECTS,
+        ) as client:
             with client.stream("GET", url) as response:
                 response.raise_for_status()
 

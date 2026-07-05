@@ -309,3 +309,75 @@ def test_request_sends_user_agent(mock_httpx_client):
     sent_headers = call_kwargs.kwargs["headers"]
     assert "User-Agent" in sent_headers
     assert sent_headers["User-Agent"].startswith("Tsugite/")
+
+
+# --- redirect following (3xx was the top tool-failure class) ---
+
+
+@pytest.fixture
+def redirect_transport(monkeypatch):
+    """Route tool requests through a real httpx.Client backed by MockTransport
+    so genuine httpx redirect semantics (hop following, 307 method+body
+    preservation, loop bounding) are exercised, not mocked away."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/old":
+            return httpx.Response(301, headers={"location": "/new"})
+        if path == "/307post":
+            return httpx.Response(307, headers={"location": "/posted"})
+        if path == "/posted":
+            return httpx.Response(
+                200,
+                json={"method": request.method, "body": request.content.decode()},
+            )
+        if path == "/loop":
+            return httpx.Response(302, headers={"location": "/loop"})
+        return httpx.Response(200, text="final", headers={"content-type": "text/plain"})
+
+    real_client = httpx.Client
+
+    def patched_client(**kwargs):
+        kwargs["transport"] = httpx.MockTransport(handler)
+        return real_client(**kwargs)
+
+    monkeypatch.setattr("tsugite.tools.http.httpx.Client", patched_client)
+
+
+def test_fetch_text_follows_redirects_by_default(redirect_transport):
+    assert fetch_text("https://example.com/old") == "final"
+
+
+def test_http_request_follows_redirects_and_exposes_final_url(redirect_transport):
+    result = http_request("https://example.com/old")
+    assert result.status_code == 200
+    assert result.text == "final"
+    assert result.url.endswith("/new"), f"final URL after redirect must be exposed; got {result.url!r}"
+
+
+def test_http_request_opt_out_returns_inspectable_redirect(redirect_transport):
+    """follow_redirects=False exists to inspect the 3xx - it must return the
+    redirect response, not raise."""
+    result = http_request("https://example.com/old", follow_redirects=False)
+    assert result.status_code == 301
+    assert result.headers.get("location") == "/new"
+
+
+def test_http_request_307_preserves_method_and_body(redirect_transport):
+    result = http_request("https://example.com/307post", method="POST", body="payload")
+    parsed = result.json()
+    assert parsed["method"] == "POST"
+    assert parsed["body"] == "payload"
+
+
+def test_fetch_text_redirect_loop_is_bounded(redirect_transport):
+    with pytest.raises(RuntimeError):
+        fetch_text("https://example.com/loop")
+
+
+def test_download_file_follows_redirects(redirect_transport, tmp_path):
+    from tsugite.tools.http import download_file
+
+    target = tmp_path / "out.txt"
+    download_file("https://example.com/old", str(target))
+    assert target.read_text() == "final"
