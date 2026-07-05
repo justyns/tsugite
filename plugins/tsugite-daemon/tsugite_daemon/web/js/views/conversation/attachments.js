@@ -73,6 +73,12 @@ export const attachmentsMixin = {
   dismissPasteBanner() {
     this.messageText += this.pendingPasteText;
     this._resetPasteState();
+    // x-model updates the value programmatically, so @input (the auto-resize
+    // trigger) never fires - resize explicitly, like confirmExpandModal does.
+    this.$nextTick(() => {
+      const ta = this.$refs.messageInput;
+      if (ta) this._resizeTextarea(ta);
+    });
   },
 
   openPasteModal() {
