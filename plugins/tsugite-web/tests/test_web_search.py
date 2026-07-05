@@ -81,6 +81,36 @@ def test_web_search_error_handling(mock_ddgs):
     assert "Network error" in str(exc_info.value)
 
 
+def test_web_search_no_results_exception_returns_empty_list(mock_ddgs):
+    """ddgs raises DDGSException('No results found.') on zero hits. That's a
+    normal search outcome, not an error - it must come back as [] instead of
+    killing the agent's whole code block."""
+    from ddgs.exceptions import DDGSException
+
+    mock_ddgs.text.side_effect = DDGSException("No results found.")
+    assert web_search("xyzzy no such thing") == []
+
+
+def test_web_search_ratelimit_still_raises(mock_ddgs):
+    """RatelimitException subclasses DDGSException but is a real failure - it
+    must not be swallowed as an empty result."""
+    from ddgs.exceptions import RatelimitException
+
+    mock_ddgs.text.side_effect = RatelimitException("429 rate limited")
+    with pytest.raises(RuntimeError, match="rate limited"):
+        web_search("test query")
+
+
+def test_web_search_engine_error_ddgs_exception_still_raises(mock_ddgs):
+    """DDGSException wrapping a real engine error (all engines down) is a
+    failure, not an empty result."""
+    from ddgs.exceptions import DDGSException
+
+    mock_ddgs.text.side_effect = DDGSException("Error in engine duckduckgo: ConnectionRefused")
+    with pytest.raises(RuntimeError, match="Web search failed"):
+        web_search("test query")
+
+
 def test_web_search_without_ddgs(monkeypatch):
     """web_search raises a clear install hint when ddgs is unavailable."""
     monkeypatch.setitem(sys.modules, "ddgs", None)

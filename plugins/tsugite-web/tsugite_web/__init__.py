@@ -20,13 +20,15 @@ def web_search(query: str, max_results: int = 5) -> list[Dict[str, str]]:
         max_results: Maximum number of results to return (default: 5)
 
     Returns:
-        List of search result dictionaries with title, url, and snippet
+        List of search result dictionaries with title, url, and snippet.
+        Empty list when the search finds nothing.
 
     Raises:
         RuntimeError: If search fails
     """
     try:
         from ddgs import DDGS
+        from ddgs.exceptions import DDGSException
     except ImportError as e:
         raise RuntimeError(f"Web search requires the ddgs package. {_WEB_EXTRA_HINT}") from e
 
@@ -45,5 +47,13 @@ def web_search(query: str, max_results: int = 5) -> list[Dict[str, str]]:
 
         return results
 
+    except DDGSException as e:
+        # ddgs raises instead of returning [] when a search simply finds
+        # nothing. No results is a normal outcome, not an error - raising
+        # would kill the agent's whole code block. Rate limits, timeouts, and
+        # engine errors carry different messages and still raise below.
+        if "no results found" in str(e).lower():
+            return []
+        raise RuntimeError(f"Web search failed: {e}") from e
     except Exception as e:
         raise RuntimeError(f"Web search failed: {e}") from e
