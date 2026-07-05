@@ -119,6 +119,16 @@ export function eventsToBubbles(events, { dropTrailing = false } = {}) {
   let currentUserBubble = null;
   let lastModelText = '';
   let sawInlineAgent = false;
+  // Spawned/worker sessions interleave the UI-handler event family
+  // (code / tool_call / tool_result) with the agent recording family
+  // (code_execution). Both carry the same code/output for a completed turn,
+  // so rendering needs pairing state: a `code` step is upgraded in place by
+  // its `code_execution`, and the block-level `tool_result` is skipped when
+  // the execution already rendered that output. Interrupted turns (stall or
+  // restart before the post-execution recording) only have the UI-handler
+  // events - these must still render code and output.
+  let pendingCodeStep = null;
+  let lastExecOutput = null;
 
   // Push the accumulated tool steps as a finalized progress bubble. Called both
   // at user_input boundaries (flushBubble) and when reasoning arrives mid-turn,
@@ -146,6 +156,8 @@ export function eventsToBubbles(events, { dropTrailing = false } = {}) {
     currentUserBubble = null;
     lastModelText = '';
     sawInlineAgent = false;
+    pendingCodeStep = null;
+    lastExecOutput = null;
   }
 
   for (const ev of events) {
@@ -256,25 +268,103 @@ export function eventsToBubbles(events, { dropTrailing = false } = {}) {
       continue;
     }
 
+    if (type === 'turn_start') {
+      // Turn boundary for the UI-handler event family: code/tool_result pairing
+      // must not leak across turns.
+      pendingCodeStep = null;
+      lastExecOutput = null;
+      continue;
+    }
+
+    if (type === 'code') {
+      // Emitted at execution start; the same turn's code_execution (if the turn
+      // completed) upgrades this step with duration + output.
+      pendingCodeStep = {
+        hasDetails: true,
+        summary: `<code>code</code>`,
+        content: data.content || '',
+        open: false,
+        _tool: true,
+      };
+      currentSteps.push(pendingCodeStep);
+      continue;
+    }
+
     if (type === 'code_execution') {
       const code = data.code || '';
       const dur = _formatDuration(data.duration_ms);
-      currentSteps.push({
-        hasDetails: true,
-        summary: `<code>code</code>${dur ? ` <span class="step-dur">(${dur})</span>` : ''}`,
-        content: code,
-        open: false,
-        _tool: true,
-      });
+      const summary = `<code>code</code>${dur ? ` <span class="step-dur">(${dur})</span>` : ''}`;
+      if (pendingCodeStep && pendingCodeStep.content === code) {
+        pendingCodeStep.summary = summary;
+        pendingCodeStep = null;
+      } else {
+        currentSteps.push({
+          hasDetails: true,
+          summary,
+          content: code,
+          open: false,
+          _tool: true,
+        });
+      }
       const output = data.output || '';
       const error = data.error || null;
       if (output || error) {
+        lastExecOutput = error ? `${error}\n\n${output}`.trim() : output;
         currentSteps.push({
           hasDetails: true,
           summary: error ? `<code>error</code>` : `<code>result</code>`,
-          content: error ? `${error}\n\n${output}`.trim() : output,
+          content: lastExecOutput,
           open: false,
         });
+      }
+      continue;
+    }
+
+    if (type === 'tool_call') {
+      const name = data.tool || 'tool';
+      const args = typeof data.arguments === 'string' ? data.arguments : JSON.stringify(data.arguments || {}, null, 2);
+      if (args && args !== '{}') {
+        currentSteps.push({
+          hasDetails: true,
+          summary: `<code>${escapeHtml(name)}</code>`,
+          content: args,
+          open: false,
+          _tool: true,
+          _toolName: name,
+        });
+      } else {
+        currentSteps.push({ html: `<code>${escapeHtml(name)}</code>`, _tool: true });
+      }
+      continue;
+    }
+
+    if (type === 'tool_result') {
+      const output = data.output || data.error || '';
+      // The block-level observation duplicates the output the same turn's
+      // code_execution already rendered; only show it when that recording is
+      // missing (interrupted turn) or the output genuinely differs.
+      if (output && output !== lastExecOutput) {
+        const failed = data.success === false;
+        const label = !data.tool || data.tool === 'unknown' ? (failed ? 'error' : 'result') : data.tool;
+        currentSteps.push({
+          hasDetails: true,
+          summary: `<code>${escapeHtml(label)}</code>`,
+          content: output,
+          open: false,
+        });
+      }
+      continue;
+    }
+
+    if (type === 'thought') {
+      // Worker/spawned turns deliver prose via `thought` (their model_response
+      // raw_content is often empty on subprocess providers). Same presentation
+      // as model_response prose. Deliberately does NOT set sawInlineAgent: the
+      // final_result may be a different text and must still render (equality
+      // dedup happens there).
+      if (data.content) {
+        pushProgressIfHasSteps();
+        bubbles.push({ type: 'agent', text: data.content });
       }
       continue;
     }
@@ -356,8 +446,13 @@ export function eventsToBubbles(events, { dropTrailing = false } = {}) {
         bubbles.push(bubble);
       } else if (bubble?.type === 'agent' && !sawInlineAgent && !lastModelText) {
         // Scheduled agents that go straight to return_value("...") with no model_response
-        // would otherwise show only tool steps and no answer.
-        lastModelText = bubble.text;
+        // would otherwise show only tool steps and no answer. Skip when the final text
+        // is byte-identical to the last rendered agent bubble (a final turn's `thought`
+        // carries the same text) - rendering it twice reads as a stutter.
+        const lastAgent = bubbles.findLast(b => b.type === 'agent');
+        if (!lastAgent || lastAgent.text !== bubble.text) {
+          lastModelText = bubble.text;
+        }
       }
       continue;
     }
