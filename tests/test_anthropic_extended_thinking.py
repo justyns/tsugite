@@ -214,3 +214,70 @@ class TestAnthropicThinkingStreaming:
 
         assert "reasoning A reasoning B" in reasoning_text
         assert "answer" in text
+
+
+class TestAdaptiveThinkingRequestBody:
+    """Opus 4.7+/Sonnet 5/Fable 5 reject budget_tokens and sampling params (400);
+    effort must ride the native adaptive surface instead."""
+
+    async def _capture_body(self, monkeypatch, **kwargs) -> dict:
+        from tsugite.providers.anthropic import AnthropicProvider
+
+        provider = AnthropicProvider(api_key="sk-test")
+        captured = {}
+
+        async def fake_post(self, url, json=None, headers=None):  # noqa: A002
+            captured["body"] = json
+            return _mock_response(
+                {
+                    "content": [{"type": "text", "text": "ok"}],
+                    "usage": {"input_tokens": 1, "output_tokens": 1},
+                }
+            )
+
+        monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+        await provider.acompletion(messages=[{"role": "user", "content": "hi"}], **kwargs)
+        return captured["body"]
+
+    @pytest.mark.asyncio
+    async def test_effort_uses_output_config_not_budget(self, monkeypatch):
+        body = await self._capture_body(monkeypatch, model="claude-opus-4-8", reasoning_effort="high")
+        assert body.get("output_config") == {"effort": "high"}
+        assert body.get("thinking") == {"type": "adaptive"}
+
+    @pytest.mark.asyncio
+    async def test_xhigh_is_not_dropped(self, monkeypatch):
+        """xhigh has no budget mapping; on adaptive models it must reach the API
+        verbatim instead of being silently discarded."""
+        body = await self._capture_body(monkeypatch, model="claude-fable-5", reasoning_effort="xhigh")
+        assert body.get("output_config") == {"effort": "xhigh"}
+        assert "budget_tokens" not in str(body.get("thinking", {}))
+
+    @pytest.mark.asyncio
+    async def test_sampling_params_dropped_on_adaptive_models(self, monkeypatch):
+        body = await self._capture_body(monkeypatch, model="claude-sonnet-5", temperature=0.7, top_p=0.9, top_k=40)
+        assert "temperature" not in body
+        assert "top_p" not in body
+        assert "top_k" not in body
+
+    @pytest.mark.asyncio
+    async def test_sampling_params_kept_on_budget_models(self, monkeypatch):
+        body = await self._capture_body(monkeypatch, model="claude-opus-4-6", temperature=0.7)
+        assert body.get("temperature") == 0.7
+
+    @pytest.mark.asyncio
+    async def test_budget_models_keep_budget_thinking(self, monkeypatch):
+        body = await self._capture_body(monkeypatch, model="claude-opus-4-6", reasoning_effort="high")
+        assert body.get("thinking") == {"type": "enabled", "budget_tokens": 16384}
+        assert "output_config" not in body
+
+    @pytest.mark.asyncio
+    async def test_no_effort_omits_thinking_on_adaptive_models(self, monkeypatch):
+        body = await self._capture_body(monkeypatch, model="claude-opus-4-8")
+        assert "thinking" not in body
+        assert "output_config" not in body
+
+    @pytest.mark.asyncio
+    async def test_unknown_model_falls_back_to_budget_path(self, monkeypatch):
+        body = await self._capture_body(monkeypatch, model="claude-mystery-9", reasoning_effort="high")
+        assert body.get("thinking") == {"type": "enabled", "budget_tokens": 16384}

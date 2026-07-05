@@ -115,6 +115,48 @@ class TestEffortLevels:
         assert info.supported_effort_levels is None
 
 
+class TestThinkingStyle:
+    """thinking_style tells the anthropic provider which API surface drives
+    reasoning: budget_tokens extended thinking vs the adaptive/effort surface
+    (which rejects budget_tokens and sampling params with 400)."""
+
+    def test_budget_tokens_option_maps_to_budget_style(self):
+        entry = _entry(reasoning=True, reasoning_options=[{"type": "budget_tokens", "min": 1024}])
+        info = _info("claude-haiku-4-5", entry, "anthropic")
+        assert info.thinking_style == "budget_tokens"
+
+    def test_budget_option_wins_when_both_present(self):
+        entry = _entry(
+            reasoning=True,
+            reasoning_options=[
+                {"type": "effort", "values": ["low", "medium", "high"]},
+                {"type": "budget_tokens", "min": 1024},
+            ],
+        )
+        info = _info("claude-opus-4-5", entry, "anthropic")
+        assert info.thinking_style == "budget_tokens"
+
+    def test_effort_only_maps_to_adaptive_style(self):
+        entry = _entry(
+            reasoning=True,
+            reasoning_options=[{"type": "effort", "values": ["low", "medium", "high", "xhigh", "max"]}],
+        )
+        info = _info("claude-opus-4-8", entry, "anthropic")
+        assert info.thinking_style == "adaptive"
+
+    def test_openai_models_get_no_thinking_style(self):
+        entry = _entry(
+            reasoning=True,
+            reasoning_options=[{"type": "effort", "values": ["low", "medium", "high"]}],
+        )
+        info = _info("o3", entry, "openai")
+        assert info.thinking_style is None
+
+    def test_non_reasoning_model_gets_no_thinking_style(self):
+        info = _info("m", _entry(), "anthropic")
+        assert info.thinking_style is None
+
+
 class TestShouldSkip:
     def test_skips_non_text_output_models(self):
         entry = _entry(modalities={"input": ["text"], "output": ["image"]})

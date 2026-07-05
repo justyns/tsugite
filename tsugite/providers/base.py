@@ -49,6 +49,11 @@ class ModelInfo:
     supports_reasoning: bool = False
     supports_streaming: bool = True
     supported_effort_levels: list[str] | None = None
+    # How the model exposes reasoning control: "budget_tokens" (extended
+    # thinking via thinking budgets) or "adaptive" (native effort parameter;
+    # budget_tokens and sampling params are rejected with 400). None when the
+    # model has neither or the style is unknown.
+    thinking_style: str | None = None
 
 
 @runtime_checkable

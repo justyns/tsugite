@@ -82,14 +82,37 @@ def should_skip(key: str, entry: dict) -> bool:
     return any(key.startswith(p) for p in SKIP_PREFIXES)
 
 
+def _reasoning_options(entry: dict) -> dict[str, dict]:
+    """reasoning_options keyed by type."""
+    return {o.get("type"): o for o in (entry.get("reasoning_options") or []) if isinstance(o, dict)}
+
+
 def _effort_levels(entry: dict, provider: str) -> list[str] | None:
     """Derive supported_effort_levels from structured reasoning_options."""
-    options = {o.get("type"): o for o in (entry.get("reasoning_options") or []) if isinstance(o, dict)}
+    options = _reasoning_options(entry)
     if provider == "anthropic" and "budget_tokens" in options:
         return list(BUDGET_TOKENS_EFFORT_LEVELS)
     effort = options.get("effort")
     if effort and effort.get("values"):
         return list(effort["values"])
+    return None
+
+
+def _thinking_style(entry: dict, provider: str) -> str | None:
+    """Which API surface drives reasoning on this model (anthropic only).
+
+    budget_tokens option → "budget_tokens" (extended thinking budgets; wins
+    when both options exist since tsugite's provider drives effort through it).
+    effort-only → "adaptive" (native effort param; budget_tokens/sampling
+    params are rejected with 400 on that generation).
+    """
+    if provider != "anthropic":
+        return None
+    options = _reasoning_options(entry)
+    if "budget_tokens" in options:
+        return "budget_tokens"
+    if "effort" in options:
+        return "adaptive"
     return None
 
 
@@ -117,6 +140,9 @@ def entry_to_model_info(key: str, entry: dict, provider: str) -> str:
     effort_levels = _effort_levels(entry, provider)
     if effort_levels:
         parts.append(f"supported_effort_levels={json.dumps(effort_levels)}")
+    thinking_style = _thinking_style(entry, provider)
+    if thinking_style:
+        parts.append(f'thinking_style="{thinking_style}"')
 
     return f"ModelInfo({', '.join(parts)})"
 

@@ -37,28 +37,28 @@ _EFFORT_TO_BUDGET = {
 _ANTHROPIC_MODELS: dict[str, ModelInfo] = {
     "anthropic/claude-3-5-sonnet-20240620": ModelInfo(max_input_tokens=200_000, max_output_tokens=8_192, input_cost_per_million=3.0, output_cost_per_million=15.0, supports_vision=True),
     "anthropic/claude-3-5-sonnet-20241022": ModelInfo(max_input_tokens=200_000, max_output_tokens=8_192, input_cost_per_million=3.0, output_cost_per_million=15.0, supports_vision=True),
-    "anthropic/claude-3-7-sonnet-20250219": ModelInfo(max_input_tokens=200_000, max_output_tokens=64_000, input_cost_per_million=3.0, output_cost_per_million=15.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high", "max"]),
+    "anthropic/claude-3-7-sonnet-20250219": ModelInfo(max_input_tokens=200_000, max_output_tokens=64_000, input_cost_per_million=3.0, output_cost_per_million=15.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high", "max"], thinking_style="budget_tokens"),
     "anthropic/claude-3-haiku-20240307": ModelInfo(max_input_tokens=200_000, max_output_tokens=4_096, input_cost_per_million=0.25, output_cost_per_million=1.25, supports_vision=True),
     "anthropic/claude-3-opus-20240229": ModelInfo(max_input_tokens=200_000, max_output_tokens=4_096, input_cost_per_million=15.0, output_cost_per_million=75.0, supports_vision=True),
     "anthropic/claude-3-sonnet-20240229": ModelInfo(max_input_tokens=200_000, max_output_tokens=4_096, input_cost_per_million=3.0, output_cost_per_million=15.0, supports_vision=True),
-    "anthropic/claude-fable-5": ModelInfo(max_input_tokens=1_000_000, max_output_tokens=128_000, input_cost_per_million=10.0, output_cost_per_million=50.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high", "xhigh", "max"]),
-    "anthropic/claude-haiku-4-5": ModelInfo(max_input_tokens=200_000, max_output_tokens=64_000, input_cost_per_million=1.0, output_cost_per_million=5.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high", "max"]),
-    "anthropic/claude-haiku-4-5-20251001": ModelInfo(max_input_tokens=200_000, max_output_tokens=64_000, input_cost_per_million=1.0, output_cost_per_million=5.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high", "max"]),
-    "anthropic/claude-opus-4-0": ModelInfo(max_input_tokens=200_000, max_output_tokens=32_000, input_cost_per_million=15.0, output_cost_per_million=75.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high", "max"]),
-    "anthropic/claude-opus-4-1": ModelInfo(max_input_tokens=200_000, max_output_tokens=32_000, input_cost_per_million=15.0, output_cost_per_million=75.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high", "max"]),
-    "anthropic/claude-opus-4-1-20250805": ModelInfo(max_input_tokens=200_000, max_output_tokens=32_000, input_cost_per_million=15.0, output_cost_per_million=75.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high", "max"]),
-    "anthropic/claude-opus-4-20250514": ModelInfo(max_input_tokens=200_000, max_output_tokens=32_000, input_cost_per_million=15.0, output_cost_per_million=75.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high", "max"]),
-    "anthropic/claude-opus-4-5": ModelInfo(max_input_tokens=200_000, max_output_tokens=64_000, input_cost_per_million=5.0, output_cost_per_million=25.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high", "max"]),
-    "anthropic/claude-opus-4-5-20251101": ModelInfo(max_input_tokens=200_000, max_output_tokens=64_000, input_cost_per_million=5.0, output_cost_per_million=25.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high", "max"]),
-    "anthropic/claude-opus-4-6": ModelInfo(max_input_tokens=1_000_000, max_output_tokens=128_000, input_cost_per_million=5.0, output_cost_per_million=25.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high", "max"]),
-    "anthropic/claude-opus-4-7": ModelInfo(max_input_tokens=1_000_000, max_output_tokens=128_000, input_cost_per_million=5.0, output_cost_per_million=25.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high", "xhigh", "max"]),
-    "anthropic/claude-opus-4-8": ModelInfo(max_input_tokens=1_000_000, max_output_tokens=128_000, input_cost_per_million=5.0, output_cost_per_million=25.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high", "xhigh", "max"]),
-    "anthropic/claude-sonnet-4-0": ModelInfo(max_input_tokens=200_000, max_output_tokens=64_000, input_cost_per_million=3.0, output_cost_per_million=15.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high", "max"]),
-    "anthropic/claude-sonnet-4-20250514": ModelInfo(max_input_tokens=200_000, max_output_tokens=64_000, input_cost_per_million=3.0, output_cost_per_million=15.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high", "max"]),
-    "anthropic/claude-sonnet-4-5": ModelInfo(max_input_tokens=200_000, max_output_tokens=64_000, input_cost_per_million=3.0, output_cost_per_million=15.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high", "max"]),
-    "anthropic/claude-sonnet-4-5-20250929": ModelInfo(max_input_tokens=200_000, max_output_tokens=64_000, input_cost_per_million=3.0, output_cost_per_million=15.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high", "max"]),
-    "anthropic/claude-sonnet-4-6": ModelInfo(max_input_tokens=1_000_000, max_output_tokens=64_000, input_cost_per_million=3.0, output_cost_per_million=15.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high", "max"]),
-    "anthropic/claude-sonnet-5": ModelInfo(max_input_tokens=1_000_000, max_output_tokens=128_000, input_cost_per_million=2.0, output_cost_per_million=10.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high", "xhigh", "max"]),
+    "anthropic/claude-fable-5": ModelInfo(max_input_tokens=1_000_000, max_output_tokens=128_000, input_cost_per_million=10.0, output_cost_per_million=50.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high", "xhigh", "max"], thinking_style="adaptive"),
+    "anthropic/claude-haiku-4-5": ModelInfo(max_input_tokens=200_000, max_output_tokens=64_000, input_cost_per_million=1.0, output_cost_per_million=5.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high", "max"], thinking_style="budget_tokens"),
+    "anthropic/claude-haiku-4-5-20251001": ModelInfo(max_input_tokens=200_000, max_output_tokens=64_000, input_cost_per_million=1.0, output_cost_per_million=5.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high", "max"], thinking_style="budget_tokens"),
+    "anthropic/claude-opus-4-0": ModelInfo(max_input_tokens=200_000, max_output_tokens=32_000, input_cost_per_million=15.0, output_cost_per_million=75.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high", "max"], thinking_style="budget_tokens"),
+    "anthropic/claude-opus-4-1": ModelInfo(max_input_tokens=200_000, max_output_tokens=32_000, input_cost_per_million=15.0, output_cost_per_million=75.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high", "max"], thinking_style="budget_tokens"),
+    "anthropic/claude-opus-4-1-20250805": ModelInfo(max_input_tokens=200_000, max_output_tokens=32_000, input_cost_per_million=15.0, output_cost_per_million=75.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high", "max"], thinking_style="budget_tokens"),
+    "anthropic/claude-opus-4-20250514": ModelInfo(max_input_tokens=200_000, max_output_tokens=32_000, input_cost_per_million=15.0, output_cost_per_million=75.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high", "max"], thinking_style="budget_tokens"),
+    "anthropic/claude-opus-4-5": ModelInfo(max_input_tokens=200_000, max_output_tokens=64_000, input_cost_per_million=5.0, output_cost_per_million=25.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high", "max"], thinking_style="budget_tokens"),
+    "anthropic/claude-opus-4-5-20251101": ModelInfo(max_input_tokens=200_000, max_output_tokens=64_000, input_cost_per_million=5.0, output_cost_per_million=25.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high", "max"], thinking_style="budget_tokens"),
+    "anthropic/claude-opus-4-6": ModelInfo(max_input_tokens=1_000_000, max_output_tokens=128_000, input_cost_per_million=5.0, output_cost_per_million=25.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high", "max"], thinking_style="budget_tokens"),
+    "anthropic/claude-opus-4-7": ModelInfo(max_input_tokens=1_000_000, max_output_tokens=128_000, input_cost_per_million=5.0, output_cost_per_million=25.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high", "xhigh", "max"], thinking_style="adaptive"),
+    "anthropic/claude-opus-4-8": ModelInfo(max_input_tokens=1_000_000, max_output_tokens=128_000, input_cost_per_million=5.0, output_cost_per_million=25.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high", "xhigh", "max"], thinking_style="adaptive"),
+    "anthropic/claude-sonnet-4-0": ModelInfo(max_input_tokens=200_000, max_output_tokens=64_000, input_cost_per_million=3.0, output_cost_per_million=15.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high", "max"], thinking_style="budget_tokens"),
+    "anthropic/claude-sonnet-4-20250514": ModelInfo(max_input_tokens=200_000, max_output_tokens=64_000, input_cost_per_million=3.0, output_cost_per_million=15.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high", "max"], thinking_style="budget_tokens"),
+    "anthropic/claude-sonnet-4-5": ModelInfo(max_input_tokens=200_000, max_output_tokens=64_000, input_cost_per_million=3.0, output_cost_per_million=15.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high", "max"], thinking_style="budget_tokens"),
+    "anthropic/claude-sonnet-4-5-20250929": ModelInfo(max_input_tokens=200_000, max_output_tokens=64_000, input_cost_per_million=3.0, output_cost_per_million=15.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high", "max"], thinking_style="budget_tokens"),
+    "anthropic/claude-sonnet-4-6": ModelInfo(max_input_tokens=1_000_000, max_output_tokens=64_000, input_cost_per_million=3.0, output_cost_per_million=15.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high", "max"], thinking_style="budget_tokens"),
+    "anthropic/claude-sonnet-5": ModelInfo(max_input_tokens=1_000_000, max_output_tokens=128_000, input_cost_per_million=2.0, output_cost_per_million=10.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high", "xhigh", "max"], thinking_style="adaptive"),
 }
 # fmt: on
 # --- END GENERATED MODELS (anthropic) --- #
@@ -117,20 +117,37 @@ class AnthropicProvider:
         if system:
             body["system"] = system
 
+        # The adaptive-thinking generation (Opus 4.7+, Sonnet 5, Fable 5)
+        # rejects budget_tokens thinking AND sampling params with 400; effort
+        # rides output_config there instead. Unknown models fall back to the
+        # budget_tokens path (pre-adaptive behavior).
+        info = self.get_model_info(model)
+        adaptive = info is not None and info.thinking_style == "adaptive"
+
         for key in ("temperature", "top_p", "top_k", "stop_sequences", "metadata"):
-            if key in kwargs:
-                body[key] = kwargs[key]
+            if key not in kwargs:
+                continue
+            if adaptive and key in ("temperature", "top_p", "top_k"):
+                logger.warning(
+                    "Model %s rejects sampling param %s (adaptive-thinking generation); dropping", model, key
+                )
+                continue
+            body[key] = kwargs[key]
 
         effort = kwargs.get("reasoning_effort")
         if effort:
-            budget = _EFFORT_TO_BUDGET.get(effort)
-            if budget is None:
-                logger.warning("Unknown reasoning_effort=%r for Anthropic; dropping", effort)
+            if adaptive:
+                body["thinking"] = {"type": "adaptive"}
+                body["output_config"] = {"effort": effort}
             else:
-                # Extended thinking requires max_tokens > budget_tokens.
-                if body["max_tokens"] <= budget:
-                    body["max_tokens"] = budget + 1024
-                body["thinking"] = {"type": "enabled", "budget_tokens": budget}
+                budget = _EFFORT_TO_BUDGET.get(effort)
+                if budget is None:
+                    logger.warning("Unknown reasoning_effort=%r for Anthropic; dropping", effort)
+                else:
+                    # Extended thinking requires max_tokens > budget_tokens.
+                    if body["max_tokens"] <= budget:
+                        body["max_tokens"] = budget + 1024
+                    body["thinking"] = {"type": "enabled", "budget_tokens": budget}
 
         url = f"{self.api_base}/v1/messages"
         headers = self._build_headers()
