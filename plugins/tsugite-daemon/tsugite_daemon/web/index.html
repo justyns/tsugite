@@ -915,7 +915,7 @@
                       </div>
                       <div class="console-turn-bubble">
                         <strong style="font-family:var(--font-mono);font-size:10px;letter-spacing:0.14em;text-transform:uppercase;color:var(--sky)">progress: </strong>
-                        <span x-text="msg.text"></span>
+                        <span x-html="renderHtml(msg.text)"></span>
                       </div>
                     </div>
                   </template>
