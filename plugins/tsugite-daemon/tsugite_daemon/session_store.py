@@ -1021,7 +1021,13 @@ class SessionStore:
             ]
             if limit:
                 results.sort(key=lambda s: s.last_active or s.created_at, reverse=True)
-                results = results[:limit]
+                # Pins are persistent navigation - the recency window must not
+                # evict them (an idle pin would silently vanish from every
+                # consumer). The limit keeps bounding the non-pinned tail.
+                head = results[:limit]
+                head_ids = {s.id for s in head}
+                head.extend(s for s in results[limit:] if s.pinned and s.id not in head_ids)
+                results = head
             return results
 
     def list_interactive_by_agent(self, agent: str) -> list[Session]:

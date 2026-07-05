@@ -191,3 +191,47 @@ class TestCompactionTransfersPinAndTitle:
         ids = [r.id for r in store.list_sessions(agent=s.agent, include_superseded=True)]
         assert new.id in ids
         assert s.id in ids
+
+
+# ── recency limit must not evict pins ──
+
+
+class TestListSessionsPinExemption:
+    def _seed(self, store, n_recent: int):
+        """One old pinned session + n_recent newer unpinned ones."""
+        old_pin = _make(store, title="old-pin")
+        store.set_pin(old_pin.id, True)
+        store.update_session(old_pin.id)
+        old_pin = store.get_session(old_pin.id)
+        old_pin.last_active = "2026-01-01T00:00:00+00:00"
+        recent = []
+        for i in range(n_recent):
+            s = _make(store, title=f"recent-{i}")
+            s.last_active = f"2026-07-04T10:{i:02d}:00+00:00"
+            recent.append(s)
+        return old_pin, recent
+
+    def test_pinned_session_survives_recency_limit(self, store):
+        """A pin idle for weeks must still be returned when limit truncates -
+        pins are persistent navigation, not recency-ranked rows."""
+        old_pin, _ = self._seed(store, n_recent=5)
+        result = store.list_sessions(agent="agent-x", limit=3)
+        ids = [s.id for s in result]
+        assert old_pin.id in ids, "recency limit evicted a pinned session"
+
+    def test_limit_still_bounds_unpinned_sessions(self, store):
+        old_pin, _ = self._seed(store, n_recent=5)
+        result = store.list_sessions(agent="agent-x", limit=3)
+        unpinned = [s for s in result if not s.pinned]
+        assert len(unpinned) == 3, "limit must keep bounding the non-pinned tail"
+
+    def test_pin_inside_window_not_duplicated(self, store):
+        fresh_pin = _make(store, title="fresh-pin")
+        store.set_pin(fresh_pin.id, True)
+        fresh = store.get_session(fresh_pin.id)
+        fresh.last_active = "2026-07-04T23:59:00+00:00"
+        for i in range(3):
+            s = _make(store, title=f"r{i}")
+            s.last_active = f"2026-07-04T10:{i:02d}:00+00:00"
+        result = store.list_sessions(agent="agent-x", limit=3)
+        assert sum(1 for s in result if s.id == fresh_pin.id) == 1
