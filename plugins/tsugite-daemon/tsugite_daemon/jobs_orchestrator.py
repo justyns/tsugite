@@ -229,6 +229,9 @@ class JobsOrchestrator:
             agent=self._resolve_adapter_key(job.parent_session_id),
             source=SessionSource.SPAWNED.value,
             prompt=prompt,
+            # Sidebar label; without it the UI falls back to the raw session id.
+            # Also skips the LLM auto-title pass on completion.
+            title=f"{job.id} · worker",
             agent_file=job.agent or WORKER_AGENT,
             model=job.model,
             workspace_override=workspace,
@@ -619,6 +622,7 @@ class JobsOrchestrator:
             agent=verifier_adapter_key,
             source=SessionSource.SPAWNED.value,
             prompt=verifier_prompt,
+            title=f"{job.id} · verifier",
             agent_file=VERIFIER_AGENT,
             # Verifier uses its own model override when set, else inherits the
             # job's model (same override as the worker), else the workspace

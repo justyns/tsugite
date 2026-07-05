@@ -2143,3 +2143,32 @@ async def test_partially_graded_acs_are_padded_as_failed(store, runner, orchestr
     padded = [e for e in (fresh.ac_results or []) if e.get("ac_index") == 2]
     assert padded and padded[0]["pass"] is False
     assert "did not grade" in (padded[0].get("reason") or "")
+
+
+# ── spawned session titles ──
+
+
+@pytest.mark.asyncio
+async def test_worker_and_verifier_sessions_get_job_titles(store, runner, orchestrator):
+    """Worker/verifier sessions spawn with descriptive titles so the sidebar
+    doesn't fall back to the raw session-<hex> id."""
+    job, started = await orchestrator.create_and_start_job(
+        parent_session_id="parent-1", prompt="do the thing", acceptance_criteria=["x"]
+    )
+    assert started.title == f"{job.id} · worker"
+    await orchestrator.on_session_complete(_worker_session(job, started.id), "did it")
+    verifier = next(s for s in runner.started if (s.metadata or {}).get("verifier_for"))
+    assert verifier.title == f"{job.id} · verifier"
+
+
+@pytest.mark.asyncio
+async def test_retry_worker_session_gets_job_title(store, runner, orchestrator):
+    job, started = await orchestrator.create_and_start_job(
+        parent_session_id="parent-1", prompt="do the thing", acceptance_criteria=["x"]
+    )
+    await orchestrator.on_session_complete(_worker_session(job, started.id), "did it")
+    fail = json.dumps({"ac_results": [{"ac_text": "x", "pass": False, "reason": "no"}], "overall_pass": False})
+    await orchestrator.on_session_complete(_verifier_session(store.get(job.id)), fail)
+    retry = runner.started[-1]
+    assert (retry.metadata or {}).get("loop_attempt") == 1
+    assert retry.title == f"{job.id} · worker"
