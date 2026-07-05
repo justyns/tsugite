@@ -657,7 +657,7 @@
                 <!-- effort popover (wrapped <select> to keep a11y) -->
                 <span class="kv" x-show="effortLevels.length > 0">
                   <span class="k">effort</span>
-                  <select class="v-select" :value="sessionEffort" @change="setSessionEffort($event.target.value)" title="Reasoning effort">
+                  <select class="v-select" :value="sessionEffort" @change="setSessionEffort($event.target.value)" title="Reasoning effort" aria-label="Reasoning effort">
                     <option value="">—</option>
                     <template x-for="lvl in effortLevels" :key="lvl">
                       <option :value="lvl" x-text="lvl" :selected="sessionEffort === lvl"></option>
