@@ -1349,3 +1349,49 @@ class TestClaudeCodeProcessReadLimit:
                 f"subprocess must raise the 64KB readline limit (got limit={limit!r})"
             )
         await proc.stop()
+
+
+class TestHungSubprocessRecovery:
+    """The #422 recovery path: an operator SIGTERMs a stalled `claude` child.
+    The in-flight send_message must surface RuntimeError - a failed turn the
+    daemon's session runner contains - never an exception that escapes the
+    event loop (the suspected daemon-crash vector)."""
+
+    @pytest.mark.asyncio
+    async def test_sigterm_on_hung_subprocess_fails_turn_cleanly(self, tmp_path, monkeypatch):
+        import os
+
+        fake = tmp_path / "claude"
+        fake.write_text(
+            "#!/usr/bin/env bash\n"
+            "read -r _line\n"
+            'echo \'{"type":"system","subtype":"init","session_id":"fake-s"}\'\n'
+            "exec sleep 300\n"
+        )
+        fake.chmod(0o755)
+        monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
+
+        from tsugite_claude_code.process import ClaudeCodeProcess
+
+        proc = ClaudeCodeProcess()
+        await proc.start(model="fake-model", system_prompt="sys")
+
+        unhandled = []
+        asyncio.get_running_loop().set_exception_handler(lambda loop, ctx: unhandled.append(ctx))
+        try:
+
+            async def kill_after_stall():
+                await asyncio.sleep(0.5)
+                proc._process.terminate()
+
+            killer = asyncio.create_task(kill_after_stall())
+            with pytest.raises(RuntimeError, match="ended unexpectedly"):
+                async for _event in proc.send_message("hello"):
+                    pass
+            await killer
+            # Let any stray subprocess-transport callbacks fire before asserting.
+            await asyncio.sleep(0.2)
+            assert unhandled == [], f"child death leaked unhandled loop exceptions: {unhandled}"
+        finally:
+            asyncio.get_running_loop().set_exception_handler(None)
+            await proc.stop()
