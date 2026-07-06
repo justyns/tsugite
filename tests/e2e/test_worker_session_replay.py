@@ -73,13 +73,17 @@ def _seed_complete_worker(e2e_session_store, e2e_tmp, user_id):
 
 def _seed_interrupted_worker(e2e_session_store, e2e_tmp, user_id):
     """Interrupted turn: the UI-handler events landed but the turn never reached
-    the post-execution code_execution recording (daemon restart / stall)."""
+    the post-execution code_execution recording (cancelled/failed mid-execution).
+    The terminal session_end event matches what the runner's cancel/fail paths
+    append; without ANY terminal event the replay treats the session as mid-turn
+    and defers the trailing bubble to live rehydration (separate issue)."""
     history_dir, storage = _storage_for(e2e_session_store, e2e_tmp, user_id, "session-e2eworkerint")
     storage.record("user_input", text="Create the KB page for threads")
     storage.record("turn_start", turn=1)
     storage.record("code", content=WORKER_CODE)
     storage.record("tool_call", tool="read_file", arguments=TOOL_ARGS)
     storage.record("tool_result", tool="unknown", success=True, output=TOOL_OUTPUT)
+    storage.record("session_end", status="error")
     return history_dir, "session-e2eworkerint"
 
 
