@@ -1,7 +1,6 @@
 """Tests for daemon scheduler."""
 
 import asyncio
-import json
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 
@@ -110,16 +109,17 @@ class TestSchedulerPersistence:
         sched._load()
         assert len(sched.list()) == 0
 
-    def test_atomic_write(self, schedules_path, run_callback):
+    def test_durable_write_through(self, schedules_path, run_callback):
+        """Saves go write-through to daemon.db; no legacy JSON is written and a
+        fresh Scheduler over the same dir sees the entry with no shutdown."""
         sched = Scheduler(schedules_path, run_callback)
         entry = ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
         sched.add(entry)
 
-        # Verify no .tmp file left behind
-        assert not schedules_path.with_suffix(".tmp").exists()
-        # Verify JSON is valid
-        data = json.loads(schedules_path.read_text())
-        assert "job1" in data["schedules"]
+        assert not schedules_path.exists(), "legacy schedules.json must not be written"
+        reloaded = Scheduler(schedules_path, run_callback)
+        reloaded._load()
+        assert reloaded.get("job1") is not None
 
 
 class TestNextRunComputation:

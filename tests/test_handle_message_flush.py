@@ -44,7 +44,8 @@ def adapter(tmp_path):
 
 @pytest.mark.asyncio
 async def test_handle_message_persists_dirty_state(adapter, monkeypatch):
-    """handle_message must flush() so session metadata mutations land on disk."""
+    """Session metadata mutations must land on disk after a turn (write-through:
+    durable at mutation time; the reload below is the proof)."""
     a, store = adapter
     session = Session(id="s1", agent="test-agent", source=SessionSource.INTERACTIVE.value, user_id="u1")
     store.create_session(session)
@@ -60,8 +61,6 @@ async def test_handle_message_persists_dirty_state(adapter, monkeypatch):
     ctx = ChannelContext(source="test", channel_id="c1", user_id="u1", reply_to="test")
     await a.handle_message("u1", "hi", ctx)
 
-    assert not store._dirty
-
     reloaded = SessionStore(Path(store._path))
     s = reloaded.get_session("s1")
     assert s.message_count == 1
@@ -69,7 +68,8 @@ async def test_handle_message_persists_dirty_state(adapter, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_handle_message_flushes_even_when_inner_raises(adapter, monkeypatch):
-    """Flush must run on the error path too, otherwise failed-turn state stays stale."""
+    """Mutations made before an inner failure must still be on disk (write-through
+    covers the error path structurally)."""
     a, store = adapter
     session = Session(id="s1", agent="test-agent", source=SessionSource.INTERACTIVE.value, user_id="u1")
     store.create_session(session)
@@ -85,8 +85,6 @@ async def test_handle_message_flushes_even_when_inner_raises(adapter, monkeypatc
     ctx = ChannelContext(source="test", channel_id="c1", user_id="u1", reply_to="test")
     with pytest.raises(RuntimeError):
         await a.handle_message("u1", "hi", ctx)
-
-    assert not store._dirty
 
     reloaded = SessionStore(Path(store._path))
     assert reloaded.get_session("s1").error == "boom"

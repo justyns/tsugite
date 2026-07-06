@@ -29,7 +29,7 @@ def test_add_assigns_id_and_persists(store, store_path):
     t = store.add(_make_terminal())
     assert t.id.startswith("term-")
     assert store.get(t.id) is t
-    assert store_path.exists()
+    assert (store_path.parent / "daemon.db").exists()
 
 
 def test_round_trip_via_reload(store_path):
@@ -196,18 +196,15 @@ def test_concurrent_state_updates_serialise(store):
     assert store.get(t.id).state == TerminalState.SUCCEEDED.value
 
 
-def test_atomic_save_via_tmpfile(store, store_path, tmp_path):
-    """The store writes via a .tmp sibling and os.replace, so a half-written file
-    never replaces the canonical JSON."""
-    store.add(_make_terminal(cmd="atomic test"))
-    # The .tmp file should not linger after a successful save.
-    assert not (store_path.with_suffix(".tmp")).exists()
-    assert store_path.exists()
-    import json
-
-    data = json.loads(store_path.read_text())
-    assert "terminals" in data
-    assert len(data["terminals"]) == 1
+def test_no_json_writes_and_durable_reload(store, store_path, tmp_path):
+    """Persistence is write-through to daemon.db: no legacy JSON is written,
+    and a mutation survives a reopen with no flush/close."""
+    t = store.add(_make_terminal(cmd="atomic test"))
+    assert not store_path.exists(), "legacy terminal_sessions.json must not be written"
+    reopened = TerminalSessionStore(store_path)
+    loaded = reopened.get(t.id)
+    assert loaded is not None
+    assert loaded.cmd == "atomic test"
 
 
 def _force_state(store, terminal_id, target_state):

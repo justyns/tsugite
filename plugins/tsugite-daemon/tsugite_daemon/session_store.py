@@ -6,7 +6,6 @@ webhook, background, spawned). Conversation data stays in JSONL history files.
 
 import json
 import logging
-import os
 import threading
 from dataclasses import asdict, dataclass, field
 from dataclasses import fields as dataclass_fields
@@ -16,6 +15,7 @@ from pathlib import Path
 from typing import Optional
 from uuid import uuid4
 
+from tsugite.core.record_store import SqliteCollectionStorage
 from tsugite.history import event_to_ui_dict, generate_session_id, get_history_backend
 from tsugite.renderer import parse_iso_utc as _parse_ts
 from tsugite_daemon.memory import DEFAULT_CONTEXT_LIMIT
@@ -245,7 +245,7 @@ class SessionStore:
     """Global unified session metadata store.
 
     One instance shared across all agents and adapters.
-    Persists to {state_dir}/session_store.json.
+    Persists write-through to {state_dir}/daemon.db (sessions collection).
     """
 
     def __init__(
@@ -254,15 +254,14 @@ class SessionStore:
         context_limits: Optional[dict[str, int]] = None,
         history_dir: Optional[Path] = None,
     ):
-        self._path = store_path
+        self._path = store_path  # legacy JSON location; one-time migration source
+        self._storage = SqliteCollectionStorage.for_state_file(store_path, "sessions")
         # Where per-session event logs live. Defaults to `<store_path parent>/history`
         # so tests using tmp_path/session_store.json get isolated tmp_path/history/,
         # while production callers can pass the XDG history dir explicitly.
         self._history_dir = history_dir if history_dir is not None else (store_path.parent / "history")
         self._sessions: dict[str, Session] = {}
         self._lock = threading.Lock()
-        self._dirty = False
-        self._save_dir_created = False
 
         # Per-agent context limits for compaction
         self._context_limits: dict[str, int] = context_limits or {}
@@ -292,6 +291,9 @@ class SessionStore:
         self._load()
         self._migrate_legacy()
         self._recover_stale_sessions()
+        # One boot-time snapshot so the db always equals memory after load-time
+        # reconciliation (legacy imports, primary stamping, stale recovery).
+        self._save()
 
     # ── Context limit management ──
 
@@ -326,7 +328,7 @@ class SessionStore:
                 # rewrite on every turn for no reason.
                 return
             session.context_limit = limit
-            self._mark_dirty()
+            self._persist(session)
 
     def get_session_compaction_threshold(self, session_id: str) -> int:
         return int(self.get_session_context_limit(session_id) * 0.8)
@@ -349,7 +351,7 @@ class SessionStore:
                 session = self._sessions.get(session_id)
                 if session:
                     session.compacting = True
-                    self._mark_dirty()
+                    self._persist(session)
             return True
 
     def end_compaction(self, user_id: str, agent: str, session_id: str | None = None) -> None:
@@ -361,7 +363,7 @@ class SessionStore:
                 session = self._sessions.get(session_id)
                 if session:
                     session.compacting = False
-                    self._mark_dirty()
+                    self._persist(session)
         if event:
             event.set()
 
@@ -397,7 +399,7 @@ class SessionStore:
             session = self._sessions.get(session_id)
             if session and skill_name not in session.suppressed_skills:
                 session.suppressed_skills.append(skill_name)
-                self._mark_dirty()
+                self._persist(session)
 
     def unsuppress_skill(self, session_id: str, skill_name: str) -> None:
         """Remove a skill from the session's suppression set."""
@@ -405,7 +407,7 @@ class SessionStore:
             session = self._sessions.get(session_id)
             if session and skill_name in session.suppressed_skills:
                 session.suppressed_skills.remove(skill_name)
-                self._mark_dirty()
+                self._persist(session)
 
     def get_suppressed_skills(self, session_id: str) -> set[str]:
         """Return a copy of the session's suppressed skill names."""
@@ -423,7 +425,7 @@ class SessionStore:
             session = self._sessions.get(session_id)
             if session:
                 session.sticky_skills[skill_name] = 0
-                self._mark_dirty()
+                self._persist(session)
 
     def drop_sticky(self, session_id: str, skill_name: str) -> None:
         """Remove a skill from the sticky set."""
@@ -431,7 +433,7 @@ class SessionStore:
             session = self._sessions.get(session_id)
             if session and skill_name in session.sticky_skills:
                 del session.sticky_skills[skill_name]
-                self._mark_dirty()
+                self._persist(session)
 
     def get_sticky_skills(self, session_id: str) -> dict[str, int]:
         """Return a copy of the session's sticky skill counters."""
@@ -444,7 +446,7 @@ class SessionStore:
             session = self._sessions.get(session_id)
             if session:
                 session.reasoning_effort = value or None
-                self._mark_dirty()
+                self._persist(session)
 
     def get_reasoning_effort(self, session_id: str) -> str | None:
         with self._lock:
@@ -463,6 +465,7 @@ class SessionStore:
         if not current_model:
             return
         with self._lock:
+            changed = []
             for session in self._sessions.values():
                 if session.agent != agent:
                     continue
@@ -473,14 +476,15 @@ class SessionStore:
                 if session.model_override:
                     continue
                 session.model_override = current_model
-            self._mark_dirty()
+                changed.append(session)
+            self._persist(*changed)
 
     def set_model_override(self, session_id: str, value: str | None) -> None:
         with self._lock:
             session = self._sessions.get(session_id)
             if session:
                 session.model_override = value or None
-                self._mark_dirty()
+                self._persist(session)
 
     def get_model_override(self, session_id: str) -> str | None:
         with self._lock:
@@ -504,7 +508,7 @@ class SessionStore:
             if session.agent == value:
                 return
             session.agent = value
-            self._save()
+            self._persist(session)
 
     def bump_unused_counters(self, session_id: str, referenced: set[str]) -> None:
         """Advance one turn: reset referenced skills, increment the rest.
@@ -524,7 +528,7 @@ class SessionStore:
                     session.sticky_skills[name] = 0
                 else:
                     session.sticky_skills[name] += 1
-            self._mark_dirty()
+            self._persist(session)
 
     # ── Interactive session management ──
 
@@ -592,11 +596,13 @@ class SessionStore:
     def _demote_primaries_locked(
         self, user_id: str, agent: str, *, except_id: Optional[str] = None
     ) -> Optional[Session]:
-        """Clear primary flag from all (user, agent) sessions except `except_id`. Returns the last one cleared."""
+        """Clear primary flag from all (user, agent) sessions except `except_id`. Returns the last one cleared.
+        Persists every demoted session itself, so callers only persist their own target."""
         cleared: Optional[Session] = None
         for s in self._sessions.values():
             if s.user_id == user_id and s.agent == agent and s.id != except_id and s.is_primary:
                 s.metadata.pop(METADATA_PRIMARY_FLAG, None)
+                self._persist(s)
                 cleared = s
         return cleared
 
@@ -614,7 +620,7 @@ class SessionStore:
                 metadata={METADATA_PRIMARY_FLAG: True},
             )
             self._sessions[conv_id] = session
-            self._save()
+            self._persist(session)
             return session
 
     def set_primary_session(self, session_id: str) -> Session:
@@ -629,15 +635,13 @@ class SessionStore:
                 raise ValueError(f"Cannot promote superseded session '{session_id}' to primary")
             self._demote_primaries_locked(target.user_id, target.agent, except_id=target.id)
             target.metadata[METADATA_PRIMARY_FLAG] = True
-            self._mark_dirty()
+            self._persist(target)
             return target
 
     def clear_primary_session(self, user_id: str, agent: str) -> Optional[Session]:
         """Remove the primary flag from any session for (user_id, agent). Returns the cleared session, if any."""
         with self._lock:
-            cleared = self._demote_primaries_locked(user_id, agent)
-            self._mark_dirty()
-            return cleared
+            return self._demote_primaries_locked(user_id, agent)
 
     def get_or_create_named_session(self, user_id: str, agent: str, name: str) -> Session:
         """Resolve a named-route session for (user_id, agent), creating one if absent.
@@ -663,7 +667,7 @@ class SessionStore:
             session.cumulative_tokens = tokens
             session.message_count = msg_count
             self._sessions[conv_id] = session
-            self._save()
+            self._persist(session)
             return session
 
     def needs_compaction(self, session_id: str) -> bool:
@@ -711,7 +715,7 @@ class SessionStore:
         )
         with self._lock:
             self._sessions[new_id] = branch
-            self._save()
+            self._persist(branch)
         return branch
 
     def compact_session(self, session_id: str) -> Session:
@@ -780,7 +784,7 @@ class SessionStore:
             old_session.model_override = None
             old_session.compacting = False
 
-            self._save()
+            self._persist(old_session, new_session)
         self._evict_progress_cache(session_id)
         return new_session
 
@@ -812,7 +816,7 @@ class SessionStore:
                     session.cumulative_tokens = tokens_used
                 session.message_count += 1
                 session.last_active = datetime.now(timezone.utc).isoformat()
-                self._mark_dirty()
+                self._persist(session)
 
     def set_cumulative_tokens(self, session_id: str, tokens: int) -> None:
         """Set cumulative_tokens without bumping message_count or last_active.
@@ -828,7 +832,7 @@ class SessionStore:
             session = self._sessions.get(session_id)
             if session and session.cumulative_tokens != tokens:
                 session.cumulative_tokens = tokens
-                self._mark_dirty()
+                self._persist(session)
 
     # ── Generic session CRUD ──
 
@@ -850,7 +854,7 @@ class SessionStore:
             elif session.source in (SessionSource.BACKGROUND.value, SessionSource.SPAWNED.value):
                 self._prune_background_sessions(session.agent)
 
-            self._save()
+            self._persist(session)
             return session
 
     def _purge_session_state(self, session_id: str) -> None:
@@ -864,6 +868,7 @@ class SessionStore:
         briefly inside.
         """
         self._sessions.pop(session_id, None)
+        self._storage.delete(session_id)
         for tid, sid in list(self._thread_index.items()):
             if sid == session_id:
                 del self._thread_index[tid]
@@ -919,7 +924,7 @@ class SessionStore:
                     raise ValueError(f"Unknown field '{key}'")
                 setattr(session, key, value)
             session.last_active = datetime.now(timezone.utc).isoformat()
-            self._mark_dirty()
+            self._persist(session)
         if session.status in FINISHED_STATUSES:
             self._evict_progress_cache(session_id)
         return session
@@ -969,7 +974,8 @@ class SessionStore:
                     s.pin_position = i if i < insert_at else i + 1
 
             session.last_active = datetime.now(timezone.utc).isoformat()
-            self._mark_dirty()
+            # Pin/unpin repositions sibling pins too - persist the whole pin set.
+            self._persist(session, *self._pinned_for_agent(session.agent, exclude_id=session_id))
             return session
 
     def reorder_pins(self, ordered_ids: list[str]) -> list[Session]:
@@ -980,8 +986,7 @@ class SessionStore:
             valid = [self._sessions[sid] for sid in ordered_ids if sid in self._sessions and self._sessions[sid].pinned]
             for i, s in enumerate(valid):
                 s.pin_position = i
-            if valid:
-                self._mark_dirty()
+            self._persist(*valid)
             return valid
 
     def mark_viewed(self, session_id: str, ts: Optional[str] = None) -> Session:
@@ -991,7 +996,7 @@ class SessionStore:
             if not session:
                 raise ValueError(f"Session '{session_id}' not found")
             session.last_viewed_at = ts or datetime.now(timezone.utc).isoformat()
-            self._mark_dirty()
+            self._persist(session)
             return session
 
     def list_sessions(
@@ -1188,7 +1193,7 @@ class SessionStore:
                 raise ValueError(f"Session '{session_id}' not found")
             session = self._sessions[session_id]
             session.metadata.update(updates)
-            self._mark_dirty()
+            self._persist(session)
             return session
 
     def delete_metadata(self, session_id: str, key: str) -> Session:
@@ -1205,7 +1210,7 @@ class SessionStore:
             if key not in session.metadata:
                 raise ValueError(f"Key '{key}' not found in metadata")
             del session.metadata[key]
-            self._mark_dirty()
+            self._persist(session)
             return session
 
     # ── Channel session index ──
@@ -1237,7 +1242,7 @@ class SessionStore:
             session.message_count = msg_count
             self._sessions[conv_id] = session
             self._channel_index[key] = conv_id
-            self._save()
+            self._persist(session)
             return session
 
     def find_by_channel(self, channel_id: str, agent: str) -> Optional[Session]:
@@ -1259,12 +1264,13 @@ class SessionStore:
     # ── Persistence ──
 
     def _load(self):
-        if not self._path.exists():
+        entries, _migrating = self._storage.load_or_migrate(self._path, "sessions")
+        # (The boot snapshot in __init__ persists imported entries unconditionally.)
+        if not entries:
             return
-        try:
-            data = json.loads(self._path.read_text())
-            valid_fields = {f.name for f in dataclass_fields(Session)}
-            for sid, sdata in data.get("sessions", {}).items():
+        valid_fields = {f.name for f in dataclass_fields(Session)}
+        for sdata in entries:
+            try:
                 # Migrate platform_thread_id -> metadata["thread_id"]
                 old_thread_id = sdata.pop("platform_thread_id", None)
                 if old_thread_id:
@@ -1272,59 +1278,53 @@ class SessionStore:
                     meta.setdefault("thread_id", old_thread_id)
                     sdata["metadata"] = meta
                 sdata = {k: v for k, v in sdata.items() if k in valid_fields}
-                self._sessions[sid] = Session(**sdata)
-            # Rebuild indexes. Legacy stores have no is_primary flag; stamp it on the
-            # most-recently-active interactive session per (user, agent) to preserve
-            # the user's existing default-routing across the upgrade.
-            primary_candidates: dict[tuple[str, str], str] = {}
-            already_primary_keys: set[tuple[str, str]] = set()
-            for sid, session in self._sessions.items():
-                if (
-                    session.source == SessionSource.INTERACTIVE.value
-                    and session.user_id
-                    and session.superseded_by is None
-                    and session.status not in FINISHED_STATUSES
-                ):
-                    key = (session.user_id, session.agent)
-                    if session.is_primary:
-                        already_primary_keys.add(key)
-                    existing_id = primary_candidates.get(key)
-                    if not existing_id or session.last_active > self._sessions[existing_id].last_active:
-                        primary_candidates[key] = sid
-                thread_id = session.metadata.get("thread_id") if session.metadata else None
-                if thread_id:
-                    self._thread_index[thread_id] = sid
-                channel_id = session.metadata.get("channel_id") if session.metadata else None
-                if channel_id:
-                    self._channel_index[(channel_id, session.agent)] = sid
-            for key, sid in primary_candidates.items():
-                if key not in already_primary_keys:
-                    self._sessions[sid].metadata[METADATA_PRIMARY_FLAG] = True
-        except (json.JSONDecodeError, TypeError, KeyError) as e:
-            logger.error("Failed to load session store from %s: %s", self._path, e)
+                session = Session(**sdata)
+            except (TypeError, KeyError) as e:
+                logger.error("Skipping malformed session record %s: %s", sdata.get("id"), e)
+                continue
+            self._sessions[session.id] = session
 
-    def _mark_dirty(self):
-        """Mark store as needing a save. Call flush() to persist."""
-        self._dirty = True
+        # Rebuild indexes. Legacy stores have no is_primary flag; stamp it on the
+        # most-recently-active interactive session per (user, agent) to preserve
+        # the user's existing default-routing across the upgrade.
+        primary_candidates: dict[tuple[str, str], str] = {}
+        already_primary_keys: set[tuple[str, str]] = set()
+        for sid, session in self._sessions.items():
+            if (
+                session.source == SessionSource.INTERACTIVE.value
+                and session.user_id
+                and session.superseded_by is None
+                and session.status not in FINISHED_STATUSES
+            ):
+                key = (session.user_id, session.agent)
+                if session.is_primary:
+                    already_primary_keys.add(key)
+                existing_id = primary_candidates.get(key)
+                if not existing_id or session.last_active > self._sessions[existing_id].last_active:
+                    primary_candidates[key] = sid
+            thread_id = session.metadata.get("thread_id") if session.metadata else None
+            if thread_id:
+                self._thread_index[thread_id] = sid
+            channel_id = session.metadata.get("channel_id") if session.metadata else None
+            if channel_id:
+                self._channel_index[(channel_id, session.agent)] = sid
+        for key, sid in primary_candidates.items():
+            if key not in already_primary_keys:
+                self._sessions[sid].metadata[METADATA_PRIMARY_FLAG] = True
+
+    def _persist(self, *sessions: Session) -> None:
+        """Write-through the given sessions' rows. Caller holds self._lock."""
+        for session in sessions:
+            self._storage.upsert(session.id, asdict(session))
 
     def flush(self):
-        """Persist if dirty. Safe to call from outside the lock."""
-        with self._lock:
-            if self._dirty:
-                self._save()
-                self._dirty = False
+        """No-op kept for API compatibility: every mutation is written through
+        to daemon.db immediately, so there is nothing to flush."""
 
     def _save(self):
-        if not self._save_dir_created:
-            self._path.parent.mkdir(parents=True, exist_ok=True)
-            self._save_dir_created = True
-        data = {
-            "sessions": {sid: asdict(s) for sid, s in self._sessions.items()},
-        }
-        tmp = self._path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(data, separators=(",", ":")))
-        os.replace(str(tmp), str(self._path))
-        self._dirty = False
+        """Snapshot the whole in-memory store to daemon.db in one transaction.
+        Boot-time only (load reconciliation); runtime mutations use _persist."""
+        self._storage.replace_all({sid: asdict(s) for sid, s in self._sessions.items()})
 
     def _estimate_tokens(self, session_id: str) -> tuple[int, int]:
         try:

@@ -1,12 +1,12 @@
-"""Persistent webhook storage backed by a JSON file."""
+"""Persistent webhook storage (daemon.db `webhooks` collection)."""
 
-import json
 import logging
-import os
 import secrets
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+
+from tsugite.core.record_store import SqliteCollectionStorage
 
 logger = logging.getLogger(__name__)
 
@@ -24,10 +24,16 @@ class WebhookEntry:
 
 
 class WebhookStore:
-    """Persistent webhook store with atomic saves."""
+    """Persistent webhook store, write-through to daemon.db.
+
+    The legacy ``webhooks.json`` path is the constructor argument purely as a
+    one-time migration source (imported when the db collection is empty, then
+    left untouched as a backup).
+    """
 
     def __init__(self, path: Path):
         self._path = path
+        self._storage = SqliteCollectionStorage.for_state_file(path, "webhooks")
         self._webhooks: dict[str, WebhookEntry] = {}
         self._load()
 
@@ -38,7 +44,7 @@ class WebhookStore:
             raise ValueError(f"Webhook token already exists: {token[:8]}...")
         entry = WebhookEntry(token=token, agent=agent, source=source)
         self._webhooks[token] = entry
-        self._save()
+        self._storage.upsert(token, asdict(entry))
         logger.info("Added webhook for agent '%s' source '%s'", agent, source)
         return entry
 
@@ -46,7 +52,7 @@ class WebhookStore:
         if token not in self._webhooks:
             raise ValueError("Webhook not found")
         del self._webhooks[token]
-        self._save()
+        self._storage.delete(token)
         logger.info("Removed webhook %s...", token[:8])
 
     def get(self, token: str) -> WebhookEntry | None:
@@ -56,19 +62,13 @@ class WebhookStore:
         return list(self._webhooks.values())
 
     def _load(self):
-        if not self._path.exists():
-            return
-        try:
-            data = json.loads(self._path.read_text())
-            for entry_data in data.get("webhooks", []):
+        entries, migrating = self._storage.load_or_migrate(self._path, "webhooks")
+        for entry_data in entries:
+            try:
                 entry = WebhookEntry(**entry_data)
-                self._webhooks[entry.token] = entry
-        except (json.JSONDecodeError, TypeError, KeyError) as e:
-            logger.error("Failed to load webhooks from %s: %s", self._path, e)
-
-    def _save(self):
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        data = {"webhooks": [asdict(e) for e in self._webhooks.values()]}
-        tmp = self._path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(data, indent=2))
-        os.replace(str(tmp), str(self._path))
+            except TypeError as e:
+                logger.error("Skipping malformed webhook entry: %s", e)
+                continue
+            self._webhooks[entry.token] = entry
+        if migrating:
+            self._storage.replace_all({t: asdict(e) for t, e in self._webhooks.items()})

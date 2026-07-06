@@ -5,9 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
-import json
 import logging
-import os
 from dataclasses import dataclass, field
 from dataclasses import fields as dataclass_fields
 from datetime import datetime, timedelta, timezone
@@ -16,6 +14,8 @@ from typing import Callable, Coroutine
 from zoneinfo import ZoneInfo
 
 from cronsim import CronSim, CronSimError
+
+from tsugite.core.record_store import SqliteCollectionStorage
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +130,7 @@ class Scheduler:
         on_repeated_failure: Callable[["ScheduleEntry"], None] | None = None,
     ):
         self._path = schedules_path
+        self._storage = SqliteCollectionStorage.for_state_file(schedules_path, "schedules")
         self._run_callback = run_callback
         self._script_callback = script_callback
         # Called once when a schedule crosses its consecutive-failure threshold,
@@ -602,21 +603,19 @@ class Scheduler:
     # Persistence
 
     def _load(self):
-        if not self._path.exists():
-            self._schedules = {}
-            return
-        try:
-            data = json.loads(self._path.read_text())
-            valid_fields = _PERSISTED_FIELDS
-            for sid, entry_data in data.get("schedules", {}).items():
-                self._schedules[sid] = ScheduleEntry(**{k: v for k, v in entry_data.items() if k in valid_fields})
-        except (json.JSONDecodeError, TypeError, KeyError) as e:
-            logger.error("Failed to load schedules from %s: %s", self._path, e)
-            self._schedules = {}
+        self._schedules = {}
+        entries, migrating = self._storage.load_or_migrate(self._path, "schedules")
+        for entry_data in entries:
+            try:
+                entry = ScheduleEntry(**{k: v for k, v in entry_data.items() if k in _PERSISTED_FIELDS})
+            except TypeError as e:
+                logger.error("Skipping malformed schedule entry: %s", e)
+                continue
+            self._schedules[entry.id] = entry
+        if migrating:
+            self._save()
 
     def _save(self):
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        data = {"schedules": {sid: entry_to_dict(entry) for sid, entry in self._schedules.items()}}
-        tmp = self._path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(data, indent=2))
-        os.replace(str(tmp), str(self._path))
+        # Schedules are few (dozens) and several mutation paths touch multiple
+        # entries, so one transactional replace per save beats tracking deltas.
+        self._storage.replace_all({sid: entry_to_dict(entry) for sid, entry in self._schedules.items()})

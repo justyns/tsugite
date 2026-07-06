@@ -1,6 +1,6 @@
-"""Persistent TerminalSession store backed by a JSON file.
+"""Persistent TerminalSession store (daemon.db-backed).
 
-Mirrors `WebhookStore` / `JobStore`: in-memory dict + atomic tmpfile-swap saves.
+Mirrors `WebhookStore` / `JobStore`: in-memory dict + write-through daemon.db rows.
 State transitions are guarded by `_VALID_TRANSITIONS` to prevent invalid moves.
 
 PAUSED-FOLLOW from the design brief is intentionally NOT modeled here - it's a
@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Optional
 from uuid import uuid4
 
-from tsugite.core.record_store import JsonRecordStore, now_iso
+from tsugite.core.record_store import RecordStore, now_iso
 
 logger = logging.getLogger(__name__)
 
@@ -95,8 +95,8 @@ class TerminalSession:
             self.updated_at = now
 
 
-class TerminalSessionStore(JsonRecordStore):
-    """JSON-backed persistent store for TerminalSession records."""
+class TerminalSessionStore(RecordStore):
+    """Persistent store for TerminalSession records (daemon.db `terminals` collection)."""
 
     record_cls = TerminalSession
     collection_key = "terminals"

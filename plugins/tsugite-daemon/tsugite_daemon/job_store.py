@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Optional
 from uuid import uuid4
 
-from tsugite.core.record_store import JsonRecordStore, now_iso
+from tsugite.core.record_store import RecordStore, now_iso
 
 logger = logging.getLogger(__name__)
 
@@ -186,11 +186,11 @@ class Job:
         }
 
 
-class JobStore(JsonRecordStore):
-    """JSON-backed persistent store for Job records.
+class JobStore(RecordStore):
+    """Persistent store for Job records (daemon.db `jobs` collection).
 
     State transitions are guarded by `_VALID_TRANSITIONS`; resolved jobs are
-    pruned beyond `max_terminal_jobs` so jobs.json stays bounded.
+    pruned beyond `max_terminal_jobs` so the collection stays bounded.
     """
 
     record_cls = Job
@@ -235,7 +235,7 @@ class JobStore(JsonRecordStore):
             return
         terminal.sort(key=lambda j: j.resolved_at or j.updated_at or "")
         for victim in terminal[:overflow]:
-            del self._records[victim.id]
+            self._delete_record(victim.id)
 
     def _load_entry(self, entry: dict) -> Optional[Job]:
         # Migrate legacy state values that no longer exist in JobState.

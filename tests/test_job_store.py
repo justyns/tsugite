@@ -29,7 +29,7 @@ def test_add_assigns_id_and_persists(store, store_path):
     job = store.add(_make_job())
     assert job.id.startswith("job-")
     assert store.get(job.id) is job
-    assert store_path.exists()
+    assert (store_path.parent / "daemon.db").exists()
 
 
 def test_round_trip_via_reload(store_path):
@@ -192,15 +192,15 @@ def test_readers_do_not_raise_while_writer_mutates(monkeypatch, store):
     self._lock, those readers iterate self._jobs.values() while add() mutates the
     same dict from another thread, which CPython rejects mid-iteration.
 
-    Determinism: _save() is stubbed to a no-op (we're exercising the in-memory
+    Determinism: persistence is stubbed to a no-op (we're exercising the in-memory
     dict, not disk), and the baseline dict is large so each reader iteration spans
     a wide window for a concurrent insert to land inside. Multiple writer/reader
     threads + a bounded iteration budget keep it from hanging while making the
     unguarded race fire reliably.
     """
-    # Don't pay JSON serialization on every add - it both slows the test and
+    # Don't pay row serialization on every add - it both slows the test and
     # shrinks the contention window we're trying to hit.
-    monkeypatch.setattr(JobStore, "_save", lambda self: None)
+    monkeypatch.setattr(store._storage, "upsert", lambda *a, **kw: None)
 
     # Sizeable baseline → each reader iteration spans many items, so a concurrent
     # insert is very likely to land inside one iteration. Without the lock this
