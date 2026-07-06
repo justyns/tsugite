@@ -62,7 +62,7 @@ def test_409_send_restores_draft_and_marks_busy(chat_page):
         lambda route: route.fulfill(
             status=409,
             content_type="application/json",
-            body='{"error": "a turn is already running for this session"}',
+            body='{"error": "a turn is already running for this session", "code": "turn_in_flight"}',
         ),
     )
 
@@ -88,3 +88,35 @@ def test_409_send_restores_draft_and_marks_busy(chat_page):
     info = [m for m in result["msgs"] if m["type"] == "info"]
     assert info and "already running" in info[-1]["text"]
     assert result["busy"] is True, "the 409 must flip the cached session to busy"
+
+
+def test_409_session_finished_shows_error_not_busy(chat_page):
+    """The finished-session 409 must NOT mark the session busy - it needs the
+    machine-readable code to distinguish it from a turn conflict."""
+    page = chat_page
+
+    page.route(
+        "**/api/agents/*/chat",
+        lambda route: route.fulfill(
+            status=409,
+            content_type="application/json",
+            body='{"error": "Session is completed. Start a new session to continue.", "code": "session_finished"}',
+        ),
+    )
+
+    result = page.evaluate(
+        """(sel) => {
+            const v = Alpine.$data(document.querySelector(sel));
+            v.messageText = 'hello finished';
+            return v.sendMessage().then(() => {
+                const msgs = v.messages.map(m => ({ type: m.type, text: (m.text || '').slice(0, 90) }));
+                const s = v.allSessions.find(x => (x.conversation_id || x.id) === v.selectedSessionId);
+                return { msgs, draft: v.messageText, busy: s?.busy ?? null };
+            });
+        }""",
+        CONV_VIEW,
+    )
+    assert result["draft"] == "hello finished", "draft must still be restored"
+    assert result["busy"] is not True, "a finished-session conflict must not render the session as busy"
+    errors = [m for m in result["msgs"] if m["type"] == "error"]
+    assert errors and "Start a new session" in errors[-1]["text"]

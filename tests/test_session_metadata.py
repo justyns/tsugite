@@ -72,7 +72,6 @@ class TestSessionMetadata:
         s = Session(id="persist-test", agent="test")
         store1.create_session(s)
         store1.set_metadata("persist-test", "type", "research")
-        store1.flush()
 
         store2 = SessionStore(tmp_path / "store.json")
         loaded = store2.get_session("persist-test")
@@ -169,7 +168,6 @@ class TestChannelSessionIndex:
     def test_channel_index_rebuilt_on_load(self, tmp_path):
         store1 = SessionStore(tmp_path / "store.json")
         store1.get_or_create_channel_session("ch-1", "odyn", "user-1")
-        store1.flush()
 
         store2 = SessionStore(tmp_path / "store.json")
         found = store2.find_by_channel("ch-1", "odyn")

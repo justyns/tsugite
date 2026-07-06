@@ -124,11 +124,15 @@ def test_complete_worker_turn_renders_tools_and_thought(authenticated_page, e2e_
         assert len(code_steps) == 1, f"expected exactly one code step (no dup from `code` event); got {len(code_steps)}"
 
         tool_steps = [s for s in steps if "read_file" in s["summary"]]
-        assert tool_steps, f"tool_call must render a read_file step with arguments; steps: {[s['summary'] for s in steps]}"
+        assert tool_steps, (
+            f"tool_call must render a read_file step with arguments; steps: {[s['summary'] for s in steps]}"
+        )
         assert "kb/README.md" in tool_steps[0]["content"], "tool arguments must be shown"
 
         output_steps = [s for s in steps if TOOL_OUTPUT in s["content"]]
-        assert len(output_steps) == 1, f"output must render exactly once (tool_result dup suppressed); got {len(output_steps)}"
+        assert len(output_steps) == 1, (
+            f"output must render exactly once (tool_result dup suppressed); got {len(output_steps)}"
+        )
 
         agent_texts = " | ".join(b["text"] for b in bubbles if b["type"] == "agent")
         assert "writing the page now" in agent_texts, f"thought text must render as agent prose; got: {agent_texts!r}"

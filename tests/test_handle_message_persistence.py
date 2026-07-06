@@ -1,5 +1,5 @@
-"""Regression tests for #265 — adapter session-store mutations must persist to
-disk and SSE listeners must be notified after each turn."""
+"""Adapter session-store mutations must be durable after each turn (write-through)
+and SSE listeners must be notified."""
 
 from pathlib import Path
 

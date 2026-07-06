@@ -139,7 +139,6 @@ def test_recover_stale_sessions_clears_compacting_on_restart(tmp_path):
     first = SessionStore(path)
     session = first.get_or_create_interactive("alice", "test-agent")
     first.begin_compaction("alice", "test-agent", session_id=session.id)
-    first.flush()
     assert first.get_session(session.id).compacting is True
 
     second = SessionStore(path)

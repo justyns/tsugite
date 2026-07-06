@@ -322,6 +322,16 @@ export default () => ({
         }
       }
       if (ev.type === 'session_update') {
+        if (d.action === 'busy' && d.id) {
+          // Patch in place - a turn-start must not trigger a full session-list
+          // refetch (turn completion already does, via action 'updated').
+          const s = this.allSessions.find(x => x.id === d.id);
+          if (s) s.busy = !!d.busy;
+          if (this.selectedSessionMeta && (this.selectedSessionMeta.conversation_id || this.selectedSessionMeta.id) === d.id) {
+            this.selectedSessionMeta = { ...this.selectedSessionMeta, busy: !!d.busy };
+          }
+          return;
+        }
         if (d.action === 'titled' && d.title) {
           const s = this.allSessions.find(x => x.id === d.id);
           if (s) { s.title = d.title; return; }
@@ -1050,6 +1060,14 @@ export default () => ({
   // Alpine 3's :class array form does not unpack nested objects — it stringifies
   // them to `[object Object]`. Build a flat string so the `pulse` class actually
   // lands on the dot.
+  // The one client-side verdict for "is a turn in flight": the server's
+  // authoritative busy flag, or fresh live progress (covers the moments before
+  // the busy broadcast lands). Every consumer (dot, label, history dropTrailing)
+  // must use this instead of re-deriving its own version.
+  sessionTurnInFlight(s) {
+    return !!(s && (s.busy || this.isSessionProgressFresh(s)));
+  },
+
   dotClassNames(s) {
     // A session waiting on the user gets a distinct (peach), attention-pulsing dot
     // so it reads differently from the green running/working state.
@@ -1057,7 +1075,7 @@ export default () => ({
     // Server-side busy is authoritative: render the running state even when
     // this client has no fresh progress (reconnect / PWA resume).
     const base = s.busy ? this.statusDotClass('running') : this.statusDotClass(s.state);
-    return this.isSessionProgressFresh(s) || s.busy ? `${base} pulse` : base;
+    return this.sessionTurnInFlight(s) ? `${base} pulse` : base;
   },
 
   recentBuckets() {

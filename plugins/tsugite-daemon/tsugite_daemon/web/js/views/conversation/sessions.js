@@ -159,7 +159,9 @@ export const sessionsMixin = {
     // lastEventTime gates against the never-started case where the server
     // returns its default "Starting..." for sessions with zero events.
     const cached = state.progress || progressFromPayload(session.progress);
-    const liveTurn = !!cached?.statusText && !!cached?.lastEventTime;
+    // Server busy counts as a live turn: a mid-turn reconnect must defer the
+    // trailing bubble to the live stream exactly like a locally-observed turn.
+    const liveTurn = (!!cached?.statusText && !!cached?.lastEventTime) || !!session.busy;
     this.loadStatus();
     // resetHistory() above wipes loadHistory-derived state (compactionSummary,
     // pagination: _allHistoryMessages / hasMoreHistory). On a revisit we must
@@ -464,11 +466,10 @@ export const sessionsMixin = {
     const running = s.state === 'running' || s.state === 'active';
     if (!running) return '';
     const cached = this.sessionsState[s.id]?.progress || progressFromPayload(s.progress);
-    if (!cached) return s.busy ? 'Working...' : 'Starting...';
     const parts = [];
-    if (cached.turnCount) parts.push(`Turn ${cached.turnCount}`);
-    if (cached.toolCount) parts.push(`${cached.toolCount} tool${cached.toolCount > 1 ? 's' : ''}`);
-    if (cached.statusText) parts.push(cached.statusText);
+    if (cached?.turnCount) parts.push(`Turn ${cached.turnCount}`);
+    if (cached?.toolCount) parts.push(`${cached.toolCount} tool${cached.toolCount > 1 ? 's' : ''}`);
+    if (cached?.statusText) parts.push(cached.statusText);
     if (parts.length > 0) return parts.join(' · ');
     // The server's busy flag is authoritative: a turn is in flight even if no
     // progress event has reached this client (reconnect, PWA resume, missed
@@ -476,7 +477,7 @@ export const sessionsMixin = {
     if (s.busy) return 'Working...';
     // lastEventTime distinguishes "between turns" (events seen, none active) from
     // "session never started" so the idle state doesn't fall back to "Starting...".
-    return cached.lastEventTime ? '' : 'Starting...';
+    return cached?.lastEventTime ? '' : 'Starting...';
   },
 
   sessionCompactingLabel(s) {

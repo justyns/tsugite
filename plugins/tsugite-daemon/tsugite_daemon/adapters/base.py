@@ -570,19 +570,16 @@ class BaseAdapter(ABC):
                 self.session_store.end_turn(broadcast_state.get("conv_id"))
             except Exception as e:
                 logger.warning("end_turn after handle_message failed: %s", e)
-            try:
-                self.session_store.flush()
-            except Exception as e:
-                logger.warning("session_store.flush after handle_message failed: %s", e)
             self._broadcast_turn_complete(broadcast_state.get("conv_id"))
 
-    def _broadcast_session_updated(self, conv_id: Optional[str]) -> None:
-        """Broadcast a session_update so clients refresh the session's payload
-        (busy flag included). Best-effort."""
+    def _broadcast_session_busy(self, conv_id: Optional[str], busy: bool) -> None:
+        """Patchable busy transition for clients - they flip the one session's
+        flag in place instead of refetching the whole session list (which the
+        turn-complete broadcast already triggers once per turn). Best-effort."""
         if not self.event_bus or not conv_id:
             return
         try:
-            self.event_bus.emit("session_update", {"action": "updated", "id": conv_id})
+            self.event_bus.emit("session_update", {"action": "busy", "id": conv_id, "busy": busy})
         except Exception as e:
             logger.debug("session busy broadcast failed: %s", e)
 
@@ -631,18 +628,16 @@ class BaseAdapter(ABC):
         self.session_store.begin_turn(conv_id)
         # Tell every client the session went busy NOW - the sidebar/composer
         # must reflect server truth, not wait for progress events.
-        self._broadcast_session_updated(conv_id)
+        self._broadcast_session_busy(conv_id, True)
 
         # Compaction applies to override (pinned/explicit) sessions too —
         # otherwise cumulative_tokens grow until the provider raises "Prompt
         # is too long" with no recovery. compact_session migrates pin state
         # to the successor, so the user's pin follows the rotation.
         if self.session_store.needs_compaction(conv_id) or self.session_store.is_compacting(user_id, self.agent_name):
-            self.session_store.end_turn(conv_id)
-            conv_id = await self._run_compaction(user_id, conv_id, custom_logger, reason="token_threshold")
-            if _broadcast_state is not None:
-                _broadcast_state["conv_id"] = conv_id
-            self.session_store.begin_turn(conv_id)
+            conv_id = await self._run_compaction(
+                user_id, conv_id, custom_logger, reason="token_threshold", _broadcast_state=_broadcast_state
+            )
 
         from tsugite_daemon.session_runner import get_current_session_id, set_current_session_id
 
@@ -744,11 +739,9 @@ class BaseAdapter(ABC):
                     )
                     raise
                 logger.warning("[%s] Prompt too long, auto-compacting and retrying", self.agent_name)
-                self.session_store.end_turn(conv_id)
-                conv_id = await self._run_compaction(user_id, conv_id, custom_logger, reason="prompt_too_long")
-                if _broadcast_state is not None:
-                    _broadcast_state["conv_id"] = conv_id
-                self.session_store.begin_turn(conv_id)
+                conv_id = await self._run_compaction(
+                    user_id, conv_id, custom_logger, reason="prompt_too_long", _broadcast_state=_broadcast_state
+                )
                 ctx = contextvars.copy_context()
                 result = await asyncio.to_thread(ctx.run, run_in_workspace)
             else:
@@ -826,7 +819,6 @@ class BaseAdapter(ABC):
             title = await compute_session_title(user_message, assistant_response, self.resolve_model())
             if title:
                 self.session_store.update_session(session_id, title=title)
-                self.session_store.flush()
                 if self.event_bus:
                     self.event_bus.emit("session_update", {"action": "titled", "id": session_id, "title": title})
         except Exception as e:
@@ -839,7 +831,12 @@ class BaseAdapter(ABC):
     )
 
     async def _run_compaction(
-        self, user_id: str, conv_id: str, custom_logger: Optional[HasUIHandler] = None, reason: str | None = None
+        self,
+        user_id: str,
+        conv_id: str,
+        custom_logger: Optional[HasUIHandler] = None,
+        reason: str | None = None,
+        _broadcast_state: Optional[Dict[str, Optional[str]]] = None,
     ) -> str:
         """Run session compaction and return the new conv_id.
 
@@ -848,7 +845,20 @@ class BaseAdapter(ABC):
         consequences of the rotation that just happened; rediscovering via
         `find_default_session` would silently substitute the user's primary
         for non-default or non-interactive sources.
+
+        Owns the in-flight-marker handoff: when the old session had a turn in
+        flight, its marker ends here and the successor's begins before return
+        (re-broadcast), so every mid-turn compaction caller gets the handoff
+        without a bracket dance. Manual compaction (no turn running) passes
+        through untouched. `_broadcast_state` is repointed at the successor
+        when provided.
         """
+        try:
+            turn_was_in_flight = self.session_store.get_session(conv_id).turn_in_flight
+        except (ValueError, KeyError):
+            turn_was_in_flight = False
+        if turn_was_in_flight:
+            self.session_store.end_turn(conv_id)
         new_session: Optional[Session] = None
         if self.session_store.begin_compaction(user_id, self.agent_name, session_id=conv_id):
             self._emit_ui(custom_logger, "compacting")
@@ -871,6 +881,11 @@ class BaseAdapter(ABC):
 
         self._emit_ui(custom_logger, "compacted")
         new_id = new_session.id if new_session else conv_id
+        if _broadcast_state is not None:
+            _broadcast_state["conv_id"] = new_id
+        if turn_was_in_flight:
+            self.session_store.begin_turn(new_id)
+            self._broadcast_session_busy(new_id, True)
         if self.event_bus:
             self.event_bus.emit(
                 "session_update",

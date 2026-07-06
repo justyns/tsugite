@@ -93,7 +93,6 @@ def test_compacted_session_inherits_predecessor_limit(store):
 def test_per_session_limit_persists_across_store_reload(store, tmp_path):
     _make_session(store, "s1")
     store.update_session_context_limit("s1", 1_000_000)
-    store.flush()
 
     reloaded = SessionStore(store._path, context_limits={"agent-a": 128_000})
 

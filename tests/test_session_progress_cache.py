@@ -117,7 +117,6 @@ def test_cache_survives_store_reload(tmp_path: Path, history_dir):
     _make_history_session(history_dir, sid)
     s1.append_event(sid, {"type": "tool_invocation", "name": "bash"})
     s1.append_event(sid, {"type": "tool_invocation", "name": "read"})
-    s1.flush()
 
     s2 = SessionStore(path, history_dir=history_dir)
     summary = s2.session_progress_summary(sid)

@@ -212,7 +212,6 @@ class TestSessionStoreSkillSuppression:
         first = SessionStore(path)
         _seed_session(first)
         first.suppress_skill("session-1", "skill-a")
-        first.flush()
 
         second = SessionStore(path)
         assert second.get_suppressed_skills("session-1") == {"skill-a"}
@@ -345,7 +344,6 @@ class TestSessionStoreStickySkills:
         first = SessionStore(path)
         _seed_session(first)
         first.mark_sticky("session-1", "skill-a")
-        first.flush()
 
         second = SessionStore(path)
         assert second.get_sticky_skills("session-1") == {"skill-a": 0}

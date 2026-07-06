@@ -740,6 +740,19 @@ class HTTPServer:
         since = request.query_params.get("since")
         return JSONResponse(store.total(since=since))
 
+    def _session_busy(self, agent_name: str, session) -> bool:
+        """The one definition of busy, shared by the sessions payload, /status,
+        and the /chat 409 guard - the server must never 409 a send while
+        reporting the session idle. True when the durable turn_in_flight marker
+        is set OR a live HTTP chat task exists (covers the brief window between
+        task creation and begin_turn)."""
+        if session.turn_in_flight:
+            return True
+        return any(
+            a == agent_name and sid == session.id and chat.task is not None and not chat.task.done()
+            for (a, _user, sid), chat in self._active_chats.items()
+        )
+
     async def _list_agents(self, request: Request) -> JSONResponse:
         if err := self._check_auth(request):
             return err
@@ -821,10 +834,9 @@ class HTTPServer:
                 "superseded_by": s.superseded_by,
                 "unread": unread,
                 "is_primary": s.is_primary,
-                # Authoritative turn-in-flight flag (set/cleared at the adapter
-                # chokepoint, durable in daemon.db). The UI must render busy
-                # state from this, never infer it from cached progress labels.
-                "busy": s.turn_in_flight,
+                # Authoritative busy flag. The UI must render busy state from
+                # this, never infer it from cached progress labels.
+                "busy": self._session_busy(adapter.agent_name, s),
             }
             if s.status in live_statuses:
                 row["progress"] = adapter.session_store.session_progress_summary(s.id)
@@ -904,10 +916,7 @@ class HTTPServer:
                     user_id, adapter.agent_name, session_id=session.id if session else None
                 ),
                 "metadata": session_metadata,
-                # Busy is authoritative: an HTTP-driven chat task OR any other
-                # adapter turn (schedule reply, Discord, job notify) marked via
-                # the durable turn_in_flight flag.
-                "busy": backend is not None or bool(session and session.turn_in_flight),
+                "busy": bool(session and self._session_busy(adapter.agent_name, session)),
                 "pending_message": backend.pending_message if backend else None,
                 "attachments": attachments,
             }
@@ -1502,7 +1511,10 @@ class HTTPServer:
                     target_session = successor
                 else:
                     return JSONResponse(
-                        {"error": f"Session is {target_session.status}. Start a new session to continue."},
+                        {
+                            "error": f"Session is {target_session.status}. Start a new session to continue.",
+                            "code": "session_finished",
+                        },
                         status_code=409,
                     )
             if target_session is not None:
@@ -1513,11 +1525,11 @@ class HTTPServer:
         target_session_id = target_session.id
 
         backend_key = (agent_name, user_id, target_session_id)
-        existing_chat = self._active_chats.get(backend_key)
-        existing_task = existing_chat.task if existing_chat else None
-        if existing_task is not None and not existing_task.done():
+        # Same predicate the sessions payload and /status report - the server
+        # must not 409 a send while telling the sidebar the session is idle.
+        if self._session_busy(agent_name, target_session):
             return JSONResponse(
-                {"error": "a turn is already running for this session"},
+                {"error": "a turn is already running for this session", "code": "turn_in_flight"},
                 status_code=409,
             )
 

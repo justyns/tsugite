@@ -39,7 +39,9 @@ def client_and_token(adapter, tmp_path):
         agent_configs={"test-agent": adapter.agent_config},
         token_store=token_store,
     )
-    return TestClient(server.app), raw
+    client = TestClient(server.app)
+    client.app_server = server  # for tests that poke _active_chats directly
+    return client, raw
 
 
 def _mk_session(adapter, sid="s-busy"):
@@ -85,3 +87,23 @@ def test_status_busy_reflects_turn_in_flight_without_http_chat(adapter, client_a
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.json()["busy"] is False
+
+
+def test_sessions_payload_busy_from_live_http_task(adapter, client_and_token):
+    """The pre-begin_turn window: an HTTP chat task exists but the durable
+    marker isn't set yet. The unified predicate must still report busy so the
+    sessions payload can never say idle while /chat would 409."""
+    from types import SimpleNamespace
+
+    client, token = client_and_token
+    sid = _mk_session(adapter, "s-task")
+    http_server = client.app_server
+    http_server._active_chats[("test-agent", "u1", sid)] = SimpleNamespace(
+        task=SimpleNamespace(done=lambda: False), backend=None
+    )
+    try:
+        resp = client.get("/api/agents/test-agent/sessions", headers={"Authorization": f"Bearer {token}"})
+        rows = {r["id"]: r for r in resp.json()["sessions"]}
+        assert rows[sid]["busy"] is True
+    finally:
+        http_server._active_chats.pop(("test-agent", "u1", sid), None)

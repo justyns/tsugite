@@ -11,7 +11,6 @@ migration source; the file is left untouched as a backup.
 """
 
 import hashlib
-import json
 import logging
 import secrets
 from dataclasses import asdict, dataclass
@@ -52,42 +51,24 @@ class TokenStore:
 
     # --- Persistence ---
 
-    def _read_legacy(self) -> list[dict]:
-        # The legacy file was a bare JSON array, so it needs its own read
-        # rather than load_legacy_json_entries.
-        if not self._path.exists():
-            return []
+    @staticmethod
+    def _token_from_entry(entry: dict) -> Token | None:
         try:
-            entries = json.loads(self._path.read_text(encoding="utf-8"))
-            return [e for e in entries if isinstance(e, dict)]
-        except (json.JSONDecodeError, TypeError) as e:
-            logger.warning("Failed to load tokens from %s: %s", self._path, e)
-            return []
+            return Token(**entry)
+        except TypeError as e:
+            logger.warning("Skipping malformed token entry: %s", e)
+            return None
 
     def _migrate_legacy(self) -> None:
-        entries, migrating = self._storage.load_or_migrate(self._path, "auth_tokens", legacy_reader=self._read_legacy)
+        entries, migrating = self._storage.load_or_migrate(self._path, "auth_tokens")
         if not migrating:
             return
-        imported: dict[str, dict] = {}
-        for entry in entries:
-            try:
-                t = Token(**entry)
-            except TypeError as e:
-                logger.warning("Skipping malformed token entry: %s", e)
-                continue
-            if t.persistent:
-                imported[t.hash] = asdict(t)
+        imported = {t.hash: asdict(t) for e in entries if (t := self._token_from_entry(e)) and t.persistent}
         self._storage.replace_all(imported)
 
     def _persistent_token(self, token_hash: str) -> Token | None:
         entry = self._storage.get(token_hash)
-        if entry is None:
-            return None
-        try:
-            return Token(**entry)
-        except TypeError as e:
-            logger.warning("Skipping malformed persisted token: %s", e)
-            return None
+        return self._token_from_entry(entry) if entry is not None else None
 
     # --- Admin tokens (persistent, no expiry) ---
 
@@ -108,13 +89,7 @@ class TokenStore:
         return t, raw
 
     def list_admin_tokens(self) -> list[Token]:
-        tokens = []
-        for entry in self._storage.load_all():
-            try:
-                tokens.append(Token(**entry))
-            except TypeError as e:
-                logger.warning("Skipping malformed persisted token: %s", e)
-        return tokens
+        return [t for e in self._storage.load_all() if (t := self._token_from_entry(e))]
 
     def revoke_admin_token(self, name_or_prefix: str) -> bool:
         """Revoke an admin token by name or prefix. Returns True if found."""
@@ -126,7 +101,7 @@ class TokenStore:
         return False
 
     def has_admin_tokens(self) -> bool:
-        return bool(self._storage.load_all())
+        return self._storage.exists_any()
 
     # --- Agent tokens (temporary, with TTL) ---
 

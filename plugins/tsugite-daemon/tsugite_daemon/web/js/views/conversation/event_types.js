@@ -31,6 +31,14 @@ export function progressStatusFor(evType, data) {
 // nothing to render (no structured payload AND no string answer).
 // Pre-stringifies `result_data` so the template doesn't re-run JSON.stringify
 // on every Alpine re-render.
+// Normalize a tool call's arguments for display: raw string as-is, objects
+// pretty-printed, empty -> '' so callers can render a bare tool chip.
+// Shared by history replay and live streaming so their formatting can't drift.
+export function toolArgsText(args) {
+  const text = typeof args === 'string' ? args : JSON.stringify(args || {}, null, 2);
+  return text === '{}' ? '' : text;
+}
+
 export function finalResultBubble({ result, result_data }) {
   if (result_data != null) {
     return { type: 'return_value', data: result_data, dataText: JSON.stringify(result_data, null, 2) };

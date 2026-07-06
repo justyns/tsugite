@@ -292,12 +292,14 @@ class SessionStore:
         self._event_count_cache: dict[str, int] = {}
         self._cache_lock = threading.Lock()
 
-        self._load()
-        self._migrate_legacy()
-        self._recover_stale_sessions()
-        # One boot-time snapshot so the db always equals memory after load-time
-        # reconciliation (legacy imports, primary stamping, stale recovery).
-        self._save()
+        # One conditional boot snapshot keeps the db equal to memory after
+        # load-time reconciliation (legacy imports, primary stamping, stale
+        # recovery) without rewriting the whole table on a no-op boot.
+        changed = self._load()
+        changed |= self._migrate_legacy()
+        changed |= self._recover_stale_sessions()
+        if changed:
+            self._save()
 
     # ── Context limit management ──
 
@@ -1270,11 +1272,12 @@ class SessionStore:
 
     # ── Persistence ──
 
-    def _load(self):
-        entries, _migrating = self._storage.load_or_migrate(self._path, "sessions")
-        # (The boot snapshot in __init__ persists imported entries unconditionally.)
+    def _load(self) -> bool:
+        """Load sessions from storage (or legacy import). Returns True when the
+        in-memory set differs from what storage holds (import or stamping)."""
+        entries, migrating = self._storage.load_or_migrate(self._path, "sessions")
         if not entries:
-            return
+            return migrating
         valid_fields = {f.name for f in dataclass_fields(Session)}
         for sdata in entries:
             try:
@@ -1315,9 +1318,12 @@ class SessionStore:
             channel_id = session.metadata.get("channel_id") if session.metadata else None
             if channel_id:
                 self._channel_index[(channel_id, session.agent)] = sid
+        stamped = False
         for key, sid in primary_candidates.items():
             if key not in already_primary_keys:
                 self._sessions[sid].metadata[METADATA_PRIMARY_FLAG] = True
+                stamped = True
+        return migrating or stamped
 
     def _persist(self, *sessions: Session) -> None:
         """Write-through the given sessions' rows. Caller holds self._lock."""
@@ -1346,10 +1352,6 @@ class SessionStore:
                 session.turn_in_flight = False
                 self._persist(session)
 
-    def flush(self):
-        """No-op kept for API compatibility: every mutation is written through
-        to daemon.db immediately, so there is nothing to flush."""
-
     def _save(self):
         """Snapshot the whole in-memory store to daemon.db in one transaction.
         Boot-time only (load reconciliation); runtime mutations use _persist."""
@@ -1373,7 +1375,7 @@ class SessionStore:
         except Exception:
             return 0, 0
 
-    def _recover_stale_sessions(self):
+    def _recover_stale_sessions(self) -> bool:
         changed = False
         for session in self._sessions.values():
             was_running = session.status == SessionStatus.RUNNING.value
@@ -1397,8 +1399,7 @@ class SessionStore:
             if session.compacting:
                 session.compacting = False
                 changed = True
-        if changed:
-            self._save()
+        return changed
 
     def _finalize_interrupted_turn(self, session_id: str) -> None:
         """Append a visible explanation + terminal event to an orphaned turn's
@@ -1419,10 +1420,11 @@ class SessionStore:
         except Exception as e:
             logger.warning("Could not finalize interrupted turn for session '%s': %s", session_id, e)
 
-    def _migrate_legacy(self):
-        """Migrate from old SessionManager + AgentSessionStore if needed."""
+    def _migrate_legacy(self) -> bool:
+        """Migrate from old SessionManager + AgentSessionStore if needed.
+        Returns True when anything was imported (the boot snapshot persists it)."""
         if self._sessions:
-            return  # Already have data, skip migration
+            return False  # Already have data, skip migration
 
         state_dir = self._path.parent
         migrated = False
@@ -1483,7 +1485,7 @@ class SessionStore:
 
         if migrated:
             logger.info("Migrated %d legacy sessions to unified store", len(self._sessions))
-            self._save()
+        return migrated
 
 
 def create_interactive_session(session_store, agent_name: str, user_id: str, title=None, event_bus=None) -> str:

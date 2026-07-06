@@ -276,11 +276,11 @@ class Gateway:
                 webhook_store = WebhookStore(self.config.state_dir / "webhooks.json")
                 self._token_store = TokenStore(self.config.state_dir / TOKENS_FILENAME)
 
-                if not self._token_store.has_admin_tokens():
+                admin_token_count = len(self._token_store.list_admin_tokens())
+                if admin_token_count == 0:
                     logger.warning("No API tokens configured. Run: tsugite daemon token create")
                 else:
-                    count = len(self._token_store.list_admin_tokens())
-                    logger.info("HTTP auth enabled (%d admin token(s))", count)
+                    logger.info("HTTP auth enabled (%d admin token(s))", admin_token_count)
 
                 self._tsugite_api_url = f"http://127.0.0.1:{self.config.http.port}"
 
@@ -546,12 +546,6 @@ class Gateway:
                 await component.stop()
             except Exception as e:
                 logger.error("Error stopping %s: %s", label, e)
-
-        if self._session_store:
-            try:
-                self._session_store.flush()
-            except Exception as e:
-                logger.error("Error flushing session store: %s", e)
 
         if self._pty_manager:
             try:

@@ -1,6 +1,6 @@
 import { post, streamPost, uploadFiles, parseSSE } from '../../api.js';
 import { escapeHtml, formatFileSize, contentBlockHtml } from '../../utils.js';
-import { finalResultBubble, appendReasoningChunk, attachReasoningTokens } from './event_types.js';
+import { finalResultBubble, appendReasoningChunk, attachReasoningTokens, toolArgsText } from './event_types.js';
 
 export const streamingMixin = {
   _scrollTimer: null,
@@ -194,16 +194,21 @@ export const streamingMixin = {
       // strand a non-empty progress bubble as a never-closed "Working..." spinner.
       this._finalizeLiveProgress(arr);
       if (e.status === 409) {
-        // Turn conflict: the server (the authority on busy) refused the send.
-        // The message never landed - withdraw the optimistic bubble, restore
-        // the draft, and reflect the busy state instead of a scary error.
+        // The server refused the send: the message never landed, so withdraw
+        // the optimistic bubble and restore the draft in every 409 flavor.
         const last = arr[arr.length - 1];
         if (last?.type === 'user' && last.text === displayMsg) arr.pop();
         if (!this.messageText) this.messageText = msg;
-        arr.push({ type: 'info', text: `${e.message} — your message was not sent; it's back in the input box.` });
-        const s = this.allSessions.find(x => (x.conversation_id || x.id) === sendSessionId);
-        if (s) s.busy = true;
-        this.loadStatus();
+        if (e.code === 'turn_in_flight') {
+          // Turn conflict: reflect the authoritative busy state, not an error.
+          arr.push({ type: 'info', text: `${e.message} — your message was not sent; it's back in the input box.` });
+          const s = this.allSessions.find(x => (x.conversation_id || x.id) === sendSessionId);
+          if (s) s.busy = true;
+          this.loadStatus();
+        } else {
+          // e.g. session_finished: not busy - surface the server's guidance.
+          arr.push({ type: 'error', text: `${e.message} — your message was not sent; it's back in the input box.` });
+        }
       } else {
         arr.push({ type: 'error', text: `Connection error: ${e.message}` });
       }
@@ -313,10 +318,8 @@ export const streamingMixin = {
       this._pushDetailStep(prog, `<code>code</code>`, event.content || '');
     } else if (event.type === 'tool_call') {
       const name = event.tool || 'tool';
-      const args = typeof event.arguments === 'string'
-        ? event.arguments
-        : JSON.stringify(event.arguments || {}, null, 2);
-      if (args && args !== '{}') {
+      const args = toolArgsText(event.arguments);
+      if (args) {
         this._pushDetailStep(prog, `<code>${escapeHtml(name)}</code>`, args);
       } else {
         prog.steps.push({ html: `<code>${escapeHtml(name)}</code>` });

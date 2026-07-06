@@ -234,8 +234,6 @@ class SessionRunner:
                     await self.reply_to_session(session.parent_id, error_summary, source="session_failed")
                 except Exception as notify_err:
                     logger.warning("Failed to notify parent session '%s' of failure: %s", session.parent_id, notify_err)
-        finally:
-            self._store.flush()
 
     def rename_session(self, session_id: str, title: str) -> Session:
         session = self._store.update_session(session_id, title=title)

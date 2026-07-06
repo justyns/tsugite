@@ -1,6 +1,6 @@
 import { get } from '../../api.js';
 import { escapeHtml, contentBlockHtml } from '../../utils.js';
-import { finalResultBubble, appendReasoningChunk, attachReasoningTokens } from './event_types.js';
+import { finalResultBubble, appendReasoningChunk, attachReasoningTokens, toolArgsText } from './event_types.js';
 
 const _CONTENT_BLOCK_RE = /<(?:tsu:)?content\s+name="([^"]+)">([\s\S]*?)<\/(?:tsu:)?content>/g;
 
@@ -322,8 +322,8 @@ export function eventsToBubbles(events, { dropTrailing = false } = {}) {
 
     if (type === 'tool_call') {
       const name = data.tool || 'tool';
-      const args = typeof data.arguments === 'string' ? data.arguments : JSON.stringify(data.arguments || {}, null, 2);
-      if (args && args !== '{}') {
+      const args = toolArgsText(data.arguments);
+      if (args) {
         currentSteps.push({
           hasDetails: true,
           summary: `<code>${escapeHtml(name)}</code>`,
@@ -375,7 +375,7 @@ export function eventsToBubbles(events, { dropTrailing = false } = {}) {
       currentSteps.push({
         hasDetails: true,
         summary: `<code>${escapeHtml(name)}</code>${dur ? ` <span class="step-dur">(${dur})</span>` : ''}`,
-        content: typeof data.args === 'string' ? data.args : JSON.stringify(data.args || {}, null, 2),
+        content: toolArgsText(data.args),
         open: false,
         _tool: true,
         _toolName: name,

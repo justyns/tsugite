@@ -15,6 +15,7 @@ async function handleError(resp) {
   const err = await resp.json().catch(() => ({ error: resp.statusText }));
   const e = new Error(err.error || resp.statusText);
   e.status = resp.status;
+  e.code = err.code;
   throw e;
 }
 

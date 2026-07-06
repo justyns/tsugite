@@ -49,6 +49,12 @@ class SqliteCollectionStorage:
     def __init__(self, db_path: Path, collection: str):
         if not _COLLECTION_NAME_RE.match(collection):
             raise ValueError(f"Invalid collection name: {collection!r}")
+        # Reject non-paths outright: a test's MagicMock would otherwise
+        # materialize junk directories/db files named after the mock's repr in
+        # the CWD (Path(mock) "works" via the mock's auto-generated __fspath__).
+        if not isinstance(db_path, (str, Path)):
+            raise TypeError(f"db_path must be a Path, got {type(db_path).__name__}")
+        db_path = Path(db_path)
         self._collection = collection
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(db_path), check_same_thread=False, isolation_level=None)
@@ -74,14 +80,12 @@ class SqliteCollectionStorage:
         the shared daemon.db sits next to it."""
         return cls(legacy_path.parent / DAEMON_DB_FILENAME, collection)
 
-    def load_or_migrate(self, legacy_path: Path, collection_key: str, legacy_reader=None) -> tuple[list[dict], bool]:
+    def load_or_migrate(self, legacy_path: Path, collection_key: str) -> tuple[list[dict], bool]:
         """Entries from the db, falling back to a one-time legacy JSON import.
 
         The import runs at most once per collection (tracked in the _migrated
         table), so a collection emptied at runtime stays empty across restarts
-        instead of resurrecting the stale legacy file. ``legacy_reader``
-        overrides the default ``{key: ...}`` file shape for stores whose legacy
-        file was a bare array (push subscriptions, auth tokens).
+        instead of resurrecting the stale legacy file.
 
         Returns (entries, migrating). When migrating is True the caller must
         persist its parsed records back (replace_all / _save) so the import
@@ -91,7 +95,7 @@ class SqliteCollectionStorage:
         if entries or self._is_migrated():
             self._mark_migrated()  # stamp dbs created before the marker existed
             return entries, False
-        entries = legacy_reader() if legacy_reader else load_legacy_json_entries(legacy_path, collection_key)
+        entries = load_legacy_json_entries(legacy_path, collection_key)
         if entries:
             logger.info(
                 "Migrating %d %s record(s) from %s into daemon.db (legacy file kept as backup)",
@@ -111,6 +115,10 @@ class SqliteCollectionStorage:
             'INSERT OR IGNORE INTO "_migrated" (collection, at) VALUES (?, ?)',
             (self._collection, datetime.now(timezone.utc).isoformat()),
         )
+
+    def exists_any(self) -> bool:
+        """True when the collection has at least one row (no full scan)."""
+        return self._conn.execute(f'SELECT 1 FROM "{self._collection}" LIMIT 1').fetchone() is not None
 
     def get(self, record_id: str) -> dict | None:
         row = self._conn.execute(f'SELECT data FROM "{self._collection}" WHERE id = ?', (record_id,)).fetchone()
@@ -163,8 +171,9 @@ class SqliteCollectionStorage:
 
 
 def load_legacy_json_entries(path: Path, collection_key: str) -> list[dict]:
-    """Entries from a legacy whole-file JSON store, tolerating both the list
-    shape (``{key: [...]}``) and the dict shape (``{key: {id: {...}}}``).
+    """Entries from a legacy whole-file JSON store, tolerating the list shape
+    (``{key: [...]}``), the dict shape (``{key: {id: {...}}}``), and the bare
+    top-level array some stores used (tokens.json, push_subscriptions.json).
     Returns [] when the file is absent or unreadable."""
     if not path.exists():
         return []
@@ -173,10 +182,12 @@ def load_legacy_json_entries(path: Path, collection_key: str) -> list[dict]:
     except (json.JSONDecodeError, OSError) as e:
         logger.error("Failed to load legacy %s from %s: %s", collection_key, path, e)
         return []
-    raw = data.get(collection_key, [])
+    raw = data.get(collection_key, []) if isinstance(data, dict) else data
     if isinstance(raw, dict):
         return list(raw.values())
-    return raw if isinstance(raw, list) else []
+    if isinstance(raw, list):
+        return [e for e in raw if isinstance(e, dict)]
+    return []
 
 
 class RecordStore:

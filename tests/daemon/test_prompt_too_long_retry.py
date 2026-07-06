@@ -220,7 +220,7 @@ async def test_proactive_compaction_runs_for_override_session(stub_adapter_inter
 
     compact_calls: list[str] = []
 
-    async def fake_compaction(user_id, conv_id, custom_logger=None, reason=None):
+    async def fake_compaction(user_id, conv_id, custom_logger=None, reason=None, _broadcast_state=None):
         compact_calls.append(conv_id)
         return conv_id
 

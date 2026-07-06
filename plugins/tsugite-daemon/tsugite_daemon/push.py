@@ -26,21 +26,9 @@ class PushSubscriptionStore:
         self._lock = threading.Lock()
         self._load()
 
-    def _read_legacy(self) -> list[dict]:
-        # The legacy file was a bare JSON array (not `{key: [...]}`), so it
-        # needs its own read rather than load_legacy_json_entries.
-        if not self._path.exists():
-            return []
-        try:
-            return [s for s in json.loads(self._path.read_text()) if isinstance(s, dict) and "endpoint" in s]
-        except (json.JSONDecodeError, TypeError):
-            return []
-
     def _load(self):
-        entries, migrating = self._storage.load_or_migrate(
-            self._path, "push_subscriptions", legacy_reader=self._read_legacy
-        )
-        self._subs = {s["endpoint"]: s for s in entries if isinstance(s, dict) and "endpoint" in s}
+        entries, migrating = self._storage.load_or_migrate(self._path, "push_subscriptions")
+        self._subs = {s["endpoint"]: s for s in entries if "endpoint" in s}
         if migrating:
             self._storage.replace_all(dict(self._subs))
 

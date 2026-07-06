@@ -43,7 +43,6 @@ class TestSchemaFields:
         store.mark_viewed(s.id)
 
         # Reload from disk
-        store.flush()
         store2 = SessionStore(path)
         loaded = store2.get_session(s.id)
         assert loaded.pinned is True
@@ -147,7 +146,6 @@ class TestMarkViewed:
         store = SessionStore(path)
         s = _make(store, title="t")
         store.mark_viewed(s.id, ts="2026-04-25T01:02:03+00:00")
-        store.flush()
         store2 = SessionStore(path)
         assert store2.get_session(s.id).last_viewed_at == "2026-04-25T01:02:03+00:00"
 
