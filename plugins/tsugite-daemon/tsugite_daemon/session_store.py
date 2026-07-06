@@ -220,6 +220,10 @@ class Session:
     # session runs inside its provisioned git worktree, not the adapter's default).
     workspace_override: Optional[str] = None
     compacting: bool = False
+    # Durably True while a turn is executing (set/cleared by the adapter around
+    # handle_message). A daemon death mid-turn leaves it set, so the next boot
+    # can finalize the orphaned turn (see _recover_stale_sessions).
+    turn_in_flight: bool = False
     # Provider-reported context window for this session's model. None until the
     # first turn reports it; consumers fall back to the agent-wide default via
     # SessionStore.get_session_context_limit. Per-session so a compact-model
@@ -783,6 +787,9 @@ class SessionStore:
             old_session.reasoning_effort = None
             old_session.model_override = None
             old_session.compacting = False
+            # The successor owns any in-flight turn now; a stale marker on the
+            # superseded session would trigger a spurious boot-time repair.
+            old_session.turn_in_flight = False
 
             self._persist(old_session, new_session)
         self._evict_progress_cache(session_id)
@@ -1317,6 +1324,28 @@ class SessionStore:
         for session in sessions:
             self._storage.upsert(session.id, asdict(session))
 
+    # ── Turn lifecycle ──
+
+    def begin_turn(self, session_id: str) -> None:
+        """Durably mark a turn in flight so a daemon death mid-turn can be
+        finalized at the next boot."""
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if session and not session.turn_in_flight:
+                session.turn_in_flight = True
+                self._persist(session)
+
+    def end_turn(self, session_id: Optional[str]) -> None:
+        """Clear the in-flight marker. Tolerates None/unknown ids (a turn that
+        failed before session routing has nothing to clear)."""
+        if not session_id:
+            return
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if session and session.turn_in_flight:
+                session.turn_in_flight = False
+                self._persist(session)
+
     def flush(self):
         """No-op kept for API compatibility: every mutation is written through
         to daemon.db immediately, so there is nothing to flush."""
@@ -1347,10 +1376,20 @@ class SessionStore:
     def _recover_stale_sessions(self):
         changed = False
         for session in self._sessions.values():
-            if session.status == SessionStatus.RUNNING.value:
+            was_running = session.status == SessionStatus.RUNNING.value
+            if was_running:
                 session.status = SessionStatus.FAILED.value
                 session.error = "Daemon restarted while session was active"
                 session.last_active = datetime.now(timezone.utc).isoformat()
+                changed = True
+            # A turn that was executing when the previous daemon died left its
+            # history mid-turn (no terminal event): the progress label would
+            # stay live forever and the UI would hide the turn's replay as
+            # "still streaming". Finalize it in the history.
+            if session.turn_in_flight or was_running:
+                self._finalize_interrupted_turn(session.id)
+            if session.turn_in_flight:
+                session.turn_in_flight = False
                 changed = True
             # A session that was mid-compaction at restart can't still be — the
             # in-memory lock didn't survive. Clear the flag so the UI doesn't
@@ -1360,6 +1399,25 @@ class SessionStore:
                 changed = True
         if changed:
             self._save()
+
+    def _finalize_interrupted_turn(self, session_id: str) -> None:
+        """Append a visible explanation + terminal event to an orphaned turn's
+        history. Best-effort: boot recovery must never fail the daemon."""
+        try:
+            backend = get_history_backend()
+            if not backend.exists(session_id):
+                return
+            now = datetime.now(timezone.utc).isoformat()
+            self.append_event(
+                session_id,
+                {"type": "info", "message": "Turn interrupted: the daemon restarted mid-turn.", "timestamp": now},
+            )
+            self.append_event(
+                session_id,
+                {"type": "session_error", "error": "daemon restarted mid-turn", "timestamp": now},
+            )
+        except Exception as e:
+            logger.warning("Could not finalize interrupted turn for session '%s': %s", session_id, e)
 
     def _migrate_legacy(self):
         """Migrate from old SessionManager + AgentSessionStore if needed."""

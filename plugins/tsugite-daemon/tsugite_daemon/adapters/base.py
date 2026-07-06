@@ -563,6 +563,13 @@ class BaseAdapter(ABC):
                 user_id, message, channel_context, custom_logger, _broadcast_state=broadcast_state
             )
         finally:
+            # Clear the durable in-flight marker set when the session resolved
+            # (see _handle_message_inner); a daemon death before this line is
+            # what boot recovery repairs.
+            try:
+                self.session_store.end_turn(broadcast_state.get("conv_id"))
+            except Exception as e:
+                logger.warning("end_turn after handle_message failed: %s", e)
             try:
                 self.session_store.flush()
             except Exception as e:
@@ -611,15 +618,18 @@ class BaseAdapter(ABC):
                 conv_id = self.session_store.get_or_create_interactive(user_id, self.agent_name).id
         if _broadcast_state is not None:
             _broadcast_state["conv_id"] = conv_id
+        self.session_store.begin_turn(conv_id)
 
         # Compaction applies to override (pinned/explicit) sessions too —
         # otherwise cumulative_tokens grow until the provider raises "Prompt
         # is too long" with no recovery. compact_session migrates pin state
         # to the successor, so the user's pin follows the rotation.
         if self.session_store.needs_compaction(conv_id) or self.session_store.is_compacting(user_id, self.agent_name):
+            self.session_store.end_turn(conv_id)
             conv_id = await self._run_compaction(user_id, conv_id, custom_logger, reason="token_threshold")
             if _broadcast_state is not None:
                 _broadcast_state["conv_id"] = conv_id
+            self.session_store.begin_turn(conv_id)
 
         from tsugite_daemon.session_runner import get_current_session_id, set_current_session_id
 
@@ -721,9 +731,11 @@ class BaseAdapter(ABC):
                     )
                     raise
                 logger.warning("[%s] Prompt too long, auto-compacting and retrying", self.agent_name)
+                self.session_store.end_turn(conv_id)
                 conv_id = await self._run_compaction(user_id, conv_id, custom_logger, reason="prompt_too_long")
                 if _broadcast_state is not None:
                     _broadcast_state["conv_id"] = conv_id
+                self.session_store.begin_turn(conv_id)
                 ctx = contextvars.copy_context()
                 result = await asyncio.to_thread(ctx.run, run_in_workspace)
             else:
