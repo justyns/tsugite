@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import sqlite3
 import threading
@@ -55,6 +56,17 @@ class SqliteCollectionStorage:
         self._conn.execute(f"PRAGMA busy_timeout={_BUSY_TIMEOUT_MS}")
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.execute(f'CREATE TABLE IF NOT EXISTS "{collection}" (id TEXT PRIMARY KEY, data TEXT NOT NULL)')
+        # Tracks which collections have completed their one-time legacy-JSON
+        # import. Row-count can't stand in for this: a collection legitimately
+        # emptied at runtime must NOT re-import the stale legacy file on the
+        # next start.
+        self._conn.execute('CREATE TABLE IF NOT EXISTS "_migrated" (collection TEXT PRIMARY KEY, at TEXT NOT NULL)')
+        # Owner-only, like tokens.json was: the db holds session content and
+        # auth token hashes. SQLite propagates the mode to -wal/-shm siblings.
+        try:
+            os.chmod(db_path, 0o600)
+        except OSError:
+            pass
 
     @classmethod
     def for_state_file(cls, legacy_path: Path, collection: str) -> "SqliteCollectionStorage":
@@ -62,17 +74,24 @@ class SqliteCollectionStorage:
         the shared daemon.db sits next to it."""
         return cls(legacy_path.parent / DAEMON_DB_FILENAME, collection)
 
-    def load_or_migrate(self, legacy_path: Path, collection_key: str) -> tuple[list[dict], bool]:
+    def load_or_migrate(self, legacy_path: Path, collection_key: str, legacy_reader=None) -> tuple[list[dict], bool]:
         """Entries from the db, falling back to a one-time legacy JSON import.
+
+        The import runs at most once per collection (tracked in the _migrated
+        table), so a collection emptied at runtime stays empty across restarts
+        instead of resurrecting the stale legacy file. ``legacy_reader``
+        overrides the default ``{key: ...}`` file shape for stores whose legacy
+        file was a bare array (push subscriptions, auth tokens).
 
         Returns (entries, migrating). When migrating is True the caller must
         persist its parsed records back (replace_all / _save) so the import
         becomes durable; the legacy file is left untouched as a backup.
         """
         entries = self.load_all()
-        if entries:
+        if entries or self._is_migrated():
+            self._mark_migrated()  # stamp dbs created before the marker existed
             return entries, False
-        entries = load_legacy_json_entries(legacy_path, collection_key)
+        entries = legacy_reader() if legacy_reader else load_legacy_json_entries(legacy_path, collection_key)
         if entries:
             logger.info(
                 "Migrating %d %s record(s) from %s into daemon.db (legacy file kept as backup)",
@@ -80,7 +99,28 @@ class SqliteCollectionStorage:
                 collection_key,
                 legacy_path.name,
             )
+        self._mark_migrated()
         return entries, bool(entries)
+
+    def _is_migrated(self) -> bool:
+        row = self._conn.execute('SELECT 1 FROM "_migrated" WHERE collection = ?', (self._collection,)).fetchone()
+        return row is not None
+
+    def _mark_migrated(self) -> None:
+        self._conn.execute(
+            'INSERT OR IGNORE INTO "_migrated" (collection, at) VALUES (?, ?)',
+            (self._collection, datetime.now(timezone.utc).isoformat()),
+        )
+
+    def get(self, record_id: str) -> dict | None:
+        row = self._conn.execute(f'SELECT data FROM "{self._collection}" WHERE id = ?', (record_id,)).fetchone()
+        if row is None:
+            return None
+        try:
+            return json.loads(row[0])
+        except json.JSONDecodeError as e:
+            logger.error("Corrupt %s row %s: %s", self._collection, record_id, e)
+            return None
 
     def load_all(self) -> list[dict]:
         rows = self._conn.execute(f'SELECT data FROM "{self._collection}"').fetchall()

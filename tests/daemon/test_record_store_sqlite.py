@@ -68,3 +68,20 @@ def test_pruned_records_stay_pruned_across_reopen(tmp_path):
 
     reopened = JobStore(tmp_path / "jobs.json")
     assert len(reopened.list_all()) == 1
+
+
+def test_emptied_collection_does_not_reimport_legacy(tmp_path):
+    """The one-time import must be tracked durably: a collection legitimately
+    emptied at runtime must stay empty across restarts, not resurrect the
+    stale legacy file."""
+    from tsugite_daemon.webhook_store import WebhookStore
+
+    path = tmp_path / "webhooks.json"
+    path.write_text(json.dumps({"webhooks": [{"token": "tok1", "agent": "a", "source": "s"}]}))
+
+    store = WebhookStore(path)
+    assert store.get("tok1") is not None, "legacy webhook must import"
+    store.remove("tok1")
+
+    reopened = WebhookStore(path)
+    assert reopened.get("tok1") is None, "removed record resurrected from the legacy JSON"
