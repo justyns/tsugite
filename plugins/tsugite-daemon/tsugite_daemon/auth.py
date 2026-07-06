@@ -1,18 +1,24 @@
 """Token management for daemon HTTP API authentication.
 
-All tokens are hashed (SHA-256) and stored in a single dict. Tokens differ by:
-- persistent: saved to tokens.json (admin tokens for humans/web UI)
-- expires_at: TTL-based expiry (agent tokens per scheduled task)
+All tokens are hashed (SHA-256). Persistent admin tokens live in daemon.db
+(`auth_tokens` collection) and are queried per operation, so tokens created or
+revoked by another process (the `tsu daemon token` CLI) take effect on the
+running daemon's next validation - no reload machinery. Ephemeral agent tokens
+(TTL-based, per scheduled task) are memory-only and die with the process.
+
+The legacy ``tokens.json`` path remains the constructor argument as a one-time
+migration source; the file is left untouched as a backup.
 """
 
 import hashlib
 import json
 import logging
-import os
 import secrets
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+from tsugite.core.record_store import SqliteCollectionStorage
 
 logger = logging.getLogger(__name__)
 
@@ -31,14 +37,14 @@ class Token:
 
 
 class TokenStore:
-    """Manages all API tokens (admin and agent) in a single store."""
+    """Manages all API tokens (admin and agent)."""
 
     def __init__(self, path: Path, default_ttl_seconds: int = 3600):
         self._path = path
+        self._storage = SqliteCollectionStorage.for_state_file(path, "auth_tokens")
         self._default_ttl = default_ttl_seconds
-        self._tokens: dict[str, Token] = {}  # hash -> Token
-        self._mtime: float = 0.0
-        self._load()
+        self._tokens: dict[str, Token] = {}  # ephemeral (agent) tokens only
+        self._migrate_legacy()
 
     @staticmethod
     def _hash(token: str) -> str:
@@ -46,49 +52,42 @@ class TokenStore:
 
     # --- Persistence ---
 
-    def _current_mtime(self) -> float:
-        try:
-            return self._path.stat().st_mtime
-        except FileNotFoundError:
-            return 0.0
-
-    def _load(self) -> None:
+    def _read_legacy(self) -> list[dict]:
+        # The legacy file was a bare JSON array, so it needs its own read
+        # rather than load_legacy_json_entries.
         if not self._path.exists():
-            return
+            return []
         try:
-            for entry in json.loads(self._path.read_text(encoding="utf-8")):
-                t = Token(**entry)
-                self._tokens[t.hash] = t
-            self._mtime = self._current_mtime()
-        except (json.JSONDecodeError, TypeError, KeyError) as e:
+            entries = json.loads(self._path.read_text(encoding="utf-8"))
+            return [e for e in entries if isinstance(e, dict)]
+        except (json.JSONDecodeError, TypeError) as e:
             logger.warning("Failed to load tokens from %s: %s", self._path, e)
+            return []
 
-    def _maybe_reload(self) -> None:
-        """Reload persistent tokens from disk if tokens.json has changed since last load."""
-        if self._current_mtime() <= self._mtime:
+    def _migrate_legacy(self) -> None:
+        entries, migrating = self._storage.load_or_migrate(self._path, "auth_tokens", legacy_reader=self._read_legacy)
+        if not migrating:
             return
-        temp_tokens = [t for t in self._tokens.values() if not t.persistent]
-        self._tokens = {t.hash: t for t in temp_tokens}
-        self._load()
-        logger.info("Reloaded tokens from %s (file changed)", self._path)
+        imported: dict[str, dict] = {}
+        for entry in entries:
+            try:
+                t = Token(**entry)
+            except TypeError as e:
+                logger.warning("Skipping malformed token entry: %s", e)
+                continue
+            if t.persistent:
+                imported[t.hash] = asdict(t)
+        self._storage.replace_all(imported)
 
-    def _save(self) -> None:
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        persistent = [
-            {"hash": t.hash, "identity": t.identity, "created_at": t.created_at, "prefix": t.prefix, "persistent": True}
-            for t in self._tokens.values()
-            if t.persistent
-        ]
-        tmp = self._path.with_suffix(".tmp")
-        fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    def _persistent_token(self, token_hash: str) -> Token | None:
+        entry = self._storage.get(token_hash)
+        if entry is None:
+            return None
         try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(persistent, f, indent=2)
-        except BaseException:
-            tmp.unlink(missing_ok=True)
-            raise
-        os.replace(str(tmp), str(self._path))
-        self._mtime = self._current_mtime()
+            return Token(**entry)
+        except TypeError as e:
+            logger.warning("Skipping malformed persisted token: %s", e)
+            return None
 
     # --- Admin tokens (persistent, no expiry) ---
 
@@ -105,31 +104,35 @@ class TokenStore:
             prefix=raw[:8],
             persistent=True,
         )
-        self._tokens[t.hash] = t
-        self._save()
+        self._storage.upsert(t.hash, asdict(t))
         return t, raw
 
     def list_admin_tokens(self) -> list[Token]:
-        return [t for t in self._tokens.values() if t.persistent]
+        tokens = []
+        for entry in self._storage.load_all():
+            try:
+                tokens.append(Token(**entry))
+            except TypeError as e:
+                logger.warning("Skipping malformed persisted token: %s", e)
+        return tokens
 
     def revoke_admin_token(self, name_or_prefix: str) -> bool:
         """Revoke an admin token by name or prefix. Returns True if found."""
         target = f"admin:{name_or_prefix}"
-        for h, t in self._tokens.items():
-            if t.persistent and (t.identity == target or t.prefix == name_or_prefix):
-                del self._tokens[h]
-                self._save()
+        for t in self.list_admin_tokens():
+            if t.identity == target or t.prefix == name_or_prefix:
+                self._storage.delete(t.hash)
                 return True
         return False
 
     def has_admin_tokens(self) -> bool:
-        return any(t.persistent for t in self._tokens.values())
+        return bool(self._storage.load_all())
 
     # --- Agent tokens (temporary, with TTL) ---
 
     def issue(self, agent: str, schedule_id: str = "", ttl: int | None = None) -> str:
         """Issue a temporary token for an agent/schedule. Returns the raw token."""
-        if sum(1 for t in self._tokens.values() if not t.persistent) > 100:
+        if len(self._tokens) > 100:
             self.cleanup_expired()
         raw = TOKEN_PREFIX + secrets.token_urlsafe(32)
         now = datetime.now(timezone.utc)
@@ -144,11 +147,13 @@ class TokenStore:
         return raw
 
     def revoke(self, token: str) -> None:
-        """Revoke a token by raw value."""
-        self._tokens.pop(self._hash(token), None)
+        """Revoke a token by raw value (ephemeral or persistent)."""
+        h = self._hash(token)
+        self._tokens.pop(h, None)
+        self._storage.delete(h)
 
     def cleanup_expired(self) -> int:
-        """Remove expired tokens. Returns count removed."""
+        """Remove expired ephemeral tokens. Returns count removed."""
         now = datetime.now(timezone.utc).isoformat()
         before = len(self._tokens)
         self._tokens = {h: t for h, t in self._tokens.items() if t.expires_at is None or t.expires_at > now}
@@ -158,12 +163,11 @@ class TokenStore:
 
     def validate(self, token: str) -> tuple[bool, str]:
         """Validate a token. Returns (valid, identity)."""
-        self._maybe_reload()
         h = self._hash(token)
-        t = self._tokens.get(h)
+        t = self._tokens.get(h) or self._persistent_token(h)
         if not t:
             return False, ""
         if t.expires_at and t.expires_at < datetime.now(timezone.utc).isoformat():
-            del self._tokens[h]
+            self._tokens.pop(h, None)
             return False, ""
         return True, t.identity

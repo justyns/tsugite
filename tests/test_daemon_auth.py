@@ -1,7 +1,5 @@
 """Tests for daemon auth token management."""
 
-import os
-import time
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
@@ -83,12 +81,14 @@ class TestAdminTokens:
         store.create_admin_token(name="test")
         assert store.has_admin_tokens() is True
 
-    def test_token_file_permissions(self, tmp_path):
+    def test_daemon_db_permissions(self, tmp_path):
+        """daemon.db now holds token hashes (and session content) - it must be
+        owner-only like tokens.json was."""
         path = tmp_path / "tokens.json"
         store = TokenStore(path)
         store.create_admin_token(name="perm-test")
 
-        mode = path.stat().st_mode & 0o777
+        mode = (tmp_path / "daemon.db").stat().st_mode & 0o777
         assert mode == 0o600
 
     def test_corrupt_file_handled(self, tmp_path):
@@ -172,13 +172,10 @@ class TestTempTokens:
         assert (expires - created).total_seconds() == 600
 
 
-class TestHotReload:
-    """Tokens.json written by one process should be picked up by another without restart."""
-
-    def _bump_mtime(self, path):
-        # Ensure mtime changes even on fast filesystems
-        future = time.time() + 2
-        os.utime(path, (future, future))
+class TestCrossProcessVisibility:
+    """Tokens created/revoked by one process (the CLI) must take effect in
+    another (the daemon) without restart - persistent tokens are queried from
+    daemon.db per validation, no reload machinery."""
 
     def test_new_token_visible_without_restart(self, tmp_path):
         path = tmp_path / "tokens.json"
@@ -189,7 +186,6 @@ class TestHotReload:
         # Simulate `tsugite daemon token create` in another process
         cli = TokenStore(path)
         _t2, new_raw = cli.create_admin_token(name="fresh")
-        self._bump_mtime(path)
 
         # Daemon's running TokenStore picks up the new token on next validate
         valid, identity = daemon.validate(new_raw)
@@ -204,7 +200,6 @@ class TestHotReload:
 
         cli = TokenStore(path)
         cli.revoke_admin_token("doomed")
-        self._bump_mtime(path)
 
         valid, _ = daemon.validate(raw)
         assert valid is False
@@ -216,10 +211,8 @@ class TestHotReload:
 
         cli = TokenStore(path)
         cli.create_admin_token(name="new-admin")
-        self._bump_mtime(path)
 
-        # Trigger reload; temp token must survive
-        daemon.validate("trigger-reload")
+        daemon.validate("unknown-token")
         valid, identity = daemon.validate(temp_raw)
         assert valid is True
         assert identity == "agent:sched"
@@ -252,3 +245,65 @@ class TestMixedValidation:
         valid, identity = store.validate(temp_raw)
         assert valid is True
         assert identity == "agent:sched"
+
+
+class TestSqliteTokenStorage:
+    def test_no_tokens_json_writes(self, tmp_path):
+        path = tmp_path / "tokens.json"
+        store = TokenStore(path)
+        store.create_admin_token(name="x")
+        assert not path.exists(), "legacy tokens.json must not be written"
+        assert (tmp_path / "daemon.db").exists()
+
+    def test_legacy_tokens_json_migrated_and_left_untouched(self, tmp_path):
+        import hashlib
+        import json
+
+        path = tmp_path / "tokens.json"
+        h = hashlib.sha256(b"tsu_legacyraw").hexdigest()
+        path.write_text(
+            json.dumps(
+                [
+                    {
+                        "hash": h,
+                        "identity": "admin:old",
+                        "created_at": "2026-01-01",
+                        "prefix": "tsu_lega",
+                        "persistent": True,
+                    }
+                ]
+            )
+        )
+        original = path.read_text()
+
+        store = TokenStore(path)
+        valid, identity = store.validate("tsu_legacyraw")
+        assert valid is True and identity == "admin:old"
+
+        store.revoke_admin_token("old")
+        assert path.read_text() == original, "legacy file stays as an untouched backup"
+        assert TokenStore(path).validate("tsu_legacyraw")[0] is False, "the db, not the stale JSON, is the authority"
+
+
+class TestCliTokensPathResolution:
+    def test_resolves_state_dir_from_daemon_config(self, tmp_path):
+        """`tsu daemon token create` must write where the DAEMON reads: a custom
+        state_dir in daemon.yaml previously left the CLI writing to the XDG
+        default, and the daemon could never see created tokens."""
+        cfg = tmp_path / "daemon.yaml"
+        cfg.write_text(f"state_dir: {tmp_path / 'custom-state'}\nagents: {{}}\n")
+
+        from tsugite.cli.daemon import _get_tokens_path
+
+        assert _get_tokens_path(cfg) == tmp_path / "custom-state" / "tokens.json"
+
+    def test_falls_back_to_default_when_config_missing(self, tmp_path, monkeypatch):
+        """A fresh box (no daemon.yaml yet) must still be able to create tokens
+        in the default state dir instead of crashing."""
+        monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+
+        from tsugite.cli.daemon import _get_tokens_path
+
+        assert (
+            _get_tokens_path(tmp_path / "nonexistent.yaml") == tmp_path / "data" / "tsugite" / "daemon" / "tokens.json"
+        )

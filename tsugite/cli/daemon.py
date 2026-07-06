@@ -716,20 +716,36 @@ token_app = typer.Typer(help="Manage API authentication tokens")
 daemon_app.add_typer(token_app, name="token")
 
 
-def _get_tokens_path() -> Path:
+def _get_tokens_path(config_path: Optional[Path] = None) -> Path:
+    """Resolve the daemon's token storage from its config so the CLI writes
+    where the daemon reads. Previously the CLI always used the XDG default,
+    so a daemon with a custom `state_dir` never saw CLI-created tokens.
+    Falls back to the default state dir when no daemon config exists yet.
+    """
     from tsugite_daemon.auth import TOKENS_FILENAME
+    from tsugite_daemon.config import load_daemon_config
 
-    return get_xdg_data_path("daemon") / TOKENS_FILENAME
+    try:
+        state_dir = load_daemon_config(config_path).state_dir
+    except ValueError:
+        state_dir = get_xdg_data_path("daemon")
+    return state_dir / TOKENS_FILENAME
+
+
+_TOKEN_CONFIG_OPTION = typer.Option(
+    None, "--config", "-c", help="Daemon config to resolve state_dir from (default: ~/.config/tsugite/daemon.yaml)"
+)
 
 
 @token_app.command("create")
 def token_create(
     name: str = typer.Option("", "--name", "-n", help="Name for the token (for identification)"),
+    config: Optional[Path] = _TOKEN_CONFIG_OPTION,
 ):
     """Create a new admin API token."""
     from tsugite_daemon.auth import TokenStore
 
-    store = TokenStore(_get_tokens_path())
+    store = TokenStore(_get_tokens_path(config))
     t, raw = store.create_admin_token(name=name)
     print(raw)
     err = Console(stderr=True)
@@ -740,11 +756,11 @@ def token_create(
 
 
 @token_app.command("list")
-def token_list():
+def token_list(config: Optional[Path] = _TOKEN_CONFIG_OPTION):
     """List all admin API tokens."""
     from tsugite_daemon.auth import TokenStore
 
-    store = TokenStore(_get_tokens_path())
+    store = TokenStore(_get_tokens_path(config))
     tokens = store.list_admin_tokens()
     if not tokens:
         console.print("[dim]No tokens configured.[/dim]")
@@ -757,11 +773,12 @@ def token_list():
 @token_app.command("revoke")
 def token_revoke(
     name_or_prefix: str = typer.Argument(help="Token name or prefix to revoke"),
+    config: Optional[Path] = _TOKEN_CONFIG_OPTION,
 ):
     """Revoke an admin API token."""
     from tsugite_daemon.auth import TokenStore
 
-    store = TokenStore(_get_tokens_path())
+    store = TokenStore(_get_tokens_path(config))
     if store.revoke_admin_token(name_or_prefix):
         console.print(f"[green]Token '{name_or_prefix}' revoked.[/green]")
     else:
