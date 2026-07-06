@@ -67,11 +67,11 @@ class TestPushSubscriptionStore:
         assert len(store2.all()) == 1
         assert store2.all()[0]["endpoint"] == sample_sub["endpoint"]
 
-    def test_atomic_save(self, store_path, sample_sub):
+    def test_no_json_writes_and_db_created(self, store_path, sample_sub):
         store = PushSubscriptionStore(store_path)
         store.subscribe(sample_sub)
-        assert store_path.exists()
-        assert not store_path.with_suffix(".tmp").exists()
+        assert not store_path.exists(), "legacy JSON must not be written"
+        assert (store_path.parent / "daemon.db").exists()
 
     def test_corrupt_file_recovery(self, store_path):
         store_path.parent.mkdir(parents=True, exist_ok=True)
@@ -83,7 +83,23 @@ class TestPushSubscriptionStore:
         deep_path = tmp_path / "a" / "b" / "subs.json"
         store = PushSubscriptionStore(deep_path)
         store.subscribe({"endpoint": "https://example.com", "keys": {}})
-        assert deep_path.exists()
+        assert (deep_path.parent / "daemon.db").exists()
+
+    def test_legacy_bare_list_migrated_and_left_untouched(self, store_path, sample_sub):
+        """The pre-daemon.db file was a bare JSON array; it must import once and
+        stay byte-identical as a backup."""
+        import json
+
+        store_path.parent.mkdir(parents=True, exist_ok=True)
+        store_path.write_text(json.dumps([sample_sub]))
+        original = store_path.read_text()
+
+        store = PushSubscriptionStore(store_path)
+        assert len(store.all()) == 1
+        store.unsubscribe(sample_sub["endpoint"])
+
+        assert store_path.read_text() == original
+        assert PushSubscriptionStore(store_path).all() == [], "the db, not the stale JSON, is the authority"
 
 
 class TestGetOrCreateVapidKeys:

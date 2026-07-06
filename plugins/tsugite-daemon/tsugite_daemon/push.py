@@ -3,44 +3,56 @@
 import asyncio
 import json
 import logging
-import os
 import threading
 from pathlib import Path
+
+from tsugite.core.record_store import SqliteCollectionStorage
 
 logger = logging.getLogger(__name__)
 
 
 class PushSubscriptionStore:
-    """JSON file backed store for web push subscriptions, keyed by endpoint URL."""
+    """Web push subscriptions, write-through to daemon.db (keyed by endpoint URL).
+
+    The legacy JSON path stays as the constructor argument purely as a one-time
+    migration source (imported when the db collection is empty, then left
+    untouched as a backup).
+    """
 
     def __init__(self, path: Path):
         self._path = path
+        self._storage = SqliteCollectionStorage.for_state_file(path, "push_subscriptions")
         self._subs: dict[str, dict] = {}
         self._lock = threading.Lock()
         self._load()
 
-    def _load(self):
-        if self._path.exists():
-            try:
-                self._subs = {s["endpoint"]: s for s in json.loads(self._path.read_text())}
-            except (json.JSONDecodeError, KeyError):
-                self._subs = {}
+    def _read_legacy(self) -> list[dict]:
+        # The legacy file was a bare JSON array (not `{key: [...]}`), so it
+        # needs its own read rather than load_legacy_json_entries.
+        if not self._path.exists():
+            return []
+        try:
+            return [s for s in json.loads(self._path.read_text()) if isinstance(s, dict) and "endpoint" in s]
+        except (json.JSONDecodeError, TypeError):
+            return []
 
-    def _save(self):
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self._path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(list(self._subs.values()), indent=2))
-        os.replace(str(tmp), str(self._path))
+    def _load(self):
+        entries, migrating = self._storage.load_or_migrate(
+            self._path, "push_subscriptions", legacy_reader=self._read_legacy
+        )
+        self._subs = {s["endpoint"]: s for s in entries if isinstance(s, dict) and "endpoint" in s}
+        if migrating:
+            self._storage.replace_all(dict(self._subs))
 
     def subscribe(self, subscription_info: dict) -> None:
         with self._lock:
             self._subs[subscription_info["endpoint"]] = subscription_info
-            self._save()
+            self._storage.upsert(subscription_info["endpoint"], subscription_info)
 
     def unsubscribe(self, endpoint: str) -> None:
         with self._lock:
             self._subs.pop(endpoint, None)
-            self._save()
+            self._storage.delete(endpoint)
 
     def all(self) -> list[dict]:
         with self._lock:
