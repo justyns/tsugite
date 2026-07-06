@@ -13,7 +13,9 @@ function authHeaders() {
 async function handleError(resp) {
   if (resp.status === 401 && _onAuthRequired) _onAuthRequired();
   const err = await resp.json().catch(() => ({ error: resp.statusText }));
-  throw new Error(err.error || resp.statusText);
+  const e = new Error(err.error || resp.statusText);
+  e.status = resp.status;
+  throw e;
 }
 
 async function request(method, path, body, raw = false) {

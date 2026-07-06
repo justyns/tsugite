@@ -1054,8 +1054,10 @@ export default () => ({
     // A session waiting on the user gets a distinct (peach), attention-pulsing dot
     // so it reads differently from the green running/working state.
     if (this._isAwaitingInput(s)) return 'awaiting pulse';
-    const base = this.statusDotClass(s.state);
-    return this.isSessionProgressFresh(s) ? `${base} pulse` : base;
+    // Server-side busy is authoritative: render the running state even when
+    // this client has no fresh progress (reconnect / PWA resume).
+    const base = s.busy ? this.statusDotClass('running') : this.statusDotClass(s.state);
+    return this.isSessionProgressFresh(s) || s.busy ? `${base} pulse` : base;
   },
 
   recentBuckets() {

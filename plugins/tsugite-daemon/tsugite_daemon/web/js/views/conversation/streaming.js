@@ -193,7 +193,20 @@ export const streamingMixin = {
       // Finalize (not just pop-if-empty) so a connection error mid-turn doesn't
       // strand a non-empty progress bubble as a never-closed "Working..." spinner.
       this._finalizeLiveProgress(arr);
-      arr.push({ type: 'error', text: `Connection error: ${e.message}` });
+      if (e.status === 409) {
+        // Turn conflict: the server (the authority on busy) refused the send.
+        // The message never landed - withdraw the optimistic bubble, restore
+        // the draft, and reflect the busy state instead of a scary error.
+        const last = arr[arr.length - 1];
+        if (last?.type === 'user' && last.text === displayMsg) arr.pop();
+        if (!this.messageText) this.messageText = msg;
+        arr.push({ type: 'info', text: `${e.message} — your message was not sent; it's back in the input box.` });
+        const s = this.allSessions.find(x => (x.conversation_id || x.id) === sendSessionId);
+        if (s) s.busy = true;
+        this.loadStatus();
+      } else {
+        arr.push({ type: 'error', text: `Connection error: ${e.message}` });
+      }
     } finally {
       sendState.reader = null;
       sendState.sending = false;

@@ -464,12 +464,16 @@ export const sessionsMixin = {
     const running = s.state === 'running' || s.state === 'active';
     if (!running) return '';
     const cached = this.sessionsState[s.id]?.progress || progressFromPayload(s.progress);
-    if (!cached) return 'Starting...';
+    if (!cached) return s.busy ? 'Working...' : 'Starting...';
     const parts = [];
     if (cached.turnCount) parts.push(`Turn ${cached.turnCount}`);
     if (cached.toolCount) parts.push(`${cached.toolCount} tool${cached.toolCount > 1 ? 's' : ''}`);
     if (cached.statusText) parts.push(cached.statusText);
     if (parts.length > 0) return parts.join(' · ');
+    // The server's busy flag is authoritative: a turn is in flight even if no
+    // progress event has reached this client (reconnect, PWA resume, missed
+    // broadcasts) - never show an idle session while the server says busy.
+    if (s.busy) return 'Working...';
     // lastEventTime distinguishes "between turns" (events seen, none active) from
     // "session never started" so the idle state doesn't fall back to "Starting...".
     return cached.lastEventTime ? '' : 'Starting...';

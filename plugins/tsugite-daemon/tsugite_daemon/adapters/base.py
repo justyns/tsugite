@@ -576,6 +576,16 @@ class BaseAdapter(ABC):
                 logger.warning("session_store.flush after handle_message failed: %s", e)
             self._broadcast_turn_complete(broadcast_state.get("conv_id"))
 
+    def _broadcast_session_updated(self, conv_id: Optional[str]) -> None:
+        """Broadcast a session_update so clients refresh the session's payload
+        (busy flag included). Best-effort."""
+        if not self.event_bus or not conv_id:
+            return
+        try:
+            self.event_bus.emit("session_update", {"action": "updated", "id": conv_id})
+        except Exception as e:
+            logger.debug("session busy broadcast failed: %s", e)
+
     def _broadcast_turn_complete(self, conv_id: Optional[str]) -> None:
         """Notify SSE listeners (web UI) that a turn just finished, so the
         sidebar refreshes message_count/last_active and the open conversation
@@ -619,6 +629,9 @@ class BaseAdapter(ABC):
         if _broadcast_state is not None:
             _broadcast_state["conv_id"] = conv_id
         self.session_store.begin_turn(conv_id)
+        # Tell every client the session went busy NOW - the sidebar/composer
+        # must reflect server truth, not wait for progress events.
+        self._broadcast_session_updated(conv_id)
 
         # Compaction applies to override (pinned/explicit) sessions too —
         # otherwise cumulative_tokens grow until the provider raises "Prompt

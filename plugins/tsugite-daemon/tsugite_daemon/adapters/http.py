@@ -821,6 +821,10 @@ class HTTPServer:
                 "superseded_by": s.superseded_by,
                 "unread": unread,
                 "is_primary": s.is_primary,
+                # Authoritative turn-in-flight flag (set/cleared at the adapter
+                # chokepoint, durable in daemon.db). The UI must render busy
+                # state from this, never infer it from cached progress labels.
+                "busy": s.turn_in_flight,
             }
             if s.status in live_statuses:
                 row["progress"] = adapter.session_store.session_progress_summary(s.id)
@@ -900,7 +904,10 @@ class HTTPServer:
                     user_id, adapter.agent_name, session_id=session.id if session else None
                 ),
                 "metadata": session_metadata,
-                "busy": backend is not None,
+                # Busy is authoritative: an HTTP-driven chat task OR any other
+                # adapter turn (schedule reply, Discord, job notify) marked via
+                # the durable turn_in_flight flag.
+                "busy": backend is not None or bool(session and session.turn_in_flight),
                 "pending_message": backend.pending_message if backend else None,
                 "attachments": attachments,
             }
