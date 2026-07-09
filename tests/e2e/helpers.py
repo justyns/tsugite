@@ -12,6 +12,10 @@ from typing import Optional
 
 ALPINE_READY = "typeof Alpine !== 'undefined' && Alpine.store('app') && !Alpine.store('app').authRequired"
 CONV_VIEW = "[x-data*=conversationsView]"
+# The view's TRUE reactive context (registered by the component's init). Writes
+# through Alpine.$data(...) wrappers can miss Alpine's dependency graph for
+# nested state, so helpers must drive the view through this instead.
+CONV_REF = "window.__tsugiteConv"
 
 
 def wait_for_alpine_ready(page, timeout: int = 10000) -> None:
@@ -39,13 +43,13 @@ def reload_conversations_view(page) -> None:
     Needed when a test added sessions to the store after page mount; the
     initial /api/agents/{agent}/sessions fetch is stale.
     """
-    page.evaluate(f"Alpine.$data(document.querySelector({CONV_VIEW!r})).reload()")
+    page.evaluate(f"{CONV_REF}.reload()")
 
 
 def wait_for_session_in_list(page, session_id: str, timeout: int = 5000) -> None:
     """Wait until the conversationsView's allSessions array includes session_id."""
     page.wait_for_function(
-        f"(() => {{ const v = Alpine.$data(document.querySelector({CONV_VIEW!r})); "
+        f"(() => {{ const v = {CONV_REF}; "
         f"return v && v.allSessions && v.allSessions.some(s => s.id === {session_id!r}); }})()",
         timeout=timeout,
     )
@@ -53,11 +57,9 @@ def wait_for_session_in_list(page, session_id: str, timeout: int = 5000) -> None
 
 def select_session_in_view(page, session_id: str, timeout: int = 3000) -> None:
     """Programmatically select a session and wait for it to take effect."""
-    page.evaluate(
-        f"Alpine.$data(document.querySelector({CONV_VIEW!r})).selectSessionById({session_id!r}, {{follow: false}})"
-    )
+    page.evaluate(f"{CONV_REF}.selectSessionById({session_id!r}, {{follow: false}})")
     page.wait_for_function(
-        f"Alpine.$data(document.querySelector({CONV_VIEW!r})).selectedSessionId === {session_id!r}",
+        f"{CONV_REF}.selectedSessionId === {session_id!r}",
         timeout=timeout,
     )
 

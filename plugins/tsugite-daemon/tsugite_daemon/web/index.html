@@ -772,12 +772,15 @@
                   <span>loading conversation…</span>
                 </div>
               </template>
-              <template x-if="compactionSummary">
-                <div class="console-compaction-banner console-carried-summary">
-                  <h4>Previous conversation summary</h4>
-                  <div x-html="renderHtml(compactionSummary)"></div>
-                </div>
-              </template>
+              <!-- x-show, not x-if: the x-if clone's effect intermittently lost its
+                   subscription to the session state (rare Alpine template-clone
+                   lifecycle quirk), leaving the banner unrendered until a
+                   re-navigation. x-show keeps the node mounted so the binding
+                   can't detach. -->
+              <div class="console-compaction-banner console-carried-summary" x-show="compactionSummary" x-cloak>
+                <h4>Previous conversation summary</h4>
+                <div x-html="compactionSummary ? renderHtml(compactionSummary) : ''"></div>
+              </div>
               <template x-for="(msg, i) in messages" :key="i">
                 <div>
                   <template x-if="msg.type === 'compaction'">

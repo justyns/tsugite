@@ -282,6 +282,10 @@ export default () => ({
 
   // Lifecycle
   init() {
+    // e2e hook: `this` here is the TRUE reactive context. Alpine.$data()
+    // hands tests a wrapper whose nested writes can miss the dependency
+    // graph, so Playwright helpers drive the view through this reference.
+    window.__tsugiteConv = this;
     this._loadCommands();
     this._mobileQuery = window.matchMedia('(max-width: 640px)');
     const maybeReload = () => {

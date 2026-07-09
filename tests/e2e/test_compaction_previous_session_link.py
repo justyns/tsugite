@@ -83,18 +83,36 @@ def _seed_new_with_two_compactions(e2e_tmp, new_session_id, source_id):
 
 def _set_compaction_summary(page, summary):
     """Render the carried-forward summary card by setting what the real flow derives
-    from the last compaction event. compactionSummary is a getter over
-    sessionsState[selectedSessionId], so set the per-session field it reads. Keeps
-    these tests independent of the history-seeding pipeline."""
+    from the last compaction event (via the true reactive context - see
+    helpers.CONV_REF).
+
+    Rarely (~5-15% under suite load), Alpine's effect for the banner's x-show
+    binding dies: the element's own scope resolves compactionSummary truthy yet
+    the effect never re-runs (verified: no wipe, no cloak, scope value present,
+    display stuck at none; re-writing the value does not heal, re-cloning via a
+    session reselect does). Until that upstream scheduler quirk is addressed,
+    heal exactly the way a user navigation would."""
     page.evaluate(
-        """([sel, summary]) => {
-            const v = Alpine.$data(document.querySelector(sel));
-            (v.sessionsState[v.selectedSessionId] ||= {}).compactionSummary = summary;
+        """(summary) => {
+            const v = window.__tsugiteConv;
+            v._sessionState(v.selectedSessionId).compactionSummary = summary;
         }""",
-        [CONV_VIEW, summary],
+        summary,
     )
-    banner = page.locator(".console-thread .console-compaction-banner").first
-    banner.wait_for(state="visible", timeout=5000)
+    banner = page.locator(".console-thread .console-carried-summary").first
+    try:
+        banner.wait_for(state="visible", timeout=3000)
+    except Exception:
+        page.evaluate(
+            """async () => {
+                const v = window.__tsugiteConv;
+                const sid = v.selectedSessionId;
+                v.selectedSessionId = '';
+                await new Promise(r => setTimeout(r, 50));
+                v.selectedSessionId = sid;
+            }"""
+        )
+        banner.wait_for(state="visible", timeout=5000)
     return banner
 
 

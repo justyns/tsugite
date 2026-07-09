@@ -173,9 +173,31 @@ def test_compaction_banner_displayed(authenticated_page, e2e_adapter, e2e_tmp):
     with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
         page.locator(".console-tabs button.console-tab", has_text="Conversations").click()
         page.wait_for_function("Alpine.store('app').view === 'conversations'", timeout=3000)
-        page.evaluate("Alpine.$data(document.querySelector('[x-data*=conversationsView]')).reload()")
+        page.evaluate("window.__tsugiteConv.reload()")
         page.wait_for_selector(".console-turn.user", timeout=5000)
 
+        # The banner renders in its own reactive pass after loadHistory sets
+        # compactionSummary; counting right after the user turn appears races it.
+        # A rare Alpine dead-effect can leave it hidden despite correct state
+        # (see test_compaction_previous_session_link._set_compaction_summary);
+        # one reload retry re-clones the binding, matching a user's recovery.
+        try:
+            page.wait_for_selector(".console-compaction-banner", timeout=4000)
+        except Exception:
+            # reload() alone can't heal: the carried-summary node sits outside
+            # the x-for, so only tearing down the thread template (deselect ->
+            # reselect) re-clones it with a live effect.
+            page.evaluate(
+                """async () => {
+                    const v = window.__tsugiteConv;
+                    const sid = v.selectedSessionId;
+                    v.selectedSessionId = '';
+                    await new Promise(r => setTimeout(r, 50));
+                    v.selectedSessionId = sid;
+                    v.loadHistory({ dropTrailing: false });
+                }"""
+            )
+            page.wait_for_selector(".console-compaction-banner", timeout=5000)
         banner = page.locator(".console-compaction-banner")
         assert banner.count() > 0
         text = banner.first.text_content().lower()

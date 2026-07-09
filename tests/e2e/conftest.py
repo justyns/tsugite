@@ -15,6 +15,7 @@ from tsugite_daemon.session_store import SessionStore
 from tsugite_daemon.webhook_store import WebhookStore
 
 from .helpers import (
+    CONV_VIEW,
     open_conversations,
     reload_conversations_view,
     select_session_in_view,
@@ -185,6 +186,18 @@ def chat_page(authenticated_page, e2e_session_store):
     wait_for_session_in_list(page, session.id)
     select_session_in_view(page, session.id)
     page.wait_for_selector("textarea#message-input", timeout=5000)
+    # selectSession's async tail (loadHistory -> resetHistory) must settle
+    # before tests mutate per-session view state: an in-flight resetHistory
+    # wipes what the test just wrote (the flaky banner/dedupe family).
+    # networkidle can't be used - the SSE stream keeps the network busy forever.
+    page.wait_for_function(
+        f"""(() => {{
+            const v = Alpine.$data(document.querySelector('{CONV_VIEW}'));
+            const s = v && v.sessionsState[v.selectedSessionId];
+            return s && !s.historyLoading;
+        }})()""",
+        timeout=5000,
+    )
     return page
 
 
