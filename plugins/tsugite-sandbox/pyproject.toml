@@ -1,9 +1,9 @@
 [project]
 name = "tsugite-sandbox"
-version = "0.17.1"
+version = "0.17.2"
 description = "Tsugite plugin: bubblewrap sandbox backend (default-installed)"
 requires-python = ">=3.11"
-dependencies = ["tsugite-cli==0.17.1"]
+dependencies = ["tsugite-cli==0.17.2"]
 
 [project.entry-points."tsugite.sandbox"]
 bwrap = "tsugite_sandbox:BubblewrapSandbox"
