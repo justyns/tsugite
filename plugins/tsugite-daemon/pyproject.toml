@@ -1,12 +1,12 @@
 [project]
 name = "tsugite-daemon"
-version = "0.17.2"
+version = "0.17.3"
 description = "Tsugite plugin: daemon stack (HTTP/web UI, scheduler, jobs, sessions, notifications)"
 requires-python = ">=3.11"
 dependencies = [
-  "tsugite-cli==0.17.2",
-  "tsugite-pty==0.17.2",
-  "tsugite-sandbox==0.17.2",
+  "tsugite-cli==0.17.3",
+  "tsugite-pty==0.17.3",
+  "tsugite-sandbox==0.17.3",
   "cronsim>=2.6",
   "starlette>=0.36",
   "uvicorn>=0.25",

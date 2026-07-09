@@ -2324,7 +2324,7 @@ wheels = [
 
 [[package]]
 name = "tsugite-acp"
-version = "0.17.2"
+version = "0.17.3"
 source = { editable = "plugins/tsugite-acp" }
 dependencies = [
     { name = "agent-client-protocol" },
@@ -2339,7 +2339,7 @@ requires-dist = [
 
 [[package]]
 name = "tsugite-claude-code"
-version = "0.17.2"
+version = "0.17.3"
 source = { editable = "plugins/tsugite-claude-code" }
 dependencies = [
     { name = "tsugite-cli" },
@@ -2350,7 +2350,7 @@ requires-dist = [{ name = "tsugite-cli", editable = "." }]
 
 [[package]]
 name = "tsugite-cli"
-version = "0.17.2"
+version = "0.17.3"
 source = { editable = "." }
 dependencies = [
     { name = "cryptography" },
@@ -2486,7 +2486,7 @@ dev = [
 
 [[package]]
 name = "tsugite-codex-cli"
-version = "0.17.2"
+version = "0.17.3"
 source = { editable = "plugins/tsugite-codex-cli" }
 dependencies = [
     { name = "tsugite-cli" },
@@ -2497,7 +2497,7 @@ requires-dist = [{ name = "tsugite-cli", editable = "." }]
 
 [[package]]
 name = "tsugite-daemon"
-version = "0.17.2"
+version = "0.17.3"
 source = { editable = "plugins/tsugite-daemon" }
 dependencies = [
     { name = "cronsim" },
@@ -2526,7 +2526,7 @@ requires-dist = [
 
 [[package]]
 name = "tsugite-discord"
-version = "0.17.2"
+version = "0.17.3"
 source = { editable = "plugins/tsugite-discord" }
 dependencies = [
     { name = "discord-py" },
@@ -2541,7 +2541,7 @@ requires-dist = [
 
 [[package]]
 name = "tsugite-pty"
-version = "0.17.2"
+version = "0.17.3"
 source = { editable = "plugins/tsugite-pty" }
 dependencies = [
     { name = "tsugite-cli" },
@@ -2552,7 +2552,7 @@ requires-dist = [{ name = "tsugite-cli", editable = "." }]
 
 [[package]]
 name = "tsugite-sandbox"
-version = "0.17.2"
+version = "0.17.3"
 source = { editable = "plugins/tsugite-sandbox" }
 dependencies = [
     { name = "tsugite-cli" },
@@ -2563,7 +2563,7 @@ requires-dist = [{ name = "tsugite-cli", editable = "." }]
 
 [[package]]
 name = "tsugite-tmux"
-version = "0.17.2"
+version = "0.17.3"
 source = { editable = "plugins/tsugite-tmux" }
 dependencies = [
     { name = "tsugite-cli" },
@@ -2574,7 +2574,7 @@ requires-dist = [{ name = "tsugite-cli", editable = "." }]
 
 [[package]]
 name = "tsugite-web"
-version = "0.17.2"
+version = "0.17.3"
 source = { editable = "plugins/tsugite-web" }
 dependencies = [
     { name = "ddgs" },
@@ -2591,7 +2591,7 @@ requires-dist = [
 
 [[package]]
 name = "tsugite-youtube"
-version = "0.17.2"
+version = "0.17.3"
 source = { editable = "plugins/tsugite-youtube" }
 dependencies = [
     { name = "tsugite-cli" },
