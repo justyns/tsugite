@@ -190,7 +190,7 @@ def track_compaction_usage():
     tasks (map-reduce summarization), so totals aggregate correctly. Compaction
     spend was previously discarded; this makes it visible to the caller.
     """
-    acc = {"prompt_tokens": 0, "completion_tokens": 0, "calls": 0}
+    acc = {"prompt_tokens": 0, "completion_tokens": 0, "calls": 0, "cost": None}
     token = _compaction_usage.set(acc)
     try:
         yield acc
@@ -225,6 +225,8 @@ async def _llm_complete(system_prompt: str, user_content: str, model: str) -> st
             acc["prompt_tokens"] += response.usage.prompt_tokens or 0
             acc["completion_tokens"] += response.usage.completion_tokens or 0
             acc["calls"] += 1
+            if response.cost is not None:
+                acc["cost"] = (acc["cost"] or 0.0) + response.cost
     except Exception as e:
         raise RuntimeError(f"LLM call failed ({model}): {e}") from e
 

@@ -339,6 +339,9 @@ class TsugiteAgent:
         self._resume_after_compaction = resume_after_compaction
 
         self.total_cost = 0.0
+        # Distinguishes "provider reported $0" (subscription models) from "no
+        # cost data at all" (interrupted turn) - only the latter records NULL.
+        self.cost_reported = False
         self.total_tokens = 0
         self.last_input_tokens = 0
         self.cache_creation_tokens = 0
@@ -571,7 +574,7 @@ class TsugiteAgent:
                 "answer": str(final_value)[:500] if final_value is not None else "",
                 "turns": turn_num + 1,
                 "tokens": total_tokens,
-                "cost": self.total_cost if self.total_cost > 0 else None,
+                "cost": self.reported_cost,
             }
 
             from tsugite.hooks import fire_hooks_background
@@ -585,13 +588,13 @@ class TsugiteAgent:
                         answer_data=_safe_json(final_value),
                         turns=turn_num + 1,
                         tokens=total_tokens,
-                        cost=self.total_cost if self.total_cost > 0 else None,
+                        cost=self.reported_cost,
                     )
                 )
                 self.event_bus.emit(
                     CostSummaryEvent(
                         tokens=total_tokens,
-                        cost=self.total_cost if self.total_cost > 0 else None,
+                        cost=self.reported_cost,
                         model=self.model_name,
                         duration_seconds=time.time() - start_time,
                         cache_creation_input_tokens=self.cache_creation_tokens or None,
@@ -610,7 +613,7 @@ class TsugiteAgent:
                 return AgentResult(
                     output=final_value,
                     token_usage=total_tokens,
-                    cost=self.total_cost if self.total_cost > 0 else None,
+                    cost=self.reported_cost,
                     steps=self.memory.steps,
                     error=error_message,
                     provider_state=self._provider.get_state(),
@@ -731,7 +734,7 @@ class TsugiteAgent:
             self.event_bus.emit(StreamCompleteEvent())
 
         if final_chunk and final_chunk.usage:
-            step_cost = self._accumulate_usage(final_chunk.usage, final_chunk.cost or 0.0)
+            step_cost = self._accumulate_usage(final_chunk.usage, final_chunk.cost)
 
         accumulated_content, spoofed = escape_runtime_injection_tags(accumulated_content)
         parsed = self._parse_response_from_text(accumulated_content)
@@ -765,8 +768,10 @@ class TsugiteAgent:
 
         step_cost = response.cost or 0.0
         if response.usage:
-            self._accumulate_usage(response.usage, step_cost)
+            self._accumulate_usage(response.usage, response.cost)
         else:
+            if response.cost is not None:
+                self.cost_reported = True
             self.total_cost += step_cost
 
         if response.reasoning_content:
@@ -1135,7 +1140,12 @@ class TsugiteAgent:
             parts.append('warning="approaching turn limit, wrap up soon"')
         return f"\n<tsugite_budget {' '.join(parts)} />"
 
-    def _accumulate_usage(self, usage, cost: float = 0.0) -> float:
+    @property
+    def reported_cost(self) -> float | None:
+        """Cumulative cost when any provider response carried one, else None."""
+        return self.total_cost if (self.cost_reported or self.total_cost > 0) else None
+
+    def _accumulate_usage(self, usage, cost: float | None = None) -> float:
         """Update cumulative token/cost counters from a usage object.
 
         Returns the step cost for caller convenience.
@@ -1146,8 +1156,10 @@ class TsugiteAgent:
         )
         self.cache_creation_tokens += usage.cache_creation_input_tokens or 0
         self.cache_read_tokens += usage.cache_read_input_tokens or 0
-        self.total_cost += cost
-        return cost
+        if cost is not None:
+            self.cost_reported = True
+        self.total_cost += cost or 0.0
+        return cost or 0.0
 
     def _parse_response_from_text(self, content: str) -> ParsedResponse:
         """Parse text content into thought, code, and content blocks."""

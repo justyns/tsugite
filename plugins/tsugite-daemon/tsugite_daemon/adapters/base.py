@@ -1178,6 +1178,7 @@ class BaseAdapter(ABC):
                     input_tokens=summary_usage["prompt_tokens"],
                     output_tokens=summary_usage["completion_tokens"],
                     total_tokens=summary_usage["prompt_tokens"] + summary_usage["completion_tokens"],
+                    cost_usd=summary_usage.get("cost"),
                 )
             except Exception as e:
                 logger.debug("Failed to record compaction usage: %s", e)
