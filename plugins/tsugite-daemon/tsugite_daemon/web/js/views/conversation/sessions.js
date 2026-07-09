@@ -534,10 +534,29 @@ export const sessionsMixin = {
 
   _matchesFilters(s) {
     if (this.sessionFilter) {
-      const text = [s.title, s.label, s.id, s.conversation_id, s.source, s.state].filter(Boolean).join(' ');
+      const text = [s.title, s.label, s.id, s.conversation_id, s.source, s.state,
+                    s.metadata?.topic, s.metadata?.notes].filter(Boolean).join(' ');
       if (!text.toLowerCase().includes(this.sessionFilter.toLowerCase())) return false;
     }
     return true;
+  },
+
+  // The sidebar list only holds the ~100 most-recent sessions; typing a filter
+  // also asks the server to search the FULL set (title/topic/metadata,
+  // superseded bodies resolved to live heads) and merges any rows the client
+  // hasn't loaded, so search never false-negatives on an older session.
+  async searchSessionsServer() {
+    const q = (this.sessionFilter || '').trim();
+    if (!q) return;
+    const agent = this.$store.app.selectedAgent;
+    if (!agent) return;
+    try {
+      const data = await get(`/api/agents/${agent}/sessions?q=${encodeURIComponent(q)}`);
+      if ((this.sessionFilter || '').trim() !== q) return;
+      const known = new Set(this.allSessions.map(x => x.id));
+      const extra = (data.sessions || []).filter(x => !known.has(x.id));
+      if (extra.length) this.allSessions.push(...extra);
+    } catch { /* best-effort; local filtering still applies */ }
   },
 
   async togglePin(s) {

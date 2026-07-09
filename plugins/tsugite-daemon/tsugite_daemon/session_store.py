@@ -1044,6 +1044,35 @@ class SessionStore:
                 results = head
             return results
 
+    def search_sessions(self, agent: Optional[str], q: str, limit: int = 50) -> list[Session]:
+        """Case-insensitive substring search over ALL sessions - title, id,
+        prompt, and string metadata values (topic etc.) - ignoring the recency
+        window that bounds list_sessions. A hit on a superseded session
+        resolves to its live successor so a compacted conversation stays
+        findable by its pre-compaction content."""
+        needle = q.strip().lower()
+        if not needle:
+            return []
+        with self._lock:
+            hits = []
+            for s in self._sessions.values():
+                if agent and s.agent != agent:
+                    continue
+                meta_text = " ".join(str(v) for v in (s.metadata or {}).values() if isinstance(v, (str, int, float)))
+                text = " ".join(filter(None, [s.title, s.id, s.prompt, meta_text])).lower()
+                if needle in text:
+                    hits.append(s)
+            resolved: dict[str, Session] = {}
+            for s in hits:
+                seen: set[str] = set()
+                while s.superseded_by and s.superseded_by in self._sessions and s.id not in seen:
+                    seen.add(s.id)
+                    s = self._sessions[s.superseded_by]
+                resolved[s.id] = s
+            results = list(resolved.values())
+            results.sort(key=lambda s: s.last_active or s.created_at, reverse=True)
+            return results[:limit]
+
     def list_interactive_by_agent(self, agent: str) -> list[Session]:
         """Return all active interactive sessions for a given agent."""
         with self._lock:

@@ -84,7 +84,7 @@
       <aside class="console-sidebar" :class="{ 'mobile-hidden': selectedSessionId }">
         <div class="console-filter">
           <span class="prompt">›</span>
-          <input type="text" x-model="sessionFilter" placeholder="filter agent:odyn status:running" aria-label="Filter sessions">
+          <input type="text" x-model="sessionFilter" @input.debounce.300ms="searchSessionsServer()" placeholder="filter agent:odyn status:running" aria-label="Filter sessions">
           <kbd>/</kbd>
         </div>
         <div class="console-sidebar-scroll">

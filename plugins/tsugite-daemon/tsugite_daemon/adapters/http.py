@@ -784,14 +784,24 @@ class HTTPServer:
         except (ValueError, TypeError):
             limit = 100
 
-        all_sessions = adapter.session_store.list_sessions(
-            agent=adapter.agent_name,
-            source=source,
-            status=status,
-            parent_id=parent_id,
-            limit=limit,
-            include_superseded=include_superseded,
-        )
+        q = request.query_params.get("q")
+        if q:
+            # Search scans the FULL session set (the recency limit exists to
+            # bound the sidebar payload, not to hide sessions from search).
+            all_sessions = adapter.session_store.search_sessions(adapter.agent_name, q, limit=limit)
+            if source:
+                all_sessions = [s for s in all_sessions if s.source == source]
+            if status:
+                all_sessions = [s for s in all_sessions if s.status == status]
+        else:
+            all_sessions = adapter.session_store.list_sessions(
+                agent=adapter.agent_name,
+                source=source,
+                status=status,
+                parent_id=parent_id,
+                limit=limit,
+                include_superseded=include_superseded,
+            )
 
         from tsugite_daemon.session_store import SessionStatus
 
