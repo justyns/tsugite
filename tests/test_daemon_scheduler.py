@@ -819,3 +819,43 @@ async def test_overlapping_fire_does_not_corrupt_drift_metadata(scheduler):
         assert datetime.fromisoformat(e.next_run) > datetime.now(timezone.utc)
     finally:
         e.lock.release()
+
+
+class TestNotifyValidation:
+    """Agents pass booleans and bare strings as `notify` in practice; those must
+    produce a clear message or coerce, never "'bool' object is not iterable"."""
+
+    def _validate(self, notify, notify_tool=False, channels={"discord", "web"}):
+        from tsugite.tools import schedule as sched_tools
+
+        old = sched_tools._channel_names
+        sched_tools._channel_names = channels
+        try:
+            return sched_tools._validate_notify(notify, notify_tool)
+        finally:
+            sched_tools._channel_names = old
+
+    def test_notify_true_gives_clear_error(self):
+        with pytest.raises(ValueError, match="notify must be a list.*got True.*discord"):
+            self._validate(True)
+
+    def test_notify_false_means_no_notify(self):
+        assert self._validate(False) is None
+
+    def test_notify_bare_string_coerced_to_list(self):
+        assert self._validate("discord") == ["discord"]
+
+    def test_notify_other_type_gives_clear_error(self):
+        with pytest.raises(ValueError, match="notify must be a list.*got int"):
+            self._validate(3)
+
+    def test_notify_list_passes_through(self):
+        assert self._validate(["discord"]) == ["discord"]
+
+    def test_unknown_channel_still_rejected(self):
+        with pytest.raises(ValueError, match="Unknown notification channel"):
+            self._validate(["nope"])
+
+    def test_notify_tool_still_requires_notify(self):
+        with pytest.raises(ValueError, match="notify_tool=True requires"):
+            self._validate(None, notify_tool=True)

@@ -36,14 +36,27 @@ def _call(fn, *args, **kwargs):
     return call_on_loop(_loop, fn, *args, timeout=10, **kwargs)
 
 
-def _validate_notify(notify: Optional[list[str]], notify_tool: bool) -> None:
-    """Validate notification channels and notify_tool requirement."""
+def _validate_notify(notify, notify_tool: bool) -> Optional[list[str]]:
+    """Normalize and validate the notify argument; returns the coerced list.
+
+    Agents pass booleans and bare strings here in practice - those must coerce
+    or produce a message that names the argument and the expected type, never
+    leak "'bool' object is not iterable"."""
+    if notify is True or (notify is not None and notify is not False and not isinstance(notify, (list, str))):
+        channels = f"Available channels: {', '.join(sorted(_channel_names))}" if _channel_names else ""
+        got = "True" if notify is True else type(notify).__name__
+        raise ValueError(f"notify must be a list of channel names, got {got}. {channels}".strip())
+    if notify is False:
+        notify = None
+    elif isinstance(notify, str):
+        notify = [notify]
     if notify_tool and not notify:
         raise ValueError("notify_tool=True requires a non-empty 'notify' list")
     if notify:
         unknown = set(notify) - _channel_names
         if unknown:
             raise ValueError(f"Unknown notification channel(s): {', '.join(sorted(unknown))}")
+    return notify
 
 
 def _validate_agent(agent: str) -> None:
@@ -128,7 +141,7 @@ def schedule_create(
         if not prompt and not agent_file:
             raise ValueError("Provide at least one of 'prompt' or 'agent_file'")
 
-    _validate_notify(notify, notify_tool)
+    notify = _validate_notify(notify, notify_tool)
     agent = _resolve_agent(agent)
     _validate_agent(agent)
 
@@ -274,8 +287,8 @@ def schedule_update(
     fields = {k: v for k, v in simple.items() if v is not None}
 
     if notify is not None:
-        _validate_notify(notify, False)
-        fields["notify"] = notify
+        notify = _validate_notify(notify, False)
+        fields["notify"] = notify or []
     if notify_tool is not None:
         if notify_tool:
             effective_notify = notify if notify is not None else _call(_scheduler.get, id).notify
@@ -436,7 +449,7 @@ def background_task(
     if on_complete and (not isinstance(on_complete, dict) or on_complete.get("action") != "reply"):
         raise ValueError("on_complete must be {'action': 'reply'}")
 
-    _validate_notify(notify, notify_tool)
+    notify = _validate_notify(notify, notify_tool)
     agent = _resolve_agent(agent)
     _validate_agent(agent)
 
