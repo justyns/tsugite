@@ -1,6 +1,6 @@
 """Tests for per-schedule model and max_turns override pipeline."""
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 from tsugite_daemon.scheduler import ScheduleEntry

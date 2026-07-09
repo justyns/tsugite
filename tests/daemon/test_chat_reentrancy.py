@@ -167,6 +167,18 @@ def _make_session(mock_adapter, sid: str, user_id: str):
     return session
 
 
+def _wait_for_active_chats(server, *session_ids, timeout=5.0):
+    """Poll until every session has a registered ActiveChat. A blind sleep
+    races the chat threads' registration on slow CI workers."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        live = {key[2] for key in server._active_chats}
+        if all(sid in live for sid in session_ids):
+            return
+        time.sleep(0.02)
+    raise AssertionError(f"chats never registered for {session_ids}; have {list(server._active_chats)}")
+
+
 def _start_chat_in_thread(client, test_token, *, session_id: str, user_id: str, message: str = "hi"):
     """Start a streaming /chat in a daemon thread; returns (thread, status_holder, done_event)."""
     import threading
@@ -216,7 +228,7 @@ def test_distinct_sessions_same_user_run_in_parallel(client, mock_adapter, test_
 
     with patch.object(mock_adapter, "handle_message", side_effect=slow_handle):
         _t1, st1, d1 = _start_chat_in_thread(client, test_token, session_id="sess-A", user_id="alice")
-        time.sleep(0.1)
+        _wait_for_active_chats(server, "sess-A")
         _t2, st2, d2 = _start_chat_in_thread(client, test_token, session_id="sess-B", user_id="alice")
 
         d1.wait(timeout=5)
@@ -228,7 +240,7 @@ def test_distinct_sessions_same_user_run_in_parallel(client, mock_adapter, test_
     assert sorted(seen_sessions) == ["sess-A", "sess-B"]
 
 
-def test_same_session_double_send_still_409s(client, mock_adapter, test_token):
+def test_same_session_double_send_still_409s(client, mock_adapter, test_token, server):
     """Preserve original safety: two POSTs with the SAME session_id while the
     first is in flight must still return 409. Per-session keying must not
     weaken the same-session guard.
@@ -247,7 +259,7 @@ def test_same_session_double_send_still_409s(client, mock_adapter, test_token):
 
     with patch.object(mock_adapter, "handle_message", side_effect=slow_handle):
         _t1, st1, d1 = _start_chat_in_thread(client, test_token, session_id="sess-X", user_id="alice")
-        time.sleep(0.1)
+        _wait_for_active_chats(server, "sess-X")
 
         resp2 = client.post(
             "/api/agents/test-agent/chat",
@@ -287,7 +299,7 @@ def test_cancel_chat_routes_by_session(client, mock_adapter, test_token, server)
     with patch.object(mock_adapter, "handle_message", side_effect=slow_handle):
         _t1, _st1, d1 = _start_chat_in_thread(client, test_token, session_id="sess-A", user_id="alice")
         _t2, _st2, d2 = _start_chat_in_thread(client, test_token, session_id="sess-B", user_id="alice")
-        time.sleep(0.2)
+        _wait_for_active_chats(server, "sess-A", "sess-B")
 
         resp = client.post(
             "/api/agents/test-agent/chat/cancel",
@@ -329,7 +341,7 @@ def test_cancel_chat_sets_cooperative_cancel_event(client, mock_adapter, test_to
 
     with patch.object(mock_adapter, "handle_message", side_effect=slow_handle):
         _t, _st, d = _start_chat_in_thread(client, test_token, session_id="sess-COOP", user_id="alice")
-        time.sleep(0.2)
+        _wait_for_active_chats(server, "sess-COOP")
 
         chats = list(server._active_chats.values())
         assert len(chats) == 1, f"expected one active chat, got {len(chats)}"
@@ -363,7 +375,7 @@ def test_respond_routes_by_session(client, mock_adapter, test_token, server):
     with patch.object(mock_adapter, "handle_message", side_effect=slow_handle):
         _t1, _st1, d1 = _start_chat_in_thread(client, test_token, session_id="sess-A", user_id="alice")
         _t2, _st2, d2 = _start_chat_in_thread(client, test_token, session_id="sess-B", user_id="alice")
-        time.sleep(0.3)
+        _wait_for_active_chats(server, "sess-A", "sess-B")
 
         resolved_user = mock_adapter.resolve_http_user("alice")
         agent_name = mock_adapter.agent_name
@@ -397,7 +409,7 @@ def test_respond_routes_by_session(client, mock_adapter, test_token, server):
         d2.wait(timeout=5)
 
 
-def test_status_returns_correct_session_busy(client, mock_adapter, test_token):
+def test_status_returns_correct_session_busy(client, mock_adapter, test_token, server):
     """While S1 is mid-turn, /status?session_id=S1 reports busy=true and
     /status?session_id=S2 reports busy=false. On master, both report busy=true
     because the (agent, user) backend lookup ignores session_id.
@@ -413,7 +425,7 @@ def test_status_returns_correct_session_busy(client, mock_adapter, test_token):
 
     with patch.object(mock_adapter, "handle_message", side_effect=slow_handle):
         _t1, _st1, d1 = _start_chat_in_thread(client, test_token, session_id="sess-A", user_id="alice", message="probe")
-        time.sleep(0.2)
+        _wait_for_active_chats(server, "sess-A")
 
         resp_a = client.get(
             "/api/agents/test-agent/status?user_id=alice&session_id=sess-A",
