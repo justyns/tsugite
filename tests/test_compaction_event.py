@@ -210,4 +210,4 @@ class TestCompactionUsageTracking:
             # Outside the block the accumulator is cleared, so this call is untracked.
             await _llm_complete("sys", "u3", "openai:gpt-4o-mini")
 
-        assert usage == {"prompt_tokens": 200, "completion_tokens": 50, "calls": 2}
+        assert usage == {"prompt_tokens": 200, "completion_tokens": 50, "calls": 2, "cost": None}
