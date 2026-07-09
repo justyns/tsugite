@@ -93,6 +93,11 @@ class Job:
     # Optional separate model for the verifier round. Falls back to `model`
     # (then the workspace default) when unset.
     verifier_model: Optional[str] = None
+    # Ordered escalation ladder ("cheap first"). When set, `model` always holds
+    # the current rung; a qualifying failure (verifier budget exhausted, or a
+    # worker infra/quota death) advances to the next rung with a fresh budget.
+    model_ladder: Optional[list[str]] = None
+    ladder_index: int = 0
     agent: Optional[str] = None
     timeout_minutes: int = 30
     verify_attempts: int = 0
@@ -177,6 +182,8 @@ class Job:
             "result": self.result,
             "agent": self.agent,
             "model": self.model,
+            "model_ladder": self.model_ladder,
+            "ladder_index": self.ladder_index,
             "verifier_model": self.verifier_model,
             "repo": self.repo,
             "created_at": self.created_at,

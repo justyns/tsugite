@@ -280,10 +280,23 @@ export default () => ({
       return;
     }
     if (key === 'retry') {
-      const hint = prompt('Retry hint (sent to the worker):');
-      if (!hint || !hint.trim()) return;
+      // Hint and model are each optional, but at least one is required: a
+      // usage-limit death is retried by switching models, no hint needed.
+      const hint = prompt('Retry hint (optional if changing model):');
+      if (hint === null) return;
+      const current = job.model || '';
+      const modelIn = prompt(`Retry on model (blank keeps ${current || 'the workspace default'}):`, current);
+      if (modelIn === null) return;
+      const model = modelIn.trim() && modelIn.trim() !== current ? modelIn.trim() : '';
+      if (!hint.trim() && !model) {
+        toast('Provide a hint or a different model to retry', 'error');
+        return;
+      }
       try {
-        await post(`/api/jobs/${job.job_id}/retry`, { hint: hint.trim() });
+        const body = {};
+        if (hint.trim()) body.hint = hint.trim();
+        if (model) body.model = model;
+        await post(`/api/jobs/${job.job_id}/retry`, body);
         await this.load();
       } catch (e) {
         toast('Retry failed: ' + e.message, 'error');

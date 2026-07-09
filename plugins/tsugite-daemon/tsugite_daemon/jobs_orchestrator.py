@@ -17,6 +17,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import subprocess
 from pathlib import Path
 from typing import Optional
@@ -134,6 +135,7 @@ class JobsOrchestrator:
         repo: Optional[str] = None,
         model: Optional[str] = None,
         verifier_model: Optional[str] = None,
+        model_ladder: Optional[list] = None,
         agent: Optional[str] = None,
         timeout_minutes: int = 30,
         spawned_by: str = "user-slash",
@@ -149,6 +151,8 @@ class JobsOrchestrator:
 
         notify_when: one of "done", "stuck", "errored", "terminal", "never" (default).
         max_attempts: verifier-loop cap. Defaults to 3 when omitted.
+        model_ladder: ordered "cheap first" model list; `model` is set to the
+            first rung and qualifying failures escalate to the next rung.
         """
         worker_agent_file = agent or WORKER_AGENT
 
@@ -161,6 +165,13 @@ class JobsOrchestrator:
             sandbox_override = self._resolve_parent_sandbox_override(parent_session_id)
 
         job_kwargs: dict = {}
+        if model_ladder:
+            ladder = [str(m).strip() for m in model_ladder if str(m).strip()]
+            if not ladder:
+                raise ValueError("model_ladder must contain at least one non-empty model name")
+            job_kwargs["model_ladder"] = ladder
+            job_kwargs["ladder_index"] = 0
+            model = ladder[0]
         if max_attempts is not None:
             job_kwargs["max_attempts"] = max_attempts
         if notify_when:
@@ -271,6 +282,9 @@ class JobsOrchestrator:
                 "worker_session_id": worker_session_id,
                 "verifier_session_id": None,
                 "verifier_pass": None,
+                # Which model this attempt ran on - makes a ladder walk (and any
+                # manual retry-on-model) auditable in the UI/history.
+                "model": job.model,
             }
         )
         self._jobs.update(job_id, attempts=attempts)
@@ -430,19 +444,28 @@ class JobsOrchestrator:
         *,
         reset_counter: bool = False,
         fresh_workspace: bool = False,
+        model: Optional[str] = None,
+        verifier_model: Optional[str] = None,
     ) -> Job:
         """Give a STUCK or ERRORED Job one more shot, with the user's hint as the worker prompt.
 
         Args:
             job_id: STUCK/ERRORED job to resurrect.
-            hint: Free-text guidance for the new worker.
+            hint: Free-text guidance for the new worker. Optional when `model`
+                is supplied - retrying purely to switch models (e.g. after a
+                usage-limit death) shouldn't force the user to invent a hint.
             reset_counter: Zero out `verify_attempts` so the retry gets a full new
                 budget of verifier rounds (the UI exposes this as "reset to 1").
                 Defaults False to preserve the historical no-infinite-loops guard.
             fresh_workspace: When the job has a `repo` worktree, prune the existing
                 tree and recreate it from HEAD before spawning. No-op when the Job
                 was created without `repo`.
+            model: Run this and subsequent attempts on a different model
+                (persisted onto the Job).
+            verifier_model: Same, for the verifier round.
         """
+        if not (hint or "").strip() and not model:
+            raise ValueError("hint or model is required - an unchanged retry would just repeat the same failure")
         # Serialize the whole check-then-act region per job: the stuck guard and the
         # stuck → running flip straddle the fresh_workspace provisioning await, so two
         # concurrent retries would otherwise both pass the guard and double-spawn.
@@ -475,6 +498,15 @@ class JobsOrchestrator:
                     raise ValueError(
                         f"retry_with_hint: workspace at '{anchor}' no longer exists; cannot resume in a missing directory"
                     )
+
+            if model or verifier_model:
+                fields = {}
+                if model:
+                    fields["model"] = model
+                if verifier_model:
+                    fields["verifier_model"] = verifier_model
+                self._jobs.update(job_id, **fields)
+                job = self._jobs.get(job_id)
 
             if reset_counter:
                 self._jobs.update(job_id, verify_attempts=0)
@@ -668,6 +700,52 @@ class JobsOrchestrator:
         prior = [e for e in (job.ac_results or []) if e.get("attempt") != attempt_num]
         self._jobs.update(job_id, ac_results=prior + list(predicate_results))
 
+    def _next_ladder_model(self, job: Job) -> Optional[str]:
+        ladder = job.model_ladder or []
+        nxt = job.ladder_index + 1
+        return ladder[nxt] if nxt < len(ladder) else None
+
+    def _escalate(self, job: Job, *, prompt: str, reason: str) -> bool:
+        """Advance the Job to its next ladder rung and spawn a worker there with
+        a fresh verifier budget. Returns False when there is no next rung (the
+        caller then finalizes normally). Works from both RUNNING (worker infra
+        death) and VERIFYING (budget exhausted) states."""
+        next_model = self._next_ladder_model(job)
+        if not next_model:
+            return False
+        self._cancel_timeout(job.id)
+        self._jobs.update(
+            job.id,
+            model=next_model,
+            ladder_index=job.ladder_index + 1,
+            verify_attempts=0,
+            resolved_at=None,
+            error=None,
+        )
+        job = self._jobs.get(job.id)
+        logger.info("Job '%s' escalating to model '%s' (%s)", job.id, next_model, reason)
+        try:
+            started = self._spawn_worker(
+                job,
+                prompt=prompt,
+                workspace=_job_workspace(job),
+                extra_metadata={"escalation": True},
+            )
+        except Exception as e:
+            logger.exception("Failed to spawn escalation worker for job '%s': %s", job.id, e)
+            self._finalize(job, JobState.ERRORED, error=f"escalation worker spawn failed: {e}")
+            return True  # handled (terminally)
+        self._jobs.update(job.id, worker_session_id=started.id)
+        self._append_attempt(job.id, kind="escalation", worker_session_id=started.id)
+        if job.state != JobState.RUNNING.value:
+            try:
+                self._jobs.update_state(job.id, JobState.RUNNING.value)
+            except JobStateTransitionError as e:
+                logger.warning("Cannot transition job '%s' to running after escalation: %s", job.id, e)
+        self._emit_job_event(self._jobs.get(job.id))
+        self._schedule_timeout(job.id, job.timeout_minutes)
+        return True
+
     async def _handle_worker_failed(self, job: Job, worker: Session, result_str: str) -> None:
         # Guard: mirrors _handle_worker_complete. A late failure/cancel notify for
         # a Job already finalized (e.g. _on_timeout marked it STUCK then cancelled
@@ -686,6 +764,18 @@ class JobsOrchestrator:
             self._finalize(job, JobState.CANCELLED, error=reason)
             return
         reason = worker.error or result_str or f"worker session ended with status '{worker.status}'"
+        if _is_infra_failure(reason):
+            # Quota/rate-limit death is not a quality failure: escalate to the
+            # next ladder rung when one exists, and label it either way so the
+            # user knows waiting or switching models (not fixing the task) is
+            # the remedy. Never consumes a verifier attempt.
+            fresh_prompt = build_worker_prompt(job.prompt, job.acceptance_criteria or [], job.repo)
+            if self._escalate(job, prompt=fresh_prompt, reason=f"worker infra failure: {reason}"):
+                return
+            self._finalize(
+                job, JobState.ERRORED, error=f"infrastructure/quota failure (not a quality failure): {reason}"
+            )
+            return
         self._finalize(job, JobState.ERRORED, error=reason)
 
     async def _handle_verifier_complete(self, job: Job, verifier: Session, result_str: str) -> None:
@@ -791,6 +881,11 @@ class JobsOrchestrator:
             ]
         new_attempts = job.verify_attempts + 1
         if new_attempts >= job.max_attempts:
+            # Ladder: an exhausted verifier budget on this rung escalates to the
+            # next model with a fresh budget instead of going STUCK. The failed
+            # ACs ride along so the stronger model knows what to fix.
+            if self._escalate(job, prompt=_build_followup_prompt(job, failed_acs), reason="verifier budget exhausted"):
+                return
             error_lines = ["Verifier failed after max attempts:"]
             for ac in failed_acs:
                 error_lines.append(f"- {ac.get('ac_text', '?')}: {ac.get('reason', '?')}")
@@ -1147,13 +1242,33 @@ def _retry_context_lines(job: Job) -> list[str]:
     ]
 
 
+_INFRA_FAILURE_RE = re.compile(
+    r"usage.?limit|rate.?limit|quota|\b429\b|too many requests|overloaded|"
+    r"insufficient credit|resource.?exhausted|capacity",
+    re.IGNORECASE,
+)
+
+
+def _is_infra_failure(text: str) -> bool:
+    """Usage/rate-limit/quota style failures are infrastructure, not quality:
+    they must not read as an acceptance-criteria problem and are the natural
+    trigger for escalating to a different model."""
+    return bool(text and _INFRA_FAILURE_RE.search(text))
+
+
 def _build_hint_prompt(job: Job, hint: str) -> str:
-    """Compose the retry-with-hint prompt for a worker resurrected from STUCK."""
+    """Compose the retry prompt for a worker resurrected from STUCK/ERRORED.
+    With no hint (a pure retry-on-different-model), restate the failure instead."""
     parts = _retry_context_lines(job)
     parts.append("")
-    parts.append("This job previously hit the verifier's max-attempt limit. A user provided a hint:")
-    parts.append("")
-    parts.append(hint)
+    if hint.strip():
+        parts.append("This job previously hit the verifier's max-attempt limit. A user provided a hint:")
+        parts.append("")
+        parts.append(hint)
+    else:
+        parts.append("A previous attempt of this job failed; you are a fresh retry (possibly on a different model).")
+        if job.error:
+            parts.append(f"The recorded failure was: {job.error[:500]}")
     parts.append("")
     parts.append("Acceptance criteria the verifier will check:")
     for i, ac in enumerate(job.acceptance_criteria, 1):

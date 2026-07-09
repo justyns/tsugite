@@ -2134,8 +2134,12 @@ class HTTPServer:
         job_id = request.path_params["job_id"]
         body = await self._optional_json_body(request)
         hint = (body.get("hint") or "").strip()
-        if not hint:
-            return JSONResponse({"error": "hint is required"}, status_code=400)
+        model = (body.get("model") or "").strip() or None
+        verifier_model = (body.get("verifier_model") or "").strip() or None
+        if not hint and not model:
+            # Retrying purely to switch models is legitimate (usage-limit death);
+            # an unchanged retry with neither is a no-op repeat.
+            return JSONResponse({"error": "hint or model is required"}, status_code=400)
         reset_counter = bool(body.get("reset_counter", False))
         fresh_workspace = bool(body.get("fresh_workspace", False))
         try:
@@ -2144,6 +2148,8 @@ class HTTPServer:
                 hint=hint,
                 reset_counter=reset_counter,
                 fresh_workspace=fresh_workspace,
+                model=model,
+                verifier_model=verifier_model,
             )
         except ValueError as e:
             status = 404 if "Unknown job" in str(e) else 409

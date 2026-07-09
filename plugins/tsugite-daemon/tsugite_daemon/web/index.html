@@ -1513,6 +1513,12 @@
               <button type="button" class="dlg-chip" @click="retryDialog.hint = tip" x-text="tip.length > 42 ? tip.slice(0, 42) + '…' : tip"></button>
             </template>
           </div>
+          <label class="tsu-field" for="retry-model">
+            <span class="tsu-label">model (optional - retry on a different model)</span>
+            <input id="retry-model" class="tsu-input" type="text"
+                   x-model="retryDialog.model"
+                   :placeholder="retryDialog.currentModel ? 'current: ' + retryDialog.currentModel : 'workspace default'">
+          </label>
           <div class="tsu-grid-2">
             <div class="tsu-field">
               <span class="tsu-label">attempt counter</span>
@@ -1533,7 +1539,7 @@
         <footer class="tsu-modal-foot">
           <span class="spacer"></span>
           <button class="tsu-btn" @click="closeRetryDialog()">cancel</button>
-          <button class="tsu-btn --primary" @click="submitRetryDialog()" :disabled="!retryDialog.hint.trim()">↻ retry with hint</button>
+          <button class="tsu-btn --primary" @click="submitRetryDialog()" :disabled="!retryDialog.hint.trim() && !retryDialog.model.trim()">↻ retry</button>
         </footer>
       </div>
     </div>

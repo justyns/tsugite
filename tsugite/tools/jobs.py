@@ -37,6 +37,7 @@ def spawn_job(
     repo: Optional[str] = None,
     model: Optional[str] = None,
     verifier_model: Optional[str] = None,
+    model_ladder: Optional[list] = None,
     timeout_minutes: int = 30,
     agent: Optional[str] = None,
     max_attempts: Optional[int] = None,
@@ -67,6 +68,11 @@ def spawn_job(
         verifier_model: Optional separate model for the verifier round. Defaults
             to `model` (then the workspace default) when unset - handy to pin
             verification to a cheaper/more-available model than the worker.
+        model_ladder: Ordered "cheap first" model list, e.g.
+            ["claude_code:haiku", "claude_code:opus"]. The Job starts on the
+            first entry; when a rung exhausts its verifier attempts or the
+            worker dies on a usage/rate limit, the next attempt escalates to
+            the next model with a fresh budget. Overrides `model`.
         timeout_minutes: Per-phase budget for each worker run and verifier round
             (re-armed each phase, not a whole-job wall clock); on expiry the Job
             transitions to `stuck`.
@@ -104,6 +110,7 @@ def spawn_job(
             repo=repo,
             model=model,
             verifier_model=verifier_model,
+            model_ladder=model_ladder,
             agent=agent,
             timeout_minutes=timeout_minutes,
             spawned_by="agent-tool",

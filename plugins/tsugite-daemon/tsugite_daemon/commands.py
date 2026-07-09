@@ -123,6 +123,12 @@ async def cmd_bg(adapter: BaseAdapter, prompt: str, agent: str | None = None) ->
         ),
         CommandParam("repo", str, "Workspace-relative repo path (persisted; enforcement deferred)", required=False),
         CommandParam("model", str, "Model override; defaults to workspace default", required=False),
+        CommandParam(
+            "model_ladder",
+            str,
+            "Pipe-separated cheap-first escalation ladder (e.g. 'claude_code:haiku|claude_code:opus'); overrides model",
+            required=False,
+        ),
         CommandParam("timeout_minutes", int, "Per-phase timeout, re-armed each phase (default 30)", required=False),
         CommandParam("agent", str, "Worker agent file (default job_worker)", required=False),
         CommandParam(
@@ -147,6 +153,7 @@ async def cmd_job(
     acceptance_criteria: str | list[str] | None = None,
     repo: str | None = None,
     model: str | None = None,
+    model_ladder: str | list[str] | None = None,
     timeout_minutes: int | None = None,
     agent: str | None = None,
     max_attempts: int | None = None,
@@ -177,6 +184,7 @@ async def cmd_job(
         parent_session_id = _create_job_host_session(adapter, user_id, prompt)
 
     ac_list = _parse_acceptance_criteria(acceptance_criteria)
+    ladder = model_ladder.split("|") if isinstance(model_ladder, str) and model_ladder else model_ladder
 
     try:
         job, started = await _jobs_orchestrator.create_and_start_job(
@@ -185,6 +193,7 @@ async def cmd_job(
             acceptance_criteria=ac_list,
             repo=repo,
             model=model,
+            model_ladder=ladder,
             agent=agent,
             timeout_minutes=timeout_minutes or 30,
             spawned_by="user-slash",

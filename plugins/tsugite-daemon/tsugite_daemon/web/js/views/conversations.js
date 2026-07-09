@@ -51,6 +51,8 @@ export default () => ({
     prompt: '',
     lastVerdict: '',
     hint: '',
+    model: '',
+    currentModel: '',
     resetCounter: true,
     workspace: 'keep',
     suggestions: [
@@ -862,7 +864,10 @@ export default () => ({
     // progress bubble while it's running; bail to avoid double-rendering.
     // Once it finishes (or after a reload), this session's sending flag is
     // cleared and the global SSE feed becomes the source of in-flight progress.
-    if (this.sessionsState[d.session_id]?.sending) return;
+    // The mute window covers stragglers delivered just after `sending` clears.
+    const st = this.sessionsState[d.session_id];
+    if (st?.sending) return;
+    if (st?.passiveMuteUntil && Date.now() < st.passiveMuteUntil && !TURN_END_EVENTS.has(d.event_type) && !SESSION_END_EVENTS.has(d.event_type)) return;
 
     const evType = d.event_type;
     // Finalize the in-flight bubble directly on turn end. The paired
@@ -1050,6 +1055,8 @@ export default () => ({
     this.retryDialog.prompt = msg?.prompt || '';
     this.retryDialog.lastVerdict = lastVerdict;
     this.retryDialog.hint = '';
+    this.retryDialog.model = '';
+    this.retryDialog.currentModel = msg?.model || '';
     this.retryDialog.resetCounter = true;
     this.retryDialog.workspace = 'keep';
     this.$store.tsu.open('retry-hint');
@@ -1064,13 +1071,17 @@ export default () => ({
 
   async submitRetryDialog() {
     const hint = (this.retryDialog.hint || '').trim();
-    if (!hint) return;
+    const model = (this.retryDialog.model || '').trim();
+    // Hint OR model: retrying purely to switch models (usage-limit death)
+    // shouldn't force inventing a hint.
+    if (!hint && !model) return;
     const jobId = this.retryDialog.jobId;
     const body = {
-      hint,
       reset_counter: !!this.retryDialog.resetCounter,
       fresh_workspace: this.retryDialog.workspace === 'fresh',
     };
+    if (hint) body.hint = hint;
+    if (model && model !== this.retryDialog.currentModel) body.model = model;
     this.$store.tsu.close('retry-hint');
     try {
       await post(`/api/jobs/${jobId}/retry`, body);

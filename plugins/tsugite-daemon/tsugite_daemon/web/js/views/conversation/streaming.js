@@ -215,6 +215,11 @@ export const streamingMixin = {
     } finally {
       sendState.reader = null;
       sendState.sending = false;
+      // Grace window: broadcast copies of this turn's events (thought, tool
+      // progress) can still be in flight on the global SSE feed after the
+      // per-chat reader finishes. The passive handler's `sending` guard no
+      // longer holds then, so without this it re-renders them as duplicates.
+      sendState.passiveMuteUntil = Date.now() + 1500;
       this.scrollMessages();
       // Stream-end mark-viewed: selectSession/visibilitychange both miss the "already-here, agent just replied" case.
       if (sendSessionId === this.selectedSessionId && document.visibilityState === 'visible') {

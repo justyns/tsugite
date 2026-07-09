@@ -209,13 +209,17 @@ class _RecordingOrchestrator:
     def __init__(self):
         self.calls: list[dict] = []
 
-    async def retry_with_hint(self, job_id, *, hint, reset_counter=False, fresh_workspace=False):
+    async def retry_with_hint(
+        self, job_id, *, hint, reset_counter=False, fresh_workspace=False, model=None, verifier_model=None
+    ):
         self.calls.append(
             {
                 "job_id": job_id,
                 "hint": hint,
                 "reset_counter": reset_counter,
                 "fresh_workspace": fresh_workspace,
+                "model": model,
+                "verifier_model": verifier_model,
             }
         )
 
@@ -235,7 +239,14 @@ class TestRetryJobEndpoint:
         )
         assert resp.status_code == 200
         assert orchestrator.calls == [
-            {"job_id": "job-s1", "hint": "real problem is X", "reset_counter": True, "fresh_workspace": True}
+            {
+                "job_id": "job-s1",
+                "hint": "real problem is X",
+                "reset_counter": True,
+                "fresh_workspace": True,
+                "model": None,
+                "verifier_model": None,
+            }
         ]
 
     def test_retry_defaults_flags_to_false_when_omitted(self, client, test_token, orchestrator):
@@ -272,3 +283,35 @@ class TestListJobsDefaultLimit:
             job_store.add(Job(id=f"job-bulk-{i}", parent_session_id="parent-1", prompt=f"bulk {i}", state="done"))
         resp = client.get("/api/jobs?limit=0", headers={"Authorization": f"Bearer {test_token}"})
         assert len(resp.json()["jobs"]) == 127
+
+
+class TestRetryModelEndpoint:
+    @pytest.fixture
+    def orchestrator(self, server):
+        recording = _RecordingOrchestrator()
+        server.jobs_orchestrator = recording
+        return recording
+
+    def test_retry_with_model_only_accepted(self, client, test_token, orchestrator):
+        resp = client.post(
+            "/api/jobs/j1/retry",
+            headers={"Authorization": f"Bearer {test_token}"},
+            json={"model": "anthropic:claude-opus-4-8"},
+        )
+        assert resp.status_code == 200
+        assert orchestrator.calls[-1]["model"] == "anthropic:claude-opus-4-8"
+        assert orchestrator.calls[-1]["hint"] == ""
+
+    def test_retry_without_hint_or_model_rejected(self, client, test_token, orchestrator):
+        resp = client.post("/api/jobs/j1/retry", headers={"Authorization": f"Bearer {test_token}"}, json={})
+        assert resp.status_code == 400
+        assert "hint or model" in resp.json()["error"]
+
+    def test_retry_forwards_verifier_model(self, client, test_token, orchestrator):
+        resp = client.post(
+            "/api/jobs/j1/retry",
+            headers={"Authorization": f"Bearer {test_token}"},
+            json={"hint": "h", "verifier_model": "claude_code:haiku"},
+        )
+        assert resp.status_code == 200
+        assert orchestrator.calls[-1]["verifier_model"] == "claude_code:haiku"
