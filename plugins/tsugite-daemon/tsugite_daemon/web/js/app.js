@@ -48,6 +48,8 @@ Alpine.store('app', {
   theme: localStorage.getItem('tsugite_theme') || 'frappe',
   userId: localStorage.getItem('tsugite_user_id') || 'web-user-1',
   authRequired: !localStorage.getItem('tsugite_token'),
+  // null = never connected yet; the keystrip only warns on a LOST connection.
+  sseConnected: null,
   menuOpen: false,
   lastEvent: null,
   viewSessionId: initialParsed.sessionId || null,
@@ -215,19 +217,24 @@ function connectSSE() {
       loadJobsNeedsYou().catch(() => {});
     }
     Alpine.store('app').lastEvent = { ...event, _ts: Date.now() };
+  }, (connected) => {
+    Alpine.store('app').sseConnected = connected;
   });
+  window.__tsugiteEventStream = _es;
 }
 
 if (localStorage.getItem('tsugite_token')) {
   loadAgents().catch(() => {});
 }
 
-// When the PWA resumes from background (mobile suspend, tab switch),
-// reconnect SSE and reload agents to ensure fresh state.
+// When the PWA resumes from background (mobile suspend, tab switch), kick the
+// stream so it reconnects immediately ON THE SAME instance - that preserves
+// epoch/lastSeq, so events missed while backgrounded replay instead of being
+// lost (recreating the stream used to discard that state).
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
   if (!localStorage.getItem('tsugite_token')) return;
-  if (_es) { _es.close(); _es = null; }
+  if (_es) _es.kick();
   loadAgents().catch(() => {});
 });
 

@@ -2504,6 +2504,9 @@
   <span><kbd>#</kbd> file</span>
   <span><kbd>⌘↩</kbd> send</span>
   <span class="grow"></span>
+  <template x-if="$store.app.sseConnected === false">
+    <span class="console-conn-lost" title="Live updates disconnected; retrying">⚠ reconnecting…</span>
+  </template>
   <template x-if="$store.app.tokensTotal != null">
     <span x-text="'tok ' + (($store.app.tokensTotal / 1000).toFixed(1)) + 'k'"></span>
   </template>

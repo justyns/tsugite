@@ -1704,3 +1704,11 @@ textarea.editor-body {
   box-shadow: 0 12px 30px rgba(0,0,0,0.45);
   z-index: 200;
 }
+
+.console-conn-lost {
+  color: var(--peach, #ef9f76);
+  animation: conn-lost-pulse 1.6s ease-in-out infinite;
+}
+@keyframes conn-lost-pulse {
+  50% { opacity: 0.45; }
+}

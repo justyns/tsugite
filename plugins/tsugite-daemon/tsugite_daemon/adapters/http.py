@@ -8,6 +8,7 @@ import re
 import shutil
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from dataclasses import fields as dataclass_fields
 from datetime import datetime, timezone
@@ -242,18 +243,35 @@ def _format_upload_message_suffix(workspace_only_files: list[str], attachment_na
 
 
 class SSEBroadcaster:
-    """Pub/sub for pushing real-time events to SSE subscribers."""
+    """Pub/sub for pushing real-time events to SSE subscribers.
+
+    Every event gets a monotonic ``seq`` and lands in a bounded ring buffer, so
+    a reconnecting client can replay what it missed (sleep/wake, network blip)
+    instead of silently going stale. ``epoch`` identifies this daemon process:
+    a client holding a different epoch reconnected across a restart and must
+    fully resync rather than trust a delta.
+    """
+
+    REPLAY_BUFFER_SIZE = 512
 
     def __init__(self):
         self._subscribers: list[asyncio.Queue] = []
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._loop_thread_id: Optional[int] = None
+        self._seq = 0
+        self._buffer: deque[dict] = deque(maxlen=self.REPLAY_BUFFER_SIZE)
+        self.epoch = uuid4().hex[:12]
+
+    @property
+    def seq(self) -> int:
+        return self._seq
 
     def subscribe(self) -> asyncio.Queue:
         if self._loop is None:
             self._loop = asyncio.get_running_loop()
             self._loop_thread_id = threading.current_thread().ident
         q: asyncio.Queue = asyncio.Queue(maxsize=64)
+        q.lagged = False
         self._subscribers.append(q)
         return q
 
@@ -264,23 +282,52 @@ class SSEBroadcaster:
             pass
 
     def emit(self, event_type: str, data: dict | None = None):
+        self._seq += 1
+        msg = {"seq": self._seq, "type": event_type, "data": data or {}}
+        self._buffer.append(msg)
         if not self._subscribers:
             return
-        msg = {"type": event_type, "data": data or {}}
         on_loop = threading.current_thread().ident == self._loop_thread_id
         for q in list(self._subscribers):
             try:
                 if on_loop:
                     q.put_nowait(msg)
                 elif self._loop:
-                    self._loop.call_soon_threadsafe(q.put_nowait, msg)
-            except (asyncio.QueueFull, RuntimeError):
+                    self._loop.call_soon_threadsafe(self._put_or_lag, q, msg)
+            except asyncio.QueueFull:
+                # Don't silently drop: flag the slow subscriber so its stream
+                # tells it to fully resync instead of losing events.
+                q.lagged = True
+            except RuntimeError:
                 pass
+
+    @staticmethod
+    def _put_or_lag(q: asyncio.Queue, msg: dict) -> None:
+        try:
+            q.put_nowait(msg)
+        except asyncio.QueueFull:
+            q.lagged = True
+
+    def replay_since(self, last_seq: int) -> Optional[list[dict]]:
+        """Events after ``last_seq``, or None when the gap is unreplayable
+        (older than the buffer) and the client must fully resync."""
+        if last_seq >= self._seq:
+            return []
+        if not self._buffer or self._buffer[0]["seq"] > last_seq + 1:
+            return None
+        return [m for m in self._buffer if m["seq"] > last_seq]
 
 
 async def sse_stream(queue: asyncio.Queue, keepalive_interval: float = 15.0):
-    """Shared async generator for SSE streams with keepalive."""
+    """Shared async generator for SSE streams with keepalive.
+
+    A subscriber whose queue overflowed (flagged by the broadcaster) is told to
+    fully resync instead of continuing with a silent gap in its event stream.
+    """
     while True:
+        if getattr(queue, "lagged", False):
+            queue.lagged = False
+            yield f"data: {json.dumps({'type': 'resync_required', 'data': {}})}\n\n"
         try:
             data = await asyncio.wait_for(queue.get(), timeout=keepalive_interval)
         except asyncio.TimeoutError:
@@ -3027,11 +3074,50 @@ class HTTPServer:
     async def _events(self, request: Request) -> Response:
         if err := self._check_auth(request):
             return err
+
+        # Reconnect reconciliation: a client that was connected before sends
+        # its last-seen seq + the server epoch it saw. Same epoch and a
+        # replayable gap -> replay the missed events; daemon restarted (epoch
+        # change) or gap older than the buffer -> tell it to fully resync.
+        client_epoch = request.query_params.get("epoch")
+        try:
+            last_seq = int(request.query_params.get("last_seq", "0"))
+        except ValueError:
+            last_seq = 0
+
+        # Subscribe BEFORE computing the replay so no event falls in a crack:
+        # anything emitted from here on lands in the live queue, the replay
+        # covers everything before, and the seq-dedup below drops the overlap.
         queue = self.event_bus.subscribe()
+        replay: list[dict] = []
+        resync = False
+        if client_epoch is not None:
+            if client_epoch != self.event_bus.epoch:
+                resync = True
+            else:
+                replayable = self.event_bus.replay_since(last_seq)
+                if replayable is None:
+                    resync = True
+                else:
+                    replay = replayable
+        hello = {"type": "hello", "data": {"epoch": self.event_bus.epoch, "seq": self.event_bus.seq, "resync": resync}}
 
         async def generator():
             try:
+                yield f"data: {json.dumps(hello)}\n\n"
+                seen = last_seq
+                for msg in replay:
+                    yield f"data: {json.dumps(msg)}\n\n"
+                    seen = msg["seq"]
                 async for chunk in sse_stream(queue):
+                    # A replayed event can also sit in the live queue (emitted
+                    # between the replay snapshot and subscribe); drop dups.
+                    if chunk.startswith("data: ") and '"seq"' in chunk:
+                        try:
+                            if json.loads(chunk[6:]).get("seq", 0) <= seen:
+                                continue
+                        except json.JSONDecodeError:
+                            pass
                     yield chunk
             finally:
                 self.event_bus.unsubscribe(queue)
