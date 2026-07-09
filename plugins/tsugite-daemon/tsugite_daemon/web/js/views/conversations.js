@@ -398,6 +398,10 @@ export default () => ({
     });
     // Refresh relative-time labels ("5m ago") in the sidebar.
     this._relTimeTimer = setInterval(() => { this._relTimeTick++; }, 60000);
+    // Watchdog for stranded progress bubbles: a live "Working..." that gets no
+    // events while the server says not-busy (missed terminal event after a
+    // disconnect/sleep) is finalized instead of spinning forever.
+    this._staleProgressTimer = setInterval(() => { this._reconcileStaleProgress(); }, 8000);
     // On tab refocus, mark the selected session viewed AND refetch its history:
     // the SSE reconnect on resume suppresses its 'reconnect' catch-up event (fresh
     // closure) and missed events aren't replayed, so the live stream can't be trusted
@@ -424,6 +428,7 @@ export default () => ({
     if (this._scrollTimer) clearTimeout(this._scrollTimer);
     if (this._historyDebounceTimer) clearTimeout(this._historyDebounceTimer);
     if (this._relTimeTimer) clearInterval(this._relTimeTimer);
+    if (this._staleProgressTimer) clearInterval(this._staleProgressTimer);
     if (this._onVisibilityChange) document.removeEventListener('visibilitychange', this._onVisibilityChange);
     if (this._followObserver) this._followObserver.disconnect();
     Object.values(this.sessionsState).forEach(s => { if (s.reader) s.reader.cancel().catch(() => {}); });
@@ -592,6 +597,35 @@ export default () => ({
   },
 
   // Status
+  // Belt-and-suspenders for a live progress bubble whose terminal event never
+  // arrived (SSE gap: laptop sleep, wifi blip, daemon restart). If the bubble
+  // has been quiet past the threshold and the server reports not-busy, settle
+  // it and reload the real history.
+  async _reconcileStaleProgress() {
+    const sid = this.selectedSessionId;
+    const agent = this.$store.app.selectedAgent;
+    if (!sid || !agent || !this._sessionProgress) return;
+    const state = this._sessionState(sid);
+    if (state.sending) return;
+    const last = state.progress?.lastEventTime;
+    // Only act when we KNOW events flowed and then stopped; a bubble with no
+    // event timestamp yet is a fresh/rehydrating turn the other reconcile
+    // paths own (and acting on it would misfire right after a send starts).
+    if (!last || Date.now() - Date.parse(last) < 15000) return;
+    try {
+      const data = await get(`/api/agents/${agent}/status?user_id=${encodeURIComponent(this.userId)}&session_id=${encodeURIComponent(sid)}`);
+      if (data.busy) return;
+      // Re-check after the await: an event may have landed or the view swapped.
+      if (this.selectedSessionId !== sid || !this._sessionProgress) return;
+      this._sessionProgress.type = 'progress-done';
+      this._sessionProgress = null;
+      if (state.progress) state.progress.statusText = '';
+      const s = this.allSessions.find(x => x.id === sid);
+      if (s) s.busy = false;
+      this._debouncedLoadHistory();
+    } catch { /* transient; next tick retries */ }
+  },
+
   async loadStatus() {
     const agent = this.$store.app.selectedAgent;
     if (!agent) return;
@@ -827,11 +861,23 @@ export default () => ({
     if (this.sessionsState[d.session_id]?.sending) return;
 
     const evType = d.event_type;
-    // Defense-in-depth: even if a future adapter broadcasts turn-end events,
-    // loadHistory (fired by the paired history_update) reconciles them from
-    // JSONL. Pushing here would race the per-chat reader's clear of the
-    // session's `sending` flag and produce duplicate bubbles.
-    if (TURN_END_EVENTS.has(evType)) return;
+    // Finalize the in-flight bubble directly on turn end. The paired
+    // history_update reload reconciles the CONTENT, but it's conditional
+    // (isActiveSession, sending) and can be dropped entirely - the spinner
+    // must not depend on it. Content is never pushed here, so if the live
+    // reader already finalized, _sessionProgress is null and this is a no-op.
+    if (TURN_END_EVENTS.has(evType)) {
+      if (this._sessionProgress) {
+        this._sessionProgress.type = 'progress-done';
+        if (evType === 'error') {
+          this._sessionProgress.failed = true;
+          this._sessionProgress.errorText = d.error || 'Turn failed';
+        }
+        this._sessionProgress = null;
+        this._scrollThrottled();
+      }
+      return;
+    }
 
     if (SESSION_END_EVENTS.has(evType)) {
       // Only finalize an in-flight progress bubble; don't materialize an empty one

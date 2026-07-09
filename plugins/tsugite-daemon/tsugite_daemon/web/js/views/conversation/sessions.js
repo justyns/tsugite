@@ -176,7 +176,11 @@ export const sessionsMixin = {
     this.loadEffortLevels();
     this._restoreDraft();
     this._markSessionViewed(session);
-    if (isFirstVisit && !state.sending && liveTurn) {
+    // Revisits too, not just first visits: the "turn in flight" signal that
+    // gates reloadHistory can be stale (crashed turn, dropped terminal event),
+    // and a revisit that skips both the reload AND this reconcile strands the
+    // old "Working..." bubble forever.
+    if (!state.sending && liveTurn) {
       await historyPromise;
       if (this.selectedSessionId !== convId) return;
       this._rehydrateProgressFromEvents(convId);
@@ -197,6 +201,11 @@ export const sessionsMixin = {
     let progress = this._sessionProgress;
     if (progress) {
       if (!this.messages.includes(progress)) this.messages.push(progress);
+      // The replay below rebuilds the bubble from the event log; reset so a
+      // revisit doesn't duplicate steps already rendered in this bubble.
+      progress.steps = [];
+      progress.turnCount = 0;
+      progress.toolCount = 0;
     } else {
       progress = { type: 'progress', steps: [], statusText: 'Starting...', turnCount: 0, toolCount: 0 };
       this._sessionProgress = progress;
