@@ -140,11 +140,20 @@ READ_ONLY_METADATA_KEYS = frozenset(
         # so a sandboxed agent can't tamper with its own / a child's isolation. It's
         # in COMPACTION_PRESERVED via this set, so it also survives compaction.
         "sandbox_override",
+        # Marks a placeholder session provisioned to host a /job launched outside
+        # any chat. System-stamped at creation; the jobs orchestrator closes such
+        # sessions when their job finishes. Read-only so an agent can't tag a real
+        # chat as a job host and get it auto-closed.
+        "job_host",
     }
 )
 
 METADATA_SESSION_NAME = "session_name"
 METADATA_PRIMARY_FLAG = "is_primary"
+# Truthy on a placeholder session that exists only to host a /job spawned outside a
+# conversation. The jobs orchestrator reconciles these to a terminal status when the
+# job finishes so they stop rendering as active/"starting" in the sidebar.
+METADATA_JOB_HOST = "job_host"
 
 # Metadata keys preserved across compaction in addition to READ_ONLY ones. session_name
 # anchors named-route adapters (e.g. Discord session_name) to the successor session;
@@ -1520,7 +1529,9 @@ class SessionStore:
         return migrated
 
 
-def create_interactive_session(session_store, agent_name: str, user_id: str, title=None, event_bus=None) -> str:
+def create_interactive_session(
+    session_store, agent_name: str, user_id: str, title=None, event_bus=None, metadata=None
+) -> str:
     """Provision a fresh interactive session and broadcast its creation.
 
     Single implementation behind both the HTTP "new chat" endpoint and the
@@ -1537,6 +1548,7 @@ def create_interactive_session(session_store, agent_name: str, user_id: str, tit
             source=SessionSource.INTERACTIVE.value,
             user_id=user_id,
             title=title or None,
+            metadata=metadata or {},
         )
     )
     if event_bus is not None:
