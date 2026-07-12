@@ -352,11 +352,8 @@ export default () => ({
     this.newForm.maxAttempts = next;
   },
 
-  // The executor names /api/executors reported (always includes 'agent'). The
-  // dropdown is shown only when there's a real choice to make.
-  get availableExecutors() {
-    return this.executorNames;
-  },
+  // The executor dropdown is shown only when there's a real choice to make
+  // (executorNames always includes 'agent').
   get showExecutorSelect() {
     return this.executorNames.length > 1;
   },

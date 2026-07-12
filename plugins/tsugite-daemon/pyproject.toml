@@ -2,6 +2,7 @@
 name = "tsugite-daemon"
 version = "0.17.3"
 description = "Tsugite plugin: daemon stack (HTTP/web UI, scheduler, jobs, sessions, notifications)"
+authors = [{ name = "Justyn Shull" }]
 requires-python = ">=3.11"
 dependencies = [
   "tsugite-cli==0.17.3",

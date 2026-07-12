@@ -1,9 +1,9 @@
 """Per-job Claude Code settings.json builder + on-disk lifecycle.
 
 The settings file registers the three HTTP hooks the driver needs (Stop,
-StopFailure, Notification), all pointing at the plugin's per-job hook URL. Per the
-spike, SessionStart does NOT fire from --settings, so it is intentionally absent;
-the driving protocol is baked into the initial prompt instead (see hooks.py).
+StopFailure, Notification), all pointing at the plugin's per-job hook URL.
+SessionStart does not fire from --settings, so it is intentionally absent; the
+driving protocol is baked into the initial prompt instead (see hooks.py).
 """
 
 from __future__ import annotations

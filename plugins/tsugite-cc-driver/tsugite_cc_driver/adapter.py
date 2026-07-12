@@ -78,7 +78,6 @@ class CCDriverAdapter(BaseAdapter):
         self.session_store = session_store
         self._identity_map = identity_map or {}
         self.event_bus = None  # set by attach_plugin_http
-        self.http_check_auth = None  # set by attach_plugin_http
         self.config = config
         self.config.state_dir = _resolve_state_dir(config.state_dir)
         self._drive_state = DriveStateStore()
@@ -137,11 +136,9 @@ class CCDriverAdapter(BaseAdapter):
             # or a retry drives the next attempt.
             return JSONResponse({})
 
-        # Every payload carries these; record them so a respawn can --resume.
+        # Every payload carries the session id; record it so a respawn can --resume.
         if payload.get("session_id"):
             state.cc_session_id = payload["session_id"]
-        if payload.get("transcript_path"):
-            state.transcript_path = payload["transcript_path"]
 
         event = payload.get("hook_event_name")
         if event == "Stop":
@@ -161,8 +158,6 @@ class CCDriverAdapter(BaseAdapter):
             if decision.complete:
                 await orch.complete_worker(job_id, decision.summary or "")
             elif decision.needs_input:
-                # Within-attempt pause: the job parks awaiting_input and the
-                # parent session is woken to answer via respond_to_job.
                 await orch.pause_worker(job_id, decision.needs_input)
             return JSONResponse(decision.response)
 

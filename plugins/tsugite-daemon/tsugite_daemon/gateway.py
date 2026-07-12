@@ -103,20 +103,14 @@ def attach_plugin_http(http_server, plugin_name: str, adapter) -> None:
 
     Sets the shared SSE bus on the adapter (so it can broadcast events), then
     mounts its `get_http_routes()` (auth-wrapped) and `get_public_http_routes()`
-    (no auth) under `/api/plugins/<plugin_name>`. Both are duck-typed and
-    error-isolated: a plugin that lacks the methods is skipped, and one that
-    raises while producing its routes is logged and skipped - never aborting
-    daemon startup. When HTTP is disabled (no server) but a plugin declares
-    routes, that's a warning, not a crash.
+    (no auth) under `/api/plugins/<plugin_name>`. A plugin that lacks the methods
+    is skipped, and one that raises while producing its routes is logged and skipped.
     """
     if http_server is not None:
         try:
             adapter.event_bus = http_server.event_bus
-            # Hand the plugin the daemon auth callable so its own routes (or any
-            # it wraps itself) can enforce the same bearer-token check.
-            adapter.http_check_auth = http_server.check_auth
-        except Exception:  # noqa: BLE001 — a read-only/exotic adapter shouldn't abort startup
-            logger.debug("Could not set event_bus/http_check_auth on plugin '%s'", plugin_name)
+        except Exception:  # noqa: BLE001 -- a read-only/exotic adapter shouldn't abort startup
+            logger.debug("Could not set event_bus on plugin '%s'", plugin_name)
 
     def _collect(method_name: str) -> list:
         method = getattr(adapter, method_name, None)
@@ -141,10 +135,10 @@ def attach_plugin_http(http_server, plugin_name: str, adapter) -> None:
 def attach_plugin_executors(jobs_orchestrator, plugin_name: str, adapter) -> None:
     """Register a loaded adapter plugin's job executors on the orchestrator.
 
-    Duck-typed on `get_job_executors() -> dict[str, executor]`; connects the WS3a
-    executor seam so a plugin (e.g. cc-driver) can supply a non-agent executor.
-    No-op when the plugin exposes no executors or the orchestrator is disabled;
-    a plugin that raises while producing its executors is logged and skipped.
+    Reads `get_job_executors() -> dict[str, executor]` so a plugin (e.g.
+    cc-driver) can supply a non-agent executor. No-op when the plugin exposes no
+    executors or the orchestrator is disabled; a plugin that raises while
+    producing its executors is logged and skipped.
     """
     method = getattr(adapter, "get_job_executors", None)
     if method is None:
@@ -162,7 +156,7 @@ def attach_plugin_executors(jobs_orchestrator, plugin_name: str, adapter) -> Non
         )
         return
     # Hand the orchestrator back to the adapter so its executors can report
-    # completion/failure (complete_worker/fail_worker). Duck-typed + isolated.
+    # completion/failure via complete_worker/fail_worker.
     setter = getattr(adapter, "set_jobs_orchestrator", None)
     if setter is not None:
         try:

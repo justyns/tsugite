@@ -76,13 +76,6 @@ class HTTPServer(
         self.event_bus = SSEBroadcaster()
         self.app = self._build_app()
 
-    def check_auth(self, request: Request) -> Optional[JSONResponse]:
-        """Public wrapper over the daemon bearer-token check. Returns a 401
-        response when the request is unauthenticated, else None. Handed to plugin
-        adapters (via attach_plugin_http) so a plugin's own routes can enforce the
-        same auth as the core API."""
-        return self._check_auth(request)
-
     def mount_plugin_routes(self, plugin_name: str, authed_routes: list, public_routes: list) -> None:
         """Mount an adapter plugin's routes under `/api/plugins/<plugin_name>`.
 
@@ -91,10 +84,24 @@ class HTTPServer(
         access control). Called after plugin load and before uvicorn starts, so
         appending to the live router is race-free. No-op when neither list has
         anything to mount.
+
+        Auth-wrapping needs a flat Route endpoint. Anything else (e.g. a Mount)
+        is skipped with a warning - never mounted unwrapped, which would
+        silently drop the bearer check - so a plugin mistake can't abort daemon
+        startup or open an unauthenticated hole.
         """
         from starlette.routing import Mount
 
-        routes = [self._wrap_route_with_auth(r) for r in authed_routes]
+        routes = []
+        for r in authed_routes:
+            if not isinstance(r, Route):
+                logger.warning(
+                    "Plugin '%s': cannot auth-wrap non-Route entry %r from get_http_routes(); skipping it",
+                    plugin_name,
+                    r,
+                )
+                continue
+            routes.append(self._wrap_route_with_auth(r))
         routes.extend(public_routes)
         if not routes:
             return
@@ -174,7 +181,7 @@ class HTTPServer(
             from importlib.metadata import version
 
             v = version("tsugite-cli")
-        except Exception:  # noqa: BLE001 — fall back to in-tree constant
+        except Exception:  # noqa: BLE001 -- fall back to in-tree constant
             from tsugite import __version__ as v
         return JSONResponse({"status": "ok", "version": v, "agents": list(self.adapters.keys())})
 
@@ -230,7 +237,7 @@ class HTTPServer(
             for name in list_all_providers():
                 try:
                     get_provider(name)
-                except Exception:  # noqa: BLE001 — provider init may fail without env keys; skip those
+                except Exception:  # noqa: BLE001 -- provider init may fail without env keys; skip those
                     continue
             self._models_primed = True
 

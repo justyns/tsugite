@@ -90,7 +90,7 @@ class JobsOrchestrator:
         """Register a non-agent job executor under `name` (matched against
         Job.executor). Called by adapter plugins at load time.
 
-        Executor contract (duck-typed - no ABC needed):
+        Executor contract:
 
             async def start(self, job, followup: str | None) -> None
                 Kick off the work for `job`. `followup` is None on the initial
@@ -263,12 +263,6 @@ class JobsOrchestrator:
                 **job_kwargs,
             )
         )
-        # Attribution trail: every Job creation logs its trigger (source +
-        # caller session + executor) so an unexpected Job is traceable to who
-        # spawned it - a post-hoc daemon.log grep for the job id lands here.
-        # Each call mints a fresh Job id, so there is no shared-job check-then-act
-        # window on this path (unlike the retry path): two concurrent spawns
-        # produce two distinct Jobs, never a double-spawn of one.
         logger.info(
             "Job '%s' created: source=%s parent_session=%s executor=%s repo=%s prompt=%r",
             job.id,
@@ -470,7 +464,6 @@ class JobsOrchestrator:
         self._jobs.update(job_id, worker_session_id=worker_session_id)
         # First call to register_worker for this Job - record the initial attempt.
         # Retry / hint paths bypass register_worker and call _append_attempt directly.
-        job = self._jobs.get(job_id)
         if job is not None and not (job.attempts or []):
             self._append_attempt(job_id, kind="initial", worker_session_id=worker_session_id)
         # The guard above guarantees the Job is QUEUED here, and QUEUED -> RUNNING
@@ -529,11 +522,8 @@ class JobsOrchestrator:
         if job.state != JobState.RUNNING.value:
             logger.warning("pause_worker for job '%s' in state '%s' (expected RUNNING) - ignoring", job_id, job.state)
             return
-        try:
-            self._jobs.update_state(job_id, JobState.AWAITING_INPUT.value)
-        except JobStateTransitionError as e:
-            logger.warning("Cannot pause job '%s': %s", job_id, e)
-            return
+        # The RUNNING guard above makes this transition always valid.
+        self._jobs.update_state(job_id, JobState.AWAITING_INPUT.value)
         self._jobs.update(job_id, pending_question=question)
         fresh = self._jobs.get(job_id)
         self._emit_job_event(fresh)
@@ -563,8 +553,6 @@ class JobsOrchestrator:
         if job.executor == "agent":
             raise ValueError("respond_to_job only supports executor jobs; agent workers have no steering channel")
         if job.state == JobState.AWAITING_INPUT.value:
-            # Answer + auto-resume. The executor delivers the answer to the live
-            # session, or respawns with --resume if the PTY died while paused.
             job = await self.resume_worker(job_id)
         elif job.state != JobState.RUNNING.value:
             raise ValueError(f"job '{job_id}' is {job.state}, not running - use retry for parked jobs")
@@ -969,8 +957,9 @@ class JobsOrchestrator:
     async def fail_worker(self, job_id: str, error: str, detail: Optional[str] = None) -> None:
         """Executor-facing failure: a non-agent executor's attempt failed (process
         died, missing binary, etc). Routes into the SAME errored/retry path the
-        agent path uses. No-op when the Job is not RUNNING. `detail` is an optional
-        multi-line diagnostic (e.g. the worker PTY's output tail) persisted onto
+        agent path uses. No-op once the Job is already verifying or finalized
+        (see _process_worker_failure). `detail` is an optional multi-line
+        diagnostic (e.g. the worker PTY's output tail) persisted onto
         job.error_detail so the failure is diagnosable from the tile."""
         job = self._jobs.get(job_id)
         if job is None:
@@ -981,16 +970,12 @@ class JobsOrchestrator:
     async def _process_worker_failure(
         self, job: Job, *, reason: str, cancelled: bool = False, detail: Optional[str] = None
     ) -> None:
-        # Accept RUNNING (normal mid-drive failure) and QUEUED (a worker that
-        # failed during startup - worktree provisioning / trust check / spawn /
-        # PTY creation - before create_and_start_job flipped it to RUNNING; the
-        # executor's synchronous _fail lands here while still QUEUED). Reject any
-        # other state: a late failure/cancel notify for a Job already finalized
-        # (e.g. _on_timeout marked it STUCK then cancelled the worker, whose
-        # CANCELLED notify lands here) must not touch the record.
-        if job.state not in (JobState.RUNNING.value, JobState.QUEUED.value):
+        # Any other state means a late or duplicate notify for an already-finalized
+        # Job (a timeout marked it stuck, then the cancelled worker's own notify
+        # lands here); acting on it would overwrite the real outcome.
+        if job.state not in (JobState.RUNNING.value, JobState.QUEUED.value, JobState.AWAITING_INPUT.value):
             logger.warning(
-                "Worker failure for job '%s' in state '%s' (expected running/queued) - ignoring",
+                "Worker failure for job '%s' in state '%s' (expected running/queued/awaiting_input) - ignoring",
                 job.id,
                 job.state,
             )
@@ -1181,12 +1166,9 @@ class JobsOrchestrator:
         if fields:
             self._jobs.update(job.id, **fields)
         fresh = self._jobs.get(job.id)
-        # Teardown: stop a non-agent executor's child (e.g. a PTY) on EVERY
-        # terminal finalize - a parked job would otherwise leak a live, still
-        # interactive claude process. On DONE/CANCELLED the worktree is then
-        # pruned (child first: it holds the cwd open); STUCK/ERRORED keep the
-        # worktree for inspection, and the executor keeps its own resume state
-        # so retry-with-hint can still resume the conversation.
+        # Reap the executor's child (e.g. a PTY) on every terminal finalize, or a
+        # parked job leaks a live claude. Prune the worktree only on a clean exit;
+        # STUCK/ERRORED keep it for inspection and for retry-with-hint to --resume into.
         if fresh:
             prune = terminal in (JobState.DONE, JobState.CANCELLED)
             self._schedule_executor_teardown(fresh, prune_worktree=prune)

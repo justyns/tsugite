@@ -961,8 +961,12 @@ export default () => ({
     // when they returned, because revisits don't reload history.
     const owner = this._resolveSessionId(d.parent_session_id);
     if (d.job_id && d.state) this._trackJobNeedsInput(owner, d);
-    const state = this.sessionsState[owner];
-    if (!state) return;  // parent not loaded in memory; the tile renders fresh from history on next visit
+    // Allocating the owner's state on purpose: the sidebar needs-input dot reads
+    // sessionsState[owner].jobsNeedingInput, which must exist even for a parent
+    // never opened in this tab. A parent with no loaded history still gets no
+    // tile push - the selectedSessionId gate below only spawns tiles in the
+    // session being viewed; its tile renders fresh from history on next visit.
+    const state = this._sessionState(owner);
     const existing = state.messages.find(m => m.type === 'job_status' && m.job_id === d.job_id);
     // Drop undefined fields so an emit without `error` (e.g. a RUNNING tick after
     // a STUCK terminal) doesn't wipe a previously-set error from the tile.

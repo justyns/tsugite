@@ -246,13 +246,6 @@ def _mount_subpaths(app, prefix: str) -> list[str]:
     raise AssertionError(f"no mount at {prefix}")
 
 
-def _first_index(items, predicate) -> int:
-    for i, item in enumerate(items):
-        if predicate(item):
-            return i
-    raise AssertionError("no match found")
-
-
 def test_clear_primary_precedes_set_primary(server):
     subpaths = _mount_subpaths(server.app, "/api/sessions")
     clear = subpaths.index("/clear-primary")
@@ -263,7 +256,7 @@ def test_clear_primary_precedes_set_primary(server):
 def test_schedules_cleanup_precedes_param_route(server):
     subpaths = _mount_subpaths(server.app, "/api/schedules")
     cleanup = subpaths.index("/cleanup")
-    param = _first_index(subpaths, lambda p: p == "/{schedule_id}")
+    param = subpaths.index("/{schedule_id}")
     assert cleanup < param
 
 

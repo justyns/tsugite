@@ -38,9 +38,7 @@ class DriveState:
     token: str
     terminal_id: Optional[str] = None
     cc_session_id: Optional[str] = None
-    transcript_path: Optional[str] = None
     consecutive_continues: int = 0
-    settings_path: Optional[str] = None
     # True while an un-actioned permission prompt is (probably) on screen: set
     # on a permission_prompt Notification, cleared on the next Stop (claude
     # finishing a turn proves the prompt was answered). Drives the UI's
@@ -74,16 +72,13 @@ class DriveStateStore:
             self._token_to_job.pop(state.token, None)
 
 
-# Human-readable meaning for exit codes a driven claude commonly dies with, so a
-# failed job names its cause instead of a bare number.
 _EXIT_CODE_HINTS = {
     126: "claude binary is not executable",
     127: "claude binary not found (PATH, or missing from the sandbox binds)",
     130: "interrupted (SIGINT)",
 }
 
-# CSI (colors/cursor) and OSC (title) escape sequences - PTY output is full of
-# them and they make a captured tail unreadable.
+# ANSI escape sequences (CSI colors/cursor, OSC title) to strip from a captured tail.
 _ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
 
 
@@ -93,8 +88,7 @@ def describe_exit(exit_code) -> str:
 
 
 def pty_tail(buffer: bytes, *, max_bytes: int = 4096, max_lines: int = 40) -> Optional[str]:
-    """Readable tail of a PTY ring buffer: last `max_bytes`, ANSI stripped,
-    blank lines dropped, capped at `max_lines`. None when nothing is left."""
+    """ANSI-stripped, blank-trimmed tail of a PTY buffer, or None if empty."""
     text = bytes(buffer)[-max_bytes:].decode("utf-8", errors="replace")
     lines = [ln.rstrip() for ln in _ANSI_RE.sub("", text).splitlines() if ln.strip()]
     return "\n".join(lines[-max_lines:]) or None
@@ -111,15 +105,10 @@ def build_claude_command(
     effort: Optional[str] = None,
     ax_screen_reader: bool = False,
 ) -> str:
-    """Build the shell command string for spawn_terminal (it wraps in `sh -c`).
+    """Build the shell command for spawn_terminal (which wraps it in `sh -c`).
 
     Everything is shlex.quoted so a goal/followup containing quotes or newlines
-    can't break out of the argument. `model` accepts an alias (sonnet/opus/haiku)
-    or a full name; when None, claude uses its own configured default. `effort`
-    is a per-job reasoning dial (low/medium/high/xhigh/max), passed through to
-    `--effort`. `ax_screen_reader` renders flat text (no decorative borders or
-    animations), which keeps PTY tail capture clean and cuts xterm escape edge
-    cases - the driver's real state signal is the hook markers, not TUI scraping.
+    can't break out of the argument.
     """
     parts = [claude_binary, "--settings", str(settings_path), "--permission-mode", permission_mode]
     if model:
@@ -134,8 +123,8 @@ def build_claude_command(
     return shlex.join(parts)
 
 
-# Serializes our read-modify-write of ~/.claude.json across concurrent cc spawns
-# in this daemon so two trust provisions can't clobber each other's merge.
+# Serializes the ~/.claude.json read-modify-write so two concurrent trust
+# provisions can't clobber each other's merge.
 _trust_config_lock = threading.Lock()
 
 
@@ -298,7 +287,7 @@ def build_sandbox_ctx(sandbox: bool, cwd: Optional[str], *, claude_binary: str =
         ro.append(Path(settings_dir))
 
     rw: list[Path] = [Path.home() / ".claude"]
-    config_json = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home()) / ".claude.json"
+    config_json = _default_trust_config_path()
     if config_json.exists():
         rw.append(config_json)
 
@@ -332,11 +321,8 @@ class CCExecutor:
             pty_manager, _store, _cb = get_terminal_runtime()
             proc = pty_manager.get(state.terminal_id) if pty_manager else None
             if proc is not None and proc.exit_code is None:
-                # A supervisor turn: type the followup as natural guidance and
-                # reset the continue budget (the next Stop is a driven turn again).
-                # The claude TUI (Ink) submits on carriage return, not newline, and
-                # debounces pasted input - so send the text, let it register, then
-                # send a bare \r as Enter.
+                # claude's Ink TUI submits on carriage return, not newline, and
+                # debounces paste, so the text and the \r must be sent separately.
                 pty_manager.write_stdin(state.terminal_id, followup.strip().encode())
                 await asyncio.sleep(0.2)
                 pty_manager.write_stdin(state.terminal_id, b"\r")
@@ -360,10 +346,8 @@ class CCExecutor:
             await self._fail(job.id, f"cc job workspace does not exist: {cwd!r}")
             return
 
-        # An untrusted workspace would hang forever on the "Is this a project you
-        # trust?" dialog (no CLI flag skips it). With provision_trust on (default),
-        # write the trust flag ourselves so cc jobs are self-service; otherwise
-        # fail fast and require the user to pre-trust the cwd.
+        # An untrusted cwd hangs forever on the trust dialog (no CLI flag skips
+        # it), so we provision the flag ourselves, or fail fast if that's disabled.
         if not await asyncio.to_thread(is_workspace_trusted, cwd):
             if self.config.provision_trust:
                 target = await asyncio.to_thread(trust_provision_target, cwd)
@@ -394,7 +378,6 @@ class CCExecutor:
 
         hook_url = f"{self.config.base_url.rstrip('/')}/api/plugins/cc_driver/hook/{state.token}"
         settings_path = write_run_settings(self.config.state_dir, job.id, build_settings(hook_url))
-        state.settings_path = str(settings_path)
 
         prompt = (
             followup
@@ -437,17 +420,13 @@ class CCExecutor:
 
         proc = pty_manager.get(session.id)
         if proc is not None:
-            try:
-                loop = asyncio.get_running_loop()
-            except RuntimeError:
-                loop = None
+            loop = asyncio.get_running_loop()
             proc.on_exit(lambda p: self._on_pty_exit(job.id, p, loop))
 
     async def cancel(self, job) -> None:
-        """Tear down the driven session. Called on every terminal finalize.
-        Best-effort. A resolved job (done/cancelled) drops all state; a parked one
-        (stuck/errored) kills the PTY so it can't leak as a live interactive
-        claude, but keeps DriveState so a retry can respawn with --resume."""
+        """Tear down the driven session on any terminal finalize (best-effort). A
+        resolved job (done/cancelled) drops all state; a parked one (stuck/errored)
+        still kills the PTY but keeps DriveState so a retry can `--resume`."""
         from tsugite_pty.tools import get_terminal_runtime
 
         state = self.drive_state.get(job.id)
@@ -465,12 +444,10 @@ class CCExecutor:
         self.drive_state.remove(job.id)
 
     def _on_pty_exit(self, job_id: str, proc, loop) -> None:
-        """PTY reader-thread callback. A deliberate kill (cancel / clean-exit
-        teardown) is expected; any other exit while the job is still RUNNING is a
-        failure (fail_worker no-ops if the job already advanced). The buffer tail
-        rides along as the failure detail - it holds the actual error claude
-        printed (command not found, auth failure, stack trace), which the exit
-        code alone can't convey."""
+        """PTY-exit callback. A deliberate kill sets proc.killed and is ignored;
+        any other exit fails the worker. The buffer tail rides along as the detail
+        because the exit code alone can't convey the real error (missing binary,
+        auth failure, ...)."""
         if getattr(proc, "killed", False):
             return
         reason = f"claude session exited ({describe_exit(proc.exit_code)}) before completing the task"
@@ -478,7 +455,7 @@ class CCExecutor:
             detail = pty_tail(proc.buffer)
         except Exception:
             detail = None
-        if loop is None or self.orchestrator is None:
+        if self.orchestrator is None:
             return
         loop.call_soon_threadsafe(
             lambda: loop.create_task(self.orchestrator.fail_worker(job_id, reason, detail=detail))

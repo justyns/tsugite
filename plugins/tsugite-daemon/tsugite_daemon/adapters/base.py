@@ -249,9 +249,6 @@ class BaseAdapter(ABC):
         self.session_store = session_store
         self._identity_map = identity_map or {}
         self.event_bus = None  # Set by HTTPServer for global SSE broadcast
-        # Set to HTTPServer.check_auth by attach_plugin_http so a plugin's own
-        # HTTP routes can reuse the daemon bearer-token check (None outside HTTP).
-        self.http_check_auth = None
 
         from tsugite.workspace import Workspace
 
@@ -265,15 +262,13 @@ class BaseAdapter(ABC):
         `/api/plugins/<plugin_name>`. Every route is wrapped with the daemon bearer
         token check, so these assume web-UI-style authenticated consumers.
 
-        Default: none. Adapter plugins override to expose an authed HTTP surface.
+        Default: none.
         """
         return []
 
     def get_public_http_routes(self) -> list:
         """Like `get_http_routes` but mounted with NO auth. The plugin is
-        responsible for its own access control (token-in-path, API-key header, or
-        nothing). Use for receivers that can't send a bearer token, e.g. inbound
-        webhooks / CLI hooks.
+        responsible for its own access control.
 
         Default: none.
         """

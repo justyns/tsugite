@@ -27,8 +27,8 @@ TUI - the next Stop resumes and grades the turn normally.
 
 For headless, non-interactive automation use the `tsugite-claude-code` provider
 instead - it drives Claude Code through the SDK without a PTY. cc-driver is for
-**supervised autonomy**: a human can watch the TUI in the job tile and take over by
-typing at any time.
+jobs you want to watch: the TUI is embedded in the job tile and you can take over
+by typing at any time.
 
 ## Config (`daemon.yaml` -> `plugins.cc_driver`)
 
@@ -49,7 +49,7 @@ typing at any time.
 | `state_dir` | XDG state | where per-job `settings.json` files are written |
 
 `max_attempts`, `timeout_minutes`, `model`, `effort`, and acceptance criteria are
-ordinary per-job fields (`/job … --executor cc --effort max`, or `spawn_job(…,
+ordinary per-job fields (`/job ... --executor cc --effort max`, or `spawn_job(...,
 executor="cc", effort="max")`).
 
 ## Workspace trust
@@ -63,15 +63,15 @@ cc-driver checks trust **before** spawning.
 By default (`provision_trust: true`) cc-driver provisions trust itself: it writes
 `projects["<abs path>"].hasTrustDialogAccepted = true` into the config Claude reads
 (`<CLAUDE_CONFIG_DIR>/.claude.json`, else `~/.claude.json`) via an atomic
-read-modify-write that preserves every other entry, so cc jobs are self-service and
-`--repo` worktrees just work. Trust is checked against the cwd and its ancestors
-(Claude Code treats a subdir of a trusted project as trusted), and for a `--repo`
-job cc-driver provisions the **repo root** rather than the ephemeral worktree - one
-entry covers every future worktree instead of piling up a dead entry per job.
+read-modify-write that preserves every other entry, so no manual trust step is
+needed. Trust is checked against the cwd and its ancestors (Claude Code treats a
+subdir of a trusted project as trusted); for a `--repo` job cc-driver provisions
+the **repo root** rather than the ephemeral worktree, so one entry covers every
+future worktree instead of a dead entry per job.
 
-Set `provision_trust: false` to keep cc-driver read-only: it then fails a job fast
-with an actionable message when the workspace isn't already trusted, and you trust
-each workspace once yourself (run `claude` there and accept the prompt).
+Set `provision_trust: false` to keep cc-driver read-only: a job in an untrusted
+workspace fails with instructions, and you trust each workspace once yourself
+(run `claude` there and accept the prompt).
 
 ## Sandbox caveats
 

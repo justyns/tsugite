@@ -3,9 +3,9 @@ name = "tsugite-example-plugin"
 version = "0.1.0"
 description = "Example tsugite plugin demonstrating every author-facing extension point"
 requires-python = ">=3.11"
-# Needs the daemon extra because this single file imports the adapter base; a real
-# plugin would split the daemon-only adapter into its own module.
-dependencies = ["tsugite-cli[daemon]"]
+# Core only: the daemon-only adapter lives in its own module (adapter.py) and is
+# imported by the daemon itself, which ships the `[daemon]` extra.
+dependencies = ["tsugite-cli"]
 
 # Unified entry point: import triggers @tool / @hook / @subscribe decorators.
 [project.entry-points."tsugite.plugins"]
@@ -13,7 +13,7 @@ example = "tsugite_example_plugin"
 
 # Adapters need constructor kwargs, so they keep their own group.
 [project.entry-points."tsugite.adapters"]
-example = "tsugite_example_plugin:create_adapter"
+example = "tsugite_example_plugin.adapter:create_adapter"
 
 [build-system]
 requires = ["hatchling"]

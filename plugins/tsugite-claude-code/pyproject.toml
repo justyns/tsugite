@@ -2,6 +2,7 @@
 name = "tsugite-claude-code"
 version = "0.17.3"
 description = "Tsugite plugin: Claude Code provider (routes LLM calls through the claude CLI)"
+authors = [{ name = "Justyn Shull" }]
 requires-python = ">=3.11"
 dependencies = [
   "tsugite-cli==0.17.3",

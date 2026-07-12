@@ -2517,7 +2517,7 @@
                 <label class="tsu-field nj-executor-field">
                   <span class="tsu-label">executor</span>
                   <select class="tsu-select" data-testid="nj-executor" x-model="newForm.executor">
-                    <template x-for="ex in availableExecutors" :key="ex">
+                    <template x-for="ex in executorNames" :key="ex">
                       <option :value="ex" x-text="ex"></option>
                     </template>
                   </select>

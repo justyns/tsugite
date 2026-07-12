@@ -1,4 +1,4 @@
-"""PushMixin: push HTTP handlers for HTTPServer (split from adapters/http.py)."""
+"""PushMixin: push HTTP handlers for HTTPServer."""
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse

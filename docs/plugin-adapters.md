@@ -60,8 +60,7 @@ mounted under `/api/plugins/<plugin_name>`.
 
 Both default to `[]`. An authed handler runs only after the bearer-token check has passed, so it
 never checks auth itself. A public route is expected to gate itself (token-in-path, API-key
-header, or nothing); to reuse the daemon's own check inside one, call the `http_check_auth`
-callable the gateway sets on the adapter.
+header, or nothing).
 
 ```python
 from starlette.responses import JSONResponse
@@ -70,7 +69,7 @@ from starlette.routing import Route
 
 class MyAdapter(BaseAdapter):
     def get_http_routes(self):
-        # Mounted at POST /api/plugins/my_plugin/status; wrapped with the daemon token.
+        # Mounted at GET /api/plugins/my_plugin/status; wrapped with the daemon token.
         return [Route("/status", self._status, methods=["GET"])]
 
     async def _status(self, request):

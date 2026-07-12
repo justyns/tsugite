@@ -621,7 +621,7 @@ async def test_initial_spawn_stamps_worker_terminal_and_writes_settings(tmp_path
     st = ex.drive_state.get("job-1")
     assert st is not None and st.terminal_id, "DriveState must record the spawned terminal"
     assert job.worker_terminal_id == st.terminal_id, "job.worker_terminal_id must be stamped for the tile"
-    settings = json.loads(Path(st.settings_path).read_text())
+    settings = json.loads((tmp_path / "state" / "job-1" / "settings.json").read_text())
     assert set(settings["hooks"]) == {"Stop", "StopFailure", "Notification"}
     assert st.token in settings["hooks"]["Stop"][0]["hooks"][0]["url"]
 

@@ -4,12 +4,12 @@ Each function maps a Claude Code hook payload (see hook-payloads-reference.md) t
 a decision, so the adapter's HTTP route stays a thin dispatcher and the driving
 logic is unit-testable in isolation.
 
-Driving protocol, per the spike findings:
-  - The completion marker + "a supervisor may give follow-ups" note is baked into
-    the INITIAL prompt (SessionStart hooks do not fire from --settings).
-  - All injected/continue text is phrased as natural task guidance - Claude
-    refuses injection-shaped instructions ("output exactly X and nothing else").
-  - `stop_hook_active` is True only on a turn we drove; False marks a fresh
+Driving protocol:
+  - The completion marker and "a supervisor may give follow-ups" note are baked
+    into the initial prompt (SessionStart hooks do not fire from --settings).
+  - Injected/continue text is phrased as natural task guidance. Claude refuses
+    injection-shaped instructions ("output exactly X and nothing else").
+  - `stop_hook_active` is True only on a turn we drove. False marks a fresh
     human/CLI turn, which resets the continue budget.
 """
 
@@ -97,7 +97,6 @@ def decide_stop(
         )
 
     if count >= max_consecutive_continues:
-        # Budget exhausted: end the attempt and let the verifier judge it.
         return StopDecision(response={}, complete=True, summary=last_msg, new_consecutive_continues=count)
 
     block = {

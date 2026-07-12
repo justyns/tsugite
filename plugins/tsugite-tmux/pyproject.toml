@@ -2,6 +2,7 @@
 name = "tsugite-tmux"
 version = "0.17.3"
 description = "Tsugite plugin: tmux session management tools with automatic output logging"
+authors = [{ name = "Justyn Shull" }]
 requires-python = ">=3.11"
 dependencies = ["tsugite-cli==0.17.3"]
 

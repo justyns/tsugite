@@ -1,4 +1,4 @@
-"""SessionsMixin: sessions HTTP handlers for HTTPServer (split from adapters/http.py)."""
+"""SessionsMixin: sessions HTTP handlers for HTTPServer."""
 
 from typing import Any, Optional
 

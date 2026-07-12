@@ -1,4 +1,4 @@
-"""WebhooksMixin: webhooks HTTP handlers for HTTPServer (split from adapters/http.py)."""
+"""WebhooksMixin: webhooks HTTP handlers for HTTPServer."""
 
 import asyncio
 import json

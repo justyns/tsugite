@@ -1,4 +1,4 @@
-"""FilesMixin: files HTTP handlers for HTTPServer (split from adapters/http.py)."""
+"""FilesMixin: files HTTP handlers for HTTPServer."""
 
 from pathlib import Path
 from typing import Optional

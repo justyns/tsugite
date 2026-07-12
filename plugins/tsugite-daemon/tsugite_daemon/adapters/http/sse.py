@@ -161,7 +161,7 @@ class SSEProgressHandler(JSONLUIHandler):
     latest_prompt_messages: Optional[list] = None
 
     def handle_event(self, event: BaseEvent) -> None:
-        """Handle event from agent thread — schedule onto the event loop."""
+        """Handle event from agent thread -- schedule onto the event loop."""
         from tsugite.events import PromptSnapshotEvent
 
         if isinstance(event, PromptSnapshotEvent):
@@ -226,7 +226,7 @@ class SSEProgressHandler(JSONLUIHandler):
 
 
 class HTTPInteractionBackend:
-    """Interaction backend for HTTP — emits SSE events, blocks until response."""
+    """Interaction backend for HTTP -- emits SSE events, blocks until response."""
 
     TIMEOUT = 300  # 5 minutes
 

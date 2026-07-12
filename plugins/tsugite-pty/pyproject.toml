@@ -2,6 +2,7 @@
 name = "tsugite-pty"
 version = "0.17.3"
 description = "Tsugite plugin: PTY terminal runtime and tools (daemon-only)"
+authors = [{ name = "Justyn Shull" }]
 requires-python = ">=3.11"
 dependencies = ["tsugite-cli==0.17.3"]
 

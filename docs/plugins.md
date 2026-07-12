@@ -121,26 +121,3 @@ def register_event_subscribers(config):
         subs.append(Subscription(handler=debug_logger))
     return subs
 ```
-
-## Adapter plugins
-
-Tools, hooks, and subscribers use the `tsugite.plugins` entry point above. A second kind of
-plugin - the **adapter** - registers under `tsugite.adapters` and extends the running daemon:
-it can front a chat platform, mount its own HTTP routes under `/api/plugins/<name>` (authed or
-public), and register job executors. See [plugin-adapters.md](plugin-adapters.md).
-
-## Versioning and release (lockstep)
-
-Core + every workspace plugin ship together with the same version number, driven by a single git tag. To bump:
-
-```bash
-uv run python scripts/bump_version.py 0.14.0
-git diff
-git commit -am "chore: bump version to 0.14.0"
-git tag v0.14.0
-git push origin master --tags
-```
-
-The push triggers `.github/workflows/pypi-publish.yml` which builds wheels for every workspace member (`uv build --all-packages`), publishes to PyPI, and creates a GitHub release with auto-generated notes from `cliff.toml` (conventional-commits parsing).
-
-Each plugin must be registered as a separate trusted publisher on PyPI (one-time setup per package).

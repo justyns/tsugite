@@ -1,4 +1,4 @@
-"""AgentsMixin: agents HTTP handlers for HTTPServer (split from adapters/http.py)."""
+"""AgentsMixin: agents HTTP handlers for HTTPServer."""
 
 import asyncio
 import shutil
@@ -574,7 +574,7 @@ class AgentsMixin:
             info = provider.get_model_info(get_model_id(resolved))
             if info and info.supported_effort_levels:
                 levels = list(info.supported_effort_levels)
-        except (ValueError, Exception):  # noqa: BLE001 — treat any resolution failure as "unknown"
+        except (ValueError, Exception):  # noqa: BLE001 -- treat any resolution failure as "unknown"
             pass
 
         return JSONResponse({"model": model_string, "supported_effort_levels": levels})
@@ -701,7 +701,7 @@ class AgentsMixin:
         if err_resp:
             return err_resp
 
-        # Process uploaded files — only accept filenames, resolve against uploads dir
+        # Process uploaded files -- only accept filenames, resolve against uploads dir
         uploaded_attachments = []
         workspace_only_files = []
         uploads_dir = adapter.agent_config.workspace_dir / "uploads"

@@ -280,9 +280,8 @@ def test_route_stop_block_does_not_complete_and_increments(tmp_path):
 def test_route_stop_records_cc_session_id(tmp_path):
     adapter, orch = _wired_adapter(state_dir=str(tmp_path))
     st = _seed(adapter, orch)
-    _client(adapter).post("/hook/tok-1", json=_stop_payload(session_id="cc-xyz", transcript_path="/t/x.jsonl"))
+    _client(adapter).post("/hook/tok-1", json=_stop_payload(session_id="cc-xyz"))
     assert st.cc_session_id == "cc-xyz"
-    assert st.transcript_path == "/t/x.jsonl"
 
 
 def test_route_stop_need_input_pauses_worker(tmp_path):

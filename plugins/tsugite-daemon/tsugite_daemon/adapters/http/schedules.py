@@ -1,4 +1,4 @@
-"""SchedulesMixin: schedules HTTP handlers for HTTPServer (split from adapters/http.py)."""
+"""SchedulesMixin: schedules HTTP handlers for HTTPServer."""
 
 from dataclasses import fields as dataclass_fields
 

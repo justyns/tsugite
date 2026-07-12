@@ -35,7 +35,6 @@ class FakePluginAdapter:
         self._public = public or []
         self._executors = executors or {}
         self.event_bus = None
-        self.http_check_auth = None
 
     def get_http_routes(self):
         return self._authed
@@ -129,16 +128,30 @@ def test_public_and_authed_coexist_under_same_plugin(server, test_token):
     assert client.get("/api/plugins/alpha/admin", headers={"Authorization": f"Bearer {test_token}"}).status_code == 200
 
 
+def test_authed_non_route_entry_is_skipped_not_fatal(server, test_token, caplog):
+    """A plugin returning a Mount (or anything that isn't a flat Route) from
+    get_http_routes() must not crash daemon startup. The entry is skipped with a
+    warning - never mounted unwrapped, which would silently drop the bearer
+    check - and the plugin's flat routes still mount auth-wrapped."""
+    from starlette.routing import Mount
+
+    grouped = Mount("/grouped", routes=[_route("/sub", "grouped")])
+    with caplog.at_level(logging.WARNING):
+        server.mount_plugin_routes("alpha", [_route("/ok", "authed"), grouped], [])
+    assert "cannot auth-wrap" in caplog.text
+    client = TestClient(server.app)
+    assert client.get("/api/plugins/alpha/ok").status_code == 401, "flat routes must still mount auth-wrapped"
+    assert client.get("/api/plugins/alpha/ok", headers={"Authorization": f"Bearer {test_token}"}).status_code == 200
+    assert client.get("/api/plugins/alpha/grouped/sub").status_code == 404, "the skipped entry must not be reachable"
+
+
 # ── attach_plugin_http: gateway wiring, isolation, disabled/routeless ──
 
 
-def test_attach_sets_event_bus_and_check_auth_and_mounts(server):
+def test_attach_sets_event_bus_and_mounts(server):
     adapter = FakePluginAdapter(public=[_route("/hook", "x")])
     attach_plugin_http(server, "alpha", adapter)
     assert adapter.event_bus is server.event_bus, "the plugin adapter must get the shared SSE bus"
-    assert adapter.http_check_auth == server.check_auth, (
-        "the adapter must get the daemon auth callable for its own routes"
-    )
     client = TestClient(server.app)
     assert client.get("/api/plugins/alpha/hook").status_code == 200
 

@@ -1,4 +1,4 @@
-"""TerminalsMixin: terminals HTTP handlers for HTTPServer (split from adapters/http.py)."""
+"""TerminalsMixin: terminals HTTP handlers for HTTPServer."""
 
 import asyncio
 import json

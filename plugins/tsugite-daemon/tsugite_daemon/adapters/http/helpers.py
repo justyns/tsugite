@@ -124,7 +124,7 @@ class _NoCacheStaticFiles(StaticFiles):
         return response
 
 
-MAX_TEXT_ATTACH_SIZE = 50 * 1024  # 50KB — ~12K tokens
+MAX_TEXT_ATTACH_SIZE = 50 * 1024  # 50KB -- ~12K tokens
 MAX_BINARY_ATTACH_SIZE = 10 * 1024 * 1024  # 10MB
 MAX_UPLOAD_TOTAL = 100 * 1024 * 1024  # 100MB per request
 MAX_WEBHOOK_BODY = 5 * 1024 * 1024  # 5MB per delivery (GitHub caps payloads at ~25MB; ours are envelopes)

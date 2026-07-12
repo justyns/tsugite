@@ -532,10 +532,10 @@ class HookHandler:
     def handle_event(self, event: BaseEvent) -> None:
         if isinstance(event, ToolCallEvent):
             self._pending = (event.tool_name, event.arguments)
-            self._fire_pre_tool_call(event.tool_name, event.arguments)
+            self._fire_tool_phase("pre_tool_call", event.tool_name, event.arguments)
         elif isinstance(event, ToolResultEvent):
             if event.success and self._pending:
-                self._fire_post_tool(*self._pending)
+                self._fire_tool_phase("post_tool", *self._pending)
             self._pending = None
 
     def _build_tool_context(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -575,12 +575,6 @@ class HookHandler:
                 _jinja_env, rules, context, self.workspace_dir, interactive=self.interactive, phase=phase
             )
             self._executions.extend(results.executions)
-
-    def _fire_pre_tool_call(self, tool_name: str, arguments: dict[str, Any]) -> None:
-        self._fire_tool_phase("pre_tool_call", tool_name, arguments)
-
-    def _fire_post_tool(self, tool_name: str, arguments: dict[str, Any]) -> None:
-        self._fire_tool_phase("post_tool", tool_name, arguments)
 
     def drain_executions(self) -> list[HookExecution]:
         """Return and clear accumulated hook executions."""

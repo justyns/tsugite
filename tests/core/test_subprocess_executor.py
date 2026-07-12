@@ -28,7 +28,6 @@ def _make_tool(name, func, parent_only=False):
 async def test_exec_wall_clock_timeout_recovers_from_a_hung_tool():
     """A parent-only tool that never returns must not wedge the whole turn - the
     exec wall-clock timeout kills the child and returns an actionable error."""
-    import asyncio
 
     async def hang(**kwargs):
         await asyncio.sleep(60)

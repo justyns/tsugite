@@ -394,6 +394,25 @@ async def test_pause_worker_noop_when_not_running(store, runner, orchestrator):
 
 
 @pytest.mark.asyncio
+async def test_fail_worker_while_awaiting_input_errors_promptly(store, runner, orchestrator):
+    """The pause keeps the worker PTY alive, so a PTY death while AWAITING_INPUT
+    is a real attempt failure: the job must error with the captured detail right
+    away, not dangle until the phase timer parks it STUCK with the cause dropped."""
+    orchestrator.register_executor("fake", FakeExecutor())
+    job = _seed_running_executor_job(store, orchestrator, acceptance_criteria=["x"])
+    await orchestrator.pause_worker(job.id, "what is the codeword?")
+    assert store.get(job.id).state == JobState.AWAITING_INPUT.value
+
+    await orchestrator.fail_worker(job.id, "claude session exited (code 1)", detail="segfault tail")
+    await _drain(orchestrator)
+
+    fresh = store.get(job.id)
+    assert fresh.state == JobState.ERRORED.value, "a dead paused worker must error the job promptly"
+    assert "exited" in (fresh.error or "")
+    assert fresh.error_detail == "segfault tail", "the failure detail must land on the job"
+
+
+@pytest.mark.asyncio
 async def test_respond_to_job_answers_and_resumes_awaiting_input(store, runner, orchestrator):
     ex = FakeExecutor()
     orchestrator.register_executor("fake", ex)

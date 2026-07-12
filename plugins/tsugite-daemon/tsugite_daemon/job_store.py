@@ -18,9 +18,6 @@ class JobState(str, Enum):
     QUEUED = "queued"
     RUNNING = "running"
     VERIFYING = "verifying"
-    # Worker-initiated within-attempt pause: the worker asked for supervisor
-    # input (e.g. cc's CCDRIVER_NEED_INPUT). Non-terminal - respond_to_job
-    # resumes it to RUNNING; the phase timer still parks it STUCK if unanswered.
     AWAITING_INPUT = "awaiting_input"
     DONE = "done"
     STUCK = "stuck"

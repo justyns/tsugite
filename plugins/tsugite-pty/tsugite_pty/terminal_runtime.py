@@ -104,7 +104,7 @@ def maybe_sandbox_argv(
 
     sandbox = sandbox_cls(
         config=SandboxConfig(
-            no_network=True if force_no_network else getattr(sandbox_ctx, "no_network", False),
+            no_network=force_no_network or sandbox_ctx.no_network,
             extra_ro_binds=list(sandbox_ctx.extra_ro_binds),
             extra_rw_binds=list(sandbox_ctx.extra_rw_binds),
         ),
