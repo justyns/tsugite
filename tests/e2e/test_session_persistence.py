@@ -124,3 +124,76 @@ def test_persisted_session_id_for_superseded_session_chases_to_successor(
         f"Alpine.$data(document.querySelector({CONV_VIEW!r}))?.selectedSessionId === {successor.id!r}",
         timeout=5000,
     )
+
+
+def test_restore_resolves_persisted_conversation_id(authenticated_page, e2e_session_store, base_url):
+    """The persisted value is what selectSession stored: conversation_id when
+    the row carries one. Cold-start restore must resolve it the same way the
+    hash path does (conversation_id OR id), not with the id-only findSession.
+    """
+    page = authenticated_page
+    user_id = page.evaluate("Alpine.store('app').userId")
+
+    auto_pick = _make_session(e2e_session_store, user_id, last_active="2026-05-14T12:00:00+00:00")
+    user_pick = _make_session(e2e_session_store, user_id, last_active="2026-05-14T08:00:00+00:00")
+    conv_id = f"conv-{user_pick.id}"
+
+    def _rewrite_conv_id(route):
+        response = route.fetch()
+        body = response.json()
+        for s in body.get("sessions", []):
+            if s["id"] == user_pick.id:
+                s["conversation_id"] = conv_id
+        route.fulfill(json=body)
+
+    page.route("**/api/agents/test-agent/sessions*", _rewrite_conv_id)
+
+    open_conversations(page)
+    reload_conversations_view(page)
+    wait_for_session_in_list(page, user_pick.id)
+    page.evaluate(f"{{ const v = Alpine.$data(document.querySelector({CONV_VIEW!r})); v.selectSession(v.findSession({user_pick.id!r})); }}")
+    page.wait_for_function(
+        f"localStorage.getItem('tsugite_selected_session_test-agent') === {conv_id!r}",
+        timeout=3000,
+    )
+
+    page.goto(base_url + "/")
+    wait_for_alpine_ready(page)
+    open_conversations(page)
+    page.wait_for_function(
+        f"!!Alpine.$data(document.querySelector({CONV_VIEW!r}))?.selectedSessionId",
+        timeout=5000,
+    )
+    page.screenshot(path="/tmp/tsugite-issue-state.png", full_page=True)
+
+    selected = page.evaluate(f"Alpine.$data(document.querySelector({CONV_VIEW!r})).selectedSessionId")
+    assert selected == conv_id, (
+        f"expected persisted conversation_id {conv_id} to restore its session, "
+        f"got {selected} (auto_pick={auto_pick.id})"
+    )
+
+
+def test_auto_select_fallback_keeps_persisted_selection(authenticated_page, e2e_session_store, base_url):
+    """A transient restore miss must not ratchet the persisted last-viewed to
+    the auto-picked session — otherwise one bad wake permanently rewrites the
+    user's preference to the pinned/most-active pick.
+    """
+    page = authenticated_page
+    user_id = page.evaluate("Alpine.store('app').userId")
+
+    _make_session(e2e_session_store, user_id, last_active="2026-05-14T12:00:00+00:00")
+
+    page.evaluate("localStorage.setItem('tsugite_selected_session_test-agent', 'sess-gone-for-now')")
+
+    page.goto(base_url + "/")
+    wait_for_alpine_ready(page)
+    open_conversations(page)
+    page.wait_for_function(
+        f"!!Alpine.$data(document.querySelector({CONV_VIEW!r}))?.selectedSessionId",
+        timeout=5000,
+    )
+
+    persisted = page.evaluate("localStorage.getItem('tsugite_selected_session_test-agent')")
+    assert persisted == "sess-gone-for-now", (
+        f"auto-select fallback overwrote the persisted last-viewed session with {persisted}"
+    )

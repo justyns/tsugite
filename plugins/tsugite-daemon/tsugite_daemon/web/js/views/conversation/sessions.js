@@ -96,6 +96,14 @@ export const sessionsMixin = {
     return this.allSessions.find(s => s.id === id);
   },
 
+  // Shared resolver for hash targets and the persisted last-viewed value: both
+  // store what selectSession stored, which is conversation_id when the row
+  // carries one. Matches on conversation_id OR id (unlike findSession's
+  // id-only match).
+  resolveSession(targetId) {
+    return this.allSessions.find((s) => s.conversation_id === targetId || s.id === targetId);
+  },
+
   selectSessionById(id, opts = {}) {
     const s = this.findSession(id);
     if (s) this.selectSession(s, opts);
@@ -103,21 +111,22 @@ export const sessionsMixin = {
 
   // Resolve a viewSessionId (a conversation id) to a loaded session and select
   // it, falling back to a synthetic stub when the target isn't loaded yet.
-  // Matches on conversation_id OR id (unlike findSession's id-only match), so
-  // reload() and the viewSessionId watcher resolve the hash the same way.
   openViewSession(targetId, opts = {}) {
-    const match = this.allSessions.find((s) => s.conversation_id === targetId || s.id === targetId);
+    const match = this.resolveSession(targetId);
     this.selectSession(match || { conversation_id: targetId, agent: this.$store.app.selectedAgent }, opts);
   },
 
   autoSelectInteractive() {
     // Pinned-and-mine wins over a recently-fired schedule run; if no pinned
     // interactive session exists, fall back to any of mine, then to whatever's
-    // active, then recent.
+    // active, then recent. As a fallback pick this must not overwrite the
+    // persisted last-viewed session: a transient restore miss (pruned
+    // schedule run, partial list on wake) would otherwise permanently ratchet
+    // the preference to the pinned pick.
     const g = this.groupedSessions;
     const mine = (s) => this._isMyInteractive(s);
     const first = g.pinned.find(mine) || g.active.find(mine) || g.active[0] || g.recent[0];
-    if (first) this.selectSession(first);
+    if (first) this.selectSession(first, { persist: false });
   },
 
   async selectSession(session, opts = {}) {
@@ -145,7 +154,7 @@ export const sessionsMixin = {
     const convId = session.conversation_id || session.id;
     this.selectedSessionId = convId;
     this.selectedSessionMeta = session;
-    this._persistSelectedSession(convId);
+    if (opts.persist !== false) this._persistSelectedSession(convId);
     const state = this._sessionState(convId);
     const isFirstVisit = state.messages.length === 0;
     this.resetHistory();

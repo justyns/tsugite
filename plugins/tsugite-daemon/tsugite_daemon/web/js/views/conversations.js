@@ -461,10 +461,12 @@ export default () => ({
     } else {
       // PWA cold-restart at start_url drops the URL hash; restore the user's
       // last selection from localStorage before falling back to autoSelect.
-      // selectSession already chases superseded_by, so a stale persisted ID for
-      // a now-compacted session lands on the live successor automatically.
+      // The persisted value is a conversation_id (what selectSession stored),
+      // so resolve it the same way the hash path does. selectSession already
+      // chases superseded_by, so a stale persisted ID for a now-compacted
+      // session lands on the live successor automatically.
       const persisted = this._loadPersistedSessionId();
-      const restored = persisted ? this.findSession(persisted) : null;
+      const restored = persisted ? this.resolveSession(persisted) : null;
       if (restored) {
         this.selectSession(restored);
       } else {
