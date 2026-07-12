@@ -17,6 +17,8 @@ import os
 import re
 import shlex
 import shutil
+import tempfile
+import threading
 import traceback
 from dataclasses import dataclass
 from pathlib import Path
@@ -106,20 +108,40 @@ def build_claude_command(
     *,
     model: Optional[str] = None,
     resume_session_id: Optional[str] = None,
+    effort: Optional[str] = None,
+    ax_screen_reader: bool = False,
 ) -> str:
     """Build the shell command string for spawn_terminal (it wraps in `sh -c`).
 
     Everything is shlex.quoted so a goal/followup containing quotes or newlines
     can't break out of the argument. `model` accepts an alias (sonnet/opus/haiku)
-    or a full name; when None, claude uses its own configured default.
+    or a full name; when None, claude uses its own configured default. `effort`
+    is a per-job reasoning dial (low/medium/high/xhigh/max), passed through to
+    `--effort`. `ax_screen_reader` renders flat text (no decorative borders or
+    animations), which keeps PTY tail capture clean and cuts xterm escape edge
+    cases - the driver's real state signal is the hook markers, not TUI scraping.
     """
     parts = [claude_binary, "--settings", str(settings_path), "--permission-mode", permission_mode]
     if model:
         parts += ["--model", model]
+    if effort:
+        parts += ["--effort", effort]
+    if ax_screen_reader:
+        parts.append("--ax-screen-reader")
     if resume_session_id:
         parts += ["--resume", resume_session_id]
     parts.append(prompt)
     return shlex.join(parts)
+
+
+# Serializes our read-modify-write of ~/.claude.json across concurrent cc spawns
+# in this daemon so two trust provisions can't clobber each other's merge.
+_trust_config_lock = threading.Lock()
+
+
+def _default_trust_config_path() -> Path:
+    base = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~")
+    return Path(base) / ".claude.json"
 
 
 def is_workspace_trusted(cwd, config_path=None) -> bool:
@@ -131,15 +153,13 @@ def is_workspace_trusted(cwd, config_path=None) -> bool:
     reads. Claude Code treats a subdir of a trusted project as trusted (verified
     against claude 2.1.207) - a `--repo` Job's worker runs in a fresh worktree at
     <repo>/.tsugite-jobs/<id> whose exact path is never trusted, so the ancestor
-    check is what lets those jobs launch. We READ that config only; cc-driver
-    never writes it (option B: require pre-trusted workspaces).
+    check is what lets those jobs launch.
 
     config_path defaults to <CLAUDE_CONFIG_DIR>/.claude.json (or ~/.claude.json).
     Tolerant: a missing / unreadable / malformed config means "not trusted".
     """
     if config_path is None:
-        base = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~")
-        config_path = Path(base) / ".claude.json"
+        config_path = _default_trust_config_path()
     try:
         data = json.loads(Path(config_path).read_text())
     except Exception:
@@ -153,6 +173,94 @@ def is_workspace_trusted(cwd, config_path=None) -> bool:
         if isinstance(project, dict) and project.get("hasTrustDialogAccepted") is True:
             return True
     return False
+
+
+def ensure_workspace_trusted(cwd, config_path=None) -> bool:
+    """Provision Claude Code trust for `cwd` by setting
+    projects["<abs cwd>"].hasTrustDialogAccepted = true in the config Claude
+    reads, so an unattended spawn skips the trust dialog (a minimal entry with
+    just this flag is enough - verified against claude 2.1.207). Returns True on
+    success (including when already trusted), False if the config couldn't be
+    provisioned.
+
+    Read-modify-write, preserving every other key and project entry, then an
+    atomic replace so a crash mid-write can't truncate the config. A malformed
+    existing config is left untouched (we won't destroy recoverable user data);
+    a missing config is created. Serialized across concurrent cc spawns via
+    _trust_config_lock. claude itself also writes this file at runtime; the
+    provision happens before we spawn claude for this job, so it can't race our
+    own worker.
+    """
+    if config_path is None:
+        config_path = _default_trust_config_path()
+    config_path = Path(config_path)
+    resolved = str(Path(cwd).resolve())
+    with _trust_config_lock:
+        if config_path.exists():
+            try:
+                data = json.loads(config_path.read_text())
+            except Exception:
+                logger.warning("cc-driver: %s is not valid JSON; not provisioning trust for %s", config_path, cwd)
+                return False
+            if not isinstance(data, dict):
+                logger.warning("cc-driver: %s is not a JSON object; not provisioning trust for %s", config_path, cwd)
+                return False
+        else:
+            data = {}
+        projects = data.setdefault("projects", {})
+        if not isinstance(projects, dict):
+            logger.warning("cc-driver: %s 'projects' is not an object; not provisioning trust", config_path)
+            return False
+        entry = projects.setdefault(resolved, {})
+        if not isinstance(entry, dict):
+            entry = projects[resolved] = {}
+        entry["hasTrustDialogAccepted"] = True
+        try:
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            fd, tmp = tempfile.mkstemp(dir=str(config_path.parent), prefix=".claude.json.")
+            with os.fdopen(fd, "w") as f:
+                json.dump(data, f)
+            os.replace(tmp, config_path)
+        except Exception:
+            logger.exception("cc-driver: failed to write trust for %s into %s", cwd, config_path)
+            return False
+    logger.info("cc-driver: provisioned Claude Code trust for %s", resolved)
+    return True
+
+
+def trust_provision_target(cwd) -> Path:
+    """The path to provision trust for when `cwd` needs it: the main repo root
+    when cwd is a linked git worktree living under it (tsugite's --repo
+    worktrees are <repo>/.tsugite-jobs/<id>), else cwd itself.
+
+    Trusting the repo root instead of the ephemeral worktree keeps
+    ~/.claude.json from accumulating one dead entry per --repo job - the
+    ancestor rule then covers every future worktree under that root. An
+    external worktree (outside the repo root) still gets its own entry, since
+    the ancestor rule wouldn't reach it.
+
+    A linked worktree's `.git` is a *file* containing
+    `gitdir: <repo>/.git/worktrees/<name>`; anything else means cwd is not a
+    worktree.
+    """
+    cwd = Path(cwd).resolve()
+    gitfile = cwd / ".git"
+    if not gitfile.is_file():
+        return cwd
+    try:
+        m = re.match(r"gitdir:\s*(.+)", gitfile.read_text().strip())
+    except OSError:
+        return cwd
+    if m is None:
+        return cwd
+    gitdir = Path(m.group(1))
+    if not gitdir.is_absolute():
+        gitdir = cwd / gitdir
+    gitdir = gitdir.resolve()
+    if gitdir.parent.name != "worktrees" or gitdir.parent.parent.name != ".git":
+        return cwd
+    root = gitdir.parent.parent.parent
+    return root if cwd.is_relative_to(root) else cwd
 
 
 def build_sandbox_ctx(sandbox: bool, cwd: Optional[str], *, claude_binary: str = "claude", settings_dir=None):
@@ -252,18 +360,28 @@ class CCExecutor:
             await self._fail(job.id, f"cc job workspace does not exist: {cwd!r}")
             return
 
-        # Fail fast on an untrusted workspace: Claude Code would otherwise hang
-        # forever on the "Is this a project you trust?" dialog (no flag skips it).
-        # cc-driver never edits ~/.claude.json - the user trusts the cwd once.
+        # An untrusted workspace would hang forever on the "Is this a project you
+        # trust?" dialog (no CLI flag skips it). With provision_trust on (default),
+        # write the trust flag ourselves so cc jobs are self-service; otherwise
+        # fail fast and require the user to pre-trust the cwd.
         if not await asyncio.to_thread(is_workspace_trusted, cwd):
-            await self._fail(
-                job.id,
-                f"cc-driver: workspace {cwd} is not trusted by Claude Code, so an unattended "
-                f"session would hang on the trust prompt. Trust it once: run `claude` in {cwd} "
-                f"and accept the trust prompt (and, in bypass/skip-permissions mode, the one-time "
-                f"bypass warning), then retry this job.",
-            )
-            return
+            if self.config.provision_trust:
+                target = await asyncio.to_thread(trust_provision_target, cwd)
+                if not await asyncio.to_thread(ensure_workspace_trusted, target):
+                    await self._fail(
+                        job.id,
+                        f"cc-driver: could not provision Claude Code trust for {target} "
+                        f"(check the config at ~/.claude.json is writable and valid JSON).",
+                    )
+                    return
+            else:
+                await self._fail(
+                    job.id,
+                    f"cc-driver: workspace {cwd} is not trusted by Claude Code, so an unattended "
+                    f"session would hang on the trust prompt. Trust it once (run `claude` in {cwd} and "
+                    f"accept the prompt), or enable plugins.cc_driver.provision_trust to auto-trust it.",
+                )
+                return
 
         pty_manager, store, on_state_change = get_terminal_runtime()
         if pty_manager is None or store is None:
@@ -291,6 +409,8 @@ class CCExecutor:
             self.config.permission_mode,
             prompt,
             model=(getattr(job, "model", None) or self.config.model),
+            effort=getattr(job, "effort", None) or self.config.effort,
+            ax_screen_reader=self.config.ax_screen_reader,
             resume_session_id=state.cc_session_id if followup is not None else None,
         )
 

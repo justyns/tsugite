@@ -6,6 +6,7 @@ script - no real claude, no network.
 
 import asyncio
 import json
+import shlex
 from pathlib import Path
 
 import pytest
@@ -15,7 +16,9 @@ from tsugite_cc_driver.executor import (
     DriveStateStore,
     build_claude_command,
     build_sandbox_ctx,
+    ensure_workspace_trusted,
     is_workspace_trusted,
+    trust_provision_target,
 )
 from tsugite_cc_driver.settings import build_settings, write_run_settings
 from tsugite_pty.pty_manager import PtyManager
@@ -167,6 +170,107 @@ def test_is_workspace_trusted_reads_claude_config_dir(tmp_path, monkeypatch):
     assert is_workspace_trusted(cwd) is True, "must read <CLAUDE_CONFIG_DIR>/.claude.json by default"
 
 
+# ── ensure_workspace_trusted (provisioning) ──
+
+
+def test_ensure_workspace_trusted_writes_the_flag(tmp_path):
+    cwd = tmp_path / "ws"
+    cwd.mkdir()
+    cfg = tmp_path / "cfg" / ".claude.json"
+    cfg.parent.mkdir()
+    cfg.write_text(json.dumps({"projects": {}, "someOtherKey": 42}))
+
+    assert ensure_workspace_trusted(cwd, config_path=cfg) is True
+    data = json.loads(cfg.read_text())
+    assert data["projects"][str(cwd.resolve())]["hasTrustDialogAccepted"] is True
+    assert data["someOtherKey"] == 42, "unrelated top-level keys must be preserved"
+    # And the read side now agrees.
+    assert is_workspace_trusted(cwd, config_path=cfg) is True
+
+
+def test_ensure_workspace_trusted_preserves_existing_projects(tmp_path):
+    cwd = tmp_path / "ws"
+    cwd.mkdir()
+    cfg = tmp_path / "cfg" / ".claude.json"
+    cfg.parent.mkdir()
+    cfg.write_text(
+        json.dumps({"projects": {"/other/proj": {"hasTrustDialogAccepted": True, "allowedTools": ["Read"]}}})
+    )
+    ensure_workspace_trusted(cwd, config_path=cfg)
+    data = json.loads(cfg.read_text())
+    assert data["projects"]["/other/proj"]["allowedTools"] == ["Read"], "existing project entries must survive"
+    assert data["projects"][str(cwd.resolve())]["hasTrustDialogAccepted"] is True
+
+
+def test_ensure_workspace_trusted_creates_config_when_absent(tmp_path):
+    cwd = tmp_path / "ws"
+    cwd.mkdir()
+    cfg = tmp_path / "cfg" / ".claude.json"  # parent dir + file both missing
+    assert ensure_workspace_trusted(cwd, config_path=cfg) is True
+    assert is_workspace_trusted(cwd, config_path=cfg) is True
+
+
+def test_ensure_workspace_trusted_idempotent(tmp_path):
+    cwd = tmp_path / "ws"
+    cwd.mkdir()
+    cfg = _write_trust_config(tmp_path / "cfg", cwd)
+    before = cfg.read_text()
+    assert ensure_workspace_trusted(cwd, config_path=cfg) is True
+    assert is_workspace_trusted(cwd, config_path=cfg) is True
+    assert json.loads(cfg.read_text()) == json.loads(before), "already-trusted -> no meaningful change"
+
+
+def test_ensure_workspace_trusted_does_not_clobber_malformed_config(tmp_path):
+    cwd = tmp_path / "ws"
+    cwd.mkdir()
+    cfg = tmp_path / "cfg" / ".claude.json"
+    cfg.parent.mkdir()
+    cfg.write_text("{ this is not valid json")
+    assert ensure_workspace_trusted(cwd, config_path=cfg) is False, "must not overwrite an unparseable config"
+    assert cfg.read_text() == "{ this is not valid json", "the malformed file must be left untouched"
+
+
+# ── trust_provision_target ──
+
+
+def _fake_linked_worktree(repo: Path, name: str) -> Path:
+    """Lay out a linked-worktree structure by hand, matching what
+    `git worktree add` writes: <repo>/.git/worktrees/<name> plus a worktree
+    under <repo>/.tsugite-jobs/ whose `.git` *file* points at it."""
+    gitdir = repo / ".git" / "worktrees" / name
+    gitdir.mkdir(parents=True)
+    wt = repo / ".tsugite-jobs" / name
+    wt.mkdir(parents=True)
+    (wt / ".git").write_text(f"gitdir: {gitdir}\n")
+    return wt
+
+
+def test_trust_provision_target_maps_worktree_to_repo_root(tmp_path):
+    repo = tmp_path / "repo"
+    wt = _fake_linked_worktree(repo, "job-1")
+    assert trust_provision_target(wt) == repo.resolve()
+
+
+def test_trust_provision_target_plain_repo_is_itself(tmp_path):
+    ws = tmp_path / "ws"
+    (ws / ".git").mkdir(parents=True)  # main checkout: .git is a directory
+    assert trust_provision_target(ws) == ws.resolve()
+    bare = tmp_path / "bare"
+    bare.mkdir()  # no .git at all
+    assert trust_provision_target(bare) == bare.resolve()
+
+
+def test_trust_provision_target_external_worktree_is_itself(tmp_path):
+    # A worktree OUTSIDE the repo root: trusting the repo root wouldn't cover
+    # it (the ancestor rule only reaches subdirs), so it needs its own entry.
+    repo = tmp_path / "repo"
+    (repo / ".git" / "worktrees" / "wt").mkdir(parents=True)
+    wt = tmp_path / "elsewhere" / "wt"
+    wt.mkdir(parents=True)
+    (wt / ".git").write_text(f"gitdir: {repo / '.git' / 'worktrees' / 'wt'}\n")
+    assert trust_provision_target(wt) == wt.resolve()
+
+
 # ── pure helpers ──
 
 
@@ -174,8 +278,6 @@ def test_build_claude_command_quotes_goal_with_quotes_and_newlines():
     prompt = "fix the 'bug'\nand add a test"
     cmd = build_claude_command("claude", "/s/settings.json", "bypassPermissions", prompt)
     # The whole prompt is a single shell token; re-splitting must recover it verbatim.
-    import shlex
-
     argv = shlex.split(cmd)
     assert argv[0] == "claude"
     assert "--settings" in argv and "/s/settings.json" in argv
@@ -185,19 +287,75 @@ def test_build_claude_command_quotes_goal_with_quotes_and_newlines():
 
 def test_build_claude_command_adds_resume_when_given():
     cmd = build_claude_command("claude", "/s.json", "bypassPermissions", "go", resume_session_id="cc-42")
-    import shlex
-
     argv = shlex.split(cmd)
     assert "--resume" in argv and "cc-42" in argv
 
 
 def test_build_claude_command_adds_model_when_given():
-    import shlex
-
     argv = shlex.split(build_claude_command("claude", "/s.json", "bypassPermissions", "go", model="opus"))
     assert "--model" in argv and "opus" in argv
     # None -> no --model flag (claude uses its own default).
     assert "--model" not in shlex.split(build_claude_command("claude", "/s.json", "bypassPermissions", "go"))
+
+
+def test_build_claude_command_adds_effort_when_given():
+    argv = shlex.split(build_claude_command("claude", "/s.json", "bypassPermissions", "go", effort="max"))
+    assert "--effort" in argv and "max" in argv
+    # None -> no --effort flag.
+    assert "--effort" not in shlex.split(build_claude_command("claude", "/s.json", "bypassPermissions", "go"))
+
+
+def test_build_claude_command_adds_ax_screen_reader_when_enabled():
+    argv = shlex.split(build_claude_command("claude", "/s.json", "bypassPermissions", "go", ax_screen_reader=True))
+    assert "--ax-screen-reader" in argv, "flat screen-reader output makes PTY capture cleaner"
+    # Off -> no flag.
+    assert "--ax-screen-reader" not in shlex.split(build_claude_command("claude", "/s.json", "bypassPermissions", "go"))
+
+
+def test_cc_config_defaults_ax_screen_reader_off():
+    assert CCDriverConfig().ax_screen_reader is False, "screen-reader output is opt-in; the TUI is the default"
+
+
+@pytest.mark.asyncio
+async def test_initial_spawn_threads_effort_and_ax_screen_reader(tmp_path, runtime, monkeypatch):
+    manager, store = runtime
+    orch = FakeOrchestrator()
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    job = FakeJob("job-1", workspace_path=str(workspace))
+    job.effort = "high"
+    orch._jobs.add(job)
+
+    config_dir = tmp_path / "cfgdir"
+    _write_trust_config(config_dir, workspace)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
+
+    captured = {}
+    import tsugite_pty.terminal_runtime as tr_mod
+
+    real_spawn = tr_mod.spawn_terminal
+
+    def spy_spawn(**kwargs):
+        captured["cmd"] = kwargs.get("cmd")
+        return real_spawn(**kwargs)
+
+    monkeypatch.setattr(tr_mod, "spawn_terminal", spy_spawn)
+
+    fake = tmp_path / "claude"
+    fake.write_text("#!/bin/sh\nsleep 30\n")
+    fake.chmod(0o755)
+    # ax_screen_reader is off by default; enable it here to prove it threads through.
+    ex = _executor(tmp_path, orch, claude_binary=str(fake), sandbox=False, ax_screen_reader=True)
+
+    await ex.start(job, followup=None)
+
+    argv = shlex.split(captured["cmd"])
+    assert "--effort" in argv and "high" in argv, "per-job effort must reach the claude command"
+    assert "--ax-screen-reader" in argv, "the enabled config flag must reach the claude command"
+
+    st = ex.drive_state.get("job-1")
+    if st and st.terminal_id:
+        manager.kill(st.terminal_id)
 
 
 def test_build_sandbox_ctx_off_is_none():
@@ -361,7 +519,7 @@ async def test_followup_on_live_pty_types_via_write_stdin(tmp_path, runtime):
 
 
 @pytest.mark.asyncio
-async def test_untrusted_workspace_fails_worker_without_spawning(tmp_path, runtime, monkeypatch):
+async def test_untrusted_workspace_fails_worker_when_provisioning_disabled(tmp_path, runtime, monkeypatch):
     manager, store = runtime
     orch = FakeOrchestrator()
     workspace = tmp_path / "ws"
@@ -373,13 +531,67 @@ async def test_untrusted_workspace_fails_worker_without_spawning(tmp_path, runti
     fake.chmod(0o755)
     # Point trust lookup at an empty config dir -> cwd is NOT trusted.
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "empty-cfg"))
-    ex = _executor(tmp_path, orch, claude_binary=str(fake))
+    ex = _executor(tmp_path, orch, claude_binary=str(fake), provision_trust=False)
 
     await ex.start(job, followup=None)
 
     assert orch.failed and "not trusted" in orch.failed[0][1]
     assert store.list_all() == [], "an untrusted workspace must not spawn a PTY (it would hang on the trust dialog)"
     assert ex.drive_state.get("job-1") is None
+
+
+@pytest.mark.asyncio
+async def test_untrusted_workspace_is_provisioned_then_spawns(tmp_path, runtime, monkeypatch):
+    manager, store = runtime
+    orch = FakeOrchestrator()
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    job = FakeJob("job-1", workspace_path=str(workspace))
+    orch._jobs.add(job)
+    fake = tmp_path / "claude"
+    fake.write_text("#!/bin/sh\nsleep 30\n")
+    fake.chmod(0o755)
+    config_dir = tmp_path / "cfgdir"  # starts empty -> cwd NOT trusted
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
+    # provision_trust defaults True; sandbox off keeps it hermetic.
+    ex = _executor(tmp_path, orch, claude_binary=str(fake), sandbox=False)
+
+    await ex.start(job, followup=None)
+
+    assert not orch.failed, f"provisioning should let the spawn proceed, got {orch.failed}"
+    # The trust flag was written for the workspace, so the read side now agrees.
+    assert is_workspace_trusted(workspace, config_path=config_dir / ".claude.json") is True
+    st = ex.drive_state.get("job-1")
+    assert st is not None and st.terminal_id, "the worker PTY must spawn after trust is provisioned"
+    manager.kill(st.terminal_id)
+
+
+@pytest.mark.asyncio
+async def test_repo_job_provisions_trust_for_repo_root_not_worktree(tmp_path, runtime, monkeypatch):
+    manager, store = runtime
+    orch = FakeOrchestrator()
+    repo = tmp_path / "repo"
+    wt = _fake_linked_worktree(repo, "job-1")
+    job = FakeJob("job-1", worktree_path=str(wt))
+    orch._jobs.add(job)
+    fake = tmp_path / "claude"
+    fake.write_text("#!/bin/sh\nsleep 30\n")
+    fake.chmod(0o755)
+    config_dir = tmp_path / "cfgdir"  # starts empty -> nothing trusted
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
+    ex = _executor(tmp_path, orch, claude_binary=str(fake), sandbox=False)
+
+    await ex.start(job, followup=None)
+
+    assert not orch.failed, f"provisioning should let the spawn proceed, got {orch.failed}"
+    projects = json.loads((config_dir / ".claude.json").read_text())["projects"]
+    assert str(repo.resolve()) in projects, "the repo ROOT must be trusted, not the ephemeral worktree"
+    assert str(wt.resolve()) not in projects, "no per-worktree dead entry may accumulate"
+    # The ancestor rule makes the worktree itself read as trusted.
+    assert is_workspace_trusted(wt, config_path=config_dir / ".claude.json") is True
+    st = ex.drive_state.get("job-1")
+    assert st is not None and st.terminal_id, "the worker PTY must spawn after trust is provisioned"
+    manager.kill(st.terminal_id)
 
 
 @pytest.mark.asyncio

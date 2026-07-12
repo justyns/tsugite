@@ -109,6 +109,10 @@ class Job:
     # Optional separate model for the verifier round. Falls back to `model`
     # (then the workspace default) when unset.
     verifier_model: Optional[str] = None
+    # Optional per-job reasoning effort (low/medium/high/xhigh/max). For a cc
+    # executor job this maps to claude's `--effort`; None uses the executor's
+    # own default. Not applied to the tsugite verifier.
+    effort: Optional[str] = None
     # Ordered escalation ladder ("cheap first"). When set, `model` always holds
     # the current rung; a qualifying failure (verifier budget exhausted, or a
     # worker infra/quota death) advances to the next rung with a fresh budget.
@@ -219,6 +223,7 @@ class Job:
             "result": self.result,
             "agent": self.agent,
             "model": self.model,
+            "effort": self.effort,
             "model_ladder": self.model_ladder,
             "ladder_index": self.ladder_index,
             "verifier_model": self.verifier_model,

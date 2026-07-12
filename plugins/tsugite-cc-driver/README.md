@@ -39,28 +39,39 @@ typing at any time.
 | `model` | `sonnet` | default `--model` (alias or full name); a per-job `model` overrides it, `null` uses claude's own default |
 | `permission_mode` | `bypassPermissions` | passed to `--permission-mode` |
 | `sandbox` | `true` | run claude under bubblewrap (see below) |
+| `provision_trust` | `true` | auto-write Claude Code trust for a job's workspace (see below); `false` = require pre-trusted workspaces |
 | `max_consecutive_continues` | `5` | Stop nudges before an attempt is handed to the verifier anyway |
 | `completion_marker` | `CCDRIVER_GOAL_COMPLETE` | token claude ends its reply with when done |
 | `needs_input_marker` | `CCDRIVER_NEED_INPUT` | line claude emits to pause the job for supervisor input |
+| `ax_screen_reader` | `false` | opt in to `--ax-screen-reader` (flat text, cleaner PTY capture; off keeps the normal TUI) |
+| `effort` | `null` | default `--effort` (low/medium/high/xhigh/max); per-job `effort` overrides, null uses claude's own default |
 | `base_url` | `http://127.0.0.1:8374` | daemon URL the hook receiver is reached at |
 | `state_dir` | XDG state | where per-job `settings.json` files are written |
 
-`max_attempts`, `timeout_minutes`, and acceptance criteria are ordinary job fields.
+`max_attempts`, `timeout_minutes`, `model`, `effort`, and acceptance criteria are
+ordinary per-job fields (`/job … --executor cc --effort max`, or `spawn_job(…,
+executor="cc", effort="max")`).
 
-## Workspace trust (required, one-time)
+## Workspace trust
 
 Claude Code shows a blocking "Is this a project you trust?" dialog the first time
 it runs in a directory, and **no flag skips it** (`bypassPermissions`,
 `--dangerously-skip-permissions`, `--add-dir`, `IS_SANDBOX=1` were all verified not
 to). A daemon-spawned session in an untrusted cwd would hang there forever, so
-cc-driver checks trust **before** spawning and fails the job fast with an
-actionable message if the workspace isn't trusted yet.
+cc-driver checks trust **before** spawning.
 
-You must trust each job workspace once, yourself: run `claude` in that directory
-and accept the trust prompt (and, in bypass/skip-permissions mode, the one-time
-"bypass permissions mode" warning - cc-driver can't accept it for you). cc-driver
-**never modifies `~/.claude.json`**; it only reads the trust flag. The trust config
-is read from `<CLAUDE_CONFIG_DIR>/.claude.json` (or `~/.claude.json`).
+By default (`provision_trust: true`) cc-driver provisions trust itself: it writes
+`projects["<abs path>"].hasTrustDialogAccepted = true` into the config Claude reads
+(`<CLAUDE_CONFIG_DIR>/.claude.json`, else `~/.claude.json`) via an atomic
+read-modify-write that preserves every other entry, so cc jobs are self-service and
+`--repo` worktrees just work. Trust is checked against the cwd and its ancestors
+(Claude Code treats a subdir of a trusted project as trusted), and for a `--repo`
+job cc-driver provisions the **repo root** rather than the ephemeral worktree - one
+entry covers every future worktree instead of piling up a dead entry per job.
+
+Set `provision_trust: false` to keep cc-driver read-only: it then fails a job fast
+with an actionable message when the workspace isn't already trusted, and you trust
+each workspace once yourself (run `claude` there and accept the prompt).
 
 ## Sandbox caveats
 

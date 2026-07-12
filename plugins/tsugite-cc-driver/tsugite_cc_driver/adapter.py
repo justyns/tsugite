@@ -37,11 +37,23 @@ class CCDriverConfig(BaseModel):
     # bypass/skip-permissions trust workaround so a driven claude can't write
     # outside the job workspace. Network stays on (it needs the API).
     sandbox: bool = True
+    # Auto-provision Claude Code trust for a job's workspace (writes
+    # projects[cwd].hasTrustDialogAccepted into ~/.claude.json) so cc jobs are
+    # self-service. Off = require the user to pre-trust each workspace once.
+    provision_trust: bool = True
     max_consecutive_continues: int = 5
     completion_marker: str = "CCDRIVER_GOAL_COMPLETE"
     # Marker the driven claude emits when it is blocked on supervisor input;
     # pauses the job in awaiting_input instead of nudging it to guess.
     needs_input_marker: str = "CCDRIVER_NEED_INPUT"
+    # Opt-in: render flat, screen-reader-friendly PTY output (no decorative
+    # borders or animations) via --ax-screen-reader. Cleaner failure-tail capture
+    # and fewer xterm escape edge cases, but off by default so the live terminal
+    # viewer keeps the normal TUI; the real state signal is the hook markers.
+    ax_screen_reader: bool = False
+    # Default reasoning effort (low/medium/high/xhigh/max) for the driven claude;
+    # a per-job `effort` overrides it, None uses claude's own default.
+    effort: Optional[str] = None
     base_url: str = "http://127.0.0.1:8374"
     state_dir: Optional[str] = None
 

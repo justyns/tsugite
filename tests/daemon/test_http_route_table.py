@@ -272,21 +272,31 @@ def test_catchalls_last(server):
     assert [row[0] for row in table[-3:]] == ["/static", "/sw.js", "/"]
 
 
+def _mounts_with_root_handler(app) -> list[str]:
+    """Every top-level Mount that has a GET root ('/') sub-route - i.e. a
+    collection whose bare prefix would 307-redirect without mounted_api_routes.
+    Auto-discovered so a future collection (or plugin) that forgets the helper is
+    caught here instead of silently reintroducing the redirect."""
+    prefixes = []
+    for r in app.routes:
+        if not isinstance(r, Mount):
+            continue
+        sub = [sr for sr in (getattr(r, "routes", None) or []) if isinstance(sr, Route)]
+        if any(sr.path == "/" and "GET" in (sr.methods or set()) for sr in sub):
+            prefixes.append(r.path)
+    return prefixes
+
+
 # A Mount("/api/jobs", ...) only matches sub-paths starting with "/", so the
 # bare collection root 307-redirects to the trailing-slash form - and Starlette
 # builds that Location as an absolute internal-host URL a proxied browser can't
-# follow. The collection root must resolve directly (auth check runs -> 401),
-# never a redirect.
-@pytest.mark.parametrize("prefix", ["/api/jobs", "/api/sessions", "/api/schedules", "/api/terminals", "/api/webhooks"])
-def test_collection_root_does_not_redirect(server, prefix):
+# follow. EVERY collection with a root handler must resolve its bare prefix
+# directly (auth check runs -> 401), never a redirect.
+def test_no_collection_root_redirects(server):
     client = TestClient(server.app)
-    resp = client.get(prefix, follow_redirects=False)
-    assert resp.status_code != 307, f"GET {prefix} must not 307-redirect to the trailing-slash form"
-    assert resp.status_code == 401, f"GET {prefix} must reach the auth check, got {resp.status_code}"
-
-
-def test_secrets_root_does_not_redirect(server):
-    client = TestClient(server.app)
-    resp = client.get("/api/secrets", follow_redirects=False)
-    assert resp.status_code != 307
-    assert resp.status_code == 401
+    prefixes = _mounts_with_root_handler(server.app)
+    assert prefixes, "expected to discover mounted collections with a root handler"
+    for prefix in prefixes:
+        resp = client.get(prefix, follow_redirects=False)
+        assert resp.status_code != 307, f"GET {prefix} must not 307-redirect (use mounted_api_routes)"
+        assert resp.status_code == 401, f"GET {prefix} must reach the auth check, got {resp.status_code}"

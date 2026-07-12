@@ -149,6 +149,12 @@ async def cmd_bg(adapter: BaseAdapter, prompt: str, agent: str | None = None) ->
             "Which registered executor runs the job (default agent)",
             required=False,
         ),
+        CommandParam(
+            "effort",
+            str,
+            "Reasoning effort for the worker: low|medium|high|xhigh|max (cc executor -> claude --effort)",
+            required=False,
+        ),
     ],
 )
 async def cmd_job(
@@ -165,6 +171,7 @@ async def cmd_job(
     max_attempts: int | None = None,
     notify_when: str | None = None,
     executor: str | None = None,
+    effort: str | None = None,
 ) -> str:
     """Create a Job, spawn a worker session, and return the Job + worker IDs."""
     from tsugite.tools.jobs import _jobs_orchestrator
@@ -207,6 +214,7 @@ async def cmd_job(
             max_attempts=max_attempts,
             notify_when=notify_when,
             executor=executor or "agent",
+            effort=effort,
         )
     except Exception as e:
         raise CommandError(f"Failed to spawn job worker: {e}") from e

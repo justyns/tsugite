@@ -43,6 +43,7 @@ def spawn_job(
     max_attempts: Optional[int] = None,
     notify_when: Optional[str] = None,
     executor: str = "agent",
+    effort: Optional[str] = None,
 ) -> dict:
     """Spawn a background Job with a verification loop.
 
@@ -85,6 +86,9 @@ def spawn_job(
         executor: Which registered executor produces the work. "agent" (default)
             spawns a tsugite worker session; a plugin may register others (e.g. a
             PTY-driven CLI). An unknown name is rejected.
+        effort: Optional per-job reasoning effort (low|medium|high|xhigh|max).
+            For a cc executor job this maps to claude's --effort; ignored by
+            executors that don't support it.
 
     Returns:
         Dict with job_id, worker_session_id, parent_session_id, state.
@@ -122,6 +126,7 @@ def spawn_job(
             notify_when=notify_when,
             sandbox_override=sandbox_override,
             executor=executor,
+            effort=effort,
             timeout=180,
         )
     except concurrent.futures.TimeoutError:

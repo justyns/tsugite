@@ -94,6 +94,15 @@ async def test_cmd_job_default_executor_is_agent(stub_orchestrator):
 
 
 @pytest.mark.asyncio
+async def test_cmd_job_threads_effort(stub_orchestrator):
+    adapter = _StubAdapter()
+    await cmd_job(adapter=adapter, user_id="user-1", prompt="x", executor="cc", effort="max")
+    assert stub_orchestrator.calls[-1]["effort"] == "max"
+    await cmd_job(adapter=adapter, user_id="user-1", prompt="x")
+    assert stub_orchestrator.calls[-1]["effort"] is None, "effort defaults to None (executor's own default)"
+
+
+@pytest.mark.asyncio
 async def test_cmd_job_default_notify_when_is_none(stub_orchestrator):
     """When no --notify-when is given, the orchestrator receives None and
     Job.__post_init__ normalises to 'never'."""

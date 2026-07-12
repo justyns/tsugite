@@ -188,6 +188,7 @@ class JobsOrchestrator:
         notify_when: Optional[str] = None,
         sandbox_override: Optional[dict] = None,
         executor: str = "agent",
+        effort: Optional[str] = None,
     ) -> tuple[Job, Optional[Session]]:
         """Create a Job record + spawn the worker session in one step.
 
@@ -252,6 +253,7 @@ class JobsOrchestrator:
                 repo=repo,
                 model=model,
                 verifier_model=verifier_model,
+                effort=effort,
                 agent=worker_agent_file,
                 timeout_minutes=timeout_minutes,
                 spawned_by=spawned_by,
@@ -471,11 +473,9 @@ class JobsOrchestrator:
         job = self._jobs.get(job_id)
         if job is not None and not (job.attempts or []):
             self._append_attempt(job_id, kind="initial", worker_session_id=worker_session_id)
-        try:
-            self._jobs.update_state(job_id, JobState.RUNNING.value)
-        except JobStateTransitionError:
-            # If we're being called again on a retry, the Job is already in RUNNING.
-            pass
+        # The guard above guarantees the Job is QUEUED here, and QUEUED -> RUNNING
+        # is always valid, so no transition-error handling is needed.
+        self._jobs.update_state(job_id, JobState.RUNNING.value)
         self._emit_job_event(self._jobs.get(job_id))
         self._schedule_timeout(job_id, timeout_minutes)
 
