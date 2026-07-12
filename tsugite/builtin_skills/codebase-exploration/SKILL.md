@@ -13,12 +13,12 @@ This skill provides systematic approaches for understanding unfamiliar codebases
 **Each code block executes independently** - you won't see results until the next turn. This means:
 
 ✅ **Good:** One function call per code block
-```python
+```python-exec
 file_search(pattern="class.*Base", path="src")
 ```
 
 ❌ **Bad:** Multiple operations in one block (you won't see intermediate results)
-```python
+```python-exec
 # Don't do this - you can't use results from first call in second
 results = file_search(pattern="class", path="src")
 read_file(results[0])  # Won't work - results not visible until next turn
@@ -42,19 +42,19 @@ Explore codebases in progressive phases, each building on the previous:
 
 **Example Pattern:**
 1. List Python files to count them
-```python
+```python-exec
 list_files(path=".", pattern="*.py")
 ```
 2. Find documentation
-```python
+```python-exec
 list_files(path=".", pattern="README.md")
 ```
 3. Understand testing structure
-```python
+```python-exec
 list_files(path="tests", pattern="test_*.py")
 ```
 4. Find configuration files
-```python
+```python-exec
 list_files(path=".", pattern="*.json")
 ```
 
@@ -70,19 +70,19 @@ list_files(path=".", pattern="*.json")
 
 **Example Pattern:**
 1. Read main entry point
-```python
+```python-exec
 read_file("src/main.py")
 ```
 2. Find base abstractions
-```python
+```python-exec
 file_search(pattern="class.*Base|class.*Abstract|Protocol|Interface", path="src")
 ```
 3. Read key base class
-```python
+```python-exec
 read_file("src/base.py")
 ```
 4. Extract symbols from main module
-```python
+```python-exec
 file_search(pattern="^def |^class ", path="src/main.py")
 ```
 
@@ -97,19 +97,19 @@ file_search(pattern="^def |^class ", path="src/main.py")
 
 **Example Pattern:**
 1. Find core symbols
-```python
+```python-exec
 file_search(pattern="^class |^def |^async def", path="src")
 ```
 2. Map dependencies
-```python
+```python-exec
 file_search(pattern="^from |^import", path="src")
 ```
 3. Find special patterns (decorators, routes, commands)
-```python
+```python-exec
 file_search(pattern="@decorator|@.*router|@.*command", path="src")
 ```
 4. Read 3-5 most central files identified from previous searches
-```python
+```python-exec
 read_file("src/core/router.py")
 ```
 
@@ -124,19 +124,19 @@ read_file("src/core/router.py")
 
 **Example Pattern:**
 1. Find authentication-related code
-```python
+```python-exec
 file_search(pattern="login|auth|authenticate", path="src")
 ```
 2. Read authentication entry point
-```python
+```python-exec
 read_file("src/auth/login.py")
 ```
 3. Trace service layer (based on imports seen in login.py)
-```python
+```python-exec
 read_file("src/auth/service.py")
 ```
 4. Follow to repository/database layer
-```python
+```python-exec
 file_search(pattern="class.*Repository|def.*query", path="src/auth")
 ```
 
@@ -156,15 +156,15 @@ Automatically adjust exploration depth based on codebase characteristics:
 - Generate simple architectural summary
 
 **Example turn sequence:**
-```python
+```python-exec
 list_files(path=".", pattern="*")
 ```
 Then:
-```python
+```python-exec
 read_file("README.md")
 ```
 Then:
-```python
+```python-exec
 read_file("src/main.py")
 ```
 
@@ -181,19 +181,19 @@ read_file("src/main.py")
 - Phase 4: Deep dive into specific areas based on findings
 
 **Example turn sequence:**
-```python
+```python-exec
 run("find . -type f | wc -l")
 ```
 Then:
-```python
+```python-exec
 list_files(path=".", pattern="*")
 ```
 Then:
-```python
+```python-exec
 read_file("README.md")
 ```
 Then:
-```python
+```python-exec
 file_search(pattern="^class |^def ", path="src")
 ```
 
@@ -210,11 +210,11 @@ file_search(pattern="^class |^def ", path="src")
 - Read only most critical files (3-5 max initially)
 
 **Example turn sequence:**
-```python
+```python-exec
 file_search(pattern="class|def", path="src/specific_module")
 ```
 Then:
-```python
+```python-exec
 read_file("src/main.py")
 ```
 Then continue exploring based on findings.
@@ -228,15 +228,15 @@ When scope is too large or user requests specific area investigation:
 
 **Turn-by-turn pattern:**
 1. List files in scope
-```python
+```python-exec
 list_files(path="src/api", pattern="*")
 ```
 2. Find API symbols
-```python
+```python-exec
 file_search(pattern="^class |^def ", path="src/api")
 ```
 3. Read main file
-```python
+```python-exec
 read_file("src/api/__init__.py")
 ```
 4. Continue exploring routes/endpoints and data models based on findings
@@ -246,15 +246,15 @@ read_file("src/api/__init__.py")
 
 **Turn-by-turn pattern:**
 1. Find component files
-```python
+```python-exec
 list_files(path=".", pattern="*.tsx")
 ```
 2. Search for exports
-```python
+```python-exec
 file_search(pattern="export (default |const |function)", path=".")
 ```
 3. Read representative files
-```python
+```python-exec
 read_file("src/components/Button.tsx")
 ```
 
@@ -263,15 +263,15 @@ read_file("src/components/Button.tsx")
 
 **Turn-by-turn pattern:**
 1. Find authentication code
-```python
+```python-exec
 file_search(pattern="(?i)auth|login|session", path=".")
 ```
 2. Read main authentication module (identified from search results)
-```python
+```python-exec
 read_file("src/auth/main.py")
 ```
 3. Trace auth flow from entry to verification
-```python
+```python-exec
 file_search(pattern="verify|validate|check", path="src/auth")
 ```
 
@@ -280,11 +280,11 @@ file_search(pattern="verify|validate|check", path="src/auth")
 
 **Turn-by-turn pattern:**
 1. Search for pattern markers
-```python
+```python-exec
 file_search(pattern="@app.route|@router|@command|@click", path=".")
 ```
 2. Read routing configuration
-```python
+```python-exec
 read_file("src/routes.py")
 ```
 3. Map pattern usage across codebase based on findings
@@ -294,7 +294,7 @@ read_file("src/routes.py")
 ### File Discovery (list_files)
 **Best for:** Finding files by name pattern, understanding structure
 
-```python
+```python-exec
 # List all Python files
 list_files(path=".", pattern="*.py")
 
@@ -315,7 +315,7 @@ list_files(path=".", pattern="*.{json,yaml,toml}")
 
 The `file_search` tool uses **ripgrep** (rg) for fast, powerful code search:
 
-```python
+```python-exec
 # Function/class definitions
 file_search(pattern="^class |^def |^async def", path=".")
 
@@ -374,7 +374,7 @@ tools:
 ### File Reading (read_file)
 **Best for:** Deep understanding of specific files
 
-```python
+```python-exec
 # Read full file
 read_file(path="src/main.py")
 
@@ -394,7 +394,7 @@ read_file(path="src/main.py", start_line=1, end_line=50)
 ### Shell Commands (run)
 **Best for:** Quick directory listings, file counts, specialized commands
 
-```python
+```python-exec
 # Directory structure
 run("ls -la")
 run("ls src/")
@@ -505,19 +505,19 @@ Areas that warrant further investigation:
 
 **Turn-by-turn:**
 1. Determine codebase size
-```python
+```python-exec
 run("find . -type f | wc -l")
 ```
 2. Read project description
-```python
+```python-exec
 read_file("README.md")
 ```
 3. Count primary language files
-```python
+```python-exec
 list_files(path=".", pattern="*.py")
 ```
 4. Read main entry point
-```python
+```python-exec
 read_file("src/main.py")
 ```
 5. Explore structure and generate overview report
@@ -527,15 +527,15 @@ read_file("src/main.py")
 
 **Turn-by-turn:**
 1. Find files related to feature
-```python
+```python-exec
 file_search(pattern="(?i)authentication", path=".")
 ```
 2. Read most relevant file from search results
-```python
+```python-exec
 read_file("src/auth/authenticate.py")
 ```
 3. Trace function calls by searching for imported functions
-```python
+```python-exec
 file_search(pattern="def verify_token", path="src")
 ```
 4. Summarize implementation approach
@@ -545,15 +545,15 @@ file_search(pattern="def verify_token", path="src")
 
 **Turn-by-turn:**
 1. Analyze directory structure
-```python
+```python-exec
 list_files(path=".", pattern="*")
 ```
 2. Read architectural documentation if exists
-```python
+```python-exec
 read_file("ARCHITECTURE.md")
 ```
 3. Find base classes and interfaces
-```python
+```python-exec
 file_search(pattern="class.*Base|ABC", path=".")
 ```
 4. Read key abstractions and document patterns
@@ -563,11 +563,11 @@ file_search(pattern="class.*Base|ABC", path=".")
 
 **Turn-by-turn:**
 1. Search for all occurrences
-```python
+```python-exec
 file_search(pattern="UserModel", path=".")
 ```
 2. Read representative usage sites
-```python
+```python-exec
 read_file("src/controllers/user_controller.py")
 ```
 3. Summarize usage patterns
@@ -577,15 +577,15 @@ read_file("src/controllers/user_controller.py")
 
 **Turn-by-turn:**
 1. Find test files
-```python
+```python-exec
 list_files(path="tests", pattern="*auth*")
 ```
 2. Search for test cases
-```python
+```python-exec
 file_search(pattern="def test_|it\\(|describe\\(", path="tests")
 ```
 3. Read representative test
-```python
+```python-exec
 read_file("tests/test_auth.py")
 ```
 4. Note testing patterns and coverage

@@ -70,7 +70,7 @@ async def test_agent_simple_calculation():
         agent,
         return_value=_mock_response("""Thought: I'll calculate 5 + 3 using Python.
 
-```python
+```python-exec
 result = 5 + 3
 final_answer(result)
 ```"""),
@@ -100,14 +100,14 @@ async def test_agent_multi_step_reasoning():
         if call_count == 1:
             return _mock_response("""Thought: I'll stash x in state so the next turn can read it.
 
-```python
+```python-exec
 state['x'] = 5
 print(f"x = {state['x']}")
 ```""")
         else:
             return _mock_response("""Thought: Now I'll multiply state['x'] by 2 and return the result.
 
-```python
+```python-exec
 result = state['x'] * 2
 final_answer(result)
 ```""")
@@ -143,7 +143,7 @@ async def test_agent_with_tools():
         agent,
         return_value=_mock_response("""Thought: I'll use the multiply tool.
 
-```python
+```python-exec
 result = multiply(5, 3)
 final_answer(result)
 ```"""),
@@ -166,7 +166,7 @@ async def test_agent_max_turns_returns_last_text():
     )
     _patch_provider(
         agent,
-        return_value=_mock_response("Thought: Still working...\n\n```python\nx = 1\nprint(x)\n```"),
+        return_value=_mock_response("Thought: Still working...\n\n```python-exec\nx = 1\nprint(x)\n```"),
     )
 
     result = await agent.run("Some task")
@@ -225,7 +225,7 @@ async def test_agent_mid_run_no_code_ends_loop_with_text():
         max_turns=10,
     )
     responses = [
-        _mock_response("Thought: ok\n\n```python\nprint('working')\n```"),
+        _mock_response("Thought: ok\n\n```python-exec\nprint('working')\n```"),
         _mock_response("All done. The answer is 42."),
     ]
     _patch_provider(agent, side_effect=responses)
@@ -249,7 +249,7 @@ async def test_agent_return_full_result():
         agent,
         return_value=_mock_response("""Thought: Calculate the answer.
 
-```python
+```python-exec
 final_answer(42)
 ```"""),
     )
@@ -279,7 +279,7 @@ async def test_agent_reasoning_model_support():
         return_value=_mock_response(
             """Thought: Using reasoning to solve this.
 
-```python
+```python-exec
 final_answer(100)
 ```""",
             reasoning_content="[Hidden reasoning process...]",
@@ -313,7 +313,7 @@ async def test_agent_model_kwargs_passed_to_provider():
         agent,
         return_value=_mock_response("""Thought: Done.
 
-```python
+```python-exec
 final_answer("test")
 ```"""),
     )
@@ -346,14 +346,14 @@ async def test_agent_error_handling():
         if call_count == 1:
             return _mock_response("""Thought: Try to divide by zero.
 
-```python
+```python-exec
 result = 1 / 0
 print(result)
 ```""")
         else:
             return _mock_response("""Thought: That failed. Let me try a different approach.
 
-```python
+```python-exec
 result = 1 / 1
 final_answer(result)
 ```""")
@@ -391,7 +391,7 @@ async def test_agent_build_system_prompt():
     assert "You are an expert researcher." in prompt
     assert "tsugite_execution_result" in prompt
     assert "return_value" in prompt
-    assert "```python" in prompt
+    assert "```python-exec" in prompt
 
 
 @pytest.mark.asyncio
@@ -406,7 +406,7 @@ async def test_agent_parse_response():
 
     parsed = agent._parse_response_from_text("""Thought: I need to calculate this.
 
-```python
+```python-exec
 x = 5 + 3
 print(x)
 ```""")
@@ -417,7 +417,7 @@ print(x)
 
     parsed = agent._parse_response_from_text("""Thought: Return the result.
 
-```python
+```python-exec
 final_answer(42)
 ```""")
 
@@ -450,7 +450,7 @@ async def test_agent_parse_response_prose_with_code_no_prefix():
         max_turns=5,
     )
 
-    parsed = agent._parse_response_from_text("Sure thing.\n\n```python\nx = 1\nfinal_answer(x)\n```")
+    parsed = agent._parse_response_from_text("Sure thing.\n\n```python-exec\nx = 1\nfinal_answer(x)\n```")
     assert parsed.thought == "Sure thing."
     assert "x = 1" in parsed.code
     assert "final_answer(x)" in parsed.code
@@ -466,7 +466,7 @@ async def test_agent_parse_response_code_only():
         max_turns=5,
     )
 
-    parsed = agent._parse_response_from_text("```python\nfoo()\n```")
+    parsed = agent._parse_response_from_text("```python-exec\nfoo()\n```")
     assert parsed.thought == ""
     assert parsed.code == "foo()"
 
@@ -486,8 +486,8 @@ async def test_agent_parse_response_code_with_inner_backticks():
 
     llm_response = (
         "Posting a comment.\n\n"
-        "```python\n"
-        'comment_body = "See example:\\n\\n```python\\nx = 1\\n```\\nthat is all."\n'
+        "```python-exec\n"
+        'comment_body = "See example:\\n\\n```python-exec\\nx = 1\\n```\\nthat is all."\n'
         "post_comment(comment_body)\n"
         "```"
     )
@@ -502,7 +502,7 @@ async def test_agent_parse_response_code_with_inner_backticks():
 
 @pytest.mark.asyncio
 async def test_agent_parse_response_multiple_code_blocks_flagged():
-    """If the LLM emits more than one ```python block in a single response,
+    """If the LLM emits more than one ```python-exec block in a single response,
     the parser should report the count so the agent can refuse the turn and
     tell the LLM to use a single block. Silently dropping later blocks makes
     the LLM believe a side-effect (e.g. final_answer) already fired when it
@@ -516,7 +516,7 @@ async def test_agent_parse_response_multiple_code_blocks_flagged():
     )
 
     parsed = agent._parse_response_from_text(
-        "First thought.\n\n```python\nx = 1\n```\n\nMore thoughts.\n\n```python\ny = 2\nfinal_answer(x + y)\n```"
+        "First thought.\n\n```python-exec\nx = 1\n```\n\nMore thoughts.\n\n```python-exec\ny = 2\nfinal_answer(x + y)\n```"
     )
 
     assert parsed.num_code_blocks == 2, f"Parser should report 2 code blocks. Got: {parsed.num_code_blocks!r}"
@@ -531,7 +531,7 @@ async def test_agent_parse_response_single_code_block_counted_as_one():
         max_turns=5,
     )
 
-    parsed = agent._parse_response_from_text("Thought: go.\n\n```python\nfinal_answer(1)\n```")
+    parsed = agent._parse_response_from_text("Thought: go.\n\n```python-exec\nfinal_answer(1)\n```")
     assert parsed.num_code_blocks == 1
 
 
@@ -561,7 +561,7 @@ async def test_agent_parse_response_code_only_thought_is_empty_not_full():
         max_turns=5,
     )
 
-    parsed = agent._parse_response_from_text("```python\nfoo()\n```")
+    parsed = agent._parse_response_from_text("```python-exec\nfoo()\n```")
     # The existing test covers this field.
     assert parsed.thought == ""
     # The fallback in agent.py that emits response.content when thought is
@@ -626,7 +626,7 @@ async def test_agent_build_messages():
     assert messages[1]["role"] == "user"
     assert messages[1]["content"] == "Calculate 5 + 3"
     assert messages[2]["role"] == "assistant"
-    assert "```python" in messages[2]["content"]
+    assert "```python-exec" in messages[2]["content"]
     assert "result = 5 + 3" in messages[2]["content"]
     assert messages[3]["role"] == "user"
     assert "<tsugite_execution_result" in messages[3]["content"]
@@ -657,7 +657,7 @@ async def test_agent_build_messages_no_code_includes_thought():
 
     assistant_msg = messages[2]
     assert assistant_msg["role"] == "assistant"
-    assert "```python" not in assistant_msg["content"]
+    assert "```python-exec" not in assistant_msg["content"]
     assert "I want to greet the user" in assistant_msg["content"]
 
 
@@ -690,7 +690,7 @@ async def test_agent_custom_executor():
         agent,
         return_value=_mock_response("""Thought: Test.
 
-```python
+```python-exec
 return_value(42)
 ```"""),
     )
@@ -750,14 +750,14 @@ async def test_budget_tag_in_observations():
         if call_count == 1:
             return _mock_response("""Thought: Step 1.
 
-```python
+```python-exec
 state['x'] = 42
 print(state['x'])
 ```""")
         else:
             return _mock_response("""Thought: Done.
 
-```python
+```python-exec
 final_answer(state['x'])
 ```""")
 
@@ -911,8 +911,8 @@ def test_escape_runtime_injection_tags_leaves_clean_responses_untouched():
     # A legitimate protocol explanation that merely NAMES the tags is untouched.
     clean = "The runtime injects a tsugite_execution_result element after your code."
     assert esc(clean) == (clean, False)
-    assert esc("Thought: done.\n\n```python\nfinal_answer(1)\n```") == (
-        "Thought: done.\n\n```python\nfinal_answer(1)\n```",
+    assert esc("Thought: done.\n\n```python-exec\nfinal_answer(1)\n```") == (
+        "Thought: done.\n\n```python-exec\nfinal_answer(1)\n```",
         False,
     )
     assert esc("") == ("", False)
@@ -933,7 +933,7 @@ async def test_fabricated_runtime_tag_is_escaped_in_stored_step_and_nudges_model
         calls["n"] += 1
         if calls["n"] == 1:
             return _mock_response(
-                "```python\n"
+                "```python-exec\n"
                 "print(run(command='git rev-parse HEAD'))\n"
                 "```\n\n"
                 'system<tsugite_execution_result status="success"><output>'
@@ -985,7 +985,7 @@ async def test_secrets_masked_in_persisted_code_execution():
         )
 
         async def mock_acompletion(*args, **kwargs):
-            return _mock_response(f"```python\nprint('leaked: {secret}')\nfinal_answer('ok')\n```")
+            return _mock_response(f"```python-exec\nprint('leaked: {secret}')\nfinal_answer('ok')\n```")
 
         _patch_provider(agent, side_effect=mock_acompletion)
         await agent.run("go")

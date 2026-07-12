@@ -77,7 +77,7 @@ library like requests...
 Use httpx (not requests) — our async codebase requires non-blocking calls.
 Auth tokens go in `X-Internal-Token` header, not `Authorization`.
 
-```python
+```python-exec
 async with httpx.AsyncClient() as client:
     resp = await client.get(url, headers={"X-Internal-Token": token})
 ```

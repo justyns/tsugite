@@ -42,9 +42,9 @@ class TestExtractContentBlocks:
         assert cleaned == text
 
     def test_content_with_backticks(self):
-        text = '<content name="code">\n```python\nprint("hello")\n```\n</content>'
+        text = '<content name="code">\n```python-exec\nprint("hello")\n```\n</content>'
         cleaned, blocks = extract_content_blocks(text)
-        assert "```python" in blocks["code"]
+        assert "```python-exec" in blocks["code"]
         assert 'print("hello")' in blocks["code"]
 
     def test_content_block_preserves_indentation(self):
@@ -90,7 +90,7 @@ class TestContentBlocksIntegration:
 
             mock_provider.acompletion.return_value = mock_completion_response(
                 "Thought: Writing a Python file\n\n"
-                "```python\n"
+                "```python-exec\n"
                 f'write_file("{outfile}", content=py_code)\n'
                 'final_answer("done")\n'
                 "```\n\n"
@@ -131,7 +131,7 @@ class TestContentBlocksIntegration:
 
             mock_provider.acompletion.return_value = mock_completion_response(
                 "Thought: Editing the file\n\n"
-                "```python\n"
+                "```python-exec\n"
                 f'result = edit_file("{target}", old_string=old, new_string=new)\n'
                 "print(result)\n"
                 'final_answer("edited")\n'
@@ -178,13 +178,13 @@ class TestContentBlocksIntegration:
             if call_count == 1:
                 return mock_completion_response(
                     "Thought: Setting up\n\n"
-                    "```python\n"
+                    "```python-exec\n"
                     "print(my_data)\n"
                     "```\n\n"
                     '<content name="my_data">\ntest content\n</content>'
                 )
             else:
-                return mock_completion_response('```python\nfinal_answer("done")\n```')
+                return mock_completion_response('```python-exec\nfinal_answer("done")\n```')
 
         mock_provider.acompletion.side_effect = mock_acompletion
 
@@ -213,10 +213,10 @@ class TestContentBlocksIntegration:
             call_count += 1
             if call_count == 1:
                 return mock_completion_response(
-                    '```python\nprint(data)\n```\n\n<content name="data">\npersisted value\n</content>'
+                    '```python-exec\nprint(data)\n```\n\n<content name="data">\npersisted value\n</content>'
                 )
             else:
-                return mock_completion_response("```python\nfinal_answer(data)\n```")
+                return mock_completion_response("```python-exec\nfinal_answer(data)\n```")
 
         mock_provider.acompletion.side_effect = mock_acompletion
 
@@ -239,7 +239,7 @@ class TestContentBlocksIntegration:
             file_b = os.path.join(tmpdir, "b.txt")
 
             mock_provider.acompletion.return_value = mock_completion_response(
-                "```python\n"
+                "```python-exec\n"
                 f'write_file("{file_a}", content=content_a)\n'
                 f'write_file("{file_b}", content=content_b)\n'
                 'final_answer("done")\n'

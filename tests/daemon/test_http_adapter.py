@@ -742,7 +742,7 @@ class TestHistoryEndpoint:
 
         storage = SessionStorage.create("test-agent", model="test", session_path=session_path)
         storage.record("user_input", text="go")
-        storage.record("model_response", raw_content="```python\nprint('hi')\n```")
+        storage.record("model_response", raw_content="```python-exec\nprint('hi')\n```")
         storage.record("code_execution", code="print('hi')", output="hi\n", duration_ms=12)
         storage.record("model_response", raw_content="Done.")
 

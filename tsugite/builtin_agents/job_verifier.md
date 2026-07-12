@@ -44,9 +44,9 @@ inspecting the workspace yourself.
 
 ## Tool use
 
-To inspect, reply with a single ```python code block calling a tool:
+To inspect, reply with a single ```python-exec code block calling a tool:
 
-```python
+```python-exec
 read_file(path="docs/page.md")
 ```
 

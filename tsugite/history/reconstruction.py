@@ -111,7 +111,7 @@ def _execution_xml(data: Dict[str, Any], ts: Optional[datetime] = None) -> str:
 def _format_error_xml(data: Dict[str, Any]) -> str:
     reason = data.get("reason", "")
     msg = (
-        "Format Error: " + reason + ". You must respond with exactly ONE ```python "
+        "Format Error: " + reason + ". You must respond with exactly ONE ```python-exec "
         "code block per response. Combine all code into a single block."
     )
     return (

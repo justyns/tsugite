@@ -621,10 +621,10 @@ class TestClaudeCodeAgentIntegration:
 
         async def mock_send(*args, **kwargs):
             events = [
-                {"type": "text_delta", "text": "Thought: simple\n```python\nfinal_answer('42')\n```"},
+                {"type": "text_delta", "text": "Thought: simple\n```python-exec\nfinal_answer('42')\n```"},
                 {
                     "type": "result",
-                    "text": "Thought: simple\n```python\nfinal_answer('42')\n```",
+                    "text": "Thought: simple\n```python-exec\nfinal_answer('42')\n```",
                     "cost_usd": 0.001,
                     "session_id": "test-session",
                     "input_tokens": 500,
@@ -669,7 +669,7 @@ class TestClaudeCodeAgentIntegration:
 
         async def mock_send(*args, **kwargs):
             events = [
-                {"type": "text_delta", "text": "Thought: done\n```python\nfinal_answer('hi')\n```"},
+                {"type": "text_delta", "text": "Thought: done\n```python-exec\nfinal_answer('hi')\n```"},
                 {
                     "type": "result",
                     "text": "",
@@ -715,7 +715,7 @@ class TestClaudeCodeAgentIntegration:
 
         async def mock_send(*args, **kwargs):
             events = [
-                {"type": "text_delta", "text": "Thought: done\n```python\nfinal_answer('hi')\n```"},
+                {"type": "text_delta", "text": "Thought: done\n```python-exec\nfinal_answer('hi')\n```"},
                 {
                     "type": "result",
                     "text": "",
@@ -816,7 +816,7 @@ class TestClaudeCodeContextLimit:
 
         async def mock_send(*args, **kwargs):
             events = [
-                {"type": "text_delta", "text": "Thought: done\n```python\nfinal_answer('ok')\n```"},
+                {"type": "text_delta", "text": "Thought: done\n```python-exec\nfinal_answer('ok')\n```"},
                 {
                     "type": "result",
                     "text": "",
@@ -1097,7 +1097,7 @@ class TestClaudeCodeMultiTurnTokens:
             call_count += 1
             code = td["code"]
             events = [
-                {"type": "text_delta", "text": f"Thought: step\n```python\n{code}\n```"},
+                {"type": "text_delta", "text": f"Thought: step\n```python-exec\n{code}\n```"},
                 {
                     "type": "result",
                     "text": "",

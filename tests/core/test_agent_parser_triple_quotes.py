@@ -26,7 +26,7 @@ def _agent():
 @pytest.mark.asyncio
 async def test_parse_triple_quoted_body_with_real_newlines_and_inner_fences():
     llm_response = (
-        'Posting a comment.\n\n```python\nbody = """example:\n\n```\ninner\n```\n\nend.\n"""\npost_comment(body)\n```'
+        'Posting a comment.\n\n```python-exec\nbody = """example:\n\n```\ninner\n```\n\nend.\n"""\npost_comment(body)\n```'
     )
 
     parsed = _agent()._parse_response_from_text(llm_response)
@@ -37,7 +37,7 @@ async def test_parse_triple_quoted_body_with_real_newlines_and_inner_fences():
 
 @pytest.mark.asyncio
 async def test_parse_triple_single_quoted_body_with_inner_fences():
-    llm_response = "```python\nbody = '''\nexample:\n```\ninner\n```\nend\n'''\nprint(body)\n```"
+    llm_response = "```python-exec\nbody = '''\nexample:\n```\ninner\n```\nend\n'''\nprint(body)\n```"
 
     parsed = _agent()._parse_response_from_text(llm_response)
     assert "print(body)" in parsed.code, f"Got: {parsed.code!r}"
@@ -50,7 +50,7 @@ async def test_existing_single_quoted_escape_case_still_works():
     inside a single-quoted string with `\\n` escape sequences.
     """
     llm_response = (
-        "```python\n"
+        "```python-exec\n"
         'comment_body = "See example:\\n\\n```python\\nx = 1\\n```\\nthat is all."\n'
         "post_comment(comment_body)\n"
         "```"
@@ -65,6 +65,6 @@ async def test_multiple_top_level_blocks_still_counted():
     """Picking the right close fence must not change the multi-block count
     the agent relies on for its warning.
     """
-    llm_response = '```python\nx = """\n```\ny\n```\n"""\n```\n\nsome prose\n\n```python\nfinal_answer(x)\n```'
+    llm_response = '```python-exec\nx = """\n```\ny\n```\n"""\n```\n\nsome prose\n\n```python-exec\nfinal_answer(x)\n```'
     parsed = _agent()._parse_response_from_text(llm_response)
     assert parsed.num_code_blocks == 2, f"got {parsed.num_code_blocks}"

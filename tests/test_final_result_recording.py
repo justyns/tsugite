@@ -44,7 +44,7 @@ def _finals(storage):
 async def test_return_value_records_final_result(tmp_path: Path):
     storage = _storage(tmp_path)
     agent = TsugiteAgent(model_string="openai:gpt-4o-mini", tools=[], instructions="", max_turns=5, storage=storage)
-    _patch(agent, return_value=_resp('```python\nreturn_value("nothing to commit")\n```'))
+    _patch(agent, return_value=_resp('```python-exec\nreturn_value("nothing to commit")\n```'))
 
     await agent.run("check repo")
 
@@ -62,7 +62,7 @@ async def test_return_value_records_final_result(tmp_path: Path):
 async def test_structured_return_value_records_result_data(tmp_path: Path):
     storage = _storage(tmp_path)
     agent = TsugiteAgent(model_string="openai:gpt-4o-mini", tools=[], instructions="", max_turns=5, storage=storage)
-    _patch(agent, return_value=_resp('```python\nreturn_value({"a": 1})\n```'))
+    _patch(agent, return_value=_resp('```python-exec\nreturn_value({"a": 1})\n```'))
 
     await agent.run("structured")
 

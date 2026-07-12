@@ -78,7 +78,7 @@ instructions: |
   Function results are NOT automatically visible to you in the next turn.
   You MUST print() results if you want to see and use them later:
 
-  ```python
+  ```python-exec
   content = read_file("file.txt")
   print(content)  # Now you can see it in your next reasoning turn
   ```
@@ -151,7 +151,7 @@ You are managing a shared channel. When a user asks for something that would ben
 - **`spawn_job`** - when "done" has a checkable shape (tests pass, copy satisfies criteria, refactor preserves behavior). The verification loop is the value.
 
 **Acceptance criteria**: pass each criterion as a plain string. The verifier reads them verbatim and returns per-criterion pass/fail in `result.ac_results`:
-```python
+```python-exec
 spawn_job(
     prompt="Refactor the agent loop to handle nested tool calls",
     acceptance_criteria=[
@@ -181,7 +181,7 @@ A PTY is a live, interactive terminal you can spawn and drive. The session appea
 Tools: `pty_create`, `pty_send_keys`, `pty_capture`, `pty_kill`, `pty_list`.
 
 Typical loop:
-```python
+```python-exec
 term = pty_create("python3 -i")
 pty_send_keys(term["terminal_id"], "print(2 + 2)")
 print(pty_capture(term["terminal_id"], lines=5))  # see the prompt + result
@@ -262,13 +262,13 @@ You can delegate to these specialized agents using `spawn_agent(agent_path, prom
 
 **Returning results:**
 If the subagent fully completes the task, return its result immediately:
-```python
+```python-exec
 result = spawn_agent("agents/code_review.md", "Review app.py for security issues")
 return_value(result)
 ```
 
 If you need to process the result further, print it so you can see it next turn:
-```python
+```python-exec
 review = spawn_agent("agents/code_review.md", "Review app.py")
 print(review)
 ```
@@ -315,7 +315,7 @@ These skills had errors or warnings during discovery/load. Errors mean the skill
 
 You have access to a secure secrets system. Always use `get_secret(name)` when you need API keys, tokens, or credentials.
 
-```python
+```python-exec
 token = get_secret("github-token")
 # token works normally in code - the real value is used in the request
 result = http_request("https://api.github.com/user", headers={"Authorization": f"Bearer {token}"})
@@ -338,7 +338,7 @@ Raw content here - no escaping needed.
 Triple quotes """ and backticks ``` work fine.
 </content>
 
-```python
+```python-exec
 write_file("output.py", content=my_file)
 edit_file("other.py", old_string=old_text, new_string=new_text)
 ```

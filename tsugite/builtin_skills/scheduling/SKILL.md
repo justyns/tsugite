@@ -50,7 +50,7 @@ Schedules support two execution types:
 
 ### Script Examples
 
-```python
+```python-exec
 # Recurring health check
 schedule_create(
     id="health-ping",
@@ -103,7 +103,7 @@ The `prompt` field is what the scheduled agent will receive as its task. **Do NO
 
 ### Recurring (Cron)
 
-```python
+```python-exec
 schedule_create(
     id="daily-digest",
     prompt="Summarize today's inbox and create a digest",
@@ -114,7 +114,7 @@ schedule_create(
 
 ### One-Off
 
-```python
+```python-exec
 schedule_create(
     id="deploy-reminder",
     prompt="Remind the user to deploy the staging branch",
@@ -154,7 +154,7 @@ schedule_create(
 
 ## Listing and Checking Status
 
-```python
+```python-exec
 schedules = schedule_list()
 print(schedules)
 ```
@@ -163,7 +163,7 @@ Each schedule includes: `id`, `agent`, `schedule_type`, `enabled`, `next_run`, `
 
 ## Managing Schedules
 
-```python
+```python-exec
 # Pause a schedule
 schedule_disable("daily-digest")
 
@@ -177,7 +177,7 @@ schedule_remove("deploy-reminder")
 ## Workflow: User Asks to Schedule Something
 
 1. **Check existing schedules** to avoid duplicates:
-```python
+```python-exec
 schedules = schedule_list()
 print(schedules)
 ```
@@ -199,7 +199,7 @@ print(schedules)
    > Does this look right?
 
 5. **Only after the user confirms**, create the schedule:
-```python
+```python-exec
 result = schedule_create(
     id="weekly-report",
     prompt="Generate the weekly project status report covering all commits and open PRs",
@@ -219,7 +219,7 @@ Scheduled tasks can send notifications to the user via configured channels (Disc
 
 Set `notify` to automatically send the final result when the task finishes:
 
-```python
+```python-exec
 schedule_create(
     id="daily-report",
     prompt="Generate a daily status report",
@@ -232,7 +232,7 @@ schedule_create(
 
 Set both `notify` and `notify_tool=True` to give the agent the `notify_user` tool. The agent can send progress updates, alerts, or findings at any point during execution:
 
-```python
+```python-exec
 schedule_create(
     id="monitoring",
     prompt="Check server health and notify if any issues are found",
@@ -244,7 +244,7 @@ schedule_create(
 
 ### Both (auto-notify + tool)
 
-```python
+```python-exec
 schedule_create(
     id="full-check",
     prompt="Run security audit and report findings",

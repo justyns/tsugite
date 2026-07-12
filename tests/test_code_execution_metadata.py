@@ -46,7 +46,7 @@ def _code_exec_event(storage):
 async def test_return_value_dict_records_expr_and_type(tmp_path: Path):
     storage = SessionStorage.create(agent_name="t", model="openai:gpt-4o-mini", session_path=tmp_path / "s.jsonl")
     agent = _agent(storage)
-    _patch(agent, return_value=_resp('```python\nreturn_value({"a": 1, "b": [1, 2, 3]})\n```'))
+    _patch(agent, return_value=_resp('```python-exec\nreturn_value({"a": 1, "b": [1, 2, 3]})\n```'))
 
     await agent.run("structured")
 
@@ -65,7 +65,7 @@ async def test_trailing_statement_has_no_return_value(tmp_path: Path):
     async def side(*a, **k):
         nonlocal calls
         calls += 1
-        return _resp("```python\nx = 1\n```") if calls == 1 else _resp("done")
+        return _resp("```python-exec\nx = 1\n```") if calls == 1 else _resp("done")
 
     _patch(agent, side_effect=side)
 
@@ -82,7 +82,7 @@ async def test_non_serializable_return_value_stored_as_repr(tmp_path: Path):
     storage = SessionStorage.create(agent_name="t", model="openai:gpt-4o-mini", session_path=tmp_path / "s.jsonl")
     agent = _agent(storage)
     # A set is not JSON-serializable; recording must not attempt json.dumps on it.
-    _patch(agent, return_value=_resp("```python\nreturn_value({1, 2, 3})\n```"))
+    _patch(agent, return_value=_resp("```python-exec\nreturn_value({1, 2, 3})\n```"))
 
     await agent.run("set")
 

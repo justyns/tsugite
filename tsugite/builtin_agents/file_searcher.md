@@ -43,7 +43,7 @@ Use the `run()` tool with these commands:
 ### Search for content in files
 
 {% if has_rg %}
-```python
+```python-exec
 # Basic search
 run(command="rg 'pattern' path/")
 
@@ -60,7 +60,7 @@ run(command="rg -l 'pattern' path/")
 run(command="rg 'def\\s+\\w+' src/")
 ```
 {% elif has_ag %}
-```python
+```python-exec
 # Basic search
 run(command="ag 'pattern' path/")
 
@@ -71,7 +71,7 @@ run(command="ag -C 3 'pattern' path/")
 run(command="ag -i 'pattern' path/")
 ```
 {% else %}
-```python
+```python-exec
 # Basic search (excludes .venv, node_modules, .git, __pycache__, etc.)
 run(command="grep -r --exclude-dir={.git,.venv,venv,node_modules,__pycache__,.pytest_cache,.mypy_cache,build,dist,.tox} --exclude='*.pyc' --exclude='*.pyo' --exclude='*.so' --exclude='*.o' 'pattern' path/")
 
@@ -86,7 +86,7 @@ run(command="grep -ri --exclude-dir={.git,.venv,venv,node_modules,__pycache__} -
 ### Find files by name
 
 {% if has_fd %}
-```python
+```python-exec
 # Find by pattern
 run(command="fd 'pattern' path/")
 
@@ -100,7 +100,7 @@ run(command="fd --type f 'pattern' path/")
 run(command="fd -i 'pattern' path/")
 ```
 {% else %}
-```python
+```python-exec
 # Find by name (excludes .venv, node_modules, .git, etc.)
 run(command="find path/ -type f -name 'pattern' -not -path '*/.git/*' -not -path '*/.venv/*' -not -path '*/venv/*' -not -path '*/node_modules/*' -not -path '*/__pycache__/*' -not -path '*/build/*' -not -path '*/dist/*'")
 
@@ -115,7 +115,7 @@ run(command="find path/ -type f -iname 'pattern' -not -path '*/.git/*' -not -pat
 ## Common Search Patterns
 
 ### Find TODOs/FIXMEs:
-```python
+```python-exec
 {% if has_rg %}
 run(command="rg '(TODO|FIXME|XXX|HACK)' .")
 {% elif has_ag %}
@@ -126,7 +126,7 @@ run(command="grep -rE --exclude-dir={.git,.venv,venv,node_modules,__pycache__} -
 ```
 
 ### Find function/class definitions:
-```python
+```python-exec
 {% if has_rg %}
 run(command="rg '^(def|class)\\s+\\w+' src/")
 {% elif has_ag %}
@@ -137,7 +137,7 @@ run(command="grep -rE --exclude-dir={.git,.venv,venv,__pycache__} --exclude='*.p
 ```
 
 ### Find imports:
-```python
+```python-exec
 {% if has_rg %}
 run(command="rg '^(import|from)' .")
 {% elif has_ag %}
@@ -148,7 +148,7 @@ run(command="grep -r --exclude-dir={.git,.venv,venv,__pycache__} --exclude='*.py
 ```
 
 ### Find potential secrets (IMPORTANT - use with care):
-```python
+```python-exec
 {% if has_rg %}
 run(command="rg -i '(api[_-]?key|password|secret|token)\\s*=' .")
 {% elif has_ag %}
@@ -159,7 +159,7 @@ run(command="grep -riE --exclude-dir={.git,.venv,venv,node_modules,__pycache__} 
 ```
 
 ### Find files by extension:
-```python
+```python-exec
 {% if has_fd %}
 run(command="fd -e py -e js -e ts src/")
 {% else %}
@@ -170,7 +170,7 @@ run(command="find src/ -type f \\( -name '*.py' -o -name '*.js' -o -name '*.ts' 
 ## Response Guidelines
 
 Execute searches and return results:
-```python
+```python-exec
 {% if has_rg %}
 # Search for pattern
 results = run(command="rg 'function_name' src/")

@@ -75,7 +75,7 @@ async def test_code_then_no_code_ends_loop(storage):
         nonlocal calls
         calls += 1
         if calls == 1:
-            return _resp("Working on it.\n\n```python\nx = 1\nprint(x)\n```")
+            return _resp("Working on it.\n\n```python-exec\nx = 1\nprint(x)\n```")
         return _resp("All done. The answer is 1.")
 
     _patch(agent, side_effect=side)
@@ -99,7 +99,7 @@ async def test_return_value_ends_loop_with_structured_value(storage):
     )
     _patch(
         agent,
-        return_value=_resp('```python\nreturn_value({"a": 1, "b": [1,2,3]})\n```'),
+        return_value=_resp('```python-exec\nreturn_value({"a": 1, "b": [1,2,3]})\n```'),
     )
 
     result = await agent.run("structured")
@@ -116,7 +116,7 @@ async def test_max_turns_returns_last_response_text(storage):
         max_turns=3,
         storage=storage,
     )
-    _patch(agent, return_value=_resp("Still going.\n```python\nx = 1\n```"))
+    _patch(agent, return_value=_resp("Still going.\n```python-exec\nx = 1\n```"))
 
     result = await agent.run("loop forever")
 
@@ -128,7 +128,7 @@ async def test_max_turns_returns_last_response_text(storage):
 
 @pytest.mark.asyncio
 async def test_multi_code_block_executes_first_and_warns(storage):
-    """When the model emits multiple ```python blocks in one response, the agent
+    """When the model emits multiple ```python-exec blocks in one response, the agent
     executes only the first block (the parser already takes just the first),
     emits a WarningEvent noting the extras were dropped, and proceeds normally.
     No format_error event is recorded and no retry is forced.
@@ -151,7 +151,7 @@ async def test_multi_code_block_executes_first_and_warns(storage):
         nonlocal calls
         calls += 1
         if calls == 1:
-            return _resp("```python\na=1\n```\n\n```python\nb=2\n```")
+            return _resp("```python-exec\na=1\n```\n\n```python-exec\nb=2\n```")
         return _resp("Recovered.")
 
     _patch(agent, side_effect=side)
@@ -175,7 +175,7 @@ async def test_multi_code_block_executes_first_and_warns(storage):
 async def test_multi_code_block_warning_lands_in_next_turn_observation(storage):
     """Regression test for justyns/tsugite#212.
 
-    When the model emits N>1 ```python blocks in a single response, only the
+    When the model emits N>1 ```python-exec blocks in a single response, only the
     first block runs. The model's prior response (saved as raw_content) still
     shows all N blocks, so without an explicit signal the model cannot tell
     that blocks 2..N were dropped — it sees one observation and assumes the
@@ -196,7 +196,7 @@ async def test_multi_code_block_warning_lands_in_next_turn_observation(storage):
         nonlocal calls
         calls += 1
         if calls == 1:
-            return _resp("```python\na = 1\nprint(a)\n```\n\n```python\nb = 2\n```\n\n```python\nc = 3\n```")
+            return _resp("```python-exec\na = 1\nprint(a)\n```\n\n```python-exec\nb = 2\n```\n\n```python-exec\nc = 3\n```")
         return _resp("All done.")
 
     provider_mock = _patch(agent, side_effect=side)
@@ -221,7 +221,7 @@ async def test_multi_code_block_warning_lands_in_next_turn_observation(storage):
     assert 'dropped="2"' in obs_text and 'total="3"' in obs_text, (
         f"warning should report dropped=2 total=3, got: {obs_text!r}"
     )
-    assert "one ```python block per turn" in obs_text, (
+    assert "one ```python-exec block per turn" in obs_text, (
         f"warning should instruct one-block-per-turn discipline, got: {obs_text!r}"
     )
 
@@ -250,7 +250,7 @@ async def test_single_block_response_has_no_multi_block_warning(storage):
         nonlocal calls
         calls += 1
         if calls == 1:
-            return _resp("```python\nx = 1\nprint(x)\n```")
+            return _resp("```python-exec\nx = 1\nprint(x)\n```")
         return _resp("done")
 
     provider_mock = _patch(agent, side_effect=side)
@@ -274,7 +274,7 @@ async def test_raw_assistant_text_recorded_verbatim(storage):
         max_turns=3,
         storage=storage,
     )
-    raw = "Some prose with `inline backticks` and ```python\nx = 1\n```\nMore prose after."
+    raw = "Some prose with `inline backticks` and ```python-exec\nx = 1\n```\nMore prose after."
     calls = 0
 
     async def side(*a, **k):

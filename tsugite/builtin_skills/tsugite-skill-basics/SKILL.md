@@ -110,13 +110,13 @@ triggers:
 
 Agents can load a skill mid-execution:
 
-```python
+```python-exec
 load_skill("python-math")
 ```
 
 Calling `load_skill()` on an already-loaded skill renews its TTL (resets the unused-turn counter). To drop a skill early:
 
-```python
+```python-exec
 unload_skill("python-math")
 ```
 
@@ -132,7 +132,7 @@ Override TTL per skill with frontmatter `ttl: N`. Global default lives in `confi
 
 ### List Available Skills
 
-```python
+```python-exec
 list_available_skills()
 # - python-math: Reference for performing common math operations in Python
 # - tsugite-jinja-reference: Reference for Jinja templating in Tsugite agents
@@ -209,21 +209,21 @@ Tsugite agents execute in a **turn-based model** - each code block runs independ
 
 Good (one call per block):
 
-```python
+```python-exec
 # Step 1: Search
 file_search(pattern="class.*Base", path="src")
 ```
 
 Then:
 
-```python
+```python-exec
 # Step 2: Read a result
 read_file("src/base.py")
 ```
 
 Bad (chains results inside one block - won't work):
 
-```python
+```python-exec
 results = file_search(pattern="class", path="src")
 read_file(results[0])
 ```
@@ -262,7 +262,7 @@ When working with [domain], follow these conventions:
 
 ### Pattern 1
 
-```python
+```python-exec
 # concrete example
 ```
 

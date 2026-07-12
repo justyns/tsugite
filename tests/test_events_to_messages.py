@@ -38,7 +38,7 @@ class TestEventsToMessagesStateless:
     def test_assistant_uses_raw_content_not_reparse(self):
         # The raw content may include arbitrary prose plus a code fence; we must
         # send it back verbatim, not re-render from a parsed shape.
-        raw = "Thinking out loud.\n\n```python\nprint(1)\n```\n\nDone."
+        raw = "Thinking out loud.\n\n```python-exec\nprint(1)\n```\n\nDone."
         events = [
             _ev("user_input", ts=FIXED_TS, text="task"),
             _ev("model_response", raw_content=raw),
@@ -55,7 +55,7 @@ class TestEventsToMessagesStateless:
     def test_multi_turn_conversation(self):
         events = [
             _ev("user_input", ts=FIXED_TS, text="t1"),
-            _ev("model_response", raw_content="r1\n```python\nx=1\n```"),
+            _ev("model_response", raw_content="r1\n```python-exec\nx=1\n```"),
             _ev("code_execution", output="ok"),
             _ev("model_response", raw_content="r2"),
             _ev("user_input", ts=FIXED_TS, text="t2"),
@@ -74,7 +74,7 @@ class TestEventsToMessagesStateless:
     def test_error_observation_includes_error_tag(self):
         events = [
             _ev("user_input", text="t"),
-            _ev("model_response", raw_content="```python\nbad\n```"),
+            _ev("model_response", raw_content="```python-exec\nbad\n```"),
             _ev("code_execution", code="bad", output="", error="NameError: bad"),
         ]
         msgs = events_to_messages(events)
@@ -102,7 +102,7 @@ class TestEventsToMessagesStateless:
     def test_format_error_observation(self):
         events = [
             _ev("user_input", text="t"),
-            _ev("model_response", raw_content="```python\na\n```\n```python\nb\n```"),
+            _ev("model_response", raw_content="```python-exec\na\n```\n```python-exec\nb\n```"),
             _ev("format_error", reason="2 python blocks", rejected_content="..."),
         ]
         msgs = events_to_messages(events)
@@ -137,9 +137,9 @@ class TestReplayDeterminism:
         # output - never the other turn's stale text.
         events = [
             _ev("user_input", ts=FIXED_TS, text="read it twice"),
-            _ev("model_response", raw_content="```python\nprint(read_file('skill.md'))\n```"),
+            _ev("model_response", raw_content="```python-exec\nprint(read_file('skill.md'))\n```"),
             _ev("code_execution", code="read_file('skill.md')", output="WC=4357 heading: Sandboxed MCP"),
-            _ev("model_response", raw_content="```python\nprint(read_file('skill.md'))\n```"),
+            _ev("model_response", raw_content="```python-exec\nprint(read_file('skill.md'))\n```"),
             _ev("code_execution", code="read_file('skill.md')", output="WC=6201 heading: sandboxed-mcp"),
             _ev("model_response", raw_content="done"),
         ]
@@ -194,7 +194,7 @@ class TestTimestampPrefixing:
     def test_code_execution_envelope_has_ts_attribute(self):
         events = [
             _ev("user_input", text="t"),
-            _ev("model_response", raw_content="```python\nx=1\n```"),
+            _ev("model_response", raw_content="```python-exec\nx=1\n```"),
             _ev("code_execution", ts=FIXED_TS, output="ok", duration_ms=5),
         ]
         msgs = events_to_messages(events)

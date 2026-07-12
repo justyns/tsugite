@@ -197,7 +197,7 @@ class _RecordingProvider:
 
         self.calls.append(kwargs)
         return CompletionResponse(
-            content="finishing up\n```python\nfinal_answer('ok')\n```",
+            content="finishing up\n```python-exec\nfinal_answer('ok')\n```",
             usage=Usage(total_tokens=5),
             cost=0.0,
         )

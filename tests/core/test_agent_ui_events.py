@@ -59,7 +59,7 @@ async def test_ui_event_task_start(event_bus_with_handler):
         agent,
         return_value=_resp("""Thought: Calculate the answer.
 
-```python
+```python-exec
 final_answer(42)
 ```"""),
     )
@@ -84,14 +84,14 @@ async def test_ui_event_step_start(event_bus_with_handler):
         if call_count == 1:
             return _resp("""Thought: First step.
 
-```python
+```python-exec
 state['x'] = 5
 print(state['x'])
 ```""")
         else:
             return _resp("""Thought: Second step.
 
-```python
+```python-exec
 final_answer(state['x'] * 2)
 ```""")
 
@@ -127,7 +127,7 @@ async def test_ui_event_code_execution(event_bus_with_handler):
         agent,
         return_value=_resp("""Thought: Execute code.
 
-```python
+```python-exec
 result = 5 + 3
 final_answer(result)
 ```"""),
@@ -156,7 +156,7 @@ async def test_ui_event_observation(event_bus_with_handler):
         agent,
         return_value=_resp("""Thought: Print something.
 
-```python
+```python-exec
 print("Hello, World!")
 final_answer("done")
 ```"""),
@@ -184,7 +184,7 @@ async def test_ui_event_final_answer(event_bus_with_handler):
         agent,
         return_value=_resp("""Thought: Return the answer.
 
-```python
+```python-exec
 final_answer("The answer is 42")
 ```"""),
     )
@@ -208,13 +208,13 @@ async def test_ui_event_error_on_execution_failure(event_bus_with_handler):
         if call_count == 1:
             return _resp("""Thought: Try to divide by zero.
 
-```python
+```python-exec
 result = 1 / 0
 ```""")
         else:
             return _resp("""Thought: Fix the error.
 
-```python
+```python-exec
 final_answer(1)
 ```""")
 
@@ -250,7 +250,7 @@ async def test_ui_event_warning_on_max_turns(event_bus_with_handler):
         agent,
         return_value=_resp("""Thought: Still working...
 
-```python
+```python-exec
 x = 1
 print(x)
 ```"""),
@@ -279,7 +279,7 @@ async def test_ui_event_reasoning_content(event_bus_with_handler):
         return_value=_resp(
             """Thought: Solve this.
 
-```python
+```python-exec
 final_answer(100)
 ```""",
             reasoning_content="Deep thinking process here...",
@@ -310,7 +310,7 @@ async def test_ui_event_reasoning_tokens(event_bus_with_handler):
         return_value=_resp(
             """Thought: Solve this.
 
-```python
+```python-exec
 final_answer(100)
 ```""",
             reasoning_tokens=256,
@@ -338,7 +338,7 @@ async def test_agent_without_ui_handler():
         agent,
         return_value=_resp("""Thought: Calculate.
 
-```python
+```python-exec
 final_answer(42)
 ```"""),
     )
@@ -362,7 +362,7 @@ async def test_ui_event_order(event_bus_with_handler):
         agent,
         return_value=_resp("""Thought: Calculate.
 
-```python
+```python-exec
 print("Hello")
 final_answer(42)
 ```"""),
@@ -400,14 +400,14 @@ async def test_llm_message_does_not_contain_code_fence(event_bus_with_handler):
     )
     _patch_provider(
         agent,
-        return_value=_resp("```python\nfinal_answer(42)\n```"),
+        return_value=_resp("```python-exec\nfinal_answer(42)\n```"),
     )
 
     await agent.run("Test task")
 
     llm_message_events = [e["event_obj"] for e in mock_ui_handler.events if e["event"] == EventType.LLM_MESSAGE]
     for ev in llm_message_events:
-        assert "```python" not in ev.content, (
+        assert "```python-exec" not in ev.content, (
             f"LLMMessageEvent carried a code fence as its thought content. "
             f"This causes the UI to render the code block twice. content={ev.content!r}"
         )
@@ -415,7 +415,7 @@ async def test_llm_message_does_not_contain_code_fence(event_bus_with_handler):
 
 @pytest.mark.asyncio
 async def test_ui_event_warning_on_multiple_code_blocks(event_bus_with_handler):
-    """If the LLM emits two ```python blocks in one response, the agent executes
+    """If the LLM emits two ```python-exec blocks in one response, the agent executes
     the first block (parser already does this) and emits a WarningEvent noting
     the extras were dropped. It does NOT reject the turn or emit an ErrorEvent —
     that behavior burned a retry per multi-block response with no upside, since
@@ -426,10 +426,10 @@ async def test_ui_event_warning_on_multiple_code_blocks(event_bus_with_handler):
     async def mock_acompletion(*args, **kwargs):
         return _resp(
             "Thought: doing work and then replying.\n\n"
-            "```python\n"
+            "```python-exec\n"
             "final_answer(1)\n"
             "```\n\n"
-            "```python\n"
+            "```python-exec\n"
             "# this block will be dropped\n"
             "x = 99\n"
             "```"

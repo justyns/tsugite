@@ -19,7 +19,7 @@ description: How to respond effectively - when to use print/send_message/react_t
 
 No functions needed? One line:
 
-```python
+```python-exec
 final_answer("Hello! What can I help you with?")
 ```
 
@@ -32,7 +32,7 @@ More examples:
 
 Acknowledge messages with emoji instead of (or before) a text response:
 
-```python
+```python-exec
 react_to_message("👍")  # React to the most recent user message
 react_to_message("✅")  # Checkmark when task is done
 ```
@@ -43,13 +43,13 @@ Use reactions for lightweight acknowledgment — when a thumbs-up says enough an
 
 For longer tasks, keep user informed:
 
-```python
+```python-exec
 send_message("Searching codebase...")
 results = search_code("def main")
 print(results)  # You'll see this next turn
 ```
 
-```python
+```python-exec
 send_message(f"Found {len(results)} matches. Analyzing...")
 # ... more work ...
 final_answer("Here's what I found: ...")
@@ -61,7 +61,7 @@ When you need clarification or a decision, use `ask_user()`. It blocks until the
 
 **Question types:**
 
-```python
+```python-exec
 # Freeform text
 name = ask_user("What should the file be named?", question_type="text")
 
@@ -74,7 +74,7 @@ fmt = ask_user("Which format?", question_type="choice", options=["json", "yaml",
 
 **Batch questions** — ask multiple at once:
 
-```python
+```python-exec
 answers = ask_user_batch(questions=[
     {"id": "name", "question": "Project name?", "type": "text"},
     {"id": "confirm", "question": "Create directory?", "type": "yes_no"},

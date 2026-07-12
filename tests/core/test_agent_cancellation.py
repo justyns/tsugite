@@ -19,7 +19,7 @@ from tsugite.providers.base import CompletionResponse, Usage
 # cancellation.
 LOOPING_RESPONSE = """Thought: keep working
 
-```python
+```python-exec
 print("tick")
 ```"""
 

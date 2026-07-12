@@ -5,6 +5,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
@@ -119,8 +120,16 @@ def build_system_prompt(tools: List[Tool], instructions: str = "") -> str:
     return build_standard_mode_prompt(tools_section, instructions, has_tools)
 
 
-_OPEN_FENCE = "```python"
+# Only ```python-exec blocks are executed. A bare ```python block is treated as
+# illustration (shown, not run) so an agent can quote Python in prose without the
+# runtime executing it. See justyns/tsugite#479.
+_EXEC_FENCE = "```python-exec"
 _CLOSE_FENCE = "\n```"
+
+# Start-of-line ```python fence whose info string is exactly "python" (bare) — i.e.
+# NOT ```python-exec. Used to nudge the model toward the exec fence when it emits a
+# bare block. The negative lookahead keeps ```python-exec from matching.
+_BARE_PYTHON_FENCE = re.compile(r"(?:^|\n)```python(?!-exec)[ \t]*\r?\n")
 
 
 def _find_parseable_close_fence(cleaned: str, code_start: int) -> Optional[int]:
@@ -138,22 +147,28 @@ def _find_parseable_close_fence(cleaned: str, code_start: int) -> Optional[int]:
 
 
 def _find_python_blocks(cleaned: str) -> List[tuple[int, int]]:
-    """Return (code_start, close_at) spans for every ``` ```python ``` block on its own line."""
+    """Return (code_start, close_at) spans for every ``` ```python-exec ``` block on its own line."""
     blocks: List[tuple[int, int]] = []
     search_pos = 0
     while True:
-        open_at = cleaned.find(_OPEN_FENCE, search_pos)
+        open_at = cleaned.find(_EXEC_FENCE, search_pos)
         if open_at == -1:
             return blocks
         if open_at != 0 and cleaned[open_at - 1] != "\n":
-            search_pos = open_at + len(_OPEN_FENCE)
+            search_pos = open_at + len(_EXEC_FENCE)
             continue
-        code_start = open_at + len(_OPEN_FENCE)
+        code_start = open_at + len(_EXEC_FENCE)
         close_at = _find_parseable_close_fence(cleaned, code_start)
         if close_at is None:
             return blocks
         blocks.append((code_start, close_at))
         search_pos = close_at + len(_CLOSE_FENCE)
+
+
+def _has_bare_python_fence(cleaned: str) -> bool:
+    """True if the text contains a start-of-line bare ```python block (info string
+    exactly "python", not ```python-exec)."""
+    return _BARE_PYTHON_FENCE.search(cleaned) is not None
 
 
 # Tags the runtime injects into the model's NEXT user message after executing
@@ -197,7 +212,7 @@ def _build_spoofed_runtime_tag_warning() -> str:
         "(tsugite_execution_result / tsugite_multi_block_warning / tsugite_budget). "
         "The runtime injects those AFTER it runs your code - do not write them yourself. "
         "They were neutralized; only the real execution result below is authoritative. "
-        "Reply with prose or exactly one ```python block."
+        "Reply with prose or exactly one ```python-exec block."
         "</tsugite_runtime_tag_notice>"
     )
 
@@ -212,12 +227,25 @@ def _build_multi_block_warning_xml(count: int) -> str:
     """
     return (
         f'\n<tsugite_multi_block_warning dropped="{count - 1}" total="{count}">'
-        f"Your response contained {count} ```python blocks. "
+        f"Your response contained {count} ```python-exec blocks. "
         f"Only block 1 was executed; blocks 2..{count} were dropped silently. "
         "If those blocks contained work that still needs to happen, re-emit them "
-        "in your next response — exactly one ```python block per turn. "
+        "in your next response — exactly one ```python-exec block per turn. "
         "Do not assume the dropped blocks ran."
         "</tsugite_multi_block_warning>"
+    )
+
+
+def _build_bare_python_notice_xml() -> str:
+    """Model-visible nudge when a response carried a bare ```python block but no
+    executable ```python-exec block. A bare block is illustration (shown, not
+    run); this tells the model which fence actually executes so a habit miss
+    doesn't leave intended work silently unexecuted. See justyns/tsugite#479."""
+    return (
+        "\n<tsugite_bare_python_notice>"
+        "Your response contained a ```python block. Bare ```python blocks are shown but "
+        "NOT executed. If you meant to run that code, re-emit it as a ```python-exec block."
+        "</tsugite_bare_python_notice>"
     )
 
 
@@ -229,6 +257,9 @@ class ParsedResponse:
     code: str
     content_blocks: Dict[str, str] = field(default_factory=dict)
     num_code_blocks: int = 0
+    # True when the response carried a bare ```python block (not ```python-exec).
+    # Drives a corrective nudge so the model learns which fence executes.
+    has_bare_python: bool = False
 
 
 @dataclass
@@ -244,6 +275,8 @@ class TurnResult:
     # True when the model emitted a runtime-only tag (escaped before storage);
     # drives the model-facing notice so a hallucinated loop doesn't compound.
     spoofed_runtime_tag: bool = False
+    # True when the response carried a bare ```python block (not ```python-exec).
+    has_bare_python: bool = False
 
 
 @dataclass
@@ -452,7 +485,7 @@ class TsugiteAgent:
                     self.event_bus.emit(
                         WarningEvent(
                             message=(
-                                f"Response contained {multi_block_count} ```python blocks; "
+                                f"Response contained {multi_block_count} ```python-exec blocks; "
                                 "only the first was executed, the rest were dropped."
                             ),
                             category="multi_code_block",
@@ -468,6 +501,10 @@ class TsugiteAgent:
                         trailing_notice += _build_multi_block_warning_xml(multi_block_count)
                     if turn.spoofed_runtime_tag:
                         trailing_notice += _build_spoofed_runtime_tag_warning()
+                    # The model wrote a bare ```python block instead of ```python-exec;
+                    # it wasn't executed. Nudge it toward the exec fence for next turn.
+                    if turn.has_bare_python:
+                        trailing_notice += _build_bare_python_notice_xml()
                     self.memory.add_step(
                         thought=thought,
                         code="",
@@ -770,6 +807,7 @@ class TsugiteAgent:
             response=synthetic,
             num_code_blocks=parsed.num_code_blocks,
             spoofed_runtime_tag=spoofed,
+            has_bare_python=parsed.has_bare_python,
         )
 
     async def _provider_turn_blocking(self, messages, turn_num) -> TurnResult:
@@ -796,7 +834,7 @@ class TsugiteAgent:
             self.event_bus.emit(ReasoningTokensEvent(tokens=response.usage.reasoning_tokens, step=turn_num + 1))
 
         # Only emit thought prose. Falling back to response.content would include the
-        # raw ```python fence, causing the UI to render the code block twice (once
+        # raw ```python-exec fence, causing the UI to render the code block twice (once
         # inside the thought markdown, once as a separate code-execution event).
         if self.event_bus and parsed.thought and parsed.thought.strip():
             self.event_bus.emit(
@@ -819,6 +857,7 @@ class TsugiteAgent:
             response=response,
             num_code_blocks=parsed.num_code_blocks,
             spoofed_runtime_tag=spoofed,
+            has_bare_python=parsed.has_bare_python,
         )
 
     def _record_model_request(self, messages, turn_num: int) -> None:
@@ -1022,7 +1061,7 @@ class TsugiteAgent:
             {"role": "user", "content": "previous turn 1"},
             {"role": "assistant", "content": "previous response 1"},
             {"role": "user", "content": task},
-            {"role": "assistant", "content": "```python\\n...```"},
+            {"role": "assistant", "content": "```python-exec\\n...```"},
             {"role": "user", "content": <loaded_skill>...</loaded_skill>\\n<observation>..."},
             ...
         ]
@@ -1052,7 +1091,7 @@ class TsugiteAgent:
             if step.raw_content:
                 assistant_msg = step.raw_content
             elif step.code and step.code.strip():
-                assistant_msg = f"```python\n{step.code}\n```"
+                assistant_msg = f"```python-exec\n{step.code}\n```"
             else:
                 assistant_msg = step.thought if step.thought else "(empty response)"
             messages.append({"role": "assistant", "content": assistant_msg})
@@ -1186,17 +1225,18 @@ class TsugiteAgent:
             start, end = blocks[0]
             code = cleaned[start:end].strip()
         else:
-            # No block parsed cleanly. If there's still a ```python opener, fall
-            # back to the first naive close fence so the LLM gets a SyntaxError
-            # back instead of empty code (which would look like "model is done").
-            opener = cleaned.find(_OPEN_FENCE)
+            # No block parsed cleanly. If there's still a ```python-exec opener,
+            # fall back to the first naive close fence so the LLM gets a
+            # SyntaxError back instead of empty code (which would look like
+            # "model is done").
+            opener = cleaned.find(_EXEC_FENCE)
             if opener != -1:
-                code_start = opener + len(_OPEN_FENCE)
+                code_start = opener + len(_EXEC_FENCE)
                 fallback_end = cleaned.find(_CLOSE_FENCE, code_start)
                 if fallback_end != -1:
                     code = cleaned[code_start:fallback_end].strip()
 
-        first_open = cleaned.find(_OPEN_FENCE)
+        first_open = cleaned.find(_EXEC_FENCE)
         prose_end = first_open if first_open != -1 else len(cleaned)
         thought_start = cleaned.find("Thought:")
         if thought_start != -1:
@@ -1209,6 +1249,7 @@ class TsugiteAgent:
             code=code,
             content_blocks=content_blocks,
             num_code_blocks=num_code_blocks,
+            has_bare_python=_has_bare_python_fence(cleaned),
         )
 
 
@@ -1264,15 +1305,19 @@ def build_standard_mode_prompt(tools_section: str, instructions: str, has_tools:
 Each turn you can either:
 
 1. **Run Python code** to use tools, read files, compute things — wrap it in a single
-   ```python code block. You'll see the result and can run more code next turn.
+   ```python-exec code block. You'll see the result and can run more code next turn.
 
 2. **Answer directly with text** — when you're done, just respond with your answer
    in plain text (no code block). That ends the run; the user sees your text.
 
-```python
+```python-exec
 config = read_file("config.yaml")
 print(config)
 ```
+
+Only ```python-exec blocks are executed. A plain ```python block is treated as
+illustration — it is shown to the user but NOT run — so you can quote or explain
+Python without executing it.
 
 ## Current Working Directory
 
@@ -1300,7 +1345,7 @@ the real result next turn.
 
 ## How to write code
 
-- Exactly one ```python code block per response. The parser runs only the first;
+- Exactly one ```python-exec code block per response. The parser runs only the first;
   any additional blocks are silently dropped, and the runtime will warn you next
   turn. Never assume dropped blocks ran.
 - Use print() to surface anything you'll want to refer to next turn.

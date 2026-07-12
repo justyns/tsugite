@@ -258,7 +258,7 @@ Each LLM turn runs its code in a **fresh Python namespace**. Plain variables
 (`x = 5`, `data = fetch(...)`) are discarded when the turn ends. To carry a
 value into the next turn, assign it to `state`:
 
-```python
+```python-exec
 # Turn 1
 issues = fetch_issues()
 state["issues"] = issues          # persisted across turns

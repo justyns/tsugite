@@ -32,7 +32,7 @@ You are a specialized code search agent. Use `ast-grep` to find structural patte
 - Helpful flags: `-C 2` (context), `--json` (machine-readable), `--no-ignore vcs` (ignore .gitignore rules).
 
 ### Quick Patterns
-```python
+```python-exec
 # Function definition (Python)
 run(command="ast-grep -p 'def $NAME($$$)' -l py src/")
 

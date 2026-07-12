@@ -9,7 +9,7 @@ Use these patterns to perform accurate math in Python:
 
 ## Basic Arithmetic
 
-```python
+```python-exec
 x, y = 10, 3
 sum_ = x + y        # 13
 diff = x - y        # 7
@@ -22,7 +22,7 @@ power = x ** y      # 1000
 
 ## Math Module Essentials
 
-```python
+```python-exec
 import math
 
 sqrt_val = math.sqrt(16)      # 4.0
@@ -44,7 +44,7 @@ Key functions worth memorizing:
 
 ## Precise Decimal Arithmetic
 
-```python
+```python-exec
 from decimal import Decimal, getcontext
 
 getcontext().prec = 28  # Set precision
@@ -55,7 +55,7 @@ total = price * qty  # 59.97 without floating error
 
 ## Fractions and Rational Numbers
 
-```python
+```python-exec
 from fractions import Fraction
 
 ratio = Fraction(3, 4) + Fraction(5, 6)
@@ -64,7 +64,7 @@ ratio = ratio.limit_denominator()  # Simplify result
 
 ## Aggregations
 
-```python
+```python-exec
 import math
 
 numbers = [2, 4, 6, 8]
@@ -79,7 +79,7 @@ Prefer `math.fsum` for floating-point sums and `statistics.fmean` when averaging
 
 ## Complex Numbers
 
-```python
+```python-exec
 import cmath
 
 z = 3 + 4j  # Complex number literal
@@ -97,7 +97,7 @@ exp_complex = cmath.exp(1j * cmath.pi)  # -1+1.2e-16j (Euler's formula)
 
 ## Statistics Module
 
-```python
+```python-exec
 from statistics import mean, median, mode, stdev, variance, quantiles
 
 data = [1, 2, 2, 3, 4, 5, 5, 5, 6, 7, 8, 9]
@@ -127,7 +127,7 @@ Common use cases:
 
 ## Random Number Generation
 
-```python
+```python-exec
 import random
 
 # Basic random operations
@@ -154,7 +154,7 @@ random.seed(42)  # Set seed for deterministic results
 
 ### Cryptographically Secure Random
 
-```python
+```python-exec
 import secrets
 
 # Use secrets for security-sensitive operations (tokens, passwords, keys)
@@ -183,7 +183,7 @@ Prefer these when problems move from scalar math into data analysis or scientifi
 
 ### NumPy Quick Examples
 
-```python
+```python-exec
 import numpy as np
 
 # Arrays and vectorized operations

@@ -46,11 +46,11 @@ async def test_last_input_tokens_from_prompt_tokens():
         call_count += 1
         if call_count == 1:
             return _mock_response(
-                "Thought: step 1\n\n```python\nx = 1\nprint(x)\n```",
+                "Thought: step 1\n\n```python-exec\nx = 1\nprint(x)\n```",
                 Usage(prompt_tokens=5000, completion_tokens=200, total_tokens=5200),
             )
         return _mock_response(
-            "Thought: done\n\n```python\nfinal_answer(42)\n```",
+            "Thought: done\n\n```python-exec\nfinal_answer(42)\n```",
             Usage(prompt_tokens=6000, completion_tokens=150, total_tokens=6150),
         )
 
@@ -72,7 +72,7 @@ async def test_last_input_tokens_includes_cache_tokens():
         agent,
         side_effect=[
             _mock_response(
-                "Thought: step\n\n```python\nprint(1)\n```",
+                "Thought: step\n\n```python-exec\nprint(1)\n```",
                 Usage(
                     prompt_tokens=100,
                     completion_tokens=50,
@@ -82,7 +82,7 @@ async def test_last_input_tokens_includes_cache_tokens():
                 ),
             ),
             _mock_response(
-                "Thought: done\n\n```python\nfinal_answer(1)\n```",
+                "Thought: done\n\n```python-exec\nfinal_answer(1)\n```",
                 Usage(
                     prompt_tokens=200,
                     completion_tokens=50,
@@ -109,7 +109,7 @@ async def test_last_input_tokens_zero_prompt_with_cache():
     _patch_provider(
         agent,
         return_value=_mock_response(
-            "Thought: done\n\n```python\nfinal_answer(1)\n```",
+            "Thought: done\n\n```python-exec\nfinal_answer(1)\n```",
             Usage(
                 prompt_tokens=0,
                 completion_tokens=100,
@@ -135,7 +135,7 @@ async def test_last_input_tokens_no_cache():
     _patch_provider(
         agent,
         return_value=_mock_response(
-            "Thought: done\n\n```python\nfinal_answer(1)\n```",
+            "Thought: done\n\n```python-exec\nfinal_answer(1)\n```",
             Usage(prompt_tokens=15000, completion_tokens=500, total_tokens=15500),
         ),
     )

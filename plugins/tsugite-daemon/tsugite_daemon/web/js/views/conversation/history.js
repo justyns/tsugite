@@ -14,12 +14,13 @@ function _extractContentBlocks(raw) {
   return { prose, blocks };
 }
 
-// A ```python fence means tsugite parsed this model_response as an executable
-// tool action (it always runs python fences). Such a turn's surrounding text is
-// thought/preamble, not a user-visible answer, and is unsafe to surface: the
-// non-syntax-aware strip leaked the block's tail (nested markdown fences inside
-// return_value("""...""") strings) as phantom prose.
-const _EXECUTABLE_FENCE = /```python\n/;
+// A ```python-exec fence means tsugite parsed this model_response as an executable
+// tool action. Such a turn's surrounding text is thought/preamble, not a
+// user-visible answer, and is unsafe to surface: the non-syntax-aware strip leaked
+// the block's tail (nested markdown fences inside return_value("""...""") strings)
+// as phantom prose. Bare ```python (no -exec) is matched too so pre-#479 history,
+// whose executable turns used the bare fence, still renders the same way.
+const _EXECUTABLE_FENCE = /```python(?:-exec)?\n/;
 
 // Runtime-only tags a model may have fabricated (escaped to &lt; by the backend
 // before storage). Without _stripRuntimeEcho they'd survive into a non-executable
