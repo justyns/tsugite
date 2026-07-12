@@ -151,8 +151,11 @@ METADATA_PRIMARY_FLAG = "is_primary"
 # is_primary makes the user's chosen primary session "follow" compaction. topic/type
 # describe the conversation's subject and are carried forward like title, so a compacted
 # session keeps its subject instead of resetting to blank until the next turn re-sets it.
+# task/pr/notes are user-authored workstream links and freeform notes — durable by
+# intent. Anything outside this set is dropped deliberately; in particular status_text
+# is transient ("investigating", "idle") and must reset on compaction.
 COMPACTION_PRESERVED_METADATA_KEYS = READ_ONLY_METADATA_KEYS | frozenset(
-    {METADATA_SESSION_NAME, METADATA_PRIMARY_FLAG, "topic", "type"}
+    {METADATA_SESSION_NAME, METADATA_PRIMARY_FLAG, "topic", "type", "task", "pr", "notes"}
 )
 
 TOPIC_MAX_LENGTH = 160
