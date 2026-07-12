@@ -398,7 +398,7 @@ export default () => ({
         if (this.isActiveSession && d.session_id === this.selectedSessionId) this.reload();
       }
       if (ev.type === 'reconnect' && this.$store.app.selectedAgent) {
-        this.reload();
+        this._debouncedReconcile();
       }
     });
     this.$watch('$store.app.pendingWorkspaceFiles', (files) => {
@@ -439,12 +439,54 @@ export default () => ({
     if (this._debounceTimer) clearTimeout(this._debounceTimer);
     if (this._scrollTimer) clearTimeout(this._scrollTimer);
     if (this._historyDebounceTimer) clearTimeout(this._historyDebounceTimer);
+    if (this._reconcileTimer) clearTimeout(this._reconcileTimer);
     if (this._relTimeTimer) clearInterval(this._relTimeTimer);
     if (this._staleProgressTimer) clearInterval(this._staleProgressTimer);
     if (this._onVisibilityChange) document.removeEventListener('visibilitychange', this._onVisibilityChange);
     if (this._followObserver) this._followObserver.disconnect();
     Object.values(this.sessionsState).forEach(s => { if (s.reader) s.reader.cancel().catch(() => {}); });
     this.pendingFiles.forEach(f => { if (f.previewUrl) URL.revokeObjectURL(f.previewUrl); });
+  },
+
+  // Non-destructive catch-up after an SSE reconnect: refresh the session list
+  // and the visible thread in place, keeping the per-session cache and the
+  // current selection so the view never blanks. A mobile wake can emit several
+  // reconnect events in quick succession (radio flaps: connect -> fail ->
+  // backoff -> reconnect), so bursts coalesce through a trailing debounce plus
+  // an in-flight guard. The destructive reload() stays for genuine view
+  // switches, where a blank is acceptable.
+  _debouncedReconcile() {
+    if (this._reconcileTimer) clearTimeout(this._reconcileTimer);
+    this._reconcileTimer = setTimeout(() => this.reconcile(), 250);
+  },
+
+  async reconcile() {
+    if (this._reconciling) {
+      this._debouncedReconcile();
+      return;
+    }
+    this._reconciling = true;
+    try {
+      await this.loadSessions();
+      const current = this.selectedSessionId ? this.resolveSession(this.selectedSessionId) : null;
+      if (!current) {
+        // Nothing selected, or the selection vanished while away (daemon
+        // restart, pruned session) — that genuinely needs the full flow.
+        await this.reload();
+        return;
+      }
+      if (current.superseded_by) {
+        // Compacted while asleep: selectSession chases to the live successor.
+        this.selectSession(current);
+        return;
+      }
+      this.selectedSessionMeta = current;
+      // Same guards and debounce as the visibilitychange catch-up, so the two
+      // wake pathways share one history refetch instead of stacking.
+      if (this.isActiveSession && !this.sending && this.isAtBottom) this._debouncedLoadHistory();
+    } finally {
+      this._reconciling = false;
+    }
   },
 
   async reload() {
