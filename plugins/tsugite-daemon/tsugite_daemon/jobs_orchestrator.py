@@ -106,6 +106,25 @@ class JobsOrchestrator:
         """
         self._executors[name] = executor
 
+    def get_job(self, job_id: str) -> Optional[Job]:
+        """Read a Job by id. The public accessor for executor plugins, so they
+        don't depend on the private JobStore layout."""
+        return self._jobs.get(job_id)
+
+    def attach_worker_terminal(self, job_id: str, terminal_id: str) -> None:
+        """Stamp a job's worker_terminal_id so the web tile embeds that live
+        terminal. Executor plugins call this instead of touching the JobStore."""
+        self._jobs.update(job_id, worker_terminal_id=terminal_id)
+
+    @property
+    def executor_names(self) -> list[str]:
+        """Registered non-agent executor names, for UI feature-detection.
+
+        "agent" is implicit and excluded; the web new-job modal shows its
+        executor dropdown only when this is non-empty.
+        """
+        return sorted(self._executors)
+
     def attach(self) -> None:
         """Register for session-completion notifications. Idempotent (the
         runner's listener registry dedups), so test fixtures / hot-reload paths

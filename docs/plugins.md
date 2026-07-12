@@ -122,6 +122,13 @@ def register_event_subscribers(config):
     return subs
 ```
 
+## Adapter plugins
+
+Tools, hooks, and subscribers use the `tsugite.plugins` entry point above. A second kind of
+plugin - the **adapter** - registers under `tsugite.adapters` and extends the running daemon:
+it can front a chat platform, mount its own HTTP routes under `/api/plugins/<name>` (authed or
+public), and register job executors. See [plugin-adapters.md](plugin-adapters.md).
+
 ## Versioning and release (lockstep)
 
 Core + every workspace plugin ship together with the same version number, driven by a single git tag. To bump:

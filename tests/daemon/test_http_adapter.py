@@ -99,6 +99,24 @@ class TestHealthEndpoint:
         assert resp.status_code == 200
 
 
+class TestExecutorsEndpoint:
+    def test_lists_agent_by_default(self, client, test_token):
+        resp = client.get("/api/executors", headers={"Authorization": f"Bearer {test_token}"})
+        assert resp.status_code == 200
+        assert resp.json()["executors"] == ["agent"]
+
+    def test_reflects_registered_executor(self, server, client, test_token):
+        from types import SimpleNamespace
+
+        server.jobs_orchestrator = SimpleNamespace(executor_names=["cc"])
+        resp = client.get("/api/executors", headers={"Authorization": f"Bearer {test_token}"})
+        assert resp.json()["executors"] == ["agent", "cc"]
+
+    def test_requires_auth(self, client):
+        resp = client.get("/api/executors")
+        assert resp.status_code == 401
+
+
 class TestAgentsEndpoint:
     def test_list_agents_with_auth(self, client, test_token):
         resp = client.get("/api/agents", headers={"Authorization": f"Bearer {test_token}"})

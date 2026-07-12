@@ -1,10 +1,13 @@
 [project]
 name = "tsugite-example-plugin"
 version = "0.1.0"
-description = "Example tsugite plugin demonstrating the unified entry point + a function-form adapter"
+description = "Example tsugite plugin demonstrating every author-facing extension point"
 requires-python = ">=3.11"
+# Needs the daemon extra because this single file imports the adapter base; a real
+# plugin would split the daemon-only adapter into its own module.
+dependencies = ["tsugite-cli[daemon]"]
 
-# Unified entry point: import triggers @tool and @subscribe decorators.
+# Unified entry point: import triggers @tool / @hook / @subscribe decorators.
 [project.entry-points."tsugite.plugins"]
 example = "tsugite_example_plugin"
 

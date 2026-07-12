@@ -1,0 +1,31 @@
+[project]
+name = "tsugite-cc-driver"
+version = "0.17.3"
+description = "Tsugite plugin: drive interactive Claude Code sessions as verified jobs via HTTP hooks (daemon-only)"
+requires-python = ">=3.11"
+dependencies = [
+  "tsugite-cli==0.17.3",
+  "tsugite-daemon==0.17.3",
+  "tsugite-pty==0.17.3",
+]
+
+[project.entry-points."tsugite.adapters"]
+cc_driver = "tsugite_cc_driver.adapter:create_adapter"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["tsugite_cc_driver"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/tsugite_cc_driver",
+  "/pyproject.toml",
+]
+
+[tool.uv.sources]
+tsugite-cli = { workspace = true }
+tsugite-daemon = { workspace = true }
+tsugite-pty = { workspace = true }

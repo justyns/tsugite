@@ -88,6 +88,7 @@ function emptyNewJobForm() {
     agent: '',
     acs: [],
     maxAttempts: 3,
+    executor: 'agent',
   };
 }
 
@@ -120,6 +121,9 @@ export default () => ({
   newForm: emptyNewJobForm(),
   newError: null,
   submitting: false,
+  // Executor names the daemon reports at /api/executors, refreshed each time the
+  // new-job modal opens. Just ['agent'] unless a plugin registered another.
+  executorNames: ['agent'],
 
   init() {
     this.load();
@@ -314,6 +318,19 @@ export default () => ({
     }
     this.newError = null;
     this.$store.tsu.open('new-job');
+    this.loadExecutors();
+  },
+
+  // Feature-detect executors when the modal opens; the dropdown appears only if
+  // the daemon reports a non-agent one. Falls back to agent-only on error.
+  async loadExecutors() {
+    try {
+      const data = await get('/api/executors');
+      const names = Array.isArray(data.executors) ? data.executors : [];
+      this.executorNames = names.length ? names : ['agent'];
+    } catch {
+      this.executorNames = ['agent'];
+    }
   },
 
   closeNewJob() {
@@ -333,11 +350,23 @@ export default () => ({
     this.newForm.maxAttempts = next;
   },
 
+  // The executor names /api/executors reported (always includes 'agent'). The
+  // dropdown is shown only when there's a real choice to make.
+  get availableExecutors() {
+    return this.executorNames;
+  },
+  get showExecutorSelect() {
+    return this.executorNames.length > 1;
+  },
+
   get commandPreviewParts() {
     const f = this.newForm;
     const parts = [{ cls: 'cmd', text: '/job' }];
     if (f.agent) {
       parts.push({ text: ' ' }, { cls: 'flag', text: '--agent' }, { text: ' ' + f.agent });
+    }
+    if (f.executor && f.executor !== 'agent') {
+      parts.push({ text: ' ' }, { cls: 'flag', text: '--executor' }, { text: ' ' + f.executor });
     }
     parts.push({ text: ' ' }, { cls: 'flag', text: '--max-attempts' }, { text: ' ' + f.maxAttempts });
     for (const ac of (f.acs || []).filter((a) => a.text && a.text.trim())) {
@@ -365,6 +394,7 @@ export default () => ({
       max_attempts: f.maxAttempts,
     };
     if (ac_list.length) body.acceptance_criteria = ac_list.join('|');
+    if (f.executor && f.executor !== 'agent') body.executor = f.executor;
     // No session_id: the new-job modal is never opened from inside a conversation,
     // so the backend provisions a fresh host session for the Job rather than
     // guessing which chat to attach it to (the old "wrong session" behaviour).

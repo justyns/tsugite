@@ -489,12 +489,12 @@ Reproducing tests don't need to be elaborate. A 10-line test that flips red→gr
 
 ## Web UI
 
-The daemon's web UI lives at `tsugite/daemon/web/`.
+The daemon's web UI lives at `plugins/tsugite-daemon/tsugite_daemon/web/`.
 
 ### Stack
 
 - **Alpine.js 3** loaded from CDN. No build step. No React. Don't port this to a framework - the design handoff explicitly said match visuals, not internal structure.
-- **Starlette** serves `index.html` plus `/static/{css,js,icons}` and the `/api/*` routes (`tsugite/daemon/adapters/http.py`).
+- **Starlette** serves `index.html` plus `/static/{css,js,icons}` and the `/api/*` routes (`plugins/tsugite-daemon/tsugite_daemon/adapters/http/`, a per-domain package).
 - CSS lives in three files. Read all three before adding rules: `theme.css` (Catppuccin tokens), `console.css` (Console redesign - the real stylesheet), `styles.css` (legacy modals/auth/forms; ~120 lines, pruned aggressively after the redesign).
 - View modules under `js/views/`: `conversations.js` (orchestrator) + `conversation/{sessions,history,streaming,input,attachments,event_types}.js` mixins, plus `workspace.js`, `schedules.js`, `webhooks.js`, `usage.js`, `file-editor.js`. Shared helpers: `js/api.js` (REST + SSE), `js/utils.js` (markdown, formatters, toast).
 

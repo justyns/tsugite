@@ -14,6 +14,7 @@ exclude-newer-span = "P10D"
 [manifest]
 members = [
     "tsugite-acp",
+    "tsugite-cc-driver",
     "tsugite-claude-code",
     "tsugite-cli",
     "tsugite-codex-cli",
@@ -2338,6 +2339,23 @@ requires-dist = [
 ]
 
 [[package]]
+name = "tsugite-cc-driver"
+version = "0.17.3"
+source = { editable = "plugins/tsugite-cc-driver" }
+dependencies = [
+    { name = "tsugite-cli" },
+    { name = "tsugite-daemon" },
+    { name = "tsugite-pty" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "tsugite-cli", editable = "." },
+    { name = "tsugite-daemon", editable = "plugins/tsugite-daemon" },
+    { name = "tsugite-pty", editable = "plugins/tsugite-pty" },
+]
+
+[[package]]
 name = "tsugite-claude-code"
 version = "0.17.3"
 source = { editable = "plugins/tsugite-claude-code" }
@@ -2412,6 +2430,7 @@ dev = [
     { name = "pytest-xdist" },
     { name = "ruff" },
     { name = "tsugite-acp" },
+    { name = "tsugite-cc-driver" },
     { name = "tsugite-claude-code" },
     { name = "tsugite-codex-cli" },
     { name = "tsugite-daemon" },
@@ -2472,6 +2491,7 @@ dev = [
     { name = "pytest-xdist", specifier = ">=3.5.0" },
     { name = "ruff", specifier = ">=0.1" },
     { name = "tsugite-acp", editable = "plugins/tsugite-acp" },
+    { name = "tsugite-cc-driver", editable = "plugins/tsugite-cc-driver" },
     { name = "tsugite-claude-code", editable = "plugins/tsugite-claude-code" },
     { name = "tsugite-codex-cli", editable = "plugins/tsugite-codex-cli" },
     { name = "tsugite-daemon", editable = "plugins/tsugite-daemon" },

@@ -18,7 +18,18 @@ class JobsMixin:
                     Route("/{job_id}/retry", self._api_retry_job, methods=["POST"]),
                 ],
             ),
+            # Top-level (not under the /api/jobs mount): the new-job modal fetches
+            # this to decide whether to show its executor dropdown.
+            Route("/api/executors", self._api_list_executors, methods=["GET"]),
         ]
+
+    async def _api_list_executors(self, request: Request) -> JSONResponse:
+        """Job executors the new-job modal can pick from: the built-in "agent"
+        plus any non-agent executors a plugin registered (e.g. "cc")."""
+        if err := self._check_auth(request):
+            return err
+        registered = self.jobs_orchestrator.executor_names if self.jobs_orchestrator is not None else []
+        return JSONResponse({"executors": ["agent", *registered]})
 
     async def _api_list_jobs(self, request: Request) -> JSONResponse:
         """Return Jobs for the Jobs tab, newest first. Optional ?state=<state>

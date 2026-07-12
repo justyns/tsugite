@@ -92,6 +92,7 @@ tsugite-sandbox = { workspace = true }
 tsugite-pty = { workspace = true }
 tsugite-daemon = { workspace = true }
 tsugite-discord = { workspace = true }
+tsugite-cc-driver = { workspace = true }
 
 [tool.ruff]
 target-version = "py311"
@@ -175,4 +176,5 @@ dev = [
   "tsugite-pty",
   "tsugite-daemon",
   "tsugite-discord",
+  "tsugite-cc-driver",
 ]

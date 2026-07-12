@@ -975,10 +975,10 @@
                               </template>
 
                               <!-- Conditional terminal embed. The host scope drives lifecycle; the
-                                   embed only mounts when this job has a worker terminal (see jobHasTerminal).
-                                   Heuristic: a worker_session_id paired with a discovered terminal whose
-                                   parent_session_id matches. The detection happens inside jobTerminalView. -->
-                              <template x-if="msg.worker_session_id">
+                                   embed only mounts when this job has a worker terminal (see jobHasTerminal):
+                                   a cc executor supplies worker_terminal_id directly, while an agent worker
+                                   is discovered by parent_session_id inside jobTerminalView. -->
+                              <template x-if="jobHasTerminal(msg)">
                                 <div class="jx-term" x-data="jobTerminalView()" x-init="bind($el, msg)"
                                      x-show="termActive" data-job-terminal>
                                   <div class="jx-term-head">
@@ -999,7 +999,7 @@
                                   <div class="rh">
                                     <span class="teal">result</span>
                                     <span class="grow"></span>
-                                    <span x-text="msg.worker_session_id ? '' : 'llm-only · no shell'"></span>
+                                    <span x-text="jobHasTerminal(msg) ? '' : 'llm-only · no shell'"></span>
                                   </div>
                                   <pre x-text="jobResultSummary(msg)"></pre>
                                 </div>
@@ -2480,6 +2480,20 @@
                   </div>
                 </div>
               </div>
+
+              <!-- Executor picker: only rendered when the daemon registered a
+                   non-agent executor (e.g. cc-driver). Default 'agent' keeps the
+                   built-in worker-session path. -->
+              <template x-if="showExecutorSelect">
+                <label class="tsu-field nj-executor-field">
+                  <span class="tsu-label">executor</span>
+                  <select class="tsu-select" data-testid="nj-executor" x-model="newForm.executor">
+                    <template x-for="ex in availableExecutors" :key="ex">
+                      <option :value="ex" x-text="ex"></option>
+                    </template>
+                  </select>
+                </label>
+              </template>
 
               <div class="nj-cmd">
                 <div class="h">equivalent command</div>

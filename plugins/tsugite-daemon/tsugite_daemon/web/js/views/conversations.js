@@ -1001,7 +1001,15 @@ export default () => ({
     if (!msg) return false;
     if (msg.state === 'running' || msg.state === 'verifying') return true;
     if (msg.state === 'stuck' || msg.state === 'errored') return true;
-    return !!msg.worker_session_id;
+    return this.jobHasTerminal(msg);
+  },
+
+  // A worker terminal exists when the backend supplied its id directly (a cc
+  // executor spawns no worker Session, so it carries only worker_terminal_id)
+  // or when a worker session ran (agent executor - jobTerminalView probes
+  // /api/terminals for its PTY, if the worker produced one).
+  jobHasTerminal(msg) {
+    return !!(msg && (msg.worker_terminal_id || msg.worker_session_id));
   },
 
   // ---------- Job tile actions (dialogs) ----------
