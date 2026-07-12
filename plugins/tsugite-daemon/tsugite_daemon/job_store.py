@@ -18,6 +18,10 @@ class JobState(str, Enum):
     QUEUED = "queued"
     RUNNING = "running"
     VERIFYING = "verifying"
+    # Worker-initiated within-attempt pause: the worker asked for supervisor
+    # input (e.g. cc's CCDRIVER_NEED_INPUT). Non-terminal - respond_to_job
+    # resumes it to RUNNING; the phase timer still parks it STUCK if unanswered.
+    AWAITING_INPUT = "awaiting_input"
     DONE = "done"
     STUCK = "stuck"
     CANCELLED = "cancelled"
@@ -31,7 +35,19 @@ _TERMINAL_STATES = frozenset(
 _VALID_TRANSITIONS: dict[str, frozenset[str]] = {
     JobState.QUEUED.value: frozenset({JobState.RUNNING.value, JobState.CANCELLED.value, JobState.ERRORED.value}),
     JobState.RUNNING.value: frozenset(
-        {JobState.VERIFYING.value, JobState.STUCK.value, JobState.CANCELLED.value, JobState.ERRORED.value}
+        {
+            JobState.VERIFYING.value,
+            JobState.AWAITING_INPUT.value,
+            JobState.STUCK.value,
+            JobState.CANCELLED.value,
+            JobState.ERRORED.value,
+        }
+    ),
+    # AWAITING_INPUT → RUNNING is the answered/resumed path (respond_to_job);
+    # the phase timer still covers the pause, so an unanswered question parks
+    # STUCK; cancel gives up; a daemon restart mid-pause recovers to ERRORED.
+    JobState.AWAITING_INPUT.value: frozenset(
+        {JobState.RUNNING.value, JobState.STUCK.value, JobState.CANCELLED.value, JobState.ERRORED.value}
     ),
     # VERIFYING → RUNNING is the verifier-rejected retry path; the timer covers
     # this window so a hung verifier can still hit STUCK.
@@ -111,6 +127,10 @@ class Job:
     # PTY's output, so a "claude session exited (code N)" failure is
     # self-explanatory. Cleared with `error` on retry.
     error_detail: Optional[str] = None
+    # The question the worker is blocked on while AWAITING_INPUT. Cleared when
+    # answered (respond_to_job); left in place on stuck/cancelled so the tile
+    # still shows what was never answered.
+    pending_question: Optional[str] = None
     # Most recent verifier session id - set by orchestrator when verifier spawns
     # so a hung verifier can be cancelled from _on_timeout.
     verifier_session_id: Optional[str] = None
@@ -192,6 +212,7 @@ class Job:
             "notify_when": self.notify_when,
             "error": self.error,
             "error_detail": self.error_detail,
+            "pending_question": self.pending_question,
             "attempts": list(self.attempts or []),
             "acceptance_criteria": list(self.acceptance_criteria or []),
             "ac_results": list(self.ac_results or []),

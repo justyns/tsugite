@@ -71,6 +71,9 @@ def job_store(tmp_path):
     store.add(Job(id="job-q1", parent_session_id="parent-1", prompt="queued task", state="queued", agent="assistant"))
     store.add(Job(id="job-s1", parent_session_id="parent-1", prompt="stuck task", state="stuck", agent="odyn"))
     store.add(Job(id="job-e1", parent_session_id="parent-1", prompt="errored", state="errored", agent="odyn"))
+    store.add(
+        Job(id="job-w1", parent_session_id="parent-1", prompt="needs input", state="awaiting_input", agent="odyn")
+    )
     store.add(Job(id="job-d1", parent_session_id="parent-1", prompt="done!", state="done", agent="assistant"))
     store.add(Job(id="job-c1", parent_session_id="parent-1", prompt="cancelled", state="cancelled", agent="assistant"))
     return store
@@ -122,9 +125,9 @@ class TestListJobsEndpoint:
         assert resp.status_code == 200
         data = resp.json()
         assert "jobs" in data
-        assert len(data["jobs"]) == 7
+        assert len(data["jobs"]) == 8
         ids = {j["job_id"] for j in data["jobs"]}
-        assert {"job-r1", "job-v1", "job-q1", "job-s1", "job-e1", "job-d1", "job-c1"} == ids
+        assert {"job-r1", "job-v1", "job-q1", "job-s1", "job-e1", "job-w1", "job-d1", "job-c1"} == ids
 
     def test_job_payload_shape_matches_emit_event(self, client, test_token):
         resp = client.get("/api/jobs", headers={"Authorization": f"Bearer {test_token}"})
@@ -162,11 +165,13 @@ class TestListJobsEndpoint:
         jobs = resp.json()["jobs"]
         assert {j["job_id"] for j in jobs} == {"job-q1"}
 
-    def test_state_alias_stuck_includes_errored(self, client, test_token):
+    def test_state_alias_stuck_includes_errored_and_awaiting_input(self, client, test_token):
+        # The 'stuck' alias is the "needs you" set the tab badge counts: a job
+        # paused on a question needs you just as much as a parked one.
         resp = client.get("/api/jobs?state=stuck", headers={"Authorization": f"Bearer {test_token}"})
         assert resp.status_code == 200
         ids = {j["job_id"] for j in resp.json()["jobs"]}
-        assert ids == {"job-s1", "job-e1"}
+        assert ids == {"job-s1", "job-e1", "job-w1"}
 
     def test_state_alias_active_includes_running_and_verifying(self, client, test_token):
         resp = client.get("/api/jobs?state=active", headers={"Authorization": f"Bearer {test_token}"})
@@ -282,7 +287,7 @@ class TestListJobsDefaultLimit:
         for i in range(120):
             job_store.add(Job(id=f"job-bulk-{i}", parent_session_id="parent-1", prompt=f"bulk {i}", state="done"))
         resp = client.get("/api/jobs?limit=0", headers={"Authorization": f"Bearer {test_token}"})
-        assert len(resp.json()["jobs"]) == 127
+        assert len(resp.json()["jobs"]) == 128
 
 
 class TestRetryModelEndpoint:

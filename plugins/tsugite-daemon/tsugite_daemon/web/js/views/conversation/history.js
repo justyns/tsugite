@@ -428,7 +428,7 @@ export function eventsToBubbles(events, { dropTrailing = false } = {}) {
       // doesn't broadcast them today, but the tile is forward-compatible.
       // ac_results is broadcast top-level during VERIFYING so mid-verify criteria reach the tile.
       const fields = { job_id: data.job_id };
-      for (const k of ['state', 'prompt', 'worker_session_id', 'worker_terminal_id', 'verifier_session_id', 'verify_attempts', 'error', 'error_detail', 'attempts', 'acceptance_criteria', 'result', 'ac_results']) {
+      for (const k of ['state', 'prompt', 'worker_session_id', 'worker_terminal_id', 'verifier_session_id', 'verify_attempts', 'error', 'error_detail', 'pending_question', 'attempts', 'acceptance_criteria', 'result', 'ac_results']) {
         if (data[k] !== undefined) fields[k] = data[k];
       }
       if (existing) {

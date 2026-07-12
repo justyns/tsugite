@@ -77,3 +77,85 @@ def test_sidebar_awaiting_marker_clears_when_session_resumes(authenticated_page,
     dot = _view_call(page, f"view.dotClassNames(view.allSessions.find(s => s.id === {session.id!r}))")
     assert "waiting" not in label.lower(), f"awaiting marker should clear once resumed, got {label!r}"
     assert "awaiting" not in dot, f"dot 'awaiting' marker should clear once resumed, got {dot!r}"
+
+
+def _job_update(page, session_id, job_id, state):
+    page.evaluate(
+        f"""([sid, jid, st]) => {{
+            const view = Alpine.$data(document.querySelector({VIEW!r}));
+            view._handleJobUpdate({{ parent_session_id: sid, job_id: jid, state: st, prompt: 'x' }});
+        }}""",
+        [session_id, job_id, state],
+    )
+
+
+def test_sidebar_marks_session_with_awaiting_input_job_and_clears_on_resume(
+    authenticated_page, e2e_session_store, base_url
+):
+    """A job paused on a question (awaiting_input) must flag its OWNING session
+    in the sidebar - the toast fades, the durable marker must not."""
+    page = authenticated_page
+    user_id = page.evaluate("Alpine.store('app').userId")
+    session = e2e_session_store.get_or_create_interactive(user_id, "test-agent")
+    _load_session_into_sidebar(page, base_url, session.id)
+
+    _job_update(page, session.id, "job-ni01", "awaiting_input")
+
+    label = _view_call(page, f"view.sessionProgressLabel(view.allSessions.find(s => s.id === {session.id!r}))")
+    dot = _view_call(page, f"view.dotClassNames(view.allSessions.find(s => s.id === {session.id!r}))")
+    assert "input" in label.lower(), f"sidebar label should flag the blocked job, got {label!r}"
+    assert "awaiting" in dot, f"status dot should carry the 'awaiting' marker, got {dot!r}"
+
+    # Answered via respond_to_job -> the job resumes -> the marker clears.
+    _job_update(page, session.id, "job-ni01", "running")
+    label = _view_call(page, f"view.sessionProgressLabel(view.allSessions.find(s => s.id === {session.id!r}))")
+    assert "input" not in label.lower(), f"marker should clear once the job resumes, got {label!r}"
+
+
+def _dispatch_event(page, event_type, data):
+    page.evaluate(
+        f"""(payload) => {{
+            const view = Alpine.$data(document.querySelector({VIEW!r}));
+            view._handleAttentionEvent(payload.type, payload.data);
+        }}""",
+        {"type": event_type, "data": data},
+    )
+
+
+def test_sidebar_marks_session_on_cc_permission_prompt_until_cleared(authenticated_page, e2e_session_store, base_url):
+    """A cc permission prompt (needs_attention) must set the persistent marker on
+    the owning session, and attention_cleared (the next Stop) must clear it."""
+    page = authenticated_page
+    user_id = page.evaluate("Alpine.store('app').userId")
+    session = e2e_session_store.get_or_create_interactive(user_id, "test-agent")
+    _load_session_into_sidebar(page, base_url, session.id)
+
+    _dispatch_event(
+        page, "needs_attention", {"job_id": "job-pp01", "parent_session_id": session.id, "message": "approve?"}
+    )
+    label = _view_call(page, f"view.sessionProgressLabel(view.allSessions.find(s => s.id === {session.id!r}))")
+    assert "input" in label.lower(), f"a permission prompt must set the durable marker, got {label!r}"
+
+    _dispatch_event(page, "attention_cleared", {"job_id": "job-pp01", "parent_session_id": session.id})
+    label = _view_call(page, f"view.sessionProgressLabel(view.allSessions.find(s => s.id === {session.id!r}))")
+    assert "input" not in label.lower(), f"attention_cleared must clear the marker, got {label!r}"
+
+
+def test_sidebar_aggregate_counts_sessions_needing_input(authenticated_page, e2e_session_store, base_url):
+    """The sidebar surfaces an at-a-glance count of sessions awaiting input."""
+    page = authenticated_page
+    user_id = page.evaluate("Alpine.store('app').userId")
+    session = e2e_session_store.get_or_create_interactive(user_id, "test-agent")
+    _load_session_into_sidebar(page, base_url, session.id)
+
+    assert _view_call(page, "view.awaitingCount()") == 0
+    _emit_session_event(page, session.id, "ask_user")
+    assert _view_call(page, "view.awaitingCount()") == 1, "an ask_user-blocked session must count"
+
+    chip = page.locator("[data-testid='awaiting-count']")
+    assert chip.count() == 1 and chip.is_visible(), "the aggregate chip must render when sessions need input"
+    assert "1" in (chip.text_content() or "")
+
+    _emit_session_event(page, session.id, "turn_start", extra="turn: 2")
+    assert _view_call(page, "view.awaitingCount()") == 0
+    assert not chip.is_visible(), "the chip must hide when nothing needs input"

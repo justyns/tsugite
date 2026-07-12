@@ -1,7 +1,7 @@
 """E2E tests for the redesigned job tile (Direction B), dialogs, and notify turn.
 
 Covers:
-  - All 7 states (queued / running / verifying / done / stuck / errored / cancelled)
+  - All job states (queued / running / verifying / awaiting_input / done / stuck / errored / cancelled)
     render the correct accent color via data-state + state-glyph label.
   - Collapse/expand toggles the body.
   - AC chips render with per-criterion verdicts when `acceptance_criteria` is in the payload.
@@ -17,7 +17,7 @@ from unittest.mock import patch
 
 from tsugite.history.storage import SessionStorage
 
-JOB_STATES = ["queued", "running", "verifying", "done", "stuck", "errored", "cancelled"]
+JOB_STATES = ["queued", "running", "verifying", "awaiting_input", "done", "stuck", "errored", "cancelled"]
 
 
 def _new_session(e2e_adapter, e2e_tmp, user_id, tag):
@@ -36,7 +36,7 @@ def _open_conv(page):
     page.wait_for_function("Alpine.store('app').view === 'conversations'", timeout=3000)
 
 
-def test_redesigned_tile_renders_all_seven_states(authenticated_page, e2e_adapter, e2e_tmp):
+def test_redesigned_tile_renders_all_states(authenticated_page, e2e_adapter, e2e_tmp):
     page = authenticated_page
     _open_conv(page)
     user_id = page.evaluate("Alpine.store('app').userId")
@@ -58,7 +58,7 @@ def test_redesigned_tile_renders_all_seven_states(authenticated_page, e2e_adapte
         tiles = page.locator(".jx")
         assert tiles.count() == len(JOB_STATES), f"Expected {len(JOB_STATES)} tiles, got {tiles.count()}"
         states_rendered = {tiles.nth(i).get_attribute("data-state") for i in range(tiles.count())}
-        assert states_rendered == set(JOB_STATES), f"All seven states must render; got {sorted(states_rendered)}"
+        assert states_rendered == set(JOB_STATES), f"All job states must render; got {sorted(states_rendered)}"
 
 
 def test_tile_collapse_expand_toggle(authenticated_page, e2e_adapter, e2e_tmp):
@@ -228,6 +228,31 @@ def test_errored_tile_shows_worker_output_detail(authenticated_page, e2e_adapter
         assert detail.count() == 1, "an errored job with error_detail must render the expandable output tail"
         detail.locator("summary").click()
         assert "claude: not found" in (detail.text_content() or "")
+
+
+def test_awaiting_input_tile_shows_worker_question(authenticated_page, e2e_adapter, e2e_tmp):
+    page = authenticated_page
+    _open_conv(page)
+    user_id = page.evaluate("Alpine.store('app').userId")
+    history_dir, session, storage = _new_session(e2e_adapter, e2e_tmp, user_id, "needinput")
+    storage.record("user_input", text="/job needs-input test")
+    storage.record(
+        "job_status",
+        job_id="job-needin01",
+        parent_session_id=session.id,
+        state="awaiting_input",
+        prompt="codeword handshake",
+        pending_question="what is the codeword?",
+    )
+
+    with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
+        page.reload()
+        page.wait_for_selector(".jx", timeout=5000)
+        tile = page.locator(".jx").first
+        # awaiting_input default-expands and shows the worker's question.
+        q = tile.locator("[data-testid='jx-question']")
+        assert q.count() == 1, "an awaiting_input job must surface the worker's question"
+        assert "what is the codeword?" in (q.text_content() or "")
 
 
 def test_retry_with_hint_dialog_opens_and_submits(authenticated_page, e2e_adapter, e2e_tmp, base_url):

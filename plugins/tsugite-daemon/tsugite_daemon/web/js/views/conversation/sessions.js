@@ -455,10 +455,21 @@ export const sessionsMixin = {
     return (s.result || s.prompt || '').slice(0, 60) || '';
   },
 
-  // True when the session is blocked on an ask_user prompt: set in
-  // _updateProgressCache for every broadcast event and cleared on reply.
+  // True when the session is blocked on the user: an ask_user prompt (set in
+  // _updateProgressCache, cleared on reply), a job paused on a question
+  // (awaiting_input), or a cc permission prompt (needs_attention).
   _isAwaitingInput(s) {
-    return !!this.sessionsState[s?.id]?.awaitingInput;
+    const st = this.sessionsState[s?.id];
+    if (!st) return false;
+    return !!st.awaitingInput || Object.keys(st.jobsNeedingInput || {}).length > 0;
+  },
+
+  // Aggregate "needs your input" count across the loaded session list, so
+  // blocked sessions are discoverable at a glance without scanning every row.
+  // A method, not a getter: mixins merge by object spread, which would freeze
+  // a getter's first value.
+  awaitingCount() {
+    return (this.allSessions || []).filter((s) => this._isAwaitingInput(s)).length;
   },
 
   // Class for the row2 live-label: a waiting session gets its own (peach) treatment
@@ -469,7 +480,11 @@ export const sessionsMixin = {
 
   sessionProgressLabel(s) {
     if (!s) return '';
-    if (this._isAwaitingInput(s)) return 'waiting for your reply';
+    if (this._isAwaitingInput(s)) {
+      const st = this.sessionsState[s.id];
+      if (!st?.awaitingInput) return 'a job needs your input';
+      return 'waiting for your reply';
+    }
     const compacting = this.sessionCompactingLabel(s);
     if (compacting) return compacting;
     const running = s.state === 'running' || s.state === 'active';

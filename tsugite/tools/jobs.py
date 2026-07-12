@@ -167,6 +167,57 @@ def get_job(job_id: str) -> dict:
 
 
 @tool(require_daemon=True)
+def cancel_job(job_id: str, reason: str = "cancelled by agent") -> dict:
+    """Cancel a Job (or dismiss a parked one).
+
+    Stops the worker/verifier for a live Job (queued/running/verifying) and
+    finalizes it as cancelled. For a stuck/errored Job this is the "give up /
+    dismiss" action. No-op when the Job is already done/cancelled.
+
+    Args:
+        job_id: Job id (e.g. 'job-4f2a1b3c').
+        reason: Short audit note recorded on the Job.
+
+    Returns:
+        Dict with job_id and the resulting state, or {"error": "..."}.
+    """
+    if _jobs_orchestrator is None:
+        return {"error": "Jobs orchestrator not initialised"}
+    try:
+        job = _call(_jobs_orchestrator.cancel_job, job_id, reason)
+    except Exception as e:
+        return {"error": str(e)}
+    return {"job_id": job.id, "state": job.state}
+
+
+@tool(require_daemon=True)
+def respond_to_job(job_id: str, message: str) -> dict:
+    """Send input/steering to an executor Job's live worker.
+
+    Use this to answer a question the worker is blocked on (a Job in the
+    `awaiting_input` state - answering resumes it) or to add mid-flight guidance
+    to a running one. The message is fed into the live worker session (for a cc
+    job it is typed into the worker's terminal) and does not consume a
+    verification attempt. Only valid for non-agent executor Jobs (e.g.
+    executor="cc"); for stuck/errored Jobs use the retry action instead.
+
+    Args:
+        job_id: Job id (e.g. 'job-4f2a1b3c').
+        message: The input/guidance to deliver to the worker.
+
+    Returns:
+        Dict with job_id and state, or {"error": "..."}.
+    """
+    if _jobs_orchestrator is None:
+        return {"error": "Jobs orchestrator not initialised"}
+    try:
+        job = _call(_jobs_orchestrator.respond_to_job, job_id, message)
+    except Exception as e:
+        return {"error": str(e)}
+    return {"job_id": job.id, "state": job.state}
+
+
+@tool(require_daemon=True)
 def list_jobs(
     session_id: Optional[str] = None,
     state: Optional[str] = None,

@@ -142,6 +142,8 @@ You are managing a shared channel. When a user asks for something that would ben
 - `spawn_job(prompt, acceptance_criteria=[...], max_attempts=3, notify_when="never")` — Spawn a verified Job. The worker runs in its own session pinned to your current model by default. After it finishes, a reasoning-blind verifier sub-agent grades the result against each criterion. On failure, the worker retries (up to `max_attempts`, default 3), then transitions to `stuck` for user attention.
 - `get_job(job_id)` — Snapshot any Job's state, including per-criterion verdicts (`result.ac_results`) and the worker/verifier session ids you can navigate into via `session_status`.
 - `list_jobs(session_id=..., state=..., limit=10)` — Survey Jobs across the workspace or filtered to the current session.
+- `cancel_job(job_id, reason=...)` — Cancel a live Job, or give up on a stuck/errored one.
+- `respond_to_job(job_id, message)` — Answer or steer an executor Job's live worker. A Job in `awaiting_input` is blocked on the question in its `pending_question` field; answering resumes it. Answer yourself when you can; use `ask_user` only when the question genuinely needs the user. Not for agent-executor Jobs.
 
 **When to use what:**
 - **Inline** — single edit, one-shot read, small calculation. Don't spawn anything.

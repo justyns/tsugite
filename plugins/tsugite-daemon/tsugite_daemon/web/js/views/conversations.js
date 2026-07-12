@@ -127,6 +127,9 @@ export default () => ({
       compactionSourceId: null,
       liveProgress: null,
       awaitingInput: false,
+      // job_id -> 'awaiting_input' | 'permission': jobs in this session blocked
+      // on the user/agent (paused on a question, or a cc permission prompt).
+      jobsNeedingInput: {},
     });
   },
 
@@ -369,6 +372,9 @@ export default () => ({
       }
       if (ev.type === 'job_update') {
         this._handleJobUpdate(d);
+      }
+      if (ev.type === 'needs_attention' || ev.type === 'attention_cleared') {
+        this._handleAttentionEvent(ev.type, d);
       }
       if (ev.type === 'compaction_started' && d.agent === this.$store.app.selectedAgent && d.session_id) {
         const s = this._sessionState(d.session_id);
@@ -922,6 +928,32 @@ export default () => ({
     }
   },
 
+  // The durable "needs your input" marker for the sidebar. An awaiting_input
+  // job flags its owning session until it leaves that state; a cc permission
+  // prompt (needs_attention) flags it until the job's next Stop
+  // (attention_cleared) or a terminal job_update. Distinct from the chat-level
+  // `awaitingInput` flag, which every session_event recomputes.
+  _handleAttentionEvent(type, d) {
+    if (!d.job_id || !d.parent_session_id) return;
+    const st = this._sessionState(this._resolveSessionId(d.parent_session_id));
+    const map = st.jobsNeedingInput || (st.jobsNeedingInput = {});
+    if (type === 'needs_attention') map[d.job_id] = 'permission';
+    else if (map[d.job_id] === 'permission') delete map[d.job_id];
+  },
+
+  _trackJobNeedsInput(owner, d) {
+    const st = this._sessionState(owner);
+    const map = st.jobsNeedingInput || (st.jobsNeedingInput = {});
+    if (d.state === 'awaiting_input') {
+      map[d.job_id] = 'awaiting_input';
+    } else if (map[d.job_id] === 'awaiting_input') {
+      delete map[d.job_id];
+    } else if (map[d.job_id] && ['done', 'stuck', 'cancelled', 'errored'].includes(d.state)) {
+      // A permission-prompt flag can't outlive the job.
+      delete map[d.job_id];
+    }
+  },
+
   _handleJobUpdate(d) {
     if (!d.parent_session_id) return;
     // Route the update to the OWNING session's message list, not just the one
@@ -930,6 +962,7 @@ export default () => ({
     // worker"); dropping them there left the tile stuck on its last-seen state
     // when they returned, because revisits don't reload history.
     const owner = this._resolveSessionId(d.parent_session_id);
+    if (d.job_id && d.state) this._trackJobNeedsInput(owner, d);
     const state = this.sessionsState[owner];
     if (!state) return;  // parent not loaded in memory; the tile renders fresh from history on next visit
     const existing = state.messages.find(m => m.type === 'job_status' && m.job_id === d.job_id);
@@ -939,7 +972,7 @@ export default () => ({
     // include them in _emit_job_event today, but the tile is forward-compatible.
     // ac_results is broadcast top-level during VERIFYING so mid-verify criteria reach the tile.
     const fields = {};
-    for (const k of ['state', 'prompt', 'worker_session_id', 'worker_terminal_id', 'verifier_session_id', 'verify_attempts', 'error', 'error_detail', 'attempts', 'acceptance_criteria', 'result', 'ac_results']) {
+    for (const k of ['state', 'prompt', 'worker_session_id', 'worker_terminal_id', 'verifier_session_id', 'verify_attempts', 'error', 'error_detail', 'pending_question', 'attempts', 'acceptance_criteria', 'result', 'ac_results']) {
       if (d[k] !== undefined) fields[k] = d[k];
     }
     if (existing) {
@@ -959,11 +992,13 @@ export default () => ({
   jobTileOpen(msg) {
     if (typeof msg._open === 'boolean') return msg._open;
     return msg.state === 'running' || msg.state === 'verifying'
-      || msg.state === 'stuck' || msg.state === 'errored';
+      || msg.state === 'stuck' || msg.state === 'errored' || msg.state === 'awaiting_input';
   },
 
   jobStateLabel(state) {
-    return state === 'errored' ? 'error' : (state || 'unknown');
+    if (state === 'errored') return 'error';
+    if (state === 'awaiting_input') return 'needs input';
+    return state || 'unknown';
   },
 
   jobShortId(jobId) {

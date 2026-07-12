@@ -18,38 +18,50 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
+DEFAULT_NEEDS_INPUT_MARKER = "CCDRIVER_NEED_INPUT"
 
-def build_initial_prompt(goal: str, completion_marker: str) -> str:
-    """The first-arg goal seed. Bakes the completion protocol into the prompt
-    since SessionStart can't inject it. Phrased as natural guidance."""
+
+def build_initial_prompt(
+    goal: str, completion_marker: str, *, needs_input_marker: str = DEFAULT_NEEDS_INPUT_MARKER
+) -> str:
+    """The first-arg goal seed. Bakes the completion AND needs-input protocol
+    into the prompt since SessionStart can't inject it. Phrased as natural
+    guidance."""
     return (
         f"{goal}\n\n"
         f"When the task is fully complete, end your reply with the token "
         f"{completion_marker} so your supervisor knows you are done. A supervisor "
         f"may give you follow-up instructions after you stop; keep working until "
-        f"the task genuinely meets its goal."
+        f"the task genuinely meets its goal. If you are blocked on information or "
+        f"a decision you cannot obtain yourself, do not guess - end your reply "
+        f"with the line {needs_input_marker}: <your question> and stop; your "
+        f"supervisor will answer."
     )
 
 
-def continue_instruction(completion_marker: str) -> str:
+def continue_instruction(completion_marker: str, needs_input_marker: str = DEFAULT_NEEDS_INPUT_MARKER) -> str:
     """Natural-language nudge injected via a Stop `additionalContext` block to
     drive another turn. Never phrased as 'output exactly X' (Claude refuses that)."""
     return (
         "You do not appear to be finished with the task yet. Please keep working "
         "toward the goal. When the task is genuinely complete, end your reply with "
-        f"the token {completion_marker} so your supervisor knows you are done."
+        f"the token {completion_marker} so your supervisor knows you are done. If "
+        f"you are blocked on something only your supervisor can answer, end your "
+        f"reply with the line {needs_input_marker}: <your question> instead of guessing."
     )
 
 
 @dataclass
 class StopDecision:
     """Outcome of a Stop hook: the JSON body to return to Claude plus whether the
-    attempt is finished and the updated continue budget the caller must persist."""
+    attempt is finished, an optional needs-input question (a within-attempt
+    pause), and the updated continue budget the caller must persist."""
 
     response: dict
     complete: bool
     summary: Optional[str]
     new_consecutive_continues: int
+    needs_input: Optional[str] = None
 
 
 def decide_stop(
@@ -58,13 +70,17 @@ def decide_stop(
     consecutive_continues: int,
     max_consecutive_continues: int,
     completion_marker: str,
+    needs_input_marker: str = DEFAULT_NEEDS_INPUT_MARKER,
 ) -> StopDecision:
     """Decide what to do when Claude stops.
 
-    Cap-first: a fresh (human/CLI) turn resets the budget; the completion marker
-    ends the attempt (the verifier then grades it); an exhausted continue budget
-    also ends the attempt (maybe it IS done - let the verifier decide); otherwise
-    return a `decision: block` that drives one more turn.
+    A fresh (human/CLI) turn resets the budget; the completion marker ends the
+    attempt (the verifier then grades it); the needs-input marker pauses the
+    attempt - checked BEFORE budget exhaustion, or a blocked worker near the
+    nudge cap would be force-completed into a verification it already knows it
+    can't pass; an exhausted continue budget also ends the attempt (maybe it IS
+    done - let the verifier decide); otherwise return a `decision: block` that
+    drives one more turn.
     """
     last_msg = payload.get("last_assistant_message") or ""
     stop_hook_active = bool(payload.get("stop_hook_active"))
@@ -74,6 +90,16 @@ def decide_stop(
     if completion_marker and completion_marker in last_msg:
         return StopDecision(response={}, complete=True, summary=last_msg, new_consecutive_continues=count)
 
+    if needs_input_marker and needs_input_marker in last_msg:
+        question = last_msg.split(needs_input_marker, 1)[1].lstrip(":").strip()[:500]
+        return StopDecision(
+            response={},
+            complete=False,
+            summary=None,
+            new_consecutive_continues=count,
+            needs_input=question or "the worker asked for supervisor input (no question text)",
+        )
+
     if count >= max_consecutive_continues:
         # Budget exhausted: end the attempt and let the verifier judge it.
         return StopDecision(response={}, complete=True, summary=last_msg, new_consecutive_continues=count)
@@ -82,7 +108,7 @@ def decide_stop(
         "decision": "block",
         "hookSpecificOutput": {
             "hookEventName": "Stop",
-            "additionalContext": continue_instruction(completion_marker),
+            "additionalContext": continue_instruction(completion_marker, needs_input_marker),
         },
     }
     return StopDecision(response=block, complete=False, summary=None, new_consecutive_continues=count + 1)

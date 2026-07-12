@@ -333,7 +333,7 @@ class JobsOrchestrator:
         RUNNING transition, tile event, fresh phase timer."""
         fields: dict = {"worker_session_id": worker_session_id}
         if clear_error:
-            fields.update(resolved_at=None, error=None, error_detail=None)
+            fields.update(resolved_at=None, error=None, error_detail=None, pending_question=None)
         self._jobs.update(job_id, **fields)
         self._append_attempt(job_id, kind=kind, worker_session_id=worker_session_id)
         try:
@@ -487,6 +487,82 @@ class JobsOrchestrator:
                     logger.exception("cancel_job: failed to cancel session '%s'", sid)
         self._finalize(job, JobState.CANCELLED, error=reason)
         return self._jobs.get(job_id)
+
+    async def pause_worker(self, job_id: str, question: str) -> None:
+        """Executor-facing pause: the worker is blocked on supervisor input it
+        cannot obtain itself (e.g. cc's CCDRIVER_NEED_INPUT marker). Parks the
+        job in AWAITING_INPUT - a within-attempt pause: no verify attempt is
+        consumed, the live worker (PTY) stays up, and the phase timer keeps
+        running so an unanswered question still times out to STUCK - then wakes
+        the parent session so its agent can answer via respond_to_job (or
+        escalate to the human). No-op when the Job is not RUNNING: a pause must
+        never revive a resolved/parked job."""
+        job = self._jobs.get(job_id)
+        if job is None:
+            logger.warning("pause_worker for unknown job '%s'", job_id)
+            return
+        if job.state != JobState.RUNNING.value:
+            logger.warning("pause_worker for job '%s' in state '%s' (expected RUNNING) - ignoring", job_id, job.state)
+            return
+        try:
+            self._jobs.update_state(job_id, JobState.AWAITING_INPUT.value)
+        except JobStateTransitionError as e:
+            logger.warning("Cannot pause job '%s': %s", job_id, e)
+            return
+        self._jobs.update(job_id, pending_question=question)
+        fresh = self._jobs.get(job_id)
+        self._emit_job_event(fresh)
+        self._schedule_reply(
+            fresh,
+            f"Job {fresh.id} needs input: {question}\n"
+            f"Answer with respond_to_job('{fresh.id}', <answer>) to resume the worker. "
+            f"Only escalate to the user (ask_user) if you cannot answer this yourself.",
+            source="job_needs_input",
+        )
+
+    async def respond_to_job(self, job_id: str, message: str) -> Job:
+        """Deliver supervisor input to an executor job's live worker: answer an
+        AWAITING_INPUT question (resumes the attempt) or steer a RUNNING worker
+        mid-flight. The executor feeds the message into its live session - for
+        cc that's typed into the PTY - without consuming a verification attempt.
+
+        Agent jobs are rejected: their workers are autonomous sessions with no
+        steering channel (a durable comment thread is a separate feature).
+        Parked jobs are rejected too - retry-with-hint is the resurrect path.
+        """
+        if not (message or "").strip():
+            raise ValueError("message is required")
+        job = self._jobs.get(job_id)
+        if job is None:
+            raise ValueError(f"Unknown job: {job_id}")
+        if job.executor == "agent":
+            raise ValueError("respond_to_job only supports executor jobs; agent workers have no steering channel")
+        if job.state == JobState.AWAITING_INPUT.value:
+            # Answer + auto-resume. The executor delivers the answer to the live
+            # session, or respawns with --resume if the PTY died while paused.
+            job = await self.resume_worker(job_id)
+        elif job.state != JobState.RUNNING.value:
+            raise ValueError(f"job '{job_id}' is {job.state}, not running - use retry for parked jobs")
+        executor = self._executors.get(job.executor)
+        if executor is None:
+            raise ValueError(f"executor '{job.executor}' is not loaded")
+        await executor.start(job, followup=message)
+        return self._jobs.get(job_id)
+
+    async def resume_worker(self, job_id: str) -> Job:
+        """Return an AWAITING_INPUT job to RUNNING with a fresh phase timer and
+        a cleared question. Called when the pause ends: an answer arrives via
+        respond_to_job, or a human answered directly in the live TUI (the hook
+        route sees a Stop while paused)."""
+        job = self._jobs.get(job_id)
+        if job is None:
+            raise ValueError(f"Unknown job: {job_id}")
+        self._jobs.update_state(job_id, JobState.RUNNING.value)
+        self._jobs.update(job_id, pending_question=None)
+        job = self._jobs.get(job_id)
+        self._schedule_timeout(job_id, job.timeout_minutes)
+        self._emit_job_event(job)
+        return job
 
     async def mark_done_manual(self, job_id: str, reason: str = "marked done by user") -> Job:
         """Override a STUCK Job to DONE. Audit trail goes into result.manual_done_reason
@@ -1140,11 +1216,15 @@ class JobsOrchestrator:
     def _schedule_notify(self, job: Job) -> None:
         """Post a one-line wake-up message into the parent session so its agent
         learns the Job finished. Best-effort: errors are logged, not raised."""
-        message = _build_notify_message(job)
+        self._schedule_reply(job, _build_notify_message(job), source="job_complete")
+
+    def _schedule_reply(self, job: Job, message: str, *, source: str) -> None:
+        """Wake the parent session with `message` as a background task.
+        Best-effort: errors are logged, not raised."""
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
-            logger.debug("No running loop; skipping notify for job '%s'", job.id)
+            logger.debug("No running loop; skipping %s wake-up for job '%s'", source, job.id)
             return
 
         async def _send():
@@ -1152,11 +1232,11 @@ class JobsOrchestrator:
                 await self._runner.reply_to_session(
                     job.parent_session_id,
                     message,
-                    source="job_complete",
+                    source=source,
                     metadata={"job_id": job.id, "kind": "job_notify"},
                 )
             except Exception:
-                logger.exception("Failed to notify parent of job '%s' completion", job.id)
+                logger.exception("Failed to wake parent of job '%s' (%s)", job.id, source)
 
         task = loop.create_task(_send())
         self._notify_tasks.add(task)

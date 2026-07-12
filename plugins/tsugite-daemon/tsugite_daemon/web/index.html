@@ -85,6 +85,9 @@
         <div class="console-filter">
           <span class="prompt">›</span>
           <input type="text" x-model="sessionFilter" @input.debounce.300ms="searchSessionsServer()" placeholder="filter agent:odyn status:running" aria-label="Filter sessions">
+          <span class="awaiting-count" data-testid="awaiting-count" x-show="awaitingCount() > 0"
+                :title="awaitingCount() + ' session' + (awaitingCount() === 1 ? '' : 's') + ' awaiting your input'"
+                x-text="awaitingCount() + ' need you'"></span>
           <kbd>/</kbd>
         </div>
         <div class="console-sidebar-scroll">
@@ -941,6 +944,7 @@
                                 <template x-if="msg.state === 'queued'"><span class="jt-dot live"></span></template>
                                 <template x-if="msg.state === 'done'"><span class="g">✓</span></template>
                                 <template x-if="msg.state === 'stuck'"><span class="g">▲</span></template>
+                                <template x-if="msg.state === 'awaiting_input'"><span class="g">?</span></template>
                                 <template x-if="msg.state === 'errored'"><span class="g">✗</span></template>
                                 <template x-if="msg.state === 'cancelled'"><span class="g">⊘</span></template>
                               </span>
@@ -1002,6 +1006,14 @@
                                     <span x-text="jobHasTerminal(msg) ? '' : 'llm-only · no shell'"></span>
                                   </div>
                                   <pre x-text="jobResultSummary(msg)"></pre>
+                                </div>
+                              </template>
+
+                              <!-- Worker blocked on a question (awaiting_input, or unanswered at stuck). -->
+                              <template x-if="msg.pending_question">
+                                <div class="jx-issue" data-testid="jx-question">
+                                  <span class="mk">?</span>
+                                  <span x-text="'worker asks: ' + msg.pending_question"></span>
                                 </div>
                               </template>
 

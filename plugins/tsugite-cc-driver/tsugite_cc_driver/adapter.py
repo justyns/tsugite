@@ -39,6 +39,9 @@ class CCDriverConfig(BaseModel):
     sandbox: bool = True
     max_consecutive_continues: int = 5
     completion_marker: str = "CCDRIVER_GOAL_COMPLETE"
+    # Marker the driven claude emits when it is blocked on supervisor input;
+    # pauses the job in awaiting_input instead of nudging it to guess.
+    needs_input_marker: str = "CCDRIVER_NEED_INPUT"
     base_url: str = "http://127.0.0.1:8374"
     state_dir: Optional[str] = None
 
@@ -104,15 +107,23 @@ class CCDriverAdapter(BaseAdapter):
         job_id = state.job_id
         orch = self._orchestrator
         job = orch.get_job(job_id) if orch is not None else None
-        if job is None or job.state != JobState.RUNNING.value:
-            # Not RUNNING (verifying/terminal): allow claude to stop; the verifier
-            # or a retry drives the next attempt.
-            return JSONResponse({})
 
         try:
             payload = await request.json()
         except Exception:
             payload = {}
+
+        if job is not None and job.state == JobState.AWAITING_INPUT.value and payload.get("hook_event_name") == "Stop":
+            # A Stop while paused means someone answered directly in the live
+            # TUI (claude only runs a turn when typed at). Resume the job and
+            # grade the turn normally instead of dropping it - otherwise a
+            # human take-over could never re-grade the attempt.
+            job = await orch.resume_worker(job_id)
+
+        if job is None or job.state != JobState.RUNNING.value:
+            # Not RUNNING (verifying/terminal): allow claude to stop; the verifier
+            # or a retry drives the next attempt.
+            return JSONResponse({})
 
         # Every payload carries these; record them so a respawn can --resume.
         if payload.get("session_id"):
@@ -122,15 +133,25 @@ class CCDriverAdapter(BaseAdapter):
 
         event = payload.get("hook_event_name")
         if event == "Stop":
+            if state.attention_flagged:
+                # Claude finished a turn, so the permission prompt that set the
+                # flag was answered - tell the UI to drop its persistent marker.
+                state.attention_flagged = False
+                self._emit("attention_cleared", {"job_id": job_id, "parent_session_id": job.parent_session_id})
             decision = decide_stop(
                 payload,
                 consecutive_continues=state.consecutive_continues,
                 max_consecutive_continues=self.config.max_consecutive_continues,
                 completion_marker=self.config.completion_marker,
+                needs_input_marker=self.config.needs_input_marker,
             )
             state.consecutive_continues = decision.new_consecutive_continues
             if decision.complete:
                 await orch.complete_worker(job_id, decision.summary or "")
+            elif decision.needs_input:
+                # Within-attempt pause: the job parks awaiting_input and the
+                # parent session is woken to answer via respond_to_job.
+                await orch.pause_worker(job_id, decision.needs_input)
             return JSONResponse(decision.response)
 
         if event == "StopFailure":
@@ -139,15 +160,24 @@ class CCDriverAdapter(BaseAdapter):
 
         if event == "Notification":
             message = notification_attention(payload)
-            if message and self.event_bus is not None:
-                try:
-                    self.event_bus.emit("needs_attention", {"job_id": job_id, "message": message})
-                except Exception:
-                    logger.debug("cc-driver: needs_attention emit failed for job '%s'", job_id)
+            if message:
+                state.attention_flagged = True
+                self._emit(
+                    "needs_attention",
+                    {"job_id": job_id, "parent_session_id": job.parent_session_id, "message": message},
+                )
             return JSONResponse({})
 
         # Unknown/other events: acknowledge without driving.
         return JSONResponse({})
+
+    def _emit(self, event: str, payload: dict) -> None:
+        if self.event_bus is None:
+            return
+        try:
+            self.event_bus.emit(event, payload)
+        except Exception:
+            logger.debug("cc-driver: %s emit failed for job '%s'", event, payload.get("job_id"))
 
 
 def create_adapter(*, config, agents_config, session_store, identity_map):

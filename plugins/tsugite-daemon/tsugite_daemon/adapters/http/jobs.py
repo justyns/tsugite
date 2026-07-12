@@ -44,7 +44,9 @@ class JobsMixin:
         state_filter = request.query_params.get("state")
         if state_filter:
             alias = {
-                "stuck": frozenset({"stuck", "errored"}),
+                # The "needs you" set the tab badge counts: parked jobs AND ones
+                # paused on a question.
+                "stuck": frozenset({"stuck", "errored", "awaiting_input"}),
                 "active": frozenset({"running", "verifying"}),
                 "resolved": frozenset({"done", "cancelled"}),
             }

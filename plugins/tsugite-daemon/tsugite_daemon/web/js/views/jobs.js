@@ -5,6 +5,7 @@ const STATE_META = {
   queued:    { color: 'var(--overlay0)', word: 'queued' },
   running:   { color: 'var(--green)',    word: 'running' },
   verifying: { color: 'var(--yellow)',   word: 'verifying' },
+  awaiting_input: { color: 'var(--peach)', word: 'needs input' },
   done:      { color: 'var(--green)',    word: 'done' },
   stuck:     { color: 'var(--peach)',    word: 'stuck' },
   errored:   { color: 'var(--red)',      word: 'error' },
@@ -18,7 +19,7 @@ const STATE_META = {
 const GROUPS = [
   { key: 'running', label: 'active',    color: 'var(--green)',    states: ['running', 'verifying'] },
   { key: 'queued',  label: 'queued',    color: 'var(--overlay0)', states: ['queued'] },
-  { key: 'needs',   label: 'needs you', color: 'var(--peach)',    states: ['stuck', 'errored'] },
+  { key: 'needs',   label: 'needs you', color: 'var(--peach)',    states: ['stuck', 'errored', 'awaiting_input'] },
   { key: 'done',    label: 'resolved',  color: 'var(--green)',    states: ['done', 'cancelled'] },
 ];
 const GROUPS_BY_KEY = Object.fromEntries(GROUPS.map((g) => [g.key, g]));
@@ -46,6 +47,7 @@ function defaultLine(job) {
     return { kind: 'verify', text: 'verifier · checking' + (ac ? ' ' + ac + ' criteria' : '') };
   }
   if (job.state === 'queued') return { kind: 'queue', text: 'queued' };
+  if (job.state === 'awaiting_input') return { kind: 'issue', text: job.pending_question || 'worker needs input' };
   if (job.state === 'stuck') return { kind: 'issue', text: job.error || 'needs you' };
   if (job.state === 'errored') return { kind: 'error', text: job.error || 'worker crashed' };
   if (job.state === 'done') {

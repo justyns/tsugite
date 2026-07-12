@@ -254,6 +254,122 @@ async def test_cancel_job_cancels_executor_before_worktree_prune(store, runner, 
     assert store.get(job.id).worktree_path is None
 
 
+# ── respond_to_job: feed supervisor input into a live executor worker ──
+
+
+@pytest.mark.asyncio
+async def test_respond_to_job_feeds_followup_into_running_executor(store, runner, orchestrator):
+    ex = FakeExecutor()
+    orchestrator.register_executor("fake", ex)
+    job = _seed_running_executor_job(store, orchestrator, acceptance_criteria=[])
+    result = await orchestrator.respond_to_job(job.id, "the codeword is swordfish")
+    assert ex.starts == [(job.id, "the codeword is swordfish")], "the message must reach the live worker as a followup"
+    assert result.state == JobState.RUNNING.value, "steering must not consume the attempt or change state"
+
+
+@pytest.mark.asyncio
+async def test_respond_to_job_rejects_blank_agent_and_non_running(store, runner, orchestrator):
+    ex = FakeExecutor()
+    orchestrator.register_executor("fake", ex)
+    running = _seed_running_executor_job(store, orchestrator, acceptance_criteria=[])
+    with pytest.raises(ValueError, match="message"):
+        await orchestrator.respond_to_job(running.id, "   ")
+
+    agent_job = store.add(Job(id="", parent_session_id="parent-1", prompt="agent work"))
+    orchestrator.register_worker(agent_job.id, "ws-1", timeout_minutes=30)
+    with pytest.raises(ValueError, match="agent"):
+        await orchestrator.respond_to_job(agent_job.id, "hello")
+
+    await orchestrator.cancel_job(running.id, reason="gave up")
+    await _drain(orchestrator)
+    with pytest.raises(ValueError, match="cancelled"):
+        await orchestrator.respond_to_job(running.id, "hello")
+    assert ex.starts == [], "no rejected respond may reach the executor"
+
+
+# ── awaiting_input: worker-initiated pause / notify / resume ──
+
+
+@pytest.mark.asyncio
+async def test_pause_worker_parks_awaiting_input_and_notifies_parent(store, runner, orchestrator):
+    sent = []
+
+    async def fake_reply(session_id, message, source="session", metadata=None):
+        sent.append((session_id, message, source))
+        return "ok"
+
+    runner.reply_to_session = fake_reply
+    orchestrator.register_executor("fake", FakeExecutor())
+    job = _seed_running_executor_job(store, orchestrator, acceptance_criteria=["x"])
+
+    await orchestrator.pause_worker(job.id, "what is the codeword?")
+    await asyncio.sleep(0)
+
+    fresh = store.get(job.id)
+    assert fresh.state == JobState.AWAITING_INPUT.value
+    assert fresh.pending_question == "what is the codeword?"
+    assert fresh.verify_attempts == 0, "a pause is within-attempt - it must not consume a verify attempt"
+    assert sent and sent[0][0] == "parent-1", "the spawning session must be woken with the question"
+    assert "what is the codeword?" in sent[0][1]
+    assert "respond_to_job" in sent[0][1], "the wake-up must name the tool that answers/resumes"
+
+
+@pytest.mark.asyncio
+async def test_pause_worker_noop_when_not_running(store, runner, orchestrator):
+    orchestrator.register_executor("fake", FakeExecutor())
+    job = _seed_running_executor_job(store, orchestrator, acceptance_criteria=[])
+    await orchestrator.cancel_job(job.id, reason="gave up")
+    await _drain(orchestrator)
+    await orchestrator.pause_worker(job.id, "too late")
+    fresh = store.get(job.id)
+    assert fresh.state == JobState.CANCELLED.value, "a pause must never revive a resolved job"
+    assert fresh.pending_question is None
+
+
+@pytest.mark.asyncio
+async def test_respond_to_job_answers_and_resumes_awaiting_input(store, runner, orchestrator):
+    ex = FakeExecutor()
+    orchestrator.register_executor("fake", ex)
+    job = _seed_running_executor_job(store, orchestrator, acceptance_criteria=[])
+    await orchestrator.pause_worker(job.id, "codeword?")
+
+    result = await orchestrator.respond_to_job(job.id, "swordfish")
+
+    assert ex.starts == [(job.id, "swordfish")], "the answer must reach the executor as a followup"
+    assert result.state == JobState.RUNNING.value, "answering must resume the attempt"
+    assert result.pending_question is None, "the answered question must clear"
+
+
+@pytest.mark.asyncio
+async def test_resume_worker_returns_awaiting_input_to_running(store, runner, orchestrator):
+    orchestrator.register_executor("fake", FakeExecutor())
+    job = _seed_running_executor_job(store, orchestrator, acceptance_criteria=[])
+    await orchestrator.pause_worker(job.id, "codeword?")
+    resumed = await orchestrator.resume_worker(job.id)
+    assert resumed.state == JobState.RUNNING.value
+    assert resumed.pending_question is None
+
+
+@pytest.mark.asyncio
+async def test_awaiting_input_times_out_to_stuck(store, runner, orchestrator):
+    orchestrator.register_executor("fake", FakeExecutor())
+    job = _seed_running_executor_job(store, orchestrator, acceptance_criteria=[])
+    await orchestrator.pause_worker(job.id, "anyone there?")
+    orchestrator._on_timeout(job.id)
+    await _drain(orchestrator)
+    assert store.get(job.id).state == JobState.STUCK.value, "an unanswered pause must eventually park, not dangle"
+
+
+@pytest.mark.asyncio
+async def test_recover_orphaned_jobs_errors_awaiting_input(store, runner, orchestrator):
+    orchestrator.register_executor("fake", FakeExecutor())
+    job = _seed_running_executor_job(store, orchestrator, acceptance_criteria=[])
+    await orchestrator.pause_worker(job.id, "q?")
+    recovered = orchestrator.recover_orphaned_jobs()
+    assert recovered >= 1
+    assert store.get(job.id).state == JobState.ERRORED.value, "no persistence in the MVP: restart mid-pause errors"
+
+
 # ── parked (STUCK/ERRORED) reaps the executor's child but keeps the worktree ──
 
 

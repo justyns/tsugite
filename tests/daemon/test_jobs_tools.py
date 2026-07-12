@@ -200,6 +200,71 @@ def test_list_jobs_uninitialised_orchestrator_returns_error(monkeypatch):
     assert jobs_tool.list_jobs() == [{"error": "Jobs orchestrator not initialised"}]
 
 
+# ── cancel_job / respond_to_job tool wrappers ──
+
+
+def test_cancel_job_tool_wraps_orchestrator_cancel(monkeypatch):
+    from types import SimpleNamespace
+
+    seen = {}
+
+    def fake_cancel(job_id, reason):
+        seen["args"] = (job_id, reason)
+        return SimpleNamespace(id=job_id, state="cancelled")
+
+    monkeypatch.setattr(jobs_tool, "_jobs_orchestrator", SimpleNamespace(cancel_job=fake_cancel))
+    monkeypatch.setattr(jobs_tool, "_call", lambda fn, *a, timeout=30, **k: fn(*a, **k))
+
+    out = jobs_tool.cancel_job("job-1", reason="agent gave up")
+    assert seen["args"] == ("job-1", "agent gave up")
+    assert out == {"job_id": "job-1", "state": "cancelled"}
+
+
+def test_cancel_job_tool_surfaces_errors_as_dict(monkeypatch):
+    from types import SimpleNamespace
+
+    def boom(job_id, reason):
+        raise ValueError("Unknown job: job-x")
+
+    monkeypatch.setattr(jobs_tool, "_jobs_orchestrator", SimpleNamespace(cancel_job=boom))
+    monkeypatch.setattr(jobs_tool, "_call", lambda fn, *a, timeout=30, **k: fn(*a, **k))
+    assert jobs_tool.cancel_job("job-x") == {"error": "Unknown job: job-x"}
+
+    monkeypatch.setattr(jobs_tool, "_jobs_orchestrator", None)
+    assert jobs_tool.cancel_job("job-x") == {"error": "Jobs orchestrator not initialised"}
+
+
+def test_respond_to_job_tool_wraps_orchestrator_respond(monkeypatch):
+    from types import SimpleNamespace
+
+    seen = {}
+
+    def fake_respond(job_id, message):
+        seen["args"] = (job_id, message)
+        return SimpleNamespace(id=job_id, state="running")
+
+    monkeypatch.setattr(jobs_tool, "_jobs_orchestrator", SimpleNamespace(respond_to_job=fake_respond))
+    monkeypatch.setattr(jobs_tool, "_call", lambda fn, *a, timeout=30, **k: fn(*a, **k))
+
+    out = jobs_tool.respond_to_job("job-1", "the codeword is swordfish")
+    assert seen["args"] == ("job-1", "the codeword is swordfish")
+    assert out == {"job_id": "job-1", "state": "running"}
+
+
+def test_respond_to_job_tool_surfaces_errors_as_dict(monkeypatch):
+    from types import SimpleNamespace
+
+    def boom(job_id, message):
+        raise ValueError("job 'job-x' is cancelled")
+
+    monkeypatch.setattr(jobs_tool, "_jobs_orchestrator", SimpleNamespace(respond_to_job=boom))
+    monkeypatch.setattr(jobs_tool, "_call", lambda fn, *a, timeout=30, **k: fn(*a, **k))
+    assert jobs_tool.respond_to_job("job-x", "hi") == {"error": "job 'job-x' is cancelled"}
+
+    monkeypatch.setattr(jobs_tool, "_jobs_orchestrator", None)
+    assert jobs_tool.respond_to_job("job-x", "hi") == {"error": "Jobs orchestrator not initialised"}
+
+
 # ── spawn_job timeout behaviour ──
 
 

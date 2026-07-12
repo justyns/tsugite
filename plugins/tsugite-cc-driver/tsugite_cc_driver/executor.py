@@ -39,6 +39,11 @@ class DriveState:
     transcript_path: Optional[str] = None
     consecutive_continues: int = 0
     settings_path: Optional[str] = None
+    # True while an un-actioned permission prompt is (probably) on screen: set
+    # on a permission_prompt Notification, cleared on the next Stop (claude
+    # finishing a turn proves the prompt was answered). Drives the UI's
+    # persistent needs-your-input marker via needs_attention/attention_cleared.
+    attention_flagged: bool = False
 
 
 class DriveStateStore:
@@ -265,7 +270,13 @@ class CCExecutor:
         settings_path = write_run_settings(self.config.state_dir, job.id, build_settings(hook_url))
         state.settings_path = str(settings_path)
 
-        prompt = followup if followup is not None else build_initial_prompt(job.prompt, self.config.completion_marker)
+        prompt = (
+            followup
+            if followup is not None
+            else build_initial_prompt(
+                job.prompt, self.config.completion_marker, needs_input_marker=self.config.needs_input_marker
+            )
+        )
         cmd = build_claude_command(
             claude,
             str(settings_path),

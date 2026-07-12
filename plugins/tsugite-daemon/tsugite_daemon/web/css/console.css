@@ -194,6 +194,12 @@ body.is-resizing-sidebar { cursor: col-resize; user-select: none; }
 }
 .console-filter input::placeholder { color: var(--overlay0); }
 .console-filter kbd { font-size: 9.5px; padding: 1px 4px; color: var(--overlay1); background: none; border: none; }
+.console-filter .awaiting-count {
+  flex-shrink: 0; font-family: var(--font-mono); font-size: 10px; font-weight: 600;
+  color: var(--peach); background: color-mix(in oklab, var(--peach) 12%, var(--crust));
+  border: 1px solid color-mix(in oklab, var(--peach) 30%, var(--surface0));
+  border-radius: 8px; padding: 1px 7px; white-space: nowrap;
+}
 
 .console-sidebar-scroll { overflow-y: auto; padding-bottom: 8px; min-height: 0; }
 
