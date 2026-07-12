@@ -6,6 +6,7 @@ text is sent back verbatim (no re-rendering from parsed pieces) so parser bugs
 can't corrupt what the model sees as its own past output.
 """
 
+import re
 from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional
 from xml.sax.saxutils import escape
@@ -13,6 +14,28 @@ from xml.sax.saxutils import escape
 from tsugite.renderer import format_prompt_ts, parse_iso_utc
 
 from .models import Event
+
+# Pre-#479 history stored an executed turn with a bare ```python fence. Replaying it
+# verbatim makes the model imitate that fence on its next turn, where it now no-ops
+# (bare blocks aren't executed). When an old model_response was actually executed, we
+# promote its (first) bare fence to ```python-exec so the replayed context matches the
+# current convention. The negative lookahead leaves already-migrated turns untouched.
+_LEGACY_EXEC_FENCE = re.compile(r"(?m)^```python(?!-exec)([ \t]*\r?\n)")
+
+
+def _promote_exec_fence(raw: str) -> str:
+    return _LEGACY_EXEC_FENCE.sub(r"```python-exec\1", raw, count=1)
+
+
+def _response_was_executed(events: List[Event], idx: int) -> bool:
+    """True if the model_response at ``idx`` is followed by a code_execution before the
+    next turn boundary (a later model_response / user_input)."""
+    for event in events[idx + 1 :]:
+        if event.type == "code_execution":
+            return True
+        if event.type in ("model_response", "user_input"):
+            return False
+    return False
 
 
 def _format_event_ts(ts: Optional[datetime]) -> str:
@@ -50,15 +73,16 @@ def events_to_messages(events: Iterable[Event]) -> List[Dict[str, Any]]:
             {"role": "assistant", "content": "I've reviewed our previous conversation and I'm ready to continue."}
         )
 
-    for event in post_compaction:
-        rendered = _event_to_message(event)
+    for idx, event in enumerate(post_compaction):
+        executed = event.type == "model_response" and _response_was_executed(post_compaction, idx)
+        rendered = _event_to_message(event, executed=executed)
         if rendered:
             messages.append(rendered)
 
     return messages
 
 
-def _event_to_message(event: Event) -> Optional[Dict[str, Any]]:
+def _event_to_message(event: Event, executed: bool = False) -> Optional[Dict[str, Any]]:
     if event.type == "user_input":
         text = event.data.get("text", "")
         ts_str = _format_event_ts(event.ts)
@@ -66,6 +90,8 @@ def _event_to_message(event: Event) -> Optional[Dict[str, Any]]:
         return {"role": "user", "content": content}
     if event.type == "model_response":
         raw = event.data.get("raw_content", "")
+        if executed:
+            raw = _promote_exec_fence(raw)
         return {"role": "assistant", "content": raw}
     if event.type == "code_execution":
         return {"role": "user", "content": _execution_xml(event.data, event.ts)}

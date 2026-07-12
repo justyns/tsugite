@@ -71,6 +71,30 @@ class TestEventsToMessagesStateless:
         assert msgs[4]["content"] == f"{FIXED_TS_PREFIX} t2"
         assert msgs[5]["content"] == "r3"
 
+    def test_legacy_bare_python_fence_promoted_when_executed(self):
+        """Pre-#479 history stored executed turns with a bare ```python fence. When
+        replayed as context, promote it to ```python-exec so the model doesn't imitate
+        the dead fence (which would silently no-op its next code block)."""
+        events = [
+            _ev("user_input", ts=FIXED_TS, text="task"),
+            _ev("model_response", raw_content="Computing.\n\n```python\nx = 6 * 7\nprint(x)\n```"),
+            _ev("code_execution", code="x = 6 * 7\nprint(x)", output="42\n"),
+        ]
+        msgs = events_to_messages(events)
+        assert "```python-exec" in msgs[1]["content"]
+        assert "```python\n" not in msgs[1]["content"]
+
+    def test_illustrative_bare_python_not_promoted(self):
+        """A bare ```python block in a prose answer with no execution is illustration —
+        it must stay bare, not be promoted."""
+        raw = "Here's an example:\n\n```python\nmetadata = {k: v for k, v in old.items()}\n```"
+        events = [
+            _ev("user_input", ts=FIXED_TS, text="explain"),
+            _ev("model_response", raw_content=raw),
+        ]
+        msgs = events_to_messages(events)
+        assert msgs[1]["content"] == raw
+
     def test_error_observation_includes_error_tag(self):
         events = [
             _ev("user_input", text="t"),
