@@ -23,6 +23,7 @@ typing at any time.
 |-----|---------|---------|
 | `enabled` | `false` | load the plugin |
 | `claude_binary` | `claude` | path/name of the CLI |
+| `model` | `sonnet` | default `--model` (alias or full name); a per-job `model` overrides it, `null` uses claude's own default |
 | `permission_mode` | `bypassPermissions` | passed to `--permission-mode` |
 | `sandbox` | `true` | run claude under bubblewrap (see below) |
 | `max_consecutive_continues` | `5` | Stop nudges before an attempt is handed to the verifier anyway |

@@ -547,49 +547,40 @@ class HookHandler:
                 pass
         return context
 
-    def _fire_pre_tool_call(self, tool_name: str, arguments: dict[str, Any]) -> None:
+    def _fire_tool_phase(self, phase: str, tool_name: str, arguments: dict[str, Any]) -> None:
+        """Run the matching hooks for a tool phase (pre_tool_call / post_tool).
+
+        Python and agent hooks need the async executor, so schedule them on the
+        running loop (fire-and-forget); shell-only hooks run synchronously and
+        their executions are captured for draining.
+        """
         context = self._build_tool_context(tool_name, arguments)
-        rules = [r for r in self.config.pre_tool_call if tool_name in r.tools or "*" in r.tools]
+        rules = [r for r in getattr(self.config, phase) if tool_name in r.tools or "*" in r.tools]
         if not rules:
             return
-        # Python/agent hooks need async
-        has_async = any(r.type in ("python", "agent") for r in rules)
-        if has_async:
+        if any(r.type in ("python", "agent") for r in rules):
             try:
                 loop = asyncio.get_running_loop()
-                task = loop.create_task(
-                    _render_and_execute_async(
-                        _jinja_env,
-                        rules,
-                        context,
-                        self.workspace_dir,
-                        interactive=self.interactive,
-                        phase="pre_tool_call",
-                    )
-                )
-                task.add_done_callback(_log_task_exception)
             except RuntimeError:
-                logger.debug("No running event loop; pre_tool_call hooks not scheduled")
+                logger.debug("No running event loop; %s hooks not scheduled", phase)
+                return
+            task = loop.create_task(
+                _render_and_execute_async(
+                    _jinja_env, rules, context, self.workspace_dir, interactive=self.interactive, phase=phase
+                )
+            )
+            task.add_done_callback(_log_task_exception)
         else:
             results = _render_and_execute(
-                _jinja_env, rules, context, self.workspace_dir, interactive=self.interactive, phase="pre_tool_call"
+                _jinja_env, rules, context, self.workspace_dir, interactive=self.interactive, phase=phase
             )
             self._executions.extend(results.executions)
 
+    def _fire_pre_tool_call(self, tool_name: str, arguments: dict[str, Any]) -> None:
+        self._fire_tool_phase("pre_tool_call", tool_name, arguments)
+
     def _fire_post_tool(self, tool_name: str, arguments: dict[str, Any]) -> None:
-        context = self._build_tool_context(tool_name, arguments)
-        tool_rules = [rule for rule in self.config.post_tool if tool_name in rule.tools or "*" in rule.tools]
-        if not tool_rules:
-            return
-        results = _render_and_execute(
-            _jinja_env,
-            tool_rules,
-            context,
-            self.workspace_dir,
-            interactive=self.interactive,
-            phase="post_tool",
-        )
-        self._executions.extend(results.executions)
+        self._fire_tool_phase("post_tool", tool_name, arguments)
 
     def drain_executions(self) -> list[HookExecution]:
         """Return and clear accumulated hook executions."""

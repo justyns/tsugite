@@ -71,14 +71,18 @@ def build_claude_command(
     permission_mode: str,
     prompt: str,
     *,
+    model: Optional[str] = None,
     resume_session_id: Optional[str] = None,
 ) -> str:
     """Build the shell command string for spawn_terminal (it wraps in `sh -c`).
 
     Everything is shlex.quoted so a goal/followup containing quotes or newlines
-    can't break out of the argument.
+    can't break out of the argument. `model` accepts an alias (sonnet/opus/haiku)
+    or a full name; when None, claude uses its own configured default.
     """
     parts = [claude_binary, "--settings", str(settings_path), "--permission-mode", permission_mode]
+    if model:
+        parts += ["--model", model]
     if resume_session_id:
         parts += ["--resume", resume_session_id]
     parts.append(prompt)
@@ -110,19 +114,49 @@ def is_workspace_trusted(cwd, config_path=None) -> bool:
     return isinstance(project, dict) and project.get("hasTrustDialogAccepted") is True
 
 
-def build_sandbox_ctx(sandbox: bool, cwd: Optional[str]):
+def build_sandbox_ctx(sandbox: bool, cwd: Optional[str], *, claude_binary: str = "claude", settings_dir=None):
     """Sandbox policy for a cc job: None (unsandboxed) unless `sandbox` is set.
 
     When set: filesystem isolation to cwd, network ON (no_network=False - the
     driven claude needs the API), and ~/.claude bound rw so credentials refresh.
+
+    bwrap does --clearenv and mounts only a fixed set of dirs (/usr /lib /bin
+    /sbin, the venv, the workspace, and our extra binds), so we MUST also bind
+    everything the driven claude touches by absolute path - each one, if missing
+    from the jail, is a hard failure at launch:
+    - the claude binary's dirs, or PATH points at a file that isn't there and
+      claude dies with `claude: command not found` (exit 127);
+    - the per-job settings dir holding settings.json, or `--settings <path>`
+      errors with "Settings file not found";
+    - ~/.claude.json, or claude can't see the workspace-trusted flag and hangs
+      on the trust prompt inside the jail (the exact hang the pre-check prevents).
+      Bound read-WRITE: claude persists per-run session metadata (numStartups,
+      lastCost) into it on shutdown and errors on a read-only mount.
     """
     if not sandbox:
         return None
     from tsugite.agent_runner.helpers import SandboxContext
 
+    ro: list[Path] = []
+    resolved = shutil.which(claude_binary)
+    if resolved:
+        # The PATH entry is usually a symlink into a per-version install dir; bind
+        # both so the symlink resolves AND the real files are present in the jail.
+        for d in (Path(resolved).parent, Path(os.path.realpath(resolved)).parent):
+            if d not in ro:
+                ro.append(d)
+    if settings_dir:
+        ro.append(Path(settings_dir))
+
+    rw: list[Path] = [Path.home() / ".claude"]
+    config_json = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home()) / ".claude.json"
+    if config_json.exists():
+        rw.append(config_json)
+
     return SandboxContext(
         no_network=False,
-        extra_rw_binds=[Path.home() / ".claude"],
+        extra_ro_binds=ro,
+        extra_rw_binds=rw,
         workspace_dir=Path(cwd) if cwd else None,
     )
 
@@ -151,7 +185,12 @@ class CCExecutor:
             if proc is not None and proc.exit_code is None:
                 # A supervisor turn: type the followup as natural guidance and
                 # reset the continue budget (the next Stop is a driven turn again).
-                pty_manager.write_stdin(state.terminal_id, (followup.strip() + "\n").encode())
+                # The claude TUI (Ink) submits on carriage return, not newline, and
+                # debounces pasted input - so send the text, let it register, then
+                # send a bare \r as Enter.
+                pty_manager.write_stdin(state.terminal_id, followup.strip().encode())
+                await asyncio.sleep(0.2)
+                pty_manager.write_stdin(state.terminal_id, b"\r")
                 state.consecutive_continues = 0
                 return
         await self._spawn(job, followup)
@@ -204,6 +243,7 @@ class CCExecutor:
             str(settings_path),
             self.config.permission_mode,
             prompt,
+            model=(getattr(job, "model", None) or self.config.model),
             resume_session_id=state.cc_session_id if followup is not None else None,
         )
 
@@ -215,7 +255,9 @@ class CCExecutor:
                 cwd=cwd,
                 parent_session_id=None,
                 on_state_change=on_state_change,
-                sandbox_ctx=build_sandbox_ctx(self.config.sandbox, cwd),
+                sandbox_ctx=build_sandbox_ctx(
+                    self.config.sandbox, cwd, claude_binary=claude, settings_dir=settings_path.parent
+                ),
             )
         except Exception as e:
             logger.exception("cc-driver: failed to spawn claude PTY for job '%s'", job.id)

@@ -23,13 +23,14 @@ from tsugite_pty.terminal_store import TerminalSessionStore
 
 
 class FakeJob:
-    def __init__(self, job_id, *, prompt="do the thing", workspace_path=None, worktree_path=None):
+    def __init__(self, job_id, *, prompt="do the thing", workspace_path=None, worktree_path=None, model=None):
         self.id = job_id
         self.state = "running"
         self.prompt = prompt
         self.workspace_path = workspace_path
         self.worktree_path = worktree_path
         self.worker_terminal_id = None
+        self.model = model
 
 
 class FakeJobStore:
@@ -167,6 +168,15 @@ def test_build_claude_command_adds_resume_when_given():
     assert "--resume" in argv and "cc-42" in argv
 
 
+def test_build_claude_command_adds_model_when_given():
+    import shlex
+
+    argv = shlex.split(build_claude_command("claude", "/s.json", "bypassPermissions", "go", model="opus"))
+    assert "--model" in argv and "opus" in argv
+    # None -> no --model flag (claude uses its own default).
+    assert "--model" not in shlex.split(build_claude_command("claude", "/s.json", "bypassPermissions", "go"))
+
+
 def test_build_sandbox_ctx_off_is_none():
     assert build_sandbox_ctx(False, "/work") is None
 
@@ -177,6 +187,98 @@ def test_build_sandbox_ctx_on_keeps_network_and_binds_claude_dir():
     assert ctx.no_network is False, "the driven claude needs network for the API"
     assert Path.home() / ".claude" in ctx.extra_rw_binds
     assert ctx.workspace_dir == Path("/work")
+
+
+def _fake_claude_install(tmp_path):
+    """Create bin/claude -> share/claude/<ver>/claude, mirroring the native install
+    layout (PATH symlink into a per-version dir). Returns (symlink, bindir, install)."""
+    install = tmp_path / "share" / "claude" / "2.1.0"
+    install.mkdir(parents=True)
+    real = install / "claude"
+    real.write_text("#!/bin/sh\n")
+    real.chmod(0o755)
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    link = bindir / "claude"
+    link.symlink_to(real)
+    return link, bindir, install
+
+
+def test_build_sandbox_ctx_binds_the_claude_binary_dirs(tmp_path):
+    # Without these, the jailed claude dies with exit 127 (command not found).
+    link, bindir, install = _fake_claude_install(tmp_path)
+    ctx = build_sandbox_ctx(True, str(tmp_path / "work"), claude_binary=str(link))
+    assert bindir in ctx.extra_ro_binds, "PATH dir (symlink) must be bound"
+    assert install in ctx.extra_ro_binds, "real per-version install dir must be bound"
+
+
+def test_build_sandbox_ctx_binds_the_trust_config_rw(tmp_path, monkeypatch):
+    # ~/.claude.json must be in the jail (trust flag) and bound read-WRITE - claude
+    # persists session metadata into it on shutdown and errors on a RO mount.
+    cfg = tmp_path / ".claude.json"
+    cfg.write_text("{}")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path))
+    ctx = build_sandbox_ctx(True, str(tmp_path / "work"), claude_binary="claude-absent")
+    assert cfg in ctx.extra_rw_binds
+    assert cfg not in ctx.extra_ro_binds
+
+
+def test_build_sandbox_ctx_binds_the_settings_dir(tmp_path):
+    # Without it, `claude --settings <path>` errors "Settings file not found".
+    settings_dir = tmp_path / "state" / "job-1"
+    ctx = build_sandbox_ctx(True, str(tmp_path / "work"), claude_binary="claude-absent", settings_dir=settings_dir)
+    assert settings_dir in ctx.extra_ro_binds
+
+
+def test_sandboxed_claude_and_trust_present_in_real_bwrap_argv(tmp_path, monkeypatch):
+    # Repro guard against the exit-127 bug: the claude dirs + trust file must land
+    # as --ro-bind in the ACTUAL bwrap command, not just the SandboxContext.
+    pytest.importorskip("tsugite_sandbox")
+    import shutil
+
+    if shutil.which("bwrap") is None:
+        pytest.skip("bwrap not installed")
+    from tsugite_pty.terminal_runtime import maybe_sandbox_argv
+
+    link, bindir, install = _fake_claude_install(tmp_path)
+    cfg = tmp_path / ".claude.json"
+    cfg.write_text("{}")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path))
+    work = tmp_path / "work"
+    work.mkdir()
+    settings_dir = tmp_path / "state" / "job-1"
+    settings_dir.mkdir(parents=True)
+
+    ctx = build_sandbox_ctx(True, str(work), claude_binary=str(link), settings_dir=settings_dir)
+    argv = maybe_sandbox_argv(["claude"], str(work), ctx, force_no_network=False)
+
+    assert str(bindir) in argv, "claude PATH dir missing from bwrap argv -> exit 127"
+    assert str(install) in argv, "claude install dir missing from bwrap argv"
+    assert str(settings_dir) in argv, "settings dir missing from bwrap argv -> settings file not found"
+    assert str(cfg) in argv, "trust config missing from bwrap argv -> trust-prompt hang"
+    assert "--unshare-net" not in argv, "cc-driver sandbox keeps network for the API"
+
+
+def test_real_claude_launches_inside_the_jail(tmp_path):
+    # End-to-end guard against binds that are structurally present but runtime-
+    # insufficient: claude's binary + bundled node runtime must fully load inside
+    # the exact jail cc-driver builds. `--version` needs no login/trust/network.
+    pytest.importorskip("tsugite_sandbox")
+    import shutil
+    import subprocess
+
+    if shutil.which("claude") is None or shutil.which("bwrap") is None:
+        pytest.skip("needs a real claude + bwrap install")
+    from tsugite_pty.terminal_runtime import maybe_sandbox_argv
+
+    work = tmp_path / "work"
+    work.mkdir()
+    sp = write_run_settings(tmp_path / "state", "job-1", build_settings("http://127.0.0.1:8899/hook/tok"))
+    ctx = build_sandbox_ctx(True, str(work), claude_binary="claude", settings_dir=sp.parent)
+    argv = maybe_sandbox_argv(["claude", "--version"], str(work), ctx, force_no_network=False)
+    r = subprocess.run(argv, capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, f"claude failed to launch in the jail: {r.stdout}{r.stderr}"
+    assert r.stdout.strip(), "claude --version produced no output in the jail"
 
 
 def test_settings_registers_exactly_the_three_hooks_with_token_url(tmp_path):
@@ -215,11 +317,21 @@ async def test_followup_on_live_pty_types_via_write_stdin(tmp_path, runtime):
     st.terminal_id = session.id
     st.consecutive_continues = 3
 
+    # Spy on the raw bytes written - the echo buffer is unreliable for \r vs \n
+    # because the PTY line discipline translates them.
+    writes = []
+    orig = manager.write_stdin
+    manager.write_stdin = lambda tid, data: (writes.append(data), orig(tid, data))[1]
+
     await ex.start(job, followup="please keep going")
 
     proc = manager.get(session.id)
     proc.wait_drain(timeout=1.0)
-    assert b"please keep going" in proc.buffer, "followup must be typed into the live PTY"
+    sent = b"".join(writes)
+    assert b"please keep going" in sent, "followup text must be typed into the live PTY"
+    assert b"\r" in sent, "the TUI submits on carriage return, not newline"
+    assert b"\n" not in sent, "a bare newline would land as literal text, never submitting"
+    assert b"please keep going" in proc.buffer, "the live PTY must actually receive it"
     assert st.consecutive_continues == 0, "a supervisor followup resets the continue budget"
     # No respawn: still the same terminal.
     assert st.terminal_id == session.id

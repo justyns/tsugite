@@ -61,8 +61,7 @@ def greet(name: str, excited: bool = False) -> str:
 #    a context dict. Sync or async. Phases: pre_message, pre_context_build,
 #    post_context_build, pre_llm_call, pre_tool_call, pre_response, post_response,
 #    pre_compact, post_compact, session_end. (The tool phases pre_tool_call /
-#    post_tool need tools=[...] to say which tools match; "*" = all. Note: only
-#    pre_tool_call runs *python* hooks; post_tool is shell-only.)
+#    post_tool need tools=[...] to say which tools match; "*" = all.)
 #    On the context-build phases a returned string is injected into the prompt; on
 #    other phases the return is ignored (do side effects like logging/notifying).
 # ─────────────────────────────────────────────────────────────────────────────

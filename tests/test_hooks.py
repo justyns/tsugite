@@ -1,5 +1,6 @@
 """Tests for workspace hooks."""
 
+import asyncio
 import logging
 import subprocess
 from pathlib import Path
@@ -1140,6 +1141,33 @@ class TestHookHandlerPreToolCall:
         with patch("tsugite.hooks.subprocess.run") as mock_run:
             handler.handle_event(ToolCallEvent(tool_name="read_file", arguments={}))
             mock_run.assert_not_called()
+
+
+@pytest.mark.asyncio
+class TestHookHandlerPostToolPython:
+    """post_tool python hooks must actually fire. They need the async executor
+    (like pre_tool_call); the sync path silently skipped them."""
+
+    async def _drain(self):
+        pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+        if pending:
+            await asyncio.gather(*pending)
+
+    async def test_python_post_tool_hook_fires(self):
+        fired = []
+        rule = HookRule(type="python", hook_callable=lambda ctx: fired.append(ctx.get("tool")), name="rec", tools=["*"])
+        handler = HookHandler(HooksConfig(post_tool=[rule]), Path("/tmp/test"))
+        handler.handle_event(ToolCallEvent(tool_name="write_file", arguments={}))
+        handler.handle_event(ToolResultEvent(tool_name="write_file", success=True))
+        await self._drain()
+        assert fired == ["write_file"]
+
+    def test_shell_post_tool_hook_still_fires_synchronously(self):
+        handler = HookHandler(HooksConfig(post_tool=[HookRule(tools=["*"], run="echo hi")]), Path("/tmp/test"))
+        with patch("tsugite.hooks.subprocess.run", return_value=_ok_result()) as mock_run:
+            handler.handle_event(ToolCallEvent(tool_name="write_file", arguments={}))
+            handler.handle_event(ToolResultEvent(tool_name="write_file", success=True))
+            mock_run.assert_called_once()
 
 
 class TestHookDecorator:

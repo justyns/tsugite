@@ -29,6 +29,9 @@ logger = logging.getLogger(__name__)
 class CCDriverConfig(BaseModel):
     enabled: bool = False
     claude_binary: str = "claude"
+    # Default model the driven claude runs with (alias sonnet/opus/haiku or a full
+    # name). A per-job `model` overrides it; set to null to use claude's own default.
+    model: Optional[str] = "sonnet"
     permission_mode: str = "bypassPermissions"
     # Autonomous default is sandboxed: filesystem isolation pairs with the
     # bypass/skip-permissions trust workaround so a driven claude can't write

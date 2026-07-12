@@ -216,6 +216,9 @@ function connectSSE() {
     if (event.type === 'job_update') {
       loadJobsNeedsYou().catch(() => {});
     }
+    if (event.type === 'needs_attention') {
+      toast((event.data && event.data.message) || 'A job needs your attention', 'info', 6000);
+    }
     Alpine.store('app').lastEvent = { ...event, _ts: Date.now() };
   }, (connected) => {
     Alpine.store('app').sseConnected = connected;
