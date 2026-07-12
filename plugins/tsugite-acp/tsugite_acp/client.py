@@ -27,6 +27,8 @@ from acp.schema import (
     Implementation,
     RequestPermissionResponse,
     StopReason,
+    ToolCallProgress,
+    ToolCallStart,
 )
 
 from tsugite.exceptions import AgentExecutionError
@@ -35,7 +37,13 @@ from tsugite_acp.policy import PermissionPolicy
 logger = logging.getLogger(__name__)
 
 _STDERR_BUFFER_LINES = 200
-_FATAL_STOP_REASONS = frozenset(get_args(StopReason)) - {"end_turn", "cancelled"}
+# Stop reasons other than a clean end_turn / user cancel. The agent still did work
+# under these (hit a token / turn-request cap, or refused), so we preserve the turn's
+# content and note the truncation instead of raising and discarding everything.
+_INCOMPLETE_STOP_REASONS = frozenset(get_args(StopReason)) - {"end_turn", "cancelled"}
+# ToolCallProgress statuses worth surfacing; intermediate ticks (pending/in_progress)
+# are dropped as noise.
+_TERMINAL_TOOL_STATUS = frozenset({"completed", "failed"})
 
 
 def _plugin_version() -> str:
@@ -47,9 +55,9 @@ def _plugin_version() -> str:
 
 @dataclass
 class ACPEvent:
-    """Yielded from ACPClientSession.prompt(). One of text/thought/done."""
+    """Yielded from ACPClientSession.prompt(). One of text/thought/tool/done."""
 
-    kind: Literal["text", "thought", "done"]
+    kind: Literal["text", "thought", "tool", "done"]
     text: str = ""
     stop_reason: str | None = None
     usage: dict | None = None
@@ -230,8 +238,12 @@ class ACPClientSession:
 
         resp = prompt_task.result()
         stop = resp.stop_reason
-        if stop in _FATAL_STOP_REASONS:
-            raise AgentExecutionError(f"ACP agent stopped: {stop}")
+        if stop in _INCOMPLETE_STOP_REASONS:
+            # The agent stopped without a clean end_turn (token/turn-request cap, or
+            # refusal). It still did work, so surface a truncation note as content and
+            # complete the turn rather than raising - otherwise the accumulated
+            # text/tool activity is discarded and the turn renders empty in history.
+            yield ACPEvent(kind="text", text=f"\n\n[ACP turn stopped: {stop}]")
 
         yield ACPEvent(
             kind="done",
@@ -245,6 +257,23 @@ class ACPClientSession:
             return ACPEvent(kind="text", text=update.content.text)
         if isinstance(update, AgentThoughtChunk):
             return ACPEvent(kind="thought", text=update.content.text)
+        if isinstance(update, (ToolCallStart, ToolCallProgress)):
+            text = ACPClientSession._format_tool_update(update)
+            return ACPEvent(kind="tool", text=text) if text else None
+        return None
+
+    @staticmethod
+    def _format_tool_update(update) -> str | None:
+        """Render a tool-call notification as a compact transcript line so the agent's
+        executed tool/code activity reaches history. ToolCallStart (the invocation)
+        always surfaces via its action-shaped title; ToolCallProgress surfaces only its
+        terminal status so in-progress ticks don't spam the turn."""
+        title = (getattr(update, "title", None) or "").strip()
+        if isinstance(update, ToolCallStart):
+            return f"\n\n[tool] {title}" if title else None
+        status = getattr(update, "status", None)
+        if status in _TERMINAL_TOOL_STATUS:
+            return f"\n\n[tool] {title or 'tool'}: {status}"
         return None
 
     async def cancel(self) -> None:

@@ -208,6 +208,57 @@ class TestAcompletion:
         conn.load_session.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_collect_includes_tool_call_activity(self, patched_provider):
+        """Tool-call activity must land in the completion content so it's recorded to
+        history - otherwise a turn that only ran tools renders empty."""
+        from acp.schema import AgentMessageChunk, PromptResponse, TextContentBlock, ToolCallStart
+
+        p, conn = patched_provider
+
+        async def fake_prompt(*, prompt, session_id, **_):
+            await p._session._handler.session_update(
+                session_id=session_id,
+                update=ToolCallStart(title="Launch job: research", tool_call_id="t1", session_update="tool_call"),
+            )
+            await p._session._handler.session_update(
+                session_id=session_id,
+                update=AgentMessageChunk(
+                    content=TextContentBlock(type="text", text="launched"),
+                    session_update="agent_message_chunk",
+                ),
+            )
+            return PromptResponse(stop_reason="end_turn")
+
+        conn.prompt.side_effect = fake_prompt
+
+        resp = await p.acompletion(messages=[{"role": "user", "content": "hi"}], model="sonnet", stream=False)
+        assert "Launch job: research" in resp.content
+        assert "launched" in resp.content
+
+    @pytest.mark.asyncio
+    async def test_collect_preserves_content_on_max_tokens(self, patched_provider):
+        """A max_tokens stop must not discard the turn's work - the content collected so
+        far is still returned (not raised away)."""
+        from acp.schema import AgentMessageChunk, PromptResponse, TextContentBlock
+
+        p, conn = patched_provider
+
+        async def fake_prompt(*, prompt, session_id, **_):
+            await p._session._handler.session_update(
+                session_id=session_id,
+                update=AgentMessageChunk(
+                    content=TextContentBlock(type="text", text="did a lot of work"),
+                    session_update="agent_message_chunk",
+                ),
+            )
+            return PromptResponse(stop_reason="max_tokens")
+
+        conn.prompt.side_effect = fake_prompt
+
+        resp = await p.acompletion(messages=[{"role": "user", "content": "hi"}], model="sonnet", stream=False)
+        assert "did a lot of work" in resp.content
+
+    @pytest.mark.asyncio
     async def test_resume_session_uses_load_session(self, mock_conn):
         from acp.schema import PromptResponse
         from tsugite_acp.client import ACPClientHandler, ACPClientSession

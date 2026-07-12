@@ -137,7 +137,9 @@ class ACPProvider:
         accumulated = ""
         usage = Usage()
         async for ev in self._session.prompt(blocks):
-            if ev.kind == "text":
+            # Tool activity is surfaced as content so it's recorded to history alongside
+            # the assistant's text - otherwise a tool-only turn renders empty.
+            if ev.kind in ("text", "tool"):
                 accumulated += ev.text
             elif ev.kind == "done":
                 usage = self._extract_usage(ev.usage)
@@ -147,7 +149,7 @@ class ACPProvider:
     async def _stream_turn(self, blocks: list[TextContentBlock]) -> AsyncIterator[StreamChunk]:
         usage = Usage()
         async for ev in self._session.prompt(blocks):
-            if ev.kind == "text":
+            if ev.kind in ("text", "tool"):
                 yield StreamChunk(content=ev.text)
             elif ev.kind == "thought":
                 yield StreamChunk(reasoning_content=ev.text)
