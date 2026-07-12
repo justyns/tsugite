@@ -72,6 +72,18 @@ def _make_thought_chunk(text: str):
     )
 
 
+def _make_tool_call_start(title: str, tool_call_id: str = "t1"):
+    from acp.schema import ToolCallStart
+
+    return ToolCallStart(title=title, tool_call_id=tool_call_id, session_update="tool_call")
+
+
+def _make_tool_progress(status: str, title: str | None = None, tool_call_id: str = "t1"):
+    from acp.schema import ToolCallProgress
+
+    return ToolCallProgress(title=title, tool_call_id=tool_call_id, status=status, session_update="tool_call_update")
+
+
 class TestPromptTurn:
     @pytest.mark.asyncio
     async def test_single_turn_streams_text_then_done(self, mock_conn):
@@ -123,40 +135,136 @@ class TestPromptTurn:
         assert "".join(t.text for t in texts) == "answer"
 
 
-# ── Slice 7: stop-reason error paths ──
+# ── Tool-call surfacing ──
 
 
-class TestStopReasonErrors:
+class TestToolCalls:
+    """Tool-call notifications must surface as `tool` events so the agent's executed
+    tool/code activity reaches history instead of being silently dropped."""
+
     @pytest.mark.asyncio
-    async def test_max_tokens_raises(self, mock_conn):
+    async def test_tool_call_start_surfaces_as_event(self, mock_conn):
         from acp.schema import PromptResponse
         from tsugite_acp.client import ACPClientHandler, ACPClientSession
-
-        from tsugite.exceptions import AgentExecutionError
 
         handler = ACPClientHandler()
         session = ACPClientSession(handler=handler, conn=mock_conn)
         await session.start(cwd="/tmp")
-        mock_conn.prompt = AsyncMock(return_value=PromptResponse(stop_reason="max_tokens"))
 
-        with pytest.raises(AgentExecutionError) as ei:
-            async for _ in session.prompt(blocks=[{"type": "text", "text": "hi"}]):
-                pass
-        assert "max_tokens" in str(ei.value)
+        async def fake_prompt(*, prompt, session_id, **_):
+            await handler.session_update(session_id=session_id, update=_make_tool_call_start("Bash git status"))
+            await handler.session_update(session_id=session_id, update=_make_message_chunk("done"))
+            return PromptResponse(stop_reason="end_turn")
+
+        mock_conn.prompt.side_effect = fake_prompt
+
+        events = [c async for c in session.prompt(blocks=[{"type": "text", "text": "hi"}])]
+        tool_events = [c for c in events if c.kind == "tool"]
+        assert len(tool_events) == 1
+        assert "Bash git status" in tool_events[0].text
 
     @pytest.mark.asyncio
-    async def test_refusal_raises(self, mock_conn):
+    async def test_in_progress_tool_update_is_dropped(self, mock_conn):
+        """Non-terminal progress ticks are noise; only the call and its terminal status
+        surface."""
         from acp.schema import PromptResponse
         from tsugite_acp.client import ACPClientHandler, ACPClientSession
-
-        from tsugite.exceptions import AgentExecutionError
 
         handler = ACPClientHandler()
         session = ACPClientSession(handler=handler, conn=mock_conn)
         await session.start(cwd="/tmp")
-        mock_conn.prompt = AsyncMock(return_value=PromptResponse(stop_reason="refusal"))
 
-        with pytest.raises(AgentExecutionError):
+        async def fake_prompt(*, prompt, session_id, **_):
+            await handler.session_update(session_id=session_id, update=_make_tool_progress("in_progress"))
+            return PromptResponse(stop_reason="end_turn")
+
+        mock_conn.prompt.side_effect = fake_prompt
+
+        events = [c async for c in session.prompt(blocks=[{"type": "text", "text": "hi"}])]
+        assert [c for c in events if c.kind == "tool"] == []
+
+    @pytest.mark.asyncio
+    async def test_completed_tool_update_surfaces(self, mock_conn):
+        from acp.schema import PromptResponse
+        from tsugite_acp.client import ACPClientHandler, ACPClientSession
+
+        handler = ACPClientHandler()
+        session = ACPClientSession(handler=handler, conn=mock_conn)
+        await session.start(cwd="/tmp")
+
+        async def fake_prompt(*, prompt, session_id, **_):
+            await handler.session_update(session_id=session_id, update=_make_tool_progress("failed", title="Bash"))
+            return PromptResponse(stop_reason="end_turn")
+
+        mock_conn.prompt.side_effect = fake_prompt
+
+        events = [c async for c in session.prompt(blocks=[{"type": "text", "text": "hi"}])]
+        tool_events = [c for c in events if c.kind == "tool"]
+        assert len(tool_events) == 1
+        assert "failed" in tool_events[0].text
+
+
+# ── Stop-reason handling: preserve content, don't discard the turn ──
+
+
+class TestStopReasonHandling:
+    """A turn that stops for max_tokens / max_turn_requests / refusal did real work;
+    its content must be preserved (recorded to history) instead of raising and
+    discarding everything."""
+
+    @pytest.mark.asyncio
+    async def test_max_tokens_preserves_content(self, mock_conn):
+        from acp.schema import PromptResponse
+        from tsugite_acp.client import ACPClientHandler, ACPClientSession
+
+        handler = ACPClientHandler()
+        session = ACPClientSession(handler=handler, conn=mock_conn)
+        await session.start(cwd="/tmp")
+
+        async def fake_prompt(*, prompt, session_id, **_):
+            await handler.session_update(session_id=session_id, update=_make_message_chunk("partial answer"))
+            return PromptResponse(stop_reason="max_tokens")
+
+        mock_conn.prompt.side_effect = fake_prompt
+
+        events = [c async for c in session.prompt(blocks=[{"type": "text", "text": "hi"}])]
+        text = "".join(c.text for c in events if c.kind == "text")
+        done = [c for c in events if c.kind == "done"]
+        assert "partial answer" in text
+        assert len(done) == 1
+        assert done[0].stop_reason == "max_tokens"
+
+    @pytest.mark.asyncio
+    async def test_refusal_preserves_content(self, mock_conn):
+        from acp.schema import PromptResponse
+        from tsugite_acp.client import ACPClientHandler, ACPClientSession
+
+        handler = ACPClientHandler()
+        session = ACPClientSession(handler=handler, conn=mock_conn)
+        await session.start(cwd="/tmp")
+
+        async def fake_prompt(*, prompt, session_id, **_):
+            await handler.session_update(session_id=session_id, update=_make_message_chunk("I can't help with that."))
+            return PromptResponse(stop_reason="refusal")
+
+        mock_conn.prompt.side_effect = fake_prompt
+
+        events = [c async for c in session.prompt(blocks=[{"type": "text", "text": "hi"}])]
+        assert "I can't help with that." in "".join(c.text for c in events if c.kind == "text")
+        assert [c for c in events if c.kind == "done"][0].stop_reason == "refusal"
+
+    @pytest.mark.asyncio
+    async def test_prompt_rpc_error_still_raises(self, mock_conn):
+        """A genuine transport/protocol error (the prompt RPC itself failing) must still
+        propagate - that's distinct from a stop reason."""
+        from tsugite_acp.client import ACPClientHandler, ACPClientSession
+
+        handler = ACPClientHandler()
+        session = ACPClientSession(handler=handler, conn=mock_conn)
+        await session.start(cwd="/tmp")
+        mock_conn.prompt = AsyncMock(side_effect=RuntimeError("connection dropped"))
+
+        with pytest.raises(RuntimeError, match="connection dropped"):
             async for _ in session.prompt(blocks=[{"type": "text", "text": "hi"}]):
                 pass
 

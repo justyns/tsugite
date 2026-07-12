@@ -233,7 +233,7 @@ def _create_job_host_session(adapter: "BaseAdapter", user_id: str, prompt: str) 
     surfaces it without a manual refresh. Deliberately NOT marked primary - a Job
     must never steal the user's primary-chat flag.
     """
-    from tsugite_daemon.session_store import create_interactive_session
+    from tsugite_daemon.session_store import METADATA_JOB_HOST, create_interactive_session
 
     first_line = next((ln.strip() for ln in (prompt or "").splitlines() if ln.strip()), "")
     title = f"Job: {first_line[:60]}".rstrip() if first_line else "Job"
@@ -243,6 +243,7 @@ def _create_job_host_session(adapter: "BaseAdapter", user_id: str, prompt: str) 
         user_id,
         title=title,
         event_bus=getattr(adapter, "event_bus", None),
+        metadata={METADATA_JOB_HOST: True},
     )
 
 

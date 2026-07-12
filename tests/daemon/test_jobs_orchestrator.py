@@ -11,7 +11,7 @@ from tsugite_daemon.jobs_orchestrator import (
     JobsOrchestrator,
     _parse_verifier_output,
 )
-from tsugite_daemon.session_store import Session, SessionStatus
+from tsugite_daemon.session_store import FINISHED_STATUSES, Session, SessionStatus
 
 
 class FakeStore:
@@ -26,6 +26,12 @@ class FakeStore:
 
     def get_session(self, session_id: str):
         return self.sessions.get(session_id)
+
+    def update_session(self, session_id: str, **fields) -> Session:
+        session = self.sessions[session_id]
+        for key, value in fields.items():
+            setattr(session, key, value)
+        return session
 
 
 class FakeRunner:
@@ -209,6 +215,97 @@ async def test_verifier_overall_pass_marks_done(store, runner, orchestrator):
     # The worker's actual output must land in job.result, not an empty string.
     assert final.result is not None
     assert worker_output in final.result["summary"]
+
+
+# ── job → host-session reconciliation ──
+
+
+def _job_host_session(session_id="host-1"):
+    """Placeholder host session a /job launched outside any chat gets (status=active,
+    tagged job_host)."""
+    return Session(id=session_id, agent="default", title="Job: do the thing", metadata={"job_host": True})
+
+
+def _seed_running_job_with_parent(store, orchestrator, parent_session_id):
+    job = store.add(Job(id="", parent_session_id=parent_session_id, prompt="do the thing"))
+    orchestrator.register_worker(job.id, "worker-1", timeout_minutes=30)
+    return store.get(job.id)
+
+
+@pytest.mark.asyncio
+async def test_job_done_reconciles_host_placeholder_session_to_terminal(store, runner, orchestrator):
+    """A /job launched outside a chat gets a placeholder host session (status=active).
+    When the job finishes, that placeholder must be reconciled to a terminal status so
+    it stops rendering as active/'starting' in the sidebar."""
+    host = _job_host_session()
+    runner.store.sessions[host.id] = host
+    job = _seed_running_job_with_parent(store, orchestrator, host.id)
+
+    await orchestrator.on_session_complete(_worker_session(job), "all done")
+
+    assert store.get(job.id).state == JobState.DONE.value
+    assert runner.store.sessions[host.id].status in FINISHED_STATUSES
+    assert runner.store.sessions[host.id].status == SessionStatus.COMPLETED.value
+
+
+@pytest.mark.asyncio
+async def test_job_done_does_not_touch_real_chat_parent_session(store, runner, orchestrator):
+    """A /job typed inside a chat anchors to that real conversation (no job_host marker).
+    Finishing the job must NOT close the user's chat."""
+    # parent-1 is seeded active with no job_host marker.
+    job = _seed_running_job_with_parent(store, orchestrator, "parent-1")
+
+    await orchestrator.on_session_complete(_worker_session(job), "all done")
+
+    assert store.get(job.id).state == JobState.DONE.value
+    assert runner.store.sessions["parent-1"].status == SessionStatus.ACTIVE.value
+
+
+@pytest.mark.parametrize(
+    "terminal,expected",
+    [
+        (JobState.DONE, SessionStatus.COMPLETED),
+        (JobState.CANCELLED, SessionStatus.CANCELLED),
+        (JobState.ERRORED, SessionStatus.FAILED),
+        (JobState.STUCK, SessionStatus.FAILED),
+    ],
+)
+def test_reconcile_host_session_maps_each_terminal_state(runner, orchestrator, terminal, expected):
+    host = _job_host_session()
+    runner.store.sessions[host.id] = host
+    job = Job(id="j1", parent_session_id=host.id, prompt="x")
+    orchestrator._reconcile_host_session(job, terminal)
+    assert runner.store.sessions[host.id].status == expected.value
+
+
+def test_reconcile_host_session_does_not_overwrite_already_terminal(runner, orchestrator):
+    """Race guard: a host session already reconciled (e.g. cancelled) isn't clobbered
+    when a later/other terminal transition fires."""
+    host = _job_host_session()
+    host.status = SessionStatus.CANCELLED.value
+    runner.store.sessions[host.id] = host
+    orchestrator._reconcile_host_session(Job(id="j1", parent_session_id=host.id, prompt="x"), JobState.DONE)
+    assert runner.store.sessions[host.id].status == SessionStatus.CANCELLED.value
+
+
+def test_reconcile_orphaned_host_sessions_closes_terminal_job_placeholder(store, runner, orchestrator):
+    """Boot sweep: a placeholder whose job is already terminal on disk is closed."""
+    host = _job_host_session()
+    runner.store.sessions[host.id] = host
+    store.add(Job(id="", parent_session_id=host.id, prompt="x", state=JobState.DONE.value))
+
+    assert orchestrator.reconcile_orphaned_host_sessions() == 1
+    assert runner.store.sessions[host.id].status == SessionStatus.COMPLETED.value
+
+
+def test_reconcile_orphaned_host_sessions_skips_non_terminal_job(store, runner, orchestrator):
+    """Boot sweep leaves a placeholder alone while its job is still running."""
+    host = _job_host_session()
+    runner.store.sessions[host.id] = host
+    store.add(Job(id="", parent_session_id=host.id, prompt="x", state=JobState.RUNNING.value))
+
+    assert orchestrator.reconcile_orphaned_host_sessions() == 0
+    assert runner.store.sessions[host.id].status == SessionStatus.ACTIVE.value
 
 
 @pytest.mark.asyncio

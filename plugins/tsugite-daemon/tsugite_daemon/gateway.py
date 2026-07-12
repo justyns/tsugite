@@ -467,6 +467,7 @@ class Gateway:
             )
             self._jobs_orchestrator.attach()
             self._jobs_orchestrator.recover_orphaned_jobs()
+            self._jobs_orchestrator.reconcile_orphaned_host_sessions()
             set_jobs_orchestrator(self._jobs_orchestrator, asyncio.get_running_loop())
             if self._http_server:
                 self._http_server.jobs_orchestrator = self._jobs_orchestrator

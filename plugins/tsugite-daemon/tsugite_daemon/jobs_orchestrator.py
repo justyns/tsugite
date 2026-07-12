@@ -23,13 +23,23 @@ from pathlib import Path
 from typing import Optional
 
 from tsugite_daemon.job_store import Job, JobState, JobStateTransitionError, JobStore
-from tsugite_daemon.session_store import Session, SessionSource, SessionStatus
+from tsugite_daemon.session_store import FINISHED_STATUSES, METADATA_JOB_HOST, Session, SessionSource, SessionStatus
 
 logger = logging.getLogger(__name__)
 
 MAX_VERIFY_ATTEMPTS = 3
 VERIFIER_AGENT = "job_verifier"
 WORKER_AGENT = "job_worker"
+
+# Terminal Job state -> the status its placeholder host session is reconciled to.
+# ERRORED/STUCK map to FAILED (ERROR isn't a FINISHED_STATUSES, so it would still
+# render as live); anything unmapped falls back to COMPLETED.
+_JOB_TO_SESSION_STATUS = {
+    JobState.DONE: SessionStatus.COMPLETED,
+    JobState.CANCELLED: SessionStatus.CANCELLED,
+    JobState.ERRORED: SessionStatus.FAILED,
+    JobState.STUCK: SessionStatus.FAILED,
+}
 
 # Allowed notify_when values; anything else is coerced to "never" at intake.
 _VALID_NOTIFY_WHEN = frozenset({"done", "stuck", "errored", "terminal", "never"})
@@ -1176,6 +1186,7 @@ class JobsOrchestrator:
                 self._jobs.update(job.id, worktree_path=None)
                 fresh = self._jobs.get(job.id)
         self._emit_job_event(fresh)
+        self._reconcile_host_session(job, terminal)
         if fresh and _should_notify(fresh, terminal):
             self._schedule_notify(fresh)
 
@@ -1334,6 +1345,49 @@ class JobsOrchestrator:
             return store.get_session(parent_session_id)
         except (ValueError, KeyError):
             return None
+
+    def _reconcile_host_session(self, job: Job, terminal: JobState) -> bool:
+        """Close a Job's placeholder host session when the Job reaches a terminal state.
+
+        A /job launched outside any chat is given a dedicated placeholder session that is
+        the job's parent_session_id and is tagged METADATA_JOB_HOST; it otherwise sits
+        `active` forever and renders as "starting" in the sidebar. When the Job finishes,
+        transition that placeholder to a matching terminal status. Only touches sessions
+        carrying the job_host marker, so a /job typed inside a real conversation never
+        closes the user's chat. Returns True if it reconciled a session.
+        """
+        parent = self._get_parent_session(job.parent_session_id)
+        if parent is None or not parent.metadata.get(METADATA_JOB_HOST) or parent.status in FINISHED_STATUSES:
+            return False
+        store = getattr(self._runner, "store", None)
+        if not hasattr(store, "update_session"):
+            return False
+        target = _JOB_TO_SESSION_STATUS[terminal].value
+        try:
+            store.update_session(parent.id, status=target)
+        except Exception:
+            logger.exception("Failed to reconcile host session '%s' for job '%s'", parent.id, job.id)
+            return False
+        if self._event_bus:
+            try:
+                self._event_bus.emit("session_update", {"action": "updated", "id": parent.id})
+            except Exception:
+                logger.debug("session_update emit failed for host session '%s'", parent.id)
+        return True
+
+    def reconcile_orphaned_host_sessions(self) -> int:
+        """On daemon load, close any lingering job-host placeholder session whose Job is
+        already terminal. Runs after recover_orphaned_jobs so jobs it just errored out
+        also get their host session reconciled. Placeholders created before this feature
+        shipped lack the job_host marker and are left alone."""
+        reconciled = sum(
+            self._reconcile_host_session(job, JobState(job.state))
+            for job in self._jobs.list_all()
+            if job.state in _TERMINAL_JOB_STATES
+        )
+        if reconciled:
+            logger.info("Reconciled %d orphaned job-host session(s) from previous daemon run", reconciled)
+        return reconciled
 
     def _resolve_adapter_key(self, parent_session_id: str) -> str:
         """Route Job spawns through the parent session's adapter so jobs stay on
