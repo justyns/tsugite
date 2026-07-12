@@ -52,6 +52,70 @@ def test_busy_session_shows_running_despite_stale_progress(authenticated_page, e
     e2e_session_store.end_turn(sid)
 
 
+def test_idle_active_session_does_not_pulse(authenticated_page, e2e_session_store):
+    """An active session with NO turn in flight and no cached progress must show
+    a steady dot. The old optimistic fallback pulsed every active/running
+    session the client had never streamed - i.e. most of the sidebar."""
+    page = authenticated_page
+    open_conversations(page)
+    user_id = page.evaluate("Alpine.store('app').userId")
+
+    from tsugite_daemon.session_store import Session, SessionSource
+
+    sid = "20260711_000000_idletest_bb2"
+    e2e_session_store.create_session(
+        Session(id=sid, agent="test-agent", source=SessionSource.INTERACTIVE.value, user_id=user_id, title="idle one")
+    )
+    # No begin_turn: the session is persistent-active but idle.
+    reload_conversations_view(page)
+
+    result = page.evaluate(
+        """([sel, sid]) => {
+            const v = Alpine.$data(document.querySelector(sel));
+            const s = v.allSessions.find(x => x.id === sid);
+            // The sidebar-at-large case: an active session this client has no
+            // progress cache for at all (never streamed it this page-load, or
+            // the between-turns reconcile nulled it).
+            v._sessionState(sid).progress = null;
+            return { busy: s?.busy ?? null, state: s?.state, dot: v.dotClassNames(s), inFlight: v.sessionTurnInFlight(s) };
+        }""",
+        [CONV_VIEW, sid],
+    )
+    assert not result["busy"], f"precondition: no turn in flight, got busy={result['busy']}"
+    assert result["state"] == "active", f"precondition: persistent-active session, got {result['state']!r}"
+    assert "pulse" not in result["dot"], f"an idle {result['state']} session must not pulse, got {result['dot']!r}"
+    assert result["inFlight"] is False
+
+
+def test_mid_turn_progress_still_pulses_without_busy_flag(authenticated_page, e2e_session_store):
+    """The narrow case the optimistic fallback was for: live progress events are
+    arriving but the busy broadcast hasn't landed yet. Fresh mid-turn statusText
+    must still pulse."""
+    page = authenticated_page
+    open_conversations(page)
+    user_id = page.evaluate("Alpine.store('app').userId")
+
+    from tsugite_daemon.session_store import Session, SessionSource
+
+    sid = "20260711_000000_midturn_cc3"
+    e2e_session_store.create_session(
+        Session(id=sid, agent="test-agent", source=SessionSource.INTERACTIVE.value, user_id=user_id, title="mid turn")
+    )
+    reload_conversations_view(page)
+
+    result = page.evaluate(
+        """([sel, sid]) => {
+            const v = Alpine.$data(document.querySelector(sel));
+            const s = v.allSessions.find(x => x.id === sid);
+            v._updateProgressCache({ session_id: sid, event_type: 'tool_start', tool: 'bash' });
+            return { dot: v.dotClassNames(s), inFlight: v.sessionTurnInFlight(s) };
+        }""",
+        [CONV_VIEW, sid],
+    )
+    assert result["inFlight"] is True, "fresh mid-turn progress must count as in flight even before busy lands"
+    assert "pulse" in result["dot"]
+
+
 def test_409_send_restores_draft_and_marks_busy(chat_page):
     """A 409 turn-conflict is not a 'Connection error': the optimistic user
     bubble is withdrawn, the draft comes back, and the session renders busy."""

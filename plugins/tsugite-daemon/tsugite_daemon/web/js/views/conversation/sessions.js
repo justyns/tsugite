@@ -457,11 +457,14 @@ export const sessionsMixin = {
 
   // True when the session is blocked on the user: an ask_user prompt (set in
   // _updateProgressCache, cleared on reply), a job paused on a question
-  // (awaiting_input), or a cc permission prompt (needs_attention).
+  // (awaiting_input), or a cc permission prompt (needs_attention). Runs per
+  // sidebar row per reactive tick, so no allocations here.
   _isAwaitingInput(s) {
     const st = this.sessionsState[s?.id];
     if (!st) return false;
-    return !!st.awaitingInput || Object.keys(st.jobsNeedingInput || {}).length > 0;
+    if (st.awaitingInput) return true;
+    for (const _ in st.jobsNeedingInput) return true;
+    return false;
   },
 
   // Aggregate "needs your input" count across the loaded session list, so
@@ -539,9 +542,11 @@ export const sessionsMixin = {
     // Mid-turn entries carry a non-empty statusText ('Starting...', 'Turn N...',
     // 'Tool: bash', 'Waiting on LLM (12s)', etc); turn_end resets it to ''. So
     // statusText is the truthy "in flight" signal even during long silent tools
-    // like a 20s sleep. No cache yet → optimistically pulse (running but no
-    // events seen by us yet — usually a freshly-spawned interactive session).
-    if (!cached) return true;
+    // like a 20s sleep. No cache means no evidence of a live turn: 'active' is
+    // a persistent state, and most sidebar sessions are never streamed by this
+    // client, so an optimistic default here pulsed the whole sidebar. The
+    // freshly-spawned case is covered by the server's authoritative s.busy.
+    if (!cached) return false;
     // The server defaults status_text to 'Starting...' for sessions with zero
     // events; gate on lastEventTime so never-started sessions don't pulse.
     return !!cached.statusText && !!cached.lastEventTime;

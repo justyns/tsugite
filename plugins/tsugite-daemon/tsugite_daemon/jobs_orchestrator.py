@@ -1159,13 +1159,11 @@ class JobsOrchestrator:
         # worktree for inspection, and the executor keeps its own resume state
         # so retry-with-hint can still resume the conversation.
         if fresh:
-            if terminal in (JobState.DONE, JobState.CANCELLED):
-                self._schedule_executor_teardown(fresh)
-                if fresh.worktree_path:
-                    self._jobs.update(job.id, worktree_path=None)
-                    fresh = self._jobs.get(job.id)
-            else:
-                self._schedule_executor_teardown(fresh, prune_worktree=False)
+            prune = terminal in (JobState.DONE, JobState.CANCELLED)
+            self._schedule_executor_teardown(fresh, prune_worktree=prune)
+            if prune and fresh.worktree_path:
+                self._jobs.update(job.id, worktree_path=None)
+                fresh = self._jobs.get(job.id)
         self._emit_job_event(fresh)
         if fresh and _should_notify(fresh, terminal):
             self._schedule_notify(fresh)

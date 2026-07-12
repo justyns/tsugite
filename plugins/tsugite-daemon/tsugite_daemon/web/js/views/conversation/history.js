@@ -1,5 +1,5 @@
 import { get } from '../../api.js';
-import { escapeHtml, contentBlockHtml } from '../../utils.js';
+import { escapeHtml, contentBlockHtml, JOB_TILE_FIELDS } from '../../utils.js';
 import { finalResultBubble, appendReasoningChunk, attachReasoningTokens, toolArgsText } from './event_types.js';
 
 const _CONTENT_BLOCK_RE = /<(?:tsu:)?content\s+name="([^"]+)">([\s\S]*?)<\/(?:tsu:)?content>/g;
@@ -428,7 +428,7 @@ export function eventsToBubbles(events, { dropTrailing = false } = {}) {
       // doesn't broadcast them today, but the tile is forward-compatible.
       // ac_results is broadcast top-level during VERIFYING so mid-verify criteria reach the tile.
       const fields = { job_id: data.job_id };
-      for (const k of ['state', 'prompt', 'worker_session_id', 'worker_terminal_id', 'verifier_session_id', 'verify_attempts', 'error', 'error_detail', 'pending_question', 'attempts', 'acceptance_criteria', 'result', 'ac_results']) {
+      for (const k of JOB_TILE_FIELDS) {
         if (data[k] !== undefined) fields[k] = data[k];
       }
       if (existing) {

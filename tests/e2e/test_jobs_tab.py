@@ -265,6 +265,45 @@ def test_board_groups_jobs_into_correct_columns(authenticated_page):
     assert "2" in (done_col.locator(".jb-col-head .n").text_content() or "")
 
 
+def test_board_tile_cancels_without_navigating_to_parent(authenticated_page):
+    """The board tile must offer the same per-job actions as the table row: a
+    running job can be cancelled straight from the board, and the action click
+    must not also trigger the tile's open-parent-session navigation."""
+    page = authenticated_page
+    _stub_jobs_api(page, _make_jobs())
+
+    cancelled = {"called": False}
+
+    def handle_cancel(route):
+        cancelled["called"] = True
+        route.fulfill(status=200, content_type="application/json", body=json.dumps({"status": "cancelled"}))
+
+    page.route("**/api/jobs/job-r1/cancel", handle_cancel)
+    _open_jobs_tab(page)
+
+    page.wait_for_selector(".jb-board .jb", timeout=5000)
+    tile = page.locator(".jb-board .jb", has_text="job-r1").first
+    btn = tile.locator(".rowbtn")
+    assert btn.count() == 1, "a running job's board tile must show the cancel action"
+
+    page.once("dialog", lambda d: d.accept())  # invokeRowAction confirms first
+    btn.first.click()
+    page.wait_for_function("() => Alpine.store('app').view === 'jobs'", timeout=2000)
+    assert cancelled["called"], "the board cancel must POST /api/jobs/{id}/cancel"
+    assert page.evaluate("Alpine.store('app').view") == "jobs", "the action must not navigate to the parent session"
+
+
+def test_board_tile_offers_retry_and_dismiss_for_stuck(authenticated_page):
+    page = authenticated_page
+    _stub_jobs_api(page, _make_jobs())
+    _open_jobs_tab(page)
+
+    page.wait_for_selector(".jb-board .jb", timeout=5000)
+    stuck_tile = page.locator(".jb-board .jb", has_text="job-s1").first
+    buttons = stuck_tile.locator(".rowbtn")
+    assert buttons.count() == 2, "a stuck job's board tile must offer retry + dismiss, matching the table"
+
+
 def test_layout_toggle_switches_board_to_table(authenticated_page):
     page = authenticated_page
     _stub_jobs_api(page, _make_jobs())

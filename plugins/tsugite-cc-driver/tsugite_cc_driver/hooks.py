@@ -18,12 +18,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-DEFAULT_NEEDS_INPUT_MARKER = "CCDRIVER_NEED_INPUT"
 
-
-def build_initial_prompt(
-    goal: str, completion_marker: str, *, needs_input_marker: str = DEFAULT_NEEDS_INPUT_MARKER
-) -> str:
+def build_initial_prompt(goal: str, completion_marker: str, *, needs_input_marker: str) -> str:
     """The first-arg goal seed. Bakes the completion AND needs-input protocol
     into the prompt since SessionStart can't inject it. Phrased as natural
     guidance."""
@@ -39,7 +35,7 @@ def build_initial_prompt(
     )
 
 
-def continue_instruction(completion_marker: str, needs_input_marker: str = DEFAULT_NEEDS_INPUT_MARKER) -> str:
+def continue_instruction(completion_marker: str, needs_input_marker: str) -> str:
     """Natural-language nudge injected via a Stop `additionalContext` block to
     drive another turn. Never phrased as 'output exactly X' (Claude refuses that)."""
     return (
@@ -70,7 +66,7 @@ def decide_stop(
     consecutive_continues: int,
     max_consecutive_continues: int,
     completion_marker: str,
-    needs_input_marker: str = DEFAULT_NEEDS_INPUT_MARKER,
+    needs_input_marker: str,
 ) -> StopDecision:
     """Decide what to do when Claude stops.
 

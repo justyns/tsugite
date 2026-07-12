@@ -100,11 +100,12 @@
 .jobs-table td.t-agent { color: var(--blue); }
 .jobs-table td.t-id { color: var(--overlay0); }
 .jobs-table td.t-act { text-align: right; white-space: nowrap; }
-.jobs-table .rowbtn { background: none; border: 1px solid transparent; color: var(--overlay1); border-radius: var(--r-xs);
+.rowbtn { background: none; border: 1px solid transparent; color: var(--overlay1); border-radius: var(--r-xs);
   font-family: var(--font-mono); font-size: 14px; padding: 1px 5px; cursor: pointer; }
-.jobs-table tbody tr:hover .rowbtn { color: var(--subtext1); }
-.jobs-table .rowbtn:hover { color: var(--text); border-color: var(--surface1); background: var(--surface0); }
-.jobs-table .rowbtn.primary { color: var(--lavender); }
+.jobs-table tbody tr:hover .rowbtn, .jb:hover .rowbtn { color: var(--subtext1); }
+.rowbtn:hover { color: var(--text); border-color: var(--surface1); background: var(--surface0); }
+.rowbtn.primary { color: var(--lavender); }
+.jb-act { white-space: nowrap; }
 .jobs-table .acmini-cell { color: var(--overlay1); }
 
 /* ---- empty state -------------------------------------------------------- */

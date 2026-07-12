@@ -118,6 +118,18 @@ export function stateBadgeClass(state) {
   return _stateBadgeMap[state] || 'badge-muted';
 }
 
+// Fields a job_status/job_update payload carries onto the collapsed job tile.
+// One list for both the history replay and the live SSE patch so the two
+// paths can't drift on which fields reach the tile.
+export const JOB_TILE_FIELDS = [
+  'state', 'prompt', 'worker_session_id', 'worker_terminal_id', 'verifier_session_id',
+  'verify_attempts', 'error', 'error_detail', 'pending_question', 'attempts',
+  'acceptance_criteria', 'result', 'ac_results',
+];
+
+// Mirrors _TERMINAL_STATES in tsugite_daemon/job_store.py.
+export const JOB_TERMINAL_STATES = ['done', 'stuck', 'cancelled', 'errored'];
+
 export function jobCriteriaStates(job) {
   /* Per-AC verdict rows for a Job payload (tile + Jobs tab share this so the
      two surfaces can't disagree). Matches ac_results entries against the

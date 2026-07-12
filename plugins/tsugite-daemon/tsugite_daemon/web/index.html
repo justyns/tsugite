@@ -86,7 +86,7 @@
           <span class="prompt">›</span>
           <input type="text" x-model="sessionFilter" @input.debounce.300ms="searchSessionsServer()" placeholder="filter agent:odyn status:running" aria-label="Filter sessions">
           <span class="awaiting-count" data-testid="awaiting-count" x-show="awaitingCount() > 0"
-                :title="awaitingCount() + ' session' + (awaitingCount() === 1 ? '' : 's') + ' awaiting your input'"
+                title="sessions awaiting your input"
                 x-text="awaitingCount() + ' need you'"></span>
           <kbd>/</kbd>
         </div>
@@ -2375,6 +2375,17 @@
                                 </template>
                               </span>
                               <span class="jb-agent" x-text="'@' + (job.agent || 'agent')"></span>
+                              <!-- Same actions as the table row; @click.stop so cancel/retry
+                                   doesn't also trigger the tile's open-parent navigation. -->
+                              <span class="jb-act" @click.stop>
+                                <template x-for="action in rowActionsFor(job)" :key="action.key">
+                                  <button class="rowbtn"
+                                          :class="{ primary: action.primary }"
+                                          :title="action.title"
+                                          @click="invokeRowAction(job, action.key)"
+                                          x-text="action.glyph"></button>
+                                </template>
+                              </span>
                             </div>
                           </div>
                         </template>

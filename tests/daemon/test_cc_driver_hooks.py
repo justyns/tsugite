@@ -124,6 +124,7 @@ def test_decide_stop_marker_completes():
         consecutive_continues=0,
         max_consecutive_continues=5,
         completion_marker=MARKER,
+        needs_input_marker=NEED_INPUT,
     )
     assert d.complete is True
     assert MARKER in d.summary
@@ -136,6 +137,7 @@ def test_decide_stop_under_budget_blocks_with_exact_json():
         consecutive_continues=1,
         max_consecutive_continues=5,
         completion_marker=MARKER,
+        needs_input_marker=NEED_INPUT,
     )
     assert d.complete is False
     assert d.new_consecutive_continues == 2
@@ -152,6 +154,7 @@ def test_decide_stop_budget_exhausted_completes():
         consecutive_continues=5,
         max_consecutive_continues=5,
         completion_marker=MARKER,
+        needs_input_marker=NEED_INPUT,
     )
     assert d.complete is True, "an exhausted continue budget ends the attempt for the verifier to judge"
     assert d.response == {}
@@ -164,6 +167,7 @@ def test_decide_stop_fresh_human_turn_resets_budget():
         consecutive_continues=5,
         max_consecutive_continues=5,
         completion_marker=MARKER,
+        needs_input_marker=NEED_INPUT,
     )
     assert d.complete is False, "a fresh human turn must reset the continue budget"
     assert d.new_consecutive_continues == 1
@@ -175,6 +179,7 @@ def test_decide_stop_need_input_marker_pauses():
         consecutive_continues=1,
         max_consecutive_continues=5,
         completion_marker=MARKER,
+        needs_input_marker=NEED_INPUT,
     )
     assert d.complete is False
     assert d.needs_input == "what is the codeword?"
@@ -187,6 +192,7 @@ def test_decide_stop_completion_marker_wins_over_need_input():
         consecutive_continues=0,
         max_consecutive_continues=5,
         completion_marker=MARKER,
+        needs_input_marker=NEED_INPUT,
     )
     assert d.complete is True
     assert d.needs_input is None
@@ -200,6 +206,7 @@ def test_decide_stop_need_input_checked_before_budget_exhaustion():
         consecutive_continues=5,
         max_consecutive_continues=5,
         completion_marker=MARKER,
+        needs_input_marker=NEED_INPUT,
     )
     assert d.complete is False, "needs-input at the nudge cap must pause, not complete"
     assert d.needs_input == "which environment should I target?"
@@ -211,6 +218,7 @@ def test_decide_stop_bare_need_input_marker_still_pauses():
         consecutive_continues=0,
         max_consecutive_continues=5,
         completion_marker=MARKER,
+        needs_input_marker=NEED_INPUT,
     )
     assert d.complete is False
     assert d.needs_input, "a bare marker with no question still needs a non-empty question for the notify"

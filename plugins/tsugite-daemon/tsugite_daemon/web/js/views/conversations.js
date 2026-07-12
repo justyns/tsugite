@@ -1,5 +1,5 @@
 import { get, post, patch } from '../api.js';
-import { escapeHtml, renderMarkdown, scrollToBottom, formatDate, formatRelativeTime, stateBadgeClass, copyText, toast, jobCriteriaStates } from '../utils.js';
+import { escapeHtml, renderMarkdown, scrollToBottom, formatDate, formatRelativeTime, stateBadgeClass, copyText, toast, jobCriteriaStates, JOB_TILE_FIELDS, JOB_TERMINAL_STATES } from '../utils.js';
 import { sessionsMixin } from './conversation/sessions.js';
 import { historyMixin } from './conversation/history.js';
 import { attachmentsMixin } from './conversation/attachments.js';
@@ -935,20 +935,18 @@ export default () => ({
   // `awaitingInput` flag, which every session_event recomputes.
   _handleAttentionEvent(type, d) {
     if (!d.job_id || !d.parent_session_id) return;
-    const st = this._sessionState(this._resolveSessionId(d.parent_session_id));
-    const map = st.jobsNeedingInput || (st.jobsNeedingInput = {});
+    const map = this._sessionState(this._resolveSessionId(d.parent_session_id)).jobsNeedingInput;
     if (type === 'needs_attention') map[d.job_id] = 'permission';
     else if (map[d.job_id] === 'permission') delete map[d.job_id];
   },
 
   _trackJobNeedsInput(owner, d) {
-    const st = this._sessionState(owner);
-    const map = st.jobsNeedingInput || (st.jobsNeedingInput = {});
+    const map = this._sessionState(owner).jobsNeedingInput;
     if (d.state === 'awaiting_input') {
       map[d.job_id] = 'awaiting_input';
     } else if (map[d.job_id] === 'awaiting_input') {
       delete map[d.job_id];
-    } else if (map[d.job_id] && ['done', 'stuck', 'cancelled', 'errored'].includes(d.state)) {
+    } else if (map[d.job_id] && JOB_TERMINAL_STATES.includes(d.state)) {
       // A permission-prompt flag can't outlive the job.
       delete map[d.job_id];
     }
@@ -972,7 +970,7 @@ export default () => ({
     // include them in _emit_job_event today, but the tile is forward-compatible.
     // ac_results is broadcast top-level during VERIFYING so mid-verify criteria reach the tile.
     const fields = {};
-    for (const k of ['state', 'prompt', 'worker_session_id', 'worker_terminal_id', 'verifier_session_id', 'verify_attempts', 'error', 'error_detail', 'pending_question', 'attempts', 'acceptance_criteria', 'result', 'ac_results']) {
+    for (const k of JOB_TILE_FIELDS) {
       if (d[k] !== undefined) fields[k] = d[k];
     }
     if (existing) {
