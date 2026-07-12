@@ -48,11 +48,6 @@
     </button>
   </template>
   <div class="console-tabs-spacer"></div>
-  <button class="console-tab-action"
-          @click="window.dispatchEvent(new CustomEvent('tsugite:toast', { detail: { text: 'command palette — coming soon', kind: 'info' } }))"
-          title="Command palette">
-    <kbd>⌘K</kbd>
-  </button>
   <button class="console-tab-action" @click="$store.tsu.open('settings')" title="Settings">settings</button>
 </div>
 
@@ -1332,7 +1327,7 @@
               <div class="console-composer-input-wrap">
                 <span class="leader">›</span>
                 <textarea id="message-input" x-ref="messageInput" x-model="messageText" rows="2"
-                          placeholder="message · / commands · @ agent · # file"
+                          placeholder="message · / commands"
                           @keydown="onInputKeydown($event)" @input="autoResize($event); onInputChange()"
                           @paste="onPaste($event)"></textarea>
                 <div class="console-composer-actions">
@@ -1352,7 +1347,7 @@
                     </button>
                   </div>
                   <template x-if="!sending">
-                    <button class="console-send-btn" @click="sendMessage()">send <kbd>⌘↩</kbd></button>
+                    <button class="console-send-btn" @click="sendMessage()">send <kbd>↩</kbd></button>
                   </template>
                   <template x-if="sending">
                     <button class="console-stop-btn" @click="cancelChat()">stop</button>
@@ -2474,7 +2469,7 @@
               <label class="tsu-field">
                 <span class="tsu-label">task</span>
                 <textarea class="tsu-textarea nj-grow" x-model="newForm.prompt"
-                          placeholder="describe the task · / commands · @ agent · # file"></textarea>
+                          placeholder="describe the task"></textarea>
                 <p class="tsu-hint">the agent works until the criteria below pass - be specific about &ldquo;done&rdquo;.</p>
               </label>
 
@@ -2550,11 +2545,8 @@
 
 <!-- Bottom keystrip -->
 <div class="console-keystrip">
-  <span><kbd>⌘K</kbd> palette</span>
   <span><kbd>/</kbd> commands</span>
-  <span><kbd>@</kbd> agent</span>
-  <span><kbd>#</kbd> file</span>
-  <span><kbd>⌘↩</kbd> send</span>
+  <span><kbd>↩</kbd> send</span>
   <span class="grow"></span>
   <template x-if="$store.app.sseConnected === false">
     <span class="console-conn-lost" title="Live updates disconnected; retrying">⚠ reconnecting…</span>
