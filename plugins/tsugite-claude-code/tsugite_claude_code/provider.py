@@ -54,6 +54,14 @@ _ALIASES = {
 }
 
 
+def _is_unresumable_history_error(exc: BaseException) -> bool:
+    """A 400 on a resume replay means the sidecar transcript itself is malformed
+    (e.g. an empty text content block) — retrying the same resume can never
+    succeed. Anything else (prompt too long, 429/529, execution errors) must
+    keep surfacing so the daemon's existing retry paths handle it."""
+    return "API Error: 400" in str(exc)
+
+
 def _raise_if_error(result_event: dict) -> None:
     """Translate a Claude CLI error result into AgentExecutionError.
 
@@ -133,12 +141,19 @@ class ClaudeCodeProvider:
             logger.info("claude_code model alias %r -> %s", model, resolved_model)
         self._resolved_model = resolved_model
 
-        if self._process is None:
+        first_turn = self._process is None
+        if first_turn:
             self._process = ClaudeCodeProcess()
             system_prompt = ""
             if messages and messages[0].get("role") == "system":
                 system_prompt = messages[0]["content"]
                 messages = messages[1:]
+
+            # Kept so the poisoned-resume fallback can restart fresh and
+            # rebuild the first message with serialized history included.
+            self._start_system_prompt = system_prompt
+            self._start_effort = kwargs.get("reasoning_effort")
+            self._first_messages = messages
 
             await self._process.start(
                 model=resolved_model,
@@ -151,12 +166,52 @@ class ClaudeCodeProvider:
             # Subsequent turns: subprocess has context, send the last observation
             user_content = messages[-1]["content"] if messages else ""
 
+        # Never send empty content: the CLI would persist an empty text block
+        # into its sidecar transcript, and the next --resume of that transcript
+        # is rejected wholesale (400 text content blocks must be non-empty).
+        if not user_content or not user_content.strip():
+            user_content = "(empty message)"
+
         self._turn_count += 1
 
         if stream:
-            return self._stream(user_content)
+            return self._stream(user_content, resume_fallback=first_turn)
 
-        return await self._collect(user_content)
+        try:
+            return await self._collect(user_content)
+        except AgentExecutionError as e:
+            if not self._should_fallback_to_fresh_session(first_turn, e):
+                raise
+            retry_content = await self._fallback_to_fresh_session(e)
+            return await self._collect(retry_content)
+
+    def _should_fallback_to_fresh_session(self, first_turn: bool, err: BaseException) -> bool:
+        """Only a first-send 400 on a live resume is a poisoned transcript we can recover from."""
+        return bool(first_turn and self._resume_session and _is_unresumable_history_error(err))
+
+    async def _fallback_to_fresh_session(self, err: BaseException) -> str:
+        """Sever a poisoned resume: replace the subprocess with a fresh session
+        seeded from tsugite's serialized history, and return the rebuilt first
+        message. The serializer renders "Role: content" lines, so a turn whose
+        raw content was empty survives as a non-empty block."""
+        from tsugite_claude_code.process import ClaudeCodeProcess
+
+        logger.warning(
+            "Resume of provider session %s was rejected (%s); starting a fresh session seeded from serialized history",
+            self._resume_session,
+            err,
+        )
+        await self._process.stop()
+        self._resume_session = None
+        self._resume_after_compaction = False
+        self._process = ClaudeCodeProcess()
+        await self._process.start(
+            model=self._resolved_model,
+            system_prompt=self._start_system_prompt,
+            resume_session=None,
+            effort=self._start_effort,
+        )
+        return self._build_first_message(self._first_messages)
 
     async def _collect(self, user_content: str) -> CompletionResponse:
         """Send message and collect full response."""
@@ -180,18 +235,30 @@ class ClaudeCodeProvider:
             cost=cost,
         )
 
-    async def _stream(self, user_content: str) -> AsyncIterator[StreamChunk]:
+    async def _stream(self, user_content: str, resume_fallback: bool = False) -> AsyncIterator[StreamChunk]:
         """Send message and yield streaming chunks."""
         usage = Usage()
         cost = 0.0
+        yielded = False
 
-        async for event in self._process.send_message(user_content):
-            if event["type"] == "text_delta":
-                yield StreamChunk(content=event["text"])
-            elif event["type"] == "result":
-                _raise_if_error(event)
-                cost = self._cost_delta(event.get("cost_usd") or 0.0)
-                usage = self._extract_usage(event)
+        try:
+            async for event in self._process.send_message(user_content):
+                if event["type"] == "text_delta":
+                    yielded = True
+                    yield StreamChunk(content=event["text"])
+                elif event["type"] == "result":
+                    _raise_if_error(event)
+                    cost = self._cost_delta(event.get("cost_usd") or 0.0)
+                    usage = self._extract_usage(event)
+        except AgentExecutionError as e:
+            # A poisoned resume fails wholesale before generating anything, so
+            # falling back is only safe when no content has been streamed yet.
+            if yielded or not self._should_fallback_to_fresh_session(resume_fallback, e):
+                raise
+            retry_content = await self._fallback_to_fresh_session(e)
+            async for chunk in self._stream(retry_content):
+                yield chunk
+            return
 
         yield StreamChunk(content="", done=True, usage=usage, cost=cost)
 

@@ -1046,13 +1046,15 @@ async def run_agent_async(
         else:
             logger.debug("No resumable provider session for %s", continue_conversation_id)
 
-        if not resume_session:
-            # No resumable provider session -- load history for serialization
-            try:
-                previous_messages = load_and_apply_history(continue_conversation_id)
-            except ValueError:
-                # New conversation (e.g., fresh workspace session) - start with empty history
-                pass
+        # Load serialized history even when a provider session is resumable:
+        # session-owning providers need it as fallback material if the resume
+        # replay is rejected (e.g. a poisoned Claude Code sidecar transcript
+        # that 400s on every send). Providers ignore it while a resume is live.
+        try:
+            previous_messages = load_and_apply_history(continue_conversation_id)
+        except ValueError:
+            # New conversation (e.g., fresh workspace session) - start with empty history
+            pass
 
     # Parse agent configuration (with inheritance resolution)
     try:
