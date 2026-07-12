@@ -260,6 +260,22 @@ def test_pty_list_returns_empty_when_no_terminals(runtime):
     assert listed == []
 
 
+def test_get_terminal_runtime_returns_wired_singletons():
+    """get_terminal_runtime hands back exactly what set_terminal_runtime wired,
+    so other daemon code can reach the gateway singletons without importing it."""
+    mgr, store, cb = object(), object(), object()
+    terminal_tools.set_terminal_runtime(mgr, store, cb)
+    try:
+        assert terminal_tools.get_terminal_runtime() == (mgr, store, cb)
+    finally:
+        terminal_tools.set_terminal_runtime(None, None, None)
+
+
+def test_get_terminal_runtime_none_when_unset():
+    terminal_tools.set_terminal_runtime(None, None, None)
+    assert terminal_tools.get_terminal_runtime() == (None, None, None)
+
+
 def test_pty_create_outside_daemon_errors():
     """When the runtime hasn't been wired, tools return an error dict."""
     # Explicitly clear runtime to simulate non-daemon mode.

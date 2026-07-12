@@ -26,6 +26,10 @@ logger = logging.getLogger(__name__)
 # reconnect can still replay the final buffer before the 1 MB record is freed.
 EVICT_GRACE_SECONDS = 30.0
 
+# Sentinel distinguishing "sandbox_ctx not passed" (resolve the agent-inherited
+# policy, forcing no-network) from an explicit None (run unsandboxed).
+_UNSET = object()
+
 
 def parse_command(cmd: str) -> list[str]:
     """Split a user-typed `/run` command into argv. Wrapped in a sh -c so users
@@ -64,14 +68,21 @@ def resolve_terminal_sandbox(parent_session_id: Optional[str]):
     return None
 
 
-def maybe_sandbox_argv(argv: list[str], cwd: Optional[str], sandbox_ctx=None) -> list[str]:
+def maybe_sandbox_argv(
+    argv: list[str], cwd: Optional[str], sandbox_ctx=None, force_no_network: bool = True
+) -> list[str]:
     """Wrap a PTY command in bwrap when its agent runs sandboxed.
 
     PTYs run in the daemon (parent) process, so without this a sandboxed agent
-    could use pty_create to execute outside the sandbox. Sandboxed PTYs are
-    filesystem-isolated to the workspace and get no network (no filtering proxy
-    is wired for the long-lived PTY path) - the agent's own code/shell still
+    could use pty_create to execute outside the sandbox. Agent-inherited sandboxed
+    PTYs are filesystem-isolated to the workspace and get no network (no filtering
+    proxy is wired for the long-lived PTY path) - the agent's own code/shell still
     reach the network through the executor's filtered proxy.
+
+    force_no_network=True (the agent-inherited default) forces no-network - a
+    sandboxed agent's PTY must never gain network. A caller passing an explicit
+    sandbox_ctx sets force_no_network=False so the context's own no_network is
+    honored (e.g. filesystem isolation with network on).
 
     Returns argv unchanged when sandbox_ctx is None (not sandboxed). Fails closed
     if a policy is active but no workspace dir is known.
@@ -93,7 +104,7 @@ def maybe_sandbox_argv(argv: list[str], cwd: Optional[str], sandbox_ctx=None) ->
 
     sandbox = sandbox_cls(
         config=SandboxConfig(
-            no_network=True,
+            no_network=True if force_no_network else getattr(sandbox_ctx, "no_network", False),
             extra_ro_binds=list(sandbox_ctx.extra_ro_binds),
             extra_rw_binds=list(sandbox_ctx.extra_rw_binds),
         ),
@@ -113,6 +124,7 @@ def spawn_terminal(
     parent_session_id: Optional[str] = None,
     buffer_cap: int = DEFAULT_BUFFER_CAP,
     on_state_change=None,
+    sandbox_ctx=_UNSET,
 ) -> TerminalSession:
     """Create a TerminalSession record + spawn its PTY in one step.
 
@@ -123,6 +135,10 @@ def spawn_terminal(
     on_state_change: optional callback(terminal_id, new_state) for broadcasting
     state changes to SSE subscribers. Caller is responsible for thread-safe
     dispatch (we may call it from the reader thread).
+
+    sandbox_ctx: leave unset to resolve the agent-inherited policy (which forces
+    no-network). Pass explicitly to override - a SandboxContext honors its own
+    no_network (filesystem isolation with network on), or None runs unsandboxed.
     """
     session = store.add(
         TerminalSession(
@@ -135,7 +151,10 @@ def spawn_terminal(
 
     try:
         argv = parse_command(cmd)
-        argv = maybe_sandbox_argv(argv, cwd, resolve_terminal_sandbox(parent_session_id))
+        if sandbox_ctx is _UNSET:
+            argv = maybe_sandbox_argv(argv, cwd, resolve_terminal_sandbox(parent_session_id))
+        else:
+            argv = maybe_sandbox_argv(argv, cwd, sandbox_ctx, force_no_network=False)
         proc = manager.spawn(session.id, argv, cwd=cwd, env=env, buffer_cap=buffer_cap)
     except Exception as e:
         logger.exception("Failed to spawn PTY for terminal '%s': %s", session.id, e)

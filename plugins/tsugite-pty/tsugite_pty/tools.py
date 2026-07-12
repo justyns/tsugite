@@ -51,6 +51,11 @@ def set_terminal_runtime(pty_manager, terminal_store, state_change_callback=None
     _state_change_callback = state_change_callback
 
 
+def get_terminal_runtime() -> tuple:
+    """Return the wired (pty_manager, terminal_store, state_change_callback), or (None, None, None) if unset."""
+    return (_pty_manager, _terminal_store, _state_change_callback)
+
+
 def runtime_available() -> bool:
     """True when the daemon wired a PtyManager + TerminalSessionStore in here.
     Also consulted by the adapters to decide whether to render PTY guidance."""
