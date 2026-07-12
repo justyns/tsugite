@@ -357,6 +357,58 @@ def test_typing_into_full_session_terminal_forwards_to_stdin(authenticated_page)
     assert any("x" in d for d in stdin_posts), f"keystroke must POST to /stdin, got: {stdin_posts}"
 
 
+def test_terminal_query_auto_replies_are_not_forwarded_to_stdin(authenticated_page):
+    """xterm auto-answers a program's DA/DSR terminal queries through onData. Those
+    replies must NOT be POSTed to the PTY stdin - on stream (re)connect the whole
+    buffer replays and every historical query is answered at once, storming stdin.
+    Real keystrokes still forward."""
+    page = authenticated_page
+    stdin_posts: list[str] = []
+
+    def handle_stdin(route, request):
+        stdin_posts.append(request.post_data or "")
+        route.fulfill(status=200, content_type="application/json", body=json.dumps({"status": "ok", "bytes_written": 1}))
+
+    _stub_terminals_api(
+        page,
+        terminals=[
+            {
+                "id": "term-001",
+                "cmd": "claude",
+                "state": "running",
+                "created_at": "2026-05-30T10:00:00Z",
+                "updated_at": "2026-05-30T10:00:00Z",
+                "exit_code": None,
+                "bytes_out": 0,
+                "lines_out": 0,
+                "last_line": "",
+                "pid": 222,
+            },
+        ],
+        # DSR cursor-position + Primary DA + DSR status: xterm answers each via onData.
+        stream_chunks=["\x1b[6n\x1b[c\x1b[5n"],
+    )
+    page.route("**/api/terminals/*/stdin", handle_stdin)
+    page.evaluate("Alpine.store('terminals').loadTerminals()")
+    page.locator(".console-tabs button.console-tab", has_text="Conversations").click()
+    page.wait_for_function("Alpine.store('app').view === 'conversations'", timeout=3000)
+    page.wait_for_function("Alpine.store('terminals').terminals.length === 1", timeout=3000)
+    page.evaluate("Alpine.store('terminals').selectTerminal('term-001')")
+
+    page.locator("[data-xterm-host]").wait_for(state="visible", timeout=3000)
+    page.wait_for_timeout(1500)  # let xterm load + process the stream (auto-replies fire here)
+    if not page.evaluate("() => !!document.querySelector('.tv-fs .xterm-helper-textarea')"):
+        pytest.skip("xterm.js (CDN) not loaded; cannot exercise terminal input")
+
+    assert stdin_posts == [], f"terminal-query auto-replies must be filtered, but stdin got: {stdin_posts!r}"
+
+    # Sanity: real keystrokes still forward (the filter didn't disable input).
+    with page.expect_request("**/api/terminals/*/stdin", timeout=4000):
+        page.locator(".tv-fs .xterm-helper-textarea").focus()
+        page.keyboard.type("x")
+    assert any("x" in d for d in stdin_posts), "a real keystroke must still POST to /stdin"
+
+
 def test_empty_state_renders_when_no_terminal_selected(authenticated_page):
     """Clicking the terminal section header with no terminal selected shows the empty state."""
     page = authenticated_page

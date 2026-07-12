@@ -107,6 +107,10 @@ class Job:
     resolved_at: Optional[str] = None
     result: Optional[dict] = None
     error: Optional[str] = None
+    # Multi-line diagnostic behind `error` - e.g. the tail of a failed worker
+    # PTY's output, so a "claude session exited (code N)" failure is
+    # self-explanatory. Cleared with `error` on retry.
+    error_detail: Optional[str] = None
     # Most recent verifier session id - set by orchestrator when verifier spawns
     # so a hung verifier can be cancelled from _on_timeout.
     verifier_session_id: Optional[str] = None
@@ -187,6 +191,7 @@ class Job:
             "max_attempts": self.max_attempts,
             "notify_when": self.notify_when,
             "error": self.error,
+            "error_detail": self.error_detail,
             "attempts": list(self.attempts or []),
             "acceptance_criteria": list(self.acceptance_criteria or []),
             "ac_results": list(self.ac_results or []),

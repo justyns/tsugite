@@ -230,7 +230,15 @@ class SubprocessExecutor:
         sandbox_config: Optional[Any] = None,
         state_path: Optional[Path] = None,
         session_id: Optional[str] = None,
+        exec_timeout: Optional[int] = None,
     ):
+        # Wall-clock cap on a single code block. A hung tool call (blocking IPC
+        # dispatch) would otherwise wedge the whole agent turn forever, since the
+        # IPC loop awaits each dispatch with no timeout. Override per-instance or
+        # via TSUGITE_EXEC_TIMEOUT.
+        self._exec_timeout = (
+            exec_timeout if exec_timeout is not None else int(os.environ.get("TSUGITE_EXEC_TIMEOUT", "300"))
+        )
         self.workspace_dir = workspace_dir
         self.event_bus = event_bus
         self.path_context = path_context
@@ -604,8 +612,19 @@ with open(RESULT_PATH, "w") as f:
                 stderr=stderr_output,
             )
 
+        timed_out = False
         try:
-            await self._ipc_loop(proc, req_file, resp_file)
+            await asyncio.wait_for(self._ipc_loop(proc, req_file, resp_file), timeout=self._exec_timeout)
+        except asyncio.TimeoutError:
+            timed_out = True
+            logger.warning(
+                "tsu:exec exceeded its %ss wall-clock timeout; killing the child (a tool call or loop hung)",
+                self._exec_timeout,
+            )
+            try:
+                proc.kill()
+            except Exception:
+                pass
         except Exception as e:
             logger.warning("IPC loop error: %s", e)
         finally:
@@ -617,6 +636,26 @@ with open(RESULT_PATH, "w") as f:
                 resp_file.close()
             except Exception:
                 pass
+
+        if timed_out:
+            try:
+                proc.wait(timeout=5)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+            return ExecutionResult(
+                output="",
+                error=(
+                    f"tsu:exec exceeded its {self._exec_timeout}s wall-clock timeout and was terminated - "
+                    "a tool call or loop hung. Break long work into smaller blocks, add your own timeouts "
+                    "around blocking calls, or raise TSUGITE_EXEC_TIMEOUT."
+                ),
+                stdout="",
+                stderr="",
+                tools_called=list(self._tools_called),
+            )
 
         # Wait for process to finish
         try:
@@ -671,37 +710,41 @@ with open(RESULT_PATH, "w") as f:
             )
 
     async def _ipc_loop(self, proc: subprocess.Popen, req_file, resp_file):
-        """Read IPC messages from child, dispatch tool calls, write responses."""
+        """Read IPC messages from child, dispatch tool calls, write responses.
+
+        Exactly ONE readline is outstanding at a time, re-awaited across 1s
+        liveness ticks with asyncio.wait (which never cancels it). The previous
+        wait_for(run_in_executor(readline), 1.0) pattern cancelled the future on
+        every idle tick but left its pool thread blocked in readline; an
+        abandoned reader then consumed a later request line and dropped it (its
+        future was already cancelled), so a block that paused between tool calls
+        - the poll-with-sleeps shape a session supervising a job uses - wedged
+        on a response that never came, leaking a pool thread per tick.
+        """
         loop = asyncio.get_running_loop()
-
+        pending = None
         while True:
-            # Check if child is still alive
-            if proc.poll() is not None:
-                # Drain remaining messages
-                try:
-                    while True:
-                        line = await asyncio.wait_for(loop.run_in_executor(None, req_file.readline), timeout=0.1)
-                        if not line:
-                            break
-                        await self._handle_ipc_message(json.loads(line), resp_file)
-                except (asyncio.TimeoutError, Exception):
-                    pass
-                break
-
-            try:
-                line = await asyncio.wait_for(loop.run_in_executor(None, req_file.readline), timeout=1.0)
-            except asyncio.TimeoutError:
-                continue
-
+            if pending is None:
+                pending = loop.run_in_executor(None, req_file.readline)
+            done, _ = await asyncio.wait({pending}, timeout=1.0)
+            if not done:
+                # Idle tick: keep waiting on the SAME reader. Once the child is
+                # gone, grant one grace tick for buffered lines (readline
+                # unblocks at EOF when the child's write end closes), then stop.
+                if proc.poll() is None:
+                    continue
+                done, _ = await asyncio.wait({pending}, timeout=1.0)
+                if not done:
+                    break
+            line = pending.result()
+            pending = None
             if not line:
                 break
-
             try:
                 msg = json.loads(line.strip())
             except json.JSONDecodeError:
                 logger.warning("IPC: invalid JSON from child: %r", line)
                 continue
-
             await self._handle_ipc_message(msg, resp_file)
 
     async def _handle_ipc_message(self, msg: dict, resp_file):

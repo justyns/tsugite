@@ -202,6 +202,34 @@ def test_no_terminal_for_job_without_worker(authenticated_page, e2e_adapter, e2e
         assert page.locator(".jx [data-job-terminal]").count() == 0
 
 
+def test_errored_tile_shows_worker_output_detail(authenticated_page, e2e_adapter, e2e_tmp):
+    page = authenticated_page
+    _open_conv(page)
+    user_id = page.evaluate("Alpine.store('app').userId")
+    history_dir, session, storage = _new_session(e2e_adapter, e2e_tmp, user_id, "errdetail")
+    storage.record("user_input", text="/job errdetail test")
+    storage.record(
+        "job_status",
+        job_id="job-errdet01",
+        parent_session_id=session.id,
+        state="errored",
+        prompt="errdetail target",
+        error="claude session exited (code 127 - command not found) before completing the task",
+        error_detail="sh: 1: claude: not found",
+    )
+
+    with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
+        page.reload()
+        page.wait_for_selector(".jx", timeout=5000)
+        tile = page.locator(".jx").first
+        # errored default-expands; the one-line reason shows, the tail is expandable.
+        assert "127" in (tile.locator(".jx-err").text_content() or "")
+        detail = tile.locator(".jx-errdetail")
+        assert detail.count() == 1, "an errored job with error_detail must render the expandable output tail"
+        detail.locator("summary").click()
+        assert "claude: not found" in (detail.text_content() or "")
+
+
 def test_retry_with_hint_dialog_opens_and_submits(authenticated_page, e2e_adapter, e2e_tmp, base_url):
     page = authenticated_page
     _open_conv(page)

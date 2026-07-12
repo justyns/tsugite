@@ -7,6 +7,7 @@ test_jobs_orchestrator.py and add a FakeExecutor that records start/cancel calls
 """
 
 import asyncio
+import json
 
 import pytest
 import tsugite_daemon.jobs_orchestrator as orch_mod
@@ -34,7 +35,9 @@ class FakeExecutor:
             self._seq.append("cancel")
 
 
-def _seed_running_executor_job(store, orchestrator, *, executor="fake", acceptance_criteria=None, workspace_path=None):
+def _seed_running_executor_job(
+    store, orchestrator, *, executor="fake", acceptance_criteria=None, workspace_path=None, model=None
+):
     """Seed a RUNNING job whose executor is non-agent, without spawning anything
     (register_worker does the RUNNING transition + timer, not a worker start)."""
     job = store.add(
@@ -45,6 +48,7 @@ def _seed_running_executor_job(store, orchestrator, *, executor="fake", acceptan
             acceptance_criteria=acceptance_criteria or [],
             executor=executor,
             workspace_path=workspace_path,
+            model=model,
         )
     )
     orchestrator.register_worker(job.id, None, timeout_minutes=30)
@@ -138,6 +142,38 @@ async def test_complete_worker_failing_ac_retries_via_executor_with_named_follow
 
 
 @pytest.mark.asyncio
+async def test_cc_job_model_does_not_reach_the_tsugite_verifier(store, runner, orchestrator):
+    # A non-agent job's `model` is the driven tool's own model (a claude CLI alias
+    # like "sonnet"), NOT a tsugite provider:model - the verifier is a tsugite agent
+    # and would fail with "Invalid model string format" if it inherited the alias.
+    orchestrator.register_executor("cc", FakeExecutor())
+    job = _seed_running_executor_job(
+        store, orchestrator, executor="cc", acceptance_criteria=["tests pass"], model="sonnet"
+    )
+    await orchestrator.complete_worker(job.id, "## Summary\ndone\n## Acceptance criteria\n- tests pass: yes")
+    verifiers = [s for s in runner.started if getattr(s, "agent_file", None) == "job_verifier"]
+    assert len(verifiers) == 1, "a prose AC must spawn one verifier"
+    assert verifiers[0].model is None, "cc job.model (CLI alias) must not reach the tsugite verifier"
+
+
+@pytest.mark.asyncio
+async def test_cc_job_prose_ac_full_verifier_round_trip_reaches_done(store, runner, orchestrator):
+    # End-to-end for a cc job: complete -> verifier spawns -> verdict routes back
+    # -> DONE. cc jobs have no worker Session (worker_session_id is None), so the
+    # verifier's verifier_for falls back to job.id; this proves that routing works.
+    orchestrator.register_executor("cc", FakeExecutor())
+    job = _seed_running_executor_job(store, orchestrator, executor="cc", acceptance_criteria=["tests pass"])
+    await orchestrator.complete_worker(job.id, "## Summary\ndone\n## Acceptance criteria\n- tests pass: yes")
+    assert store.get(job.id).state == JobState.VERIFYING.value
+    verifier = next(s for s in runner.started if getattr(s, "agent_file", None) == "job_verifier")
+    verdict = json.dumps(
+        {"ac_results": [{"ac_text": "tests pass", "pass": True, "reason": "ok"}], "overall_pass": True}
+    )
+    await orchestrator.on_session_complete(verifier, verdict)
+    assert store.get(job.id).state == JobState.DONE.value
+
+
+@pytest.mark.asyncio
 async def test_complete_worker_on_non_running_job_is_noop(store, runner, orchestrator):
     orchestrator.register_executor("fake", FakeExecutor())
     job = _seed_running_executor_job(store, orchestrator, acceptance_criteria=[])
@@ -162,6 +198,26 @@ async def test_fail_worker_marks_errored(store, runner, orchestrator):
     fresh = store.get(job.id)
     assert fresh.state == JobState.ERRORED.value
     assert "exited with code 1" in (fresh.error or "")
+
+
+@pytest.mark.asyncio
+async def test_fail_worker_detail_lands_on_the_job_and_clears_on_retry(store, runner, orchestrator):
+    ex = FakeExecutor()
+    orchestrator.register_executor("fake", ex)
+    job = _seed_running_executor_job(store, orchestrator, acceptance_criteria=["x"])
+    await orchestrator.fail_worker(
+        job.id,
+        "claude session exited (code 127 - command not found)",
+        detail="sh: 1: claude: not found",
+    )
+    await _drain(orchestrator)
+    fresh = store.get(job.id)
+    assert fresh.state == JobState.ERRORED.value
+    assert fresh.error_detail == "sh: 1: claude: not found", "the captured output tail must persist on the Job"
+    assert fresh.to_payload()["error_detail"] == "sh: 1: claude: not found", "the tile payload must carry it"
+
+    await orchestrator.retry_with_hint(job.id, "install claude first")
+    assert store.get(job.id).error_detail is None, "a retry must clear the stale failure detail with the error"
 
 
 @pytest.mark.asyncio
@@ -196,6 +252,48 @@ async def test_cancel_job_cancels_executor_before_worktree_prune(store, runner, 
     assert ex.cancels == [job.id], "the executor must be told to cancel"
     assert seq == ["cancel", "prune"], f"executor.cancel must run before the worktree prune, got {seq}"
     assert store.get(job.id).worktree_path is None
+
+
+# ── parked (STUCK/ERRORED) reaps the executor's child but keeps the worktree ──
+
+
+@pytest.mark.asyncio
+async def test_errored_job_tears_down_executor_but_keeps_worktree(store, runner, orchestrator, tmp_path, monkeypatch):
+    seq: list[str] = []
+    ex = FakeExecutor(seq=seq)
+    orchestrator.register_executor("fake", ex)
+    job = _seed_running_executor_job(store, orchestrator, acceptance_criteria=["x"])
+    store.update(job.id, worktree_path=str(tmp_path / "wt"))
+    monkeypatch.setattr(orch_mod, "_prune_worktree", lambda path: seq.append("prune"))
+
+    await orchestrator.fail_worker(job.id, "claude session exited (code 1)")
+    await _drain(orchestrator)
+
+    fresh = store.get(job.id)
+    assert fresh.state == JobState.ERRORED.value
+    assert ex.cancels == [job.id], "an errored job must reap the executor's child, or the PTY leaks"
+    assert seq == ["cancel"], "ERRORED keeps the worktree for inspection - no prune"
+    assert fresh.worktree_path == str(tmp_path / "wt")
+
+
+@pytest.mark.asyncio
+async def test_stuck_job_tears_down_executor_but_keeps_worktree(store, runner, orchestrator, tmp_path, monkeypatch):
+    seq: list[str] = []
+    ex = FakeExecutor(seq=seq)
+    orchestrator.register_executor("fake", ex)
+    job = _seed_running_executor_job(
+        store, orchestrator, acceptance_criteria=["file_exists:missing.txt"], workspace_path=str(tmp_path)
+    )
+    store.update(job.id, max_attempts=1, worktree_path=str(tmp_path / "wt"))
+    monkeypatch.setattr(orch_mod, "_prune_worktree", lambda path: seq.append("prune"))
+
+    await orchestrator.complete_worker(job.id, "claims it wrote the file")
+    await _drain(orchestrator)
+
+    fresh = store.get(job.id)
+    assert fresh.state == JobState.STUCK.value
+    assert ex.cancels == [job.id], "a stuck job must reap the executor's child, or the PTY leaks"
+    assert seq == ["cancel"], "STUCK keeps the worktree for inspection - no prune"
 
 
 # ── payload carries the new fields ──

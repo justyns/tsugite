@@ -939,7 +939,7 @@ export default () => ({
     // include them in _emit_job_event today, but the tile is forward-compatible.
     // ac_results is broadcast top-level during VERIFYING so mid-verify criteria reach the tile.
     const fields = {};
-    for (const k of ['state', 'prompt', 'worker_session_id', 'worker_terminal_id', 'verifier_session_id', 'verify_attempts', 'error', 'attempts', 'acceptance_criteria', 'result', 'ac_results']) {
+    for (const k of ['state', 'prompt', 'worker_session_id', 'worker_terminal_id', 'verifier_session_id', 'verify_attempts', 'error', 'error_detail', 'attempts', 'acceptance_criteria', 'result', 'ac_results']) {
       if (d[k] !== undefined) fields[k] = d[k];
     }
     if (existing) {

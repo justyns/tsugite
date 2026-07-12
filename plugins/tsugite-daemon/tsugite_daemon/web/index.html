@@ -1018,6 +1018,12 @@
                                   <span x-text="msg.error"></span>
                                 </div>
                               </template>
+                              <template x-if="(msg.state === 'errored' || msg.state === 'stuck') && msg.error_detail">
+                                <details class="jx-errdetail">
+                                  <summary>worker output</summary>
+                                  <pre x-text="msg.error_detail"></pre>
+                                </details>
+                              </template>
 
                               <!-- Attempts stack (always rendered when count > 1). -->
                               <template x-if="(msg.attempts || []).length > 1">

@@ -78,7 +78,7 @@ def orchestrator(store, runner, event_bus):
     return JobsOrchestrator(store, runner, event_bus=event_bus)
 
 
-def _seed_running_job(store, orchestrator, runner, acceptance_criteria=None, agent=None):
+def _seed_running_job(store, orchestrator, runner, acceptance_criteria=None, agent=None, model=None):
     job = store.add(
         Job(
             id="",
@@ -86,6 +86,7 @@ def _seed_running_job(store, orchestrator, runner, acceptance_criteria=None, age
             prompt="do the thing",
             acceptance_criteria=acceptance_criteria or [],
             agent=agent,
+            model=model,
         )
     )
     orchestrator.register_worker(job.id, "worker-1", timeout_minutes=30)
@@ -175,6 +176,16 @@ async def test_worker_complete_with_ac_spawns_verifier(store, runner, orchestrat
     assert verifier_spawns[0].metadata["verifier_for"] == "worker-1"
     assert verifier_spawns[0].agent_file == "job_verifier"
     assert "tests pass" in verifier_spawns[0].prompt
+
+
+@pytest.mark.asyncio
+async def test_agent_job_verifier_inherits_job_model(store, runner, orchestrator):
+    # An agent job's model IS a tsugite provider:model, so the verifier still
+    # inherits it (unchanged by the cc-executor carve-out).
+    job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=["tests pass"], model="claude_code:opus")
+    await orchestrator.on_session_complete(_worker_session(job), "## Summary\nok\n## AC\n- tests pass: yes")
+    verifier = next(s for s in runner.started if (s.metadata or {}).get("verifier_for"))
+    assert verifier.model == "claude_code:opus"
 
 
 @pytest.mark.asyncio

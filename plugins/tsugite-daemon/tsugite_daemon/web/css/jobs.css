@@ -167,6 +167,15 @@
 .jx-err b { color: var(--red); font-weight: 600; }
 .jx-err code { color: var(--maroon); }
 
+/* expandable worker-output tail behind a failure (job.error_detail) */
+.jx-errdetail { border: 1px solid var(--surface0); border-radius: 3px; background: var(--crust);
+  font-family: var(--font-mono); font-size: 11px; color: var(--subtext0); }
+.jx-errdetail summary { cursor: pointer; padding: 6px 11px; color: var(--overlay1);
+  letter-spacing: 0.04em; user-select: none; }
+.jx-errdetail[open] summary { border-bottom: 1px solid var(--surface0); }
+.jx-errdetail pre { margin: 0; padding: 8px 11px; max-height: 240px; overflow: auto;
+  white-space: pre-wrap; word-break: break-word; line-height: 1.5; }
+
 /* issue / stuck note (peach - idiomatic issue card accent) */
 .jx-issue { display: flex; gap: 9px; padding: 9px 11px; border-radius: 3px;
   background: color-mix(in oklab, var(--peach) 9%, var(--crust));

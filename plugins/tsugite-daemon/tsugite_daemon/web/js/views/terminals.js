@@ -569,7 +569,17 @@ async function bindXtermToTerminalId(host, terminalId, opts = {}) {
 
   // Forward keystrokes to the PTY. The backend writes them straight to the
   // master fd (POST /api/terminals/<id>/stdin); a dead terminal just 4xx/no-ops.
+  //
+  // BUT xterm.js auto-answers a program's terminal queries (Device Attributes,
+  // Cursor Position, Device Status) by emitting the reply through onData. A
+  // full-screen TUI (e.g. the cc-driver's claude) queries often, and on stream
+  // (re)connect the whole buffer is replayed so EVERY historical query is
+  // answered at once - hundreds of replies fed back into the PTY stdin, a storm.
+  // Those replies are emulator bookkeeping, never real keystrokes, so drop them.
+  // (Arrow/function keys end in A-H/~, never c/n/R, so they pass through.)
+  const TERMINAL_QUERY_REPLY = /^\x1b\[[?>=]?[0-9;]*(?:[cnR]|\$y)$/;
   renderer.term.onData((data) => {
+    if (TERMINAL_QUERY_REPLY.test(data)) return;
     post(`/api/terminals/${encodeURIComponent(terminalId)}/stdin`, { data }).catch(() => { /* terminal gone */ });
   });
 

@@ -100,9 +100,11 @@ class JobsOrchestrator:
                 the outcome back via orchestrator.complete_worker / fail_worker.
 
             async def cancel(self, job) -> None
-                Tear down the executor's child (e.g. kill the PTY). Called on a
-                clean-exit finalize (done/cancelled) BEFORE the worktree is pruned,
-                since the child holds the cwd open. Best-effort.
+                Tear down the executor's child (e.g. kill the PTY). Called on
+                EVERY terminal finalize - on done/cancelled BEFORE the worktree is
+                pruned (the child holds the cwd open); on stuck/errored the child
+                is reaped too (or it leaks), but the executor should keep any
+                state a later retry needs to resume the conversation. Best-effort.
         """
         self._executors[name] = executor
 
@@ -331,7 +333,7 @@ class JobsOrchestrator:
         RUNNING transition, tile event, fresh phase timer."""
         fields: dict = {"worker_session_id": worker_session_id}
         if clear_error:
-            fields.update(resolved_at=None, error=None)
+            fields.update(resolved_at=None, error=None, error_detail=None)
         self._jobs.update(job_id, **fields)
         self._append_attempt(job_id, kind=kind, worker_session_id=worker_session_id)
         try:
@@ -757,11 +759,11 @@ class JobsOrchestrator:
             title=f"{job.id} · verifier",
             agent_file=VERIFIER_AGENT,
             # Verifier uses its own model override when set, else inherits the
-            # job's model (same override as the worker), else the workspace
-            # default. Lets a job pick a cheaper/available verifier model, and
-            # stops a worker model override from silently applying to the
-            # verifier via the workspace default.
-            model=job.verifier_model or job.model,
+            # job's model (same override as the worker) for an agent job, else the
+            # workspace default. A non-agent (e.g. cc) job's `model` is the driven
+            # tool's own model string (a claude CLI alias like "sonnet"), NOT a
+            # tsugite provider:model - so the verifier must never inherit it.
+            model=job.verifier_model or (job.model if job.executor == "agent" else None),
             # Same directory as the worker - the verifier inspects the files the
             # worker wrote (and `git diff` for repo jobs), which only exist there.
             workspace_override=_job_workspace(job),
@@ -824,6 +826,7 @@ class JobsOrchestrator:
             verify_attempts=0,
             resolved_at=None,
             error=None,
+            error_detail=None,
         )
         job = self._jobs.get(job.id)
         logger.info("Job '%s' escalating to model '%s' (%s)", job.id, next_model, reason)
@@ -862,17 +865,21 @@ class JobsOrchestrator:
             cancelled = False
         await self._process_worker_failure(job, reason=reason, cancelled=cancelled)
 
-    async def fail_worker(self, job_id: str, error: str) -> None:
+    async def fail_worker(self, job_id: str, error: str, detail: Optional[str] = None) -> None:
         """Executor-facing failure: a non-agent executor's attempt failed (process
         died, missing binary, etc). Routes into the SAME errored/retry path the
-        agent path uses. No-op when the Job is not RUNNING."""
+        agent path uses. No-op when the Job is not RUNNING. `detail` is an optional
+        multi-line diagnostic (e.g. the worker PTY's output tail) persisted onto
+        job.error_detail so the failure is diagnosable from the tile."""
         job = self._jobs.get(job_id)
         if job is None:
             logger.warning("fail_worker for unknown job '%s'", job_id)
             return
-        await self._process_worker_failure(job, reason=error, cancelled=False)
+        await self._process_worker_failure(job, reason=error, cancelled=False, detail=detail)
 
-    async def _process_worker_failure(self, job: Job, *, reason: str, cancelled: bool = False) -> None:
+    async def _process_worker_failure(
+        self, job: Job, *, reason: str, cancelled: bool = False, detail: Optional[str] = None
+    ) -> None:
         # Guard: mirrors _run_verification. A late failure/cancel notify for a Job
         # already finalized (e.g. _on_timeout marked it STUCK then cancelled the
         # worker, whose CANCELLED notify lands here) must not touch the record.
@@ -897,10 +904,13 @@ class JobsOrchestrator:
             if await self._escalate(job, prompt=fresh_prompt, reason=f"worker infra failure: {reason}", followup=None):
                 return
             self._finalize(
-                job, JobState.ERRORED, error=f"infrastructure/quota failure (not a quality failure): {reason}"
+                job,
+                JobState.ERRORED,
+                error=f"infrastructure/quota failure (not a quality failure): {reason}",
+                error_detail=detail,
             )
             return
-        self._finalize(job, JobState.ERRORED, error=reason)
+        self._finalize(job, JobState.ERRORED, error=reason, error_detail=detail)
 
     async def _handle_verifier_complete(self, job: Job, verifier: Session, result_str: str) -> None:
         # State guard: a duplicate or out-of-order verifier-complete for a Job
@@ -1066,15 +1076,20 @@ class JobsOrchestrator:
         if fields:
             self._jobs.update(job.id, **fields)
         fresh = self._jobs.get(job.id)
-        # Clean-exit teardown: stop a non-agent executor's child (e.g. a PTY)
-        # THEN prune the worktree, in that order - the child holds the cwd open.
-        # STUCK/ERRORED deliberately skip this so the worktree AND the live
-        # executor session survive for inspection / retry-into-the-same-session.
-        if terminal in (JobState.DONE, JobState.CANCELLED) and fresh:
-            self._schedule_executor_teardown(fresh)
-            if fresh.worktree_path:
-                self._jobs.update(job.id, worktree_path=None)
-                fresh = self._jobs.get(job.id)
+        # Teardown: stop a non-agent executor's child (e.g. a PTY) on EVERY
+        # terminal finalize - a parked job would otherwise leak a live, still
+        # interactive claude process. On DONE/CANCELLED the worktree is then
+        # pruned (child first: it holds the cwd open); STUCK/ERRORED keep the
+        # worktree for inspection, and the executor keeps its own resume state
+        # so retry-with-hint can still resume the conversation.
+        if fresh:
+            if terminal in (JobState.DONE, JobState.CANCELLED):
+                self._schedule_executor_teardown(fresh)
+                if fresh.worktree_path:
+                    self._jobs.update(job.id, worktree_path=None)
+                    fresh = self._jobs.get(job.id)
+            else:
+                self._schedule_executor_teardown(fresh, prune_worktree=False)
         self._emit_job_event(fresh)
         if fresh and _should_notify(fresh, terminal):
             self._schedule_notify(fresh)
@@ -1092,12 +1107,14 @@ class JobsOrchestrator:
         except Exception:
             logger.exception("Executor cancel failed for job '%s'", job.id)
 
-    def _schedule_executor_teardown(self, job: Job) -> None:
-        """On a clean-exit finalize (DONE/CANCELLED): cancel a non-agent executor's
-        child THEN prune the worktree, in that order and off the event loop. For an
-        agent job (or a job whose executor is gone) this collapses to the plain
-        worktree prune, matching the historical behaviour exactly."""
-        worktree_path = job.worktree_path
+    def _schedule_executor_teardown(self, job: Job, *, prune_worktree: bool = True) -> None:
+        """Cancel a non-agent executor's child THEN (on a clean exit) prune the
+        worktree, in that order and off the event loop - the child holds the cwd
+        open. Parked finalizes (STUCK/ERRORED) pass prune_worktree=False: the child
+        is still reaped but the worktree survives for inspection. For an agent job
+        (or a job whose executor is gone) this collapses to the plain worktree
+        prune, matching the historical behaviour exactly."""
+        worktree_path = job.worktree_path if prune_worktree else None
         if job.executor == "agent":
             if worktree_path:
                 self._prune_worktree_bg(worktree_path)

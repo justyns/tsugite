@@ -1,5 +1,6 @@
 """Tests for subprocess-based code executor."""
 
+import asyncio
 import os
 import shutil
 import tempfile
@@ -21,6 +22,25 @@ def _make_tool(name, func, parent_only=False):
     )
     tool._parent_only = parent_only
     return tool
+
+
+@pytest.mark.asyncio
+async def test_exec_wall_clock_timeout_recovers_from_a_hung_tool():
+    """A parent-only tool that never returns must not wedge the whole turn - the
+    exec wall-clock timeout kills the child and returns an actionable error."""
+    import asyncio
+
+    async def hang(**kwargs):
+        await asyncio.sleep(60)
+        return "never"
+
+    tool = _make_tool("hang", hang, parent_only=True)
+    executor = SubprocessExecutor(exec_timeout=2)
+    executor.set_tools([tool], EventBus())
+    # Outer guard so a regression fails fast instead of hanging the suite.
+    result = await asyncio.wait_for(executor.execute("hang()"), timeout=20)
+    assert result.error is not None
+    assert "wall-clock timeout" in result.error
 
 
 @pytest.mark.asyncio
@@ -99,6 +119,56 @@ async def test_tool_call_ipc():
         assert result.error is None
         assert "yes" in result.output
         assert call_log == ["continue?"]
+    finally:
+        executor.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_poll_loop_with_sleeps_does_not_lose_tool_calls():
+    """A block that pauses between tool calls (the poll-with-sleeps shape a
+    session supervising a job uses) must get every tool result. The old IPC read
+    loop abandoned a blocked readline on every 1s idle tick (wait_for cancelled
+    the future but the pool thread stayed in readline); an abandoned reader then
+    consumed a later request line and dropped it (its future was already
+    cancelled), wedging the child on resp.fifo until the exec wall-clock cap."""
+    call_log = []
+
+    async def mock_tool(question: str = "") -> str:
+        call_log.append(question)
+        return f"answer-{len(call_log)}"
+
+    tool = _make_tool("poll_job", mock_tool, parent_only=True)
+    event_bus = EventBus()
+    executor = SubprocessExecutor(event_bus=event_bus, exec_timeout=20)
+    executor.set_tools([tool], event_bus)
+    try:
+        result = await executor.execute(
+            "import time\nfor i in range(3):\n    time.sleep(2.5)\n    print(poll_job(question=f'poll-{i}'))\n"
+        )
+        assert result.error is None, f"polling with sleeps must not wedge the turn: {result.error}"
+        assert call_log == ["poll-0", "poll-1", "poll-2"], f"every poll must reach the parent, got {call_log}"
+    finally:
+        executor.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_idle_wait_does_not_leak_reader_threads():
+    """While the child computes locally, the parent's IPC wait must hold ONE
+    blocked reader, not stack a new pool thread every second."""
+    import threading
+
+    executor = SubprocessExecutor(exec_timeout=20)
+    executor.set_tools([], EventBus())
+    try:
+        baseline = threading.active_count()
+        task = asyncio.get_running_loop().create_task(executor.execute("import time\ntime.sleep(6)\nprint('ok')"))
+        await asyncio.sleep(5)
+        during = threading.active_count()
+        result = await task
+        assert result.error is None
+        assert during - baseline <= 3, (
+            f"IPC idle ticks must not stack reader threads: {during - baseline} new threads during a 6s sleep"
+        )
     finally:
         executor.cleanup()
 

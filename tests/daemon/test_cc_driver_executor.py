@@ -4,6 +4,7 @@ Uses a real PtyManager + TerminalSessionStore (tmp) and a fake `claude` shell
 script - no real claude, no network.
 """
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -62,8 +63,8 @@ class FakeOrchestrator:
     def attach_worker_terminal(self, job_id, terminal_id):
         self._jobs.update(job_id, worker_terminal_id=terminal_id)
 
-    async def fail_worker(self, job_id, error):
-        self.failed.append((job_id, error))
+    async def fail_worker(self, job_id, error, detail=None):
+        self.failed.append((job_id, error, detail))
 
     async def complete_worker(self, job_id, summary):
         self.completed.append((job_id, summary))
@@ -411,3 +412,69 @@ async def test_cancel_kills_pty(tmp_path, runtime):
         proc.wait_drain(timeout=2.0)
         assert proc.killed or proc.exit_code is not None, "cancel must kill the PTY"
     assert ex.drive_state.get("job-1") is None, "cancel must drop DriveState"
+
+
+@pytest.mark.asyncio
+async def test_pty_exit_interprets_exit_code_and_captures_buffer_tail(tmp_path, runtime):
+    orch = FakeOrchestrator()
+    ex = _executor(tmp_path, orch)
+
+    class DeadProc:
+        killed = False
+        exit_code = 127
+        buffer = b"$ claude --settings s.json\r\n\x1b[31msh: 1: claude: not found\x1b[0m\r\n"
+
+    ex._on_pty_exit("job-1", DeadProc(), asyncio.get_running_loop())
+    await asyncio.sleep(0.05)
+
+    assert orch.failed, "a non-kill PTY exit must fail the worker"
+    job_id, reason, detail = orch.failed[0]
+    assert job_id == "job-1"
+    assert "127" in reason
+    assert "not found" in reason, "exit 127 must be interpreted, not left as a bare code"
+    assert "claude: not found" in detail, "the PTY buffer tail must ride along as the failure detail"
+    assert "\x1b" not in detail, "ANSI escapes must be stripped from the detail"
+
+
+@pytest.mark.asyncio
+async def test_pty_exit_without_buffer_still_fails_with_reason(tmp_path, runtime):
+    orch = FakeOrchestrator()
+    ex = _executor(tmp_path, orch)
+
+    class DeadProc:
+        killed = False
+        exit_code = 1
+        buffer = b""
+
+    ex._on_pty_exit("job-1", DeadProc(), asyncio.get_running_loop())
+    await asyncio.sleep(0.05)
+
+    assert orch.failed
+    _job_id, reason, detail = orch.failed[0]
+    assert "code 1" in reason
+    assert detail is None, "no output tail -> no detail field"
+
+
+@pytest.mark.asyncio
+async def test_cancel_on_parked_job_kills_pty_but_keeps_resume_state(tmp_path, runtime):
+    manager, store = runtime
+    orch = FakeOrchestrator()
+    job = FakeJob("job-1", workspace_path=str(tmp_path))
+    job.state = "stuck"
+    ex = _executor(tmp_path, orch)
+
+    session = spawn_terminal(store=store, manager=manager, cmd="sleep 30", cwd=str(tmp_path), sandbox_ctx=None)
+    st = ex.drive_state.create("job-1", "tok-1")
+    st.terminal_id = session.id
+    st.cc_session_id = "cc-abc"
+
+    await ex.cancel(job)
+
+    proc = manager.get(session.id)
+    if proc is not None:
+        proc.wait_drain(timeout=2.0)
+        assert proc.killed or proc.exit_code is not None, "parked teardown must still kill the PTY"
+    st2 = ex.drive_state.get("job-1")
+    assert st2 is not None, "parked teardown must keep DriveState so a retry can --resume"
+    assert st2.cc_session_id == "cc-abc"
+    assert st2.terminal_id is None, "the dead terminal must not look live to a later retry"

@@ -14,8 +14,10 @@ import asyncio
 import json
 import logging
 import os
+import re
 import shlex
 import shutil
+import traceback
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -63,6 +65,32 @@ class DriveStateStore:
         state = self._by_job.pop(job_id, None)
         if state is not None:
             self._token_to_job.pop(state.token, None)
+
+
+# Human-readable meaning for exit codes a driven claude commonly dies with, so a
+# failed job names its cause instead of a bare number.
+_EXIT_CODE_HINTS = {
+    126: "claude binary is not executable",
+    127: "claude binary not found (PATH, or missing from the sandbox binds)",
+    130: "interrupted (SIGINT)",
+}
+
+# CSI (colors/cursor) and OSC (title) escape sequences - PTY output is full of
+# them and they make a captured tail unreadable.
+_ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
+
+
+def describe_exit(exit_code) -> str:
+    hint = _EXIT_CODE_HINTS.get(exit_code)
+    return f"code {exit_code} - {hint}" if hint else f"code {exit_code}"
+
+
+def pty_tail(buffer: bytes, *, max_bytes: int = 4096, max_lines: int = 40) -> Optional[str]:
+    """Readable tail of a PTY ring buffer: last `max_bytes`, ANSI stripped,
+    blank lines dropped, capped at `max_lines`. None when nothing is left."""
+    text = bytes(buffer)[-max_bytes:].decode("utf-8", errors="replace")
+    lines = [ln.rstrip() for ln in _ANSI_RE.sub("", text).splitlines() if ln.strip()]
+    return "\n".join(lines[-max_lines:]) or None
 
 
 def build_claude_command(
@@ -261,7 +289,7 @@ class CCExecutor:
             )
         except Exception as e:
             logger.exception("cc-driver: failed to spawn claude PTY for job '%s'", job.id)
-            await self._fail(job.id, f"failed to spawn claude PTY: {e}")
+            await self._fail(job.id, f"failed to spawn claude PTY: {e}", detail=traceback.format_exc())
             return
 
         state.terminal_id = session.id
@@ -277,7 +305,10 @@ class CCExecutor:
             proc.on_exit(lambda p: self._on_pty_exit(job.id, p, loop))
 
     async def cancel(self, job) -> None:
-        """Tear down the driven session before its worktree is pruned. Best-effort."""
+        """Tear down the driven session. Called on every terminal finalize.
+        Best-effort. A resolved job (done/cancelled) drops all state; a parked one
+        (stuck/errored) kills the PTY so it can't leak as a live interactive
+        claude, but keeps DriveState so a retry can respawn with --resume."""
         from tsugite_pty.tools import get_terminal_runtime
 
         state = self.drive_state.get(job.id)
@@ -288,19 +319,31 @@ class CCExecutor:
                     pty_manager.kill(state.terminal_id)
                 except Exception:
                     logger.exception("cc-driver: failed to kill PTY for job '%s'", job.id)
+            state.terminal_id = None
+        if getattr(job, "state", None) in ("stuck", "errored"):
+            return
         cleanup(self.config.state_dir, job.id)
         self.drive_state.remove(job.id)
 
     def _on_pty_exit(self, job_id: str, proc, loop) -> None:
         """PTY reader-thread callback. A deliberate kill (cancel / clean-exit
         teardown) is expected; any other exit while the job is still RUNNING is a
-        failure (fail_worker no-ops if the job already advanced)."""
+        failure (fail_worker no-ops if the job already advanced). The buffer tail
+        rides along as the failure detail - it holds the actual error claude
+        printed (command not found, auth failure, stack trace), which the exit
+        code alone can't convey."""
         if getattr(proc, "killed", False):
             return
-        reason = f"claude session exited (code {proc.exit_code}) before completing the task"
+        reason = f"claude session exited ({describe_exit(proc.exit_code)}) before completing the task"
+        try:
+            detail = pty_tail(proc.buffer)
+        except Exception:
+            detail = None
         if loop is None or self.orchestrator is None:
             return
-        loop.call_soon_threadsafe(lambda: loop.create_task(self.orchestrator.fail_worker(job_id, reason)))
+        loop.call_soon_threadsafe(
+            lambda: loop.create_task(self.orchestrator.fail_worker(job_id, reason, detail=detail))
+        )
 
     def _set_worker_terminal(self, job_id: str, terminal_id: str) -> None:
         """Stamp job.worker_terminal_id so the existing job tile embeds the live
@@ -312,8 +355,8 @@ class CCExecutor:
         except Exception:
             logger.debug("cc-driver: could not stamp worker_terminal_id for job '%s'", job_id)
 
-    async def _fail(self, job_id: str, reason: str) -> None:
+    async def _fail(self, job_id: str, reason: str, detail: Optional[str] = None) -> None:
         if self.orchestrator is None:
             logger.warning("cc-driver: no orchestrator to report failure for job '%s': %s", job_id, reason)
             return
-        await self.orchestrator.fail_worker(job_id, reason)
+        await self.orchestrator.fail_worker(job_id, reason, detail=detail)
