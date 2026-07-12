@@ -4,20 +4,21 @@ from typing import Any, Optional
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse
-from starlette.routing import Mount, Route
+from starlette.routing import Route
 
 from tsugite_daemon.adapters.http.helpers import (
     HTTPAgentAdapter,
+    mounted_api_routes,
 )
 
 
 class SessionsMixin:
     def _session_routes(self) -> list:
         return [
-            Mount(
+            *mounted_api_routes(
                 "/api/sessions",
-                name="sessions",
-                routes=[
+                "sessions",
+                [
                     Route("/{session_id}/settings", self._session_settings_get, methods=["GET"]),
                     Route("/{session_id}/settings", self._session_settings_patch, methods=["PATCH"]),
                     Route("/", self._api_list_sessions, methods=["GET"]),

@@ -4,18 +4,19 @@ from dataclasses import fields as dataclass_fields
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse
-from starlette.routing import Mount, Route
+from starlette.routing import Route
 
+from tsugite_daemon.adapters.http.helpers import mounted_api_routes
 from tsugite_daemon.scheduler import ScheduleEntry, entry_to_dict
 
 
 class SchedulesMixin:
     def _schedule_routes(self) -> list:
         return [
-            Mount(
+            *mounted_api_routes(
                 "/api/schedules",
-                name="schedules",
-                routes=[
+                "schedules",
+                [
                     Route("/", self._list_schedules, methods=["GET"]),
                     Route("/", self._create_schedule, methods=["POST"]),
                     # NB: cleanup literal must precede {schedule_id} -- Starlette matches in order.

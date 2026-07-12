@@ -111,6 +111,28 @@ def test_is_workspace_trusted_true_when_accepted(tmp_path):
     assert is_workspace_trusted(cwd, config_path=cfg) is True
 
 
+def test_is_workspace_trusted_true_for_subdir_of_trusted_ancestor(tmp_path):
+    # A --repo Job's worker runs in a fresh worktree at <repo>/.tsugite-jobs/<id>;
+    # that exact path is never in CC's trust list, but CC treats a subdir of a
+    # trusted project as trusted (verified against claude 2.1.207), so the
+    # ancestor's trust must count or --repo cc jobs can never launch.
+    repo = tmp_path / "ws"
+    worktree = repo / ".tsugite-jobs" / "job-abc"
+    worktree.mkdir(parents=True)
+    cfg = _write_trust_config(tmp_path / "cfg", repo)  # trusts the repo root only
+    assert is_workspace_trusted(worktree, config_path=cfg) is True
+
+
+def test_is_workspace_trusted_false_when_only_a_sibling_is_trusted(tmp_path):
+    # A trusted path that is NOT an ancestor must not leak trust.
+    trusted = tmp_path / "other"
+    trusted.mkdir()
+    cwd = tmp_path / "ws" / "sub"
+    cwd.mkdir(parents=True)
+    cfg = _write_trust_config(tmp_path / "cfg", trusted)
+    assert is_workspace_trusted(cwd, config_path=cfg) is False
+
+
 def test_is_workspace_trusted_false_when_key_absent(tmp_path):
     cwd = tmp_path / "ws"
     cwd.mkdir()

@@ -261,6 +261,21 @@ class JobsOrchestrator:
                 **job_kwargs,
             )
         )
+        # Attribution trail: every Job creation logs its trigger (source +
+        # caller session + executor) so an unexpected Job is traceable to who
+        # spawned it - a post-hoc daemon.log grep for the job id lands here.
+        # Each call mints a fresh Job id, so there is no shared-job check-then-act
+        # window on this path (unlike the retry path): two concurrent spawns
+        # produce two distinct Jobs, never a double-spawn of one.
+        logger.info(
+            "Job '%s' created: source=%s parent_session=%s executor=%s repo=%s prompt=%r",
+            job.id,
+            spawned_by,
+            parent_session_id,
+            executor,
+            repo or "-",
+            (prompt or "")[:80],
+        )
 
         # Provision a fresh git worktree if --repo was given so the worker has
         # an isolated working tree (no clashes with the parent shell or other jobs).
@@ -440,6 +455,16 @@ class JobsOrchestrator:
 
         worker_session_id is None for non-agent executor jobs (no Session exists);
         the attempt entry and tile still get recorded so the job progresses."""
+        # A synchronous startup failure (e.g. the cc executor's _fail during
+        # start()) already finalized the Job to ERRORED while it was QUEUED. Don't
+        # resurrect it: ERRORED -> RUNNING is a valid (retry) transition, so an
+        # unconditional flip here would re-zombie the just-errored job.
+        job = self._jobs.get(job_id)
+        if job is not None and job.state != JobState.QUEUED.value:
+            logger.info(
+                "Job '%s' left QUEUED (now '%s') before register_worker - skipping RUNNING flip", job_id, job.state
+            )
+            return
         self._jobs.update(job_id, worker_session_id=worker_session_id)
         # First call to register_worker for this Job - record the initial attempt.
         # Retry / hint paths bypass register_worker and call _append_attempt directly.
@@ -956,12 +981,16 @@ class JobsOrchestrator:
     async def _process_worker_failure(
         self, job: Job, *, reason: str, cancelled: bool = False, detail: Optional[str] = None
     ) -> None:
-        # Guard: mirrors _run_verification. A late failure/cancel notify for a Job
-        # already finalized (e.g. _on_timeout marked it STUCK then cancelled the
-        # worker, whose CANCELLED notify lands here) must not touch the record.
-        if job.state != JobState.RUNNING.value:
+        # Accept RUNNING (normal mid-drive failure) and QUEUED (a worker that
+        # failed during startup - worktree provisioning / trust check / spawn /
+        # PTY creation - before create_and_start_job flipped it to RUNNING; the
+        # executor's synchronous _fail lands here while still QUEUED). Reject any
+        # other state: a late failure/cancel notify for a Job already finalized
+        # (e.g. _on_timeout marked it STUCK then cancelled the worker, whose
+        # CANCELLED notify lands here) must not touch the record.
+        if job.state not in (JobState.RUNNING.value, JobState.QUEUED.value):
             logger.warning(
-                "Worker failure for job '%s' in state '%s' (expected RUNNING) - ignoring",
+                "Worker failure for job '%s' in state '%s' (expected running/queued) - ignoring",
                 job.id,
                 job.state,
             )

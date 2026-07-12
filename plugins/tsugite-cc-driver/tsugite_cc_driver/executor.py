@@ -126,10 +126,13 @@ def is_workspace_trusted(cwd, config_path=None) -> bool:
     """Whether Claude Code already trusts `cwd`, so an unattended spawn won't hang
     on the fresh-cwd "Is this a project you trust?" dialog.
 
-    The only mechanism that skips that dialog is a pre-existing
-    projects["<abs cwd>"].hasTrustDialogAccepted == true in the config Claude
-    reads (verified against claude 2.1.206 - no flag skips it). We READ that config
-    only; cc-driver never writes it (option B: require pre-trusted workspaces).
+    A dir is trusted when itself OR any ancestor has
+    projects["<abs path>"].hasTrustDialogAccepted == true in the config Claude
+    reads. Claude Code treats a subdir of a trusted project as trusted (verified
+    against claude 2.1.207) - a `--repo` Job's worker runs in a fresh worktree at
+    <repo>/.tsugite-jobs/<id> whose exact path is never trusted, so the ancestor
+    check is what lets those jobs launch. We READ that config only; cc-driver
+    never writes it (option B: require pre-trusted workspaces).
 
     config_path defaults to <CLAUDE_CONFIG_DIR>/.claude.json (or ~/.claude.json).
     Tolerant: a missing / unreadable / malformed config means "not trusted".
@@ -143,8 +146,13 @@ def is_workspace_trusted(cwd, config_path=None) -> bool:
         return False
     if not isinstance(data, dict):
         return False
-    project = (data.get("projects") or {}).get(str(Path(cwd).resolve()))
-    return isinstance(project, dict) and project.get("hasTrustDialogAccepted") is True
+    projects = data.get("projects") or {}
+    resolved = Path(cwd).resolve()
+    for path in (resolved, *resolved.parents):
+        project = projects.get(str(path))
+        if isinstance(project, dict) and project.get("hasTrustDialogAccepted") is True:
+            return True
+    return False
 
 
 def build_sandbox_ctx(sandbox: bool, cwd: Optional[str], *, claude_binary: str = "claude", settings_dir=None):

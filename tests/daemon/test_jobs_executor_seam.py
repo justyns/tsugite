@@ -82,6 +82,73 @@ async def test_create_dispatches_to_registered_executor_not_runner(store, runner
 
 
 @pytest.mark.asyncio
+async def test_job_creation_is_logged_with_attribution(store, runner, orchestrator, caplog):
+    import logging
+
+    orchestrator.register_executor("cc", FakeExecutor())
+    with caplog.at_level(logging.INFO, logger="tsugite_daemon.jobs_orchestrator"):
+        job, _ = await orchestrator.create_and_start_job(
+            parent_session_id="parent-1",
+            prompt="fix the flaky test",
+            acceptance_criteria=[],
+            executor="cc",
+            spawned_by="agent-tool",
+        )
+    line = next(
+        (r.getMessage() for r in caplog.records if "created" in r.getMessage() and job.id in r.getMessage()), None
+    )
+    assert line is not None, "job creation must log a traceable line"
+    assert "source=agent-tool" in line, "the trigger/source must be attributable"
+    assert "parent_session=parent-1" in line, "the caller session must be logged"
+    assert "executor=cc" in line
+
+
+class StartupFailingExecutor:
+    """An executor whose start() reports a failure synchronously (as the cc
+    executor does on an untrusted workspace / missing binary) - i.e. before the
+    job ever leaves QUEUED. start() does NOT raise: it calls fail_worker and
+    returns, exactly like CCExecutor._fail."""
+
+    def __init__(self, orchestrator, reason="workspace is not trusted"):
+        self._orch = orchestrator
+        self._reason = reason
+        self.cancels: list[str] = []
+
+    async def start(self, job, followup=None):
+        await self._orch.fail_worker(job.id, self._reason)
+
+    async def cancel(self, job):
+        self.cancels.append(job.id)
+
+
+@pytest.mark.asyncio
+async def test_startup_failure_before_running_errors_the_job_not_zombies_it(store, runner, orchestrator):
+    orchestrator.register_executor("failing", StartupFailingExecutor(orchestrator))
+    job, started = await orchestrator.create_and_start_job(
+        parent_session_id="parent-1",
+        prompt="do it",
+        acceptance_criteria=["x"],
+        executor="failing",
+    )
+    fresh = store.get(job.id)
+    assert fresh.state == JobState.ERRORED.value, (
+        f"a worker that fails during startup (QUEUED) must ERROR, not zombie as running; got {fresh.state}"
+    )
+    assert "not trusted" in (fresh.error or ""), "the executor's failure reason must be persisted, not dropped"
+
+
+@pytest.mark.asyncio
+async def test_fail_worker_on_queued_job_errors_it(store, runner, orchestrator):
+    orchestrator.register_executor("fake", FakeExecutor())
+    job = store.add(Job(id="", parent_session_id="parent-1", prompt="x", executor="fake"))
+    assert store.get(job.id).state == JobState.QUEUED.value
+    await orchestrator.fail_worker(job.id, "spawn blew up before RUNNING")
+    fresh = store.get(job.id)
+    assert fresh.state == JobState.ERRORED.value
+    assert "spawn blew up" in (fresh.error or "")
+
+
+@pytest.mark.asyncio
 async def test_unknown_executor_at_creation_raises_before_persisting(store, runner, orchestrator):
     with pytest.raises(ValueError, match="executor"):
         await orchestrator.create_and_start_job(

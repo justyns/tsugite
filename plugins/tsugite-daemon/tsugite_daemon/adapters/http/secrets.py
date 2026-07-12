@@ -2,16 +2,18 @@
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse
-from starlette.routing import Mount, Route
+from starlette.routing import Route
+
+from tsugite_daemon.adapters.http.helpers import mounted_api_routes
 
 
 class SecretsMixin:
     def _secrets_routes(self) -> list:
         return [
-            Mount(
+            *mounted_api_routes(
                 "/api/secrets",
-                name="secrets",
-                routes=[
+                "secrets",
+                [
                     Route("/", self._secrets_list, methods=["GET"]),
                     Route("/{name:path}", self._secrets_set, methods=["POST"]),
                     Route("/{name:path}", self._secrets_delete, methods=["DELETE"]),

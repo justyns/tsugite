@@ -6,20 +6,21 @@ import threading
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
-from starlette.routing import Mount, Route
+from starlette.routing import Route
 
 from tsugite_daemon.adapters.http.helpers import (
     logger,
+    mounted_api_routes,
 )
 
 
 class TerminalsMixin:
     def _terminal_routes(self) -> list:
         return [
-            Mount(
+            *mounted_api_routes(
                 "/api/terminals",
-                name="terminals",
-                routes=[
+                "terminals",
+                [
                     Route("/", self._api_list_terminals, methods=["GET"]),
                     Route("/", self._api_create_terminal, methods=["POST"]),
                     Route("/{terminal_id}", self._api_get_terminal, methods=["GET"]),

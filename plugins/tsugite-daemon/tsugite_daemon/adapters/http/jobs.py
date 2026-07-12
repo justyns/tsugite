@@ -2,16 +2,18 @@
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse
-from starlette.routing import Mount, Route
+from starlette.routing import Route
+
+from tsugite_daemon.adapters.http.helpers import mounted_api_routes
 
 
 class JobsMixin:
     def _job_routes(self) -> list:
         return [
-            Mount(
+            *mounted_api_routes(
                 "/api/jobs",
-                name="jobs",
-                routes=[
+                "jobs",
+                [
                     Route("/", self._api_list_jobs, methods=["GET"]),
                     Route("/{job_id}/cancel", self._api_cancel_job, methods=["POST"]),
                     Route("/{job_id}/mark-done", self._api_mark_job_done, methods=["POST"]),

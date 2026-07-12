@@ -11,6 +11,7 @@ deliberately: each intentional change updates the goldens in the same commit.
 
 import pytest
 from starlette.routing import Mount, Route
+from starlette.testclient import TestClient
 from tsugite_daemon.adapters.http import HTTPServer
 from tsugite_daemon.config import HTTPConfig
 from tsugite_daemon.webhook_store import WebhookStore
@@ -93,11 +94,20 @@ GOLDEN_ROUTE_TABLE = [
     ("/api/agents/{agent}/workspace/attach", ("POST",), "_attach_workspace_file"),
     ("/api/agents/{agent}/commands/{command_name}", ("POST",), "_run_command"),
     ("/api/sessions", ("MOUNT",), "sessions"),
+    ("/api/sessions", ("GET",), "_api_list_sessions"),
+    ("/api/sessions", ("POST",), "_api_start_session"),
     ("/api/schedules", ("MOUNT",), "schedules"),
+    ("/api/schedules", ("GET",), "_list_schedules"),
+    ("/api/schedules", ("POST",), "_create_schedule"),
     ("/api/jobs", ("MOUNT",), "jobs"),
+    ("/api/jobs", ("GET",), "_api_list_jobs"),
     ("/api/executors", ("GET",), "_api_list_executors"),
     ("/api/terminals", ("MOUNT",), "terminals"),
+    ("/api/terminals", ("GET",), "_api_list_terminals"),
+    ("/api/terminals", ("POST",), "_api_create_terminal"),
     ("/api/webhooks", ("MOUNT",), "webhooks"),
+    ("/api/webhooks", ("GET",), "_list_webhooks"),
+    ("/api/webhooks", ("POST",), "_create_webhook"),
     ("/webhook/{token}", ("POST",), "_webhook"),
     ("/api/agent-files", ("GET",), "_list_agent_files"),
     ("/api/agent-files/content", ("GET",), "_read_agent_file"),
@@ -108,6 +118,7 @@ GOLDEN_ROUTE_TABLE = [
     ("/api/skills/issues", ("GET",), "_list_skill_issues"),
     ("/api/push", ("MOUNT",), "push"),
     ("/api/secrets", ("MOUNT",), "secrets"),
+    ("/api/secrets", ("GET",), "_secrets_list"),
     ("/api/usage", ("MOUNT",), "usage"),
     ("/static", ("MOUNT",), "static"),
     ("/sw.js", ("GET",), "_serve_sw"),
@@ -161,6 +172,8 @@ FULL_ROUTE_TABLE = [
     ("/api/sessions/clear-primary", ("POST",), "_api_clear_primary"),
     ("/api/sessions/{session_id}/set-primary", ("POST",), "_api_set_primary"),
     ("/api/sessions/{session_id}/mark-viewed", ("POST",), "_api_mark_viewed"),
+    ("/api/sessions", ("GET",), "_api_list_sessions"),
+    ("/api/sessions", ("POST",), "_api_start_session"),
     ("/api/schedules/", ("GET",), "_list_schedules"),
     ("/api/schedules/", ("POST",), "_create_schedule"),
     ("/api/schedules/cleanup", ("POST",), "_cleanup_schedules"),
@@ -171,10 +184,13 @@ FULL_ROUTE_TABLE = [
     ("/api/schedules/{schedule_id}/disable", ("POST",), "_disable_schedule"),
     ("/api/schedules/{schedule_id}/run", ("POST",), "_run_schedule"),
     ("/api/schedules/{schedule_id}/sessions", ("GET",), "_schedule_sessions"),
+    ("/api/schedules", ("GET",), "_list_schedules"),
+    ("/api/schedules", ("POST",), "_create_schedule"),
     ("/api/jobs/", ("GET",), "_api_list_jobs"),
     ("/api/jobs/{job_id}/cancel", ("POST",), "_api_cancel_job"),
     ("/api/jobs/{job_id}/mark-done", ("POST",), "_api_mark_job_done"),
     ("/api/jobs/{job_id}/retry", ("POST",), "_api_retry_job"),
+    ("/api/jobs", ("GET",), "_api_list_jobs"),
     ("/api/executors", ("GET",), "_api_list_executors"),
     ("/api/terminals/", ("GET",), "_api_list_terminals"),
     ("/api/terminals/", ("POST",), "_api_create_terminal"),
@@ -183,9 +199,13 @@ FULL_ROUTE_TABLE = [
     ("/api/terminals/{terminal_id}/stdin", ("POST",), "_api_terminal_stdin"),
     ("/api/terminals/{terminal_id}/restart", ("POST",), "_api_restart_terminal"),
     ("/api/terminals/{terminal_id}/stream", ("GET",), "_api_terminal_stream"),
+    ("/api/terminals", ("GET",), "_api_list_terminals"),
+    ("/api/terminals", ("POST",), "_api_create_terminal"),
     ("/api/webhooks/", ("GET",), "_list_webhooks"),
     ("/api/webhooks/", ("POST",), "_create_webhook"),
     ("/api/webhooks/{token}", ("DELETE",), "_delete_webhook"),
+    ("/api/webhooks", ("GET",), "_list_webhooks"),
+    ("/api/webhooks", ("POST",), "_create_webhook"),
     ("/webhook/{token}", ("POST",), "_webhook"),
     ("/api/agent-files", ("GET",), "_list_agent_files"),
     ("/api/agent-files/content", ("GET",), "_read_agent_file"),
@@ -200,6 +220,7 @@ FULL_ROUTE_TABLE = [
     ("/api/secrets/", ("GET",), "_secrets_list"),
     ("/api/secrets/{name:path}", ("POST",), "_secrets_set"),
     ("/api/secrets/{name:path}", ("DELETE",), "_secrets_delete"),
+    ("/api/secrets", ("GET",), "_secrets_list"),
     ("/api/usage/summary", ("GET",), "_usage_summary"),
     ("/api/usage/agents", ("GET",), "_usage_agents"),
     ("/api/usage/models", ("GET",), "_usage_models"),
@@ -249,3 +270,23 @@ def test_schedules_cleanup_precedes_param_route(server):
 def test_catchalls_last(server):
     table = _route_table(server.app)
     assert [row[0] for row in table[-3:]] == ["/static", "/sw.js", "/"]
+
+
+# A Mount("/api/jobs", ...) only matches sub-paths starting with "/", so the
+# bare collection root 307-redirects to the trailing-slash form - and Starlette
+# builds that Location as an absolute internal-host URL a proxied browser can't
+# follow. The collection root must resolve directly (auth check runs -> 401),
+# never a redirect.
+@pytest.mark.parametrize("prefix", ["/api/jobs", "/api/sessions", "/api/schedules", "/api/terminals", "/api/webhooks"])
+def test_collection_root_does_not_redirect(server, prefix):
+    client = TestClient(server.app)
+    resp = client.get(prefix, follow_redirects=False)
+    assert resp.status_code != 307, f"GET {prefix} must not 307-redirect to the trailing-slash form"
+    assert resp.status_code == 401, f"GET {prefix} must reach the auth check, got {resp.status_code}"
+
+
+def test_secrets_root_does_not_redirect(server):
+    client = TestClient(server.app)
+    resp = client.get("/api/secrets", follow_redirects=False)
+    assert resp.status_code != 307
+    assert resp.status_code == 401

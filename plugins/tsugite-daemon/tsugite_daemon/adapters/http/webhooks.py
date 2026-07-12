@@ -8,21 +8,22 @@ from uuid import uuid4
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse
-from starlette.routing import Mount, Route
+from starlette.routing import Route
 
 from tsugite_daemon.adapters.http.helpers import (
     MAX_WEBHOOK_BODY,
     logger,
+    mounted_api_routes,
 )
 
 
 class WebhooksMixin:
     def _webhook_routes(self) -> list:
         return [
-            Mount(
+            *mounted_api_routes(
                 "/api/webhooks",
-                name="webhooks",
-                routes=[
+                "webhooks",
+                [
                     Route("/", self._list_webhooks, methods=["GET"]),
                     Route("/", self._create_webhook, methods=["POST"]),
                     Route("/{token}", self._delete_webhook, methods=["DELETE"]),

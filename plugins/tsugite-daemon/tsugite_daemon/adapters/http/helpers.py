@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
+from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
 from tsugite.attachments.base import AttachmentContentType
@@ -23,6 +24,27 @@ if TYPE_CHECKING:
 
 # adapters/http/helpers.py -> up three parents reaches the daemon package root.
 WEB_DIR = Path(__file__).resolve().parent.parent.parent / "web"
+
+
+def mounted_api_routes(prefix: str, name: str, routes: list) -> list:
+    """A clean-prefix API collection as a Mount PLUS a bare-prefix Route for the
+    collection root, so both `/api/jobs` and `/api/jobs/` resolve directly.
+
+    A `Mount("/api/jobs", ...)` only matches sub-paths starting with "/", so the
+    bare `/api/jobs` (no slash) never reaches it: Starlette's top-level router
+    307-redirects it to the trailing-slash form and builds the Location as an
+    absolute URL from the daemon's own bind address (http://127.0.0.1:8374/...).
+    Behind a reverse proxy / non-localhost origin the browser can't follow that
+    (unreachable host, cross-origin, https->http), so the fetch fails. Adding a
+    top-level Route at the bare prefix for each root ("/") handler removes the
+    redirect for every collection at once.
+    """
+    extra: list = []
+    for r in routes:
+        if isinstance(r, Route) and r.path == "/":
+            methods = sorted((r.methods or set()) - {"HEAD", "OPTIONS"})
+            extra.append(Route(prefix, r.endpoint, methods=methods, name=r.name))
+    return [Mount(prefix, name=name, routes=routes), *extra]
 
 
 def build_session_event_persister(session_store: "SessionStore", session_id: str) -> Callable:
