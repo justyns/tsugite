@@ -98,6 +98,36 @@ def record_user_input(
     storage.record("user_input", **data)
 
 
+def record_final_result(
+    storage: Session,
+    result: str,
+    result_data: Any = None,
+    turns: Optional[int] = None,
+    tokens: Optional[int] = None,
+    cost: Optional[float] = None,
+) -> None:
+    """Record the turn's final answer as a durable final_result event.
+
+    Interactive daemon turns may already have one for this turn, persisted by
+    the live SSE handler during FinalAnswerEvent dispatch (which runs before
+    the agent reaches its end-of-run recording). Skip in that case so the
+    conversation view doesn't render the answer twice.
+    """
+    for event in reversed(list(storage.iter_events(types=("user_input", "final_result")))):
+        if event.type == "user_input":
+            break
+        if event.type == "final_result":
+            return
+    storage.record(
+        "final_result",
+        result=result,
+        result_data=result_data,
+        turns=turns,
+        tokens=tokens,
+        cost=cost,
+    )
+
+
 def record_session_end(
     storage: Session,
     status: str = "success",

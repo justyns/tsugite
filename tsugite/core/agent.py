@@ -570,8 +570,10 @@ class TsugiteAgent:
                 error_message = None
 
             total_tokens = self.total_tokens if self.total_tokens > 0 else None
+            answer_text = str(final_value) if final_value is not None else ""
+            answer_data = _safe_json(final_value)
             response_context = {
-                "answer": str(final_value)[:500] if final_value is not None else "",
+                "answer": answer_text[:500],
                 "turns": turn_num + 1,
                 "tokens": total_tokens,
                 "cost": self.reported_cost,
@@ -584,8 +586,8 @@ class TsugiteAgent:
             if self.event_bus:
                 self.event_bus.emit(
                     FinalAnswerEvent(
-                        answer=str(final_value) if final_value is not None else "",
-                        answer_data=_safe_json(final_value),
+                        answer=answer_text,
+                        answer_data=answer_data,
                         turns=turn_num + 1,
                         tokens=total_tokens,
                         cost=self.reported_cost,
@@ -605,8 +607,19 @@ class TsugiteAgent:
             fire_hooks_background("post_response", response_context)
 
             if self.storage:
-                from tsugite.agent_runner.history_integration import record_session_end
+                from tsugite.agent_runner.history_integration import record_final_result, record_session_end
 
+                # Durable answer record for run paths with no live SSE persist
+                # (scheduled, subprocess, CLI) — the conversation view renders
+                # the answer bubble from this event.
+                record_final_result(
+                    self.storage,
+                    result=answer_text,
+                    result_data=answer_data,
+                    turns=turn_num + 1,
+                    tokens=total_tokens,
+                    cost=self.reported_cost,
+                )
                 record_session_end(self.storage, status=status, error_message=error_message)
 
             if return_full_result:
