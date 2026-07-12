@@ -37,6 +37,36 @@ def test_model_info_accepts_supported_effort_levels():
     assert info.supported_effort_levels == ["low", "medium", "high"]
 
 
+def test_gpt_5_6_family_registered():
+    """gpt-5.6 ships as three named tiers (sol/terra/luna) plus a bare `gpt-5.6`
+    alias that routes to Sol. Specs per models.dev / OpenAI's GA announcement:
+    1.05M context, 128K output, effort ladder up to `max` (`ultra` is not an
+    API effort value in the catalog and is deliberately absent)."""
+    pricing = {
+        "openai/gpt-5.6": (5.0, 30.0),
+        "openai/gpt-5.6-sol": (5.0, 30.0),
+        "openai/gpt-5.6-terra": (2.5, 15.0),
+        "openai/gpt-5.6-luna": (1.0, 6.0),
+    }
+    for key, (input_cost, output_cost) in pricing.items():
+        info = _OPENAI_MODELS.get(key)
+        assert info is not None, f"{key} missing from registry"
+        assert info.max_input_tokens == 1_050_000, key
+        assert info.max_output_tokens == 128_000, key
+        assert info.input_cost_per_million == input_cost, key
+        assert info.output_cost_per_million == output_cost, key
+        assert info.supports_vision is True, key
+        assert info.supports_reasoning is True, key
+        assert info.supported_effort_levels == ["none", "low", "medium", "high", "xhigh", "max"], key
+
+
+def test_gpt_5_6_effort_resolution_end_to_end():
+    """`max` effort validates for gpt-5.6 through the shared resolution path."""
+    from tsugite.models import resolve_reasoning_effort
+
+    assert resolve_reasoning_effort("openai:gpt-5.6-sol", "max") == "max"
+
+
 def test_prefix_match_rejects_variants_but_allows_dated_versions():
     """Prefix lookup must not let an unlisted variant inherit a sibling's pricing:
     `o1-mini` is a distinct model from `o1` (~13x cheaper), so it must resolve to None,
