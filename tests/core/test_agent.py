@@ -977,6 +977,9 @@ async def test_secrets_masked_in_persisted_code_execution():
             def record(self, event_type, **fields):
                 recorded.append((event_type, fields))
 
+            def iter_events(self, types=None):
+                return iter(())
+
         agent = TsugiteAgent(
             model_string="openai:gpt-4o-mini", tools=[], instructions="", max_turns=2, storage=_Storage()
         )
