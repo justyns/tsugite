@@ -37,6 +37,11 @@ from tsugite_acp.policy import PermissionPolicy
 logger = logging.getLogger(__name__)
 
 _STDERR_BUFFER_LINES = 200
+# Max size of a single ACP JSON-RPC line read from the agent's stdout. asyncio's default
+# StreamReader limit is 64KB, which a large tool result / content block easily exceeds -
+# the read then fails with "Separator is found, but chunk is longer than limit" and the
+# whole turn dies. 16MB comfortably covers realistic messages without unbounded buffering.
+_STDIO_BUFFER_LIMIT = 16 * 1024 * 1024
 # Stop reasons other than a clean end_turn / user cancel. The agent still did work
 # under these (hit a token / turn-request cap, or refused), so we preserve the turn's
 # content and note the truncation instead of raising and discarding everything.
@@ -335,6 +340,7 @@ async def spawn_acp_session(
         stderr=asyncio.subprocess.PIPE,
         env=env,
         cwd=cwd,
+        limit=_STDIO_BUFFER_LIMIT,
     )
 
     handler = ACPClientHandler(policy=policy)

@@ -269,6 +269,63 @@ class TestStopReasonHandling:
                 pass
 
 
+# ── Large-message stdio buffer limit ──
+
+
+class TestStdioBufferLimit:
+    """A single ACP JSON-RPC line can exceed asyncio's default 64KB StreamReader limit
+    (a big tool result / content block), which surfaced as "Separator is found, but
+    chunk is longer than limit". spawn_acp_session must raise the subprocess stream
+    limit so large lines are read whole."""
+
+    @pytest.mark.asyncio
+    async def test_large_line_overflows_default_but_fits_configured_limit(self):
+        import asyncio
+
+        from tsugite_acp.client import _STDIO_BUFFER_LIMIT
+
+        line = b'{"jsonrpc":"2.0","result":"' + b"a" * (256 * 1024) + b'"}\n'  # ~256KB > 64KB default
+
+        # The default StreamReader limit (what the subprocess used) rejects the line -
+        # this is the exact failure the user saw.
+        default_reader = asyncio.StreamReader()
+        default_reader.feed_data(line)
+        default_reader.feed_eof()
+        with pytest.raises(ValueError, match="chunk is longer than limit"):
+            await default_reader.readline()
+
+        # The configured limit reads the same line whole.
+        big_reader = asyncio.StreamReader(limit=_STDIO_BUFFER_LIMIT)
+        big_reader.feed_data(line)
+        big_reader.feed_eof()
+        assert await big_reader.readline() == line
+
+    @pytest.mark.asyncio
+    async def test_spawn_passes_configured_stdio_limit(self, monkeypatch):
+        import asyncio
+        from unittest.mock import MagicMock
+
+        import tsugite_acp.client as client_mod
+
+        captured: dict = {}
+
+        async def fake_exec(*_args, **kwargs):
+            captured.update(kwargs)
+            proc = MagicMock()
+            proc.stdin, proc.stdout, proc.stderr = MagicMock(), MagicMock(), MagicMock()
+            return proc
+
+        async def noop_drain(*_a, **_k):
+            return None
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+        monkeypatch.setattr(client_mod, "connect_to_agent", lambda *a, **k: MagicMock())
+        monkeypatch.setattr(client_mod, "_drain_stream", noop_drain)
+
+        await client_mod.spawn_acp_session(command="/bin/true")  # "/" skips the PATH check
+        assert captured.get("limit") == client_mod._STDIO_BUFFER_LIMIT
+
+
 # ── Slice 8: cancellation ──
 
 
