@@ -3,30 +3,32 @@
 import asyncio
 import json
 import threading
-from typing import TYPE_CHECKING
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
-from starlette.routing import Route
+from starlette.routing import Mount, Route
 
 from tsugite_daemon.adapters.http.helpers import (
     logger,
 )
 
-if TYPE_CHECKING:
-    pass
-
 
 class TerminalsMixin:
     def _terminal_routes(self) -> list:
         return [
-            Route("/api/terminals", self._api_list_terminals, methods=["GET"]),
-            Route("/api/terminals", self._api_create_terminal, methods=["POST"]),
-            Route("/api/terminals/{terminal_id}", self._api_get_terminal, methods=["GET"]),
-            Route("/api/terminals/{terminal_id}/kill", self._api_kill_terminal, methods=["POST"]),
-            Route("/api/terminals/{terminal_id}/stdin", self._api_terminal_stdin, methods=["POST"]),
-            Route("/api/terminals/{terminal_id}/restart", self._api_restart_terminal, methods=["POST"]),
-            Route("/api/terminals/{terminal_id}/stream", self._api_terminal_stream, methods=["GET"]),
+            Mount(
+                "/api/terminals",
+                name="terminals",
+                routes=[
+                    Route("/", self._api_list_terminals, methods=["GET"]),
+                    Route("/", self._api_create_terminal, methods=["POST"]),
+                    Route("/{terminal_id}", self._api_get_terminal, methods=["GET"]),
+                    Route("/{terminal_id}/kill", self._api_kill_terminal, methods=["POST"]),
+                    Route("/{terminal_id}/stdin", self._api_terminal_stdin, methods=["POST"]),
+                    Route("/{terminal_id}/restart", self._api_restart_terminal, methods=["POST"]),
+                    Route("/{terminal_id}/stream", self._api_terminal_stream, methods=["GET"]),
+                ],
+            ),
         ]
 
     def _terminal_to_dict(self, terminal) -> dict:

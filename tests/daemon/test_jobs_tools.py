@@ -203,6 +203,28 @@ def test_list_jobs_uninitialised_orchestrator_returns_error(monkeypatch):
 # ── spawn_job timeout behaviour ──
 
 
+def test_spawn_job_forwards_executor(monkeypatch):
+    """The executor param (default 'agent') must reach create_and_start_job so an
+    agent can spawn a job on a non-agent executor."""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(jobs_tool, "_jobs_orchestrator", SimpleNamespace(create_and_start_job=lambda **k: None))
+    monkeypatch.setattr("tsugite_daemon.session_runner.get_current_session_id", lambda: "parent-1")
+
+    seen = {}
+
+    def fake_call(fn, *args, timeout=30, **kwargs):
+        seen.update(kwargs)
+        return SimpleNamespace(id="job-1"), SimpleNamespace(id="session-1")
+
+    monkeypatch.setattr(jobs_tool, "_call", fake_call)
+
+    jobs_tool.spawn_job(prompt="x")
+    assert seen["executor"] == "agent", "default executor must forward as 'agent'"
+    jobs_tool.spawn_job(prompt="x", executor="cc")
+    assert seen["executor"] == "cc", "explicit executor must forward through"
+
+
 def test_spawn_job_timeout_is_generous_and_warns_about_duplicates(monkeypatch):
     """Worktree provisioning for --repo can exceed the default 30s bridge
     timeout. The coroutine keeps running on the daemon loop even when the

@@ -42,6 +42,7 @@ def spawn_job(
     agent: Optional[str] = None,
     max_attempts: Optional[int] = None,
     notify_when: Optional[str] = None,
+    executor: str = "agent",
 ) -> dict:
     """Spawn a background Job with a verification loop.
 
@@ -81,6 +82,9 @@ def spawn_job(
         notify_when: When to wake the parent: done | stuck | errored | terminal |
             never. Defaults to never - be deliberate when enabling, since each
             notification adds a turn to the parent conversation.
+        executor: Which registered executor produces the work. "agent" (default)
+            spawns a tsugite worker session; a plugin may register others (e.g. a
+            PTY-driven CLI). An unknown name is rejected.
 
     Returns:
         Dict with job_id, worker_session_id, parent_session_id, state.
@@ -117,6 +121,7 @@ def spawn_job(
             max_attempts=max_attempts,
             notify_when=notify_when,
             sandbox_override=sandbox_override,
+            executor=executor,
             timeout=180,
         )
     except concurrent.futures.TimeoutError:
@@ -129,7 +134,8 @@ def spawn_job(
 
     return {
         "job_id": job.id,
-        "worker_session_id": started.id,
+        # None for a non-agent executor job (no worker Session is spawned).
+        "worker_session_id": started.id if started else None,
         "parent_session_id": parent_session_id,
         "state": "running",
     }

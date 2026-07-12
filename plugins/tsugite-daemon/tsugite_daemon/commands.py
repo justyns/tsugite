@@ -143,6 +143,12 @@ async def cmd_bg(adapter: BaseAdapter, prompt: str, agent: str | None = None) ->
             "When to wake the parent: done|stuck|errored|terminal|never (default never)",
             required=False,
         ),
+        CommandParam(
+            "executor",
+            str,
+            "Which registered executor runs the job (default agent)",
+            required=False,
+        ),
     ],
 )
 async def cmd_job(
@@ -158,6 +164,7 @@ async def cmd_job(
     agent: str | None = None,
     max_attempts: int | None = None,
     notify_when: str | None = None,
+    executor: str | None = None,
 ) -> str:
     """Create a Job, spawn a worker session, and return the Job + worker IDs."""
     from tsugite.tools.jobs import _jobs_orchestrator
@@ -199,10 +206,13 @@ async def cmd_job(
             spawned_by="user-slash",
             max_attempts=max_attempts,
             notify_when=notify_when,
+            executor=executor or "agent",
         )
     except Exception as e:
         raise CommandError(f"Failed to spawn job worker: {e}") from e
 
+    if started is None:
+        return f"Job {job.id} spawned (executor: {executor or 'agent'})"
     return f"Job {job.id} spawned (worker session: {started.id})"
 
 

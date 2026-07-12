@@ -1,32 +1,34 @@
 """SchedulesMixin: schedules HTTP handlers for HTTPServer (split from adapters/http.py)."""
 
 from dataclasses import fields as dataclass_fields
-from typing import TYPE_CHECKING
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse
-from starlette.routing import Route
+from starlette.routing import Mount, Route
 
 from tsugite_daemon.scheduler import ScheduleEntry, entry_to_dict
-
-if TYPE_CHECKING:
-    pass
 
 
 class SchedulesMixin:
     def _schedule_routes(self) -> list:
         return [
-            Route("/api/schedules", self._list_schedules, methods=["GET"]),
-            Route("/api/schedules", self._create_schedule, methods=["POST"]),
-            # NB: cleanup literal must precede {schedule_id} -- Starlette matches in order.
-            Route("/api/schedules/cleanup", self._cleanup_schedules, methods=["POST"]),
-            Route("/api/schedules/{schedule_id}", self._get_schedule, methods=["GET"]),
-            Route("/api/schedules/{schedule_id}", self._update_schedule, methods=["PATCH"]),
-            Route("/api/schedules/{schedule_id}", self._delete_schedule, methods=["DELETE"]),
-            Route("/api/schedules/{schedule_id}/enable", self._enable_schedule, methods=["POST"]),
-            Route("/api/schedules/{schedule_id}/disable", self._disable_schedule, methods=["POST"]),
-            Route("/api/schedules/{schedule_id}/run", self._run_schedule, methods=["POST"]),
-            Route("/api/schedules/{schedule_id}/sessions", self._schedule_sessions, methods=["GET"]),
+            Mount(
+                "/api/schedules",
+                name="schedules",
+                routes=[
+                    Route("/", self._list_schedules, methods=["GET"]),
+                    Route("/", self._create_schedule, methods=["POST"]),
+                    # NB: cleanup literal must precede {schedule_id} -- Starlette matches in order.
+                    Route("/cleanup", self._cleanup_schedules, methods=["POST"]),
+                    Route("/{schedule_id}", self._get_schedule, methods=["GET"]),
+                    Route("/{schedule_id}", self._update_schedule, methods=["PATCH"]),
+                    Route("/{schedule_id}", self._delete_schedule, methods=["DELETE"]),
+                    Route("/{schedule_id}/enable", self._enable_schedule, methods=["POST"]),
+                    Route("/{schedule_id}/disable", self._disable_schedule, methods=["POST"]),
+                    Route("/{schedule_id}/run", self._run_schedule, methods=["POST"]),
+                    Route("/{schedule_id}/sessions", self._schedule_sessions, methods=["GET"]),
+                ],
+            ),
         ]
 
     def _schedule_action(self, schedule_id: str, action: str, status_label: str) -> JSONResponse:

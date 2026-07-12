@@ -1,21 +1,22 @@
 """PushMixin: push HTTP handlers for HTTPServer (split from adapters/http.py)."""
 
-from typing import TYPE_CHECKING
-
 from starlette.requests import Request
 from starlette.responses import JSONResponse
-from starlette.routing import Route
-
-if TYPE_CHECKING:
-    pass
+from starlette.routing import Mount, Route
 
 
 class PushMixin:
     def _push_routes(self) -> list:
         return [
-            Route("/api/push/vapid-key", self._push_vapid_key, methods=["GET"]),
-            Route("/api/push/subscribe", self._push_subscribe, methods=["POST"]),
-            Route("/api/push/unsubscribe", self._push_unsubscribe, methods=["POST"]),
+            Mount(
+                "/api/push",
+                name="push",
+                routes=[
+                    Route("/vapid-key", self._push_vapid_key, methods=["GET"]),
+                    Route("/subscribe", self._push_subscribe, methods=["POST"]),
+                    Route("/unsubscribe", self._push_unsubscribe, methods=["POST"]),
+                ],
+            ),
         ]
 
     async def _push_vapid_key(self, request: Request) -> JSONResponse:

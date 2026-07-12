@@ -98,6 +98,81 @@ def _render_webhook_body(body_template: str, message: str) -> str:
         return body_template.replace("{message}", message)
 
 
+def attach_plugin_http(http_server, plugin_name: str, adapter) -> None:
+    """Wire a loaded adapter plugin's HTTP surface into the daemon's Starlette app.
+
+    Sets the shared SSE bus on the adapter (so it can broadcast events), then
+    mounts its `get_http_routes()` (auth-wrapped) and `get_public_http_routes()`
+    (no auth) under `/api/plugins/<plugin_name>`. Both are duck-typed and
+    error-isolated: a plugin that lacks the methods is skipped, and one that
+    raises while producing its routes is logged and skipped - never aborting
+    daemon startup. When HTTP is disabled (no server) but a plugin declares
+    routes, that's a warning, not a crash.
+    """
+    if http_server is not None:
+        try:
+            adapter.event_bus = http_server.event_bus
+            # Hand the plugin the daemon auth callable so its own routes (or any
+            # it wraps itself) can enforce the same bearer-token check.
+            adapter.http_check_auth = http_server.check_auth
+        except Exception:  # noqa: BLE001 — a read-only/exotic adapter shouldn't abort startup
+            logger.debug("Could not set event_bus/http_check_auth on plugin '%s'", plugin_name)
+
+    def _collect(method_name: str) -> list:
+        method = getattr(adapter, method_name, None)
+        if method is None:
+            return []
+        try:
+            return list(method() or [])
+        except Exception:
+            logger.warning("Plugin '%s' %s() raised; skipping those routes", plugin_name, method_name, exc_info=True)
+            return []
+
+    authed = _collect("get_http_routes")
+    public = _collect("get_public_http_routes")
+    if not authed and not public:
+        return
+    if http_server is None:
+        logger.warning("Plugin '%s' registers HTTP routes but HTTP is disabled; skipping", plugin_name)
+        return
+    http_server.mount_plugin_routes(plugin_name, authed, public)
+
+
+def attach_plugin_executors(jobs_orchestrator, plugin_name: str, adapter) -> None:
+    """Register a loaded adapter plugin's job executors on the orchestrator.
+
+    Duck-typed on `get_job_executors() -> dict[str, executor]`; connects the WS3a
+    executor seam so a plugin (e.g. cc-driver) can supply a non-agent executor.
+    No-op when the plugin exposes no executors or the orchestrator is disabled;
+    a plugin that raises while producing its executors is logged and skipped.
+    """
+    method = getattr(adapter, "get_job_executors", None)
+    if method is None:
+        return
+    try:
+        executors = dict(method() or {})
+    except Exception:
+        logger.warning("Plugin '%s' get_job_executors() raised; skipping", plugin_name, exc_info=True)
+        return
+    if not executors:
+        return
+    if jobs_orchestrator is None:
+        logger.warning(
+            "Plugin '%s' registers job executors but the jobs orchestrator is disabled; skipping", plugin_name
+        )
+        return
+    # Hand the orchestrator back to the adapter so its executors can report
+    # completion/failure (complete_worker/fail_worker). Duck-typed + isolated.
+    setter = getattr(adapter, "set_jobs_orchestrator", None)
+    if setter is not None:
+        try:
+            setter(jobs_orchestrator)
+        except Exception:
+            logger.warning("Plugin '%s' set_jobs_orchestrator() raised", plugin_name, exc_info=True)
+    for name, executor in executors.items():
+        jobs_orchestrator.register_executor(name, executor)
+
+
 async def _send_webhook(config, message: str) -> dict:
     """Send a notification via webhook."""
     import httpx
@@ -433,6 +508,8 @@ class Gateway:
         for info, adapter in plugin_results:
             if adapter:
                 self.adapters.append(adapter)
+                attach_plugin_http(self._http_server, info.name, adapter)
+                attach_plugin_executors(self._jobs_orchestrator, info.name, adapter)
                 tasks.append(adapter.start())
 
         # Set up notification callback if channels are configured

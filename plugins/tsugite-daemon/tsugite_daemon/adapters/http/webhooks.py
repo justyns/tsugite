@@ -4,28 +4,31 @@ import asyncio
 import json
 import re
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse
-from starlette.routing import Route
+from starlette.routing import Mount, Route
 
 from tsugite_daemon.adapters.http.helpers import (
     MAX_WEBHOOK_BODY,
     logger,
 )
 
-if TYPE_CHECKING:
-    pass
-
 
 class WebhooksMixin:
     def _webhook_routes(self) -> list:
         return [
-            Route("/api/webhooks", self._list_webhooks, methods=["GET"]),
-            Route("/api/webhooks", self._create_webhook, methods=["POST"]),
-            Route("/api/webhooks/{token}", self._delete_webhook, methods=["DELETE"]),
+            Mount(
+                "/api/webhooks",
+                name="webhooks",
+                routes=[
+                    Route("/", self._list_webhooks, methods=["GET"]),
+                    Route("/", self._create_webhook, methods=["POST"]),
+                    Route("/{token}", self._delete_webhook, methods=["DELETE"]),
+                ],
+            ),
+            # Public delivery endpoint stays top-level (token-in-path auth, not the bearer check).
             Route("/webhook/{token}", self._webhook, methods=["POST"]),
         ]
 

@@ -1,7 +1,7 @@
 """FilesMixin: files HTTP handlers for HTTPServer (split from adapters/http.py)."""
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -13,9 +13,6 @@ from tsugite.utils import parse_yaml_frontmatter
 from tsugite_daemon.adapters.http.helpers import (
     logger,
 )
-
-if TYPE_CHECKING:
-    pass
 
 
 class FilesMixin:

@@ -5,7 +5,7 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
@@ -31,9 +31,6 @@ from tsugite_daemon.adapters.http.sse import (
     HTTPInteractionBackend,
     SSEProgressHandler,
 )
-
-if TYPE_CHECKING:
-    pass
 
 
 class AgentsMixin:

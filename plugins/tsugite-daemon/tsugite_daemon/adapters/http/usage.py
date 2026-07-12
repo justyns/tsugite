@@ -1,22 +1,23 @@
 """UsageMixin: usage HTTP handlers for HTTPServer (split from adapters/http.py)."""
 
-from typing import TYPE_CHECKING
-
 from starlette.requests import Request
 from starlette.responses import JSONResponse
-from starlette.routing import Route
-
-if TYPE_CHECKING:
-    pass
+from starlette.routing import Mount, Route
 
 
 class UsageMixin:
     def _usage_routes(self) -> list:
         return [
-            Route("/api/usage/summary", self._usage_summary, methods=["GET"]),
-            Route("/api/usage/agents", self._usage_agents, methods=["GET"]),
-            Route("/api/usage/models", self._usage_models, methods=["GET"]),
-            Route("/api/usage/total", self._usage_total, methods=["GET"]),
+            Mount(
+                "/api/usage",
+                name="usage",
+                routes=[
+                    Route("/summary", self._usage_summary, methods=["GET"]),
+                    Route("/agents", self._usage_agents, methods=["GET"]),
+                    Route("/models", self._usage_models, methods=["GET"]),
+                    Route("/total", self._usage_total, methods=["GET"]),
+                ],
+            ),
         ]
 
     def _get_usage_store(self):

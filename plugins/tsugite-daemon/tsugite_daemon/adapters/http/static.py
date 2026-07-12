@@ -1,7 +1,5 @@
 """StaticMixin: static HTTP handlers for HTTPServer (split from adapters/http.py)."""
 
-from typing import TYPE_CHECKING
-
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, Response
 from starlette.routing import Mount, Route
@@ -11,9 +9,6 @@ from tsugite_daemon.adapters.http.helpers import (
     _NoCacheStaticFiles,
     _web_assets_version,
 )
-
-if TYPE_CHECKING:
-    pass
 
 
 class StaticMixin:

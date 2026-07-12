@@ -428,6 +428,47 @@ def test_legacy_notify_with_explicit_notify_when_preserves_explicit(store_path):
     assert store.get("job-mixed").notify_when == "never"
 
 
+def test_executor_defaults_to_agent_and_no_worker_terminal(store):
+    """A Job created without an explicit executor runs on the built-in agent path
+    and has no embedded worker terminal until an executor stamps one."""
+    job = store.add(_make_job())
+    assert job.executor == "agent"
+    assert job.worker_terminal_id is None
+
+
+def test_executor_and_worker_terminal_id_round_trip(store_path):
+    """Both new fields persist across a reload so an orphaned/recovered executor
+    job still renders its embedded terminal and routes cancel to the right executor."""
+    s1 = JobStore(store_path)
+    job = s1.add(Job(id="", parent_session_id="p1", prompt="x", executor="cc"))
+    s1.update(job.id, worker_terminal_id="term-abc123")
+
+    loaded = JobStore(store_path).get(job.id)
+    assert loaded.executor == "cc"
+    assert loaded.worker_terminal_id == "term-abc123"
+
+
+def test_to_payload_includes_executor_and_worker_terminal_id(store):
+    job = store.add(Job(id="", parent_session_id="p1", prompt="x", executor="cc"))
+    store.update(job.id, worker_terminal_id="term-xyz")
+    payload = store.get(job.id).to_payload()
+    assert payload["executor"] == "cc"
+    assert payload["worker_terminal_id"] == "term-xyz"
+
+
+def test_legacy_job_without_executor_loads_as_agent(store_path):
+    """Pre-feature jobs.json files have no executor field. Load must default it to
+    'agent' rather than crashing."""
+    import json
+
+    legacy = {"jobs": [{"id": "job-old3", "parent_session_id": "p1", "prompt": "x", "state": "queued"}]}
+    store_path.write_text(json.dumps(legacy))
+    job = JobStore(store_path).get("job-old3")
+    assert job is not None
+    assert job.executor == "agent"
+    assert job.worker_terminal_id is None
+
+
 def test_terminal_jobs_pruned_beyond_cap(store_path):
     """jobs.json must not grow forever: oldest resolved jobs are dropped once
     the terminal-job count exceeds the cap. Active jobs are never pruned."""

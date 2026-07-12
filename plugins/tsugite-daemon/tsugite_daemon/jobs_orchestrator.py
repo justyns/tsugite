@@ -81,6 +81,30 @@ class JobsOrchestrator:
         # Per-job locks serializing out-of-band STUCK transitions (retry / mark-done)
         # so two concurrent tile clicks can't both pass the stuck guard and double-act.
         self._job_action_locks: dict[str, asyncio.Lock] = {}
+        # Pluggable job executors, keyed by Job.executor name. "agent" is implicit
+        # (the built-in SessionRunner path); plugins register others here. See the
+        # executor contract on register_executor.
+        self._executors: dict = {}
+
+    def register_executor(self, name: str, executor) -> None:
+        """Register a non-agent job executor under `name` (matched against
+        Job.executor). Called by adapter plugins at load time.
+
+        Executor contract (duck-typed - no ABC needed):
+
+            async def start(self, job, followup: str | None) -> None
+                Kick off the work for `job`. `followup` is None on the initial
+                attempt; on a retry it is the prompt the agent path would have
+                spawned a fresh worker with (failed-AC / hint guidance), which the
+                executor should feed into its live session. The executor reports
+                the outcome back via orchestrator.complete_worker / fail_worker.
+
+            async def cancel(self, job) -> None
+                Tear down the executor's child (e.g. kill the PTY). Called on a
+                clean-exit finalize (done/cancelled) BEFORE the worktree is pruned,
+                since the child holds the cwd open. Best-effort.
+        """
+        self._executors[name] = executor
 
     def attach(self) -> None:
         """Register for session-completion notifications. Idempotent (the
@@ -142,19 +166,31 @@ class JobsOrchestrator:
         max_attempts: Optional[int] = None,
         notify_when: Optional[str] = None,
         sandbox_override: Optional[dict] = None,
-    ) -> tuple[Job, Session]:
+        executor: str = "agent",
+    ) -> tuple[Job, Optional[Session]]:
         """Create a Job record + spawn the worker session in one step.
 
         Used by both the /job slash command and the spawn_job() agent tool.
-        Returns (job, started_worker_session). The orchestrator's register_worker
-        is called automatically so the timeout is scheduled and the tile event fires.
+        Returns (job, started_worker_session). For a non-agent executor the second
+        element is None (no worker Session is spawned - the executor runs the work
+        and reports back via complete_worker/fail_worker). The orchestrator's
+        register_worker is still called so the timeout is scheduled and the tile
+        event fires.
 
+        executor: which registered executor produces the work; "agent" (default)
+            uses the built-in SessionRunner path. An unknown name raises ValueError
+            before any Job record is created.
         notify_when: one of "done", "stuck", "errored", "terminal", "never" (default).
         max_attempts: verifier-loop cap. Defaults to 3 when omitted.
         model_ladder: ordered "cheap first" model list; `model` is set to the
             first rung and qualifying failures escalate to the next rung.
         """
         worker_agent_file = agent or WORKER_AGENT
+
+        # Reject an unknown executor before persisting anything - a Job pinned to a
+        # missing executor would spawn nothing and strand in QUEUED.
+        if executor != "agent" and executor not in self._executors:
+            raise ValueError(f"Unknown job executor: {executor!r} (registered: {sorted(self._executors)})")
 
         # If the spawner didn't supply an inherited policy (the /job slash command
         # path, vs the spawn_job tool from a sandboxed agent), fall back to the
@@ -200,6 +236,7 @@ class JobsOrchestrator:
                 spawned_by=spawned_by,
                 sandbox_override=sandbox_override,
                 workspace_path=str(workspace_root) if workspace_root is not None and not repo else None,
+                executor=executor,
                 **job_kwargs,
             )
         )
@@ -220,21 +257,39 @@ class JobsOrchestrator:
 
         worker_prompt = build_worker_prompt(prompt, acceptance_criteria or [], repo)
         try:
-            started = self._spawn_worker(job, prompt=worker_prompt, workspace=_job_workspace(job))
+            started = await self._spawn_worker(job, prompt=worker_prompt, workspace=_job_workspace(job))
         except Exception as e:
             # Don't leave the Job persisted in QUEUED; mark it ERRORED so it
             # doesn't accumulate as a zombie in jobs.json.
             self._finalize(job, JobState.ERRORED, error=f"worker spawn failed: {e}")
             raise
-        self.register_worker(job.id, started.id, timeout_minutes=timeout_minutes)
+        self.register_worker(job.id, started.id if started else None, timeout_minutes=timeout_minutes)
         return job, started
 
-    def _spawn_worker(
-        self, job: Job, *, prompt: str, workspace: Optional[str], extra_metadata: Optional[dict] = None
-    ) -> Session:
-        """Build + start a worker session for `job` - the single spawn path for
-        initial, verifier-rejected retry, and hint-retry workers. Raises on spawn
+    async def _spawn_worker(
+        self,
+        job: Job,
+        *,
+        prompt: str,
+        workspace: Optional[str],
+        extra_metadata: Optional[dict] = None,
+        followup: Optional[str] = None,
+    ) -> Optional[Session]:
+        """Produce the work for `job` - the single spawn path for initial,
+        verifier-rejected retry, hint-retry, and escalation workers.
+
+        Agent jobs build + start a worker Session and return it. Non-agent jobs
+        dispatch to the registered executor (which reports back via
+        complete_worker/fail_worker) and return None. `followup` is None on the
+        initial spawn and the retry/hint/escalation prompt otherwise; the executor
+        feeds it into its live session instead of respawning. Raises on spawn
         failure; callers decide whether that finalizes the Job or surfaces to the user."""
+        if job.executor != "agent":
+            executor = self._executors.get(job.executor)
+            if executor is None:
+                raise ValueError(f"No executor registered for '{job.executor}'")
+            await executor.start(job, followup=followup)
+            return None
         session = Session(
             id="",
             agent=self._resolve_adapter_key(job.parent_session_id),
@@ -359,8 +414,11 @@ class JobsOrchestrator:
                     )
         self._jobs.update(job_id, ac_results=prior + new_entries)
 
-    def register_worker(self, job_id: str, worker_session_id: str, timeout_minutes: int) -> None:
-        """Record the worker session id and schedule the wall-clock timeout."""
+    def register_worker(self, job_id: str, worker_session_id: Optional[str], timeout_minutes: int) -> None:
+        """Record the worker session id and schedule the wall-clock timeout.
+
+        worker_session_id is None for non-agent executor jobs (no Session exists);
+        the attempt entry and tile still get recorded so the job progresses."""
         self._jobs.update(job_id, worker_session_id=worker_session_id)
         # First call to register_worker for this Job - record the initial attempt.
         # Retry / hint paths bypass register_worker and call _append_attempt directly.
@@ -431,6 +489,8 @@ class JobsOrchestrator:
                 result["stuck_error_at_override"] = job.error
             self._jobs.update_state(job_id, JobState.DONE.value)
             self._jobs.update(job_id, result=result, error=None, resolved_at=_iso_now())
+            # Clean exit: stop a non-agent executor's child BEFORE pruning its cwd.
+            await self._cancel_executor(self._jobs.get(job_id))
             if job.worktree_path:
                 await asyncio.to_thread(_prune_worktree, job.worktree_path)
                 self._jobs.update(job_id, worktree_path=None)
@@ -513,17 +573,23 @@ class JobsOrchestrator:
                 job = self._jobs.get(job_id)
 
             try:
-                started = self._spawn_worker(
+                hint_prompt = _build_hint_prompt(job, hint)
+                started = await self._spawn_worker(
                     job,
-                    prompt=_build_hint_prompt(job, hint),
+                    prompt=hint_prompt,
                     workspace=_job_workspace(job),
                     extra_metadata={"hint_attempt": True},
+                    followup=hint_prompt,
                 )
             except Exception as e:
                 logger.exception("retry_with_hint: failed to spawn worker for job '%s': %s", job_id, e)
                 raise ValueError(f"failed to spawn retry worker: {e}") from e
             self._activate_worker(
-                job_id, started.id, kind="hint", timeout_minutes=job.timeout_minutes, clear_error=True
+                job_id,
+                started.id if started else None,
+                kind="hint",
+                timeout_minutes=job.timeout_minutes,
+                clear_error=True,
             )
             return self._jobs.get(job_id)
 
@@ -552,6 +618,21 @@ class JobsOrchestrator:
             await self._handle_worker_complete(job, session, result_str)
 
     async def _handle_worker_complete(self, job: Job, worker: Session, result_str: str) -> None:
+        """Agent-path worker completion (from on_session_complete). Delegates to
+        the shared verify flow keyed on the worker session id."""
+        await self._run_verification(job, worker_id=worker.id, result_str=result_str)
+
+    async def complete_worker(self, job_id: str, summary: str) -> None:
+        """Executor-facing completion: a non-agent executor finished an attempt and
+        reports its summary. Routes into the SAME verify/done/retry flow the agent
+        path uses. No-op when the Job is not RUNNING (already terminal/cancelled)."""
+        job = self._jobs.get(job_id)
+        if job is None:
+            logger.warning("complete_worker for unknown job '%s'", job_id)
+            return
+        await self._run_verification(job, worker_id=None, result_str=summary)
+
+    async def _run_verification(self, job: Job, *, worker_id: Optional[str], result_str: str) -> None:
         # Guard: if the Job was already advanced out of RUNNING by a concurrent
         # path (e.g. user cancellation, external state mutation), don't overwrite
         # the result and don't attempt the VERIFYING transition. A late notify for
@@ -665,7 +746,10 @@ class JobsOrchestrator:
             # Same directory as the worker - the verifier inspects the files the
             # worker wrote (and `git diff` for repo jobs), which only exist there.
             workspace_override=_job_workspace(job),
-            metadata=_with_sandbox(job, {"job_id": job.id, "verifier_for": worker.id}),
+            # verifier_for must stay truthy so on_session_complete detects this as a
+            # verifier (not a worker) completion. Executor jobs have no worker
+            # session id, so fall back to the job id as the marker.
+            metadata=_with_sandbox(job, {"job_id": job.id, "verifier_for": worker_id or job.id}),
         )
         try:
             started_verifier = self._runner.start_session(verifier_session)
@@ -705,7 +789,7 @@ class JobsOrchestrator:
         nxt = job.ladder_index + 1
         return ladder[nxt] if nxt < len(ladder) else None
 
-    def _escalate(self, job: Job, *, prompt: str, reason: str) -> bool:
+    async def _escalate(self, job: Job, *, prompt: str, reason: str, followup: Optional[str] = None) -> bool:
         """Advance the Job to its next ladder rung and spawn a worker there with
         a fresh verifier budget. Returns False when there is no next rung (the
         caller then finalizes normally). Works from both RUNNING (worker infra
@@ -725,18 +809,20 @@ class JobsOrchestrator:
         job = self._jobs.get(job.id)
         logger.info("Job '%s' escalating to model '%s' (%s)", job.id, next_model, reason)
         try:
-            started = self._spawn_worker(
+            started = await self._spawn_worker(
                 job,
                 prompt=prompt,
                 workspace=_job_workspace(job),
                 extra_metadata={"escalation": True},
+                followup=followup,
             )
         except Exception as e:
             logger.exception("Failed to spawn escalation worker for job '%s': %s", job.id, e)
             self._finalize(job, JobState.ERRORED, error=f"escalation worker spawn failed: {e}")
             return True  # handled (terminally)
-        self._jobs.update(job.id, worker_session_id=started.id)
-        self._append_attempt(job.id, kind="escalation", worker_session_id=started.id)
+        started_id = started.id if started else None
+        self._jobs.update(job.id, worker_session_id=started_id)
+        self._append_attempt(job.id, kind="escalation", worker_session_id=started_id)
         if job.state != JobState.RUNNING.value:
             try:
                 self._jobs.update_state(job.id, JobState.RUNNING.value)
@@ -747,9 +833,30 @@ class JobsOrchestrator:
         return True
 
     async def _handle_worker_failed(self, job: Job, worker: Session, result_str: str) -> None:
-        # Guard: mirrors _handle_worker_complete. A late failure/cancel notify for
-        # a Job already finalized (e.g. _on_timeout marked it STUCK then cancelled
-        # the worker, whose CANCELLED notify lands here) must not touch the record.
+        """Agent-path worker failure (from on_session_complete). Derives the reason
+        + cancellation intent from the session, then routes into the shared path."""
+        if worker.status == SessionStatus.CANCELLED.value:
+            reason = worker.error or result_str or "worker session was cancelled"
+            cancelled = True
+        else:
+            reason = worker.error or result_str or f"worker session ended with status '{worker.status}'"
+            cancelled = False
+        await self._process_worker_failure(job, reason=reason, cancelled=cancelled)
+
+    async def fail_worker(self, job_id: str, error: str) -> None:
+        """Executor-facing failure: a non-agent executor's attempt failed (process
+        died, missing binary, etc). Routes into the SAME errored/retry path the
+        agent path uses. No-op when the Job is not RUNNING."""
+        job = self._jobs.get(job_id)
+        if job is None:
+            logger.warning("fail_worker for unknown job '%s'", job_id)
+            return
+        await self._process_worker_failure(job, reason=error, cancelled=False)
+
+    async def _process_worker_failure(self, job: Job, *, reason: str, cancelled: bool = False) -> None:
+        # Guard: mirrors _run_verification. A late failure/cancel notify for a Job
+        # already finalized (e.g. _on_timeout marked it STUCK then cancelled the
+        # worker, whose CANCELLED notify lands here) must not touch the record.
         if job.state != JobState.RUNNING.value:
             logger.warning(
                 "Worker failure for job '%s' in state '%s' (expected RUNNING) - ignoring",
@@ -759,18 +866,16 @@ class JobsOrchestrator:
             return
         self._cancel_timeout(job.id)
         # User-initiated cancellation vs genuine failure - terminal state reflects intent.
-        if worker.status == SessionStatus.CANCELLED.value:
-            reason = worker.error or result_str or "worker session was cancelled"
+        if cancelled:
             self._finalize(job, JobState.CANCELLED, error=reason)
             return
-        reason = worker.error or result_str or f"worker session ended with status '{worker.status}'"
         if _is_infra_failure(reason):
             # Quota/rate-limit death is not a quality failure: escalate to the
             # next ladder rung when one exists, and label it either way so the
             # user knows waiting or switching models (not fixing the task) is
             # the remedy. Never consumes a verifier attempt.
             fresh_prompt = build_worker_prompt(job.prompt, job.acceptance_criteria or [], job.repo)
-            if self._escalate(job, prompt=fresh_prompt, reason=f"worker infra failure: {reason}"):
+            if await self._escalate(job, prompt=fresh_prompt, reason=f"worker infra failure: {reason}", followup=None):
                 return
             self._finalize(
                 job, JobState.ERRORED, error=f"infrastructure/quota failure (not a quality failure): {reason}"
@@ -879,12 +984,15 @@ class JobsOrchestrator:
                     "reason": "verifier set overall_pass=false but did not list which AC failed; review the AC list verbatim",
                 }
             ]
+        followup_prompt = _build_followup_prompt(job, failed_acs)
         new_attempts = job.verify_attempts + 1
         if new_attempts >= job.max_attempts:
             # Ladder: an exhausted verifier budget on this rung escalates to the
             # next model with a fresh budget instead of going STUCK. The failed
             # ACs ride along so the stronger model knows what to fix.
-            if self._escalate(job, prompt=_build_followup_prompt(job, failed_acs), reason="verifier budget exhausted"):
+            if await self._escalate(
+                job, prompt=followup_prompt, reason="verifier budget exhausted", followup=followup_prompt
+            ):
                 return
             error_lines = ["Verifier failed after max attempts:"]
             for ac in failed_acs:
@@ -904,18 +1012,21 @@ class JobsOrchestrator:
         # Retry: bump counter, spawn new worker, transition verifying → running.
         self._jobs.update(job.id, verify_attempts=new_attempts)
         try:
-            started = self._spawn_worker(
+            started = await self._spawn_worker(
                 job,
-                prompt=_build_followup_prompt(job, failed_acs),
+                prompt=followup_prompt,
                 workspace=_job_workspace(job),
                 # loop_attempt mirrors verify_attempts (1-indexed retry count).
                 extra_metadata={"loop_attempt": new_attempts},
+                followup=followup_prompt,
             )
         except Exception as e:
             logger.exception("Failed to spawn retry worker for job '%s': %s", job.id, e)
             self._finalize(job, JobState.ERRORED, error=f"retry worker spawn failed: {e}")
             return
-        self._activate_worker(job.id, started.id, kind="retry", timeout_minutes=job.timeout_minutes)
+        self._activate_worker(
+            job.id, started.id if started else None, kind="retry", timeout_minutes=job.timeout_minutes
+        )
 
     def _finalize(self, job: Job, terminal: JobState, **fields) -> None:
         """Cancel timer, write per-terminal fields, transition, emit tile event.
@@ -936,13 +1047,59 @@ class JobsOrchestrator:
         if fields:
             self._jobs.update(job.id, **fields)
         fresh = self._jobs.get(job.id)
-        if terminal in (JobState.DONE, JobState.CANCELLED) and fresh and fresh.worktree_path:
-            self._prune_worktree_bg(fresh.worktree_path)
-            self._jobs.update(job.id, worktree_path=None)
-            fresh = self._jobs.get(job.id)
+        # Clean-exit teardown: stop a non-agent executor's child (e.g. a PTY)
+        # THEN prune the worktree, in that order - the child holds the cwd open.
+        # STUCK/ERRORED deliberately skip this so the worktree AND the live
+        # executor session survive for inspection / retry-into-the-same-session.
+        if terminal in (JobState.DONE, JobState.CANCELLED) and fresh:
+            self._schedule_executor_teardown(fresh)
+            if fresh.worktree_path:
+                self._jobs.update(job.id, worktree_path=None)
+                fresh = self._jobs.get(job.id)
         self._emit_job_event(fresh)
         if fresh and _should_notify(fresh, terminal):
             self._schedule_notify(fresh)
+
+    async def _cancel_executor(self, job: Job) -> None:
+        """Best-effort teardown of a non-agent executor's child. No-op for agent
+        jobs and for jobs whose executor plugin isn't loaded (e.g. after restart)."""
+        if job is None or job.executor == "agent":
+            return
+        executor = self._executors.get(job.executor)
+        if executor is None:
+            return
+        try:
+            await executor.cancel(job)
+        except Exception:
+            logger.exception("Executor cancel failed for job '%s'", job.id)
+
+    def _schedule_executor_teardown(self, job: Job) -> None:
+        """On a clean-exit finalize (DONE/CANCELLED): cancel a non-agent executor's
+        child THEN prune the worktree, in that order and off the event loop. For an
+        agent job (or a job whose executor is gone) this collapses to the plain
+        worktree prune, matching the historical behaviour exactly."""
+        worktree_path = job.worktree_path
+        if job.executor == "agent":
+            if worktree_path:
+                self._prune_worktree_bg(worktree_path)
+            return
+
+        async def _teardown() -> None:
+            await self._cancel_executor(job)
+            if worktree_path:
+                await asyncio.to_thread(_prune_worktree, worktree_path)
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # No loop (sync CLI/test path): the async executor cancel can't run,
+            # but the worktree still needs pruning.
+            if worktree_path:
+                _prune_worktree(worktree_path)
+            return
+        task = loop.create_task(_teardown())
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
 
     def _schedule_notify(self, job: Job) -> None:
         """Post a one-line wake-up message into the parent session so its agent
@@ -1110,10 +1267,11 @@ class JobsOrchestrator:
         if job is None:
             return
         payload = job.to_payload()
-        # If a terminal_store is wired, resolve the worker's PTY (if any) so the
-        # tile can mount its embedded xterm without a separate /api/terminals
-        # round-trip per tile. None for LLM-only jobs that never spawn a PTY.
-        if self._terminal_store and job.worker_session_id:
+        # payload already carries worker_terminal_id from the Job field, which a
+        # non-agent executor (PTY-driven) stamps directly. Only fall back to the
+        # terminal_store lookup for agent jobs that spawn a PTY without stamping
+        # the field - and skip it entirely when the field is already set.
+        if not payload.get("worker_terminal_id") and self._terminal_store and job.worker_session_id:
             try:
                 terms = self._terminal_store.list_for_parent(job.worker_session_id)
                 if terms:

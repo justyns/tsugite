@@ -1,21 +1,22 @@
 """SecretsMixin: secrets HTTP handlers for HTTPServer (split from adapters/http.py)."""
 
-from typing import TYPE_CHECKING
-
 from starlette.requests import Request
 from starlette.responses import JSONResponse
-from starlette.routing import Route
-
-if TYPE_CHECKING:
-    pass
+from starlette.routing import Mount, Route
 
 
 class SecretsMixin:
     def _secrets_routes(self) -> list:
         return [
-            Route("/api/secrets", self._secrets_list, methods=["GET"]),
-            Route("/api/secrets/{name:path}", self._secrets_set, methods=["POST"]),
-            Route("/api/secrets/{name:path}", self._secrets_delete, methods=["DELETE"]),
+            Mount(
+                "/api/secrets",
+                name="secrets",
+                routes=[
+                    Route("/", self._secrets_list, methods=["GET"]),
+                    Route("/{name:path}", self._secrets_set, methods=["POST"]),
+                    Route("/{name:path}", self._secrets_delete, methods=["DELETE"]),
+                ],
+            ),
         ]
 
     async def _secrets_list(self, request: Request) -> JSONResponse:

@@ -146,6 +146,17 @@ class Job:
     # Inherited sandbox policy (a SandboxSettings-shaped dict) stamped when a
     # sandboxed agent spawns the job, so worker + verifier sessions stay sandboxed.
     sandbox_override: Optional[dict] = None
+    # Which executor produces the work. "agent" (default) spawns a tsugite worker
+    # session through the SessionRunner; a plugin-registered executor (e.g. a
+    # PTY-driven CLI) runs the job itself and reports back via the orchestrator's
+    # complete_worker/fail_worker API. The verifier/AC/retry machinery is identical
+    # either way - only how the work is produced differs.
+    executor: str = "agent"
+    # Embedded PTY terminal for the worker, when one exists. A non-agent executor
+    # stamps this so the web tile mounts the live terminal directly; None for
+    # agent jobs that never spawn a PTY (the tile falls back to a terminal_store
+    # lookup keyed on worker_session_id).
+    worker_terminal_id: Optional[str] = None
 
     def __post_init__(self):
         if not self.id:
@@ -190,6 +201,8 @@ class Job:
             "updated_at": self.updated_at,
             "resolved_at": self.resolved_at,
             "spawned_by": self.spawned_by,
+            "executor": self.executor,
+            "worker_terminal_id": self.worker_terminal_id,
         }
 
 

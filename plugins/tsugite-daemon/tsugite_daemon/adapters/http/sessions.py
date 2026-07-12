@@ -1,43 +1,46 @@
 """SessionsMixin: sessions HTTP handlers for HTTPServer (split from adapters/http.py)."""
 
-from typing import TYPE_CHECKING, Any, Optional
+from typing import Any, Optional
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse
-from starlette.routing import Route
+from starlette.routing import Mount, Route
 
 from tsugite_daemon.adapters.http.helpers import (
     HTTPAgentAdapter,
 )
 
-if TYPE_CHECKING:
-    pass
-
 
 class SessionsMixin:
     def _session_routes(self) -> list:
         return [
-            Route("/api/sessions/{session_id}/settings", self._session_settings_get, methods=["GET"]),
-            Route("/api/sessions/{session_id}/settings", self._session_settings_patch, methods=["PATCH"]),
-            Route("/api/sessions", self._api_list_sessions, methods=["GET"]),
-            Route("/api/sessions", self._api_start_session, methods=["POST"]),
-            Route("/api/sessions/{session_id}/metadata", self._api_get_metadata, methods=["GET"]),
-            Route("/api/sessions/{session_id}/metadata", self._api_update_metadata, methods=["PATCH"]),
-            Route("/api/sessions/{session_id}/metadata/{key}", self._api_delete_metadata, methods=["DELETE"]),
-            Route("/api/sessions/{session_id}/scratchpad", self._api_get_scratchpad, methods=["GET"]),
-            Route("/api/sessions/{session_id}/scratchpad", self._api_update_scratchpad, methods=["PUT"]),
-            Route("/api/sessions/{session_id}", self._api_get_session, methods=["GET"]),
-            Route("/api/sessions/{session_id}", self._api_update_session, methods=["PATCH"]),
-            Route("/api/sessions/{session_id}/cancel", self._api_cancel_session, methods=["POST"]),
-            Route("/api/sessions/{session_id}/restart", self._api_restart_session, methods=["POST"]),
-            Route("/api/sessions/{session_id}/events", self._api_session_events, methods=["GET"]),
-            Route("/api/sessions/{session_id}/pin", self._api_pin_session, methods=["POST"]),
-            Route("/api/sessions/{session_id}/unpin", self._api_unpin_session, methods=["POST"]),
-            Route("/api/sessions/pinned/reorder", self._api_reorder_pins, methods=["POST"]),
-            # NB: clear-primary literal must precede {session_id}/set-primary -- Starlette matches in order.
-            Route("/api/sessions/clear-primary", self._api_clear_primary, methods=["POST"]),
-            Route("/api/sessions/{session_id}/set-primary", self._api_set_primary, methods=["POST"]),
-            Route("/api/sessions/{session_id}/mark-viewed", self._api_mark_viewed, methods=["POST"]),
+            Mount(
+                "/api/sessions",
+                name="sessions",
+                routes=[
+                    Route("/{session_id}/settings", self._session_settings_get, methods=["GET"]),
+                    Route("/{session_id}/settings", self._session_settings_patch, methods=["PATCH"]),
+                    Route("/", self._api_list_sessions, methods=["GET"]),
+                    Route("/", self._api_start_session, methods=["POST"]),
+                    Route("/{session_id}/metadata", self._api_get_metadata, methods=["GET"]),
+                    Route("/{session_id}/metadata", self._api_update_metadata, methods=["PATCH"]),
+                    Route("/{session_id}/metadata/{key}", self._api_delete_metadata, methods=["DELETE"]),
+                    Route("/{session_id}/scratchpad", self._api_get_scratchpad, methods=["GET"]),
+                    Route("/{session_id}/scratchpad", self._api_update_scratchpad, methods=["PUT"]),
+                    Route("/{session_id}", self._api_get_session, methods=["GET"]),
+                    Route("/{session_id}", self._api_update_session, methods=["PATCH"]),
+                    Route("/{session_id}/cancel", self._api_cancel_session, methods=["POST"]),
+                    Route("/{session_id}/restart", self._api_restart_session, methods=["POST"]),
+                    Route("/{session_id}/events", self._api_session_events, methods=["GET"]),
+                    Route("/{session_id}/pin", self._api_pin_session, methods=["POST"]),
+                    Route("/{session_id}/unpin", self._api_unpin_session, methods=["POST"]),
+                    Route("/pinned/reorder", self._api_reorder_pins, methods=["POST"]),
+                    # NB: clear-primary literal must precede {session_id}/set-primary -- Starlette matches in order.
+                    Route("/clear-primary", self._api_clear_primary, methods=["POST"]),
+                    Route("/{session_id}/set-primary", self._api_set_primary, methods=["POST"]),
+                    Route("/{session_id}/mark-viewed", self._api_mark_viewed, methods=["POST"]),
+                ],
+            ),
         ]
 
     def _resolve_session_for_settings(

@@ -2,40 +2,35 @@
 
 import asyncio
 import json
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
 
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
+from tsugite_daemon.adapters.http.agents import AgentsMixin
+from tsugite_daemon.adapters.http.files import FilesMixin
 from tsugite_daemon.adapters.http.helpers import (
     ActiveChat,
     HTTPAgentAdapter,
     logger,
 )
-from tsugite_daemon.adapters.http.sse import (
-    SSEBroadcaster,
-    sse_stream,
-)
-from tsugite_daemon.config import AgentConfig, HTTPConfig
-from tsugite_daemon.webhook_store import WebhookStore
-
-if TYPE_CHECKING:
-    pass
-
-
-from tsugite_daemon.adapters.http.agents import AgentsMixin
-from tsugite_daemon.adapters.http.files import FilesMixin
 from tsugite_daemon.adapters.http.jobs import JobsMixin
 from tsugite_daemon.adapters.http.push import PushMixin
 from tsugite_daemon.adapters.http.schedules import SchedulesMixin
 from tsugite_daemon.adapters.http.secrets import SecretsMixin
 from tsugite_daemon.adapters.http.sessions import SessionsMixin
+from tsugite_daemon.adapters.http.sse import (
+    SSEBroadcaster,
+    sse_stream,
+)
 from tsugite_daemon.adapters.http.static import StaticMixin
 from tsugite_daemon.adapters.http.terminals import TerminalsMixin
 from tsugite_daemon.adapters.http.usage import UsageMixin
 from tsugite_daemon.adapters.http.webhooks import WebhooksMixin
+from tsugite_daemon.config import AgentConfig, HTTPConfig
+from tsugite_daemon.webhook_store import WebhookStore
 
 
 class HTTPServer(
@@ -80,6 +75,42 @@ class HTTPServer(
         self._active_chats: dict[tuple[str, str, str], ActiveChat] = {}
         self.event_bus = SSEBroadcaster()
         self.app = self._build_app()
+
+    def check_auth(self, request: Request) -> Optional[JSONResponse]:
+        """Public wrapper over the daemon bearer-token check. Returns a 401
+        response when the request is unauthenticated, else None. Handed to plugin
+        adapters (via attach_plugin_http) so a plugin's own routes can enforce the
+        same auth as the core API."""
+        return self._check_auth(request)
+
+    def mount_plugin_routes(self, plugin_name: str, authed_routes: list, public_routes: list) -> None:
+        """Mount an adapter plugin's routes under `/api/plugins/<plugin_name>`.
+
+        `authed_routes` each get their endpoint wrapped with the daemon bearer
+        token check; `public_routes` are mounted verbatim (the plugin owns their
+        access control). Called after plugin load and before uvicorn starts, so
+        appending to the live router is race-free. No-op when neither list has
+        anything to mount.
+        """
+        from starlette.routing import Mount
+
+        routes = [self._wrap_route_with_auth(r) for r in authed_routes]
+        routes.extend(public_routes)
+        if not routes:
+            return
+        self.app.router.routes.append(Mount(f"/api/plugins/{plugin_name}", routes=routes))
+
+    def _wrap_route_with_auth(self, route: Route) -> Route:
+        """Return a copy of `route` whose endpoint short-circuits to 401 unless the
+        request carries a valid daemon token."""
+        endpoint = route.endpoint
+
+        async def guarded(request: Request):
+            if err := self._check_auth(request):
+                return err
+            return await endpoint(request)
+
+        return Route(route.path, guarded, methods=list(route.methods or []), name=route.name)
 
     def _check_auth(self, request: Request) -> Optional[JSONResponse]:
         token = request.headers.get("authorization", "").removeprefix("Bearer ")
