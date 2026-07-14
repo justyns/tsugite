@@ -367,7 +367,9 @@ def test_terminal_query_auto_replies_are_not_forwarded_to_stdin(authenticated_pa
 
     def handle_stdin(route, request):
         stdin_posts.append(request.post_data or "")
-        route.fulfill(status=200, content_type="application/json", body=json.dumps({"status": "ok", "bytes_written": 1}))
+        route.fulfill(
+            status=200, content_type="application/json", body=json.dumps({"status": "ok", "bytes_written": 1})
+        )
 
     _stub_terminals_api(
         page,

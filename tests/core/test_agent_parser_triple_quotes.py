@@ -25,9 +25,7 @@ def _agent():
 
 @pytest.mark.asyncio
 async def test_parse_triple_quoted_body_with_real_newlines_and_inner_fences():
-    llm_response = (
-        'Posting a comment.\n\n```python-exec\nbody = """example:\n\n```\ninner\n```\n\nend.\n"""\npost_comment(body)\n```'
-    )
+    llm_response = 'Posting a comment.\n\n```python-exec\nbody = """example:\n\n```\ninner\n```\n\nend.\n"""\npost_comment(body)\n```'
 
     parsed = _agent()._parse_response_from_text(llm_response)
 
@@ -65,6 +63,8 @@ async def test_multiple_top_level_blocks_still_counted():
     """Picking the right close fence must not change the multi-block count
     the agent relies on for its warning.
     """
-    llm_response = '```python-exec\nx = """\n```\ny\n```\n"""\n```\n\nsome prose\n\n```python-exec\nfinal_answer(x)\n```'
+    llm_response = (
+        '```python-exec\nx = """\n```\ny\n```\n"""\n```\n\nsome prose\n\n```python-exec\nfinal_answer(x)\n```'
+    )
     parsed = _agent()._parse_response_from_text(llm_response)
     assert parsed.num_code_blocks == 2, f"got {parsed.num_code_blocks}"

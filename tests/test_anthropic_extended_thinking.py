@@ -46,6 +46,7 @@ class TestAnthropicEffortModelInfo:
             assert info is not None, f"missing: {key}"
             assert info.supported_effort_levels == ["low", "medium", "high", "xhigh", "max"], key
 
+
 class TestAnthropicThinkingRequestBody:
     """Verify reasoning_effort is translated to the `thinking` request parameter."""
 

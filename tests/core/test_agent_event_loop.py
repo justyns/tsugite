@@ -196,7 +196,9 @@ async def test_multi_code_block_warning_lands_in_next_turn_observation(storage):
         nonlocal calls
         calls += 1
         if calls == 1:
-            return _resp("```python-exec\na = 1\nprint(a)\n```\n\n```python-exec\nb = 2\n```\n\n```python-exec\nc = 3\n```")
+            return _resp(
+                "```python-exec\na = 1\nprint(a)\n```\n\n```python-exec\nb = 2\n```\n\n```python-exec\nc = 3\n```"
+            )
         return _resp("All done.")
 
     provider_mock = _patch(agent, side_effect=side)

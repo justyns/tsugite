@@ -151,7 +151,9 @@ def test_restore_resolves_persisted_conversation_id(authenticated_page, e2e_sess
     open_conversations(page)
     reload_conversations_view(page)
     wait_for_session_in_list(page, user_pick.id)
-    page.evaluate(f"{{ const v = Alpine.$data(document.querySelector({CONV_VIEW!r})); v.selectSession(v.findSession({user_pick.id!r})); }}")
+    page.evaluate(
+        f"{{ const v = Alpine.$data(document.querySelector({CONV_VIEW!r})); v.selectSession(v.findSession({user_pick.id!r})); }}"
+    )
     page.wait_for_function(
         f"localStorage.getItem('tsugite_selected_session_test-agent') === {conv_id!r}",
         timeout=3000,

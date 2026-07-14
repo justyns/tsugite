@@ -65,9 +65,7 @@ def test_reconnect_burst_coalesces_and_preserves_state(authenticated_page, e2e_s
 
         # Marker in the per-session cache: reload()'s `sessionsState = {}` wipes
         # it, a non-destructive reconcile keeps it.
-        page.evaluate(
-            f"Alpine.$data(document.querySelector({CONV_VIEW!r})).sessionsState[{sid!r}]._testMarker = 42"
-        )
+        page.evaluate(f"Alpine.$data(document.querySelector({CONV_VIEW!r})).sessionsState[{sid!r}]._testMarker = 42")
 
         session_fetches = []
         page.on(
@@ -86,9 +84,7 @@ def test_reconnect_burst_coalesces_and_preserves_state(authenticated_page, e2e_s
 
     assert selected == sid, f"selection changed during reconnect burst: {selected}"
     assert marker == 42, "reconnect burst wiped sessionsState (destructive reload ran)"
-    assert len(session_fetches) <= 1, (
-        f"reconnect burst was not coalesced: {len(session_fetches)} session-list fetches"
-    )
+    assert len(session_fetches) <= 1, f"reconnect burst was not coalesced: {len(session_fetches)} session-list fetches"
 
 
 def test_reconnect_still_reconciles_missed_messages(authenticated_page, e2e_session_store, e2e_tmp):
