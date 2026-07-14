@@ -1,11 +1,11 @@
 [project]
 name = "tsugite-web"
-version = "0.17.3"
+version = "0.18.0"
 description = "Tsugite plugin: web search (DuckDuckGo) plus readability article extraction"
 authors = [{ name = "Justyn Shull" }]
 requires-python = ">=3.11"
 dependencies = [
-  "tsugite-cli==0.17.3",
+  "tsugite-cli==0.18.0",
   "ddgs>=9.6.0",
   "readability-lxml>=0.8",
 ]
